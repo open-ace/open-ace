@@ -17,11 +17,10 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -81,6 +80,7 @@ from app.modules.workspace.autonomous.progress_report_i18n import (
     build_progress_payload,
     render_progress_report,
 )
+from app.modules.workspace.autonomous.terminal_report_i18n import render_ci_repair_terminal_report
 from app.repositories.autonomous_repo import DEFAULT_CONTENT_LANGUAGE, AutonomousWorkflowRepository
 from app.repositories.database import Database
 from app.repositories.user_repo import UserRepository
@@ -123,20 +123,28 @@ COMPLETION_KEYWORDS = [
 # ── Framework inference for test detection (Phase 1, P0) ────────────────
 
 
-def _remove_worktree_dir(gh, path: str) -> None:
+def _remove_worktree_dir(gh, path: str, project_path: str = "") -> None:
     """Best-effort removal of a (possibly registered) worktree dir (#2335 S5).
 
     Tries ``git worktree remove --force`` when a GitHubOps handle is available
-    (unregisters the worktree from the repo's metadata), then falls back to a
-    filesystem ``shutil.rmtree``. Never raises — this runs in cleanup paths.
+    (unregisters the worktree from the repo's metadata), then uses repository-
+    owner cleanup for verifier directories before a final filesystem fallback.
+    Never raises — this runs in cleanup paths.
     """
     if not path:
         return
     if gh is not None:
         try:
             gh._run_git(["worktree", "remove", path, "--force"])
+            return
         except Exception:
             pass
+        if project_path:
+            try:
+                gh.remove_verification_worktree_dir(path, project_path)
+                return
+            except Exception:
+                pass
     try:
         if os.path.isdir(path):
             shutil.rmtree(path, ignore_errors=True)
@@ -179,7 +187,20 @@ def _infer_test_framework(project_path: str, cli_tool: str) -> str:
         dirs[:] = [
             d
             for d in dirs
-            if d not in ("node_modules", "venv", ".venv", "__pycache__", ".git", "dist", "build")
+            # ".worktrees" holds checkouts of this same project (#2376 Fix H):
+            # descending into them both slows the walk and lets a worktree's
+            # markers flip the inferred framework for the primary clone.
+            if d
+            not in (
+                "node_modules",
+                "venv",
+                ".venv",
+                "__pycache__",
+                ".git",
+                ".worktrees",
+                "dist",
+                "build",
+            )
         ]
 
         for f in files:
@@ -204,6 +225,144 @@ def _infer_test_framework(project_path: str, cli_tool: str) -> str:
     else:
         # Fallback: cannot infer from files, use "unknown" (disable keyword fallback)
         return "unknown"
+
+
+# ── #2391 requirer semantics ────────────────────────────────────────────────
+# Derive which evidence *domains* a change requires from its changed paths — a
+# recognizer-independent path (it never touches _has_test_tool_call). A required
+# domain with no passing evidence is, under enforce mode, a fail-closed retry;
+# under the default shadow mode it is observation only.
+
+_REQUIRER_MODES = ("off", "shadow", "enforce")
+_FRONTEND_CODE_EXT = (".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte")
+_DOC_EXT = (".md", ".rst", ".txt")
+# framework (TestExecutionEvidence.framework) → required-evidence domain. A
+# ``generic`` run (wrapper-invoked, no runner token) maps to no domain, so it
+# cannot vacuously "cover" a changed domain (#2391 review F2).
+_FRAMEWORK_TO_DOMAIN = {
+    "python": "python",
+    "javascript": "javascript",
+    "go": "go",
+    "rust": "rust",
+    "java": "java",
+}
+
+
+def _test_evidence_requirer_mode() -> str:
+    """Requirer rollout mode: ``off`` | ``shadow`` | ``enforce`` (default shadow).
+
+    Env-flag mechanism + ``OPENACE_`` prefix mirror ``OPENACE_MODEL_GATEWAY_MODE``
+    (the tri-state precedent). An unknown value falls back to the safe default.
+    """
+    mode = (os.environ.get("OPENACE_TEST_EVIDENCE_REQUIRER_MODE") or "shadow").strip().lower()
+    return mode if mode in _REQUIRER_MODES else "shadow"
+
+
+def _is_doc_path(path: str) -> bool:
+    lowered = path.lower()
+    return lowered.endswith(_DOC_EXT) or "/docs/" in lowered or lowered.startswith("docs/")
+
+
+def _requirer_python_suite_exists(tree_path: str) -> bool:
+    """Whether a python test suite exists in the tree the agent ran in.
+
+    Probes are cheap and best-effort; any error → not present (require nothing).
+    """
+    if not tree_path:
+        return False
+    try:
+        if os.path.exists(os.path.join(tree_path, "pytest.ini")):
+            return True
+        if os.path.isdir(os.path.join(tree_path, "tests")):
+            return True
+        pyproject = os.path.join(tree_path, "pyproject.toml")
+        if os.path.exists(pyproject):
+            with open(pyproject, encoding="utf-8", errors="replace") as handle:
+                if "[tool.pytest" in handle.read():
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _requirer_js_suite_exists(tree_path: str) -> bool:
+    """Whether a JS test suite exists: ``frontend/package.json`` has a test script."""
+    if not tree_path:
+        return False
+    package_json = os.path.join(tree_path, "frontend", "package.json")
+    try:
+        if not os.path.exists(package_json):
+            return False
+        with open(package_json, encoding="utf-8", errors="replace") as handle:
+            scripts = json.load(handle).get("scripts") or {}
+        return any(name == "test" or name.startswith("test:") for name in scripts)
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def _required_evidence_domains(changed_files: list | None, tree_path: str) -> set[str]:
+    """Evidence domains a change requires, derived from concrete changed paths.
+
+    Precise path rules (NOT the loose ``_analyze_changed_files`` tags): ``*.py``
+    under ``app``/``backend``/``tests`` (excluding e2e) → ``python``; a
+    ``frontend/**`` code file → ``javascript``. Docs-only changes require
+    nothing, and a domain is required only when its suite exists in ``tree_path``
+    (never hard-fail a repo that has no such suite). ``migrations/``, ``*.sh``,
+    ``tests/e2e/`` and a ``.ts`` outside ``frontend/`` are deliberately
+    de-scoped (fail-open). An empty/unavailable ``changed_files`` requires
+    nothing (fail-open — #2391 review F4).
+    """
+    normalized = [path.strip() for path in (changed_files or []) if path and path.strip()]
+    if not normalized or all(_is_doc_path(path) for path in normalized):
+        return set()
+
+    required: set[str] = set()
+    for path in normalized:
+        lowered = path.lower()
+        if lowered.endswith(".py") and (
+            path.startswith(("app/", "backend/"))
+            or (path.startswith("tests/") and not path.startswith("tests/e2e/"))
+        ):
+            required.add("python")
+        if path.startswith("frontend/") and lowered.endswith(_FRONTEND_CODE_EXT):
+            required.add("javascript")
+
+    if "python" in required and not _requirer_python_suite_exists(tree_path):
+        required.discard("python")
+    if "javascript" in required and not _requirer_js_suite_exists(tree_path):
+        required.discard("javascript")
+    return required
+
+
+def _evidence_domains_covered(structured_evidences: list | None) -> set[str]:
+    """Domains with an authoritative PASSED evidence in the (milestone-scoped) run.
+
+    ``generic``-framework evidence maps to no domain, so a wrapper-invoked run
+    that could not be attributed to a domain does not vacuously cover one
+    (#2391 review F2).
+    """
+    from app.modules.workspace.autonomous.command_evidence.test_evidence import ParserConfidence
+
+    authoritative = (ParserConfidence.HIGH.value, ParserConfidence.MEDIUM.value)
+    covered: set[str] = set()
+    for evidence in structured_evidences or []:
+        if (
+            evidence.verdict == ExecutionVerdict.PASSED.value
+            and evidence.parser_confidence in authoritative
+        ):
+            domain = _FRAMEWORK_TO_DOMAIN.get(evidence.framework)
+            if domain:
+                covered.add(domain)
+    return covered
+
+
+def _requirer_reason(missing: set[str]) -> str:
+    """Bilingual reason for a missing-domain enforce failure (#2391 review F10)."""
+    domains = ", ".join(sorted(missing))
+    return (
+        f"Changed {domains} but no passing {domains} test evidence in this run"
+        f" / 改动涉及 {domains} 但本轮未见对应的通过测试证据"
+    )
 
 
 def _has_strict_keyword_result(test_response_text: str, has_hallucination_desc: bool) -> bool:
@@ -415,10 +574,27 @@ _TEST_RUNNER_COMMANDS = frozenset(
     }
 )
 
-# Flags that turn a test command into a help/version query. Matched as whole
-# tokens: a raw substring test discards legitimate runs whose path or flags
-# merely contain "-h" (e.g. ``pytest -q --no-header``, ``tests/test-helper.py``).
-_EXCLUDE_FLAG_TOKENS = frozenset({"--help", "--version", "-h"})
+# Flags that turn a test command into a help/version/enumeration query. Matched
+# as whole tokens: a raw substring test discards legitimate runs whose path or
+# flags merely contain "-h" (e.g. ``pytest -q --no-header``,
+# ``tests/test-helper.py``).
+#
+# The collection flags exit 0 having asserted nothing, so they satisfy both this
+# gate and the structured layer's exit-code fallback (#2376 PR-3 re-review N4).
+# ``npx playwright test --list`` is the shape that prompted this, but
+# ``pytest --collect-only`` was already reachable before PR-3.
+_EXCLUDE_FLAG_TOKENS = frozenset(
+    {
+        "--help",
+        "--version",
+        "-h",
+        "--collect-only",
+        "--co",
+        "--list",
+        "--listTests",
+        "--list-tests",
+    }
+)
 
 
 def _shell_tokens(text: str) -> list[str]:
@@ -625,6 +801,599 @@ def _segment_is_non_executing(segment: str) -> bool:
     return False
 
 
+# Shells whose ``-c`` argument is a command line in its own right. ``python -c``
+# is deliberately absent: its argument is Python source, and expanding it would
+# make ``python -c 'import equinox'`` a test run again (#2376 PR-3 review D4).
+_SHELL_C_COMMANDS = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
+
+
+def _shell_c_argument(tokens: list[str]) -> str | None:
+    """The command string passed to a shell's ``-c``, if any.
+
+    Combined short flags count, so ``bash -lc "npm test"`` resolves.
+    """
+    for index, token in enumerate(tokens):
+        if token.rsplit("/", 1)[-1] not in _SHELL_C_COMMANDS:
+            continue
+        rest = tokens[index + 1 :]
+        for offset, flag in enumerate(rest):
+            if not flag.startswith("-") or flag == "--":
+                return None
+            if flag.startswith("--"):
+                continue
+            if "c" in flag[1:]:
+                following = rest[offset + 1 :]
+                return following[0] if following else None
+        return None
+    return None
+
+
+def _executable_segments(command: str, _depth: int = 0) -> list[str]:
+    """Segments of ``command`` that actually run, including shell ``-c`` bodies.
+
+    The read-only pre-filter is applied here rather than by each caller, because
+    the two must not come apart: a ``-c`` body may only be expanded once its
+    *wrapper* has been cleared. Expanding first would make ``echo bash -c
+    "pytest tests/"`` a test run, since the inner string would arrive as a
+    top-level segment with the ``echo`` that vetoes it left behind.
+
+    Expansion exists because ``bash -c "pytest tests/"`` is a single token to
+    the tokenizer, so PR-3's token-equality rule cannot see the runner. That
+    form works on main (matching was substring-based there) and is ordinary —
+    ``docker compose run app sh -c "pytest -q"`` — so leaving it unrecognized
+    would be a fail-closed regression (#2376 PR-3 re-review N1). Re-splitting
+    the body rather than special-casing it means the pre-filter applies to the
+    inner command too, so ``bash -c "grep -rn pytest tests/"`` is still
+    rejected. ``bash -n -c "pytest"`` parses without running, so a syntax check
+    is not expanded either.
+    """
+    segments: list[str] = []
+    for segment in _command_segments(command):
+        if _segment_is_non_executing(segment):
+            continue
+        segments.append(segment)
+        if _depth >= 2:
+            continue
+        tokens = _shell_tokens(segment)
+        if _is_syntax_check_only(tokens):
+            continue
+        # A disqualifying flag on the WRAPPER must reach its body. Callers apply
+        # _EXCLUDE_FLAG_TOKENS per segment, and the body arrives as a segment of
+        # its own, so `bash --help -c "npm test"` would otherwise leave the
+        # `--help` behind (#2376 PR-3 review-3).
+        if any(token in _EXCLUDE_FLAG_TOKENS for token in tokens):
+            continue
+        inner = _shell_c_argument(tokens)
+        if inner:
+            segments.extend(_executable_segments(inner, _depth + 1))
+    return segments
+
+
+# --------------------------------------------------------------------------- #
+# Repo-convention test detection (#2376 Fix C)
+# --------------------------------------------------------------------------- #
+# A file under tests/ that is *executed* is a test run whatever the interpreter.
+# This is what the pattern list structurally cannot express: wf 221 (#2349) ran
+# `bash tests/integration/test_sudoers_security.sh` — the repo's own integration
+# suite for exactly the code it changed — and no pattern matched it.
+
+_TEST_COMMAND_PATTERNS = {
+    "python": ["pytest", "python -m pytest", "-m pytest", "unittest", "tox", "nox"],
+    # pnpm/yarn are spelled out. They used to ride along on `npm test` only
+    # because the old matcher was a substring scan with no *leading* boundary —
+    # `pnpm test` contains `npm test`, and so does `xgo test` contain `go test`.
+    # Token matching removes that accident, so the real runners must be listed
+    # (#2376 PR-3 review-3).
+    "javascript": [
+        "jest",
+        "npm test",
+        "npm run test",
+        "yarn test",
+        "yarn run test",
+        "pnpm test",
+        "pnpm run test",
+        "vitest",
+        "mocha",
+    ],
+    "go": ["go test", "gotestsum"],
+    "rust": ["cargo test", "cargo t"],
+    "java": ["mvn test", "gradle test", "./gradlew test"],
+}
+
+# What "mixed" must match: the union of every language, not the fallback.
+_ALL_TEST_PATTERNS = sorted({p for pats in _TEST_COMMAND_PATTERNS.values() for p in pats})
+
+# Bare single-word runner names are matched only in *command position*. As
+# substrings they hit ordinary commands that merely contain the word, and the
+# union puts every language's names in front of every polyglot repo (#2376 PR-3
+# review D4): `helm install mocha`, `python -c 'import equinox'`,
+# `kubectl apply -f nox.yaml`, `pip download tox`.
+_BARE_RUNNER_PATTERNS = frozenset(
+    {"pytest", "unittest", "jest", "vitest", "mocha", "tox", "nox", "gotestsum"}
+)
+
+# Verbs that make a following bare runner name an *artifact* rather than the
+# command: `helm install mocha ./chart`, `docker build -t mocha .`,
+# `pip download tox`. Without them, token equality would accept those.
+_ARTIFACT_OPERATION_VERBS = frozenset(
+    {
+        "install",
+        "uninstall",
+        "add",
+        "remove",
+        "download",
+        "build",
+        "pull",
+        "push",
+        "tag",
+        "create",
+        "apply",
+        "delete",
+        "search",
+    }
+)
+
+# Tools whose *subcommand* can be an artifact operation. The veto is anchored on
+# these rather than on the verb's neighbours: the verbs are ordinary English
+# words, and no positional rule can tell `-u build` (option + operand) from
+# `--debug build` (option + subcommand) without an option table
+# (#2376 PR-3 review-4).
+# Commands whose first operand is a host or a user, not a subcommand. Without
+# these, `ssh build pytest` and `su build -c pytest` read `build` as a verb
+# (#2376 PR-3 review-3 HIGH-2).
+_OPERAND_HEAD_COMMANDS = frozenset({"ssh", "su", "doas", "runuser"})
+
+_ARTIFACT_TOOLS = frozenset(
+    {
+        "docker",
+        "docker-compose",
+        "podman",
+        "podman-compose",
+        "helm",
+        "kubectl",
+        "pip",
+        "pip3",
+        "npm",
+        "yarn",
+        "pnpm",
+        "poetry",
+        "uv",
+        "conda",
+        "apt",
+        "apt-get",
+        "brew",
+        "gem",
+        "cargo",
+        "go",
+        "mvn",
+        "gradle",
+        "gradlew",
+        "terraform",
+        "aws",
+        "gcloud",
+    }
+)
+
+
+def _is_artifact_operation(tokens: list[str]) -> bool:
+    """Whether the segment operates on an artifact rather than running tests.
+
+    ``helm install mocha ./chart``, ``docker build -t mocha .`` and
+    ``pip download tox`` name a runner as an *artifact*, so no pattern in them
+    is a test invocation.
+
+    The **union of two rules**, because they fail in opposite directions and
+    neither subsumes the other (#2376 PR-3 review-5). Replacing one with the
+    other traded 12 fail-opens for 30.
+
+    - ``_artifact_verb_after_a_bare_word`` is tool-agnostic, so it needs no
+      enumeration and catches noun-level subcommands (``docker image build``,
+      ``helm repo add``, ``gh release create``) and every unlisted tool
+      (``dnf install -y tox``, ``pipx install tox``, ``docker-compose build``).
+      It misses global options, because these tools accept them *before* the
+      subcommand: ``docker --debug build -t mocha .``, ``pip -q download tox``.
+    - ``_artifact_tool_subcommand_is_a_verb`` anchors on the tool, so a global
+      option cannot hide the subcommand. It misses noun levels and any tool not
+      in ``_ARTIFACT_TOOLS``.
+
+    Neither rule may be dropped. The verb set is ordinary English words, so the
+    first rule alone rejected a dozen ordinary invocations where the verb is a
+    wrapper *operand* (``sudo -u build pytest``, ``docker run --name build img
+    pytest``) — which is why its option-neighbour excuse exists, and why the
+    second rule is needed to cover what that excuse lets through.
+
+    Checked per segment rather than per match, so the multi-word patterns get
+    the same veto the bare runner names do — ``helm install mvn test`` was a
+    fail-open while it applied only to bare names (review-4).
+    """
+    return _artifact_verb_after_a_bare_word(tokens) or _artifact_tool_subcommand_is_a_verb(tokens)
+
+
+def _artifact_verb_after_a_bare_word(tokens: list[str]) -> bool:
+    """Veto rule 1: a verb following a bare word is a subcommand, not an operand.
+
+    Tool-agnostic, which is the point: it needs no enumeration, so an unlisted
+    package manager cannot slip past, and a noun level between the tool and the
+    verb (``docker image build``, ``helm repo add``) does not hide it.
+
+    An option immediately to the left makes the verb that option's argument
+    (``sudo -u build pytest``, ``docker run --name build img pytest``), and
+    ``ssh``/``su`` take a host or user in first position. Those excuses are what
+    rule 2 exists to backstop.
+    """
+    for position, token in enumerate(tokens):
+        if token.lower() not in _ARTIFACT_OPERATION_VERBS:
+            continue
+        if position == 0:
+            return True  # the verb IS the command: `install -m 755 pytest /usr/bin`
+        previous = tokens[position - 1]
+        if previous.startswith("-"):
+            continue  # an option's argument, not a subcommand
+        if previous.rsplit("/", 1)[-1] in _OPERAND_HEAD_COMMANDS:
+            continue  # `ssh <host>`, `su <user>`
+        return True
+    return False
+
+
+def _artifact_tool_subcommand_is_a_verb(tokens: list[str]) -> bool:
+    """Veto rule 2: a known tool whose subcommand is an artifact verb.
+
+    Anchored on the tool so a global option cannot hide the subcommand, which is
+    what defeats rule 1. ``docker run --name build`` is still a test run because
+    ``run`` is the subcommand and ``build`` is merely an option's operand.
+    """
+    for index, token in enumerate(tokens):
+        if token.rsplit("/", 1)[-1].lower() not in _ARTIFACT_TOOLS:
+            continue
+        for candidate in tokens[index + 1 :]:
+            if candidate.startswith("-"):
+                continue
+            return candidate.lower() in _ARTIFACT_OPERATION_VERBS
+        return False
+    return False
+
+
+def _multiword_pattern_matches(pattern: str, tokens: list[str]) -> bool:
+    """Whether ``tokens`` contains ``pattern``'s words as consecutive tokens.
+
+    Matched over the token sequence rather than the raw segment text, because a
+    substring scan reads *inside quoted arguments*. PR-3 widened
+    ``_ALL_TEST_PATTERNS`` for polyglot repos, which put every language's
+    multi-word patterns in front of every command — and the shape that broke it
+    is the one this very workflow emits (#2376 PR-3 review-3 HIGH-1)::
+
+        gh pr create --body "## Test plan
+        - [x] npm run test:coverage — 12 passed"      -> PASSED
+
+    ``git`` is in the read-only pre-filter; ``gh`` is not, and no filter can be
+    exhaustive. The same hole bypassed ``_is_syntax_check_only``
+    (``bash -n -c "npm test"``) and ``_EXCLUDE_FLAG_TOKENS``. As tokens, a
+    quoted body is a single token and cannot supply a multi-token run.
+
+    Leading words compare by basename so ``/usr/bin/python -m pytest`` and
+    ``/w/gradlew test`` still match. The final word may be continued by ``:`` or
+    ``_`` (``npm run test:coverage``, ``npm run test_unit``) but not by a letter,
+    digit or hyphen (``npm run testdata:seed``, ``npm run test-utils:build``).
+    """
+    words = pattern.split()
+    for start in range(len(tokens)):
+        cursor = start
+        for position, word in enumerate(words):
+            # Flags may sit between the words: `npm --silent test`,
+            # `cargo -q test`, `gradle --offline test`, `npm --workspace=x test`
+            # are all ordinary and matched nothing before (#2376 PR-3
+            # review-4 Q1). Only flags are skipped, never bare operands — a
+            # `-x value` form is indistinguishable from a subcommand, and
+            # skipping operands would make `npm ci --prefix test` a test run.
+            while position and cursor < len(tokens) and tokens[cursor].startswith("-"):
+                cursor += 1
+            if cursor >= len(tokens):
+                break
+            token = tokens[cursor]
+            if position < len(words) - 1:
+                if token.rsplit("/", 1)[-1] != word.rsplit("/", 1)[-1]:
+                    break
+            elif not (
+                token == word
+                or (token.startswith(word) and not re.match(r"[A-Za-z0-9-]", token[len(word) :]))
+            ):
+                break
+            cursor += 1
+        else:
+            return True
+    return False
+
+
+def _pattern_matches_segment(pattern: str, segment: str, tokens: list[str]) -> bool:
+    """Whether ``pattern`` matches ``segment`` as a test invocation.
+
+    Everything is matched over *tokens*, never over the raw segment text. Bare
+    single-word runner names must be a whole token, so the polyglot union does
+    not make ``nox`` match ``equinox`` or ``nox.yaml`` (#2376 PR-3 review D4);
+    multi-word patterns must be a consecutive token run, so a quoted argument
+    body cannot supply them (review-3 HIGH-1).
+
+    Token equality rather than command *position* is deliberate for the bare
+    names. Requiring the runner at the head broke every wrapped invocation —
+    ``sudo pytest``, ``timeout 600 pytest``, ``poetry run pytest``,
+    ``docker compose run app pytest`` — all of which work on the PR-2 tip and
+    are ordinary (review-2 N1). Wrapper operand grammars cannot be enumerated,
+    and the rest of this module scans rather than reading token 0 for exactly
+    that reason. What token equality leaves is a runner *name* used as an
+    artifact name, which the ``_is_artifact_operation`` veto handles.
+
+    The veto is deliberately scoped to this door and NOT to the ``tests/`` path
+    rule. Gating both looked tidier and was a fail-closed regression: the
+    bare-word rule fires on any verb following a bare word, and a test script's
+    own *argument* qualifies, so ``bash tests/integration/run.sh install`` and
+    six siblings died — including wf221's own command with a mode argument
+    (#2376 PR-3 review-6). The path rule needs no veto: it is positional, so
+    ``helm install mocha ./tests/run.sh`` is already rejected because the path
+    is neither token 0 nor preceded by an interpreter.
+    """
+    # Enumerate and slice the SAME list. Slicing the unstripped `tokens` with an
+    # index into the stripped one shifts the window left by the number of
+    # assignments, dropping the verb off the end of it: `FOO=1 helm install
+    # mocha` saw only {FOO=1, helm} and was accepted (review-2 follow-up).
+    stripped = _strip_leading_assignments(tokens)
+    if _is_artifact_operation(stripped):
+        return False
+    if pattern in _BARE_RUNNER_PATTERNS:
+        return any(token.rsplit("/", 1)[-1] == pattern for token in stripped)
+    return _multiword_pattern_matches(pattern, stripped)
+
+
+# Any path with a tests/ component, anchored on that component so it also
+# matches the absolute and nested forms agents actually produce inside
+# `.worktrees/<id>` checkouts (#2376 PR-3 review D11) — the anchored-at-start
+# version rejected wf221's own command written absolutely.
+_TEST_PATH_RE = re.compile(r"^(?:[\w./~-]*/)?tests?/.+\.(sh|bash|py|js|ts|mjs|bats)$")
+
+
+def _is_test_path(token: str) -> bool:
+    """Whether ``token`` is a path to a file *inside* a ``tests/`` directory.
+
+    The regex's ``.+`` happily swallows a traversal back out again, so
+    ``python tests/../scripts/deploy.py`` matched and counted as a test run
+    (#2376 PR-3 review-3). A ``..`` *before* the tests component is fine and
+    common — agents run ``bash ../tests/x.sh`` from a subdirectory — so only the
+    remainder is checked.
+    """
+    if not _TEST_PATH_RE.match(token):
+        return False
+    parts = token.split("/")
+    for index, part in enumerate(parts):
+        if part in ("tests", "test"):
+            return ".." not in parts[index + 1 :]
+    return False
+
+
+# Interpreters that can execute a test file directly. `python3.N` is matched
+# separately so 3.10/3.12/... all resolve.
+_EXECUTING_INTERPRETERS = frozenset(
+    {
+        "bash",
+        "sh",
+        "zsh",
+        # dash/ksh must stay in step with _SHELL_C_COMMANDS. A shell whose -c
+        # body is expanded but which is not an executing interpreter cannot run
+        # a tests/ file, and one that is not a _SYNTAX_CHECK_SHELLS member has
+        # its `-n` ignored — `dash -n -c "npm test"` counted as a passing run
+        # (#2376 PR-3 review-4). test_widened_recognition pins both directions.
+        "dash",
+        "ksh",
+        "python",
+        "python3",
+        "node",
+        "bun",
+        "deno",
+        "ts-node",
+        "tsx",
+    }
+)
+_PYTHON_VERSIONED_RE = re.compile(r"^python3\.\d+$")
+
+# Allowlists, deliberately not denylists. A denylist has to be exhaustive to be
+# sound, and the first cut of this rule let `python -m ruff check tests/x.py`,
+# `python -m black --check` and `python -m mypy` satisfy the gate — this
+# project's own pre-commit tools.
+_PYTHON_MODULE_RUNNERS = frozenset({"pytest", "unittest", "nose2", "tox", "nox"})
+
+# Runners that execute tests when invoked bare (`npx vitest`, `npx jest`).
+_NPX_BARE_RUNNERS = frozenset({"vitest", "jest", "mocha"})
+# Runners whose binary does many things; only these subcommands run tests.
+# Without this, `npx playwright install --with-deps` satisfies the gate — the
+# very hole the plan deleted Fix F' to avoid, re-entered through another door
+# (#2376 PR-3 review D3). frontend/package.json ships exactly that command as
+# its "playwright:install" script.
+_NPX_SUBCOMMAND_RUNNERS = {"playwright": {"test"}, "cypress": {"run"}}
+
+
+def _is_npx_test_invocation(rest: list[str]) -> bool:
+    """Whether ``npx``/``yarn``/``pnpm`` followed by ``rest`` runs tests."""
+    for index, follower in enumerate(rest):
+        if follower.startswith("-") or follower in {"dlx", "exec"}:
+            continue
+        base = follower.rsplit("/", 1)[-1]
+        if base in _NPX_BARE_RUNNERS:
+            return True
+        subcommands = _NPX_SUBCOMMAND_RUNNERS.get(base)
+        if subcommands is None:
+            return False
+        for candidate in rest[index + 1 :]:
+            if candidate.startswith("-"):
+                continue
+            return candidate in subcommands
+        return False
+    return False
+
+
+# Flags that make an interpreter parse a file without running it.
+_SYNTAX_CHECK_SHELLS = frozenset({"bash", "sh", "zsh", "dash", "ksh"})
+
+
+def _strip_leading_assignments(tokens: list[str]) -> list[str]:
+    """Drop leading ``VAR=x`` env assignments so the command is at the front."""
+    index = 0
+    while index < len(tokens) and _ASSIGNMENT_RE.match(tokens[index]):
+        index += 1
+    return tokens[index:]
+
+
+def _is_syntax_check_only(tokens: list[str]) -> bool:
+    """Whether the tokens parse a file rather than execute it.
+
+    ``bash -n`` (and ``sh -en``, ``zsh -n``, ``bash --norc -n``, ``bash -o
+    noexec``) exit 0 without running a line, so treating them as a passing test
+    run is a fail-open.
+
+    The shell is located by scanning, exactly as the interpreter scan does
+    (#2376 PR-3 review D2). Reading ``tokens[0]`` instead let every wrapper
+    defeat this while the same wrappers were deliberately stepped over for
+    recognition — ``sudo bash -n tests/x.sh`` counted as a passing test run.
+    """
+    for index, token in enumerate(tokens):
+        base = token.rsplit("/", 1)[-1]
+        if base in {"node", "nodejs"}:
+            return "--check" in tokens[index + 1 :]
+        if base not in _SYNTAX_CHECK_SHELLS:
+            continue
+        for offset, flag in enumerate(tokens[index + 1 :]):
+            if not flag.startswith("-") or flag == "--":
+                break
+            if flag == "-o":
+                following = tokens[index + 2 + offset : index + 3 + offset]
+                if following and following[0].lower() in {"noexec", "no_exec"}:
+                    return True
+                continue
+            if flag.startswith("--"):
+                continue
+            if "n" in flag[1:]:
+                return True
+        return False
+    return False
+
+
+def _is_test_path_execution(command: str) -> bool:
+    """Whether ``command`` executes a file under ``tests/``.
+
+    Recognition is per segment and runs after the non-executing pre-filter, so
+    reading or grepping a test file never reaches here.
+    """
+    for segment in _executable_segments(command):
+        tokens = _strip_leading_assignments(_shell_tokens(segment))
+        if not tokens or _is_syntax_check_only(tokens):
+            continue
+
+        # A test file invoked directly: `./tests/e2e/run.sh`. Positional — the
+        # path must BE the command, not merely appear among its arguments.
+        # Matching any token made every unrecognized tool with a tests/ argument
+        # a test run: `ruff check tests/x.py`, `eslint tests/x.ts`,
+        # `shellcheck tests/x.sh` (#2376 PR-3 review D1). The non-executing
+        # pre-filter is a denylist and cannot be the only guard here.
+        if _is_test_path(tokens[0]):
+            return True
+
+        # Scan for the first interpreter/runner token; wrapper operands
+        # (`sudo -u openace`, `timeout 60`) are stepped over rather than
+        # modelled, mirroring _segment_is_non_executing.
+        for index, token in enumerate(tokens):
+            base = token.rsplit("/", 1)[-1]
+            rest = tokens[index + 1 :]
+
+            # `python -m <runner>`: allowlisted runners only.
+            if base in {"python", "python3", "node"} or _PYTHON_VERSIONED_RE.match(base):
+                if "-m" in rest:
+                    module = rest[rest.index("-m") + 1 :]
+                    return bool(module) and module[0] in _PYTHON_MODULE_RUNNERS
+            if base in {"npx", "pnpm", "yarn", "bunx"}:
+                return _is_npx_test_invocation(rest)
+
+            if base in _EXECUTING_INTERPRETERS or _PYTHON_VERSIONED_RE.match(base):
+                return any(_is_test_path(arg) for arg in rest)
+    return False
+
+
+# Tool names that ARE a shell, compared case-insensitively (#2401 b). One
+# canonical set so a new sandbox provider's shell tool name is added in exactly
+# one place; ``test_tool_name_contract`` pins that every provider-declared shell
+# tool name is a member. The old whitelist was closed + case-sensitive, so a
+# tool-name drift (``bash``/``terminal``/``execute_bash``/...) voided the gate
+# for any command — the same "ran the right tests, judged as not run" failure as
+# the original #2376 incident, but invisible because it is command-independent.
+_SHELL_TOOL_NAMES = frozenset(
+    {
+        "bash",
+        "sh",
+        "shell",
+        "zsh",
+        "run_shell_command",
+        "exec_command",
+        "execute_bash",
+        "local_shell",
+        "container.exec",
+        "terminal",
+        "run_terminal_cmd",
+    }
+)
+
+# Dedicated test-runner tool names (#2401 a). NOT fail-open: the tool name is
+# treated as ``argv[0]`` and run through the SAME recognition as a shell command,
+# so ``pytest`` (a runner token) is recognized while ``test``/``run_tests`` pass
+# only when the command carries a real runner. Before this, the name alone
+# returned True, so a tool literally named ``test`` running ``helm install`` (or
+# nothing) reached the authoritative PASSED verdict.
+_TEST_TOOL_NAMES = frozenset({"pytest", "run_tests", "test"})
+
+
+def _command_text(tool_input: dict) -> str:
+    """Resolve one command string from a tool_use input across provider shapes.
+
+    Providers spell the executed command differently: ``command``/``cmd`` carry a
+    joined shell string, while argv-style providers carry ``argv``/``args`` as a
+    token list (#2401 c). Reading only ``command``/``cmd`` made an argv-only
+    invocation invisible to the gate; join the list forms so recognition sees the
+    same text whatever the shape.
+    """
+    if not isinstance(tool_input, dict):
+        return ""
+    command = tool_input.get("command") or tool_input.get("cmd")
+    if isinstance(command, str) and command:
+        return command
+    for key in ("argv", "args"):
+        value = tool_input.get(key)
+        if isinstance(value, list) and value:
+            # shlex.join so an arg with spaces re-quotes faithfully and the
+            # downstream _shell_tokens (shlex.split) round-trips it.
+            return shlex.join([str(part) for part in value])
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _command_runs_tests(command: str, patterns_to_check) -> bool:
+    """Per-segment recognition: whether ``command`` runs tests.
+
+    Extracted from ``_has_test_tool_call`` (#2401) so the dedicated-tool-name and
+    shell-tool-name branches share one recognition path. Each executable segment
+    is checked after the read-only pre-filter (``_EXCLUDE_FLAG_TOKENS`` drops
+    ``--help``/``--version``/collection-only flags, which assert nothing); a
+    runner pattern or a direct ``tests/`` file execution marks it a run. The
+    per-segment split is load-bearing: matching the whole command would let a
+    surviving segment lend its eligibility to a filtered one.
+    """
+    for segment in _executable_segments(command):
+        tokens = _shell_tokens(segment)
+        if any(token in _EXCLUDE_FLAG_TOKENS for token in tokens):
+            continue
+        for pattern in patterns_to_check:
+            if _pattern_matches_segment(pattern, segment, tokens):
+                return True
+        if _is_test_path_execution(segment):
+            return True
+    return False
+
+
 def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     """Check if tool_calls contains a test framework execution command.
 
@@ -636,16 +1405,32 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     if not tool_calls:
         return False
 
-    test_commands = {
-        "python": ["pytest", "python -m pytest", "-m pytest", "unittest", "tox", "nox"],
-        "javascript": ["jest", "npm test", "npm run test", "yarn test", "vitest", "mocha"],
-        "go": ["go test", "gotestsum"],
-        "rust": ["cargo test", "cargo t"],
-        "java": ["mvn test", "gradle test", "./gradlew test"],
-    }
+    test_commands = _TEST_COMMAND_PATTERNS
     # P1: generic_patterns includes unittest for unknown frameworks
-    generic_patterns = ["pytest", "unittest", "jest", "go test", "cargo test", "npm test"]
-    patterns_to_check = test_commands.get(framework_type, generic_patterns)
+    # "vitest" and "npm run test" live in the javascript list but were missing
+    # here, which made the fallback strictly weaker than any single-language
+    # list — and "mixed" landed on it (#2376 D3). "npm run test" is a prefix of
+    # "npm run test:coverage"/"test:unit", so substring matching covers the
+    # `test:*` variants.
+    generic_patterns = [
+        "pytest",
+        "unittest",
+        "jest",
+        "vitest",
+        "go test",
+        "cargo test",
+        "npm test",
+        "npm run test",
+        "yarn test",
+        "pnpm test",
+    ]
+    if framework_type == "mixed":
+        # A polyglot repo must match every language, not the weakest fallback.
+        # tests/issues/1520/test_keyword_detection.py records this as the
+        # original design intent ("mixed -> pytest + Jest + go test + unittest").
+        patterns_to_check = _ALL_TEST_PATTERNS
+    else:
+        patterns_to_check = test_commands.get(framework_type, generic_patterns)
 
     for tc in tool_calls:
         tool_name = tc.get("tool", {}).get("name", "") if isinstance(tc.get("tool"), dict) else ""
@@ -654,30 +1439,34 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
             (tc.get("tool", {}).get("input", {}) or {}) if isinstance(tc.get("tool"), dict) else {}
         )
 
-        # P2: Check non-Bash test tools first (pytest, run_tests, test)
-        if tool_name in ("pytest", "run_tests", "test"):
-            return True
+        lowered = tool_name.lower()
+        command = _command_text(tool_input)
 
-        # Then check Bash/run_shell_command for test commands
-        if tool_name in ("Bash", "Shell", "run_shell_command", "exec_command"):
-            cmd = tool_input.get("command") or tool_input.get("cmd") or ""
-            if not cmd:
+        # (a #2401) A dedicated test-runner tool name is NOT fail-open: prepend it
+        # as argv[0] and run the SAME per-segment recognition as a shell command.
+        # ``pytest`` is itself a runner token so a bare pytest tool is recognized;
+        # ``test``/``run_tests`` pass only when the command carries a real runner,
+        # so a tool named ``test`` running ``helm install`` (or nothing) no longer
+        # reaches the authoritative PASSED verdict. ``run_tests`` is added to the
+        # pattern set so a bare ``run_tests`` suite run is recognized (it is not a
+        # _BARE_RUNNER token, so it routes through the multiword matcher).
+        if lowered in _TEST_TOOL_NAMES:
+            synthetic = f"{lowered} {command}".strip()
+            if _command_runs_tests(synthetic, [*patterns_to_check, "run_tests"]):
+                return True
+            continue
+
+        # (b #2401) Shell tool names, matched case-insensitively against one
+        # canonical set (see _SHELL_TOOL_NAMES). Empty command → nothing to judge.
+        # Recognition is per segment: matching the whole command would let a
+        # surviving segment lend eligibility to a filtered one, so a one-token
+        # prefix could defeat the read-only filter:
+        #     python -c "print(1)" && grep -rn pytest tests/
+        if lowered in _SHELL_TOOL_NAMES:
+            if not command:
                 continue
-            # #2376: filter and match per segment. Both must be per-segment —
-            # matching the whole command would let a surviving segment lend its
-            # eligibility to a filtered one, so a one-token prefix would defeat
-            # the read-only filter:
-            #     python -c "print(1)" && grep -rn pytest tests/
-            for segment in _command_segments(cmd):
-                if _segment_is_non_executing(segment):
-                    continue
-                tokens = _shell_tokens(segment)
-                # Note: -v (verbose) is NOT excluded, only --help/--version/-h
-                if any(token in _EXCLUDE_FLAG_TOKENS for token in tokens):
-                    continue
-                for pattern in patterns_to_check:
-                    if pattern in segment:
-                        return True
+            if _command_runs_tests(command, patterns_to_check):
+                return True
 
     return False
 
@@ -1262,6 +2051,24 @@ PRE_COMMIT_CONVERGENCE_TIMEOUT = 600
 CI_PRE_COMMIT_SKIP = "bandit,no-commit-to-branch"
 MAX_CI_DIAGNOSTICS_ATTEMPTS = 6  # bound scheduler polls when failed job logs stay unavailable
 MAX_CLEANUP_ATTEMPTS = 10  # post-merge Git cleanup retries before giving up (#2043)
+# Cap on Tier1 CI-repair-exhaustion escalations back to a fresh development
+# round (#2443 PR-C). A Tier1 exhaustion (MAX / no-change / unchanged-signature)
+# means the PR branch and CI logs are still recoverable, so instead of terminal
+# `failed` we rebase the existing PR branch onto main, reset the CI-repair
+# counters, and re-enter development on the SAME PR/branch (ci_repair_context is
+# preserved so _get_ci_repair_prompt surfaces the prior failure). After this many
+# dev-round escalations the workflow falls through to a Tier2 terminal report +
+# `failed` — the repair is not converging and must not loop forever.
+MAX_MERGE_FAIL_DEV_ROUNDS = 3
+# Exhaustion categories that are recoverable (PR branch present, failure
+# actionable) and therefore eligible for a Tier1 dev-round escalation.
+_CI_REPAIR_TIER1_CATEGORIES = frozenset(
+    {
+        "ci_repair_exhausted",  # MAX_CI_REPAIR_ATTEMPTS reached
+        "ci_repair_no_change_exhausted",
+        "ci_repair_signature_unchanged",  # meaningful fingerprint unchanged
+    }
+)
 
 
 def _cleanup_backoff_time(attempts: int) -> str:
@@ -1305,6 +2112,129 @@ def _next_phase(current_phase: str) -> str:
     return current_phase
 
 
+def _extract_verifier_json(text: str) -> dict | None:
+    """Extract the acceptance verifier's JSON verdict object from agent output.
+
+    Tolerant of the glm family's common deviations from "ONLY a fenced JSON
+    block": prose prefaces, multiple/partial code fences, trailing commas
+    (``{"a":1,}``), and braces appearing inside string values. Returns the
+    parsed dict, or ``None`` when no JSON object can be recovered (the caller
+    records an infra_error and logs the raw text). ``None`` defers to
+    infra-retry — it never fabricates a verdict.
+    """
+    import json as _json
+    import re as _re
+
+    def _try_parse(candidate: str) -> dict | None:
+        candidate = (candidate or "").strip()
+        if not candidate:
+            return None
+        try:
+            parsed = _json.loads(candidate)
+        except Exception:
+            # glm models routinely emit trailing commas ({"a":1,}); strip them.
+            # String-aware so a ",}" inside a value (e.g. an evidence note
+            # containing a code snippet) is preserved, not mangled.
+            cleaned = _strip_trailing_commas(candidate)
+            try:
+                parsed = _json.loads(cleaned)
+            except Exception:
+                return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def _strip_trailing_commas(s: str) -> str:
+        out: list[str] = []
+        in_str = False
+        escaped = False
+        i = 0
+        n = len(s)
+        while i < n:
+            ch = s[i]
+            if escaped:
+                out.append(ch)
+                escaped = False
+                i += 1
+                continue
+            if ch == "\\":
+                out.append(ch)
+                escaped = True
+                i += 1
+                continue
+            if ch == '"':
+                in_str = not in_str
+                out.append(ch)
+                i += 1
+                continue
+            if not in_str and ch == ",":
+                j = i + 1
+                while j < n and s[j].isspace():
+                    j += 1
+                if j < n and s[j] in "}]":
+                    i += 1  # drop the trailing comma
+                    continue
+            out.append(ch)
+            i += 1
+        return "".join(out)
+
+    def _first_balanced(s: str) -> str | None:
+        # First string-aware balanced { ... } substring; braces inside quoted
+        # strings are skipped so evidence text mentioning {} can't fool depth.
+        start = s.find("{")
+        while start != -1:
+            depth = 0
+            in_str = False
+            escaped = False
+            end = None
+            for i in range(start, len(s)):
+                ch = s[i]
+                if escaped:
+                    escaped = False
+                    continue
+                if ch == "\\":
+                    escaped = True
+                    continue
+                if ch == '"':
+                    in_str = not in_str
+                    continue
+                if in_str:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+            if end is not None:
+                return s[start : end + 1]
+            start = s.find("{", start + 1)
+        return None
+
+    # 1) Prefer fenced ```json ... ``` regions (non-greedy per fence pair so two
+    #    blocks don't merge). The LAST region wins — the agent may preface with
+    #    an earlier partial draft. Within a region, take its first balanced {}.
+    fenced_regions = list(_re.finditer(r"```(?:json)?\s*(.*?)\s*```", text, _re.DOTALL))
+    for region in reversed(fenced_regions):
+        obj = _first_balanced(region.group(1))
+        if obj is not None:
+            parsed = _try_parse(obj)
+            if parsed is not None:
+                return parsed
+
+    # 2) No usable fenced region → balanced { ... } over the WHOLE text
+    #    (prose-wrapped / unfenced output). NOTE: this returns the FIRST
+    #    balanced object — if the agent writes prose with a JSON-shaped
+    #    reasoning object before the real verdict, that first object wins.
+    #    Bounded risk: a non-verdict dict lacks `verdicts`/`snapshot` and
+    #    downstream aggregates to indeterminate (never a false confirmed).
+    obj = _first_balanced(text)
+    if obj is not None:
+        parsed = _try_parse(obj)
+        if parsed is not None:
+            return parsed
+    return None
+
+
 class AutonomousOrchestrator:
     """Drives a single autonomous workflow through its phases."""
 
@@ -1324,6 +2254,11 @@ class AutonomousOrchestrator:
         # interrupts the current attempt without changing the workflow's active
         # phase/status, so the next process can retry it automatically.
         self._shutdown_requested = threading.Event()
+        # Bound by AutonomousScheduler after it acquires the distributed
+        # workflow lease. Direct/unit callers leave these unset and retain the
+        # legacy unfenced behavior.
+        self._scheduler_lock_owner: str | None = None
+        self._scheduler_lock_lost: threading.Event | None = None
 
         # Wire session_manager so agent sessions are persisted to DB
         from app.modules.workspace.session_manager import SessionManager
@@ -2006,6 +2941,32 @@ class AutonomousOrchestrator:
             wf, canonical, decision, evidence_meta, local_sha, expected_sha
         )
 
+    @staticmethod
+    def _dump_event_data(data):
+        """Serialize a timeline event payload tolerating raw datetime/date.
+
+        Workflow patches (and thus emitted events) can carry DB timestamp
+        fields that psycopg2 returns as ``datetime``; the default JSON encoder
+        raises ``TypeError: Object of type datetime is not JSON serializable``
+        on those and fails the whole phase (b48179df regression at
+        acceptance_verification — PR #2465 merged, but the post-merge event
+        crashed). ``isoformat`` keeps timestamps machine-parseable; the ``str``
+        fallback makes emission robust to any other non-native type.
+        """
+
+        def _default(obj):
+            if isinstance(obj, (datetime, date)):
+                return obj.isoformat()
+            # Diagnostic events must never crash the phase on an odd type;
+            # leave a breadcrumb so an unexpected type (set/bytes/...) is visible.
+            logger.debug(
+                "event_data serialized non-native type %s via str fallback",
+                type(obj).__name__,
+            )
+            return str(obj)
+
+        return json.dumps(data, ensure_ascii=False, default=_default)
+
     def _emit(self, event_type: str, data: dict):
         """Emit a timeline event."""
         self.emitter.emit(self._workflow_id, event_type, data)
@@ -2013,7 +2974,7 @@ class AutonomousOrchestrator:
             {
                 "workflow_id": self._workflow_id,
                 "event_type": event_type,
-                "event_data": json.dumps(data, ensure_ascii=False),
+                "event_data": self._dump_event_data(data),
             }
         )
 
@@ -2577,11 +3538,14 @@ class AutonomousOrchestrator:
             "1. 保持在当前工作分支上修复，不要创建新的 PR，不要切换到其他分支。\n"
             "2. 不要进入新的代码审查、进度汇报或等待流程；当前唯一目标是让现有 PR 的 CI 通过。\n"
             "3. 必须优先根据 CI 工作流、失败日志摘录和仓库脚本定位问题，复现 CI 真实执行的命令。\n"
-            "4. 修复后必须重新运行 CI 的完整对应命令，而不是只运行单个 hook、单个文件或你认为相关的子集。\n"
+            "4. 修复后必须重新运行**完整的 pre-commit（所有 hook），但仅作用于你本次改动或 CI 失败涉及的文件**，"
+            "而不是只运行单个 hook；也**禁止 `--all-files` 全仓扫描**——隔离环境与 CI 的工具链版本可能不同，"
+            "全仓扫描会误改你未触碰的干净文件、撑破变更范围而被编排器的范围守卫拒绝。\n"
             "5. 如果命令中的 formatter / pre-commit hook 自动修改了文件并以非零状态退出，这只是修复过程，"
             "不代表验证完成；必须保留这些修改并重复运行同一完整命令，直到 exit 0 或确认存在不可自动修复的错误。\n"
             "6. 编排器已先把当前 main 合并进 PR 分支，因此对 "
-            "`SKIP=bandit,no-commit-to-branch pre-commit run --all-files` 必须原样运行并重复至 exit 0；"
+            "`SKIP=bandit,no-commit-to-branch pre-commit run --files <你改动的文件>`"
+            "（用 `git diff --name-only origin/main` 列出本次改动的文件）必须重复运行至 exit 0；"
             "Bandit 由 CI 独立检查。\n"
             "7. 不要执行 git add、git commit 或 git push；编排器会在范围校验通过后统一提交并推送。\n"
             "8. 结束时请明确说明：你复现了哪些完整命令、最终 exit code、修复了什么、还剩什么风险。\n"
@@ -2638,13 +3602,24 @@ class AutonomousOrchestrator:
         wf: dict,
         gh: GitHubOps,
         failed_checks: list[dict],
+        commit_before: str = "",
     ) -> tuple[bool, str]:
-        """Run the CI's full pre-commit command under the isolated agent account.
+        """Run the CI's pre-commit command (scoped to changed files) under the
+        isolated agent account.
 
         Some hooks intentionally modify files and return 1 on their first pass.
         A repair agent can mistake that for completion and push a still-red
-        branch. Re-run the full command until it is clean, while preserving the
-        same credentialless OS boundary used for all autonomous repository code.
+        branch. Re-run pre-commit on the round-local targets until clean, while
+        preserving the same credentialless OS boundary used for all autonomous
+        repository code.
+
+        The run is scoped via ``--files`` to the targets that differ from
+        ``commit_before`` (the PR remote head). Running ``--all-files`` instead
+        cascades into reformatting clean files whenever the isolated env's
+        toolchain drifts from CI's pinned versions — that blew past
+        ``MAX_AUTONOMOUS_CHANGED_FILES`` and failed whole workflows. When no
+        targets exist, convergence skips entirely (the agent changed nothing for
+        pre-commit to normalize); it never falls back to ``--all-files``.
 
         Returns ``(attempted, remaining_error)``. A remaining error is reported
         in the repair summary but does not discard safe hook edits: the next CI
@@ -2698,8 +3673,20 @@ class AutonomousOrchestrator:
             "GIT_TERMINAL_PROMPT": "0",
             "SKIP": CI_PRE_COMMIT_SKIP,
         }
+        # Scope pre-commit to the round-local targets (files differing from
+        # commit_before). --all-files would reformat clean files on toolchain
+        # drift and blow the change-scope guard. No targets → nothing to
+        # normalize; skip rather than fall back to the known-broken --all-files.
+        targets = self._collect_pre_commit_targets(gh, commit_before)
+        if not targets:
+            logger.info(
+                "Skipping pre-commit convergence: no round-local targets "
+                "(nothing differs from commit_before=%s)",
+                commit_before or "(unset)",
+            )
+            return False, ""
         command, cwd = AutonomousAgentRunner._wrap_agent_cmd(
-            [pre_commit, "run", "--all-files"],
+            [pre_commit, "run", "--files", *targets],
             project_path,
             isolated_account,
             env,
@@ -2739,9 +3726,42 @@ class AutonomousOrchestrator:
 
         concise_output = last_output[-4000:] if last_output else "no output"
         return True, (
-            "isolated `pre-commit run --all-files` did not reach exit 0 after "
+            "isolated `pre-commit run --files <targets>` did not reach exit 0 after "
             f"{passes_run} pass(es):\n{concise_output}"
         )
+
+    @staticmethod
+    def _collect_pre_commit_targets(gh: GitHubOps, commit_before: str) -> list[str]:
+        """Return the files the convergence pre-commit run may touch.
+
+        This is everything that differs from the round boundary ``commit_before``
+        (the PR remote head) — committed since that point *or* sitting in the
+        working tree. That set is a conservative superset of what the per-round
+        scope guard (``_validate_autonomous_change_scope`` with ``commit_before``)
+        counts — the guard may rebase its baseline to ``merge-base`` on a merge
+        commit, narrowing what it counts, but this set only ever spans
+        legitimate round-local files, so scoping pre-commit to it cannot blow
+        past ``MAX_AUTONOMOUS_CHANGED_FILES`` via toolchain-drift reformatting of
+        unrelated clean files (the scope-exceeded cascade). Git lookups degrade
+        fail-soft: a transient
+        error on one layer yields whatever the other layer returned, never an
+        exception (the caller would otherwise be tempted to fall back to
+        ``--all-files``, which is the bug being fixed).
+        """
+        committed: list[str] = []
+        if commit_before:
+            try:
+                committed = gh.get_changed_files(commit_before, "HEAD")
+            except Exception as exc:
+                logger.warning(
+                    "pre-commit target collection: committed-delta lookup failed: %s", exc
+                )
+        try:
+            working = gh.get_worktree_changed_paths()
+        except Exception as exc:
+            logger.warning("pre-commit target collection: working-tree lookup failed: %s", exc)
+            working = []
+        return sorted({path for path in (*committed, *working) if path})
 
     @staticmethod
     def _detect_and_push_ci_repair_changes(
@@ -2839,6 +3859,14 @@ class AutonomousOrchestrator:
                 title="CI repair environment is incompatible",
                 error_message=runtime_error,
             )
+            self._emit_ci_repair_terminal_report(
+                wf,
+                pr_number,
+                category="ci_repair_environment_mismatch",
+                reason=runtime_error,
+                attempts=attempt,
+                branch_name=branch_name,
+            )
             self._update_workflow({"status": "failed", "error_message": runtime_error})
             return
 
@@ -2927,6 +3955,14 @@ class AutonomousOrchestrator:
                     "error_message": message,
                 },
             )
+            self._emit_ci_repair_terminal_report(
+                wf,
+                pr_number,
+                category="ci_repair_context_overflow",
+                reason=message,
+                attempts=attempt,
+                branch_name=branch_name,
+            )
             self._update_workflow({"status": "failed", "error_message": message})
             return
 
@@ -2947,6 +3983,14 @@ class AutonomousOrchestrator:
                         "error_message": message,
                     },
                 )
+                self._emit_ci_repair_terminal_report(
+                    wf,
+                    pr_number,
+                    category="ci_repair_branch_changed",
+                    reason=message,
+                    attempts=attempt,
+                    branch_name=branch_name,
+                )
                 self._update_workflow({"status": "failed", "error_message": message})
                 return
         except Exception as e:
@@ -2959,7 +4003,7 @@ class AutonomousOrchestrator:
         pre_commit_error = ""
         try:
             pre_commit_attempted, pre_commit_error = self._converge_pre_commit_fixes(
-                wf, gh, failed_checks
+                wf, gh, failed_checks, commit_before
             )
         except Exception as exc:
             # The isolated validation is defense-in-depth. Preserve the agent's
@@ -3001,7 +4045,8 @@ class AutonomousOrchestrator:
         )
         if pre_commit_attempted:
             validation_summary = (
-                pre_commit_error or "isolated `pre-commit run --all-files` converged with exit 0"
+                pre_commit_error
+                or "isolated pre-commit convergence (scoped to changed files) passed with exit 0"
             )
             summary = f"{summary}\n\nValidation: {validation_summary}".strip()
 
@@ -3020,6 +4065,14 @@ class AutonomousOrchestrator:
             milestone_updates["status"] = "failed"
             milestone_updates["error_message"] = message
             self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
+            self._emit_ci_repair_terminal_report(
+                wf,
+                pr_number,
+                category="ci_repair_push_failed",
+                reason=message,
+                attempts=attempt,
+                branch_name=branch_name,
+            )
             self._update_workflow({"status": "failed", "error_message": message})
             return
 
@@ -3062,6 +4115,14 @@ class AutonomousOrchestrator:
             milestone_updates["error_message"] = message
             self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
             if terminal:
+                self._emit_ci_repair_terminal_report(
+                    wf,
+                    pr_number,
+                    category="ci_repair_terminal",
+                    reason=message,
+                    attempts=attempt,
+                    branch_name=branch_name,
+                )
                 self._update_workflow({"status": "failed", "error_message": message})
             else:
                 self._update_workflow({"status": "merging", "error_message": message})
@@ -3072,6 +4133,14 @@ class AutonomousOrchestrator:
             milestone_updates["status"] = "failed"
             milestone_updates["error_message"] = message
             self.repo.update_milestone(repair_ms.get("milestone_id", ""), milestone_updates)
+            self._emit_ci_repair_terminal_report(
+                wf,
+                pr_number,
+                category="ci_repair_agent_failed",
+                reason=message,
+                attempts=attempt,
+                branch_name=branch_name,
+            )
             self._update_workflow({"status": "failed", "error_message": message})
             return
 
@@ -3511,7 +4580,7 @@ class AutonomousOrchestrator:
 
         return scopes
 
-    def _build_test_execution_context(self, wf: dict, gh: GitHubOps) -> str:
+    def _build_test_execution_context(self, wf: dict, gh: GitHubOps) -> tuple[str, list[str]]:
         """Build a targeted validation brief for the test phase."""
         project_path = wf.get("worktree_path") or wf.get("project_path", "")
         framework_type = _infer_test_framework(project_path, wf.get("cli_tool", ""))
@@ -3616,7 +4685,9 @@ class AutonomousOrchestrator:
                 guardrail,
             ]
         )
-        return "\n".join(context).strip()
+        # Return the changed files alongside the brief so the #2391 requirer can
+        # reuse them (single fetch — no second git diff at the gate).
+        return "\n".join(context).strip(), changed_files
 
     def _post_github_comment(
         self,
@@ -3750,6 +4821,7 @@ class AutonomousOrchestrator:
         but routing every transition through here makes phase/status mutation a
         single auditable path — the property Phase A requires.
         """
+        self._assert_scheduler_lock()
         patch: dict[str, object] = dict(result.workflow_patch)
 
         if result.outcome == "completed":
@@ -4042,6 +5114,173 @@ class AutonomousOrchestrator:
     def _resolve_recovery_head(self, main_gh: GitHubOps, wf: dict) -> tuple[str | None, str, dict]:
         return self._git_workspace.resolve_recovery_head(main_gh, wf)
 
+    def _emit_ci_repair_terminal_report(
+        self,
+        wf: dict,
+        pr_number: int,
+        *,
+        category: str,
+        reason: str,
+        attempts: int,
+        failure_names: str = "",
+        branch_name: str = "",
+    ) -> None:
+        """Post a Tier2 terminal report when CI repair exhausts (#2443 PR-A).
+
+        Makes an absorbing merge ``failed`` visible on its issue with a retry
+        entry point, instead of silent DB absorption (the #2443 gap). Does NOT
+        change the status machine — ``failed`` stays ``failed``. Idempotent: a
+        ``terminal_report_posted`` milestone (non-ci_repair_ prefix, so
+        completed milestones match) plus add_issue_comment's author-aware dedup,
+        so scheduler restart/replay never double-posts.
+        """
+        dev_round = int(wf.get("dev_round", 1) or 1)
+        if self._find_existing_milestone(
+            phase="merge",
+            milestone_type="terminal_report_posted",
+            dev_round=dev_round,
+            round_number=attempts,
+            completed=True,
+        ):
+            return
+        body = render_ci_repair_terminal_report(
+            category=category,
+            reason=reason,
+            attempts=attempts,
+            pr_number=pr_number,
+            failure_names=failure_names,
+            branch_name=branch_name,
+        )
+        try:
+            self._get_gh().add_issue_comment(pr_number, body)
+        except Exception as exc:
+            logger.warning("Failed to post CI repair terminal report to PR #%s: %s", pr_number, exc)
+        self._create_milestone(
+            phase="merge",
+            dev_round=dev_round,
+            round_number=attempts,
+            milestone_type="terminal_report_posted",
+            status="completed",
+            title=f"CI repair terminal report posted ({category})",
+            error_message=body[:500],
+        )
+
+    def _escalate_ci_repair_exhaustion(
+        self,
+        wf: dict,
+        pr_number: int,
+        *,
+        category: str,
+        reason: str,
+        attempts: int,
+        failure_names: str = "",
+        branch_name: str = "",
+    ) -> None:
+        """Route a CI-repair exhaustion to Tier1 (fresh dev round) or Tier2 (terminal).
+
+        #2443 PR-C. ``category`` distinguishes the two tiers:
+
+        * **Tier1** (``_CI_REPAIR_TIER1_CATEGORIES`` — MAX / no-change /
+          unchanged-signature): the PR branch and CI logs are recoverable, so a
+          fresh development pass may still succeed. While ``merge_fail_dev_rounds``
+          is under ``MAX_MERGE_FAIL_DEV_ROUNDS`` AND a PR branch exists, rebase
+          the existing branch onto main, reset the full CI-repair counter set,
+          and re-enter development on the SAME PR/branch.
+        * **Tier2** (every other category) or Tier1-at-cap: post the PR-A
+          terminal report and write absorbing ``failed``.
+
+        Replaces the PR-A ``_emit_ci_repair_terminal_report`` + ``failed`` pair
+        at the 3 Tier1 exhaustion sites; the 8 Tier2 sites keep PR-A's behavior.
+        """
+        merge_fail_dev_rounds = int(wf.get("merge_fail_dev_rounds", 0) or 0)
+        recoverable_branch = bool((wf.get("branch_name") or branch_name or "").strip())
+        if (
+            category in _CI_REPAIR_TIER1_CATEGORIES
+            and merge_fail_dev_rounds < MAX_MERGE_FAIL_DEV_ROUNDS
+            and recoverable_branch
+        ):
+            self._escalate_to_development_round(
+                wf,
+                pr_number,
+                reason=reason,
+                attempts=attempts,
+                branch_name=(wf.get("branch_name") or branch_name or ""),
+            )
+            return
+        # Tier2, or Tier1 at the dev-round cap: terminal report + absorbing failed.
+        self._emit_ci_repair_terminal_report(
+            wf,
+            pr_number,
+            category=category,
+            reason=reason,
+            attempts=attempts,
+            failure_names=failure_names,
+            branch_name=branch_name,
+        )
+        self._update_workflow({"status": "failed", "error_message": reason})
+
+    def _escalate_to_development_round(
+        self, wf: dict, pr_number: int, *, reason: str, attempts: int, branch_name: str
+    ) -> None:
+        """Re-enter development on the existing PR branch after a Tier1 exhaustion.
+
+        Rebase the PR branch onto current main first (best-effort — a sync
+        failure must not strand the workflow in ``failed``), record the
+        escalation, then transition to ``developing`` with a full CI-repair
+        counter reset. ``ci_repair_context`` is deliberately NOT cleared: the
+        development prompt's ``_get_ci_repair_prompt`` surfaces it so the fresh
+        dev round is aware of the prior CI failure rather than re-deriving the
+        same broken implementation blind (#2443 PR-C, plan N6).
+        """
+        dev_round = int(wf.get("dev_round", 1) or 1)
+        merge_fail_dev_rounds = int(wf.get("merge_fail_dev_rounds", 0) or 0)
+        if branch_name:
+            try:
+                gh = self._get_gh()
+                head_sha = ""
+                try:
+                    head_sha = gh.get_pr_head_sha(pr_number)
+                except Exception:
+                    pass
+                if head_sha:
+                    # Ignore the return: whether or not a sync push happened, the
+                    # branch is now current with main and development proceeds.
+                    self._sync_failed_pr_with_main(gh, branch_name, pr_number, head_sha)
+            except Exception as exc:
+                logger.warning(
+                    "Pre-development rebase failed for PR #%s (proceeding anyway): %s",
+                    pr_number,
+                    exc,
+                )
+        self._create_milestone(
+            phase="merge",
+            dev_round=dev_round,
+            round_number=attempts,
+            milestone_type="ci_repair_escalated_to_development",
+            status="completed",
+            title="CI repair exhausted — escalating to a fresh development round",
+            error_message=reason,
+        )
+        self._update_workflow(
+            {
+                "status": "developing",
+                "current_phase": "development",
+                "dev_round": dev_round + 1,
+                "merge_fail_dev_rounds": merge_fail_dev_rounds + 1,
+                # Full counter reset — a fresh dev round must not inherit stale
+                # CI-repair counts or a stale failure signature (mirrors
+                # retry_workflow, PR-B). ci_repair_context is intentionally left
+                # untouched (preserved as dev feedback).
+                "ci_repair_attempts": 0,
+                "ci_repair_transient_retries": 0,
+                "ci_repair_no_change_retries": 0,
+                "ci_diagnostics_attempts": 0,
+                "last_ci_failure_signature": "",
+                "last_ci_failure_head_sha": "",
+                "error_message": "",
+            }
+        )
+
     def _start_ci_repair_round(self, wf: dict, pr_number: int, failed_checks: list[dict]) -> None:
         """Repair merge-phase CI failures in-place on the existing PR branch."""
         dev_round = int(wf.get("dev_round", 1) or 1)
@@ -4070,6 +5309,13 @@ class AutonomousOrchestrator:
                     status="failed",
                     title="CI repair transient retry limit reached",
                     error_message=message,
+                )
+                self._emit_ci_repair_terminal_report(
+                    wf,
+                    pr_number,
+                    category="ci_repair_transient_exhausted",
+                    reason=message,
+                    attempts=previous_attempts,
                 )
                 self._update_workflow({"status": "failed", "error_message": message})
                 return
@@ -4100,7 +5346,13 @@ class AutonomousOrchestrator:
                     ),
                     error_message=message,
                 )
-                self._update_workflow({"status": "failed", "error_message": message})
+                self._escalate_ci_repair_exhaustion(
+                    wf,
+                    pr_number,
+                    category="ci_repair_no_change_exhausted",
+                    reason=message,
+                    attempts=previous_attempts,
+                )
                 return
             # Don't increment ci_repair_attempts; bump the no-change counter
             # (reset to 0 on a change-producing round).
@@ -4156,7 +5408,15 @@ class AutonomousOrchestrator:
                 title="CI automatic repair limit reached",
                 error_message=message,
             )
-            self._update_workflow({"status": "failed", "error_message": message})
+            self._escalate_ci_repair_exhaustion(
+                wf,
+                pr_number,
+                category="ci_repair_exhausted",
+                reason=message,
+                attempts=next_attempt,
+                failure_names=failure_names,
+                branch_name=branch_name,
+            )
             return
 
         # Resolve log evidence before consuming an attempt.  A repair agent
@@ -4247,6 +5507,13 @@ class AutonomousOrchestrator:
                     pending_ms.get("milestone_id", ""),
                     {"status": "failed", "error_message": terminal},
                 )
+                self._emit_ci_repair_terminal_report(
+                    wf,
+                    pr_number,
+                    category="ci_repair_diagnostics_exhausted",
+                    reason=terminal,
+                    attempts=previous_attempts,
+                )
                 self._update_workflow(
                     {
                         "status": "failed",
@@ -4327,7 +5594,15 @@ class AutonomousOrchestrator:
                 title="CI failures unchanged after automatic repair",
                 error_message=message,
             )
-            self._update_workflow({"status": "failed", "error_message": message})
+            self._escalate_ci_repair_exhaustion(
+                wf,
+                pr_number,
+                category="ci_repair_signature_unchanged",
+                reason=message,
+                attempts=next_attempt,
+                failure_names=failure_names,
+                branch_name=branch_name,
+            )
             return
 
         context = self._build_ci_repair_context(wf, gh, pr_number, failed_checks)
@@ -4392,9 +5667,24 @@ class AutonomousOrchestrator:
             repair_wf = self.workflow or repair_wf
         self._run_merge_ci_repair(repair_wf, gh, pr_number, failed_checks)
 
+    def _persist_workflow_update(self, updates: dict) -> dict | None:
+        """Persist one workflow patch, fenced by the scheduler lease when bound."""
+        lock_owner = getattr(self, "_scheduler_lock_owner", None)
+        if lock_owner:
+            updated = self.repo.update_workflow(
+                self._workflow_id,
+                updates,
+                required_lock_owner=lock_owner,
+            )
+            if updated is None:
+                self._mark_scheduler_lock_lost()
+                raise WorkflowPaused("Distributed workflow lock was lost")
+            return updated
+        return self.repo.update_workflow(self._workflow_id, updates)
+
     def _update_workflow(self, updates: dict):
         """Update workflow and emit event."""
-        self.repo.update_workflow(self._workflow_id, updates)
+        self._persist_workflow_update(updates)
         self._emit("workflow_updated", updates)
 
     def _cleanup_worktree_and_branch(
@@ -4487,6 +5777,7 @@ class AutonomousOrchestrator:
 
     def _accumulate_tokens(self, _result: AgentTaskResult):
         """Refresh workflow totals from the sessions linked to milestones."""
+        self._assert_scheduler_lock()
         self.repo.refresh_workflow_usage_from_sessions(self._workflow_id)
 
     def _persist_sandbox_attribution(self, result: AgentTaskResult) -> None:
@@ -4502,14 +5793,13 @@ class AutonomousOrchestrator:
         if not provider and not sandbox_id:
             return  # no sandbox ran (e.g. CLI not found before create)
         try:
-            self.repo.update_workflow(
-                self._workflow_id,
+            self._persist_workflow_update(
                 {
                     "sandbox_provider": provider,
                     "sandbox_id": sandbox_id,
                     "sandbox_generation": getattr(result, "sandbox_generation", None),
                     "sandbox_state": getattr(result, "sandbox_state", "") or None,
-                },
+                }
             )
         except Exception as e:  # pragma: no cover - best-effort attribution
             logger.warning(
@@ -4642,6 +5932,28 @@ class AutonomousOrchestrator:
             if not command_evidences:
                 return ExecutionVerdict.NOT_RUN, [], "no command execution evidence"
 
+            # #2390: ``session_id`` is stable across dev rounds, so query_by_session
+            # accumulates prior rounds' evidence into this round's verdict —
+            # forcing the structured layer to defer (non-pytest → INCONCLUSIVE) or
+            # false-FAIL (pytest broad→targeted). Scope to the current test
+            # milestone, which each ``_run_test_phase`` stamps on its evidence.
+            # Narrow ONLY when stamping is present in this session: an unstamped
+            # legacy session keeps session scope rather than silently NOT_RUN
+            # (fail-closed, but never worse than today).
+            current_milestone_id = (test_ms.get("milestone_id") or "").strip()
+            if current_milestone_id and any((ce.milestone_id or "") for ce in command_evidences):
+                command_evidences = [
+                    ce
+                    for ce in command_evidences
+                    if (ce.milestone_id or "") == current_milestone_id
+                ]
+                if not command_evidences:
+                    return (
+                        ExecutionVerdict.NOT_RUN,
+                        [],
+                        "no command evidence for current test milestone",
+                    )
+
             # Only parse commands that look like test invocations; an ``echo``
             # or ``ls`` must not be fed to the generic parser as if it were a
             # test run (#2046 — agent prose / non-test commands cannot judge).
@@ -4715,11 +6027,72 @@ class AutonomousOrchestrator:
         except Exception as e:
             logger.debug("structured fallback event emit failed: %s", e)
 
+    def _apply_test_evidence_requirer(
+        self,
+        milestone_id: str,
+        changed_files: list | None,
+        tree_path: str,
+        structured_evidences: list | None,
+    ) -> tuple[str, set[str]]:
+        """Compute the requirer's ``(mode, missing-domains)`` and emit its shadow event.
+
+        Recognizer-independent (#2391): required domains derive from changed paths,
+        covered domains from the milestone-scoped structured evidence; ``missing =
+        required - covered``. Fail-open — any compute error returns an empty
+        ``missing`` (never blocks a run on its own failure), and the observability
+        emit is separately guarded so a DB error cannot raise into the gate.
+        ``off`` computes and emits nothing; ``shadow``/``enforce`` both emit, and
+        only the caller acts on ``missing`` (under ``enforce``).
+        """
+        mode = _test_evidence_requirer_mode()
+        if mode == "off":
+            return "off", set()
+        try:
+            required = _required_evidence_domains(changed_files, tree_path)
+            covered = _evidence_domains_covered(structured_evidences)
+            missing = required - covered
+        except Exception as exc:
+            logger.debug("test-evidence requirer compute failed: %s", exc)
+            return mode, set()
+        try:
+            self.repo.create_event(
+                {
+                    "workflow_id": self._workflow_id,
+                    "milestone_id": milestone_id,
+                    "event_type": "test_evidence_requirer_shadow",
+                    "event_data": json.dumps(
+                        {
+                            "mode": mode,
+                            "required": sorted(required),
+                            "covered": sorted(covered),
+                            "missing": sorted(missing),
+                            "changed_files": list(changed_files or []),
+                            "milestone_id": milestone_id,
+                            "tree_path": tree_path,
+                            # Per-evidence framework/confidence so a genuine miss is
+                            # distinguishable from the generic-framework (F2) and
+                            # cross-milestone (F3) misfires before flipping enforce.
+                            "evidences": [
+                                {
+                                    "framework": getattr(ev, "framework", ""),
+                                    "parser_confidence": getattr(ev, "parser_confidence", ""),
+                                    "verdict": getattr(ev, "verdict", ""),
+                                }
+                                for ev in (structured_evidences or [])
+                            ],
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            )
+        except Exception as exc:
+            logger.debug("test-evidence requirer shadow emit failed: %s", exc)
+        return mode, missing
+
     def _on_pid_registered(self, session_id: str, pid: int):
         """Persist agent subprocess PID to database for reliable cancel/pause."""
         try:
-            self.repo.update_workflow(
-                self._workflow_id,
+            self._persist_workflow_update(
                 {
                     "agent_pid": pid,
                     "agent_session_id": session_id,
@@ -4765,7 +6138,7 @@ class AutonomousOrchestrator:
                 updates["sandbox_remote_session_id"] = remote_session_id
             if effective_policy is not None:
                 updates["sandbox_effective_policy"] = json.dumps(effective_policy)
-            self.repo.update_workflow(self._workflow_id, updates)
+            self._persist_workflow_update(updates)
             logger.info(
                 "Registered sandbox %s (provider=%s) for workflow %s%s",
                 sandbox_id[:8],
@@ -4781,8 +6154,7 @@ class AutonomousOrchestrator:
         try:
             with self._session_lock:
                 if self._current_session_id == session_id:
-                    self.repo.update_workflow(
-                        self._workflow_id,
+                    self._persist_workflow_update(
                         {
                             "agent_pid": None,
                             "agent_session_id": "",
@@ -5833,8 +7205,58 @@ class AutonomousOrchestrator:
             for session_id in session_ids:
                 offsets.pop(session_id, None)
 
+    def bind_scheduler_lock(self, owner: str, lock_lost: threading.Event) -> None:
+        """Attach the scheduler's lease identity and shared loss signal."""
+        self._scheduler_lock_owner = owner
+        self._scheduler_lock_lost = lock_lost
+
+    def _mark_scheduler_lock_lost(self) -> None:
+        event = getattr(self, "_scheduler_lock_lost", None)
+        if event is not None:
+            event.set()
+        # Do not call prepare_for_shutdown() here: this helper can run from the
+        # PID-cleared callback while _session_lock is held, and re-entering that
+        # non-reentrant lock would deadlock. The heartbeat owns active process
+        # interruption; these signals fence every subsequent local action.
+        shutdown = getattr(self, "_shutdown_requested", None)
+        if shutdown is not None:
+            shutdown.set()
+        cancel = getattr(self, "_cancel_requested", None)
+        if cancel is not None:
+            cancel.set()
+
+    def ensure_scheduler_lock(self) -> bool:
+        """Refresh and fence the lease before an irreversible external action."""
+        owner = getattr(self, "_scheduler_lock_owner", None)
+        if not owner:
+            return not self._is_shutdown_requested()
+        lost = getattr(self, "_scheduler_lock_lost", None)
+        if lost is not None and lost.is_set():
+            return False
+        try:
+            held = self.repo.refresh_lock(self._workflow_id, owner)
+        except Exception:
+            logger.warning(
+                "Could not fence workflow %s before external mutation",
+                self._workflow_id[:8],
+                exc_info=True,
+            )
+            return False
+        if held:
+            return True
+        self._mark_scheduler_lock_lost()
+        return False
+
+    def _assert_scheduler_lock(self) -> None:
+        """Raise the pause control signal when this worker has been superseded."""
+        if not self.ensure_scheduler_lock():
+            raise WorkflowPaused("Distributed workflow lock was lost")
+
     def _is_shutdown_requested(self) -> bool:
         """Support lightweight test/legacy instances constructed without ``__init__``."""
+        lock_lost = getattr(self, "_scheduler_lock_lost", None)
+        if lock_lost is not None and lock_lost.is_set():
+            return True
         event = getattr(self, "_shutdown_requested", None)
         return bool(event and event.is_set())
 
@@ -6232,7 +7654,7 @@ class AutonomousOrchestrator:
             if gh is None:
                 return True
             res = gh.get_issue(int(issue_number))
-            return (res or {}).get("state", "open") == "open"
+            return str((res or {}).get("state", "open")).lower() == "open"
         except Exception:
             # Fail open: if we can't tell, don't spuriously reopen.
             return True
@@ -6253,14 +7675,33 @@ class AutonomousOrchestrator:
         gh = self._get_gh()
         if gh is None:
             return None
-        tmp_dir = tempfile.mkdtemp(prefix="ace-verify-")
+        try:
+            available = gh.ensure_commit_available(merge_sha)
+        except Exception:
+            logger.exception(
+                "acceptance verifier: failed to fetch merge commit locally: %s", merge_sha
+            )
+            return None
+        if not available:
+            logger.error("acceptance verifier: merge commit unavailable locally: %s", merge_sha)
+            return None
+        wf = self.workflow or {}
+        project_path = str(wf.get("project_path") or "")
+        if not project_path:
+            logger.error("acceptance verifier: project path unavailable")
+            return None
+        try:
+            tmp_dir = gh.create_verification_worktree_dir(project_path)
+        except Exception:
+            logger.exception("acceptance verifier: failed to allocate owner-readable worktree")
+            return None
         try:
             # Detached HEAD at the merge commit: a read-only throwaway view.
             gh._run_git(["worktree", "add", "--detach", tmp_dir, merge_sha])
         except Exception:
             logger.exception("acceptance verifier: failed to checkout merged main @ %s", merge_sha)
             # Clean up the empty dir so no half-created state lingers.
-            _remove_worktree_dir(gh, tmp_dir)
+            _remove_worktree_dir(gh, tmp_dir, project_path)
             return None
         return tmp_dir
 
@@ -6273,7 +7714,8 @@ class AutonomousOrchestrator:
         if not path:
             return
         gh = self._get_gh()
-        _remove_worktree_dir(gh, path)
+        wf = self.workflow or {}
+        _remove_worktree_dir(gh, path, str(wf.get("project_path") or ""))
 
     def _run_verification_agent(
         self, *, snapshot, merge_sha, base_sha, issue_number, pr_number
@@ -6294,7 +7736,12 @@ class AutonomousOrchestrator:
 
         checkout_path = self._checkout_merged_main(merge_sha)
         if not checkout_path:
-            return {"verdicts": [], "snapshot": None, "verified_by": verified_by}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "verified_by": verified_by,
+                "infra_error": "merged-main checkout failed",
+            }
         try:
             # Spawn the agent against the merged-main checkout, NOT the dev
             # worktree. We override worktree_path/project_path on a shallow
@@ -6312,12 +7759,26 @@ class AutonomousOrchestrator:
                 cli_tool=cli_tool,
                 model=model,
                 project_path=checkout_path,
+                workflow_id=self._workflow_id,
             )
         except Exception:
             logger.exception("acceptance verifier spawn failed for issue %s", issue_number)
-            return {"verdicts": [], "snapshot": None, "verified_by": verified_by}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "verified_by": verified_by,
+                "infra_error": "verification agent spawn failed",
+            }
         finally:
             self._remove_verification_worktree(checkout_path)
+        if result is None or getattr(result, "success", False) is not True:
+            error_code = getattr(result, "error_code", None) if result is not None else None
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "verified_by": verified_by,
+                "infra_error": f"verification agent failed ({error_code or 'runner error'})",
+            }
         parsed = self._parse_verifier_output(result)
         parsed["verified_by"] = verified_by
         return parsed
@@ -6326,11 +7787,41 @@ class AutonomousOrchestrator:
         import json as _json
 
         snap_dump = _json.dumps(snapshot.to_canonical(), ensure_ascii=False, indent=2)
+        # When the issue had no structured acceptance criteria (a bug report,
+        # etc.), the snapshot is empty and the verifier MUST extract the
+        # criteria itself. Make that requirement prominent — glm models skip a
+        # requirement buried in a trailing parenthetical, then omit the
+        # ``snapshot`` field and burn the infra-retry budget (#30).
+        needs_extraction = not (
+            getattr(snapshot, "required_paths", None) or getattr(snapshot, "checklist", None)
+        )
+        if needs_extraction:
+            extraction_section = (
+                "## REQUIRED — Extract the acceptance snapshot\n"
+                "The acceptance snapshot above is EMPTY (no required_paths/checklist were "
+                "captured for this issue). You MUST read the issue and derive the acceptance "
+                "criteria yourself, then return them in the `snapshot` field. Infer "
+                "required_paths from the bug/stack trace, and write a concrete, checkable "
+                "checklist (one statement per acceptance point). Without `snapshot` populated, "
+                "your verdict is INVALID and verification cannot proceed.\n\n"
+            )
+            # Valid JSON token (the object shape) so the fenced template glm
+            # copies stays parseable — never interpolate prose into the value.
+            snapshot_token = (
+                '{"required_paths": [], "checklist": [], "non_scope": [], '
+                '"closure_constraints": false}'
+            )
+            snapshot_note = "Populate `snapshot` with the criteria you derived above."
+        else:
+            extraction_section = ""
+            snapshot_token = "null"
+            snapshot_note = "Leave `snapshot` null — the criteria above are authoritative."
         return (
             "You are an INDEPENDENT acceptance verifier. The issue must NOT be considered done "
             "just because a PR merged. Verify the MERGED code (merge commit "
             f"{merge_sha}, base {base_sha}) against this acceptance snapshot.\n\n"
             f"Acceptance snapshot:\n{snap_dump}\n\n"
+            f"{extraction_section}"
             "For each required_paths entry, confirm it was actually changed (use git diff/log). "
             "For each checklist item, determine confirmed/rejected/indeterminate against the merged "
             "code with a concrete file:line or git-diff evidence ref. Be CONSERVATIVE: if you cannot "
@@ -6339,32 +7830,52 @@ class AutonomousOrchestrator:
             "```json\n"
             '{"verdicts": [{"item": "...", "verdict": "confirmed|rejected|indeterminate", '
             '"evidence": [{"ref": "file:line|git-diff", "note": "..."}], "rationale": "..."}], '
-            '"snapshot": null}\n'
+            f'"snapshot": {snapshot_token}}}\n'
             "```\n"
-            '(set "snapshot" to the completed {required_paths, checklist, non_scope, '
-            "closure_constraints} only if you had to extract them yourself because the input "
-            "snapshot was empty; otherwise null)"
+            f"{snapshot_note}"
         )
 
     def _parse_verifier_output(self, result) -> dict:
-        import json as _json
-        import re as _re
-
         text = self._artifact_text(result) if result is not None else ""
         if not text:
-            return {"verdicts": [], "snapshot": None}
-        # Grab the last fenced ```json ... ``` block (the agent may preface reasoning).
-        blocks = _re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, _re.DOTALL)
-        candidate = blocks[-1] if blocks else text
-        try:
-            parsed = _json.loads(candidate)
-        except Exception:
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent returned empty output",
+            }
+        # Tolerant extraction: fenced blocks, prose-wrapped, trailing commas,
+        # braces in strings (glm family deviates from "ONLY a fenced JSON block").
+        parsed = _extract_verifier_json(text)
+        if parsed is None:
             logger.warning(
-                "acceptance verifier output was not valid JSON; treating as indeterminate"
+                "acceptance verifier output was not valid JSON; treating as "
+                "indeterminate. raw_output=%s",
+                text[:1500],
             )
-            return {"verdicts": [], "snapshot": None}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent output was not valid JSON",
+            }
         if not isinstance(parsed, dict):
-            return {"verdicts": [], "snapshot": None}
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent output was not an object",
+            }
+        verdicts = parsed.get("verdicts", [])
+        if not isinstance(verdicts, list) or any(not isinstance(item, dict) for item in verdicts):
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent verdicts were malformed",
+            }
+        if parsed.get("snapshot") is not None and not isinstance(parsed.get("snapshot"), dict):
+            return {
+                "verdicts": [],
+                "snapshot": None,
+                "infra_error": "verification agent snapshot was malformed",
+            }
         parsed.setdefault("verdicts", [])
         parsed.setdefault("snapshot", None)
         return parsed
@@ -8286,14 +9797,19 @@ class AutonomousOrchestrator:
             status="in_progress",
             title=f"Running tests round {dev_round}",
         )
+        requirer_changed_files: list[str] = []
         try:
-            targeted_test_context = self._build_test_execution_context(wf, gh)
+            targeted_test_context, requirer_changed_files = self._build_test_execution_context(
+                wf, gh
+            )
         except Exception as exc:
             logger.warning(
                 "Failed to build targeted test context for workflow %s: %s",
                 self._workflow_id[:8],
                 exc,
             )
+            # requirer_changed_files stays [] → the requirer requires nothing
+            # (fail-open) when the change set is unavailable.
             targeted_test_context = (
                 "## 本轮定向验证上下文\n"
                 "- 自动构建验证上下文失败，请先自行检查最终方案、改动文件和仓库测试约定，"
@@ -8705,6 +10221,46 @@ class AutonomousOrchestrator:
             )
         )
 
+        # #2391 F1 (PR review, enforce-phase): detect the agent's unfixable signal
+        # up here so the requirer guard below can exclude it. Situation B (an
+        # [UNFIXABLE] report) must keep taking its dev-round retry, never be
+        # preempted by the requirer's test retry. Cheap text scan; harmless on the
+        # early-return paths that don't reach Situation B.
+        test_response = self._artifact_visible_text(test_result) or self._artifact_text(test_result)
+        _unfixable_marker = "[UNFIXABLE]"
+        has_unfixable = _unfixable_marker in test_response
+        if not has_unfixable:
+            # Fallback: check legacy keywords for backward compatibility
+            _legacy_unfixable = [
+                "无法修复",
+                "不可修复",
+                "cannot fix",
+                "unable to fix",
+            ]
+            has_unfixable = any(kw in test_response.lower() for kw in _legacy_unfixable)
+
+        # #2391 requirer: derive the evidence domains this change *requires* from
+        # its changed paths and compare against the domains actually covered by
+        # passing evidence (recognizer-independent, fail-open). Shadow-emits an
+        # observability event always; only ``enforce`` mode acts on a missing
+        # domain, and only for a run that would otherwise proceed to pr_review —
+        # excluding inconclusive, skipped, agent-session-failed (Situation A) and
+        # unfixable (Situation B) runs, each of which has its own handling below.
+        requirer_mode, requirer_missing = self._apply_test_evidence_requirer(
+            test_ms.get("milestone_id", ""),
+            requirer_changed_files,
+            wf.get("worktree_path") or wf.get("project_path", ""),
+            _structured_evidences,
+        )
+        requirer_enforced = (
+            requirer_mode == "enforce"
+            and bool(requirer_missing)
+            and not test_result_inconclusive
+            and not tests_actually_skipped
+            and test_result.success
+            and not has_unfixable
+        )
+
         # Post test results to issue
         issue_number = wf.get("github_issue_number")
         if issue_number:
@@ -8727,6 +10283,14 @@ class AutonomousOrchestrator:
                 )
             elif tests_actually_skipped:
                 status_line = "⚠️ Tests were not actually run — see details below"
+            elif requirer_enforced:
+                # #2391 N1: the requirer retry fires below; without this arm the
+                # comment would read "All tests passed" and then re-run.
+                status_line = (
+                    "⚠️ Changed "
+                    + ", ".join(sorted(requirer_missing))
+                    + " but this run has no passing evidence for it — retrying"
+                )
             elif test_result.success:
                 status_line = "✅ All tests passed"
             else:
@@ -8752,6 +10316,25 @@ class AutonomousOrchestrator:
                     "Test execution is inconclusive: a test command was invoked, but no "
                     "structured TEST_STATUS or recognizable pass/fail output was captured"
                 )
+            self.repo.update_milestone(
+                test_ms.get("milestone_id", ""),
+                {"status": "failed", "error_message": message},
+            )
+            test_retries = int(wf.get("test_retries", 0) or 0) + 1
+            if test_retries <= MAX_TEST_RETRIES:
+                self._update_workflow({"test_retries": test_retries})
+                return
+            self._update_workflow({"status": "failed", "error_message": message})
+            return
+
+        # #2391 enforce: a required evidence domain (e.g. changed frontend) had no
+        # passing evidence, on a run that would otherwise proceed to pr_review.
+        # Force the same retry the inconclusive path uses, capped by
+        # MAX_TEST_RETRIES. ``requirer_enforced`` already excludes the
+        # inconclusive/skipped/agent-failed/unfixable runs handled above/below,
+        # and is False in the default shadow mode — a no-op until enforce is on.
+        if requirer_enforced:
+            message = _requirer_reason(requirer_missing)
             self.repo.update_milestone(
                 test_ms.get("milestone_id", ""),
                 {"status": "failed", "error_message": message},
@@ -8861,20 +10444,9 @@ class AutonomousOrchestrator:
                 )
                 return
 
-        # Situation B: test agent succeeded but reported unfixable failures
-        test_response = self._artifact_visible_text(test_result) or self._artifact_text(test_result)
-        _unfixable_marker = "[UNFIXABLE]"
-        has_unfixable = _unfixable_marker in test_response
-        if not has_unfixable:
-            # Fallback: check legacy keywords for backward compatibility
-            _legacy_unfixable = [
-                "无法修复",
-                "不可修复",
-                "cannot fix",
-                "unable to fix",
-            ]
-            has_unfixable = any(kw in test_response.lower() for kw in _legacy_unfixable)
-
+        # Situation B: test agent succeeded but reported unfixable failures.
+        # ``has_unfixable`` is computed above (so the #2391 requirer guard can
+        # exclude it); this is where an [UNFIXABLE] run takes its dev-round retry.
         if has_unfixable:
             dev_retries = wf.get("dev_retries_on_test_fail", 0) + 1
             if dev_retries <= MAX_DEV_RETRIES_ON_TEST_FAIL:
@@ -9028,6 +10600,25 @@ class AutonomousOrchestrator:
             self._update_workflow({"status": "failed", "error_message": message})
             return False
 
+        def pause_fix(message: str) -> bool:
+            """Pause (not fail) when auto-staging pre-existing changes is blocked.
+
+            A dirty-worktree auto-stage failure is recoverable — most often a
+            cross-user object-DB permission error (the service user owns
+            .git/objects while the fix agent runs as system_account, so the write
+            is denied) that the operator can fix. Terminal ``failed`` stranded the
+            workflow: ``paused`` is reachable via POST /resume (after the operator
+            fixes the tree/perms), preserves the worktree for diagnosis, and aligns
+            pr_review with the dev/CI-repair paths, which warn-and-continue rather
+            than hard-failing on staging (#2441).
+            """
+            self.repo.update_milestone(
+                fix_ms.get("milestone_id", ""),
+                {"status": "failed", "error_message": message},
+            )
+            self._update_workflow({"status": "paused", "error_message": message})
+            return False
+
         fix_prompt = (
             AUTONOMOUS_CONTEXT
             + f"根据以下代码审查意见修改代码：\n\n{self._clean_agent_text(review_text)}\n\n"
@@ -9117,7 +10708,7 @@ class AutonomousOrchestrator:
                         gh.reset_hard_to(commit_before_staging)
                     except Exception:
                         pass
-                return fail_fix(
+                return pause_fix(
                     f"Worktree was dirty and auto-staging pre-existing changes failed: {exc}"
                 )
 

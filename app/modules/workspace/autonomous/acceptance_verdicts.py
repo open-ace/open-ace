@@ -22,6 +22,9 @@ class ItemVerdict:
         default_factory=list
     )  # [{"ref": "file:line|git-diff", "note": "..."}]
     rationale: str = ""
+    # True only when INDETERMINATE came from a retryable probe/infrastructure
+    # failure rather than healthy-but-insufficient acceptance evidence.
+    retryable: bool = False
 
 
 def aggregate_verdicts(items: list[ItemVerdict]) -> str:

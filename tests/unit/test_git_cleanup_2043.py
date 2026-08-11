@@ -241,6 +241,7 @@ def test_startup_retries_pending_git_cleanup():
     from app.services.autonomous_scheduler import _retry_pending_git_cleanups
 
     fake_repo = MagicMock()
+    fake_repo.acquire_cleanup_lock.return_value = True
     fake_repo.get_workflows_pending_cleanup.return_value = [
         {
             "workflow_id": "wf-a",
@@ -264,6 +265,8 @@ def test_startup_retries_pending_git_cleanup():
         _retry_pending_git_cleanups()
     fake_repo.get_workflows_pending_cleanup.assert_called_once()
     mock_orch._perform_git_cleanup.assert_called_once()
+    fake_repo.acquire_cleanup_lock.assert_called_once()
+    fake_repo.release_lock.assert_called_once()
 
 
 def test_sandbox_destroy_does_not_complete_git_cleanup():

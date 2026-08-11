@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, act } from '@/test/utils';
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { AutonomousWorkflowList } from './AutonomousWorkflowList';
+import { ACTIVE_WORKFLOW_STATUSES, AutonomousWorkflowList } from './AutonomousWorkflowList';
 import { useWorkflows } from '@/hooks/useAutonomous';
 import type { AutonomousWorkflow } from '@/api/autonomous';
 
@@ -115,7 +115,21 @@ describe('AutonomousWorkflowList', () => {
 
     const lastFilters = lastWorkflowFilters();
     expect(lastFilters?.status).toContain('pending');
+    expect(lastFilters?.status).toContain('verification_pending');
     expect(lastFilters?.status).not.toContain('queued');
+  });
+
+  it('renders verification_pending as an active acceptance state', () => {
+    mockWorkflowList([
+      workflow({ status: 'verification_pending', current_phase: 'acceptance_verification' }),
+    ]);
+
+    render(
+      <AutonomousWorkflowList selectedId={null} onSelect={vi.fn()} onClearSelection={vi.fn()} />
+    );
+
+    expect(ACTIVE_WORKFLOW_STATUSES).toContain('verification_pending');
+    expect(screen.getByText('Verifying acceptance')).toBeInTheDocument();
   });
 
   it('sends debounced search and resets to the first page', () => {

@@ -11,11 +11,15 @@ import logging
 import os
 import pwd
 import re
+import shutil
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
+
+from app.utils.workspace import OPENACE_RM_WRAPPER
 
 logger = logging.getLogger(__name__)
 
@@ -363,6 +367,27 @@ class GitHubOps:
             # Cannot determine the current user; assume cross-user to stay safe.
             return True
         return current_user != self.system_account
+
+    def _run_as_account(
+        self, argv: list[str], *, timeout: int = 180
+    ) -> subprocess.CompletedProcess:
+        """Run a non-git shell command as ``system_account`` (#23).
+
+        Mirrors ONLY the ``sudo -u`` wrapping of :meth:`_run_git` — not its
+        trusted-git-context machinery (``safe.directory``/hooksPath/fsmonitor),
+        which is git-specific; this runs ``mkdir``/``ln`` for the node_modules
+        shim. No ``cwd`` is accepted: under ``sudo -u`` the service user cannot
+        ``chdir`` into a user-private worktree (the PermissionError of #1421),
+        so callers must pass absolute paths. When the service already runs as
+        ``system_account`` (``_needs_sudo()`` False — single-user/CI), the
+        command runs directly.
+        """
+        if self._needs_sudo():
+            assert self.system_account is not None  # _needs_sudo() guarantees non-empty
+            cmd: list[str] = ["sudo", "-u", self.system_account, *argv]
+        else:
+            cmd = list(argv)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
     def _resolve_owner_repo(self) -> str | None:
         """Resolve the ``owner/repo`` slug for the local repo's origin remote.
@@ -712,6 +737,80 @@ class GitHubOps:
 
     # ── Repo Operations ────────────────────────────────────────────
 
+    def create_verification_worktree_dir(self, project_path: str) -> str:
+        """Allocate an empty verifier worktree directory as the repo owner.
+
+        ``git worktree add`` runs as ``system_account`` in multi-user mode, so
+        its destination must not be a service-owned ``tempfile.mkdtemp``
+        directory (which is mode 0700 and cannot be traversed cross-user).
+        Keep verifier checkouts under the repository's established
+        ``.worktrees`` root and create both the root and the unique child with
+        the same identity that will run git.
+        """
+        project_root = os.path.realpath(project_path)
+        if not project_root or not os.path.isabs(project_root):
+            raise GitHubOpsError("Cannot allocate verifier worktree under an invalid project path")
+        worktrees_root = os.path.join(project_root, ".worktrees")
+        kwargs = self._build_subprocess_kwargs()
+        kwargs.pop("cwd", None)
+        kwargs["timeout"] = 10
+
+        def _mkdir(args: list[str]) -> subprocess.CompletedProcess:
+            if self._needs_sudo():
+                account = self.system_account
+                assert account is not None
+                cmd = ["sudo", "-u", account, "mkdir", *args]
+            else:
+                cmd = ["mkdir", *args]
+            return subprocess.run(cmd, **kwargs)
+
+        root_result = _mkdir(["-p", "--", worktrees_root])
+        if root_result.returncode != 0:
+            raise GitHubOpsError(
+                "Cannot create verifier worktree root: " f"{(root_result.stderr or '').strip()}"
+            )
+
+        for _attempt in range(3):
+            path = os.path.join(worktrees_root, f"verify-{uuid.uuid4().hex}")
+            result = _mkdir(["-m", "700", "--", path])
+            if result.returncode == 0:
+                return path
+        raise GitHubOpsError(
+            "Cannot allocate a unique verifier worktree directory: "
+            f"{(result.stderr or '').strip()}"
+        )
+
+    def remove_verification_worktree_dir(self, path: str, project_path: str) -> None:
+        """Remove a verifier directory with the identity that owns it.
+
+        This is only the fallback after ``git worktree remove``. The strict
+        direct-child and ``verify-`` checks keep recursive deletion scoped to
+        directories allocated by :meth:`create_verification_worktree_dir`.
+        """
+        worktrees_root = os.path.realpath(os.path.join(project_path, ".worktrees"))
+        real_path = os.path.realpath(path)
+        _assert_path_contained(real_path, worktrees_root, label="verification worktree")
+        if os.path.dirname(real_path) != worktrees_root or not os.path.basename(
+            real_path
+        ).startswith("verify-"):
+            raise GitHubOpsError("Refusing to remove a non-verifier worktree directory")
+        if not self._needs_sudo():
+            shutil.rmtree(real_path, ignore_errors=True)
+            return
+        account = self.system_account
+        assert account is not None
+        result = subprocess.run(
+            ["sudo", OPENACE_RM_WRAPPER, account, real_path, "-r", "-f"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=self._build_subprocess_kwargs().get("env"),
+        )
+        if result.returncode != 0:
+            raise GitHubOpsError(
+                f"Cannot remove verifier worktree directory: {(result.stderr or '').strip()}"
+            )
+
     def create_repo(self, name: str, private: bool = True, description: str = "") -> dict:
         """Create a new GitHub repository."""
         args = ["repo", "create", name]
@@ -794,10 +893,35 @@ class GitHubOps:
         return json.loads(result.stdout.strip())
 
     def add_issue_comment(self, number: int, body: str) -> dict:
-        """Add a comment to an issue."""
+        """Add a comment, deduplicating an exact prior body from this bot.
+
+        Acceptance verification can be re-entered after a crash between the
+        GitHub mutation and the local workflow update.  Reading first makes the
+        externally-visible operation idempotent for that retry instead of
+        posting the same report twice.  A human-authored copy is not proof that
+        the configured service account already posted its audit record.  When
+        bot identity cannot be established, fail closed for deduplication and
+        post the comment.
+        """
+        bot_login = self.get_authenticated_login()
+        if bot_login:
+            for comment in self.list_issue_comments(number):
+                author = comment.get("author") or {}
+                author_login = author.get("login") if isinstance(author, dict) else author
+                if (
+                    comment.get("body") == body
+                    and isinstance(author_login, str)
+                    and author_login.casefold() == bot_login.casefold()
+                ):
+                    logger.info("Issue #%s already has the requested bot comment; skipping", number)
+                    return {
+                        "number": number,
+                        "id": comment.get("id"),
+                        "deduplicated": True,
+                    }
         self._run_gh(["issue", "comment", str(number), "--body", body], api_only=True)
         logger.info("Added comment to issue #%s", number)
-        return {"number": number}
+        return {"number": number, "deduplicated": False}
 
     def close_issue(self, number: int) -> dict:
         """Close an issue.
@@ -821,14 +945,136 @@ class GitHubOps:
         return {"number": number}
 
     def list_issue_comments(self, number: int, since: str | None = None) -> list:
-        """List comments on an issue, optionally since a timestamp."""
-        args = ["issue", "view", str(number), "--comments", "--json", "comments"]
-        result = self._run_gh(args)
-        data = json.loads(result.stdout.strip())
-        comments = data.get("comments", [])
+        """List every issue comment, optionally since a timestamp.
+
+        Use the paginated REST endpoint rather than ``gh issue view``'s
+        connection so an older matching bot comment cannot fall off the first
+        page and be posted again.  Output is normalized to the camelCase shape
+        used by the existing wait/report consumers.
+        """
+        try:
+            repo = self.get_repo_name()
+        except (GitHubOpsError, json.JSONDecodeError):
+            repo = ""
+        if repo:
+            result = self._run_gh(
+                self._gh_api_args(
+                    [
+                        "--paginate",
+                        f"repos/{repo}/issues/{number}/comments",
+                        "--jq",
+                        ".[] | {id, body, createdAt: .created_at, author: {login: .user.login}}",
+                    ]
+                ),
+                repo_scoped=False,
+                api_only=True,
+            )
+        else:
+            # Pre-remote repositories cannot form a REST path. Preserve the
+            # best-effort CLI fallback used before pagination hardening.
+            result = self._run_gh(
+                ["issue", "view", str(number), "--comments", "--json", "comments"],
+                api_only=True,
+            )
+        comments: list[dict] = []
+        for line in (result.stdout or "").splitlines():
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            # Compatibility with old/mocked ``gh issue view`` output keeps
+            # callers resilient while production uses NDJSON from ``--jq``.
+            nested = parsed.get("comments")
+            if isinstance(nested, list):
+                comments.extend(item for item in nested if isinstance(item, dict))
+            else:
+                comments.append(parsed)
         if since:
             comments = [c for c in comments if c.get("createdAt", "") > since]
         return comments
+
+    def get_authenticated_login(self) -> str | None:
+        """Return the login associated with the configured bot credentials.
+
+        Without an explicit AI GitHub token, ``gh`` may inherit a repository
+        owner's personal login.  That identity must never be treated as the
+        autonomous service account for reopen decisions.
+        """
+        env = self._get_env()
+        if not env or not env.get("GH_TOKEN"):
+            return None
+        result = self._run_gh(
+            self._gh_api_args(["user", "--jq", ".login"]),
+            check=False,
+            repo_scoped=False,
+            api_only=True,
+        )
+        if result.returncode != 0:
+            return None
+        login = (result.stdout or "").strip()
+        return login or None
+
+    def get_issue_closure(self, number: int) -> dict | None:
+        """Return the current issue closure timestamp and its actual actor.
+
+        The issue view establishes that the issue is currently closed and gives
+        the authoritative ``closedAt`` timestamp.  The timeline API supplies
+        the actor for the latest close event.  Missing/ambiguous data returns
+        ``None`` so callers fail closed and never reopen a human's issue.
+        """
+        state_result = self._run_gh(
+            ["issue", "view", str(number), "--json", "state,closedAt"],
+            check=False,
+            api_only=True,
+        )
+        if state_result.returncode != 0:
+            return None
+        try:
+            issue = json.loads((state_result.stdout or "").strip() or "{}")
+        except json.JSONDecodeError:
+            return None
+        closed_at = issue.get("closedAt")
+        if str(issue.get("state") or "").lower() != "closed" or not closed_at:
+            return None
+
+        repo = self.get_repo_name()
+        if not repo:
+            return None
+        timeline_result = self._run_gh(
+            self._gh_api_args(
+                [
+                    "--paginate",
+                    f"repos/{repo}/issues/{number}/timeline",
+                    "--jq",
+                    '.[] | select(.event == "closed") | {closed_at: .created_at, closer_login: .actor.login}',
+                ]
+            ),
+            check=False,
+            repo_scoped=False,
+            api_only=True,
+        )
+        if timeline_result.returncode != 0:
+            return None
+        events: list[dict] = []
+        for line in (timeline_result.stdout or "").splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+        if not events:
+            return None
+        matching = [event for event in events if event.get("closed_at") == closed_at]
+        if not matching:
+            return None
+        latest = matching[-1]
+        closer_login = latest.get("closer_login")
+        if not isinstance(closer_login, str) or not closer_login:
+            return None
+        return {"closed_at": closed_at, "closer_login": closer_login}
 
     def update_issue(self, number: int, title: str | None = None, body: str | None = None) -> dict:
         """Update an issue's title or body."""
@@ -1179,55 +1425,182 @@ class GitHubOps:
             "mergeable_state": str(data.get("mergeable_state") or "").strip().lower(),
         }
 
-    def get_branch_protection(self, branch: str = "main") -> dict:
-        """Return the branch-protection rules for ``branch`` (issue #2045 Phase B).
+    @staticmethod
+    def _is_not_found(stderr: str) -> bool:
+        """Whether ``stderr`` is GitHub reporting a definitive 404.
 
-        Used by the merge-readiness classifier to distinguish required from
-        optional CI checks. Only ``required_status_checks`` is unpacked — that
-        is the only field the classifier consumes, so the rest of the protection
-        payload (required_reviews, enforce_admins, restrictions, ...) is ignored.
-
-        A 404 (branch has no protection rules) returns an empty required-contexts
-        list rather than raising: "no required checks" is a valid classification
-        — every failing check is optional — not a probe failure.
-
-        Any other non-zero exit (403 permission, 5xx, network) raises
-        :class:`GitHubOpsError` so the classifier fails closed to
-        ``indeterminate`` instead of guessing required/optional semantics it
-        cannot observe. This is the Phase B guard for #1989-class incidents
-        where an un-verifiable signal must never silently drive an irreversible
-        merge/repair decision.
+        Anchored on the HTTP status gh prints, NOT on a bare ``not found``
+        substring: ``sudo: gh: command not found`` is a missing binary on the
+        service account's PATH, and treating that as "no branch protection"
+        would report an empty required set with no error at all — silently
+        voiding the fail-closed contract this helper feeds. ``not protected``
+        stays because gh emits it verbatim for an unprotected branch.
         """
-        repo = self.get_repo_name()
-        result = self._run_gh(
-            self._gh_api_args([f"repos/{repo}/branches/{branch}/protection"]),
-            repo_scoped=False,
-            check=False,
+        lowered = (stderr or "").strip().lower()
+        # Exclude the shell/exec failures FIRST. gh is invoked through `sudo -u
+        # <account> gh …`, so a gh missing from that account's PATH surfaces as
+        # `sudo: gh: command not found` — Python found `sudo`, so no
+        # FileNotFoundError is raised and a bare `not found` substring test
+        # would classify a broken deployment as "this branch has no protection".
+        if "command not found" in lowered or "no such file" in lowered:
+            return False
+        # gh prints `gh: Not Found (HTTP 404)`; the raw REST body carries
+        # `"status":"404"`. Both are definitive absence.
+        return "404" in lowered or "not protected" in lowered
+
+    def _probe_gh_api(self, args: list[str]) -> subprocess.CompletedProcess:
+        """Run a read-only ``gh api`` probe, retrying transient failures.
+
+        ``_run_gh(check=False)`` returns the first non-zero exit immediately —
+        its retry loop is guarded by ``if check and result.returncode != 0``.
+        The required-check probes need ``check=False`` so they can inspect a
+        404, which meant a single ``Empty reply from server`` (this host reaches
+        github.com through a failover proxy) resolved to "source blind".
+
+        That is not a harmless degradation: a blind probe makes
+        ``get_branch_protection`` raise, ``_blocking_pending`` then treats
+        *every* pending check as blocking, and a slow non-required job re-defers
+        the merge every scheduler cycle — the precise failure this issue exists
+        to remove. So transient errors are retried
+        here on the same schedule ``_run_gh`` uses for its checked calls.
+        """
+        result = self._run_gh(args, repo_scoped=False, check=False)
+        for attempt in range(1, GIT_NETWORK_RETRY_COUNT):
+            if result.returncode == 0 or not _is_transient_error(result.stderr, result.returncode):
+                return result
+            logger.warning(
+                "gh api probe transient error (attempt %d/%d), retrying in %ds: %s",
+                attempt,
+                GIT_NETWORK_RETRY_COUNT,
+                GIT_NETWORK_RETRY_INTERVAL,
+                (result.stderr or "").strip()[:200],
+            )
+            time.sleep(GIT_NETWORK_RETRY_INTERVAL)
+            result = self._run_gh(args, repo_scoped=False, check=False)
+        return result
+
+    def _classic_required_contexts(self, repo: str, branch: str) -> tuple[list[str], str]:
+        """Required checks declared by *classic* branch protection.
+
+        Returns ``(contexts, error)``. A 404 is a definitive "no classic
+        protection" and yields ``([], "")``. Any other failure yields
+        ``([], reason)`` — this source is blind, which the caller must weigh
+        against what the other source could see rather than treat as fatal on
+        its own. Notably this endpoint requires admin scope, so the autonomous
+        workflow's own PAT gets 403 here even though the branch is protected.
+        """
+        result = self._probe_gh_api(
+            self._gh_api_args([f"repos/{repo}/branches/{branch}/protection"])
         )
         if result.returncode != 0:
-            stderr = (result.stderr or "").strip().lower()
-            # gh api surfaces HTTP 404 for an unprotected branch; that is a
-            # valid "no required checks" answer, not a probe failure.
-            if "404" in stderr or "not found" in stderr or "not protected" in stderr:
-                return {"required_status_checks": {"contexts": []}}
-            raise GitHubOpsError(
-                f"get_branch_protection({branch}) failed (exit {result.returncode}): "
+            if self._is_not_found(result.stderr or ""):
+                return [], ""
+            return [], (
+                f"classic protection unreadable (exit {result.returncode}): "
                 f"{(result.stderr or '').strip()}"
             )
         data = json.loads((result.stdout or "").strip() or "{}")
         rsc = data.get("required_status_checks") or {}
-        # GitHub returns the legacy string ``contexts`` array and/or the newer
-        # ``checks`` array of {context, integration_id, ...} objects. Merge both
-        # into a flat, de-duplicated required-check-name list.
         contexts: list[str] = []
-        for ctx in rsc.get("contexts", []) or []:
-            name = ctx.get("context") if isinstance(ctx, dict) else ctx
+        # GitHub returns the legacy string ``contexts`` array and/or the newer
+        # ``checks`` array of {context, integration_id, ...} objects.
+        for entry in list(rsc.get("contexts", []) or []) + list(rsc.get("checks", []) or []):
+            name = entry.get("context") if isinstance(entry, dict) else entry
             if name and name not in contexts:
                 contexts.append(name)
-        for chk in rsc.get("checks", []) or []:
-            name = chk.get("context") if isinstance(chk, dict) else chk
-            if name and name not in contexts:
+        return contexts, ""
+
+    def _ruleset_required_contexts(self, repo: str, branch: str) -> tuple[list[str], str]:
+        """Required checks declared by *rulesets* (issue #2428).
+
+        Rulesets are the modern replacement for classic branch protection, and
+        the classic endpoint does not describe them — it answers 404 for a
+        ruleset-protected branch, or 403 for a token without admin scope (which
+        is what the autonomous workflow's own PAT gets). Either way the classic
+        source alone reports no required checks on such a repository.
+
+        This endpoint needs only read access and returns the effective rules.
+
+        Paginated: it emits one entry per (ruleset x rule), so a repository with
+        an org-level ruleset stacked on repo-level ones can push the
+        ``required_status_checks`` rule past the first page. Without
+        ``--paginate`` that reads as "no required checks", which makes
+        ``_blocking_pending`` treat every pending check as blocking. Verified against the
+        live API: ``?per_page=1`` on this repo returns a ``Link: rel="next"``
+        header, so the pagination is real and not hypothetical.
+        """
+        result = self._probe_gh_api(
+            self._gh_api_args(["--paginate", f"repos/{repo}/rules/branches/{branch}"])
+        )
+        if result.returncode != 0:
+            # A branch with no rules answers 200 [] (verified live), so a 404
+            # here means the repo/endpoint itself is unknown rather than the
+            # probe having failed — treat it as "no ruleset rules", as classic.
+            if self._is_not_found(result.stderr or ""):
+                return [], ""
+            return [], (
+                f"branch rules unreadable (exit {result.returncode}): "
+                f"{(result.stderr or '').strip()}"
+            )
+        rules = json.loads((result.stdout or "").strip() or "[]")
+        if not isinstance(rules, list):
+            return [], ""
+        contexts: list[str] = []
+        for rule in rules:
+            if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+                continue
+            params = rule.get("parameters") or {}
+            for entry in params.get("required_status_checks", []) or []:
+                name = entry.get("context") if isinstance(entry, dict) else entry
+                if name and name not in contexts:
+                    contexts.append(name)
+        return contexts, ""
+
+    def get_branch_protection(self, branch: str = "main") -> dict:
+        """Return the required-check contexts enforced on ``branch``.
+
+        Used to distinguish required from optional CI checks. Only
+        ``required_status_checks`` is unpacked — that is the only field
+        consumers need.
+
+        Both enforcement mechanisms are consulted and unioned (issue #2428):
+        classic branch protection AND rulesets. Querying only the classic
+        endpoint made every ruleset-protected repository look unprotected.
+
+        A branch with neither yields an empty list, which remains a valid
+        classification — every failing check is optional — not a probe failure.
+
+        Raises :class:`GitHubOpsError` only when **neither** source observed
+        anything and at least one was blind, because "no required checks" would
+        then be a guess (#1989).
+
+        Note the direction honestly: partial blindness (one source readable, the
+        other not) does NOT raise, so the required set can *understate*. That is
+        deliberate. GitHub is the final gate — understating produces a rejected
+        merge attempt and a visible policy pause, whereas raising makes
+        ``_blocking_pending`` treat every pending check as blocking and re-defer
+        the merge each cycle on slow non-required jobs, which is the
+        #2428-shaped failure this method exists to remove (the failure-targeting
+        filter was removed in #27, but the pending split still depends on this
+        set). Over-reporting blindness is the more damaging error here, not the
+        safer one.
+        """
+        repo = self.get_repo_name()
+        contexts, classic_err = self._classic_required_contexts(repo, branch)
+        ruleset_contexts, ruleset_err = self._ruleset_required_contexts(repo, branch)
+        for name in ruleset_contexts:
+            if name not in contexts:
                 contexts.append(name)
+        # Fail closed only when nothing was positively observed AND at least one
+        # source was blind. A 403 on the classic endpoint is expected here (it
+        # needs admin scope), so it must not veto a successful ruleset read —
+        # but if neither source could see anything, "no required checks" would
+        # be a guess, and guessing is what #1989 forbids.
+        if not contexts and (classic_err or ruleset_err):
+            raise GitHubOpsError(
+                f"get_branch_protection({branch}) could not determine required checks: "
+                + "; ".join(e for e in (classic_err, ruleset_err) if e)
+            )
         return {"required_status_checks": {"contexts": contexts}}
 
     def find_existing_pr(self, head_branch: str) -> dict | None:
@@ -1284,6 +1657,30 @@ class GitHubOps:
         )
         out = (result.stdout or "").strip()
         return out or None
+
+    def ensure_commit_available(self, commit_sha: str) -> bool:
+        """Fetch a merge commit into the local repository if it is absent.
+
+        ``gh pr merge`` completes server-side, so its merge SHA is not
+        necessarily present in the long-lived production clone.  Fetch the
+        exact object first, fall back to the reachable ``main`` ref for servers
+        that disallow raw-SHA wants, then verify the object before any diff or
+        worktree operation uses it.
+        """
+        if not re.fullmatch(r"[0-9a-fA-F]{7,40}", commit_sha or ""):
+            return False
+
+        def _present() -> bool:
+            result = self._run_git(["cat-file", "-e", f"{commit_sha}^{{commit}}"], check=False)
+            return result.returncode == 0
+
+        if _present():
+            return True
+        self._run_git(["fetch", "--no-tags", "origin", commit_sha], check=False)
+        if _present():
+            return True
+        self._run_git(["fetch", "--no-tags", "origin", "main"], check=False)
+        return _present()
 
     def _gh_api_args(self, extra: list[str]) -> list[str]:
         """Build a ``gh api`` arg list with GHES hostname handling.

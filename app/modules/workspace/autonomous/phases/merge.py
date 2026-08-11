@@ -94,6 +94,95 @@ NAME = "merge"
 logger = logging.getLogger(__name__)
 
 
+def _required_contexts(gh, pr_number: int, base_branch: str) -> set[str] | None:
+    """Required-check contexts for ``base_branch``, or None if undeterminable.
+
+    None means "could not observe" and is distinct from an empty set, which
+    means "observed, and the branch requires nothing".
+    """
+    try:
+        protection = gh.get_branch_protection(base_branch)
+    except Exception as exc:  # noqa: BLE001 — degrade, never stall the merge
+        logger.warning(
+            "PR #%s: could not resolve required checks for '%s' (%s)",
+            pr_number,
+            base_branch,
+            exc,
+        )
+        return None
+    return set((protection.get("required_status_checks") or {}).get("contexts") or [])
+
+
+def _blocking_pending(gh, checks: list[dict], pr_number: int, base_branch: str) -> list[dict]:
+    """Pending checks to defer the merge for (issue #2428).
+
+    Only a pending REQUIRED check defers: a slow non-required job
+    (``Critical PR E2E``, ``Full E2E``) must not re-defer the merge every
+    scheduler cycle. ``ReadinessService._partition_checks`` documents the same
+    rule. Degrades to "all pending block" when the required set cannot be
+    observed.
+
+    Unlike the failure path — which dropped its required-filter in #27 because
+    aggregate gates made ``failing ∩ required`` return only the unrepairable
+    gate — the pending filter is kept. Dropping it would re-defer every cycle on
+    slow non-required jobs, and a pending required check is usually observable:
+    an aggregate gate (e.g. ``PR Gate``) reports its own status as pending while
+    its underlying jobs run, so the filter normally catches the wait.
+
+    Note on the aggregate-gate propagation window: a pending *underlying* job
+    whose name is not in the literal required set (e.g. ``test (3.10)`` while
+    ``required == {'PR Gate'}``) is classified non-blocking HERE — this filter
+    governs only the pre-merge / post-rejection *required*-pending deferral,
+    where over-deferring on slow non-required jobs is the cost (#2428). In the
+    narrow window before the gate's own pending status propagates, such a job
+    used to reach the policy-pause branch and freeze the workflow. That freeze
+    is now prevented by the post-rejection transient guard in :func:`handle`
+    (any pending check OR ``mergeable_state == "unknown"`` defers before the
+    pause), so the gap no longer strands workflows.
+    """
+    pending = [c for c in checks if c.get("bucket") == "pending"]
+    if not pending:
+        return []
+    required = _required_contexts(gh, pr_number, base_branch)
+    if not required:
+        return pending
+    blocking = [c for c in pending if (c.get("name") or "") in required]
+    ignored = [c for c in pending if (c.get("name") or "") not in required]
+    if ignored:
+        logger.info(
+            "PR #%s: not deferring for %d non-blocking pending check(s): %s",
+            pr_number,
+            len(ignored),
+            ", ".join(c.get("name") or "?" for c in ignored),
+        )
+    return blocking
+
+
+def _ci_repair_targets(checks: list[dict]) -> list[dict]:
+    """Failing checks to hand to CI-repair (#27; supersedes the #2428 filter).
+
+    A branch's required check may be an AGGREGATE GATE — one status-check
+    context that summarizes many underlying jobs via ``needs:`` (whatever the
+    repo names it; on open-ace it is ``PR Gate`` since #2455). Such a gate has
+    no actionable failure of its own — its log only reports which underlying
+    jobs failed — and the real failures sit OUTSIDE the required set. The
+    ``#2428`` filter (``failing ∩ required``) therefore returned only the
+    (unrepairable) gate, or nothing on a propagation lag, and workflows stalled
+    at the merge-policy pause instead of repairing the real failures.
+
+    Target every failing check instead. The #2428 concern — spending the
+    bounded repair budget on checks that do not gate the merge — is held by the
+    separate ``mergeable_state == "unstable"`` short-circuit earlier in
+    :func:`handle`: a PR that is mergeable despite failing non-required checks
+    is merged directly without a repair round. So this function is only reached
+    when a required check is actually failing, meaning every failing check here
+    is a real merge-gating failure (the gate's underlying jobs). No check name
+    is hardcoded and no gate detection is needed: the underlying jobs always
+    appear in the failing set alongside the gate.
+    """
+    return [c for c in checks if c.get("bucket") == "fail"]
+
+
 def handle(ctx, deps) -> PhaseResult:
     """Execute one merge-phase cycle.
 
@@ -104,6 +193,11 @@ def handle(ctx, deps) -> PhaseResult:
     gh = deps.gh
     pr_number = wf.get("github_pr_number")
     branch_name = wf.get("branch_name", "")
+    # The branch the PR targets — the one whose protection/ruleset defines which
+    # checks are required. Hardcoding "main" silently reports the wrong required
+    # set for any workflow targeting another base. Mirrors the
+    # ``original_branch_name or "main"`` idiom the orchestrator already uses.
+    base_branch = (wf.get("original_branch_name") or "main").strip() or "main"
 
     if pr_number:
         # Phase B (#2045): verify the PR head through the evidence contract
@@ -174,7 +268,7 @@ def handle(ctx, deps) -> PhaseResult:
                 raise GitHubOpsError(
                     f"Unable to query CI checks before merging PR #{pr_number}: {e}"
                 ) from e
-            failed = [c for c in checks if c.get("bucket") == "fail"]
+            failed = _ci_repair_targets(checks)
             if failed:
                 deps.host.start_ci_repair_round(wf, pr_number, failed)
                 return PhaseResult.retry()
@@ -188,7 +282,7 @@ def handle(ctx, deps) -> PhaseResult:
         # cycle instead of blocking (synchronous poll) or failing. The
         # scheduler re-enters the merge phase every ~10s.
         # (checks is empty for unstable PRs — no deferral needed.)
-        pending = [c for c in checks if c.get("bucket") == "pending"]
+        pending = _blocking_pending(gh, checks, pr_number, base_branch)
         if pending:
             logger.info(
                 "PR #%s: %d CI checks pending, deferring merge to next cycle",
@@ -221,11 +315,11 @@ def handle(ctx, deps) -> PhaseResult:
                     checks_err,
                 )
                 refreshed_checks = checks
-            failed = [c for c in refreshed_checks if c.get("bucket") == "fail"]
+            failed = _ci_repair_targets(refreshed_checks)
             if failed:
                 deps.host.start_ci_repair_round(wf, pr_number, failed)
                 return PhaseResult.retry()
-            pending = [c for c in refreshed_checks if c.get("bucket") == "pending"]
+            pending = _blocking_pending(gh, refreshed_checks, pr_number, base_branch)
 
             try:
                 merge_state = gh.get_pr_merge_state(pr_number)
@@ -327,8 +421,51 @@ def handle(ctx, deps) -> PhaseResult:
                     raise
 
             if is_policy_rejection:
-                # With no failed/pending checks and no conflict evidence,
-                # repository policy requires external action (approval,
+                # A "policy" rejection text overlaps two situations GitHub
+                # reports with the same "repository rule violations" /
+                # "required status check" wording:
+                #
+                #  (a) a required status check is still PENDING for this head
+                #      — most often right after a sync/repair push, while an
+                #      aggregate required gate (whatever the repo names it)
+                #      has not yet propagated its own pending status.
+                #      ``_blocking_pending`` only defers for a pending check in
+                #      the required set, so it misses a pending *underlying*
+                #      job (e.g. ``test (3.10)`` under an aggregate gate) in
+                #      that window; GitHub concurrently reports ``blocked`` and
+                #      the workflow froze at a manual-recovery pause it could
+                #      never recover from (#27 follow-up; cf. 50ba8724 /
+                #      c0758607 / cd939cbf / 1c1b63f0).
+                #  (b) a genuine non-CI block (missing review, draft, required
+                #      signing) where every check has settled.
+                #
+                # Only (b) warrants a manual-recovery pause. (a) is transient:
+                # any pending check, or GitHub still computing
+                # (``mergeable_state == "unknown"``), means CI has not settled
+                # — keep polling instead of freezing. In practice this is
+                # bounded: pending checks complete and the unknown state
+                # resolves within minutes, so a workflow does not loop here
+                # indefinitely. A permanently-absent required context (a repo
+                # misconfig — required context with no provider) has no pending
+                # check and a known ``blocked`` state, so it still pauses for a
+                # human to fix the ruleset. ``PhaseResult.retry`` does not
+                # increment any counter, so the formal backstop for a
+                # degenerate stuck-pending/unknown (e.g. a runner that never
+                # times out, or a GitHub incident) is the
+                # monitor-autonomous-workflows sweep that re-classifies a
+                # workflow stuck in this phase.
+                any_pending = any(c.get("bucket") == "pending" for c in refreshed_checks)
+                if any_pending or mergeable_state == "unknown":
+                    logger.info(
+                        "PR #%s: merge rejected by policy but CI has not "
+                        "settled (state=%s, any_pending=%s); deferring",
+                        pr_number,
+                        mergeable_state or "unknown",
+                        any_pending,
+                    )
+                    return PhaseResult.retry()
+                # No pending checks and GitHub has finished computing, yet
+                # repository policy still requires external action (approval,
                 # marking ready, or a rule change). Persist a manually
                 # recoverable pause instead of retrying forever.
                 state_label = mergeable_state or "unknown"

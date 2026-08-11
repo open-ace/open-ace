@@ -172,6 +172,7 @@ PHASE_TO_STATUS = {
     "report": "reporting",
     "wait": "waiting",
     "merge": "merging",
+    "acceptance_verification": "verification_pending",
 }
 
 ISSUE_URL_RE = re.compile(r"^https://github\.com/[^/\s]+/[^/\s]+/issues/(\d+)(?:[/?#].*)?$", re.I)
@@ -1049,7 +1050,7 @@ def pause_workflow(workflow_id):
     # Suspend the running agent subprocess (SIGSTOP)
     _pause_running_task(workflow_id)
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     _get_repo().update_workflow(
         workflow_id,
@@ -1109,7 +1110,7 @@ def stop_workflow(workflow_id):
     # Kill the running agent subprocess (SIGTERM → SIGKILL)
     _stop_running_task(workflow_id)
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     _get_repo().update_workflow(
         workflow_id,
@@ -1215,6 +1216,19 @@ def retry_workflow(workflow_id):
         "status": status,
         "error_message": "",
         "retry_count": retry_count + 1,
+        # PR-B (#2443): reset the full CI-repair counter set + failure signature
+        # so a retried failed workflow starts CI repair from a clean state
+        # instead of being instantly re-exhausted by residual counts or a stale
+        # signature guard.
+        "ci_repair_attempts": 0,
+        "ci_repair_transient_retries": 0,
+        "ci_repair_no_change_retries": 0,
+        "ci_diagnostics_attempts": 0,
+        "last_ci_failure_signature": "",
+        "last_ci_failure_head_sha": "",
+        # PR-C (#2443): reset the Tier1 dev-round escalation budget too, so a
+        # retried workflow gets a fresh MAX_MERGE_FAIL_DEV_ROUNDS allowance.
+        "merge_fail_dev_rounds": 0,
     }
     # Optional per-workflow scope bump (#2309): a failed round whose only
     # blocker was the changed-files cap can be retried with a higher limit
@@ -1235,11 +1249,13 @@ def retry_workflow(workflow_id):
             return jsonify({"error": "max_changed_files_override must be a positive integer"}), 400
         retry_updates["max_changed_files_override"] = new_limit
     # Restore worktree_path so _ensure_worktree recreates the worktree dir on
-    # the retry pass. Terminal-failure cleanup (_cleanup_worktree_and_branch)
-    # clears worktree_path after removing the dir; the canonical path survives
-    # in preferred_worktree_path, so rebind it here. Without this, an empty
-    # worktree_path makes _ensure_worktree fall back to project_path and later
-    # phases run against the main checkout (review P1-1; see also #2011/#1981).
+    # the retry pass. Since #2505, terminal-failure cleanup KEEPS worktree_path
+    # (pointing at the removed dir) so _ensure_worktree recreates it on retry —
+    # but a legacy workflow (or one that failed before that deploy) may still
+    # have an empty/stale path, so rebind to the canonical preferred_worktree_path.
+    # Without it, an empty worktree_path makes _ensure_worktree fall back to
+    # project_path and later phases run against the main checkout (review P1-1;
+    # see also #2011/#1981).
     preferred_wt = (workflow.get("preferred_worktree_path") or "").strip()
     if preferred_wt and workflow.get("branch_strategy") == "worktree":
         retry_updates["worktree_path"] = preferred_wt

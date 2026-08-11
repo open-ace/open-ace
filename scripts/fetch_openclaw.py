@@ -277,7 +277,7 @@ async def get_openclaw_usage(gateway_url: str, token: str, days: int = 7) -> dic
     except websockets.exceptions.ConnectionClosed as e:
         print(f"WebSocket connection closed: {e.code} {e.reason}")
         return None
-    except asyncio.TimeoutError:
+    except TimeoutError:
         print("Timeout waiting for response")
         return None
     except Exception as e:

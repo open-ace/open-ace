@@ -37,6 +37,7 @@ venv/
 coverage.xml
 htmlcov/
 .pytest_cache/
+test-results/
 
 # Config (local) - contains sensitive credentials
 remote_config.json
@@ -65,7 +66,7 @@ VERSION
 !app/modules/sso/secret_holder.py
 *credential*
 *password*
-!tests/routes/test_admin_reset_password.py
+!tests/integration/routes/test_admin_reset_password.py
 *.pem
 *.key
 .env.*

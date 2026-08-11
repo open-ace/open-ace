@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import queue as queue_module
+import shlex
 import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -279,8 +280,24 @@ class CommandEvidenceRecorder:
                         order.append(command_id)
                     tool_input = event.get("tool_input") or {}
                     shell_command = None
+                    argv = None
                     if isinstance(tool_input, dict):
                         shell_command = tool_input.get("command") or tool_input.get("cmd")
+                        raw_argv = tool_input.get("argv") or tool_input.get("args")
+                        if isinstance(raw_argv, list):
+                            argv = [str(part) for part in raw_argv]
+                        elif isinstance(raw_argv, str) and raw_argv.strip():
+                            argv = [raw_argv]
+                        # Argv-only providers carry no joined command; synthesize
+                        # one so BOTH recognition (_has_test_tool_call) AND parsing
+                        # (_resolve_framework / _parse_* read shell_command) can see
+                        # it. Without this an argv-only test run was invisible to the
+                        # verdict → mis-judged NOT_RUN (#2401 c).
+                        if not (isinstance(shell_command, str) and shell_command) and argv:
+                            # shlex.join (not " ".join) so an arg containing spaces
+                            # re-quotes faithfully and _shell_tokens (shlex.split)
+                            # round-trips it back to the same tokens.
+                            shell_command = shlex.join(argv)
                     self.record_tool_use(
                         command_id=command_id,
                         session_id=session_id,
@@ -288,6 +305,7 @@ class CommandEvidenceRecorder:
                         milestone_id=milestone_id,
                         tool_name=event.get("tool_name") or "",
                         shell_command=shell_command if isinstance(shell_command, str) else None,
+                        argv=argv,
                         sandbox_id=sandbox_id,
                         sandbox_generation=sandbox_generation,
                     )

@@ -33,7 +33,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install pip-audit
-        run: pip install pip-audit
+        run: pip install -c requirements-ci.lock pip-audit
 
       - name: Audit Python dependencies
         id: audit
@@ -41,7 +41,7 @@ jobs:
         run: |
           # Run pip-audit and capture output
           set +e
-          pip-audit -r requirements.txt -f json > pip-audit-report.json 2>/dev/null
+          pip-audit -r requirements-ci.lock -f json > pip-audit-report.json 2>/dev/null
           exit_code=$?
 
           # Check if vulnerabilities were found
@@ -52,7 +52,7 @@ jobs:
           fi
 
           # Re-run for human-readable output
-          pip-audit -r requirements.txt || true
+          pip-audit -r requirements-ci.lock || true
 
           exit $exit_code
 

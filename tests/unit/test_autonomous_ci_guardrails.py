@@ -1559,7 +1559,8 @@ def test_fresh_ci_repair_prompt_keeps_requirements_plan_and_diff():
     assert "APPROVED PLAN" in prompt
     assert "diff --git" in prompt
     assert "CI EXCERPT" in prompt
-    assert "pre-commit run --all-files" in prompt
+    assert "pre-commit run --files" in prompt
+    assert "pre-commit run --all-files" not in prompt
     assert "编排器已先把当前 main 合并进 PR 分支" in prompt
     assert "SKIP=bandit,no-commit-to-branch" in prompt
     assert "直到 exit 0" in prompt
@@ -1581,6 +1582,63 @@ def test_pre_commit_detection_requires_log_evidence():
     )
 
 
+def test_collect_pre_commit_targets_unions_committed_and_working_tree():
+    """Targets = everything differing from the round boundary (commit_before),
+    committed or in the working tree — the exact set the per-round scope guard
+    counts, so scoping pre-commit to it can't blow past the file limit via
+    toolchain-drift reformatting of unrelated clean files."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    gh = MagicMock()
+    gh.get_changed_files.return_value = ["app/a.py", "app/b.py"]
+    gh.get_worktree_changed_paths.return_value = ["app/b.py", "app/c.py"]
+
+    targets = AutonomousOrchestrator._collect_pre_commit_targets(gh, "base-sha")
+
+    assert targets == ["app/a.py", "app/b.py", "app/c.py"]
+    gh.get_changed_files.assert_called_once_with("base-sha", "HEAD")
+
+
+def test_collect_pre_commit_targets_empty_commit_before_uses_working_tree_only():
+    """When commit_before is unavailable (PR head lookup failed), fall back to
+    the working-tree layer rather than skipping — the agent's edits still need
+    normalizing."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    gh = MagicMock()
+    gh.get_worktree_changed_paths.return_value = ["app/c.py", "app/d.py"]
+
+    targets = AutonomousOrchestrator._collect_pre_commit_targets(gh, "")
+
+    assert targets == ["app/c.py", "app/d.py"]
+    gh.get_changed_files.assert_not_called()
+
+
+def test_collect_pre_commit_targets_empty_when_nothing_changed():
+    """No committed delta and a clean working tree → no targets → convergence
+    must skip (nothing to normalize)."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    gh = MagicMock()
+    gh.get_changed_files.return_value = []
+    gh.get_worktree_changed_paths.return_value = []
+
+    assert AutonomousOrchestrator._collect_pre_commit_targets(gh, "base-sha") == []
+
+
+def test_collect_pre_commit_targets_tolerates_git_lookup_failure():
+    """A transient git error collecting one layer must not crash convergence;
+    it degrades to whatever the other layer returned (fail-soft, never
+    fall back to --all-files)."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    gh = MagicMock()
+    gh.get_changed_files.side_effect = RuntimeError("dubious ownership")
+    gh.get_worktree_changed_paths.return_value = ["app/c.py"]
+
+    assert AutonomousOrchestrator._collect_pre_commit_targets(gh, "base-sha") == ["app/c.py"]
+
+
 def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
     from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
     from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
@@ -1592,6 +1650,8 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
     orch._select_project_python_runtime = MagicMock(return_value=(["python3"], ""))
     gh = MagicMock()
     gh.path_exists_as_user.return_value = True
+    gh.get_changed_files.return_value = ["app/a.py"]
+    gh.get_worktree_changed_paths.return_value = ["app/b.py"]
     failed_checks = [
         {
             "name": "lint",
@@ -1637,6 +1697,7 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
             },
             gh,
             failed_checks,
+            commit_before="base-sha",
         )
 
     assert attempted
@@ -1644,7 +1705,9 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
     assert run.call_count == 2
     wrap.assert_called_once()
     assert wrap.call_args.args[:3] == (
-        ["/usr/local/bin/pre-commit", "run", "--all-files"],
+        # Scoped to the round-local targets (committed + working-tree union),
+        # never --all-files (that cascades on toolchain drift → scope blow-up).
+        ["/usr/local/bin/pre-commit", "run", "--files", "app/a.py", "app/b.py"],
         "/private/repo",
         "openace-agent",
     )
@@ -1652,6 +1715,51 @@ def test_pre_commit_convergence_reruns_modified_hooks_as_isolated_agent():
     assert wrap.call_args.args[3]["SKIP"] == "bandit,no-commit-to-branch"
     assert run.call_args.kwargs["cwd"] is None
     assert run.call_args.kwargs["env"] is None
+
+
+def test_pre_commit_convergence_skips_when_no_round_local_targets():
+    """When nothing differs from commit_before, convergence must skip entirely
+    (return attempted=False) and NOT invoke pre-commit — running --all-files
+    here is exactly the toolchain-drift cascade that blows the scope guard."""
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-test"
+    orch._resolve_isolated_agent_account = MagicMock(return_value="openace-agent")
+    orch._resolve_system_account = MagicMock(return_value="repo-owner")
+    orch._select_project_python_runtime = MagicMock(return_value=(["python3"], ""))
+    gh = MagicMock()
+    gh.path_exists_as_user.return_value = True
+    gh.get_changed_files.return_value = []
+    gh.get_worktree_changed_paths.return_value = []
+    failed_checks = [{"name": "lint", "failure_excerpt": "pre-commit hook(s) made changes"}]
+
+    with (
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.shutil.which",
+            side_effect=["/usr/local/bin/pre-commit", "/usr/bin/git"],
+        ),
+        patch.object(AutonomousAgentRunner, "is_isolated_launcher_available", return_value=True),
+        patch.object(AutonomousAgentRunner, "_wrap_agent_cmd") as wrap,
+        patch.object(
+            AutonomousAgentRunner,
+            "_resolve_agent_guard_bin",
+            return_value="/usr/local/libexec/openace-agent-bin",
+        ),
+        patch("app.modules.workspace.autonomous.orchestrator.subprocess.run") as run,
+    ):
+        attempted, error = orch._converge_pre_commit_fixes(
+            {"workspace_type": "local", "worktree_path": "/private/repo"},
+            gh,
+            failed_checks,
+            commit_before="base-sha",
+        )
+
+    assert attempted is False
+    assert error == ""
+    run.assert_not_called()
+    wrap.assert_not_called()
 
 
 def test_pre_commit_convergence_falls_back_to_same_user_without_launcher():
@@ -1666,6 +1774,9 @@ def test_pre_commit_convergence_falls_back_to_same_user_without_launcher():
     orch._select_project_python_runtime = MagicMock(return_value=(["python3"], ""))
     gh = MagicMock()
     gh.path_exists_as_user.return_value = True
+    # Provide round-local targets so convergence proceeds (it skips on empty).
+    gh.get_changed_files.return_value = ["app/a.py"]
+    gh.get_worktree_changed_paths.return_value = ["app/a.py"]
 
     modified = MagicMock(
         returncode=1,
@@ -2005,7 +2116,7 @@ def test_nonstandard_report_with_real_test_evidence_does_not_retry():
     orch._workflow_id = "wf-1897"
     orch.repo = MagicMock()
     orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-test"})
-    orch._build_test_execution_context = MagicMock(return_value="targeted")
+    orch._build_test_execution_context = MagicMock(return_value=("targeted", []))
     orch._accumulate_tokens = MagicMock()
     orch._post_github_comment = MagicMock()
     orch._emit = MagicMock()
@@ -2064,7 +2175,7 @@ def test_test_tool_call_without_result_is_inconclusive():
     orch._workflow_id = "wf-inconclusive"
     orch.repo = MagicMock()
     orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-test"})
-    orch._build_test_execution_context = MagicMock(return_value="targeted")
+    orch._build_test_execution_context = MagicMock(return_value=("targeted", []))
     orch._accumulate_tokens = MagicMock()
     orch._post_github_comment = MagicMock()
     orch._emit = MagicMock()
@@ -2096,7 +2207,7 @@ def test_model_pass_summary_without_tool_result_is_inconclusive():
     orch._workflow_id = "wf-model-summary"
     orch.repo = MagicMock()
     orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-test"})
-    orch._build_test_execution_context = MagicMock(return_value="targeted")
+    orch._build_test_execution_context = MagicMock(return_value=("targeted", []))
     orch._accumulate_tokens = MagicMock()
     orch._post_github_comment = MagicMock()
     orch._emit = MagicMock()
@@ -2125,7 +2236,7 @@ def test_text_pass_evidence_fallback_when_tool_result_missing():
     orch._workflow_id = "wf-1830-fallback"
     orch.repo = MagicMock()
     orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-test"})
-    orch._build_test_execution_context = MagicMock(return_value="targeted")
+    orch._build_test_execution_context = MagicMock(return_value=("targeted", []))
     orch._accumulate_tokens = MagicMock()
     orch._post_github_comment = MagicMock()
     orch._emit = MagicMock()
@@ -2314,3 +2425,57 @@ def test_review_fix_rejects_dirty_worktree_when_pre_existing_changes_out_of_scop
         if isinstance(updates, dict) and updates.get("status") == "failed":
             failed_updates.append(updates)
     assert any("scope validation" in u.get("error_message", "") for u in failed_updates)
+
+
+def test_review_fix_stage_failure_marks_paused_not_failed():
+    """#2441: when auto-staging pre-existing dirty changes fails (e.g. a cross-user
+    object-DB permission error — the service user owns .git/objects while the fix
+    agent runs as system_account, so the write is denied), the workflow must PAUSE
+    (resumable via POST /resume, worktree preserved) rather than terminal-fail.
+    This aligns pr_review with the dev/CI-repair paths, which warn-and-continue
+    instead of hard-failing on staging. The fix agent must NOT run, and the tree is
+    reset to the pre-staging commit so no half-staged state is left behind."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-stage-fail"
+    orch.repo = MagicMock()
+    orch.emitter = MagicMock()
+    orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-fix"})
+    orch._accumulate_tokens = MagicMock()
+    orch._validate_autonomous_change_scope = MagicMock(return_value="")
+    orch._clean_agent_text = MagicMock(return_value="review feedback")
+    orch._run_agent_with_context_recovery = MagicMock()
+
+    gh = MagicMock()
+    gh.has_uncommitted_changes.return_value = True  # dirty → triggers auto-stage
+    gh.get_current_commit.return_value = "commit-pre-staging"
+    # Auto-stage itself fails (the cross-user object-DB write is denied).
+    gh.git_add_all = MagicMock(
+        side_effect=Exception("fatal: could not write .git/objects/ab/cdef123: permission denied")
+    )
+    gh.reset_hard_to = MagicMock()
+
+    wf = {
+        "workflow_id": "wf-stage-fail",
+        "worktree_path": "/tmp/repo",
+        "project_path": "/tmp/repo",
+        "cli_tool": "claude-code",
+        "dev_round": 1,
+        "branch_name": "auto-dev/wf-stage-fail",
+    }
+
+    result = orch._apply_pr_review_fix(wf, gh, 1, 1, "looks good", [], 1234)
+
+    # Stage failed → workflow paused (not failed); fix agent never ran.
+    assert result is False
+    orch._run_agent_with_context_recovery.assert_not_called()
+    statuses = []
+    for call in orch.repo.update_workflow.call_args_list:
+        updates = call.args[1] if len(call.args) > 1 else call.args[0]
+        if isinstance(updates, dict):
+            statuses.append(updates.get("status"))
+    assert "paused" in statuses, "stage failure must pause (resumable), not terminal-fail"
+    assert "failed" not in statuses, "stage failure must NOT hard-fail (#2441)"
+    # Tree reset to the pre-staging commit (no half-staged state left behind).
+    gh.reset_hard_to.assert_called_once_with("commit-pre-staging")

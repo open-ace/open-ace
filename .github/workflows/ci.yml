@@ -6,166 +6,46 @@ on:
   pull_request:
     branches: [main, master]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  lint:
-    runs-on: ubuntu-latest
+  changes:
+    name: Select suites
+    runs-on: ubuntu-24.04
+    outputs:
+      compatibility_smoke: ${{ steps.select.outputs.compatibility_smoke }}
+      critical_e2e: ${{ steps.select.outputs.critical_e2e }}
+      default_collection: ${{ steps.select.outputs.default_collection }}
+      dependency_audit: ${{ steps.select.outputs.dependency_audit }}
+      frontend: ${{ steps.select.outputs.frontend }}
+      issue_collection: ${{ steps.select.outputs.issue_collection }}
+      legacy_pr: ${{ steps.select.outputs.legacy_pr }}
+      package: ${{ steps.select.outputs.package }}
+      postgres: ${{ steps.select.outputs.postgres }}
+      python_core: ${{ steps.select.outputs.python_core }}
+      selected: ${{ steps.select.outputs.selected }}
     steps:
       - uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           submodules: false
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      - name: Install Bandit
-        run: pip install bandit[toml]
-
-      - name: Run Bandit security check
-        # Use severity+confidence layering with baseline support (Issue #1856)
-        # Bypass with 'skip-security-check' label for emergencies only
-        if: "!contains(github.event.pull_request.labels.*.name, 'skip-security-check')"
-        run: python scripts/lint/bandit_check.py --baseline scripts/lint/bandit_baseline.json
-
-      - name: Security check bypassed warning
-        if: contains(github.event.pull_request.labels.*.name, 'skip-security-check')
-        run: echo "::warning::Security check bypassed with skip-security-check label. This should only be used in emergencies."
-
-      # Issue #1897: API Security Scanner
-      - name: Run API Security Scanner
-        if: "!contains(github.event.pull_request.labels.*.name, 'skip-security-check')"
-        run: python scripts/lint/api_security_scanner.py
-
-      - name: Validate security baseline metadata
-        if: "!contains(github.event.pull_request.labels.*.name, 'skip-security-check')"
-        run: python scripts/lint/validate_baseline_metadata.py
-
-      - name: Run pre-commit (excluding Bandit)
-        uses: pre-commit/action@v3.0.1
+      - name: Select suites from changed paths
+        id: select
         env:
-          # Bandit is handled separately above with baseline support.
-          # Skip no-commit-to-branch in CI: GitHub branch protection already
-          # prevents direct pushes; this hook is for local development only.
-          SKIP: bandit,no-commit-to-branch
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python scripts/ci.py detect --base "$BASE_SHA" --github-output
 
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+      - name: Publish selection summary
+        run: 'echo "Selected suites: ${{ steps.select.outputs.selected || ''policy-only'' }}" >> "$GITHUB_STEP_SUMMARY"'
 
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: false
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Cache dependencies
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}-${{ hashFiles('**/pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-cov pytest-asyncio
-          pip install playwright
-          playwright install chromium --with-deps
-
-      - name: Collect tests and validate count
-        id: collect-tests
-        run: |
-          # Issue #2189: Collect-only gate to detect zero-test collection
-          pytest tests/ --collect-only --quiet > collection.txt 2>&1 || true
-
-          # Parse collected count
-          count=$(grep -oP '\d+ tests collected' collection.txt | grep -oP '\d+' || echo "0")
-
-          echo "collected_count=$count" >> $GITHUB_OUTPUT
-
-          # Fail if 0 tests collected
-          if [ "$count" -eq 0 ]; then
-            echo "::error::Zero tests collected - this indicates a collection failure"
-            exit 1
-          fi
-
-          # Check against baseline (if exists) — Issue #2189 Scope #4b: hard gate.
-          # A drop below the baseline (already set conservatively at ~90% of the
-          # actual collected count) fails the required test job so silent test
-          # loss cannot merge. Raise the baseline in .test-baseline.json when
-          # collection legitimately shrinks.
-          if [ -f ".test-baseline.json" ]; then
-            baseline=$(python -c "import json; print(json.load(open('.test-baseline.json'))['layers']['default']['min_tests'])" 2>/dev/null || echo "0")
-            if [ "$baseline" -gt 0 ] && [ "$count" -lt "$baseline" ]; then
-              echo "::error::Test count $count below baseline $baseline (Issue #2189 under-count hard gate). Update .test-baseline.json if the drop is intentional."
-              exit 1
-            fi
-          fi
-
-          # Output collection manifest
-          echo "=== Test Collection Manifest ==="
-          tail -n 20 collection.txt
-          echo "Total tests collected: $count"
-          echo "================================="
-
-      - name: Scan test code for false-positive patterns
-        run: |
-          # Issue #2189 Scope #6: semantic, 4-pattern regression gate
-          # (broad_except_swallow, no_assertion, return_true, erroneous_skip).
-          # Detection is AST-semantic so it cannot be gamed (e.g. print() instead
-          # of pass). Fails if any pattern's core count EXCEEDS the recorded
-          # baseline (.false-positive-baseline.json) — new false positives cannot
-          # slip in; ratchet the baseline down as findings are fixed
-          # (`python scripts/scan_test_false_positives.py tests --exclude-dirs
-          # tests/issues --update-baseline .false-positive-baseline.json`).
-          # Auto-generated tests/issues subtrees are excluded.
-          python scripts/scan_test_false_positives.py tests \
-            --exclude-dirs tests/issues \
-            --baseline .false-positive-baseline.json
-
-      - name: Run tests
-        run: |
-          # E2E/Playwright/HTTP tests live under tests/e2e/ and are excluded via
-          # pytest.ini's norecursedirs. PostgreSQL tests are marked and deselected
-          # here; they run in the postgres-test job below. Wall-clock timing
-          # benchmarks are marked 'performance' and deselected for the same reason:
-          # a shared GitHub-hosted runner cannot guarantee timing bounds, and this
-          # job is a required merge check running with fail-fast. They run in the
-          # non-blocking performance-test job below.
-          # Coverage includes scripts/shared and P0 security modules (Issue #1856)
-          # Issue #2189: Add coverage threshold to ensure failure propagates
-          pytest tests/ -v \
-            --cov=scripts/shared \
-            --cov=app/auth \
-            --cov=app/remote_ws_handler \
-            --cov=app/modules/sso \
-            --cov-fail-under=30 \
-            --cov-report=xml \
-            --cov-report=html \
-            -m "not postgres and not performance"
-
-      - name: Upload coverage to Codecov
-        timeout-minutes: 2
-        continue-on-error: true
-        uses: codecov/codecov-action@v6
-        with:
-          file: ./coverage.xml
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-  build:
-    runs-on: ubuntu-latest
-    needs: [lint, test]
-
+  lint:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
         with:
@@ -175,49 +55,168 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
 
-      - name: Build package
+      - name: Install lint dependencies
+        run: pip install -c requirements-ci.lock bandit[toml] pre-commit
+
+      - name: Run Bandit security check
+        if: "!contains(github.event.pull_request.labels.*.name, 'skip-security-check')"
+        run: python scripts/lint/bandit_check.py --baseline scripts/lint/bandit_baseline.json
+
+      - name: Run API Security Scanner
+        if: "!contains(github.event.pull_request.labels.*.name, 'skip-security-check')"
+        run: python scripts/lint/api_security_scanner.py
+
+      - name: Validate security baseline metadata
+        if: "!contains(github.event.pull_request.labels.*.name, 'skip-security-check')"
+        run: python scripts/lint/validate_baseline_metadata.py
+
+      - name: Security check bypassed warning
+        if: contains(github.event.pull_request.labels.*.name, 'skip-security-check')
+        run: echo "::warning::Security checks bypassed with skip-security-check label"
+
+      - name: Run pre-commit
+        env:
+          # Bandit has its own baseline-aware step above.
+          SKIP: bandit-check,no-commit-to-branch
+        run: pre-commit run --all-files
+
+  test:
+    name: test (${{ matrix.python-version }})
+    needs: changes
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: '3.10'
+            suite: compatibility-smoke
+          - python-version: '3.11'
+            suite: python-core
+          # Transitional compatibility context required by the current ruleset.
+          # Remove after branch protection requires the stable PR Gate context.
+          - python-version: '3.12'
+            suite: compatibility-smoke
+          - python-version: '3.14'
+            suite: compatibility-smoke
+    steps:
+      - name: Explain skipped lane
+        if: >-
+          (matrix.suite == 'python-core' && needs.changes.outputs.python_core != 'true') ||
+          (matrix.suite == 'compatibility-smoke' && needs.changes.outputs.compatibility_smoke != 'true')
+        run: echo "${{ matrix.suite }} is not needed for this change set"
+
+      - uses: actions/checkout@v6
+        if: >-
+          (matrix.suite == 'python-core' && needs.changes.outputs.python_core == 'true') ||
+          (matrix.suite == 'compatibility-smoke' && needs.changes.outputs.compatibility_smoke == 'true')
+        with:
+          submodules: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        if: >-
+          (matrix.suite == 'python-core' && needs.changes.outputs.python_core == 'true') ||
+          (matrix.suite == 'compatibility-smoke' && needs.changes.outputs.compatibility_smoke == 'true')
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+
+      - name: Install test dependencies
+        if: >-
+          (matrix.suite == 'python-core' && needs.changes.outputs.python_core == 'true') ||
+          (matrix.suite == 'compatibility-smoke' && needs.changes.outputs.compatibility_smoke == 'true')
         run: |
           python -m pip install --upgrade pip
-          pip install build
-          python -m build --sdist --wheel --outdir dist/
+          pip install -r requirements-ci.lock
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+      - name: Validate default collection baseline
+        if: matrix.suite == 'python-core' && needs.changes.outputs.default_collection == 'true'
+        run: python scripts/ci.py run default-collection
+
+      - name: Validate legacy issue collection baseline
+        if: matrix.suite == 'python-core' && needs.changes.outputs.issue_collection == 'true'
+        run: python scripts/ci.py run issue-collection
+
+      - name: Run promoted legacy regressions
+        if: matrix.suite == 'python-core' && needs.changes.outputs.legacy_pr == 'true'
+        run: python scripts/ci.py run legacy-pr
+
+      - name: Run selected test suite
+        if: >-
+          (matrix.suite == 'python-core' && needs.changes.outputs.python_core == 'true') ||
+          (matrix.suite == 'compatibility-smoke' && needs.changes.outputs.compatibility_smoke == 'true')
+        run: python scripts/ci.py run ${{ matrix.suite }}
+
+      - name: Upload coverage to Codecov
+        if: matrix.suite == 'python-core' && needs.changes.outputs.python_core == 'true'
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: codecov/codecov-action@v6
         with:
-          name: dist-packages
-          path: dist/
+          files: ./coverage.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
-  docker:
-    runs-on: ubuntu-latest
-    needs: [lint, test]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: false
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v7
+      - uses: actions/setup-node@v6
         with:
-          context: .
-          push: false
-          tags: open-ace:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Run frontend suite
+        run: python3 scripts/ci.py run frontend
+      - name: Upload frontend coverage
+        if: always()
+        continue-on-error: true
+        uses: codecov/codecov-action@v6
+        with:
+          files: ./frontend/coverage/lcov.info
+          flags: frontend
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
-  # PostgreSQL integration tests (Issue #1856)
-  # Runs only when database-related files are changed
+  build:
+    needs: [lint, test]
+    if: always() && needs.lint.result == 'success' && needs.test.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+      - name: Install build frontend
+        run: pip install -c requirements-ci.lock build
+      - name: Build packages through the shared runner
+        run: python scripts/ci.py run package
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-packages
+          path: dist/
+
   postgres-test:
-    runs-on: ubuntu-latest
-    # Skip if explicitly requested via label
-    if: |
-      github.event_name == 'push' ||
-      (github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-extended-tests'))
+    name: PostgreSQL integration
+    needs: changes
+    if: >-
+      needs.changes.outputs.postgres == 'true' &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-extended-tests')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     services:
       postgres:
         image: postgres:15
@@ -232,148 +231,142 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0
           submodules: false
-
-      - name: Check for relevant changes
-        id: changes
-        if: github.event_name == 'pull_request'
-        run: |
-          # Check if database-related files were modified
-          git diff --name-only origin/main...HEAD > changed_files.txt || true
-          if grep -qE '(app/repositories/|migrations/|tests/integration/.*_pg\.py|app/models/)' changed_files.txt; then
-            echo "run_tests=true" >> $GITHUB_OUTPUT
-          else
-            echo "run_tests=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Set up Python
-        if: |
-          github.event_name == 'push' ||
-          steps.changes.outputs.run_tests == 'true'
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
-
-      - name: Install dependencies
-        if: |
-          github.event_name == 'push' ||
-          steps.changes.outputs.run_tests == 'true'
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+      - name: Install test dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-cov pytest-asyncio
-
-      - name: Run Postgres integration tests
-        if: |
-          github.event_name == 'push' ||
-          steps.changes.outputs.run_tests == 'true'
-        run: pytest tests/integration -v -m postgres --tb=short
+          pip install -r requirements-ci.lock
+      - name: Run PostgreSQL suite
         env:
           DATABASE_URL: postgresql://ace:ace@localhost:5432/ace_test
-          # Use separate database to avoid conflict with schema-sync workflow
           ACE_DATABASE_NAME: ace_test
+        run: python scripts/ci.py run postgres
 
-  # Wall-clock performance benchmarks
-  # Split out of the required `test` matrix for the same reason postgres-test is:
-  # these assert on elapsed time, which a shared GitHub-hosted runner cannot
-  # guarantee. Noisy neighbours produced 60-70% swings and failed `test (3.12)`
-  # on main; because `test` is a required merge check running with fail-fast, a
-  # single trip cancelled the rest of the matrix and blocked every PR until
-  # someone manually re-ran the job.
-  #
-  # This job is NOT a required check: a timing blip here must never block a merge.
-  # It still reports pass/fail so a genuine, sustained regression stays visible.
-  performance-test:
-    runs-on: ubuntu-latest
-
+  critical-e2e:
+    name: Critical E2E (advisory)
+    needs: changes
+    if: >-
+      needs.changes.outputs.critical_e2e == 'true' &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-extended-tests')
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # Keep the installed browser outside the isolated HOME used by the tests.
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-asyncio
-
-      - name: Run performance benchmarks
-        run: pytest tests/ -v -m "performance and not postgres" --tb=short
-
-  # Security Audit Gate (Issue #1890)
-  # Blocks PRs with known high/critical vulnerabilities in production dependencies
-  # Bypass with 'skip-security-check' label for emergencies only
-  security-gate:
-    name: Security Audit Gate
-    runs-on: ubuntu-latest
-    needs: [lint, test]
-    if: "!contains(github.event.pull_request.labels.*.name, 'skip-security-check')"
-
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      - name: Install pip-audit
-        run: pip install pip-audit
-
-      - name: Audit Python dependencies
-        id: pip-audit
-        run: |
-          # Run pip-audit for production dependencies only
-          pip-audit -r requirements.txt --skip-editable || exit_code=$?
-
-          if [ "${exit_code:-0}" -ne 0 ]; then
-            echo "::error::pip-audit found vulnerabilities in Python dependencies. Add 'skip-security-check' label to bypass in emergencies."
-            exit 1
-          fi
-
-      - name: Set up Node
-        uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
-      - name: Install npm dependencies
+      - name: Build frontend
         working-directory: frontend
-        run: npm ci
-
-      - name: Audit npm dependencies
-        working-directory: frontend
-        env:
-          # Force the official registry: mirror registries (e.g. npmmirror.com)
-          # do not implement the /security/audits endpoint and return 404,
-          # which would otherwise fail this gate with a false positive.
-          npm_config_registry: https://registry.npmjs.org
+        run: npm ci --no-audit --no-fund && npm run build
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+      - name: Install E2E dependencies
         run: |
-          # Run npm audit for production dependencies only.
-          # --registry pins the audit to the official npm registry per the
-          # issue #1890 acceptance criteria.
+          pip install -r requirements-ci.lock
+          playwright install chromium --with-deps
+      - name: Run critical E2E suite
+        env:
+          HEADLESS: true
+        run: python scripts/ci.py run critical-e2e
+      - name: Upload E2E diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: critical-e2e
+          path: |
+            test-results/
+            screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
 
-          # Use whitelist script to filter out vulnerabilities that don't apply
-          chmod +x ../scripts/ci/npm_audit_with_whitelist.sh
-          ../scripts/ci/npm_audit_with_whitelist.sh || exit_code=$?
+  security-gate:
+    name: Dependency security audit
+    needs: changes
+    if: >-
+      needs.changes.outputs.dependency_audit == 'true' &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-security-check')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+      - name: Install Python auditor
+        run: pip install -c requirements-ci.lock pip-audit
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Audit production dependencies through the shared runner
+        env:
+          npm_config_registry: https://registry.npmjs.org
+        run: python scripts/ci.py run dependency-audit
 
-          if [ "${exit_code:-0}" -ne 0 ]; then
-            echo "::error::npm audit found high/critical vulnerabilities in production dependencies. Add 'skip-security-check' label to bypass in emergencies."
-            exit 1
-          fi
+  pr-gate:
+    name: PR Gate
+    if: always() && github.event_name == 'pull_request'
+    needs: [changes, lint, test, frontend, build, postgres-test, security-gate]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate required and selected lanes
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          LINT: ${{ needs.lint.result }}
+          TEST: ${{ needs.test.result }}
+          FRONTEND: ${{ needs.frontend.result }}
+          BUILD: ${{ needs.build.result }}
+          POSTGRES: ${{ needs.postgres-test.result }}
+          SECURITY: ${{ needs.security-gate.result }}
+        run: |
+          python - <<'PY'
+          import os
+          required = {name: os.environ[name] for name in ("CHANGES", "LINT", "TEST", "BUILD")}
+          selected = {name: os.environ[name] for name in ("FRONTEND", "POSTGRES", "SECURITY")}
+          failures = {name: result for name, result in required.items() if result != "success"}
+          failures.update(
+              {name: result for name, result in selected.items() if result not in {"success", "skipped"}}
+          )
+          if failures:
+              raise SystemExit(f"PR gate failed: {failures}")
+          print("PR gate passed", {**required, **selected})
+          PY
 
-      - name: Security gate passed
-        run: echo "✅ Security audit passed - no high/critical vulnerabilities found in production dependencies"
+  docker:
+    needs: [lint, test, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          tags: open-ace:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

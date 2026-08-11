@@ -7,12 +7,13 @@ API routes for admin operations.
 import logging
 import secrets
 import string
-from typing import cast
+from typing import Any, cast
 
 import bcrypt
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required
+from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.usage_repo import UsageRepository
 from app.repositories.user_repo import UserRepository
 from app.schemas.quota import validate_quota_update
@@ -25,11 +26,20 @@ logger = logging.getLogger(__name__)
 admin_bp = Blueprint("admin", __name__)
 user_repo = UserRepository()
 usage_repo = UsageRepository()
+audit_logger = AuditLogger()
 
 
 def hash_password(password: str) -> str:
     """Hash a password using bcrypt."""
     return cast("str", bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode())
+
+
+def get_client_info():
+    """Get client IP and user agent."""
+    return {
+        "ip_address": request.remote_addr,
+        "user_agent": request.headers.get("User-Agent", ""),
+    }
 
 
 @admin_bp.route("/admin/users", methods=["GET"])
@@ -131,6 +141,18 @@ def api_create_user():
                 logger.warning(
                     f"Failed to create system user {system_account}, workspace may not work"
                 )
+        # Audit log for user creation
+        client_info = get_client_info()
+        audit_logger.log_action(
+            action=AuditAction.USER_CREATE,
+            user_id=g.user_id,
+            username=g.user.get("username"),
+            resource_type="user",
+            resource_id=str(user_id),
+            resource_name=username,
+            details={"email": email, "role": role, "tenant_id": tenant_id},
+            **client_info,
+        )
         return jsonify({"success": True, "user_id": user_id}), 201
 
     return jsonify({"error": "Failed to create user"}), 500
@@ -141,6 +163,9 @@ def api_create_user():
 def api_update_user(user_id):
     """Update a user."""
     data = request.get_json() or {}
+
+    # Get current user state for audit diff (before update)
+    current_user = user_repo.get_user_by_id(user_id)
 
     # Auto-create system user if system_account is being set
     system_account = data.get("system_account")
@@ -157,7 +182,6 @@ def api_update_user(user_id):
 
         tenant_service = TenantService()
         # Check if user exists and get current tenant
-        current_user = user_repo.get_user_by_id(user_id)
         if current_user:
             # Issue #2179: Fail-Closed - 不再使用默认值
             current_tenant_id = current_user.get("tenant_id")
@@ -188,6 +212,31 @@ def api_update_user(user_id):
     )
 
     if success:
+        # Audit log for user update
+        details: dict[str, Any] = {"action": "update"}
+        if current_user:
+            # Track role change
+            old_role = current_user.get("role")
+            new_role = data.get("role")
+            if new_role and old_role != new_role:
+                details["role_change"] = {"from": old_role, "to": new_role}
+            # Track status change
+            old_active = current_user.get("is_active")
+            new_active = data.get("is_active")
+            if new_active is not None and old_active != new_active:
+                details["status_change"] = {"from": old_active, "to": new_active}
+        client_info = get_client_info()
+        audit_logger.log_action(
+            action=AuditAction.USER_UPDATE,
+            user_id=g.user_id,
+            username=g.user.get("username"),
+            resource_type="user",
+            resource_id=str(user_id),
+            resource_name=data.get("username")
+            or (current_user.get("username") if current_user else None),
+            details=details,
+            **client_info,
+        )
         return jsonify({"success": True})
 
     return jsonify({"error": "Failed to update user"}), 500
@@ -201,9 +250,25 @@ def api_delete_user(user_id):
     if g.user_id == user_id:
         return jsonify({"error": "Cannot delete yourself"}), 400
 
+    # Get user info for audit before deletion
+    user = user_repo.get_user_by_id(user_id)
+    username = user.get("username") if user else None
+
     success = user_repo.delete_user(user_id)
 
     if success:
+        # Audit log for user deletion
+        client_info = get_client_info()
+        audit_logger.log_action(
+            action=AuditAction.USER_DELETE,
+            user_id=g.user_id,
+            username=g.user.get("username"),
+            resource_type="user",
+            resource_id=str(user_id),
+            resource_name=username,
+            details={"action": "delete"},
+            **client_info,
+        )
         return jsonify({"success": True})
 
     return jsonify({"error": "Failed to delete user"}), 500
@@ -222,10 +287,25 @@ def api_update_user_password(user_id):
     if not is_valid:
         return jsonify({"error": error_msg}), 400
 
+    # Get user info for audit
+    user = user_repo.get_user_by_id(user_id)
+
     password_hash = hash_password(password)
     success = user_repo.update_password(user_id, password_hash)
 
     if success:
+        # Audit log for password update
+        client_info = get_client_info()
+        audit_logger.log_action(
+            action=AuditAction.USER_PASSWORD_CHANGE,
+            user_id=g.user_id,
+            username=g.user.get("username"),
+            resource_type="user",
+            resource_id=str(user_id),
+            resource_name=user.get("username") if user else None,
+            details={"action": "password_update"},
+            **client_info,
+        )
         return jsonify({"success": True})
 
     return jsonify({"error": "Failed to update password"}), 500
@@ -296,6 +376,19 @@ def api_reset_user_password(user_id):
 
     logger.info(f"Password reset for user {user_id} by admin {g.user_id}")
 
+    # Audit log for password reset
+    client_info = get_client_info()
+    audit_logger.log_action(
+        action=AuditAction.USER_PASSWORD_CHANGE,
+        user_id=g.user_id,
+        username=g.user.get("username"),
+        resource_type="user",
+        resource_id=str(user_id),
+        resource_name=user.get("username"),
+        details={"action": "password_reset", "must_change": True},
+        **client_info,
+    )
+
     return jsonify(
         {
             "success": True,
@@ -346,6 +439,25 @@ def api_update_user_quota(user_id):
     )
 
     if success:
+        # Audit log for quota update
+        user = user_repo.get_user_by_id(user_id)
+        client_info = get_client_info()
+        audit_logger.log_action(
+            action=AuditAction.QUOTA_UPDATE,
+            user_id=g.user_id,
+            username=g.user.get("username"),
+            resource_type="user",
+            resource_id=str(user_id),
+            resource_name=user.get("username") if user else None,
+            details={
+                "action": "quota_update",
+                "daily_token_quota": data.get("daily_token_quota"),
+                "monthly_token_quota": data.get("monthly_token_quota"),
+                "daily_request_quota": data.get("daily_request_quota"),
+                "monthly_request_quota": data.get("monthly_request_quota"),
+            },
+            **client_info,
+        )
         return jsonify({"success": True})
 
     return jsonify({"error": "Failed to update quota"}), 500

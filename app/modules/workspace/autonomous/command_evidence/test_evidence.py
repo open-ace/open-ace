@@ -282,11 +282,23 @@ def _parse_pytest(excerpt: str, exit_code: int | None, command_text: str) -> Par
 
 
 def _parse_jest(excerpt: str, exit_code: int | None) -> ParsedTestResult:
-    """Parse Jest output ("Tests: N passed, N failed")."""
+    """Parse Jest *or* vitest output.
+
+    Jest prints ``Tests:  3 passed, 4 total`` (colon); vitest prints
+    ``Tests  12 passed (12)`` and ``Test Files  3 passed (3)`` — no colon, and
+    the count follows the label. Without the colonless patterns this repo's own
+    suite (vitest, per frontend/package.json) fell through to the exit-code-only
+    generic parser at MEDIUM confidence (#2376 Fix G).
+    """
     passed = _extract_count(
         excerpt,
         [
+            # "Test Files N passed" is a FILE count, never a test count: a
+            # vitest run that collected zero tests reports 8 files passed, and
+            # feeding that to `passed` records 8 passing tests that do not
+            # exist — the exact condition this gate detects (#2376 PR-3 D7).
             re.compile(r"Tests:\s*(\d+)\s+passed", re.IGNORECASE),
+            re.compile(r"(?<!Files)\s+Tests\s+(\d+)\s+passed", re.IGNORECASE),
             re.compile(r"(\d+)\s+tests?\s+passed", re.IGNORECASE),
         ],
     )
@@ -294,12 +306,29 @@ def _parse_jest(excerpt: str, exit_code: int | None) -> ParsedTestResult:
         excerpt,
         [
             re.compile(r"Tests:\s*(\d+)\s+failed", re.IGNORECASE),
+            re.compile(r"(?<!Files)\s+Tests\s+(\d+)\s+failed", re.IGNORECASE),
             re.compile(r"(\d+)\s+tests?\s+failed", re.IGNORECASE),
         ],
     )
     if passed is not None or failed is not None:
         verdict = _verdict_from_counts(passed=passed, failed=failed, errors=None)
         confidence = ParserConfidence.HIGH
+        # Counts summarise the test run; a non-zero exit can still come from
+        # something after it — a coverage threshold, a failing posttest, a
+        # teardown crash. Before the vitest patterns landed, no counts parsed
+        # and the exit code decided; letting counts silently override it turns
+        # a failing `npm run test:coverage` into PASSED (#2376 PR-3 D5).
+        #
+        # FAILED, not INCONCLUSIVE. The information is not missing — the counts
+        # and the exit code *disagree*, which is decided. Deferring would hand
+        # it to the heuristic, whose prose fallback is satisfied by the very
+        # summary that triggered this, re-opening the hole one layer down. And
+        # `(INCONCLUSIVE, MEDIUM)` is a state no other parser emits: it falls
+        # between compute_run_verdict's two mechanisms (`has_low` is False, and
+        # _classify_failures counts it as an uncovered failure anyway), so the
+        # run verdict became order-dependent (#2376 PR-3 re-review N2).
+        if exit_code not in (None, 0) and verdict == ExecutionVerdict.PASSED:
+            verdict = ExecutionVerdict.FAILED
     elif exit_code is not None:
         verdict = ExecutionVerdict.PASSED if exit_code == 0 else ExecutionVerdict.FAILED
         confidence = ParserConfidence.MEDIUM
@@ -410,6 +439,15 @@ def _resolve_framework(command_evidence: CommandExecutionEvidence, hint: str) ->
         return "go"
     if head == "cargo":
         return "rust"
+    # `npm run test:coverage` / `yarn test:unit` / `pnpm run test` carry no bare
+    # runner name, so without this they fell to the exit-code-only generic
+    # parser even though the counts were right there in the output (#2376 Fix G).
+    #
+    # Ordered AFTER the go/cargo head checks: this scans the whole command, so
+    # placing it first stole `go test ./... && npm run test` from _parse_go,
+    # which then never saw the FAIL lines (#2376 PR-3 review D8).
+    if re.search(r"\b(npm|yarn|pnpm)\s+(run\s+)?test", command_text):
+        return "javascript"
     return hint or "generic"
 
 

@@ -1614,6 +1614,7 @@ export const translations: Record<Language, Translations> = {
     autoStatusReporting: 'Reporting',
     autoStatusWaiting: 'Waiting',
     autoStatusMerging: 'Merging',
+    autoStatusVerificationPending: 'Verifying acceptance',
     autoStatusCompleted: 'Completed',
     autoStatusFailed: 'Failed',
     autoStatusCancelled: 'Cancelled',
@@ -1643,6 +1644,7 @@ export const translations: Record<Language, Translations> = {
     autoPhaseReport: 'Report',
     autoPhaseWait: 'Waiting',
     autoPhaseMerge: 'Merge',
+    autoPhaseAcceptanceVerification: 'Acceptance verification',
     autoTimeline: 'Timeline',
     autoRoundLabel: 'Round',
     autoDevRoundLabel: 'Development Round',
@@ -1753,6 +1755,8 @@ export const translations: Record<Language, Translations> = {
     autoActiveHintReporting:
       'Summarizing this round’s outputs and conclusions before switching to the next state.',
     autoActiveHintMerging: 'Merging the final changes and wrapping up this workflow.',
+    autoActiveHintVerificationPending:
+      'Finalizing the delivered workflow after its post-merge acceptance checkpoint.',
     autoBannerPaused: 'This workflow is paused. Resume it to continue the remaining steps.',
     autoAcceptanceOverrideTitle: 'Acceptance pending human review',
     autoAcceptanceOverrideDesc:
@@ -3408,6 +3412,7 @@ export const translations: Record<Language, Translations> = {
     autoStatusReporting: '报告生成',
     autoStatusWaiting: '等待需求',
     autoStatusMerging: '合并中',
+    autoStatusVerificationPending: '验收确认中',
     autoStatusCompleted: '已完成',
     autoStatusFailed: '失败',
     autoStatusCancelled: '已取消',
@@ -3436,6 +3441,7 @@ export const translations: Record<Language, Translations> = {
     autoPhaseReport: '进度报告',
     autoPhaseWait: '等待需求',
     autoPhaseMerge: '合并',
+    autoPhaseAcceptanceVerification: '验收确认',
     autoTimeline: '时间线',
     autoRoundLabel: '轮次',
     autoDevRoundLabel: '开发轮次',
@@ -3537,6 +3543,7 @@ export const translations: Record<Language, Translations> = {
     autoActiveHintPrReview: '正在审查实现结果并整理最终变更，完成后会进入收尾阶段。',
     autoActiveHintReporting: '正在整理本轮产出和结论，随后会切换到下一状态。',
     autoActiveHintMerging: '正在合并最终变更并收尾当前工作流。',
+    autoActiveHintVerificationPending: '正在通过合并后的验收检查点，并完成已交付工作流的收尾。',
     autoBannerPaused: '当前工作流已暂停，恢复后会继续执行剩余步骤。',
     autoAcceptanceOverrideTitle: '验收待人工复核',
     autoAcceptanceOverrideDesc:
@@ -4949,6 +4956,7 @@ export const translations: Record<Language, Translations> = {
     autoStatusReporting: 'レポート',
     autoStatusWaiting: '要件待ち',
     autoStatusMerging: 'マージ中',
+    autoStatusVerificationPending: '受け入れ確認中',
     autoStatusCompleted: '完了',
     autoStatusFailed: '失敗',
     autoStatusCancelled: 'キャンセル',
@@ -4978,6 +4986,7 @@ export const translations: Record<Language, Translations> = {
     autoPhaseReport: 'レポート',
     autoPhaseWait: '待機',
     autoPhaseMerge: 'マージ',
+    autoPhaseAcceptanceVerification: '受け入れ確認',
     autoTimeline: 'タイムライン',
     autoRoundLabel: 'ラウンド',
     autoDevRoundLabel: '開発ラウンド',
@@ -5084,6 +5093,8 @@ export const translations: Record<Language, Translations> = {
     autoActiveHintPrReview: '実装内容をレビューし、完了前の最終変更を整えています。',
     autoActiveHintReporting: 'このラウンドの成果と結論を整理してから次の状態へ進みます。',
     autoActiveHintMerging: '最終変更をマージして、このワークフローを締めくくっています。',
+    autoActiveHintVerificationPending:
+      'マージ後の受け入れチェックポイントを通過し、完了処理を進めています。',
     autoBannerPaused: 'このワークフローは一時停止中です。再開すると残りのステップを続行します。',
     autoAcceptanceOverrideTitle: '承認確認が人間のレビューを待っています',
     autoAcceptanceOverrideDesc:
@@ -6619,6 +6630,7 @@ export const translations: Record<Language, Translations> = {
     autoStatusReporting: '보고서',
     autoStatusWaiting: '요구사항 대기',
     autoStatusMerging: '병합 중',
+    autoStatusVerificationPending: '인수 확인 중',
     autoStatusCompleted: '완료',
     autoStatusFailed: '실패',
     autoStatusCancelled: '취소됨',
@@ -6648,6 +6660,7 @@ export const translations: Record<Language, Translations> = {
     autoPhaseReport: '보고서',
     autoPhaseWait: '대기',
     autoPhaseMerge: '병합',
+    autoPhaseAcceptanceVerification: '인수 확인',
     autoTimeline: '타임라인',
     autoRoundLabel: '라운드',
     autoDevRoundLabel: '개발 라운드',
@@ -6755,6 +6768,8 @@ export const translations: Record<Language, Translations> = {
     autoActiveHintPrReview: '구현 결과를 검토하고 완료 전에 최종 변경을 정리하는 중입니다.',
     autoActiveHintReporting: '이번 라운드의 산출물과 결론을 정리한 뒤 다음 상태로 전환합니다.',
     autoActiveHintMerging: '최종 변경을 병합하고 이 워크플로를 마무리하는 중입니다.',
+    autoActiveHintVerificationPending:
+      '병합 후 인수 확인 단계를 통과하고 전달된 워크플로를 마무리하고 있습니다.',
     autoBannerPaused: '이 워크플로는 일시정지 상태입니다. 재개하면 남은 단계를 계속 진행합니다.',
     autoAcceptanceOverrideTitle: '수락 확인이 사람 검토를 기다리는 중',
     autoAcceptanceOverrideDesc:
