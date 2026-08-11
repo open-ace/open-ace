@@ -119,7 +119,7 @@ def is_production_capable_path() -> bool:
 
         if not timestamp_str:
             logger.error(
-                "EMERGENCY ROLLBACK FLAG EXPIRED: OPENACE_ALLOW_IMPLICIT_MODE=1 requires "
+                "EMERGENCY ROLLBACK FLAG REQUIRES TIMESTAMP: OPENACE_ALLOW_IMPLICIT_MODE=1 requires "
                 "OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP to be set. "
                 "Format: YYYY-MM-DD (e.g., 2025-01-15). "
                 "Flag is being IGNORED. Set OPENACE_SECURITY_MODE explicitly instead."
