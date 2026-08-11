@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "20260809_001_add_merge_fail_dev_rounds"
-down_revision: str | None = "20260805_010_acceptance_verification_columns"
+down_revision: str | None = "20260808_001_add_schema_metadata"
 branch_labels: str | None = None
 depends_on: str | None = None
 
