@@ -722,6 +722,24 @@ class RemoteAgent:
                 is_complete=True,
             )
 
+        # Acknowledge the command so the server marks it 'responded'. Without
+        # this ack, delivered send_message commands are re-claimed after
+        # COMMAND_CLAIM_TIMEOUT_SECONDS (5 minutes) and re-delivered, so the
+        # CLI receives the same user message repeatedly (duplicate replies).
+        request_id = data.get("command_id") or data.get("request_id")
+        if request_id:
+            self._http_send(
+                {
+                    "type": "command_response",
+                    "machine_id": self.config.machine_id,
+                    "request_id": request_id,
+                    "result": {
+                        "success": bool(result.get("success")),
+                        "error": result.get("error"),
+                    },
+                }
+            )
+
     def _cmd_stop_session(self, data: dict[str, Any]) -> None:
         """Handle a stop_session command."""
         session_id = data.get("session_id", "")
