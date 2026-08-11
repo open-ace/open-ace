@@ -628,10 +628,53 @@ class RemoteAgent:
                         "result": info or {"error": "Session not found"},
                     }
                 )
+        elif command == "find_session_jsonl":
+            # Find JSONL session file by project path (Issue #2404)
+            self._cmd_find_session_jsonl(data)
         elif command == "rotate_token":
             self._cmd_rotate_token(data)
         else:
             logger.warning("Unknown command: %s", command)
+
+    def _cmd_find_session_jsonl(self, data: dict[str, Any]) -> None:
+        """Handle a find_session_jsonl command from the server.
+
+        Finds the CLI session ID (JSONL filename) for a historical session
+        that predates the cli_session_id capture. Used by session resume.
+        """
+        request_id = data.get("request_id")
+        if not request_id:
+            logger.warning("find_session_jsonl: missing request_id")
+            return
+
+        # Extract parameters from extra dict
+        extra = data.get("extra", {})
+        cli_tool = data.get("cli_tool", extra.get("cli_tool", "qwen-code"))
+        project_path = extra.get("project_path", "")
+        created_at = extra.get("created_at")
+
+        if not project_path:
+            self._http_send(
+                {
+                    "type": "command_response",
+                    "machine_id": self.config.machine_id,
+                    "request_id": request_id,
+                    "result": {"error": "Missing project_path"},
+                }
+            )
+            return
+
+        # Call executor to find the JSONL file
+        result = self._executor.find_session_jsonl(cli_tool, project_path, created_at)
+
+        self._http_send(
+            {
+                "type": "command_response",
+                "machine_id": self.config.machine_id,
+                "request_id": request_id,
+                "result": result or {"error": "Session JSONL not found"},
+            }
+        )
 
     def _cmd_rotate_token(self, data: dict[str, Any]) -> None:
         """Handle a rotate_token command from the server.
@@ -664,14 +707,18 @@ class RemoteAgent:
         permission_mode = data.get("permission_mode")
         allowed_tools = data.get("allowed_tools")
         cli_settings = data.get("cli_settings", {})
+        # CLI conversation id to resume (qwen JSONL filename). Differs from the
+        # open-ace session_id; only set when restoring a terminated session.
+        resume_session_id = data.get("resume_session_id")
 
         logger.info(
-            "Starting session %s: cli=%s path=%s model=%s mode=%s",
+            "Starting session %s: cli=%s path=%s model=%s mode=%s resume=%s",
             session_id[:8],
             cli_tool,
             project_path,
             model,
             permission_mode,
+            resume_session_id[:8] if resume_session_id else None,
         )
 
         # Apply CLI settings before starting session
@@ -686,17 +733,53 @@ class RemoteAgent:
             model=model,
             permission_mode=permission_mode,
             allowed_tools=allowed_tools,
+            resume_session_id=resume_session_id,
         )
 
         if result["success"]:
-            self._send_session_status(session_id, "running", result.get("pid"))
+            pid = result.get("pid")
+            self._send_session_status(session_id, "running", pid)
         else:
-            self._send_session_status(session_id, "error")
-            self._send_session_output(
-                session_id,
-                f"Failed to start session: {result.get('error', 'unknown error')}",
-                "stderr",
-                is_complete=True,
+            error_msg = result.get("error", "unknown error")
+            if error_msg == "Session already running":
+                # Idempotent duplicate start: the session is already running on
+                # this agent (e.g. an auto/periodic restore raced a manual one).
+                # Report running, NOT error — an error status makes the server
+                # mark the session failed and revoke all of its proxy tokens,
+                # which 401s the still-alive CLI process and leaves the webui
+                # stuck on "Thinking..." (Issue #2405).
+                logger.info(
+                    "Session %s already running; duplicate start treated as no-op",
+                    session_id[:8],
+                )
+                self._send_session_status(session_id, "running")
+            else:
+                self._send_session_status(session_id, "error")
+                self._send_session_output(
+                    session_id,
+                    f"Failed to start session: {error_msg}",
+                    "stderr",
+                    is_complete=True,
+                )
+
+        # Acknowledge the command so the server can mark it 'responded'. Without
+        # this ack, persisted commands stay 'delivered' forever and the server
+        # re-delivers them every COMMAND_CLAIM_TIMEOUT_SECONDS (5 minutes),
+        # causing duplicate start_session dispatches that can revoke the proxy
+        # token of an already-running CLI process (Issue #2405).
+        request_id = data.get("command_id") or data.get("request_id")
+        if request_id:
+            self._http_send(
+                {
+                    "type": "command_response",
+                    "machine_id": self.config.machine_id,
+                    "request_id": request_id,
+                    "result": {
+                        "success": bool(result.get("success")),
+                        "pid": result.get("pid"),
+                        "error": result.get("error"),
+                    },
+                }
             )
 
     def _cmd_send_message(self, data: dict[str, Any]) -> None:

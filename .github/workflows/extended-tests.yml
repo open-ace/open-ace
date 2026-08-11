@@ -248,7 +248,12 @@ jobs:
           playwright install chromium --with-deps
 
       - name: Run issue regression shard
+        # Known legacy failures make pytest exit non-zero; keep going so the
+        # JUnit + exit code are uploaded. The authoritative verdict comes from
+        # the legacy-issue-baseline comparator job below (handoff §4.6).
+        continue-on-error: true
         run: |
+          set +e
           python scripts/run_extended_tests.py \
             --category issues \
             --issue-numbers "${{ github.event.inputs.issue_numbers || '' }}" \
@@ -258,6 +263,7 @@ jobs:
             --reruns 1 \
             --timeout 240 \
             --junitxml "test-results/issues-${{ matrix.group }}.xml"
+          echo $? > "test-results/issues-${{ matrix.group }}.exit-code"
         env:
           CI: true
           HEADLESS: true
@@ -346,17 +352,71 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  legacy-issue-baseline:
+    name: Legacy issue failure baseline
+    # Authoritative gate for tests/issues known-failure debt. Runs even when a
+    # shard was cancelled/timed out (it then fails closed on completeness). Runs
+    # on schedule and on workflow_dispatch category=issues|all so PR branches can
+    # verify against the baseline. Never runs on PRs (full execution is nightly).
+    if: >-
+      always() &&
+      (github.event_name == 'schedule' ||
+       (github.event_name == 'workflow_dispatch' && (inputs.category == 'issues' || inputs.category == 'all'))) &&
+      needs.issue-tests.result != 'skipped'
+    needs: [issue-tests]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+      - name: Install dependencies
+        run: pip install -r requirements-ci.lock
+      - name: Download all shard reports
+        uses: actions/download-artifact@v7
+        with:
+          pattern: issue-tests-*
+          merge-multiple: true
+          path: artifacts
+      - name: Compare against failure baseline
+        run: |
+          python scripts/legacy_issue_baseline.py compare \
+            --baseline ci/legacy-issue-failures.json \
+            --junit "artifacts/test-results/issues-*.xml" \
+            --exit-code-glob "artifacts/test-results/issues-*.exit-code" \
+            --shard-count 4 \
+            --test-baseline .test-baseline.json \
+            --json-output test-results/legacy-issue-diff.json \
+            --markdown-output test-results/legacy-issue-summary.md
+      - name: Upload baseline artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: legacy-issue-baseline
+          path: |
+            test-results/legacy-issue-diff.json
+            test-results/legacy-issue-summary.md
+            artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
+
   nightly-summary:
     name: Nightly Quality Gate
     if: always() && github.event_name == 'schedule'
-    needs: [nightly-python, full-e2e, issue-tests]
+    needs: [nightly-python, full-e2e, issue-tests, legacy-issue-baseline]
     runs-on: ubuntu-24.04
     steps:
       - name: Publish nightly result
         env:
           PYTHON_RESULT: ${{ needs.nightly-python.result }}
           E2E_RESULT: ${{ needs.full-e2e.result }}
-          ISSUE_RESULT: ${{ needs.issue-tests.result }}
+          LEGACY_RESULT: ${{ needs.legacy-issue-baseline.result }}
         run: |
           {
             echo "## Nightly quality gate"
@@ -364,11 +424,14 @@ jobs:
             echo "|---|---|"
             echo "| Python 3.10/3.11/3.14 | $PYTHON_RESULT |"
             echo "| Full Python E2E | $E2E_RESULT |"
-            echo "| Legacy issue shards | $ISSUE_RESULT |"
+            echo "| Legacy failure baseline | $LEGACY_RESULT |"
           } >> "$GITHUB_STEP_SUMMARY"
+          # The legacy comparator is the authoritative issue-debt verdict;
+          # issue-tests itself is non-blocking (continue-on-error transports JUnit).
+          # A missing/skipped/cancelled comparator must fail the gate.
           if [ "$PYTHON_RESULT" != success ] || \
              [ "$E2E_RESULT" != success ] || \
-             [ "$ISSUE_RESULT" != success ]; then
-            echo "::error::One or more nightly quality lanes failed; inspect their artifacts."
+             [ "$LEGACY_RESULT" != success ]; then
+            echo "::error::A nightly quality lane failed or the baseline comparator did not run."
             exit 1
           fi

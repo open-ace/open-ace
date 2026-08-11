@@ -933,10 +933,30 @@ class ProcessExecutor:
         model: str | None = None,
         permission_mode: str | None = None,
         allowed_tools: list[str] | None = None,
+        resume_session_id: str | None = None,
     ) -> dict[str, Any]:
         with self._lock:
-            if session_id in self._sessions and self._sessions[session_id].is_running:
-                return {"success": False, "error": "Session already running"}
+            existing = self._sessions.get(session_id)
+            if existing and existing.is_running:
+                if resume_session_id:
+                    # Restore semantics: the server issued a fresh proxy token
+                    # and expects the process restarted with it. The old process
+                    # may still hold a revoked/expired token and would 401 every
+                    # LLM call (Issue #2405). Stop it and fall through to start
+                    # again with the new token + --resume below.
+                    self._sessions.pop(session_id, None)
+                else:
+                    return {"success": False, "error": "Session already running"}
+
+        if existing is not None and resume_session_id:
+            try:
+                existing.stop()
+            except Exception as e:
+                logger.warning("Failed to stop stale session %s: %s", session_id[:8], e)
+            logger.info(
+                "Session %s already running; restarting with a fresh proxy token for resume",
+                session_id[:8],
+            )
 
         # ZCode runs a persistent app-server process driven by its own stdio
         # protocol (ZCode Protocol), not Claude's stream-json stdin. Route it
@@ -1690,6 +1710,106 @@ class ProcessExecutor:
             "paused": session._paused,
             "cli_session_id": session._cli_session_id,
         }
+
+    def find_session_jsonl(
+        self, cli_tool: str, project_path: str, created_at: str | None = None
+    ) -> dict[str, Any] | None:
+        """Find a JSONL session file by project path and creation time.
+
+        Used by resume_terminated_session to locate the CLI session ID
+        (the JSONL filename) for historical sessions that predate the
+        cli_session_id capture.
+
+        Args:
+            cli_tool: CLI tool name (qwen-code, claude-code, etc.)
+            project_path: Project directory path
+            created_at: Optional ISO timestamp to match file creation time
+
+        Returns:
+            Dict with session_id if found, None otherwise.
+        """
+        from datetime import datetime
+
+        # Map CLI tool to session directory
+        tool_dir_map = {
+            "qwen-code": Path.home() / ".qwen" / "projects",
+            "qwen-code-cli": Path.home() / ".qwen" / "projects",
+            "qwen": Path.home() / ".qwen" / "projects",
+            "claude-code": Path.home() / ".claude" / "projects",
+            "claude": Path.home() / ".claude" / "projects",
+            "codex-cli": Path.home() / ".codex" / "sessions",
+            "codex": Path.home() / ".codex" / "sessions",
+        }
+
+        base_dir = tool_dir_map.get(cli_tool)
+        if not base_dir or not base_dir.exists():
+            logger.debug("find_session_jsonl: no session directory for %s", cli_tool)
+            return None
+
+        # Parse created_at timestamp if provided
+        created_dt = None
+        if created_at:
+            try:
+                # Handle ISO format with optional Z suffix
+                created_at_clean = created_at.rstrip("Z")
+                created_dt = datetime.fromisoformat(created_at_clean)
+            except ValueError:
+                logger.debug("find_session_jsonl: invalid created_at format: %s", created_at)
+
+        # Search for JSONL files matching project path
+        best_match = None
+        best_match_time = None
+
+        try:
+            # Look for chats subdirectory (Claude/Qwen structure)
+            for jsonl_path in base_dir.rglob("*.jsonl"):
+                # Check if project path matches (encoded in directory name)
+                path_str = str(jsonl_path)
+                if project_path and project_path not in path_str:
+                    # Try encoded version (hyphens for special chars)
+                    encoded_path = project_path.replace("/", "-").replace("_", "-")
+                    if encoded_path not in path_str:
+                        continue
+
+                # If created_at provided, check file modification time
+                if created_dt:
+                    try:
+                        file_stat = jsonl_path.stat()
+                        file_mtime = datetime.fromtimestamp(file_stat.st_mtime)
+                        # Allow 60 second tolerance
+                        time_diff = abs((file_mtime - created_dt).total_seconds())
+                        if time_diff > 60:
+                            continue
+
+                        # Track best match by time proximity
+                        if best_match_time is None or time_diff < best_match_time:
+                            best_match_time = time_diff
+                            best_match = jsonl_path
+                    except OSError:
+                        continue
+                else:
+                    # No time filter, use first match
+                    session_id = jsonl_path.stem
+                    logger.info(
+                        "find_session_jsonl: found %s for project %s",
+                        session_id[:8],
+                        project_path[:32],
+                    )
+                    return {"session_id": session_id}
+
+            if best_match:
+                session_id = best_match.stem
+                logger.info(
+                    "find_session_jsonl: found %s for project %s (matched by time)",
+                    session_id[:8],
+                    project_path[:32],
+                )
+                return {"session_id": session_id}
+
+        except Exception as e:
+            logger.warning("find_session_jsonl: search failed: %s", e)
+
+        return None
 
     def cleanup_stopped(self) -> list[str]:
         """
