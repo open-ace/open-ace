@@ -1299,7 +1299,24 @@ def handle_llm_proxy_request(
                             existing_so.setdefault("include_usage", True)
                         else:
                             data["stream_options"] = {"include_usage": True}
-                        body = json.dumps(data).encode("utf-8")
+                    # Issue #2412: DeepSeek's thinking mode rejects tool_choice
+                    # ("Thinking mode does not support this tool_choice" -> 400).
+                    # The qwen CLI sets tool_choice when it wants to force a tool
+                    # call (e.g. create a directory); that 400 kills the whole
+                    # request and the CLI shows no reply. Strip it for
+                    # compatibility — the model still calls tools on its own.
+                    # Only strip for DeepSeek models to preserve tool_choice for
+                    # other providers that support it.
+                    if data.get("tool_choice") is not None:
+                        model_lower = (requested_model or "").lower()
+                        if "deepseek" in model_lower:
+                            logger.info(
+                                "LLM proxy: stripping tool_choice=%r for DeepSeek model=%s",
+                                data["tool_choice"],
+                                requested_model or "?",
+                            )
+                            data.pop("tool_choice", None)
+                    body = json.dumps(data).encode("utf-8")
                 except (json.JSONDecodeError, ValueError, TypeError):
                     pass  # 解析失败，使用原始请求体
 

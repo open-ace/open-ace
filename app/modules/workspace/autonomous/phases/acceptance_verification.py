@@ -246,6 +246,33 @@ def _prior_infra_retry_count(wf: dict, merge_sha: str, snap_hash: str) -> int:
         return 0
 
 
+def _acceptance_milestone(*, workflow_id, attempt, status, report) -> dict:
+    """Build the acceptance-verification milestone row.
+
+    ``result_summary`` / ``metadata`` are DB columns inserted verbatim by
+    ``repo.create_milestone`` (no JSON serialization), so they must be strings
+    — passing the raw ``report`` dict crashed with ``can't adapt type 'dict'``
+    the moment a verdict was committed (#2394). ``metadata`` keeps the full
+    structured report as JSON; ``result_summary`` is a short readable line.
+    """
+    summary = (
+        f"status={status}; "
+        f"scope={len(report.get('scope', []))} "
+        f"gates={len(report.get('gates', []))} "
+        f"verifier={len(report.get('verifier', []))}"
+    )
+    return {
+        "workflow_id": workflow_id,
+        "phase": "acceptance_verification",
+        "round_number": attempt,
+        "milestone_type": "acceptance_verification",
+        "status": status,
+        "title": f"Acceptance verification: {status}",
+        "result_summary": summary,
+        "metadata": json.dumps(report, ensure_ascii=False),
+    }
+
+
 def handle(ctx, deps) -> PhaseResult:
     # Keep this guard before all context/dependency access. Parked production
     # rows may have already released their worktrees and must drain safely while
@@ -542,16 +569,12 @@ def handle(ctx, deps) -> PhaseResult:
         "verified_by": verified_by,
         "verification_attempt": (wf.get("verification_attempt") or 0) + 1,
     }
-    milestone = {
-        "workflow_id": wf.get("workflow_id"),
-        "phase": "acceptance_verification",
-        "round_number": common_patch["verification_attempt"],
-        "milestone_type": "acceptance_verification",
-        "status": status,
-        "title": f"Acceptance verification: {status}",
-        "result_summary": report,
-        "metadata": report,
-    }
+    milestone = _acceptance_milestone(
+        workflow_id=wf.get("workflow_id"),
+        attempt=common_patch["verification_attempt"],
+        status=status,
+        report=report,
+    )
     if agent_out.get("infra_error") and infra_retry_count < MAX_VERIFIER_INFRA_RETRIES:
         # Infrastructure failures are not acceptance evidence and must not
         # create a terminal milestone. Keep the workflow in its current phase
