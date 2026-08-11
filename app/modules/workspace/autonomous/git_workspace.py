@@ -97,6 +97,7 @@ fi
 TMP="$WT_FE/.nm.shim.tmp.$$"
 rm -rf "$TMP"
 mkdir -p "$TMP"
+trap 'rm -rf "$TMP"' EXIT
 for entry in "$MAIN_NM"/.* "$MAIN_NM"/*; do
   [ -e "$entry" ] || [ -L "$entry" ] || continue
   name=$(basename "$entry")
@@ -405,16 +406,11 @@ class GitWorkspaceService:
             )
 
     def _ensure_frontend_node_modules_shim_impl(self, canonical: str, main_gh: GitHubOps) -> None:
-        # Derive the main clone root from the linked worktree's git common-dir
-        # (``dirname`` of the shared ``.git`` dir = the main clone). Mirrors the
-        # idiom in scripts/openace-run-as.sh.
-        res = main_gh._run_git(
-            ["rev-parse", "--path-format=absolute", "--git-common-dir"], check=False
-        )
-        if res.returncode != 0 or not (res.stdout or "").strip():
-            return  # not a linked worktree / can't resolve → no-op
-        main_root = os.path.dirname(os.path.normpath(res.stdout.strip()))
-        main_fe = os.path.join(main_root, "frontend")
+        # ``main_gh.repo_path`` is the workflow's project_path — the main clone
+        # the worktree branches from, and where the owner's ``npm install``
+        # lives. Reuse its ``frontend/node_modules`` (the worktree's is
+        # gitignored and absent).
+        main_fe = os.path.join(main_gh.repo_path, "frontend")
         # Gate on the main clone having a frontend install (checked as
         # system_account — the service user may not read a user-private clone).
         if not (
