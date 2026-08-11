@@ -56,7 +56,7 @@ dependencies = [
     "cachetools>=5.5.0,<8.0.0",
     "prometheus_client>=0.20.0,<1.0.0",
     "prometheus_flask_exporter>=0.23.0,<1.0.0",
-    "typing_extensions>=4.0.0",
+    "typing_extensions>=4.0.0,<5.0.0",
 ]
 
 [project.optional-dependencies]
