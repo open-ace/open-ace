@@ -23,6 +23,16 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_POLICY = PROJECT_ROOT / "ci" / "ci-health-policy.json"
 ABSENT = "ABSENT"
+CONCLUSION_KEYS = (
+    "success",
+    "failure",
+    "cancelled",
+    "skipped",
+    "neutral",
+    "timed_out",
+    "action_required",
+    "stale",
+)
 
 
 class MetricsError(RuntimeError):
@@ -92,12 +102,18 @@ class RequestBudget:
     def usable(self) -> int:
         if self.remaining is None:
             return 1
-        return min(self.maximum, max(0, self.remaining - self.reserve))
+        return min(
+            max(0, self.maximum - self.actual),
+            max(0, self.remaining - self.reserve),
+        )
 
     def guard(self) -> None:
-        if self.remaining is not None and self.actual + 1 > self.usable:
+        maximum_exhausted = self.actual + 1 > self.maximum
+        reserve_exhausted = self.remaining is not None and self.remaining <= self.reserve
+        if maximum_exhausted or reserve_exhausted:
             raise MetricsError(
-                f"request budget exhausted: actual={self.actual}, usable={self.usable}"
+                "request budget exhausted: "
+                f"actual={self.actual}, remaining={self.remaining}, reserve={self.reserve}"
             )
 
     def begin_request(self) -> None:
@@ -110,10 +126,15 @@ class RequestBudget:
 
     def preflight(self, estimated_total: int) -> None:
         self.estimated = estimated_total
-        if estimated_total > self.maximum or estimated_total > self.usable:
+        requests_left = max(0, estimated_total - self.actual)
+        remaining_capacity = (
+            requests_left if self.remaining is None else max(0, self.remaining - self.reserve)
+        )
+        if estimated_total > self.maximum or requests_left > remaining_capacity:
             raise MetricsError(
                 "request estimate exceeds budget: "
-                f"estimated={estimated_total}, max={self.maximum}, usable={self.usable}"
+                f"estimated={estimated_total}, actual={self.actual}, max={self.maximum}, "
+                f"remaining_capacity={remaining_capacity}"
             )
 
 
@@ -667,10 +688,18 @@ def aggregate_contract(runs: list[dict[str, Any]], min_samples: int) -> dict[str
                     }
                 )
     sample_count = len(runs)
+    first_conclusions = {key: first.get(key, 0) for key in CONCLUSION_KEYS}
+    eventual_conclusions = {key: eventual.get(key, 0) for key in CONCLUSION_KEYS}
+    first_conclusions.update(
+        {key: value for key, value in first.items() if key not in first_conclusions}
+    )
+    eventual_conclusions.update(
+        {key: value for key, value in eventual.items() if key not in eventual_conclusions}
+    )
     return {
         "sample_count": sample_count,
-        "first_conclusions": dict(first),
-        "eventual_conclusions": dict(eventual),
+        "first_conclusions": first_conclusions,
+        "eventual_conclusions": eventual_conclusions,
         "first_pass_rate": first.get("success", 0) / sample_count if sample_count else None,
         "eventual_pass_rate": eventual.get("success", 0) / sample_count if sample_count else None,
         "retry_recovery_count": recoveries,
@@ -870,6 +899,7 @@ def collect(
                 "id": cohort["id"],
                 "eligible_count": source["eligible_count"],
                 "sampled_count": len(normalized),
+                "invalid_count": 0,
                 "sample_cap": policy["sample_cap"],
                 "sampling_truncated_by_policy": source["sampling_truncated_by_policy"],
                 "in_progress_count": source["in_progress_count"],

@@ -131,6 +131,9 @@ class MetricsRecorder:
         except OSError as exc:
             self.error = exc
 
+    def __bool__(self) -> bool:
+        return self._handle is not None
+
     def close(self) -> None:
         if self._handle is None:
             return
@@ -283,7 +286,7 @@ def run_command(
     expanded = expand_command(command)
     print(f"+ {' '.join(expanded)}", flush=True)
     started = time.monotonic()
-    started_at = utc_now()
+    started_at = utc_now() if metrics else ""
     if metrics:
         metrics.record(
             "command_start",
@@ -378,7 +381,7 @@ def run_collection_suite(
     command = [sys.executable, "-m", "pytest", target, "--collect-only", "-q"]
     print(f"+ {' '.join(command)}", flush=True)
     started = time.monotonic()
-    started_at = utc_now()
+    started_at = utc_now() if metrics else ""
     if metrics:
         metrics.record(
             "command_start",
@@ -471,7 +474,7 @@ def run_suite(
 ) -> None:
     suites = config["suites"]
     if name not in suites:
-        failed_at = utc_now()
+        failed_at = utc_now() if metrics else ""
         if metrics:
             metrics.record(
                 "suite_start",
@@ -493,7 +496,7 @@ def run_suite(
         raise CIError(f"Unknown suite {name!r}; choose from: {', '.join(sorted(suites))}")
     suite = suites[name]
     print(f"\n=== {name}: {suite['description']} ===", flush=True)
-    suite_started_at = utc_now()
+    suite_started_at = utc_now() if metrics else ""
     suite_started = time.monotonic()
     if metrics:
         metrics.record(
@@ -629,40 +632,43 @@ def build_parser() -> argparse.ArgumentParser:
 def execute_suites(
     names: list[str], config: dict[str, Any], *, action: str, metrics: MetricsRecorder
 ) -> None:
-    invocation_id = str(uuid.uuid4())
-    invocation_started_at = utc_now()
-    invocation_started = time.monotonic()
+    invocation_id = str(uuid.uuid4()) if metrics else ""
+    invocation_started_at = utc_now() if metrics else ""
+    invocation_started = time.monotonic() if metrics else 0.0
     outcomes = dict.fromkeys(names, "planned")
-    metrics.record(
-        "invocation_start",
-        invocation_id=invocation_id,
-        action=action,
-        requested_suites=names,
-        started_at=invocation_started_at,
-        contract_sha256=metrics_contract_hash(),
-        python_version=platform.python_version(),
-        platform=platform.platform(),
-        ci=os.environ.get("CI", "").lower() == "true",
-    )
-    for position, name in enumerate(names):
+    if metrics:
         metrics.record(
-            "suite_plan",
+            "invocation_start",
             invocation_id=invocation_id,
-            suite=name,
-            position=position,
+            action=action,
+            requested_suites=names,
+            started_at=invocation_started_at,
+            contract_sha256=metrics_contract_hash(),
+            python_version=platform.python_version(),
+            platform=platform.platform(),
+            ci=os.environ.get("CI", "").lower() == "true",
         )
+    for position, name in enumerate(names):
+        if metrics:
+            metrics.record(
+                "suite_plan",
+                invocation_id=invocation_id,
+                suite=name,
+                position=position,
+            )
 
     primary: Exception | None = None
     for name in names:
         if primary is not None:
             outcomes[name] = "not_started_due_to_previous_failure"
-            metrics.record(
-                "suite_terminal",
-                invocation_id=invocation_id,
-                suite=name,
-                outcome=outcomes[name],
-                duration_seconds=0,
-            )
+            if metrics:
+                metrics.record(
+                    "suite_terminal",
+                    invocation_id=invocation_id,
+                    suite=name,
+                    outcome=outcomes[name],
+                    duration_seconds=0,
+                )
             continue
         try:
             run_suite(name, config, metrics=metrics, invocation_id=invocation_id)
@@ -675,17 +681,21 @@ def execute_suites(
             )
             primary = exc
 
-    metrics.record(
-        "invocation_terminal",
-        invocation_id=invocation_id,
-        action=action,
-        requested_suites=names,
-        suite_outcomes=outcomes,
-        started_at=invocation_started_at,
-        completed_at=utc_now(),
-        duration_seconds=round(time.monotonic() - invocation_started, 6),
-        outcome="failure" if primary else "success",
-    )
+    if metrics:
+        invocation_outcome = (
+            "timeout" if "timeout" in outcomes.values() else "failure" if primary else "success"
+        )
+        metrics.record(
+            "invocation_terminal",
+            invocation_id=invocation_id,
+            action=action,
+            requested_suites=names,
+            suite_outcomes=outcomes,
+            started_at=invocation_started_at,
+            completed_at=utc_now(),
+            duration_seconds=round(time.monotonic() - invocation_started, 6),
+            outcome=invocation_outcome,
+        )
     metrics.close()
     if primary is not None:
         if metrics.error is not None:

@@ -162,7 +162,15 @@ def test_metrics_bad_initial_path_fails_closed(tmp_path):
         ci.MetricsRecorder(str(directory))
 
 
-def test_metrics_disabled_has_no_output(tmp_path):
+def test_metrics_disabled_has_no_output_or_metadata_work(monkeypatch, tmp_path):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("metrics-only metadata should remain disabled")
+
+    monkeypatch.setattr(ci, "utc_now", forbidden)
+    monkeypatch.setattr(ci, "metrics_contract_hash", forbidden)
+    monkeypatch.setattr(ci.uuid, "uuid4", forbidden)
+    monkeypatch.setattr(ci.platform, "platform", forbidden)
+    monkeypatch.setattr(ci.platform, "python_version", forbidden)
     ci.execute_suites(
         ["first"],
         _suite_config([ci.sys.executable, "-c", "raise SystemExit(0)"]),
@@ -170,6 +178,34 @@ def test_metrics_disabled_has_no_output(tmp_path):
         metrics=ci.MetricsRecorder(None),
     )
     assert list(tmp_path.iterdir()) == []
+
+
+def test_invocation_terminal_preserves_timeout_outcome(monkeypatch, tmp_path):
+    path = tmp_path / "metrics.jsonl"
+    recorder = ci.MetricsRecorder(str(path))
+    monkeypatch.setattr(
+        ci.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+        ),
+    )
+
+    with pytest.raises(ci.CIError, match="exceeded"):
+        ci.execute_suites(
+            ["first"],
+            _suite_config(["slow-command"]),
+            action="run",
+            metrics=recorder,
+        )
+
+    records = _records(path)
+    assert (
+        next(r for r in records if r["record_type"] == "command_terminal")["outcome"] == "timeout"
+    )
+    assert next(r for r in records if r["record_type"] == "suite_terminal")["outcome"] == "timeout"
+    assert records[-1]["record_type"] == "invocation_terminal"
+    assert records[-1]["outcome"] == "timeout"
 
 
 def test_collection_suite_records_command_terminal(monkeypatch, tmp_path):
@@ -295,6 +331,40 @@ def test_pr_contract_selected_suite_set_changes_digest():
     assert first != second
 
 
+def test_policy_tracks_dependency_lint_and_database_setup_inputs():
+    policy = metrics.load_policy(ROOT / "ci" / "ci-health-policy.json")
+    cohorts = {cohort["id"]: set(cohort["contract_paths"]) for cohort in policy["cohorts"]}
+    assert {
+        "frontend/package.json",
+        "frontend/package-lock.json",
+        ".pre-commit-config.yaml",
+        "scripts/lint/bandit_baseline.json",
+        "scripts/lint/api_security_scanner.py",
+    } <= cohorts["ci-pull-request"]
+    assert {
+        "frontend/package.json",
+        "frontend/package-lock.json",
+        "schema/schema-sqlite.sql",
+        "scripts/init_db.py",
+    } <= cohorts["weekly-quality"]
+
+
+def test_critical_contract_blob_change_changes_digest():
+    cohort = {
+        "id": "pr",
+        "event": "pull_request",
+        "contract_paths": ["frontend/package-lock.json"],
+    }
+    run = {"id": 1, "_runtime_merge_sha": "merge", "_selected_suites": ("frontend",)}
+    first, _ = metrics.contract_hash(
+        run, cohort, {"merge": {"frontend/package-lock.json": "lock-one"}}, version=1
+    )
+    second, _ = metrics.contract_hash(
+        run, cohort, {"merge": {"frontend/package-lock.json": "lock-two"}}, version=1
+    )
+    assert first != second
+
+
 def test_bounded_sample_reports_policy_truncation_without_requiring_next_page():
     now = datetime(2026, 8, 11, tzinfo=timezone.utc)
     runs = [
@@ -319,11 +389,25 @@ def test_request_budget_keeps_repository_reserve():
     budget = metrics.RequestBudget(maximum=700, reserve=250)
     budget.note_rate_limit(1000)
     budget.preflight(700)
+    assert budget.usable == 700
     with pytest.raises(metrics.MetricsError, match="estimate"):
         budget.preflight(701)
-    budget.actual = 700
+    for remaining in range(999, 299, -1):
+        budget.begin_request()
+        budget.note_rate_limit(remaining)
+    assert budget.actual == 700
+    assert budget.remaining == 300
     with pytest.raises(metrics.MetricsError, match="exhausted"):
         budget.guard()
+
+
+def test_request_budget_stops_at_repository_reserve_before_maximum():
+    budget = metrics.RequestBudget(maximum=700, reserve=250)
+    budget.note_rate_limit(251)
+    budget.begin_request()
+    budget.note_rate_limit(250)
+    with pytest.raises(metrics.MetricsError, match="exhausted"):
+        budget.begin_request()
 
 
 @pytest.mark.parametrize(
@@ -609,8 +693,10 @@ def test_attempts_keep_first_failure_and_retry_recovery_separate():
     assert attempts[1]["queue"]["seconds"] == 0
     assert attempts[1]["queue"]["timestamp_skew_clamped"] is True
     assert normalized["recovered_on_retry"] is True
-    assert aggregate["first_conclusions"] == {"failure": 1}
-    assert aggregate["eventual_conclusions"] == {"success": 1}
+    assert aggregate["first_conclusions"]["failure"] == 1
+    assert aggregate["first_conclusions"]["success"] == 0
+    assert aggregate["eventual_conclusions"]["success"] == 1
+    assert aggregate["eventual_conclusions"]["failure"] == 0
     assert aggregate["retry_recovery_count"] == 1
     assert aggregate["inherited_job_snapshot_count"] == 2
     assert aggregate["workflow_queue"]["count"] == 2
@@ -680,3 +766,84 @@ def test_attempt_jobs_must_be_complete():
         metrics.collect_attempts(
             AttemptClient(responses), repo, {"id": run_id, "run_attempt": 1}, 100
         )
+
+
+def test_attempt_jobs_reject_next_page_and_missing_timestamp():
+    with pytest.raises(metrics.MetricsError, match="jobs incomplete"):
+        metrics._validate_raw_jobs(
+            1,
+            1,
+            {"total_count": 1, "jobs": [{"id": 1}]},
+            {"link": '<next>; rel="next"'},
+            100,
+        )
+
+    repo = "open-ace/open-ace"
+    run_id = 3
+    responses = {
+        f"/repos/{repo}/actions/runs/{run_id}/attempts/1": _attempt_meta(
+            1,
+            "success",
+            "2026-08-11T00:00:00Z",
+            "2026-08-11T00:00:00Z",
+            "2026-08-11T00:01:00Z",
+        ),
+        f"/repos/{repo}/actions/runs/{run_id}/attempts/1/jobs?per_page=100": {
+            "total_count": 1,
+            "jobs": [
+                _job(
+                    1,
+                    "success",
+                    "2026-08-11T00:00:00Z",
+                    None,
+                    "2026-08-11T00:01:00Z",
+                )
+            ],
+        },
+    }
+    with pytest.raises(metrics.MetricsError, match="missing timestamp"):
+        metrics.collect_attempts(
+            AttemptClient(responses), repo, {"id": run_id, "run_attempt": 1}, 100
+        )
+
+
+def test_recursive_tree_must_be_complete():
+    repo = "open-ace/open-ace"
+    client = AttemptClient(
+        {
+            f"/repos/{repo}/git/trees/head?recursive=1": {
+                "truncated": True,
+                "tree": [],
+            }
+        }
+    )
+    with pytest.raises(metrics.MetricsError, match="incomplete recursive tree"):
+        metrics.load_tree(client, repo, "head")
+
+
+def test_conclusion_schema_has_stable_zero_values_for_cancel_skip_and_neutral():
+    def run(conclusion):
+        duration = {"seconds": 1, "timestamp_skew_clamped": False, "raw_seconds": 1}
+        return {
+            "first_conclusion": conclusion,
+            "eventual_conclusion": conclusion,
+            "recovered_on_retry": False,
+            "first_attempt_wall": duration,
+            "eventual_resolution": duration,
+            "attempts": [{"queue": duration, "jobs": []}],
+        }
+
+    aggregate = metrics.aggregate_contract(
+        [run("failure"), run("cancelled"), run("skipped"), run("neutral")],
+        min_samples=20,
+    )
+    assert aggregate["first_conclusions"] == {
+        "success": 0,
+        "failure": 1,
+        "cancelled": 1,
+        "skipped": 1,
+        "neutral": 1,
+        "timed_out": 0,
+        "action_required": 0,
+        "stale": 0,
+    }
