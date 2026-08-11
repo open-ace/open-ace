@@ -5,8 +5,6 @@ Tests for Issue #2467: Audit log should include username for AI output content f
 """
 
 import sqlite3
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -26,12 +24,18 @@ class TestSessionManagerAuditUsernameFix:
         cursor = conn.cursor()
 
         # Create minimal schema
-        cursor.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, tenant_id INTEGER)")
-        cursor.execute("CREATE TABLE agent_sessions (session_id TEXT PRIMARY KEY, user_id INTEGER, tenant_id INTEGER, tool_name TEXT DEFAULT 'claude')")
+        cursor.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, tenant_id INTEGER)"
+        )
+        cursor.execute(
+            "CREATE TABLE agent_sessions (session_id TEXT PRIMARY KEY, user_id INTEGER, tenant_id INTEGER, tool_name TEXT DEFAULT 'claude')"
+        )
 
         # Insert test data
         cursor.execute("INSERT INTO users (id, username, tenant_id) VALUES (1, 'testuser', 1)")
-        cursor.execute("INSERT INTO agent_sessions (session_id, user_id, tenant_id) VALUES ('test-session', 1, 1)")
+        cursor.execute(
+            "INSERT INTO agent_sessions (session_id, user_id, tenant_id) VALUES ('test-session', 1, 1)"
+        )
         conn.commit()
 
         # Execute the modified query (from session_manager.py line 1630-1642)
@@ -43,7 +47,7 @@ class TestSessionManagerAuditUsernameFix:
             WHERE a.session_id = ?
             AND a.tenant_id = ?
             """,
-            ("test-session", 1)
+            ("test-session", 1),
         )
 
         row = cursor.fetchone()
@@ -61,12 +65,18 @@ class TestSessionManagerAuditUsernameFix:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        cursor.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, tenant_id INTEGER)")
-        cursor.execute("CREATE TABLE agent_sessions (session_id TEXT PRIMARY KEY, user_id INTEGER, tenant_id INTEGER, tool_name TEXT DEFAULT 'claude')")
+        cursor.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, tenant_id INTEGER)"
+        )
+        cursor.execute(
+            "CREATE TABLE agent_sessions (session_id TEXT PRIMARY KEY, user_id INTEGER, tenant_id INTEGER, tool_name TEXT DEFAULT 'claude')"
+        )
 
         # Insert and then delete user
         cursor.execute("INSERT INTO users (id, username, tenant_id) VALUES (99, 'deleted_user', 1)")
-        cursor.execute("INSERT INTO agent_sessions (session_id, user_id, tenant_id) VALUES ('test-session', 99, 1)")
+        cursor.execute(
+            "INSERT INTO agent_sessions (session_id, user_id, tenant_id) VALUES ('test-session', 99, 1)"
+        )
         cursor.execute("DELETE FROM users WHERE id = 99")
         conn.commit()
 
@@ -79,7 +89,7 @@ class TestSessionManagerAuditUsernameFix:
             WHERE a.session_id = ?
             AND a.tenant_id = ?
             """,
-            ("test-session", 1)
+            ("test-session", 1),
         )
 
         row = cursor.fetchone()
@@ -114,7 +124,7 @@ class TestSessionManagerAuditUsernameFix:
                 tenant_id=1,
                 resource_type="ai_output",
                 severity="medium",
-                details={"test": "data"}
+                details={"test": "data"},
             )
 
             # Verify the call succeeded
@@ -141,6 +151,7 @@ class TestSessionManagerAuditUsernameFix:
         # Import the modified code and verify it calls with correct params
         # (This is a sanity check that the code was modified correctly)
         import inspect
+
         source = inspect.getsource(SessionManager.add_message)
 
         # Verify the code includes username and tenant_id parameters
@@ -172,7 +183,9 @@ class TestSessionManagerAuditIntegration:
 
         # Create tables
         cursor.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT)")
-        cursor.execute("CREATE TABLE agent_sessions (session_id TEXT, user_id INTEGER, tenant_id INTEGER)")
+        cursor.execute(
+            "CREATE TABLE agent_sessions (session_id TEXT, user_id INTEGER, tenant_id INTEGER)"
+        )
 
         # Test the query executes without error
         try:
@@ -184,7 +197,7 @@ class TestSessionManagerAuditIntegration:
                 WHERE a.session_id = ?
                 AND a.tenant_id = ?
                 """,
-                ("test", 1)
+                ("test", 1),
             )
             # Query should execute without exception
             assert True
