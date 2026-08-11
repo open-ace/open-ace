@@ -628,10 +628,53 @@ class RemoteAgent:
                         "result": info or {"error": "Session not found"},
                     }
                 )
+        elif command == "find_session_jsonl":
+            # Find JSONL session file by project path (Issue #2404)
+            self._cmd_find_session_jsonl(data)
         elif command == "rotate_token":
             self._cmd_rotate_token(data)
         else:
             logger.warning("Unknown command: %s", command)
+
+    def _cmd_find_session_jsonl(self, data: dict[str, Any]) -> None:
+        """Handle a find_session_jsonl command from the server.
+
+        Finds the CLI session ID (JSONL filename) for a historical session
+        that predates the cli_session_id capture. Used by session resume.
+        """
+        request_id = data.get("request_id")
+        if not request_id:
+            logger.warning("find_session_jsonl: missing request_id")
+            return
+
+        # Extract parameters from extra dict
+        extra = data.get("extra", {})
+        cli_tool = data.get("cli_tool", extra.get("cli_tool", "qwen-code"))
+        project_path = extra.get("project_path", "")
+        created_at = extra.get("created_at")
+
+        if not project_path:
+            self._http_send(
+                {
+                    "type": "command_response",
+                    "machine_id": self.config.machine_id,
+                    "request_id": request_id,
+                    "result": {"error": "Missing project_path"},
+                }
+            )
+            return
+
+        # Call executor to find the JSONL file
+        result = self._executor.find_session_jsonl(cli_tool, project_path, created_at)
+
+        self._http_send(
+            {
+                "type": "command_response",
+                "machine_id": self.config.machine_id,
+                "request_id": request_id,
+                "result": result or {"error": "Session JSONL not found"},
+            }
+        )
 
     def _cmd_rotate_token(self, data: dict[str, Any]) -> None:
         """Handle a rotate_token command from the server.
