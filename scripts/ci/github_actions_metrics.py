@@ -32,6 +32,7 @@ CONCLUSION_KEYS = (
     "timed_out",
     "action_required",
     "stale",
+    "startup_failure",
 )
 
 
@@ -57,6 +58,12 @@ def measured_delta(start: str | None, end: str | None, field: str) -> dict[str, 
         "timestamp_skew_clamped": raw < 0,
         "raw_seconds": raw,
     }
+
+
+def validate_conclusion(value: Any, field: str) -> str:
+    if value not in CONCLUSION_KEYS:
+        raise MetricsError(f"invalid completed conclusion {field}: {value!r}")
+    return value
 
 
 def nearest_rank(values: list[float], percentile: float) -> float | None:
@@ -524,10 +531,17 @@ def collect_attempts(
             )
         if meta.get("run_attempt") != number:
             raise MetricsError(f"run {run['id']} attempt metadata mismatch")
+        attempt_conclusion = validate_conclusion(
+            meta.get("conclusion"), f"run {run['id']} attempt {number}"
+        )
         jobs = _validate_raw_jobs(run["id"], number, jobs_payload, headers, max_jobs)
         attempt_started = parse_time(meta.get("run_started_at"), "attempt.run_started_at")
         normalized_jobs = []
         for job in jobs:
+            job_conclusion = validate_conclusion(
+                job.get("conclusion"),
+                f"run {run['id']} attempt {number} job {job.get('id')}",
+            )
             created = parse_time(job.get("created_at"), "job.created_at")
             started = parse_time(job.get("started_at"), "job.started_at")
             completed = parse_time(job.get("completed_at"), "job.completed_at")
@@ -537,7 +551,7 @@ def collect_attempts(
             normalized = {
                 "job_id": job["id"],
                 "name": job.get("name"),
-                "conclusion": job.get("conclusion"),
+                "conclusion": job_conclusion,
                 "labels": job.get("labels", []),
                 "created_at": job.get("created_at"),
                 "started_at": job.get("started_at"),
@@ -552,7 +566,7 @@ def collect_attempts(
                         f"run {run['id']} attempt {number} job {job['id']} "
                         "has invalid cross-attempt timestamps"
                     )
-                if job.get("conclusion") == "skipped" and start_offset >= -2:
+                if job_conclusion == "skipped" and start_offset >= -2:
                     if abs((started - created).total_seconds()) > 2:
                         raise MetricsError(
                             f"run {run['id']} attempt {number} skipped job {job['id']} "
@@ -570,7 +584,7 @@ def collect_attempts(
                         prior
                         for prior in canonical_jobs
                         if prior["name"] == job.get("name")
-                        and prior["conclusion"] == job.get("conclusion")
+                        and prior["conclusion"] == job_conclusion
                         and prior["started_at"] == job.get("started_at")
                         and prior["completed_at"] == job.get("completed_at")
                     ]
@@ -609,7 +623,7 @@ def collect_attempts(
         attempts.append(
             {
                 "attempt": number,
-                "conclusion": meta.get("conclusion"),
+                "conclusion": attempt_conclusion,
                 "queue": measured_delta(
                     meta.get("created_at"), meta.get("run_started_at"), "workflow.queue"
                 ),

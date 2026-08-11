@@ -341,6 +341,8 @@ def test_policy_tracks_dependency_lint_and_database_setup_inputs():
         "scripts/lint/bandit_baseline.json",
         "scripts/lint/api_security_scanner.py",
     } <= cohorts["ci-pull-request"]
+    assert {"Dockerfile", ".dockerignore", "requirements.txt"} <= cohorts["ci-main-push"]
+    assert {"schema/schema-sqlite.sql", "scripts/init_db.py"} <= cohorts["extended-nightly"]
     assert {
         "frontend/package.json",
         "frontend/package-lock.json",
@@ -750,6 +752,82 @@ def test_inherited_job_without_canonical_origin_is_invalid():
         )
 
 
+def test_persistent_retry_failure_is_not_recovery():
+    repo = "open-ace/open-ace"
+    run_id = 4
+    base = f"/repos/{repo}/actions/runs/{run_id}/attempts"
+    responses = {}
+    for attempt, minute in ((1, 0), (2, 2)):
+        prefix = f"2026-08-11T00:0{minute}:"
+        responses[f"{base}/{attempt}"] = _attempt_meta(
+            attempt,
+            "failure",
+            f"{prefix}00Z",
+            f"{prefix}00Z",
+            f"{prefix}30Z",
+        )
+        responses[f"{base}/{attempt}/jobs?per_page=100"] = {
+            "total_count": 1,
+            "jobs": [
+                _job(
+                    attempt,
+                    "failure",
+                    f"{prefix}00Z",
+                    f"{prefix}01Z",
+                    f"{prefix}29Z",
+                )
+            ],
+        }
+    run = {
+        "id": run_id,
+        "run_attempt": 2,
+        "created_at": "2026-08-11T00:00:00Z",
+        "head_sha": "head",
+    }
+    normalized = metrics.normalize_run(
+        run,
+        "contract",
+        {},
+        metrics.collect_attempts(AttemptClient(responses), repo, run, 100),
+    )
+    assert normalized["first_conclusion"] == "failure"
+    assert normalized["eventual_conclusion"] == "failure"
+    assert normalized["recovered_on_retry"] is False
+
+
+@pytest.mark.parametrize(
+    ("attempt_conclusion", "job_conclusion"), [(None, "success"), ("success", "mystery")]
+)
+def test_completed_attempt_and_job_conclusions_are_validated(attempt_conclusion, job_conclusion):
+    repo = "open-ace/open-ace"
+    run_id = 5
+    responses = {
+        f"/repos/{repo}/actions/runs/{run_id}/attempts/1": _attempt_meta(
+            1,
+            attempt_conclusion,
+            "2026-08-11T00:00:00Z",
+            "2026-08-11T00:00:00Z",
+            "2026-08-11T00:01:00Z",
+        ),
+        f"/repos/{repo}/actions/runs/{run_id}/attempts/1/jobs?per_page=100": {
+            "total_count": 1,
+            "jobs": [
+                _job(
+                    1,
+                    job_conclusion,
+                    "2026-08-11T00:00:00Z",
+                    "2026-08-11T00:00:01Z",
+                    "2026-08-11T00:00:30Z",
+                )
+            ],
+        },
+    }
+    with pytest.raises(metrics.MetricsError, match="invalid completed conclusion"):
+        metrics.collect_attempts(
+            AttemptClient(responses), repo, {"id": run_id, "run_attempt": 1}, 100
+        )
+
+
 def test_attempt_jobs_must_be_complete():
     repo = "open-ace/open-ace"
     run_id = 1
@@ -846,4 +924,5 @@ def test_conclusion_schema_has_stable_zero_values_for_cancel_skip_and_neutral():
         "timed_out": 0,
         "action_required": 0,
         "stale": 0,
+        "startup_failure": 0,
     }
