@@ -155,10 +155,10 @@ describe('PageRefreshControl', () => {
       expect(screen.queryByTestId('refresh-clock-icon')).not.toBeInTheDocument();
       // Should render refresh time as text
       expect(screen.getByText(/minutes ago/i)).toBeInTheDocument();
-      // Should have title attribute for tooltip
+      // Issue #2397: Time text is now wrapped with Tooltip component (no native title)
       const timeText = screen.getByText(/minutes ago/i);
-      expect(timeText).toHaveAttribute('title');
-      expect(timeText.getAttribute('title')).toContain('Last Refresh');
+      // Should have tabIndex for keyboard accessibility
+      expect(timeText).toHaveAttribute('tabIndex', '0');
     });
 
     it('should not render clock icon or extra element when lastRefreshTime is null', () => {
@@ -233,6 +233,23 @@ describe('PageRefreshControl', () => {
 
       // Manual refresh button should always be present
       expect(screen.getByTestId('manual-refresh-button')).toBeInTheDocument();
+    });
+
+    // Issue #2397: Button style should match adjacent buttons
+    it('should have btn-outline-secondary class for refresh button', () => {
+      const mockRefresh = createMockRefresh();
+
+      render(
+        <PageRefreshControl
+          refresh={mockRefresh}
+          compact={true}
+          showAutoRefreshToggle={false}
+          showIntervalSelector={false}
+        />
+      );
+
+      const refreshButton = screen.getByTestId('manual-refresh-button');
+      expect(refreshButton).toHaveClass('btn-outline-secondary');
     });
   });
 
