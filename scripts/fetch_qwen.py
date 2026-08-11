@@ -167,7 +167,7 @@ def parse_timestamp(ts_str: str) -> str:
     """Extract date from ISO timestamp, converting UTC to local time.
 
     This ensures consistency with get_today() which uses local time.
-    Fixes issue #1322: UTC/local time mismatch causing early morning
+    Fixes issue #1322: timezone.utc/local time mismatch causing early morning
     usage data to be stored under the previous day's date.
     """
     if not ts_str:

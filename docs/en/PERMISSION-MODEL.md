@@ -147,3 +147,146 @@ Current boundary:
 - Users, projects, workspace sessions, session messages, daily usage aggregates, audit logs, remote machines, machine permissions, and quotas are tenant-aware.
 - Non-admin user-facing APIs apply the authenticated tenant scope to session, project, usage, and audit queries. Workspace session mutations also include the session tenant in the write boundary.
 - System administrators intentionally retain global operational visibility for support and incident response.
+
+## API Key Management Tenant Authorization (Issue #2327)
+
+### Core Principle
+
+The `tenant_id` parameter in API Key management endpoints is a **target selector**, not an **authorization credential**. Request parameters can only express the platform admin's explicit target, not expand tenant admin's permissions.
+
+### Authorization Model
+
+#### tenant_admin
+
+- **Target Tenant**: Must always come from authentication context (`g.tenant_id`)
+- **No tenant_id provided**: Uses actor tenant (backward compatible)
+- **Different tenant_id provided**: Returns 403 Forbidden
+- **Cross-tenant operations**: Strictly prohibited
+
+**Examples**:
+```python
+# tenant_admin (tenant_id=1) requests
+GET /api/api-keys                    # Success, returns tenant 1's API keys
+GET /api/api-keys?tenant_id=1       # Success, returns tenant 1's API keys
+GET /api/api-keys?tenant_id=2       # Fail, returns 403 (cross-tenant access denied)
+POST /api/api-keys {"tenant_id": 2} # Fail, returns 403 (cross-tenant access denied)
+```
+
+#### platform_admin / legacy admin
+
+- **Target Tenant**: Must explicitly specify `tenant_id` (fail-closed)
+- **No tenant_id provided**: Returns 400 Bad Request (no global list)
+- **Cross-tenant operations**: Allowed, with audit logging
+- **Permission Scope**: Can manage all tenants
+
+**Examples**:
+```python
+# platform_admin requests
+GET /api/api-keys                    # Fail, returns 400 (missing tenant_id)
+GET /api/api-keys?tenant_id=1       # Success, returns tenant 1's API keys
+GET /api/api-keys?tenant_id=2       # Success, returns tenant 2's API keys (audit logged)
+POST /api/api-keys {"tenant_id": 1} # Success, creates API key in tenant 1
+```
+
+### API Key Ownership Verification
+
+For `PUT /api/api-keys/<key_id>` and `DELETE /api/api-keys/<key_id>`:
+
+- Repository layer enforces `key_id` belongs to target tenant
+- If API Key doesn't exist or doesn't belong to target tenant: Returns 403 Forbidden
+- Doesn't return 404 to avoid information leakage (prevents attackers from probing key_id existence)
+
+### Error Responses
+
+| Status Code | Error Message | Description |
+|-------------|---------------|-------------|
+| 400 | Target tenant_id is required | platform_admin missing tenant_id |
+| 400 | Invalid tenant_id | tenant_id is negative, zero, or malformed |
+| 403 | Cross-tenant access denied | tenant_admin cross-tenant access |
+| 403 | Tenant admin must have tenant_id | tenant_admin has no associated tenant |
+| 403 | API key not found or access denied | API Key doesn't exist or doesn't belong to target tenant |
+
+### Audit Logging
+
+Platform admin cross-tenant operations must generate audit records containing:
+
+- `actor_user_id`: Operator user ID
+- `actor_tenant_id`: Operator's tenant
+- `target_tenant_id`: Target tenant
+- `action`: Operation type (API_KEY_CREATE, API_KEY_READ, API_KEY_UPDATE, API_KEY_DELETE)
+- `api_key_id`: API Key ID (when applicable)
+- `api_key_name`: API Key name
+- `result`: Operation result (success, denied, not_found)
+- `request_id`: Request tracing ID
+
+### Implementation Architecture
+
+#### Centralized Authorization Primitive
+
+Uses `resolve_authorized_target_tenant(actor, requested_tenant_id)` for unified handling:
+
+```python
+# tenant_admin: Enforce tenant boundary
+actor = {"id": 1, "role": "tenant_admin", "tenant_id": 1}
+target_tenant_id, error = resolve_authorized_target_tenant(actor, requested_tenant_id=2)
+# Returns: (None, "Cross-tenant access denied")
+
+# platform_admin: Must explicitly specify
+actor = {"id": 1, "role": "platform_admin", "tenant_id": None}
+target_tenant_id, error = resolve_authorized_target_tenant(actor, requested_tenant_id=1)
+# Returns: (1, None)
+```
+
+#### ActorScope Authorization Context
+
+Service/Repository layer uses immutable `ActorScope` objects:
+
+```python
+@dataclass(frozen=True)
+class ActorScope:
+    user_id: int
+    role: str
+    actor_tenant_id: int | None
+    target_tenant_id: int
+    is_cross_tenant: bool
+    request_id: str | None
+```
+
+#### Route Layer Decorator
+
+Uses `@api_key_admin_required` decorator for unified handling:
+
+```python
+@api_keys_bp.route("/api-keys", methods=["GET"])
+@api_key_admin_required
+def list_api_keys():
+    scope = g.actor_scope  # Verified authorization context
+    keys = api_proxy.list_api_keys(scope.target_tenant_id)
+    return jsonify({"success": True, "keys": keys})
+```
+
+#### Service Layer Defense Line
+
+Service layer methods must receive verified `ActorScope`:
+
+```python
+@require_actor_scope()
+def store_api_key(self, scope: ActorScope, ...):
+    # Automatically validates scope contains valid user_id, role, target_tenant_id
+    ...
+```
+
+### Fail-Closed Principle
+
+**No silent default behavior**:
+
+- No fallback to tenant 1 or other default tenant
+- No ignoring invalid tenant_id and continuing execution
+- No returning global list or global permissions
+- All exceptional cases must explicitly error
+
+### Backward Compatibility
+
+- `tenant_admin` without `tenant_id`: Uses actor tenant (backward compatible)
+- Error response format conforms to API specification (contains `error` field)
+- Existing tenant isolation tests continue to pass

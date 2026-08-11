@@ -57,6 +57,21 @@ ASSERT_METHODS = frozenset(
         "assert_called_once_with",
         "assert_not_called",
         "assertRaises",
+        "assertGreater",
+        "assertLess",
+        "assertGreaterEqual",
+        "assertLessEqual",
+        "assertAlmostEqual",
+        "assertNotAlmostEqual",
+        "assertRegex",
+        "assertNotRegex",
+        "assertCountEqual",
+        "assertMultiLineEqual",
+        "assertSequenceEqual",
+        "assertListEqual",
+        "assertTupleEqual",
+        "assertSetEqual",
+        "assertDictEqual",
     }
 )
 

@@ -533,6 +533,14 @@ class SSHFileSyncContext:
         except Exception as e:
             return ValidationResult(False, f"Destination path resolution failed: {e}")
 
+        # 【Phase 2: Ownership Validation Enhancement - Issue #2328】
+        # 2.5. Verify source file is owned by root (UID 0) to prevent volume mount attacks
+        # where non-root user creates files in /root/.ssh via volume mount
+        if self._src_st.st_uid != 0:
+            return ValidationResult(
+                False, f"Source file not owned by root (uid={self._src_st.st_uid})"
+            )
+
         # 3. 文件类型验证（使用 fstat 避免竞态）
         mode = self._src_st.st_mode
 
@@ -715,6 +723,32 @@ def sync_ssh_keys(
     if not os.path.isdir(root_ssh):
         log_audit(f"SYNC_SKIP user={username} reason=root_ssh_not_found", level="INFO")
         return results
+
+    # 【Phase 2: Ownership Validation Enhancement - Issue #2328】
+    # Verify /root/.ssh directory is owned by root (UID 0) to prevent volume mount attacks
+    try:
+        root_ssh_stat = os.stat(root_ssh)
+        if root_ssh_stat.st_uid != 0:
+            log_audit(
+                f"SYNC_DENIED user={username} reason=root_ssh_not_root_owned uid={root_ssh_stat.st_uid}",
+                level="ERROR",
+            )
+            print(
+                f"ERROR: {root_ssh} is not owned by root (uid={root_ssh_stat.st_uid}). "
+                f"This may indicate a volume mount attack.",
+                file=sys.stderr,
+            )
+            return [
+                SyncResult(
+                    False,
+                    f"Directory ownership check failed: {root_ssh} not owned by root",
+                )
+            ]
+    except Exception as e:
+        log_audit(
+            f"SYNC_ERROR user={username} reason=ownership_check_failed error={e}", level="ERROR"
+        )
+        return [SyncResult(False, f"Ownership check failed: {e}")]
 
     # 加载配置文件（如果提供）
     config = {}
