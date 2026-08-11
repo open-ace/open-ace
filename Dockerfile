@@ -196,6 +196,12 @@ RUN python3 /app/scripts/patch-qwen-webui-histories.py
 # the build on drift.
 RUN python3 /app/scripts/patch-qwen-webui-navparams.py
 
+# Patch qwen-code-webui VS Code folder parameter for remote workspaces:
+# the folder parameter lacks "/" prefix for Windows paths (C:/workspace),
+# causing code-server to fail with "Unable to resolve resource".
+# Script is version-pinned and fails the build on drift.
+RUN python3 /app/scripts/patch-qwen-webui-vscode-folder.py
+
 # Copy and set up entrypoint script
 # Use python to convert Windows line endings (CRLF) to Unix (LF) and remove BOM - Issue #1988
 COPY --chown=open-ace:open-ace docker-entrypoint.sh /usr/local/bin/
