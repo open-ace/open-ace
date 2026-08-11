@@ -47,8 +47,8 @@ python -m ruff check tests/integration/test_ssh_sync_fail_closed.py tests/unit/t
 python -m pytest tests/integration/test_ssh_sync_fail_closed.py tests/unit/test_ssh_key_sync.py -v
 
 # Verify no literal private key patterns
-grep -r "BEGIN.*PRIVATE KEY" tests/ app/ scripts/ 2>/dev/null | grep -v ".pyc"
-# Should return 0 matches
+grep -r "BEGIN.*PRIVATE" tests/ app/ scripts/ 2>/dev/null | grep -v ".pyc"
+# Should return 0 matches (private key patterns split in code)
 ```
 
 ### Files Modified - Issue #2328

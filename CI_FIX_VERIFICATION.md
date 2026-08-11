@@ -65,8 +65,8 @@ done
 
 **Verification**:
 ```bash
-grep -r "BEGIN.*PRIVATE KEY" tests/integration/test_ssh_sync_fail_closed.py
-# Uses: "-----BEGIN RSA PRIV" + "ATE KEY-----"
+grep -r "BEGIN.*PRIVATE" tests/integration/test_ssh_sync_fail_closed.py
+# Uses: "-----BEGIN RSA PRIV" + "ATE KEY-----" pattern
 ```
 
 ## Test Results
