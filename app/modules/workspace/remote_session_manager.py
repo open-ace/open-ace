@@ -661,9 +661,7 @@ class RemoteSessionManager:
             # Resolve the CLI conversation id to resume
             cli_session_id = ""
             try:
-                session = self._session_manager.get_session(
-                    session_id, include_messages=False
-                )
+                session = self._session_manager.get_session(session_id, include_messages=False)
                 if session:
                     cli_session_id = session.cli_session_id or ""
             except Exception as e:
@@ -709,7 +707,11 @@ class RemoteSessionManager:
             # Fresh proxy token; reuse original HA routing metadata when present.
             extra_payload: dict[str, Any] = {
                 "scope": "remote",
-                "tool_name": "qwen-code" if normalize_tool_name(cli_tool) == "qwen" else normalize_tool_name(cli_tool),
+                "tool_name": (
+                    "qwen-code"
+                    if normalize_tool_name(cli_tool) == "qwen"
+                    else normalize_tool_name(cli_tool)
+                ),
             }
             extra_payload.update(self._get_ha_metadata(session_id))
             proxy_token = self._api_key_proxy.generate_proxy_token(
