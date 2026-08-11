@@ -17,7 +17,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "20260808_001_add_schema_metadata"
-down_revision: str | None = "20260805_010_acceptance_verification_columns"
+down_revision: str | None = "20260810_001_enforce_admin_role_migration"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -58,14 +58,12 @@ def upgrade() -> None:
     # Create table with dialect-specific syntax
     if dialect == "postgresql":
         # PostgreSQL: use native TIMESTAMP type
-        op.execute(
-            """
+        op.execute("""
             CREATE TABLE schema_metadata (
                 initialized_at TIMESTAMP NOT NULL DEFAULT NOW(),
                 schema_version VARCHAR(64)
             )
-            """
-        )
+            """)
     else:
         # SQLite and others: use dialect-agnostic approach
         op.create_table(
