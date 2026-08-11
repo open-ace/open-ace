@@ -2234,7 +2234,6 @@ table .latency-row:hover td {
   box-shadow: var(--shadow-md);
   border: 1px solid var(--border-color);
   max-width: 250px;
-  white-space: pre-line; /* Support newline characters for multi-line tooltips */
 }
 
 /* Badge Styles */
