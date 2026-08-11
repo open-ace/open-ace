@@ -2169,9 +2169,7 @@ class RemoteAgentManager:
         """
         with self._lock:
             if self._session_end_flags.pop(session_id, None):
-                logger.info(
-                    "Cleared stale session-ended flag for %s", session_id[:8]
-                )
+                logger.info("Cleared stale session-ended flag for %s", session_id[:8])
 
     def _log_session_ended_db_failure_cached(self, session_id: str, minute: int) -> None:
         """Log DB failure for is_session_ended with rate limiting (Issue #1823).
