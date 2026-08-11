@@ -247,8 +247,8 @@ def test_missing_gh_binary_is_not_mistaken_for_an_unprotected_branch():
 
     Python finds `sudo`, so no FileNotFoundError is raised; a bare "not found"
     substring test classified a broken deployment as "this branch requires
-    nothing", which makes _blocking_failures skip every repair and silently
-    void the fail-closed contract.
+    nothing", which makes the required-check consumer skip every gating check
+    and silently void the fail-closed contract.
     """
     from app.modules.workspace.autonomous.github_ops import GitHubOps
 

@@ -2112,6 +2112,129 @@ def _next_phase(current_phase: str) -> str:
     return current_phase
 
 
+def _extract_verifier_json(text: str) -> dict | None:
+    """Extract the acceptance verifier's JSON verdict object from agent output.
+
+    Tolerant of the glm family's common deviations from "ONLY a fenced JSON
+    block": prose prefaces, multiple/partial code fences, trailing commas
+    (``{"a":1,}``), and braces appearing inside string values. Returns the
+    parsed dict, or ``None`` when no JSON object can be recovered (the caller
+    records an infra_error and logs the raw text). ``None`` defers to
+    infra-retry — it never fabricates a verdict.
+    """
+    import json as _json
+    import re as _re
+
+    def _try_parse(candidate: str) -> dict | None:
+        candidate = (candidate or "").strip()
+        if not candidate:
+            return None
+        try:
+            parsed = _json.loads(candidate)
+        except Exception:
+            # glm models routinely emit trailing commas ({"a":1,}); strip them.
+            # String-aware so a ",}" inside a value (e.g. an evidence note
+            # containing a code snippet) is preserved, not mangled.
+            cleaned = _strip_trailing_commas(candidate)
+            try:
+                parsed = _json.loads(cleaned)
+            except Exception:
+                return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def _strip_trailing_commas(s: str) -> str:
+        out: list[str] = []
+        in_str = False
+        escaped = False
+        i = 0
+        n = len(s)
+        while i < n:
+            ch = s[i]
+            if escaped:
+                out.append(ch)
+                escaped = False
+                i += 1
+                continue
+            if ch == "\\":
+                out.append(ch)
+                escaped = True
+                i += 1
+                continue
+            if ch == '"':
+                in_str = not in_str
+                out.append(ch)
+                i += 1
+                continue
+            if not in_str and ch == ",":
+                j = i + 1
+                while j < n and s[j].isspace():
+                    j += 1
+                if j < n and s[j] in "}]":
+                    i += 1  # drop the trailing comma
+                    continue
+            out.append(ch)
+            i += 1
+        return "".join(out)
+
+    def _first_balanced(s: str) -> str | None:
+        # First string-aware balanced { ... } substring; braces inside quoted
+        # strings are skipped so evidence text mentioning {} can't fool depth.
+        start = s.find("{")
+        while start != -1:
+            depth = 0
+            in_str = False
+            escaped = False
+            end = None
+            for i in range(start, len(s)):
+                ch = s[i]
+                if escaped:
+                    escaped = False
+                    continue
+                if ch == "\\":
+                    escaped = True
+                    continue
+                if ch == '"':
+                    in_str = not in_str
+                    continue
+                if in_str:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+            if end is not None:
+                return s[start : end + 1]
+            start = s.find("{", start + 1)
+        return None
+
+    # 1) Prefer fenced ```json ... ``` regions (non-greedy per fence pair so two
+    #    blocks don't merge). The LAST region wins — the agent may preface with
+    #    an earlier partial draft. Within a region, take its first balanced {}.
+    fenced_regions = list(_re.finditer(r"```(?:json)?\s*(.*?)\s*```", text, _re.DOTALL))
+    for region in reversed(fenced_regions):
+        obj = _first_balanced(region.group(1))
+        if obj is not None:
+            parsed = _try_parse(obj)
+            if parsed is not None:
+                return parsed
+
+    # 2) No usable fenced region → balanced { ... } over the WHOLE text
+    #    (prose-wrapped / unfenced output). NOTE: this returns the FIRST
+    #    balanced object — if the agent writes prose with a JSON-shaped
+    #    reasoning object before the real verdict, that first object wins.
+    #    Bounded risk: a non-verdict dict lacks `verdicts`/`snapshot` and
+    #    downstream aggregates to indeterminate (never a false confirmed).
+    obj = _first_balanced(text)
+    if obj is not None:
+        parsed = _try_parse(obj)
+        if parsed is not None:
+            return parsed
+    return None
+
+
 class AutonomousOrchestrator:
     """Drives a single autonomous workflow through its phases."""
 
@@ -7636,6 +7759,7 @@ class AutonomousOrchestrator:
                 cli_tool=cli_tool,
                 model=model,
                 project_path=checkout_path,
+                workflow_id=self._workflow_id,
             )
         except Exception:
             logger.exception("acceptance verifier spawn failed for issue %s", issue_number)
@@ -7663,11 +7787,41 @@ class AutonomousOrchestrator:
         import json as _json
 
         snap_dump = _json.dumps(snapshot.to_canonical(), ensure_ascii=False, indent=2)
+        # When the issue had no structured acceptance criteria (a bug report,
+        # etc.), the snapshot is empty and the verifier MUST extract the
+        # criteria itself. Make that requirement prominent — glm models skip a
+        # requirement buried in a trailing parenthetical, then omit the
+        # ``snapshot`` field and burn the infra-retry budget (#30).
+        needs_extraction = not (
+            getattr(snapshot, "required_paths", None) or getattr(snapshot, "checklist", None)
+        )
+        if needs_extraction:
+            extraction_section = (
+                "## REQUIRED — Extract the acceptance snapshot\n"
+                "The acceptance snapshot above is EMPTY (no required_paths/checklist were "
+                "captured for this issue). You MUST read the issue and derive the acceptance "
+                "criteria yourself, then return them in the `snapshot` field. Infer "
+                "required_paths from the bug/stack trace, and write a concrete, checkable "
+                "checklist (one statement per acceptance point). Without `snapshot` populated, "
+                "your verdict is INVALID and verification cannot proceed.\n\n"
+            )
+            # Valid JSON token (the object shape) so the fenced template glm
+            # copies stays parseable — never interpolate prose into the value.
+            snapshot_token = (
+                '{"required_paths": [], "checklist": [], "non_scope": [], '
+                '"closure_constraints": false}'
+            )
+            snapshot_note = "Populate `snapshot` with the criteria you derived above."
+        else:
+            extraction_section = ""
+            snapshot_token = "null"
+            snapshot_note = "Leave `snapshot` null — the criteria above are authoritative."
         return (
             "You are an INDEPENDENT acceptance verifier. The issue must NOT be considered done "
             "just because a PR merged. Verify the MERGED code (merge commit "
             f"{merge_sha}, base {base_sha}) against this acceptance snapshot.\n\n"
             f"Acceptance snapshot:\n{snap_dump}\n\n"
+            f"{extraction_section}"
             "For each required_paths entry, confirm it was actually changed (use git diff/log). "
             "For each checklist item, determine confirmed/rejected/indeterminate against the merged "
             "code with a concrete file:line or git-diff evidence ref. Be CONSERVATIVE: if you cannot "
@@ -7676,17 +7830,12 @@ class AutonomousOrchestrator:
             "```json\n"
             '{"verdicts": [{"item": "...", "verdict": "confirmed|rejected|indeterminate", '
             '"evidence": [{"ref": "file:line|git-diff", "note": "..."}], "rationale": "..."}], '
-            '"snapshot": null}\n'
+            f'"snapshot": {snapshot_token}}}\n'
             "```\n"
-            '(set "snapshot" to the completed {required_paths, checklist, non_scope, '
-            "closure_constraints} only if you had to extract them yourself because the input "
-            "snapshot was empty; otherwise null)"
+            f"{snapshot_note}"
         )
 
     def _parse_verifier_output(self, result) -> dict:
-        import json as _json
-        import re as _re
-
         text = self._artifact_text(result) if result is not None else ""
         if not text:
             return {
@@ -7694,14 +7843,14 @@ class AutonomousOrchestrator:
                 "snapshot": None,
                 "infra_error": "verification agent returned empty output",
             }
-        # Grab the last fenced ```json ... ``` block (the agent may preface reasoning).
-        blocks = _re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, _re.DOTALL)
-        candidate = blocks[-1] if blocks else text
-        try:
-            parsed = _json.loads(candidate)
-        except Exception:
+        # Tolerant extraction: fenced blocks, prose-wrapped, trailing commas,
+        # braces in strings (glm family deviates from "ONLY a fenced JSON block").
+        parsed = _extract_verifier_json(text)
+        if parsed is None:
             logger.warning(
-                "acceptance verifier output was not valid JSON; treating as indeterminate"
+                "acceptance verifier output was not valid JSON; treating as "
+                "indeterminate. raw_output=%s",
+                text[:1500],
             )
             return {
                 "verdicts": [],

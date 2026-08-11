@@ -576,6 +576,38 @@ class APIKeyProxyService:
         finally:
             conn.close()
 
+    def has_valid_proxy_token(self, session_id: str) -> bool:
+        """Return True if the session has at least one non-revoked, non-expired proxy token.
+
+        Used by the remote session restore path (Issue #2405): when a session is
+        already running on the agent, we only skip the restart if its process
+        still holds a valid token. If every issued token was revoked or has
+        expired, the running CLI would 401 every LLM call, so the restore must
+        restart the process with a freshly issued token.
+        """
+        if not session_id:
+            return False
+        now = datetime.now().isoformat()
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT 1 FROM proxy_token_jtis
+                WHERE session_id = {_param()}
+                  AND revoked_at IS NULL
+                  AND expires_at > {_param()}
+                LIMIT 1
+            """,
+                (session_id, now),
+            )
+            return cursor.fetchone() is not None
+        except Exception as e:
+            logger.warning("has_valid_proxy_token failed for %s: %s", session_id[:8], e)
+            return False
+        finally:
+            conn.close()
+
     def _encrypt_key(self, api_key: str) -> str:
         """Encrypt an API key using Fernet (requires cryptography package)."""
         try:
