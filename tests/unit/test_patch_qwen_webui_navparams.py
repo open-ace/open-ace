@@ -59,20 +59,33 @@ let E=(0,M.useCallback)(e=>{localStorage.setItem(Do,e);let t=e.startsWith(`/`)?e
 
     def test_session_nav_pattern_unique(self, mock_bundle_content):
         """Session nav pattern should be unique (count == 1)."""
-        assert mock_bundle_content.count("let l=e=>{let n=new URLSearchParams;n.set(`sessionId`,e),t({search:n.toString()})}") == 1
+        assert (
+            mock_bundle_content.count(
+                "let l=e=>{let n=new URLSearchParams;n.set(`sessionId`,e),t({search:n.toString()})}"
+            )
+            == 1
+        )
 
     def test_history_nav_pattern_count(self, mock_bundle_content):
         """History nav pattern should appear twice (two buttons)."""
-        assert mock_bundle_content.count("let e=new URLSearchParams;e.set(`view`,`history`),t({search:e.toString()}") == 2
+        assert (
+            mock_bundle_content.count(
+                "let e=new URLSearchParams;e.set(`view`,`history`),t({search:e.toString()}"
+            )
+            == 2
+        )
 
     def test_project_nav_pattern_unique(self, mock_bundle_content):
         """Project selector nav pattern should be unique."""
-        assert mock_bundle_content.count("let E=(0,M.useCallback)(e=>{localStorage.setItem(Do,e);let t=e.startsWith(`/`)?e:`/${e}`;S(`/projects${t}`)},[S])") == 1
+        assert (
+            mock_bundle_content.count(
+                "let E=(0,M.useCallback)(e=>{localStorage.setItem(Do,e);let t=e.startsWith(`/`)?e:`/${e}`;S(`/projects${t}`)},[S])"
+            )
+            == 1
+        )
 
     def test_patch_applies_session_nav(self, mock_bundle_content):
         """Patch should correctly apply sessionId nav fix."""
-        patch_module = load_patch_module()
-
         old = "let l=e=>{let n=new URLSearchParams;n.set(`sessionId`,e),t({search:n.toString()})}"
         new = "let l=e=>{let n=new URLSearchParams(window.location.search);n.set(`sessionId`,e),n.delete(`view`),t({search:n.toString()})}"
 
@@ -178,7 +191,9 @@ class TestErrorHandling:
 let l=e=>{let n=new URLSearchParams;n.set(`sessionId`,e),t({search:n.toString()})}
 let l=e=>{let n=new URLSearchParams;n.set(`sessionId`,e),t({search:n.toString()})}
 """
-        pattern = "let l=e=>{let n=new URLSearchParams;n.set(`sessionId`,e),t({search:n.toString()})}"
+        pattern = (
+            "let l=e=>{let n=new URLSearchParams;n.set(`sessionId`,e),t({search:n.toString()})}"
+        )
         assert content.count(pattern) == 2  # Should be 1, not 2
 
     def test_missing_file_handling(self):
