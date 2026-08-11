@@ -160,23 +160,7 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
   }, [showNextRefreshTime, autoRefresh, nextRefreshTime]);
 
   // Build tooltip content
-  const buildTooltip = (forCompactMode = false) => {
-    // Enhanced tooltip for compact mode without dropdown
-    if (forCompactMode && !hasDropdownContent && showLastRefreshTime && lastRefreshTime) {
-      const timeStr = formatRefreshTime(lastRefreshTime, language);
-      switch (language) {
-        case 'zh':
-          return `页面数据上次刷新于 ${timeStr}\n点击右侧按钮可刷新数据`;
-        case 'ja':
-          return `ページデータは${timeStr}に最終更新されました\n右側のボタンをクリックしてデータを更新`;
-        case 'ko':
-          return `페이지 데이터가 ${timeStr}에 마지막으로 새로고침되었습니다\n오른쪽 버튼을 클릭하여 데이터를 새로고침`;
-        default: // en
-          return `Page data was last refreshed ${timeStr}\nClick the button on the right to refresh`;
-      }
-    }
-
-    // Standard tooltip for other cases
+  const buildTooltip = () => {
     const parts: string[] = [];
 
     if (showLastRefreshTime && lastRefreshTime) {
@@ -188,6 +172,28 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
     }
 
     return parts.join('\n');
+  };
+
+  /**
+   * Build enhanced tooltip content for compact mode without dropdown.
+   * Returns React.ReactNode for multi-line layout with guidance text.
+   * Issue #2397: Improve refresh button and time display UX
+   */
+  const buildTooltipContent = (): React.ReactNode => {
+    if (!showLastRefreshTime || !lastRefreshTime) return null;
+
+    const timeStr = formatRefreshTime(lastRefreshTime, language);
+
+    return (
+      <div style={{ maxWidth: '260px' }}>
+        <div>
+          {language === 'zh'
+            ? `页面数据上次刷新于 ${timeStr}`
+            : `Page data was last refreshed ${timeStr}`}
+        </div>
+        <div className="mt-1 small text-muted">{t('lastRefreshTooltipHint', language)}</div>
+      </div>
+    );
   };
 
   // Position styles
@@ -281,11 +287,11 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
           </div>
         ) : (
           /* Compact mode without dropdown: show last refresh time as text when available.
-             Enhanced with custom Tooltip component for better UX. */
+             Issue #2397: Enhanced with Tooltip component for better UX and guidance text. */
           showLastRefreshTime &&
           lastRefreshTime && (
-            <Tooltip content={buildTooltip(true)} placement="bottom" delay={200}>
-              <small className="text-muted">
+            <Tooltip content={buildTooltipContent()} placement="bottom">
+              <small className="text-muted" tabIndex={0}>
                 {formatRefreshTime(lastRefreshTime, language)}
               </small>
             </Tooltip>
