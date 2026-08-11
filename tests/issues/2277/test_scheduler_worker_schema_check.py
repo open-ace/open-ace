@@ -12,9 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# scheduler_worker.py has a module-level guard that sys.exit(1)s unless
-# SCHEDULER_MODE=="scheduler". Set it before importing scheduler_worker.
-os.environ["SCHEDULER_MODE"] = "scheduler"
+# Note: SCHEDULER_MODE and gevent patching are handled by conftest.py
 
 
 def _run_check() -> None:
