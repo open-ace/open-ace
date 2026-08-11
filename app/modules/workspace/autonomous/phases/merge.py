@@ -116,11 +116,13 @@ def _required_contexts(gh, pr_number: int, base_branch: str) -> set[str] | None:
 def _blocking_pending(gh, checks: list[dict], pr_number: int, base_branch: str) -> list[dict]:
     """Pending checks that actually gate the merge (issue #2428).
 
-    The required/optional split applies to *pending* exactly as it does to
-    *failing*: a slow non-required job (``Critical PR E2E``, ``Full E2E``) must
-    not defer the merge every scheduler cycle. ``ReadinessService._partition_checks``
-    documents the same rule. Degrades to "all pending block" when the required
-    set cannot be observed, matching :func:`_blocking_failures`.
+    The required/optional split still applies to *pending*: a slow non-required
+    job (``Critical PR E2E``, ``Full E2E``) must not defer the merge every
+    scheduler cycle. (The failure-targeting path dropped its required-filter in
+    #27 — aggregate gates made it wrong — but pending is different: a
+    non-required pending check never blocks the merge, so waiting on one is pure
+    latency.) ``ReadinessService._partition_checks`` documents the same rule.
+    Degrades to "all pending block" when the required set cannot be observed.
     """
     pending = [c for c in checks if c.get("bucket") == "pending"]
     if not pending:
@@ -140,59 +142,29 @@ def _blocking_pending(gh, checks: list[dict], pr_number: int, base_branch: str) 
     return blocking
 
 
-def _blocking_failures(gh, checks: list[dict], pr_number: int, base_branch: str) -> list[dict]:
-    """Return the failing checks that actually block the merge (issue #2428).
+def _ci_repair_targets(checks: list[dict]) -> list[dict]:
+    """Failing checks to hand to CI-repair (#27; supersedes the #2428 filter).
 
-    CI repair rounds are a bounded budget (``MAX_CI_REPAIR_ATTEMPTS``). Spending
-    one on a check that does not gate the merge is pure waste, and it is how
-    workflows exhausted the budget and died: wf227 burned all five rounds and
-    reported ``test (3.13)`` — a check ``main`` does not require. On this
-    repository only ``lint``, ``test (3.10/3.11/3.12)`` and ``build`` are
-    required; ``test (3.13/3.14)``, ``postgres-test``, ``schema-sync``,
-    ``performance-test`` and the E2E jobs are not.
+    A branch's required check may be an AGGREGATE GATE — one status-check
+    context that summarizes many underlying jobs via ``needs:`` (whatever the
+    repo names it; on open-ace it is ``PR Gate`` since #2455). Such a gate has
+    no actionable failure of its own — its log only reports which underlying
+    jobs failed — and the real failures sit OUTSIDE the required set. The
+    ``#2428`` filter (``failing ∩ required``) therefore returned only the
+    (unrepairable) gate, or nothing on a propagation lag, and workflows stalled
+    at the merge-policy pause instead of repairing the real failures.
 
-    ``ReadinessService.collect_actionable_ci_failures`` already implements this
-    split — with the #1989/#2034 lesson written into its docstring — but nothing
-    ever called it, so the live merge path repaired every failure regardless.
-
-    Falls back to "everything that failed" when the required set cannot be
-    determined. Deferring instead (the ReadinessService ``indeterminate``
-    semantic) would stall the workflow indefinitely, which is worse than the
-    status quo; repairing too much is merely wasteful.
+    Target every failing check instead. The #2428 concern — spending the
+    bounded repair budget on checks that do not gate the merge — is held by the
+    separate ``mergeable_state == "unstable"`` short-circuit earlier in
+    :func:`handle`: a PR that is mergeable despite failing non-required checks
+    is merged directly without a repair round. So this function is only reached
+    when a required check is actually failing, meaning every failing check here
+    is a real merge-gating failure (the gate's underlying jobs). No check name
+    is hardcoded and no gate detection is needed: the underlying jobs always
+    appear in the failing set alongside the gate.
     """
-    failed = [c for c in checks if c.get("bucket") == "fail"]
-    if not failed:
-        return []
-    required = _required_contexts(gh, pr_number, base_branch)
-    if required is None:
-        logger.warning(
-            "PR #%s: required checks undeterminable; treating all %d failing check(s) "
-            "as blocking",
-            pr_number,
-            len(failed),
-        )
-        return failed
-    if not required:
-        # A genuinely unprotected branch has no merge gate to satisfy; keep the
-        # previous behaviour rather than concluding nothing needs repair.
-        logger.warning(
-            "PR #%s: branch '%s' reports no required checks; "
-            "treating all %d failing check(s) as blocking",
-            pr_number,
-            base_branch,
-            len(failed),
-        )
-        return failed
-    blocking = [c for c in failed if (c.get("name") or "") in required]
-    skipped = [c for c in failed if (c.get("name") or "") not in required]
-    if skipped:
-        logger.info(
-            "PR #%s: ignoring %d non-blocking CI failure(s) for repair purposes: %s",
-            pr_number,
-            len(skipped),
-            ", ".join(c.get("name") or "?" for c in skipped),
-        )
-    return blocking
+    return [c for c in checks if c.get("bucket") == "fail"]
 
 
 def handle(ctx, deps) -> PhaseResult:
@@ -280,7 +252,7 @@ def handle(ctx, deps) -> PhaseResult:
                 raise GitHubOpsError(
                     f"Unable to query CI checks before merging PR #{pr_number}: {e}"
                 ) from e
-            failed = _blocking_failures(gh, checks, pr_number, base_branch)
+            failed = _ci_repair_targets(checks)
             if failed:
                 deps.host.start_ci_repair_round(wf, pr_number, failed)
                 return PhaseResult.retry()
@@ -327,7 +299,7 @@ def handle(ctx, deps) -> PhaseResult:
                     checks_err,
                 )
                 refreshed_checks = checks
-            failed = _blocking_failures(gh, refreshed_checks, pr_number, base_branch)
+            failed = _ci_repair_targets(refreshed_checks)
             if failed:
                 deps.host.start_ci_repair_round(wf, pr_number, failed)
                 return PhaseResult.retry()
