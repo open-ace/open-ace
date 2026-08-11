@@ -112,7 +112,9 @@ class TestProductionCapablePathDetection:
         # Mock is_test_context to return False so we can test the expiration logic
         monkeypatch.setattr("app.utils.security_mode.is_test_context", lambda: False)
 
-        with caplog.at_level(logging.ERROR):
+        # Issue #2331: Set log level on the specific logger to ensure capture
+        # caplog.at_level() may not capture from module loggers in CI environments
+        with caplog.at_level(logging.ERROR, "app.utils.security_mode"):
             is_production_capable_path()
 
         # Expired flag should be ignored - verify expiration error is logged
@@ -134,7 +136,8 @@ class TestProductionCapablePathDetection:
         # Mock is_test_context to return False so we can test the flag logic
         monkeypatch.setattr("app.utils.security_mode.is_test_context", lambda: False)
 
-        with caplog.at_level(logging.ERROR):
+        # Issue #2331: Set log level on the specific logger to ensure capture
+        with caplog.at_level(logging.ERROR, "app.utils.security_mode"):
             is_production_capable_path()
 
         # Flag should be ignored due to missing timestamp
