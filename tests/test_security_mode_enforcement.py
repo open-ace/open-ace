@@ -121,10 +121,11 @@ class TestProductionCapablePathDetection:
         reset_security_mode_cache()
 
         # Set log level before calling the function
-        caplog.set_level(logging.ERROR, "app.utils.security_mode")
-
-        # Call the function
-        is_production_capable_path()
+        # Use caplog.at_level as context manager to ensure logs are captured
+        # even if logger was created before caplog.set_level was called
+        with caplog.at_level(logging.ERROR, "app.utils.security_mode"):
+            # Call the function
+            is_production_capable_path()
 
         # Expired flag should be ignored - verify expiration error is logged
         assert any(
@@ -151,10 +152,11 @@ class TestProductionCapablePathDetection:
         reset_security_mode_cache()
 
         # Set log level before calling the function
-        caplog.set_level(logging.ERROR, "app.utils.security_mode")
-
-        # Call the function
-        is_production_capable_path()
+        # Use caplog.at_level as context manager to ensure logs are captured
+        # even if logger was created before caplog.set_level was called
+        with caplog.at_level(logging.ERROR, "app.utils.security_mode"):
+            # Call the function
+            is_production_capable_path()
 
         # Flag should be ignored due to missing timestamp
         # Should log an error about missing timestamp
