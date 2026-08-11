@@ -591,7 +591,7 @@ class RemoteSessionManager:
         cli_tool: str,
         user_id: int,
         model: str | None = None,
-        created_at: str | None = None,
+        created_at: datetime | str | None = None,
         tenant_id: int | None = None,
     ) -> bool:
         """Restart a terminated remote CLI session with ``--resume``.
