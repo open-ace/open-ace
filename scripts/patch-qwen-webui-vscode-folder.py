@@ -29,16 +29,25 @@ import sys
 BUNDLE_GLOB = "/usr/lib/node_modules/qwen-code-webui/dist/static/assets/index-*.js"
 INDEX_HTML = "/usr/lib/node_modules/qwen-code-webui/dist/static/index.html"
 
-# Cache-bust version for the bundle URL
+# Cache-bust version for the bundle URL (increment when patch changes)
 CACHE_BUST = "v=vscodefolder-20260810"
 
-# Pattern: folder=${encodeURIComponent(n)} where n is the raw project path
-# We need to wrap n with a normalization function that adds "/" prefix
-# In the minified bundle, look for the VS Code iframe URL construction
+# Pattern 1: folder=${encodeURIComponent(n)} where n is the raw project path
+# (n is the variable name in the minified bundle for the project path)
 OLD_FOLDER_ENCODE = "folder=${encodeURIComponent(n)}"
+
+# Normalized folder parameter for VS Code remote workspaces:
+# 1. "/" prefix: Windows paths (C:/workspace) become /C:/workspace, triggering vscodeRemote branch
+# 2. .replace(/\\/g,"/"): Convert backslashes to forward slashes (Windows compatibility)
+# 3. .replace(/^\/+/,""): Dedup leading slashes (/home/user stays /home/user, not //home/user)
+#
+# Examples:
+#   C:/workspace        -> /C:/workspace
+#   C:\workspace        -> /C:/workspace
+#   /home/user/workspace -> /home/user/workspace (unchanged after dedup)
 NEW_FOLDER_ENCODE = 'folder=${encodeURIComponent("/"+n.replace(/\\\\/g,"/").replace(/^\\/+/,""))}'
 
-# Alternative pattern seen in some versions: folder parameter in template literal
+# Pattern 2: Alternative pattern where e is used instead of n in minified bundle
 OLD_FOLDER_TEMPLATE = "folder=${encodeURIComponent(e)"
 NEW_FOLDER_TEMPLATE = 'folder=${encodeURIComponent("/"+e.replace(/\\\\/g,"/").replace(/^\\/+/,""))}'
 
