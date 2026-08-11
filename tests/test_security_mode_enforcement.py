@@ -104,6 +104,9 @@ class TestProductionCapablePathDetection:
         """Test expired emergency rollback flag is ignored."""
         import logging
 
+        # Set caplog level FIRST to ensure log capture is active
+        caplog.set_level(logging.ERROR, "app.utils.security_mode")
+
         # Import module before any monkeypatching
         from app.utils import security_mode
 
@@ -120,9 +123,6 @@ class TestProductionCapablePathDetection:
 
         reset_security_mode_cache()
 
-        # Use caplog.set_level (not context manager) for more reliable capture
-        caplog.set_level(logging.ERROR, "app.utils.security_mode")
-
         # Call the function
         is_production_capable_path()
 
@@ -134,6 +134,9 @@ class TestProductionCapablePathDetection:
     def test_emergency_rollback_missing_timestamp(self, monkeypatch, caplog):
         """Test emergency rollback flag without timestamp is ignored."""
         import logging
+
+        # Set caplog level FIRST to ensure log capture is active
+        caplog.set_level(logging.ERROR, "app.utils.security_mode")
 
         # Import module before any monkeypatching
         from app.utils import security_mode
@@ -149,9 +152,6 @@ class TestProductionCapablePathDetection:
         monkeypatch.setattr(security_mode, "is_test_context", lambda: False)
 
         reset_security_mode_cache()
-
-        # Use caplog.set_level (not context manager) for more reliable capture
-        caplog.set_level(logging.ERROR, "app.utils.security_mode")
 
         # Call the function
         is_production_capable_path()
