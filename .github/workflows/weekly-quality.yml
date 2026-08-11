@@ -1,0 +1,135 @@
+name: Weekly Quality
+
+on:
+  schedule:
+    # Saturday at 03:18 Singapore time.
+    - cron: '18 3 * * 6'
+      timezone: 'Asia/Singapore'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-quality-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cross-browser-e2e:
+    name: Chromium, Firefox and WebKit E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend and browsers
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium firefox webkit
+          npm run build
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+      - name: Install backend
+        run: pip install -r requirements-ci.lock
+      - name: Initialize isolated test database
+        env:
+          HOME: ${{ runner.temp }}/openace-home
+        run: |
+          mkdir -p "$HOME/.open-ace"
+          sqlite3 "$HOME/.open-ace/ace.db" < schema/schema-sqlite.sql
+          python scripts/init_db.py
+      - name: Run cross-browser E2E
+        working-directory: frontend
+        env:
+          CI: true
+          HOME: ${{ runner.temp }}/openace-home
+        run: npm run test:e2e
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: weekly-playwright-report
+          path: frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  performance:
+    name: Performance (advisory)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+      - name: Install test dependencies
+        run: |
+          pip install -r requirements-ci.lock
+      - name: Run performance suite
+        run: python scripts/ci.py run performance
+
+  package-install:
+    name: Package install Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.14']
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+      - name: Build and install wheel
+        run: |
+          pip install -c requirements-ci.lock build
+          python scripts/ci.py run package
+          wheel=$(find dist -name '*.whl' -print -quit)
+          test -n "$wheel"
+          pip install "$wheel"
+          openace --help
+
+  weekly-summary:
+    name: Weekly Quality Summary
+    if: always()
+    needs: [cross-browser-e2e, performance, package-install]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish weekly result
+        env:
+          BROWSER_RESULT: ${{ needs.cross-browser-e2e.result }}
+          PERFORMANCE_RESULT: ${{ needs.performance.result }}
+          PACKAGE_RESULT: ${{ needs.package-install.result }}
+        run: |
+          {
+            echo "## Weekly quality summary"
+            echo "| Lane | Result | Required here |"
+            echo "|---|---|---|"
+            echo "| Cross-browser E2E | $BROWSER_RESULT | yes |"
+            echo "| Performance | $PERFORMANCE_RESULT | advisory |"
+            echo "| Package install 3.10/3.11/3.14 | $PACKAGE_RESULT | yes |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$BROWSER_RESULT" != success ] || [ "$PACKAGE_RESULT" != success ]; then
+            echo "::error::A required weekly quality lane failed."
+            exit 1
+          fi

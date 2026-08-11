@@ -183,10 +183,22 @@ describe('i18n', () => {
       'logout',
     ];
 
+    const acceptanceVerificationKeys = [
+      'autoStatusVerificationPending',
+      'autoPhaseAcceptanceVerification',
+      'autoActiveHintVerificationPending',
+    ];
+
     it.each(languages)('should have all essential keys in %s', (lang) => {
       essentialKeys.forEach((key) => {
         const translation = t(key, lang);
         expect(translation).not.toBe(key);
+      });
+    });
+
+    it.each(languages)('should describe acceptance verification in %s', (lang) => {
+      acceptanceVerificationKeys.forEach((key) => {
+        expect(t(key, lang)).not.toBe(key);
       });
     });
 

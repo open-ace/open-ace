@@ -68,9 +68,9 @@ def verify_run_extended_tests() -> bool:
 
 def verify_test_logout() -> bool:
     """Verify test_logout has been fixed."""
-    test_path = Path("tests/e2e/regression/test_login.py")
+    test_path = Path("tests/e2e/browser/test_login.py")
     if not test_path.exists():
-        print("❌ tests/e2e/regression/test_login.py not found")
+        print("❌ tests/e2e/browser/test_login.py not found")
         return False
 
     content = test_path.read_text()

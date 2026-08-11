@@ -91,10 +91,10 @@ jobs:
           set +e
           echo "<details><summary>📦 依赖漏洞（pip-audit）</summary>" >> health_report.md
           echo "" >> health_report.md
-          pip-audit -r requirements.txt > /tmp/audit.txt 2>&1
+          pip-audit -r requirements-ci.lock > /tmp/audit.txt 2>&1
           code=$?
           if [ $code -eq 0 ]; then
-            echo "✅ requirements.txt 已知依赖漏洞均为 0" >> health_report.md
+            echo "✅ requirements-ci.lock 已知依赖漏洞均为 0" >> health_report.md
           else
             echo "⚠️ 发现依赖漏洞或扫描异常（详见下方）：" >> health_report.md
             echo "" >> health_report.md

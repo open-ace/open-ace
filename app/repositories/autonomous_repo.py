@@ -95,6 +95,7 @@ class AutonomousWorkflowRepository:
         "ci_repair_no_change_retries",
         "last_ci_failure_signature",
         "last_ci_failure_head_sha",
+        "merge_fail_dev_rounds",
         # Worktree transition journal for SIGKILL-resilient recovery (#2050).
         "worktree_transition_state",
         "transition_original_path",
@@ -183,6 +184,9 @@ class AutonomousWorkflowRepository:
             "reporting",
             "waiting",
             "merging",
+            # #2431: a workflow parked at acceptance_verification can still own
+            # an agent PID, so the startup orphan sweep must consider it.
+            "verification_pending",
         )
         placeholders = ", ".join(["?"] * len(active_statuses))
         conn = self.db.get_connection()
@@ -316,8 +320,8 @@ class AutonomousWorkflowRepository:
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name, content_language, system_account,
                      ci_repair_context, ci_repair_attempts, ci_diagnostics_attempts, ci_repair_transient_retries, ci_repair_no_change_retries, last_ci_failure_signature,
-                     last_ci_failure_head_sha, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     last_ci_failure_head_sha, merge_fail_dev_rounds, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING *
                 """,
                 (
@@ -364,6 +368,7 @@ class AutonomousWorkflowRepository:
                     data.get("ci_repair_no_change_retries", 0),
                     data.get("last_ci_failure_signature", ""),
                     data.get("last_ci_failure_head_sha", ""),
+                    data.get("merge_fail_dev_rounds", 0),
                     now,
                     now,
                 ),
@@ -385,8 +390,8 @@ class AutonomousWorkflowRepository:
                      parent_workflow_id, fork_milestone_id, user_feedback,
                      original_branch_name, content_language, system_account,
                      ci_repair_context, ci_repair_attempts, ci_diagnostics_attempts, ci_repair_transient_retries, ci_repair_no_change_retries, last_ci_failure_signature,
-                     last_ci_failure_head_sha, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     last_ci_failure_head_sha, merge_fail_dev_rounds, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
@@ -432,6 +437,7 @@ class AutonomousWorkflowRepository:
                     data.get("ci_repair_no_change_retries", 0),
                     data.get("last_ci_failure_signature", ""),
                     data.get("last_ci_failure_head_sha", ""),
+                    data.get("merge_fail_dev_rounds", 0),
                     now,
                     now,
                 ),
@@ -550,12 +556,18 @@ class AutonomousWorkflowRepository:
         return where, params
 
     def get_active_workflows(self) -> list:
-        """Get all workflows that need processing."""
+        """Get all workflows that need processing.
+
+        ``verification_pending`` must remain paired with the
+        ``acceptance_verification`` phase/status mapping so delivered rows can
+        run the default-off drain path instead of becoming dead ends.
+        """
         return self.db.fetch_all(
             """
             SELECT * FROM autonomous_workflows
             WHERE status IN ('pending', 'preparing', 'planning', 'developing',
-                             'pr_review', 'reporting', 'waiting', 'merging')
+                             'pr_review', 'reporting', 'waiting', 'merging',
+                             'verification_pending')
             ORDER BY created_at ASC
             """
         )
@@ -563,15 +575,22 @@ class AutonomousWorkflowRepository:
     def get_workflows_pending_cleanup(self) -> list:
         """Get delivered workflows whose Git cleanup is still pending (#2043).
 
-        Returns ``status='completed'`` rows with ``cleanup_status='pending'`` so
-        the startup sweep and scheduler retry pass can re-attempt worktree/branch
-        removal. Ordered by ``cleanup_updated_at`` so the oldest failures retry
-        first. Legacy rows (NULL cleanup_status) are excluded.
+        Returns delivered rows with ``cleanup_status='pending'`` so the startup
+        sweep and scheduler retry pass can re-attempt worktree/branch removal.
+        Ordered by ``cleanup_updated_at`` so the oldest failures retry first.
+        Legacy rows (NULL cleanup_status) are excluded.
+
+        ``verification_pending`` counts as delivered (#2431): the PR is merged
+        by the time the workflow reaches acceptance_verification, so its cleanup
+        is just as due as a completed workflow's. Excluding it left the sweep
+        blind for the entire parked window. The caller skips workflows the
+        scheduler is currently advancing — see ``_is_in_flight``.
         """
         return self.db.fetch_all(
             """
             SELECT * FROM autonomous_workflows
-            WHERE status = 'completed' AND cleanup_status = 'pending'
+            WHERE status IN ('completed', 'verification_pending')
+              AND cleanup_status = 'pending'
             ORDER BY cleanup_updated_at ASC NULLS LAST, created_at ASC
             """
         )
@@ -587,7 +606,8 @@ class AutonomousWorkflowRepository:
             SELECT COUNT(*) as count FROM autonomous_workflows
             WHERE user_id = ? AND status IN ('pending', 'preparing', 'planning',
                                               'developing', 'pr_review', 'reporting',
-                                              'waiting', 'merging')
+                                              'waiting', 'merging',
+                                              'verification_pending')
             """,
             (user_id,),
         )
@@ -663,7 +683,11 @@ class AutonomousWorkflowRepository:
             conn.close()
 
     def update_workflow(
-        self, workflow_id: str, updates: dict, expected_values: dict | None = None
+        self,
+        workflow_id: str,
+        updates: dict,
+        expected_values: dict | None = None,
+        required_lock_owner: str | None = None,
     ) -> dict | None:
         """Update a workflow's fields. Returns updated record.
 
@@ -675,6 +699,8 @@ class AutonomousWorkflowRepository:
             workflow_id: Workflow UUID
             updates: Dict of fields to update
             expected_values: Optional dict of {field: old_value} for optimistic lock
+            required_lock_owner: Optional distributed-lock owner that must still
+                match for the update to commit (scheduler fencing).
 
         Returns:
             Updated workflow dict if successful, None if optimistic lock failed
@@ -707,6 +733,9 @@ class AutonomousWorkflowRepository:
 
         # ── Optimistic lock support (Phase 1, P0) ──────────────────────
         where_clauses = ["workflow_id = ?"]
+        if required_lock_owner:
+            where_clauses.append("locked_by = ?")
+            params.append(required_lock_owner)
         if expected_values:
             # Filter expected_values to retry fields only (保守策略)
             _RETRY_FIELDS = {"test_retries", "skip_retries", "dev_retries_on_test_fail"}
@@ -725,12 +754,13 @@ class AutonomousWorkflowRepository:
             affected_rows = cursor.rowcount
             conn.commit()
 
-            if expected_values and affected_rows == 0:
-                # Optimistic lock failed - concurrent modification detected
+            if (expected_values or required_lock_owner) and affected_rows == 0:
+                # Optimistic/fencing condition failed - concurrent modification detected
                 logger.warning(
-                    "Optimistic lock failed for workflow %s: expected_values=%s",
+                    "Conditional workflow update failed for %s: expected=%s lock_owner=%s",
                     workflow_id[:8],
                     expected_values,
+                    required_lock_owner,
                 )
                 return None
 
@@ -1264,6 +1294,8 @@ class AutonomousWorkflowRepository:
 
         Returns True if the lock was acquired, False if already locked.
         Stale locks (older than LOCK_TIMEOUT_SECONDS) are broken automatically.
+        The scheduler renews live leases with :meth:`refresh_lock`, because
+        agent calls may legitimately run longer than this recovery timeout.
         """
         import app.repositories.database as _db_mod
 
@@ -1283,6 +1315,111 @@ class AutonomousWorkflowRepository:
                     SET locked_at = ?, locked_by = ?
                     WHERE workflow_id = ?
                       AND (locked_at IS NULL OR locked_at < ?)
+                    """
+                ),
+                (now, owner, workflow_id, cutoff),
+            )
+            rowcount = cursor.rowcount
+            conn.commit()
+            return rowcount > 0
+        finally:
+            conn.close()
+
+    def refresh_lock(self, workflow_id: str, owner: str) -> bool:
+        """Renew a workflow lease only while ``owner`` still holds it.
+
+        Long agent phases can exceed :attr:`LOCK_TIMEOUT_SECONDS`. The
+        scheduler heartbeats through this compare-and-set update so another
+        process never treats a healthy advance as stale. ``False`` means
+        ownership was lost and the caller must stop the old advance.
+        """
+        import app.repositories.database as _db_mod
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                _db_mod.adapt_sql(
+                    """
+                    UPDATE autonomous_workflows
+                    SET locked_at = ?
+                    WHERE workflow_id = ? AND locked_by = ?
+                    """
+                ),
+                (now, workflow_id, owner),
+            )
+            refreshed = cursor.rowcount > 0
+            conn.commit()
+            return refreshed
+        finally:
+            conn.close()
+
+    def clear_agent_pid_if_lock_owner(self, workflow_id: str, owner: str) -> bool:
+        """Clear stale agent identity only while ``owner`` still holds the lease.
+
+        This is the scheduler-finally safety net. A superseded worker must not
+        clear the PID just registered by the replacement owner.
+        """
+        import app.repositories.database as _db_mod
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                _db_mod.adapt_sql(
+                    """
+                    UPDATE autonomous_workflows
+                    SET agent_pid = NULL, agent_session_id = '', updated_at = ?
+                    WHERE workflow_id = ? AND locked_by = ? AND agent_pid IS NOT NULL
+                    """
+                ),
+                (now, workflow_id, owner),
+            )
+            cleared = cursor.rowcount > 0
+            conn.commit()
+            return cleared
+        finally:
+            conn.close()
+
+    def acquire_cleanup_lock(self, workflow_id: str, owner: str) -> bool:
+        """Atomically lock a workflow for destructive Git cleanup (#2431).
+
+        Unlike :meth:`acquire_lock`, a stale timestamp is not enough to break a
+        lock on ``verification_pending`` at all, even after the generic
+        30-minute timeout. Agent tasks may legitimately run for 60 minutes and
+        clear ``agent_pid`` before the same advance finishes its mechanical
+        gates, so PID alone is not a sufficient lease. A stale lock is only
+        recoverable here after the workflow is terminal ``completed`` and has no
+        agent PID; active verification rows are left for the scheduler's normal
+        advance/recovery path to release.
+        """
+        import app.repositories.database as _db_mod
+
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+        cutoff = (now_dt - timedelta(seconds=self.LOCK_TIMEOUT_SECONDS)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                _db_mod.adapt_sql(
+                    """
+                    UPDATE autonomous_workflows
+                    SET locked_at = ?, locked_by = ?
+                    WHERE workflow_id = ?
+                      AND (
+                        locked_at IS NULL
+                        OR (
+                          locked_at < ?
+                          AND status = 'completed'
+                          AND (agent_pid IS NULL OR agent_pid <= 0)
+                        )
+                      )
                     """
                 ),
                 (now, owner, workflow_id, cutoff),

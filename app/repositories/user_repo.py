@@ -56,8 +56,10 @@ class UserRepository:
         Issue #2179: 消除静默回退到 tenant_id=1，建立 Fail-Closed 机制
         """
         # Fail-Closed: 非平台管理员用户必须指定 tenant_id
-        # 平台管理员（role='platform_admin' 或 'admin'）可以没有 tenant_id
-        if tenant_id is None and role not in ("platform_admin", "admin"):
+        # Issue #2332: Use centralized permission check
+        from app.auth.permissions import is_platform_admin_role
+
+        if tenant_id is None and not is_platform_admin_role(role):
             raise ValueError(
                 f"创建用户必须指定 tenant_id。"
                 f"用户名: {username}, 角色: {role}。"

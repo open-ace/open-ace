@@ -109,7 +109,7 @@ def _run(orch, wf, *, verdict, text, tool_pass, tool_calls=None):
     orch._find_or_create_milestone = MagicMock(return_value={"milestone_id": "ms-1"})
     orch._run_agent = MagicMock(return_value=result)
     orch._runtime_environment_gate = MagicMock(return_value="")
-    orch._build_test_execution_context = MagicMock(return_value=None)
+    orch._build_test_execution_context = MagicMock(return_value=("", []))
     orch._project_runtime_contract = MagicMock(return_value="")
     orch._artifact_visible_text = MagicMock(return_value=text)
     orch._artifact_text = MagicMock(return_value=text)

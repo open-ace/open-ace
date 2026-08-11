@@ -148,10 +148,19 @@ def test_diagnostics_pending_milestone_closes_when_all_logs_arrive():
     )
 
 
-def test_meaningful_fingerprint_still_gives_up_when_unchanged():
+def test_meaningful_fingerprint_still_fires_guard_when_unchanged():
     """Sanity: when excerpt IS available and signature truly unchanged, the
-    guard still fires (regression guard for the layer-2 change)."""
-    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+    guard still FIRES (regression guard for the layer-2 #1855 change).
+
+    #2443 PR-C changed what "fires" means: a meaningful unchanged signature is a
+    Tier1 exhaustion, so under the dev-round cap it escalates to a fresh
+    development round (``developing``) instead of terminal-``failed``; only at
+    the cap does it fall through to failed. Either way the guard fired: no
+    repair attempt is launched and the workflow leaves the merge-repair loop."""
+    from app.modules.workspace.autonomous.orchestrator import (
+        MAX_MERGE_FAIL_DEV_ROUNDS,
+        AutonomousOrchestrator,
+    )
 
     excerpt = "mypy....Failed\napp/baz.py:5 error: no-any-return\n"
     import hashlib
@@ -164,6 +173,7 @@ def test_meaningful_fingerprint_still_gives_up_when_unchanged():
     wf = _make_workflow(
         last_ci_failure_signature=expected_fingerprint,
         last_ci_failure_head_sha="sha-old",
+        merge_fail_dev_rounds=0,  # under cap → Tier1 escalation
     )
     orch, mock_repo = _make_orchestrator(wf)
     gh = MagicMock()
@@ -174,10 +184,26 @@ def test_meaningful_fingerprint_still_gives_up_when_unchanged():
 
     orch._start_ci_repair_round(wf, 1873, _FAILED_CHECKS)
 
-    # Guard fires → no repair, workflow failed.
+    # Guard fired: no repair attempt, and the workflow escalated to development.
     orch._run_merge_ci_repair.assert_not_called()
     last_updates = [c.args[1] for c in mock_repo.update_workflow.call_args_list]
-    assert any(u.get("status") == "failed" for u in last_updates)
+    assert any(u.get("status") == "developing" for u in last_updates)
+    assert not any(u.get("status") == "merging" for u in last_updates)
+    # At the cap the same guard instead falls through to terminal failed.
+    wf_cap = _make_workflow(
+        last_ci_failure_signature=expected_fingerprint,
+        last_ci_failure_head_sha="sha-old",
+        merge_fail_dev_rounds=MAX_MERGE_FAIL_DEV_ROUNDS,
+    )
+    orch2, mock_repo2 = _make_orchestrator(wf_cap)
+    gh2 = MagicMock()
+    gh2.get_pr_head_sha.return_value = "sha-new"
+    gh2.get_check_failure_excerpt.return_value = excerpt
+    orch2._get_gh = MagicMock(return_value=gh2)
+    orch2._run_merge_ci_repair = MagicMock()
+    orch2._start_ci_repair_round(wf_cap, 1873, _FAILED_CHECKS)
+    cap_updates = [c.args[1] for c in mock_repo2.update_workflow.call_args_list]
+    assert any(u.get("status") == "failed" for u in cap_updates)
 
 
 # ── Layer 1: REST-API check-run link falls back to gh run list ─────────

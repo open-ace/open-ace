@@ -280,7 +280,7 @@ find /var/log/sudo-openace.log -mtime +7 -delete
 | `scripts/openace-mkdir.sh` | 安全 mkdir wrapper |
 | `scripts/openace-restore-sudoers.sh` | sudoers 回滚脚本 |
 | `tests/integration/test_sudoers_security.sh` | sudoers 安全集成测试 |
-| `tests/security/test_wrapper_security.py` | wrapper 安全单元测试 |
+| `tests/integration/subprocess/test_wrapper_security.py` | wrapper 安全集成测试 |
 
 ### 9.4 环境变量
 

@@ -10,8 +10,9 @@ git/IO is required.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+from app.modules.workspace.autonomous import acceptance_gates as gates_module
 from app.modules.workspace.autonomous.acceptance_gates import (
     call_chain_gate,
     deployment_gate,
@@ -21,6 +22,7 @@ from app.modules.workspace.autonomous.acceptance_gates import (
     run_mechanical_gates,
 )
 from app.modules.workspace.autonomous.acceptance_snapshot import AcceptanceSnapshot
+from app.modules.workspace.autonomous.acceptance_verdicts import ItemVerdict
 from app.modules.workspace.autonomous.evidence import Verdict
 
 
@@ -267,15 +269,34 @@ def test_regression_silent_when_only_todo_in_security_path():
 
 
 def test_run_mechanical_gates_returns_flat_list():
-    gh = _gh(["app/services/security/auth.py", "tests/test_auth.py"])
-    files = {
-        "app/services/security/auth.py": "def verify():\n    pass\n",
-        "tests/test_auth.py": "def test_x():\n    with pytest.raises(E):\n        verify()\n",
+    production_gate_names = (
+        "negative_test_gate",
+        "call_chain_gate",
+        "deployment_gate",
+        "regression_gate",
+    )
+    production_mocks = {
+        name: MagicMock(return_value=[ItemVerdict(item=name, verdict=Verdict.CONFIRMED)])
+        for name in production_gate_names
     }
-    verdicts = run_mechanical_gates(gh, AcceptanceSnapshot(), "b", "m", read_file=_reader(files))
-    # At least one verdict per gate (5 gates), flat list.
-    assert isinstance(verdicts, list)
-    assert all(hasattr(v, "verdict") for v in verdicts)
+    legacy_mock = MagicMock(
+        return_value=[ItemVerdict(item="legacy_pattern_gate", verdict=Verdict.REJECTED)]
+    )
+    patches = [patch.object(gates_module, name, mock) for name, mock in production_mocks.items()]
+    patches.append(patch.object(gates_module, "legacy_pattern_gate", legacy_mock))
+
+    for active_patch in patches:
+        active_patch.start()
+    try:
+        verdicts = run_mechanical_gates(_gh([]), AcceptanceSnapshot(), "b", "m")
+    finally:
+        for active_patch in reversed(patches):
+            active_patch.stop()
+
+    assert [verdict.item for verdict in verdicts] == list(production_gate_names)
+    for gate_mock in production_mocks.values():
+        gate_mock.assert_called_once()
+    legacy_mock.assert_not_called()
 
 
 def test_run_mechanical_gates_works_without_read_file():
@@ -291,9 +312,9 @@ def test_run_mechanical_gates_works_without_read_file():
         assert v.verdict in (Verdict.CONFIRMED, Verdict.REJECTED, Verdict.INDETERMINATE)
 
 
-def test_run_mechanical_gates_rejects_when_legacy_pattern_present():
+def test_run_mechanical_gates_ignores_retired_legacy_pattern():
     gh = _gh(["app/services/security/keys.py"])
     files = {"app/services/security/keys.py": "_sync_ssh_keys_legacy()\n"}
     verdicts = run_mechanical_gates(gh, AcceptanceSnapshot(), "b", "m", read_file=_reader(files))
-    # The legacy gate emits a REJECTED; at least one verdict is REJECTED.
-    assert any(v.verdict is Verdict.REJECTED for v in verdicts)
+
+    assert all("legacy" not in verdict.item for verdict in verdicts)

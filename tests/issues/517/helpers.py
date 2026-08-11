@@ -26,6 +26,8 @@ TEST_PASS = os.environ.get("TEST_PASS", "admin123")
 
 # ── Test Runner ────────────────────────────────────────
 class TestResults:
+    __test__ = False
+
     def __init__(self):
         self.passed = 0
         self.failed = 0

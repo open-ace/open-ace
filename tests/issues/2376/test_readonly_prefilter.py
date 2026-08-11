@@ -378,5 +378,17 @@ def test_argument_basename_does_not_veto_a_genuine_run(command):
 
 
 def test_dedicated_test_tool_names_still_recognized():
-    for name in ("pytest", "run_tests", "test"):
+    # #2401: the unambiguous runner names remain recognized on the name alone
+    # (a bare pytest/run_tests tool runs the suite), but the ambiguous ``test``
+    # name is no longer fail-open — it must carry a real runner. The old contract
+    # let ``name="test", input={}`` (and ``helm install`` under it) reach the
+    # authoritative PASSED verdict.
+    for name in ("pytest", "run_tests"):
         assert _has_test_tool_call([{"tool": {"name": name, "input": {}}}], "mixed") is True
+    assert _has_test_tool_call([{"tool": {"name": "test", "input": {}}}], "mixed") is False
+    assert (
+        _has_test_tool_call(
+            [{"tool": {"name": "test", "input": {"command": "pytest tests/"}}}], "mixed"
+        )
+        is True
+    )

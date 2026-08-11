@@ -16,13 +16,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-try:
-    from playwright.sync_api import sync_playwright
-except ImportError:
-    print(
-        "Error: playwright not installed. Run: pip install playwright && playwright install chromium"
-    )
-    sys.exit(1)
+import pytest
+
+sync_playwright = pytest.importorskip(
+    "playwright.sync_api",
+    reason="browser verification requires the Playwright Python package",
+).sync_playwright
 
 # Configuration
 BASE_URL = "http://localhost:19888"

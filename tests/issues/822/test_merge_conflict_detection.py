@@ -891,19 +891,25 @@ class TestDoMergeDeferredRetry:
         ]
         assert started_milestones == []
 
-    def test_start_ci_repair_round_fails_when_signature_repeats(self):
-        """A repeated failed-check signature should stop the auto-repair loop.
+    def test_start_ci_repair_round_escalates_when_signature_repeats(self):
+        """A repeated failed-check signature fires the give-up guard (#822).
 
         Uses a real fine-grained fingerprint (name::sha256[:12] of the normalized
-        excerpt) so the give-up guard's signature comparison is meaningful. The
-        excerpt is mocked to be deterministic. Previously this test used the
-        pre-#1811 pipe format ("test (3.9)|failure|fail") which never matched
-        the new name::hash signature, so the guard never fired and the test
-        fell through to _build_ci_repair_context hitting an unmocked MagicMock.
+        excerpt) so the guard's signature comparison is meaningful. The excerpt
+        is mocked to be deterministic.
+
+        #2443 PR-C changed the guard's outcome: a meaningful repeated signature
+        is a Tier1 exhaustion, so under the dev-round cap it escalates to a
+        fresh development round (``developing``) rather than terminal-``failed``;
+        only at the cap does it fall through to ``failed``. Either way the guard
+        fired and the auto-repair loop stopped (no new repair attempt).
         """
         import hashlib
 
-        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+        from app.modules.workspace.autonomous.orchestrator import (
+            MAX_MERGE_FAIL_DEV_ROUNDS,
+            AutonomousOrchestrator,
+        )
 
         excerpt = "FAILED tests/test_x.py::test_y - AssertionError\n"
         expected_digest = hashlib.sha256(
@@ -911,10 +917,12 @@ class TestDoMergeDeferredRetry:
         ).hexdigest()[:12]
         expected_fingerprint = f"test (3.9)::{expected_digest}"
 
+        # Under cap → Tier1 escalation to development.
         wf = _make_workflow(
             ci_repair_attempts=1,
             last_ci_failure_signature=expected_fingerprint,
             last_ci_failure_head_sha="sha-old",
+            merge_fail_dev_rounds=0,
         )
         o, _ = _make_orchestrator(wf)
         mock_gh = MagicMock()
@@ -928,7 +936,28 @@ class TestDoMergeDeferredRetry:
             [{"name": "test (3.9)", "bucket": "fail", "state": "failure"}],
         )
 
-        failure_update = o._update_workflow.call_args.args[0]
+        escalation_update = o._update_workflow.call_args.args[0]
+        assert escalation_update["status"] == "developing"
+
+        # At the dev-round cap → Tier2 fall-through to terminal failed, with the
+        # "signature still unchanged" reason recorded on the failed update.
+        wf_cap = _make_workflow(
+            ci_repair_attempts=1,
+            last_ci_failure_signature=expected_fingerprint,
+            last_ci_failure_head_sha="sha-old",
+            merge_fail_dev_rounds=MAX_MERGE_FAIL_DEV_ROUNDS,
+        )
+        o2, _ = _make_orchestrator(wf_cap)
+        mock_gh2 = MagicMock()
+        mock_gh2.get_pr_head_sha.return_value = "sha-new"
+        mock_gh2.get_check_failure_excerpt.return_value = excerpt
+        o2._get_gh = MagicMock(return_value=mock_gh2)
+        o2._start_ci_repair_round(
+            wf_cap,
+            1103,
+            [{"name": "test (3.9)", "bucket": "fail", "state": "failure"}],
+        )
+        failure_update = o2._update_workflow.call_args.args[0]
         assert failure_update["status"] == "failed"
         assert "仍未变化" in failure_update["error_message"]
 

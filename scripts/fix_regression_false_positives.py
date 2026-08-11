@@ -72,7 +72,7 @@ def find_function_start(lines: list[str], line_idx: int) -> int:
 
 def main():
     """主函数"""
-    regression_dir = Path("tests/e2e/regression")
+    regression_dir = Path("tests/e2e/browser")
 
     print("批量修复 regression/ 目录的假阳性...")
     print("=" * 60)

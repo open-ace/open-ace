@@ -732,7 +732,10 @@ def assign_user(machine_id):
     permission = data.get("permission", "user")
 
     # Machine admins can only assign 'user' permission
-    if g.user.get("role") not in ("admin", "platform_admin"):
+    # Issue #2332: Use centralized permission check
+    from app.auth.permissions import is_platform_admin_role
+
+    if not is_platform_admin_role(g.user.get("role")):
         permission = "user"
 
     if not user_id:
@@ -765,7 +768,10 @@ def revoke_user(machine_id, user_id):
         return error
 
     # Machine admins cannot revoke other admins
-    if g.user.get("role") not in ("admin", "platform_admin"):
+    # Issue #2332: Use centralized permission check
+    from app.auth.permissions import is_platform_admin_role
+
+    if not is_platform_admin_role(g.user.get("role")):
         mgr = get_remote_agent_manager()
         target_perm = mgr.get_user_permission(machine_id, user_id)
         if target_perm == "admin":
@@ -3680,9 +3686,11 @@ def remote_vscode_proxy(vscode_id, path=""):
 
         # Check tenant isolation (Issue #2183)
         if session_tenant_id is not None and user_tenant_id != session_tenant_id:
-            # Platform admin (or legacy admin) can access cross-tenant (with audit)
-            # Issue #2286: Accept legacy 'admin' role for backward compatibility
-            if g.user.get("role") in ("platform_admin", "admin"):
+            # Check platform admin role using centralized utility
+            # Issue #2332: Use strict mode for platform admin checking
+            from app.auth.permissions import is_platform_admin_role
+
+            if is_platform_admin_role(g.user.get("role")):
                 audit_logger.log(
                     action=AuditAction.ADMIN_CROSS_TENANT_ACCESS.value,
                     severity="info",
@@ -3734,7 +3742,10 @@ def remote_vscode_proxy(vscode_id, path=""):
                 user_authenticated = True
 
         # System admin can access any session
-        if g.user.get("role") in ("admin", "platform_admin"):
+        # Issue #2332: Use centralized permission check
+        from app.auth.permissions import is_platform_admin_role
+
+        if is_platform_admin_role(g.user.get("role")):
             user_authenticated = True
 
     # Issue #2183: Require valid token or user authentication

@@ -6,6 +6,7 @@ matches the Python implementation in security_mode.py.
 """
 
 import os
+import re
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -13,6 +14,13 @@ from unittest.mock import patch
 import pytest
 
 from app.utils.security_mode import SecurityMode, detect_security_mode, reset_security_mode_cache
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.security,
+    pytest.mark.regression,
+    pytest.mark.issue(2185),
+]
 
 
 class TestShellPythonConsistency:
@@ -34,19 +42,18 @@ class TestShellPythonConsistency:
         if not entrypoint.exists():
             pytest.skip("docker-entrypoint.sh not found")
 
-        # Build the shell command to source the script and call the function
-        # We extract just the detect_security_mode function and call it
-        script = f"""
-set -e
-# Source the detect_security_mode function
-source <(sed -n '/^detect_security_mode()/,/^}}/p' {entrypoint})
-
-# Set environment variables
-{os.linesep.join(f'export {k}="{v}"' for k, v in env_vars.items())}
-
-# Call the function and print result
-detect_security_mode
-"""
+        # Extract the function in Python instead of using bash process
+        # substitution. macOS bash may not expose /dev/fd, while GitHub's Linux
+        # runner does; that difference used to make local CI fail silently.
+        match = re.search(
+            r"^detect_security_mode\(\) \{.*?^\}",
+            entrypoint.read_text(),
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        assert match, "detect_security_mode function not found"
+        script = f"set -e\n{match.group(0)}\ndetect_security_mode\n"
+        shell_environment = os.environ.copy()
+        shell_environment.update(env_vars)
 
         try:
             result = subprocess.run(
@@ -54,7 +61,9 @@ detect_security_mode
                 capture_output=True,
                 text=True,
                 timeout=5,
+                env=shell_environment,
             )
+            assert result.returncode == 0, result.stderr
             return result.stdout.strip()
         except subprocess.TimeoutExpired:
             pytest.fail("Shell script timed out")

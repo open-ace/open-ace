@@ -1,0 +1,12 @@
+# Legacy issue directories promoted to the required PR gate before Issue #2429.
+# Remove an entry only when its tests move to a canonical runtime layer.
+2335
+2390
+2401
+2403
+2428
+2431
+2438
+2439
+2442
+2443
