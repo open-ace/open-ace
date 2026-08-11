@@ -89,7 +89,7 @@ class TestUserUpdateTenantId:
             user_id,
             username="charlie_updated",
             email="charlie@new.com",
-            role="admin",
+            role="tenant_admin",
             tenant_id=tenant2_id,
         )
         assert result is True
@@ -99,7 +99,7 @@ class TestUserUpdateTenantId:
         assert user is not None
         assert user["username"] == "charlie_updated"
         assert user["email"] == "charlie@new.com"
-        assert user["role"] == "admin"
+        assert user["role"] == "tenant_admin"
         assert user["tenant_id"] == tenant2_id
 
 
@@ -175,11 +175,11 @@ class TestUserCRUD:
         repo = UserRepository(db=tmp_db)
         user_id = _insert_user(tmp_db, username="grace")
 
-        result = repo.update_user(user_id, role="admin")
+        result = repo.update_user(user_id, role="manager")
         assert result is True
 
         user = repo.get_user_by_id(user_id)
-        assert user["role"] == "admin"
+        assert user["role"] == "manager"
 
     def test_update_user_is_active(self, tmp_db):
         """Update is_active field."""
