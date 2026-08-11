@@ -114,7 +114,10 @@ class TestProductionCapablePathDetection:
             monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP", "2025-01-01")
 
             # Mock is_test_context to return False so we can test the expiration logic
-            monkeypatch.setattr("app.utils.security_mode.is_test_context", lambda: False)
+            # Use the imported function reference for reliable patching
+            from app.utils import security_mode
+
+            monkeypatch.setattr(security_mode, "is_test_context", lambda: False)
 
             is_production_capable_path()
 
@@ -135,7 +138,10 @@ class TestProductionCapablePathDetection:
             # Don't set OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP
 
             # Mock is_test_context to return False so we can test the flag logic
-            monkeypatch.setattr("app.utils.security_mode.is_test_context", lambda: False)
+            # Use the imported module reference for reliable patching
+            from app.utils import security_mode
+
+            monkeypatch.setattr(security_mode, "is_test_context", lambda: False)
 
             is_production_capable_path()
 
