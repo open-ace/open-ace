@@ -102,8 +102,10 @@ RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.
     && npm config set registry https://registry.npmmirror.com/ \
     && npm install -g qwen-code-webui@0.2.40 @qwen-code/qwen-code@0.15.10 \
     # === code-server Installation (for local workspace VS Code button) ===
-    && curl -fsSL --connect-timeout 15 --max-time 300 https://code-server.dev/install.sh | sh -s -- --prefix=/usr/local \
-    && test -x /usr/local/bin/code-server \
+    # NOTE: On Debian, the install script uses deb package which ignores --prefix
+    # and always installs to /usr/bin/code-server
+    && curl -fsSL --connect-timeout 15 --max-time 300 https://code-server.dev/install.sh | sh -s -- \
+    && test -x /usr/bin/code-server \
     # === CLI Verification ===
     && test -f /usr/lib/node_modules/@qwen-code/qwen-code/cli.js \
     && test -x /usr/bin/qwen-code-webui \

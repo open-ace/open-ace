@@ -248,3 +248,66 @@ def test_merge_aggregate_gate_lag_still_repairs_underlying_jobs():
     host.start_ci_repair_round.assert_called_once()
     repaired = {c.get("name") for c in host.start_ci_repair_round.call_args[0][2]}
     assert {"test (3.10)", "lint"} <= repaired, repaired
+
+
+# ── policy-pause transient defer (#27 follow-up) ──────────────────────────
+
+
+def test_merge_policy_block_with_pending_ci_defers_not_pauses():
+    """#27 follow-up: right after a sync/repair push, the aggregate required
+    gate's own pending status has not propagated, but its underlying jobs ARE
+    pending. ``_blocking_pending`` filters them (not in the required set), so the
+    merge is attempted and rejected with a generic policy error; GitHub reports
+    ``blocked``. The workflow must DEFER (CI has not settled) rather than freeze
+    at a manual-recovery pause it can never recover from. Reproduced by
+    50ba8724 / c0758607 / 1c1b63f0 / 67241d8d / 2d0c317d / cd939cbf."""
+    deps, host = _build_deps(
+        checks=[{"name": "test (3.10)", "bucket": "pending"}],
+        merge_state={"mergeable": True, "mergeable_state": "blocked"},
+        merge_raises=GitHubOpsError("base branch policy prohibits the merge"),
+    )
+    deps.gh.get_branch_protection.return_value = {
+        "required_status_checks": {"contexts": ["PR Gate"]}
+    }
+    result = merge_phase.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "retry"
+    host.emit_status_change.assert_not_called()  # did not pause
+
+
+def test_merge_policy_block_with_unknown_state_defers_not_pauses():
+    """GitHub's mergeability is async: right after a push, ``mergeable_state``
+    is ``unknown`` while it recomputes. A merge attempted in that window is
+    rejected with a generic policy error. Defer (GitHub has not decided) instead
+    of pausing for manual recovery."""
+    deps, host = _build_deps(
+        checks=[],
+        merge_state={"mergeable": None, "mergeable_state": "unknown"},
+        merge_raises=GitHubOpsError("repository rule violations"),
+    )
+    deps.gh.get_branch_protection.return_value = {
+        "required_status_checks": {"contexts": ["PR Gate"]}
+    }
+    result = merge_phase.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "retry"
+    host.emit_status_change.assert_not_called()
+
+
+def test_merge_policy_block_with_settled_ci_still_pauses():
+    """When CI has fully settled (no pending checks, state known and blocked), a
+    policy rejection is a genuine non-CI block (missing review / draft /
+    signing). The manual-recovery pause must still fire — the defer is only for
+    the transient CI-settling window, so genuine blocks are not masked."""
+    deps, host = _build_deps(
+        checks=[{"name": "PR Gate", "bucket": "pass"}],
+        merge_state={"mergeable": True, "mergeable_state": "blocked"},
+        merge_raises=GitHubOpsError("review is required"),
+    )
+    deps.gh.get_branch_protection.return_value = {
+        "required_status_checks": {"contexts": ["PR Gate"]}
+    }
+    result = merge_phase.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "pause"
+    host.emit_status_change.assert_called_once()

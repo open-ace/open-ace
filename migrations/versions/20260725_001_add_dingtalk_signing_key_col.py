@@ -53,7 +53,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Remove the dingtalk_webhook_secret column."""
+    """Remove the dingtalk_webhook_secret column.
+
+    SQLite: Use batch mode for DROP COLUMN compatibility.
+    """
     connection = op.get_bind()
     inspector = sa.inspect(connection)
 
@@ -64,4 +67,9 @@ def downgrade() -> None:
     if "dingtalk_webhook_secret" not in existing_columns:
         return
 
-    op.drop_column("notification_preferences", "dingtalk_webhook_secret")
+    dialect = connection.dialect.name
+    if dialect == "sqlite":
+        with op.batch_alter_table("notification_preferences") as batch_op:
+            batch_op.drop_column("dingtalk_webhook_secret")
+    else:
+        op.drop_column("notification_preferences", "dingtalk_webhook_secret")
