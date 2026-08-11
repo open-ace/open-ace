@@ -117,6 +117,10 @@ class TestProductionCapablePathDetection:
         # Remove test context indicators to allow production path detection
         monkeypatch.delenv("OPENACE_TEST_MODE", raising=False)
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        # Issue #2331: conftest.py sets OPENACE_SECURITY_MODE, which causes
+        # is_production_capable_path() to return True early, before checking
+        # the emergency rollback flag. We must unset it to reach that code path.
+        monkeypatch.delenv("OPENACE_SECURITY_MODE", raising=False)
 
         # Mock is_test_context to return False AFTER setting up environment
         monkeypatch.setattr(security_mode, "is_test_context", lambda: False)
@@ -147,6 +151,10 @@ class TestProductionCapablePathDetection:
         # Remove test context indicators to allow production path detection
         monkeypatch.delenv("OPENACE_TEST_MODE", raising=False)
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        # Issue #2331: conftest.py sets OPENACE_SECURITY_MODE, which causes
+        # is_production_capable_path() to return True early, before checking
+        # the emergency rollback flag. We must unset it to reach that code path.
+        monkeypatch.delenv("OPENACE_SECURITY_MODE", raising=False)
 
         # Mock is_test_context to return False AFTER setting up environment
         monkeypatch.setattr(security_mode, "is_test_context", lambda: False)
