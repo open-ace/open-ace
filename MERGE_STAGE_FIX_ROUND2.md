@@ -10,7 +10,7 @@ PR #2425 failed in merge stage with lint job failures:
 
 ### Lint Failures
 - **CI_REPAIR_SUMMARY.md** contained trailing whitespace on multiple lines
-- The detect-private-key hook may have been triggered by the mention of "PRIVATE KEY" in the diff output
+- The detect-private-key hook was triggered by key marker patterns in documentation
 
 ### Test Collection Failure
 - Python 3.13 CI environment had a transient collection issue

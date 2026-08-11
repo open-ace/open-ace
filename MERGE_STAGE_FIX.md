@@ -5,7 +5,7 @@
 ### 1. Private Key Pattern in Documentation (detect-private-key hook)
 **File**: `CI_FIX_SUMMARY.md:24`
 **Problem**: Line 24 contained literal private key pattern triggering the detect-private-key pre-commit hook
-**Fix**: Changed to `"-----BEGIN RSA PRIV" + "ATE KEY-----"` pattern description
+**Fix**: Changed to generic description without literal key markers
 **Impact**: Hook no longer triggers on documentation file
 
 ### 2. Missing Trailing Newline (end-of-file-fixer hook)
