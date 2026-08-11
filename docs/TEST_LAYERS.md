@@ -137,3 +137,42 @@ Baseline 是防止测试静默消失的下限，不是覆盖率指标。降低 b
 `min_*`，并在 PR 中解释原因；新增测试只更新 `actual_*`，定期将 `min_*`
 向实际值收紧。最后重跑两个 collection suite。`ci/suites.json` 的
 `baseline_runbook` 字段固定指向本节，确保从 suite 清单可以发现本流程。
+
+### Legacy 失败基线（`ci/legacy-issue-failures.json`）
+
+这是与上面**完全不同**的另一类 baseline：它记录 `tests/issues/` 当前已审查的
+历史失败（assertion/error），不是 item/file 数量下限。两者必须同时生效，互不
+替代。详见 `docs/issue-2457-agent-handoff.md`。
+
+- 身份键 = `(nodeid, outcome, category)`。`nodeid` 由 `tests/issues/conftest.py`
+  的 `record_property("openace_nodeid", ...)` 注入（xunit2 不带 `file` 属性，故
+  必须由 conftest 提供权威 nodeid）。因此**生成 baseline 的 reference run 必须
+  在包含该 conftest 的提交上触发**。
+- `compare`（只读）是权威 gate：仅有 `known` 且完整 → exit 0（summary 仍列债务）；
+  出现 `new`/`changed`/`resolved`/任何 `collection_error`/`invalid` → 非零退出。
+  `collection_error` 永不进 baseline（collection gate 必须保持为零）；`resolved`
+  强制从 baseline 删除该 entry（包括 rerun 后转绿的失败），保证 baseline 持续收缩。
+- `snapshot`（显式 `--output`）生成候选 baseline 供人工 review，**拒绝**包含
+  `collection_error`。
+
+更新流程（只能由 PR 显式更新，CI 不得自动写回）：
+
+1. 在包含 `tests/issues/conftest.py` 的分支上触发
+   `workflow_dispatch category=issues`，等全部 4 shard 完成。
+2. 下载 `issue-tests-*` artifact，运行：
+
+   ```bash
+   python scripts/legacy_issue_baseline.py snapshot \
+     --junit '<下载的 test-results/issues-*.xml>' \
+     --source-run <run-id> --reference-commit <sha> \
+     --run-contract 'extended-tests issue-tests, --isolated-home --reruns 1 --timeout 240, 4 shards' \
+     --output ci/legacy-issue-failures.json
+   ```
+
+3. 在 PR 中说明全部新增 entries 来自哪次 reference run、按 outcome/category/issue
+   的分布，以及异常大户。降低/删除 entry 时同样在 PR 中逐条说明。
+4. 重跑一次 `category=issues`：仅已知失败时 `compare` exit 0。
+
+`run_extended_tests.py` 的 `require_review_threshold`（10%）同时是 comparator 的
+文件数地板来源，避免两套门禁口径不一致。Targeted（`--issue-numbers`）运行只在
+summary 标为 targeted，不冒充完整 nightly gate。

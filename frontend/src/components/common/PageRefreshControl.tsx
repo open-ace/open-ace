@@ -15,6 +15,7 @@ import { cn } from '@/utils';
 import { useLanguage } from '@/hooks';
 import { t, type Language } from '@/i18n';
 import type { UsePageRefreshReturn } from '@/hooks/usePageRefresh';
+import { Tooltip } from './Tooltip';
 
 /**
  * Refresh interval options
@@ -173,6 +174,28 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
     return parts.join('\n');
   };
 
+  /**
+   * Build enhanced tooltip content for compact mode without dropdown.
+   * Returns React.ReactNode for multi-line layout with guidance text.
+   * Issue #2397: Improve refresh button and time display UX
+   */
+  const buildTooltipContent = (): React.ReactNode => {
+    if (!showLastRefreshTime || !lastRefreshTime) return null;
+
+    const timeStr = formatRefreshTime(lastRefreshTime, language);
+
+    return (
+      <div style={{ maxWidth: '260px' }}>
+        <div>
+          {language === 'zh'
+            ? `页面数据上次刷新于 ${timeStr}`
+            : `Page data was last refreshed ${timeStr}`}
+        </div>
+        <div className="mt-1 small text-muted">{t('lastRefreshTooltipHint', language)}</div>
+      </div>
+    );
+  };
+
   // Position styles
   const positionStyles = {
     'top-right': 'position-absolute top-0 end-0',
@@ -264,18 +287,20 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
           </div>
         ) : (
           /* Compact mode without dropdown: show last refresh time as text when available.
-             Replaced static clock icon which provided no actionable information. */
+             Issue #2397: Enhanced with Tooltip component for better UX and guidance text. */
           showLastRefreshTime &&
           lastRefreshTime && (
-            <small className="text-muted" title={buildTooltip()}>
-              {formatRefreshTime(lastRefreshTime, language)}
-            </small>
+            <Tooltip content={buildTooltipContent()} placement="bottom">
+              <small className="text-muted" tabIndex={0}>
+                {formatRefreshTime(lastRefreshTime, language)}
+              </small>
+            </Tooltip>
           )
         )}
 
         {/* Manual refresh button */}
         <button
-          className="btn btn-link btn-sm p-0"
+          className="btn btn-outline-secondary btn-sm"
           onClick={handleRefresh}
           disabled={isButtonDisabled || isRefreshing}
           title={t('refresh', language)}
