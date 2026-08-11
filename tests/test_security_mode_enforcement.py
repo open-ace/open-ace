@@ -104,21 +104,24 @@ class TestProductionCapablePathDetection:
         """Test expired emergency rollback flag is ignored."""
         import logging
 
-        # Import module BEFORE entering context manager to ensure logger is set up
+        # Import module before any monkeypatching
         from app.utils import security_mode
 
-        # Issue #2331: Use at_level context manager for reliable log capture
-        # This ensures the handler is properly attached throughout the test
+        # Set flag with an old timestamp (more than 30 days ago)
+        monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE", "1")
+        monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP", "2025-01-01")
+
+        # Remove test context indicators to allow production path detection
+        monkeypatch.delenv("OPENACE_TEST_MODE", raising=False)
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+        # Mock is_test_context to return False AFTER setting up environment
+        monkeypatch.setattr(security_mode, "is_test_context", lambda: False)
+
+        reset_security_mode_cache()
+
+        # Use at_level context manager for reliable log capture
         with caplog.at_level(logging.ERROR, "app.utils.security_mode"):
-            reset_security_mode_cache()
-
-            # Set flag with an old timestamp (more than 30 days ago)
-            monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE", "1")
-            monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP", "2025-01-01")
-
-            # Mock is_test_context to return False so we can test the expiration logic
-            monkeypatch.setattr(security_mode, "is_test_context", lambda: False)
-
             is_production_capable_path()
 
             # Expired flag should be ignored - verify expiration error is logged
@@ -130,19 +133,23 @@ class TestProductionCapablePathDetection:
         """Test emergency rollback flag without timestamp is ignored."""
         import logging
 
-        # Import module BEFORE entering context manager to ensure logger is set up
+        # Import module before any monkeypatching
         from app.utils import security_mode
 
-        # Issue #2331: Use at_level context manager for reliable log capture
+        monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE", "1")
+        # Don't set OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP
+
+        # Remove test context indicators to allow production path detection
+        monkeypatch.delenv("OPENACE_TEST_MODE", raising=False)
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+        # Mock is_test_context to return False AFTER setting up environment
+        monkeypatch.setattr(security_mode, "is_test_context", lambda: False)
+
+        reset_security_mode_cache()
+
+        # Use at_level context manager for reliable log capture
         with caplog.at_level(logging.ERROR, "app.utils.security_mode"):
-            reset_security_mode_cache()
-
-            monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE", "1")
-            # Don't set OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP
-
-            # Mock is_test_context to return False so we can test the flag logic
-            monkeypatch.setattr(security_mode, "is_test_context", lambda: False)
-
             is_production_capable_path()
 
             # Flag should be ignored due to missing timestamp
