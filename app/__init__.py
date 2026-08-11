@@ -385,14 +385,15 @@ def create_app(config=None):
     register_blueprints(app)
 
     # Schema initialization: distinguish production vs development paths (Issue #2190)
+    # Issue #2331: Use unified security mode API consistently
     from app.repositories.database import is_postgresql
     from app.repositories.schema_guard import (
         SchemaCompatibilityError,
         check_schema_compatibility,
-        get_environment_mode,
     )
+    from app.utils.security_mode import get_security_mode
 
-    env_mode = get_environment_mode()
+    env_mode = get_security_mode().value
 
     if is_postgresql() and env_mode == "production":
         # PostgreSQL production path: check schema version, do NOT execute DDL
