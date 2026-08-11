@@ -113,6 +113,32 @@ def test_unknown_suite_still_has_start_and_terminal_records(tmp_path):
     assert suite_records[-1]["outcome"] == "failure"
 
 
+def test_command_spawn_error_still_has_terminal_record(monkeypatch, tmp_path):
+    path = tmp_path / "metrics.jsonl"
+    recorder = ci.MetricsRecorder(str(path))
+    monkeypatch.setattr(
+        ci.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("missing executable")),
+    )
+
+    with pytest.raises(FileNotFoundError, match="missing executable"):
+        ci.execute_suites(
+            ["first"],
+            _suite_config(["missing-command"]),
+            action="run",
+            metrics=recorder,
+        )
+
+    records = _records(path)
+    command_terminal = next(
+        record for record in records if record["record_type"] == "command_terminal"
+    )
+    assert command_terminal["outcome"] == "failure"
+    assert command_terminal["error_class"] == "FileNotFoundError"
+    assert records[-1]["record_type"] == "invocation_terminal"
+
+
 def test_metrics_write_error_does_not_hide_primary_failure(tmp_path):
     recorder = ci.MetricsRecorder(str(tmp_path / "metrics.jsonl"))
     recorder.error = OSError("disk full")

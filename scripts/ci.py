@@ -310,6 +310,21 @@ def run_command(
                 return_code=None,
             )
         raise CIError(f"Command exceeded {timeout_seconds}s: {' '.join(expanded)}") from exc
+    except OSError as exc:
+        if metrics:
+            metrics.record(
+                "command_terminal",
+                invocation_id=invocation_id,
+                suite=suite_name,
+                command_index=command_index,
+                started_at=started_at,
+                completed_at=utc_now(),
+                duration_seconds=round(time.monotonic() - started, 6),
+                outcome="failure",
+                return_code=None,
+                error_class=type(exc).__name__,
+            )
+        raise
     elapsed = time.monotonic() - started
     if metrics:
         metrics.record(
@@ -397,6 +412,21 @@ def run_collection_suite(
                 duration_seconds=round(time.monotonic() - started, 6),
                 outcome="timeout",
                 return_code=None,
+            )
+        raise
+    except OSError as exc:
+        if metrics:
+            metrics.record(
+                "command_terminal",
+                invocation_id=invocation_id,
+                suite=name,
+                command_index=0,
+                started_at=started_at,
+                completed_at=utc_now(),
+                duration_seconds=round(time.monotonic() - started, 6),
+                outcome="failure",
+                return_code=None,
+                error_class=type(exc).__name__,
             )
         raise
     if metrics:
