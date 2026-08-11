@@ -6,11 +6,7 @@ Issue #2327: API Key 管理 Tenant 授权修复。
 
 import pytest
 
-from app.auth.decorators import (
-    ActorScope,
-    require_actor_scope,
-    resolve_authorized_target_tenant,
-)
+from app.auth.decorators import ActorScope, require_actor_scope, resolve_authorized_target_tenant
 
 
 class TestActorScope:
@@ -42,7 +38,8 @@ class TestActorScope:
             request_id=None,
         )
         # 应该不抛异常
-        scope.validate_for_read()
+        result = scope.validate_for_read()
+        assert result is None
 
     def test_validate_for_write_success(self):
         """测试写操作验证成功"""
@@ -55,7 +52,8 @@ class TestActorScope:
             request_id="test-id",
         )
         # 应该不抛异常
-        scope.validate_for_write()
+        result = scope.validate_for_write()
+        assert result is None
 
     def test_validate_invalid_user_id(self):
         """测试无效的 user_id"""

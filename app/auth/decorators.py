@@ -1580,9 +1580,9 @@ def api_key_admin_required(f=None):
 
             # 4. 创建 ActorScope 并设置到 Flask g
             # assert target_tenant_id is not None: resolve_authorized_target_tenant 在错误时会提前返回
-            assert target_tenant_id is not None, (
-                "target_tenant_id must not be None after authorization"
-            )
+            assert (
+                target_tenant_id is not None
+            ), "target_tenant_id must not be None after authorization"
             request_id = str(uuid.uuid4())
             actor_scope = ActorScope.from_actor_and_target(
                 actor=user,

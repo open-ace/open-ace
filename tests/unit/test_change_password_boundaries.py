@@ -102,6 +102,7 @@ class TestLockoutTimeBoundary:
         mock_db = MagicMock()
         # Locked_until is 1 second in the past (use UTC time to match _utcnow())
         from app.services.auth_service import _utcnow
+
         past = _utcnow() - timedelta(seconds=1)
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
@@ -138,6 +139,7 @@ class TestLockoutTimeBoundary:
         mock_db = MagicMock()
         # locked_until is exactly now (boundary case, use UTC time to match _utcnow())
         from app.services.auth_service import _utcnow
+
         now = _utcnow()
         mock_db.fetch_one.return_value = {
             "attempt_count": 5,
