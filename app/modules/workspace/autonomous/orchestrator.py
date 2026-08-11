@@ -2112,6 +2112,129 @@ def _next_phase(current_phase: str) -> str:
     return current_phase
 
 
+def _extract_verifier_json(text: str) -> dict | None:
+    """Extract the acceptance verifier's JSON verdict object from agent output.
+
+    Tolerant of the glm family's common deviations from "ONLY a fenced JSON
+    block": prose prefaces, multiple/partial code fences, trailing commas
+    (``{"a":1,}``), and braces appearing inside string values. Returns the
+    parsed dict, or ``None`` when no JSON object can be recovered (the caller
+    records an infra_error and logs the raw text). ``None`` defers to
+    infra-retry — it never fabricates a verdict.
+    """
+    import json as _json
+    import re as _re
+
+    def _try_parse(candidate: str) -> dict | None:
+        candidate = (candidate or "").strip()
+        if not candidate:
+            return None
+        try:
+            parsed = _json.loads(candidate)
+        except Exception:
+            # glm models routinely emit trailing commas ({"a":1,}); strip them.
+            # String-aware so a ",}" inside a value (e.g. an evidence note
+            # containing a code snippet) is preserved, not mangled.
+            cleaned = _strip_trailing_commas(candidate)
+            try:
+                parsed = _json.loads(cleaned)
+            except Exception:
+                return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def _strip_trailing_commas(s: str) -> str:
+        out: list[str] = []
+        in_str = False
+        escaped = False
+        i = 0
+        n = len(s)
+        while i < n:
+            ch = s[i]
+            if escaped:
+                out.append(ch)
+                escaped = False
+                i += 1
+                continue
+            if ch == "\\":
+                out.append(ch)
+                escaped = True
+                i += 1
+                continue
+            if ch == '"':
+                in_str = not in_str
+                out.append(ch)
+                i += 1
+                continue
+            if not in_str and ch == ",":
+                j = i + 1
+                while j < n and s[j].isspace():
+                    j += 1
+                if j < n and s[j] in "}]":
+                    i += 1  # drop the trailing comma
+                    continue
+            out.append(ch)
+            i += 1
+        return "".join(out)
+
+    def _first_balanced(s: str) -> str | None:
+        # First string-aware balanced { ... } substring; braces inside quoted
+        # strings are skipped so evidence text mentioning {} can't fool depth.
+        start = s.find("{")
+        while start != -1:
+            depth = 0
+            in_str = False
+            escaped = False
+            end = None
+            for i in range(start, len(s)):
+                ch = s[i]
+                if escaped:
+                    escaped = False
+                    continue
+                if ch == "\\":
+                    escaped = True
+                    continue
+                if ch == '"':
+                    in_str = not in_str
+                    continue
+                if in_str:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+            if end is not None:
+                return s[start : end + 1]
+            start = s.find("{", start + 1)
+        return None
+
+    # 1) Prefer fenced ```json ... ``` regions (non-greedy per fence pair so two
+    #    blocks don't merge). The LAST region wins — the agent may preface with
+    #    an earlier partial draft. Within a region, take its first balanced {}.
+    fenced_regions = list(_re.finditer(r"```(?:json)?\s*(.*?)\s*```", text, _re.DOTALL))
+    for region in reversed(fenced_regions):
+        obj = _first_balanced(region.group(1))
+        if obj is not None:
+            parsed = _try_parse(obj)
+            if parsed is not None:
+                return parsed
+
+    # 2) No usable fenced region → balanced { ... } over the WHOLE text
+    #    (prose-wrapped / unfenced output). NOTE: this returns the FIRST
+    #    balanced object — if the agent writes prose with a JSON-shaped
+    #    reasoning object before the real verdict, that first object wins.
+    #    Bounded risk: a non-verdict dict lacks `verdicts`/`snapshot` and
+    #    downstream aggregates to indeterminate (never a false confirmed).
+    obj = _first_balanced(text)
+    if obj is not None:
+        parsed = _try_parse(obj)
+        if parsed is not None:
+            return parsed
+    return None
+
+
 class AutonomousOrchestrator:
     """Drives a single autonomous workflow through its phases."""
 
@@ -3415,11 +3538,14 @@ class AutonomousOrchestrator:
             "1. 保持在当前工作分支上修复，不要创建新的 PR，不要切换到其他分支。\n"
             "2. 不要进入新的代码审查、进度汇报或等待流程；当前唯一目标是让现有 PR 的 CI 通过。\n"
             "3. 必须优先根据 CI 工作流、失败日志摘录和仓库脚本定位问题，复现 CI 真实执行的命令。\n"
-            "4. 修复后必须重新运行 CI 的完整对应命令，而不是只运行单个 hook、单个文件或你认为相关的子集。\n"
+            "4. 修复后必须重新运行**完整的 pre-commit（所有 hook），但仅作用于你本次改动或 CI 失败涉及的文件**，"
+            "而不是只运行单个 hook；也**禁止 `--all-files` 全仓扫描**——隔离环境与 CI 的工具链版本可能不同，"
+            "全仓扫描会误改你未触碰的干净文件、撑破变更范围而被编排器的范围守卫拒绝。\n"
             "5. 如果命令中的 formatter / pre-commit hook 自动修改了文件并以非零状态退出，这只是修复过程，"
             "不代表验证完成；必须保留这些修改并重复运行同一完整命令，直到 exit 0 或确认存在不可自动修复的错误。\n"
             "6. 编排器已先把当前 main 合并进 PR 分支，因此对 "
-            "`SKIP=bandit,no-commit-to-branch pre-commit run --all-files` 必须原样运行并重复至 exit 0；"
+            "`SKIP=bandit,no-commit-to-branch pre-commit run --files <你改动的文件>`"
+            "（用 `git diff --name-only origin/main` 列出本次改动的文件）必须重复运行至 exit 0；"
             "Bandit 由 CI 独立检查。\n"
             "7. 不要执行 git add、git commit 或 git push；编排器会在范围校验通过后统一提交并推送。\n"
             "8. 结束时请明确说明：你复现了哪些完整命令、最终 exit code、修复了什么、还剩什么风险。\n"
@@ -3476,13 +3602,24 @@ class AutonomousOrchestrator:
         wf: dict,
         gh: GitHubOps,
         failed_checks: list[dict],
+        commit_before: str = "",
     ) -> tuple[bool, str]:
-        """Run the CI's full pre-commit command under the isolated agent account.
+        """Run the CI's pre-commit command (scoped to changed files) under the
+        isolated agent account.
 
         Some hooks intentionally modify files and return 1 on their first pass.
         A repair agent can mistake that for completion and push a still-red
-        branch. Re-run the full command until it is clean, while preserving the
-        same credentialless OS boundary used for all autonomous repository code.
+        branch. Re-run pre-commit on the round-local targets until clean, while
+        preserving the same credentialless OS boundary used for all autonomous
+        repository code.
+
+        The run is scoped via ``--files`` to the targets that differ from
+        ``commit_before`` (the PR remote head). Running ``--all-files`` instead
+        cascades into reformatting clean files whenever the isolated env's
+        toolchain drifts from CI's pinned versions — that blew past
+        ``MAX_AUTONOMOUS_CHANGED_FILES`` and failed whole workflows. When no
+        targets exist, convergence skips entirely (the agent changed nothing for
+        pre-commit to normalize); it never falls back to ``--all-files``.
 
         Returns ``(attempted, remaining_error)``. A remaining error is reported
         in the repair summary but does not discard safe hook edits: the next CI
@@ -3536,8 +3673,20 @@ class AutonomousOrchestrator:
             "GIT_TERMINAL_PROMPT": "0",
             "SKIP": CI_PRE_COMMIT_SKIP,
         }
+        # Scope pre-commit to the round-local targets (files differing from
+        # commit_before). --all-files would reformat clean files on toolchain
+        # drift and blow the change-scope guard. No targets → nothing to
+        # normalize; skip rather than fall back to the known-broken --all-files.
+        targets = self._collect_pre_commit_targets(gh, commit_before)
+        if not targets:
+            logger.info(
+                "Skipping pre-commit convergence: no round-local targets "
+                "(nothing differs from commit_before=%s)",
+                commit_before or "(unset)",
+            )
+            return False, ""
         command, cwd = AutonomousAgentRunner._wrap_agent_cmd(
-            [pre_commit, "run", "--all-files"],
+            [pre_commit, "run", "--files", *targets],
             project_path,
             isolated_account,
             env,
@@ -3577,9 +3726,42 @@ class AutonomousOrchestrator:
 
         concise_output = last_output[-4000:] if last_output else "no output"
         return True, (
-            "isolated `pre-commit run --all-files` did not reach exit 0 after "
+            "isolated `pre-commit run --files <targets>` did not reach exit 0 after "
             f"{passes_run} pass(es):\n{concise_output}"
         )
+
+    @staticmethod
+    def _collect_pre_commit_targets(gh: GitHubOps, commit_before: str) -> list[str]:
+        """Return the files the convergence pre-commit run may touch.
+
+        This is everything that differs from the round boundary ``commit_before``
+        (the PR remote head) — committed since that point *or* sitting in the
+        working tree. That set is a conservative superset of what the per-round
+        scope guard (``_validate_autonomous_change_scope`` with ``commit_before``)
+        counts — the guard may rebase its baseline to ``merge-base`` on a merge
+        commit, narrowing what it counts, but this set only ever spans
+        legitimate round-local files, so scoping pre-commit to it cannot blow
+        past ``MAX_AUTONOMOUS_CHANGED_FILES`` via toolchain-drift reformatting of
+        unrelated clean files (the scope-exceeded cascade). Git lookups degrade
+        fail-soft: a transient
+        error on one layer yields whatever the other layer returned, never an
+        exception (the caller would otherwise be tempted to fall back to
+        ``--all-files``, which is the bug being fixed).
+        """
+        committed: list[str] = []
+        if commit_before:
+            try:
+                committed = gh.get_changed_files(commit_before, "HEAD")
+            except Exception as exc:
+                logger.warning(
+                    "pre-commit target collection: committed-delta lookup failed: %s", exc
+                )
+        try:
+            working = gh.get_worktree_changed_paths()
+        except Exception as exc:
+            logger.warning("pre-commit target collection: working-tree lookup failed: %s", exc)
+            working = []
+        return sorted({path for path in (*committed, *working) if path})
 
     @staticmethod
     def _detect_and_push_ci_repair_changes(
@@ -3821,7 +4003,7 @@ class AutonomousOrchestrator:
         pre_commit_error = ""
         try:
             pre_commit_attempted, pre_commit_error = self._converge_pre_commit_fixes(
-                wf, gh, failed_checks
+                wf, gh, failed_checks, commit_before
             )
         except Exception as exc:
             # The isolated validation is defense-in-depth. Preserve the agent's
@@ -3863,7 +4045,8 @@ class AutonomousOrchestrator:
         )
         if pre_commit_attempted:
             validation_summary = (
-                pre_commit_error or "isolated `pre-commit run --all-files` converged with exit 0"
+                pre_commit_error
+                or "isolated pre-commit convergence (scoped to changed files) passed with exit 0"
             )
             summary = f"{summary}\n\nValidation: {validation_summary}".strip()
 
@@ -7576,6 +7759,7 @@ class AutonomousOrchestrator:
                 cli_tool=cli_tool,
                 model=model,
                 project_path=checkout_path,
+                workflow_id=self._workflow_id,
             )
         except Exception:
             logger.exception("acceptance verifier spawn failed for issue %s", issue_number)
@@ -7603,11 +7787,41 @@ class AutonomousOrchestrator:
         import json as _json
 
         snap_dump = _json.dumps(snapshot.to_canonical(), ensure_ascii=False, indent=2)
+        # When the issue had no structured acceptance criteria (a bug report,
+        # etc.), the snapshot is empty and the verifier MUST extract the
+        # criteria itself. Make that requirement prominent — glm models skip a
+        # requirement buried in a trailing parenthetical, then omit the
+        # ``snapshot`` field and burn the infra-retry budget (#30).
+        needs_extraction = not (
+            getattr(snapshot, "required_paths", None) or getattr(snapshot, "checklist", None)
+        )
+        if needs_extraction:
+            extraction_section = (
+                "## REQUIRED — Extract the acceptance snapshot\n"
+                "The acceptance snapshot above is EMPTY (no required_paths/checklist were "
+                "captured for this issue). You MUST read the issue and derive the acceptance "
+                "criteria yourself, then return them in the `snapshot` field. Infer "
+                "required_paths from the bug/stack trace, and write a concrete, checkable "
+                "checklist (one statement per acceptance point). Without `snapshot` populated, "
+                "your verdict is INVALID and verification cannot proceed.\n\n"
+            )
+            # Valid JSON token (the object shape) so the fenced template glm
+            # copies stays parseable — never interpolate prose into the value.
+            snapshot_token = (
+                '{"required_paths": [], "checklist": [], "non_scope": [], '
+                '"closure_constraints": false}'
+            )
+            snapshot_note = "Populate `snapshot` with the criteria you derived above."
+        else:
+            extraction_section = ""
+            snapshot_token = "null"
+            snapshot_note = "Leave `snapshot` null — the criteria above are authoritative."
         return (
             "You are an INDEPENDENT acceptance verifier. The issue must NOT be considered done "
             "just because a PR merged. Verify the MERGED code (merge commit "
             f"{merge_sha}, base {base_sha}) against this acceptance snapshot.\n\n"
             f"Acceptance snapshot:\n{snap_dump}\n\n"
+            f"{extraction_section}"
             "For each required_paths entry, confirm it was actually changed (use git diff/log). "
             "For each checklist item, determine confirmed/rejected/indeterminate against the merged "
             "code with a concrete file:line or git-diff evidence ref. Be CONSERVATIVE: if you cannot "
@@ -7616,17 +7830,12 @@ class AutonomousOrchestrator:
             "```json\n"
             '{"verdicts": [{"item": "...", "verdict": "confirmed|rejected|indeterminate", '
             '"evidence": [{"ref": "file:line|git-diff", "note": "..."}], "rationale": "..."}], '
-            '"snapshot": null}\n'
+            f'"snapshot": {snapshot_token}}}\n'
             "```\n"
-            '(set "snapshot" to the completed {required_paths, checklist, non_scope, '
-            "closure_constraints} only if you had to extract them yourself because the input "
-            "snapshot was empty; otherwise null)"
+            f"{snapshot_note}"
         )
 
     def _parse_verifier_output(self, result) -> dict:
-        import json as _json
-        import re as _re
-
         text = self._artifact_text(result) if result is not None else ""
         if not text:
             return {
@@ -7634,14 +7843,14 @@ class AutonomousOrchestrator:
                 "snapshot": None,
                 "infra_error": "verification agent returned empty output",
             }
-        # Grab the last fenced ```json ... ``` block (the agent may preface reasoning).
-        blocks = _re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, _re.DOTALL)
-        candidate = blocks[-1] if blocks else text
-        try:
-            parsed = _json.loads(candidate)
-        except Exception:
+        # Tolerant extraction: fenced blocks, prose-wrapped, trailing commas,
+        # braces in strings (glm family deviates from "ONLY a fenced JSON block").
+        parsed = _extract_verifier_json(text)
+        if parsed is None:
             logger.warning(
-                "acceptance verifier output was not valid JSON; treating as indeterminate"
+                "acceptance verifier output was not valid JSON; treating as "
+                "indeterminate. raw_output=%s",
+                text[:1500],
             )
             return {
                 "verdicts": [],
