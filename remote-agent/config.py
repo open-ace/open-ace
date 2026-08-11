@@ -247,6 +247,118 @@ class AgentConfig:
         self.save()
         logger.info("Agent token updated and persisted to config")
 
+    def save_agent_token_atomic(self, token: str, keep_backups: int = 3) -> None:
+        """Save agent_token atomically with backup mechanism.
+
+        Issue #2499: Implements atomic write to prevent config corruption.
+
+        Args:
+            token: The new agent token to save.
+            keep_backups: Number of backup files to keep (default: 3).
+
+        Raises:
+            OSError: If save operation fails.
+        """
+        import sys
+        import tempfile
+
+        if os.environ.get("OPENACE_AGENT_TOKEN"):
+            logger.warning(
+                "OPENACE_AGENT_TOKEN env var is set; saved token will be"
+                " overridden on next restart. Unset the env var to use"
+                " the config file value."
+            )
+
+        # Update the data
+        self.update({"agent_token": token})
+
+        # Ensure config directory exists
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Create backup if config file exists
+        if self._config_path.exists():
+            try:
+                backup_path = self._config_path.with_suffix(".json.backup")
+                # Rotate backups
+                self._rotate_backups(backup_path, keep_backups)
+                # Create new backup
+                shutil.copy2(self._config_path, backup_path)
+                logger.debug("Created config backup: %s", backup_path)
+            except OSError as e:
+                logger.warning("Failed to create config backup: %s", e)
+
+        # Atomic write: write to temp file, then rename
+        temp_path = self._config_path.with_suffix(".json.tmp")
+
+        try:
+            # Write to temporary file
+            with open(temp_path, "w") as f:
+                json.dump(self._data, f, indent=2)
+                f.flush()
+                # Ensure data is written to disk
+                os.fsync(f.fileno())
+
+            # Atomic rename (or move on Windows)
+            if sys.platform == "win32":
+                # Windows: shutil.move is more reliable than os.rename
+                if self._config_path.exists():
+                    # Remove existing file first
+                    self._config_path.unlink()
+                shutil.move(str(temp_path), str(self._config_path))
+            else:
+                # Unix: atomic rename
+                temp_path.rename(self._config_path)
+
+            logger.info("Atomically saved config with new token to %s", self._config_path)
+
+        except OSError as e:
+            # Clean up temp file on failure
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+            raise OSError(f"Failed to save config atomically: {e}") from e
+
+    def _rotate_backups(self, backup_path: Path, keep: int) -> None:
+        """Rotate backup files, keeping only the most recent ones.
+
+        Args:
+            backup_path: Path to the backup file.
+            keep: Number of backups to keep.
+        """
+        if not backup_path.exists():
+            return
+
+        # Generate backup file pattern: config.json.backup.1, config.json.backup.2, etc.
+        backup_dir = backup_path.parent
+        backup_name = backup_path.name
+
+        # Find existing backups
+        backups = sorted(
+            [f for f in backup_dir.iterdir() if f.name.startswith(backup_name)],
+            reverse=True
+        )
+
+        # Remove old backups beyond keep limit
+        for old_backup in backups[keep:]:
+            try:
+                old_backup.unlink()
+                logger.debug("Removed old backup: %s", old_backup)
+            except OSError as e:
+                logger.warning("Failed to remove old backup %s: %s", old_backup, e)
+
+        # Rename current backup to backup.1
+        if backups:
+            # Shift existing backups: backup -> backup.1, backup.1 -> backup.2, etc.
+            for i, old_backup in enumerate(backups[:keep]):
+                new_name = backup_path.with_suffix(f".backup.{i + 1}")
+                try:
+                    old_backup.rename(new_name)
+                    logger.debug("Rotated backup: %s -> %s", old_backup, new_name)
+                except OSError as e:
+                    logger.warning("Failed to rotate backup %s: %s", old_backup, e)
+
     def ensure_config_dir(self) -> None:
         """Create the configuration directory if it does not exist."""
         try:

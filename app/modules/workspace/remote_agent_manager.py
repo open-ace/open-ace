@@ -7,8 +7,11 @@ Manages WebSocket connections to remote agents, heartbeat monitoring,
 command dispatching, and message routing for remote workspace sessions.
 """
 
+import hashlib
+import hmac
 import json
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -31,6 +34,14 @@ from app.modules.workspace.agent_token import (
 from app.repositories.database import DB_PATH, Database, adapt_boolean_value, is_postgresql
 
 logger = logging.getLogger(__name__)
+
+# Token rotation configuration (Issue #2499)
+# Default timeout for pending revocation (5 minutes)
+DEFAULT_TOKEN_REVOKE_TIMEOUT = int(os.getenv("AGENT_TOKEN_REVOKE_TIMEOUT_SEC", "300"))
+# Minimum timeout (1 minute)
+MIN_TOKEN_REVOKE_TIMEOUT = 60
+# Maximum timeout (1 hour)
+MAX_TOKEN_REVOKE_TIMEOUT = 3600
 
 # Bounded retry count for the event_index allocation race. Concurrent producers
 # can both read the same MAX(event_index)+1; the UNIQUE(session_id, event_index)
@@ -955,6 +966,8 @@ class RemoteAgentManager:
         Checks that the token hash exists, belongs to the given machine,
         and has not been revoked.
 
+        Issue #2499: Also accepts pending_revoke tokens within timeout window.
+
         Returns:
             True if valid, False otherwise.
         """
@@ -964,11 +977,21 @@ class RemoteAgentManager:
             cursor = conn.cursor()
             cursor.execute(
                 f"""
-                SELECT id, machine_id, is_revoked
+                SELECT id, machine_id, is_revoked, pending_revoke, revoke_after,
+                       CASE
+                           WHEN pending_revoke = {_param()} AND revoke_after > NOW()
+                           THEN {_param()}
+                           ELSE {_param()}
+                       END AS is_temporarily_valid
                 FROM agent_tokens
                 WHERE token_hash = {_param()}
             """,
-                (token_hash_val,),
+                (
+                    adapt_boolean_value(True),
+                    adapt_boolean_value(True),
+                    adapt_boolean_value(False),
+                    token_hash_val,
+                ),
             )
             row = cursor.fetchone()
 
@@ -985,45 +1008,97 @@ class RemoteAgentManager:
         if is_revoked:
             return False
 
+        # Issue #2499: Check pending_revoke status
+        pending_revoke = row.get("pending_revoke")
+        if is_postgresql():
+            pending_revoke = bool(pending_revoke) if pending_revoke is not None else False
+        else:
+            pending_revoke = bool(pending_revoke)
+
+        if pending_revoke:
+            # Check if temporarily valid (within timeout window)
+            is_temporarily_valid = row.get("is_temporarily_valid")
+            if is_postgresql():
+                is_temporarily_valid = bool(is_temporarily_valid) if is_temporarily_valid is not None else False
+            else:
+                is_temporarily_valid = bool(is_temporarily_valid)
+
+            if not is_temporarily_valid:
+                # Token has exceeded timeout window
+                return False
+
         # Check machine_id binding
         return bool(row["machine_id"] == machine_id)
 
     def rotate_agent_token(
-        self, machine_id: str, rotated_by: int | None = None
+        self, machine_id: str, rotated_by: int | None = None, immediate: bool = False
     ) -> dict[str, str | bool] | None:
         """Rotate the agent token for a machine.
 
-        Revokes all existing tokens for the machine and issues a new one.
-        If existing tokens were already revoked (e.g., the machine was
-        previously revoked), the revocation is silently lifted — this is
-        an intentional admin action tracked via audit logging.
+        Issue #2499: Supports two modes:
+        - Normal (immediate=False): Delayed revocation with confirmation mechanism
+        - Emergency (immediate=True): Immediate revocation, manual update required
 
         Args:
             machine_id: The machine whose token to rotate.
             rotated_by: User ID who initiated the rotation.
+            immediate: If True, immediately revoke old token (emergency mode).
+                      If False, delay revocation pending agent confirmation.
 
         Returns:
-            New plaintext agent token, or None if machine not found.
+            Dict with new_token, rotation_id, mode, and status flags.
+            Returns None if machine not found.
         """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        # Get timeout configuration
+        timeout = self._get_token_revoke_timeout(machine_id)
 
         with self._lock, self.db.connection() as conn:
             cursor = conn.cursor()
 
-            # Verify machine exists
-            cursor.execute(
-                f"SELECT machine_id FROM remote_machines WHERE machine_id = {_param()}",
-                (machine_id,),
-            )
+            # Verify machine exists and lock the row (FOR UPDATE)
+            if is_postgresql():
+                cursor.execute(
+                    f"SELECT machine_id FROM remote_machines WHERE machine_id = {_param()} FOR UPDATE",
+                    (machine_id,),
+                )
+            else:
+                # SQLite doesn't support FOR UPDATE, rely on application lock
+                cursor.execute(
+                    f"SELECT machine_id FROM remote_machines WHERE machine_id = {_param()}",
+                    (machine_id,),
+                )
             if not cursor.fetchone():
                 return None
 
-            # Revoke all existing active tokens for this machine
+            # Generate rotation ID for this operation
+            rotation_id = str(uuid.uuid4())
+
+            # Issue #2499: Clean up any old pending_revoke tokens first
+            # This ensures only one pending_revoke token exists at a time
+            cursor.execute(
+                f"""
+                UPDATE agent_tokens
+                SET is_revoked = {_param()}, revoked_at = {_param()}, revoked_by = {_param()}
+                WHERE machine_id = {_param()} AND pending_revoke = {_param()} AND is_revoked = {_param()}
+                """,
+                (
+                    adapt_boolean_value(True),
+                    now.isoformat(),
+                    rotated_by,
+                    machine_id,
+                    adapt_boolean_value(True),
+                    adapt_boolean_value(False),
+                ),
+            )
+
+            # Get existing tokens
             cursor.execute(
                 f"""
                 SELECT id, is_revoked FROM agent_tokens
                 WHERE machine_id = {_param()}
-            """,
+                """,
                 (machine_id,),
             )
             existing = cursor.fetchall()
@@ -1037,21 +1112,39 @@ class RemoteAgentManager:
                 if not is_revoked:
                     any_unrevoked = True
 
-            # Mark all existing tokens as revoked
-            cursor.execute(
-                f"""
-                UPDATE agent_tokens
-                SET is_revoked = {_param()}, revoked_at = {_param()}, revoked_by = {_param()}
-                WHERE machine_id = {_param()} AND is_revoked = {_param()}
-            """,
-                (
-                    adapt_boolean_value(True),
-                    now.isoformat(),
-                    rotated_by,
-                    machine_id,
-                    adapt_boolean_value(False),
-                ),
-            )
+            if immediate:
+                # Emergency mode: Immediately revoke all existing tokens
+                cursor.execute(
+                    f"""
+                    UPDATE agent_tokens
+                    SET is_revoked = {_param()}, revoked_at = {_param()}, revoked_by = {_param()}
+                    WHERE machine_id = {_param()} AND is_revoked = {_param()}
+                    """,
+                    (
+                        adapt_boolean_value(True),
+                        now.isoformat(),
+                        rotated_by,
+                        machine_id,
+                        adapt_boolean_value(False),
+                    ),
+                )
+            else:
+                # Normal mode: Mark existing tokens as pending_revoke
+                revoke_after = now + timedelta(seconds=timeout)
+                cursor.execute(
+                    f"""
+                    UPDATE agent_tokens
+                    SET pending_revoke = {_param()}, revoke_after = {_param()}, rotation_id = {_param()}
+                    WHERE machine_id = {_param()} AND is_revoked = {_param()}
+                    """,
+                    (
+                        adapt_boolean_value(True),
+                        revoke_after.isoformat(),
+                        rotation_id,
+                        machine_id,
+                        adapt_boolean_value(False),
+                    ),
+                )
 
             conn.commit()
 
@@ -1059,12 +1152,166 @@ class RemoteAgentManager:
         had_revoked_tokens = len(existing) > 0 and not any_unrevoked
 
         # Issue a new token
-        new_token = self._create_agent_token(machine_id)
-        logger.info("Rotated agent token for machine %s", machine_id[:8])
+        new_token = self._create_agent_token_with_rotation(machine_id, rotation_id)
+
+        logger.info(
+            "Rotated agent token for machine %s (mode=%s, rotation_id=%s)",
+            machine_id[:8],
+            "immediate" if immediate else "delayed",
+            rotation_id[:8],
+        )
+
         return {
             "new_token": new_token,
+            "rotation_id": rotation_id,
             "unrevoked": had_revoked_tokens,
+            "immediate": immediate,
+            "timeout": timeout if not immediate else None,
         }
+
+    def _get_token_revoke_timeout(self, machine_id: str) -> int:
+        """Get token revoke timeout for a machine.
+
+        Priority: machine config > env var > default
+        """
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"SELECT token_revoke_timeout FROM remote_machines WHERE machine_id = {_param()}",
+                    (machine_id,),
+                )
+                row = cursor.fetchone()
+                if row and row.get("token_revoke_timeout"):
+                    timeout = row["token_revoke_timeout"]
+                    # Clamp to valid range
+                    return max(MIN_TOKEN_REVOKE_TIMEOUT, min(timeout, MAX_TOKEN_REVOKE_TIMEOUT))
+        except Exception as e:
+            logger.warning("Failed to get token_revoke_timeout for %s: %s", machine_id[:8], e)
+
+        # Fall back to environment variable or default
+        return max(MIN_TOKEN_REVOKE_TIMEOUT, min(DEFAULT_TOKEN_REVOKE_TIMEOUT, MAX_TOKEN_REVOKE_TIMEOUT))
+
+    def _create_agent_token_with_rotation(self, machine_id: str, rotation_id: str) -> str:
+        """Generate and store a new agent token with rotation_id.
+
+        Issue #2499: Associates token with rotation operation.
+
+        Returns:
+            The plaintext agent token (shown once to the caller).
+        """
+        token = generate_agent_token()
+        token_hash_val = hash_token(token)
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                INSERT INTO agent_tokens (token_hash, machine_id, created_at, rotation_id)
+                VALUES ({_param()}, {_param()}, {_param()}, {_param()})
+            """,
+                (token_hash_val, machine_id, now, rotation_id),
+            )
+            conn.commit()
+
+        logger.info("Issued agent token for machine %s (rotation_id=%s)", machine_id[:8], rotation_id[:8])
+        return token
+
+    def confirm_token_rotation(
+        self, machine_id: str, rotation_id: str, signature: str, timestamp: int, new_token: str
+    ) -> bool:
+        """Confirm token rotation from agent.
+
+        Issue #2499: Validates signature and marks old token as revoked.
+
+        Args:
+            machine_id: The machine confirming the rotation.
+            rotation_id: The rotation operation ID.
+            signature: HMAC signature from agent.
+            timestamp: Unix timestamp from agent (for replay protection).
+            new_token: The new token (used for signature verification).
+
+        Returns:
+            True if confirmation succeeded, False otherwise.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now_ts = int(now.timestamp())
+
+        # Verify timestamp (5-minute window for replay protection)
+        if abs(now_ts - timestamp) > 300:
+            logger.warning(
+                "Token rotation confirmation timestamp expired for machine %s (delta=%ds)",
+                machine_id[:8],
+                abs(now_ts - timestamp),
+            )
+            return False
+
+        # Verify HMAC signature
+        message = f"{rotation_id}:{timestamp}"
+        expected_signature = hmac.new(
+            new_token.encode(),
+            message.encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(signature, expected_signature):
+            logger.warning(
+                "Invalid signature for token rotation confirmation (machine=%s, rotation=%s)",
+                machine_id[:8],
+                rotation_id[:8],
+            )
+            return False
+
+        with self._lock, self.db.connection() as conn:
+            cursor = conn.cursor()
+
+            # Find the pending_revoke token with this rotation_id
+            cursor.execute(
+                f"""
+                SELECT id, machine_id FROM agent_tokens
+                WHERE rotation_id = {_param()} AND pending_revoke = {_param()} AND is_revoked = {_param()}
+                """,
+                (rotation_id, adapt_boolean_value(True), adapt_boolean_value(False)),
+            )
+            row = cursor.fetchone()
+
+            if not row:
+                # Already processed (idempotent) or not found
+                logger.info(
+                    "Token rotation already confirmed or not found (machine=%s, rotation=%s)",
+                    machine_id[:8],
+                    rotation_id[:8],
+                )
+                return True  # Return success for idempotency
+
+            # Verify machine_id matches
+            if row["machine_id"] != machine_id:
+                logger.warning(
+                    "Machine ID mismatch in rotation confirmation (expected=%s, got=%s)",
+                    row["machine_id"][:8],
+                    machine_id[:8],
+                )
+                return False
+
+            # Revoke the old token
+            cursor.execute(
+                f"""
+                UPDATE agent_tokens
+                SET is_revoked = {_param()}, revoked_at = {_param()}, pending_revoke = {_param()}
+                WHERE id = {_param()}
+                """,
+                (adapt_boolean_value(True), now.isoformat(), adapt_boolean_value(False), row["id"]),
+            )
+
+            conn.commit()
+
+        logger.info(
+            "Token rotation confirmed for machine %s (rotation_id=%s)",
+            machine_id[:8],
+            rotation_id[:8],
+        )
+        return True
 
     def revoke_agent_token(self, machine_id: str, revoked_by: int | None = None) -> bool:
         """Revoke all active agent tokens for a machine.

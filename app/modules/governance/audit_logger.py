@@ -80,6 +80,8 @@ class AuditAction(Enum):
     AGENT_REGISTER = "agent_register"
     AGENT_TOKEN_ROTATE = "agent_token_rotate"
     AGENT_TOKEN_REVOKE = "agent_token_revoke"
+    AGENT_TOKEN_ROTATE_CONFIRMED = "agent_token_rotate_confirmed"  # Issue #2499
+    AGENT_TOKEN_FORCE_REVOKED = "agent_token_force_revoked"  # Issue #2499
     AGENT_AUTH_FAILURE = "agent_auth_failure"
     AGENT_RECONNECT = "agent_reconnect"
 

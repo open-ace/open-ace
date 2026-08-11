@@ -792,11 +792,19 @@ def rotate_machine_token(machine_id):
     Rotate the agent token for a machine. System admin only.
 
     Issue #2180: Validate machine tenant access.
+    Issue #2499: Support immediate and delayed revocation modes.
 
-    Revokes all existing tokens and issues a new one. If the existing
-    tokens were already revoked (i.e., the machine was previously
-    revoked and is being re-activated), this is logged as an unrevoke.
+    Args:
+        immediate (bool): If True, immediately revoke old token (emergency mode).
+                        If False (default), delay revocation pending agent confirmation.
+
+    Returns:
+        JSON response with new token and rotation details.
     """
+    # Get immediate parameter from request
+    data = request.get_json() or {}
+    immediate = data.get("immediate", False)
+
     # Validate tenant access
     machine, error = _check_machine_tenant_access(machine_id)
     if error:
@@ -807,17 +815,22 @@ def rotate_machine_token(machine_id):
     result = agent_mgr.rotate_agent_token(
         machine_id=machine_id,
         rotated_by=g.user["id"],
+        immediate=immediate,
     )
 
     if result is None:
         return jsonify({"error": "Machine not found"}), 404
 
     new_token = result["new_token"]
+    rotation_id = result.get("rotation_id", "")
+    mode = "immediate" if immediate else "delayed"
 
     # AGENT_TOKEN_ROTATE audit event
     details = {
         "machine_id": machine_id,
         "rotated_by": g.user["id"],
+        "rotation_id": rotation_id,
+        "mode": mode,
     }
     if result.get("unrevoked"):
         details["unrevoke"] = True
@@ -832,29 +845,45 @@ def rotate_machine_token(machine_id):
         details=details,
     )
 
-    # Push rotate_token command to agent so it updates its local config.
-    # send_command() only enqueues — check if agent is online to determine
-    # whether the new token will be delivered immediately or needs manual update.
-    agent_mgr.send_command(
-        machine_id,
-        {
-            "command": "rotate_token",
-            "new_token": new_token,
-        },
-    )
-    is_online = agent_mgr.is_connected(machine_id)
-    msg = (
-        "Agent token rotated. The new token has been pushed to the agent."
-        if is_online
-        else "Agent token rotated. Agent is offline — save the new token and"
-        " manually update the agent config."
-    )
+    # Issue #2499: Only push command for delayed mode
+    if not immediate:
+        # Push rotate_token command to agent so it updates its local config.
+        # send_command() only enqueues — check if agent is online to determine
+        # whether the new token will be delivered immediately or needs manual update.
+        agent_mgr.send_command(
+            machine_id,
+            {
+                "command": "rotate_token",
+                "new_token": new_token,
+                "rotation_id": rotation_id,
+                "timeout": result.get("timeout", 300),
+            },
+        )
+        is_online = agent_mgr.is_connected(machine_id)
+        if is_online:
+            msg = (
+                "Token rotated successfully. The new token has been pushed to the agent. "
+                "The agent will automatically update its configuration."
+            )
+        else:
+            msg = (
+                "Token rotated successfully. The agent is offline — "
+                "save the new token and manually update the agent config."
+            )
+    else:
+        # Immediate mode: token revoked immediately, no command pushed
+        msg = (
+            "Token revoked immediately for security. "
+            "You must manually update the agent configuration with the new token."
+        )
 
     return jsonify(
         {
             "success": True,
             "agent_token": new_token,
+            "rotation_id": rotation_id,
             "message": msg,
+            "mode": mode,
         }
     )
 
@@ -1721,6 +1750,49 @@ def agent_message():
         agent_mgr.ensure_agent_tracked(machine_id)
         pending = agent_mgr.get_pending_commands(machine_id)
         return jsonify({"success": True, "type": "poll_ack", "pending_commands": pending})
+
+    elif msg_type == "token_rotation_ack":
+        # Issue #2499: Token rotation confirmation from agent
+        rotation_id = data.get("rotation_id")
+        signature = data.get("signature")
+        timestamp = data.get("timestamp")
+        new_token_hash = data.get("new_token_hash", "")[:8]  # For audit only
+
+        if not all([rotation_id, signature, timestamp]):
+            return jsonify({"error": "Missing required fields for token_rotation_ack"}), 400
+
+        # Get the new token from the Authorization header
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return jsonify({"error": "Missing Bearer token"}), 401
+        new_token = auth_header[7:]
+
+        # Confirm the rotation
+        success = agent_mgr.confirm_token_rotation(
+            machine_id=machine_id,
+            rotation_id=rotation_id,
+            signature=signature,
+            timestamp=int(timestamp),
+            new_token=new_token,
+        )
+
+        if success:
+            # Audit log for successful confirmation
+            audit_logger.log_action(
+                AuditAction.AGENT_TOKEN_ROTATE_CONFIRMED,
+                severity="info",
+                resource_type="remote_machine",
+                resource_id=machine_id,
+                details={
+                    "machine_id": machine_id,
+                    "rotation_id": rotation_id,
+                    "new_token_hash": new_token_hash,
+                },
+            )
+            pending = agent_mgr.get_pending_commands(machine_id)
+            return jsonify({"success": True, "pending_commands": pending})
+        else:
+            return jsonify({"error": "Token rotation confirmation failed"}), 400
 
     elif msg_type == "session_output":
         session_id = data.get("session_id")
