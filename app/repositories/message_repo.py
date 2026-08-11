@@ -5,6 +5,7 @@ Repository for message data access operations.
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.repositories.database import Database, escape_like
@@ -404,7 +405,6 @@ class MessageRepository:
         Returns:
             List[Dict]: List of conversation records.
         """
-        from datetime import datetime, timedelta, timezone
 
         conditions: list[str] = []
         params: list[Any] = []
@@ -508,7 +508,6 @@ class MessageRepository:
         Returns:
             int: Count of conversations.
         """
-        from datetime import datetime, timedelta, timezone
 
         conditions: list[str] = []
         params: list[Any] = []
@@ -847,7 +846,7 @@ class MessageRepository:
 
         Returns:
             List[Dict]: List of hourly usage data with hour, tokens, requests.
-            Hour is converted from UTC to CST (UTC+8).
+            Hour is converted from timezone.utc to CST (timezone.utc+8).
         """
         from app.repositories.database import is_postgresql
 
@@ -1168,7 +1167,6 @@ class MessageRepository:
             as a backward-compatible alias of ``average_messages_per_conversation``
             for existing consumers (calculateHealthScore, insights, exports).
         """
-        from datetime import datetime, timedelta, timezone
 
         conditions: list[str] = []
         params: list[Any] = []
