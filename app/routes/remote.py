@@ -217,7 +217,7 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple[Any, Any] | Non
     machine = agent_mgr.get_machine(machine_id)
     if machine and machine.get("created_at"):
         try:
-            from datetime import datetime, timezone
+            from datetime import datetime
 
             created_at = machine["created_at"]
             if isinstance(created_at, str):

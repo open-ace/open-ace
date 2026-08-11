@@ -7,6 +7,7 @@ API routes for authentication operations.
 import logging
 import os
 import uuid
+from datetime import datetime, timezone
 from typing import cast
 
 import bcrypt
@@ -224,7 +225,7 @@ def _refresh_auth_session(token: str) -> int | None:
 
     Returns new timeout seconds if session was refreshed, None otherwise.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import timedelta
 
     from app.services.auth_service import _get_session_timeout_hours
 

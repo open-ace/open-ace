@@ -1050,7 +1050,7 @@ def pause_workflow(workflow_id):
     # Suspend the running agent subprocess (SIGSTOP)
     _pause_running_task(workflow_id)
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     _get_repo().update_workflow(
         workflow_id,
@@ -1110,7 +1110,7 @@ def stop_workflow(workflow_id):
     # Kill the running agent subprocess (SIGTERM → SIGKILL)
     _stop_running_task(workflow_id)
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     _get_repo().update_workflow(
         workflow_id,

@@ -1440,7 +1440,7 @@ def format_timestamp_to_cst(timestamp_str: str) -> str:
     - "2026-03-03 04:21:31.917Z" (modified format with space)
 
     Args:
-        timestamp_str: UTC timestamp in ISO format
+        timestamp_str: timezone.utc timestamp in ISO format
 
     Returns:
         Formatted string in CST timezone (e.g., "2026-03-03 20:21:31")
@@ -2337,9 +2337,9 @@ def get_hourly_usage_from_messages(
         host_name: Optional host name filter
 
     Returns:
-        List of dicts with hour (0-23 in UTC+8/CST), day_of_week (0-6), tokens_used, message_count
+        List of dicts with hour (0-23 in timezone.utc+8/CST), day_of_week (0-6), tokens_used, message_count
         Note: day_of_week uses SQLite strftime('%w'): 0=Sunday, 1=Monday, ..., 6=Saturday
-        Times are converted from UTC to CST (UTC+8).
+        Times are converted from timezone.utc to CST (timezone.utc+8).
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -2428,7 +2428,7 @@ def get_daily_hourly_usage(
 
     Returns:
         List of dicts with date, hour (0-23 in CST), tokens_used, message_count
-        Times are converted from UTC to CST (UTC+8).
+        Times are converted from timezone.utc to CST (timezone.utc+8).
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -2702,7 +2702,7 @@ def get_peak_usage_periods(
         limit: Number of peak periods to return
 
     Returns:
-        List of dicts with date, hour (in UTC+8/CST), tokens_used, message_count
+        List of dicts with date, hour (in timezone.utc+8/CST), tokens_used, message_count
     """
     conn = get_connection()
     cursor = conn.cursor()

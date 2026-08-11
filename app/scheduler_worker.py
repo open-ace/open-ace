@@ -26,6 +26,7 @@ import signal
 import socket
 import sys
 import threading
+from datetime import timezone
 
 # Configure logging
 logging.basicConfig(
@@ -216,7 +217,7 @@ class SchedulerWorker:
 
                 if path == "/livez":
                     # Liveness probe - minimal check
-                    from datetime import datetime, timezone
+                    from datetime import datetime
 
                     timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                     response_body = f'{{"status": "alive", "timestamp": "{timestamp}"}}'
