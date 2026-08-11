@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "derivation_version": 1,
+  "window_days": 30,
+  "sample_cap": 25,
+  "min_samples": 20,
+  "max_collector_requests": 700,
+  "reserve_remaining": 250,
+  "max_jobs_per_attempt": 100,
+  "cohorts": [
+    {
+      "id": "ci-pull-request",
+      "workflow": "ci.yml",
+      "event": "pull_request",
+      "contract_paths": [
+        ".github/workflows/ci.yml",
+        ".false-positive-baseline.json",
+        ".test-baseline.json",
+        "ci/suites.json",
+        "pyproject.toml",
+        "pytest.ini",
+        "requirements-ci.lock",
+        "scripts/ci.py",
+        "tests/conftest.py"
+      ]
+    },
+    {
+      "id": "ci-main-push",
+      "workflow": "ci.yml",
+      "event": "push",
+      "branch": "main",
+      "contract_paths": [
+        ".github/workflows/ci.yml",
+        ".false-positive-baseline.json",
+        ".test-baseline.json",
+        "ci/suites.json",
+        "pyproject.toml",
+        "pytest.ini",
+        "requirements-ci.lock",
+        "scripts/ci.py",
+        "tests/conftest.py"
+      ]
+    },
+    {
+      "id": "extended-nightly",
+      "workflow": "extended-tests.yml",
+      "event": "schedule",
+      "branch": "main",
+      "contract_paths": [
+        ".github/workflows/extended-tests.yml",
+        ".test-baseline.json",
+        "ci/legacy-issue-failures.json",
+        "ci/legacy-issue-quarantine.json",
+        "ci/suites.json",
+        "pytest.ini",
+        "requirements-ci.lock",
+        "scripts/ci.py",
+        "scripts/legacy_issue_baseline.py",
+        "scripts/run_extended_tests.py",
+        "tests/conftest.py",
+        "tests/issues/conftest.py"
+      ]
+    },
+    {
+      "id": "weekly-quality",
+      "workflow": "weekly-quality.yml",
+      "event": "schedule",
+      "branch": "main",
+      "contract_paths": [
+        ".github/workflows/weekly-quality.yml",
+        ".test-baseline.json",
+        "ci/suites.json",
+        "pytest.ini",
+        "requirements-ci.lock",
+        "scripts/ci.py",
+        "scripts/run_extended_tests.py"
+      ]
+    }
+  ]
+}

@@ -120,6 +120,8 @@ jobs:
       - name: Install test dependencies
         run: pip install -r requirements-ci.lock
       - name: Run full deterministic and collection gates
+        env:
+          OPENACE_CI_METRICS_FILE: test-results/nightly-ci-suite-metrics-${{ matrix.python-version }}.jsonl
         run: |
           mkdir -p test-results
           python scripts/ci.py run default-collection issue-collection python-core \
@@ -132,6 +134,15 @@ jobs:
           path: test-results/
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload nightly CI suite metrics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-ci-suite-metrics-${{ matrix.python-version }}
+          path: test-results/nightly-ci-suite-metrics-${{ matrix.python-version }}.jsonl
+          if-no-files-found: error
+          retention-days: 90
 
   full-e2e:
     name: Full E2E

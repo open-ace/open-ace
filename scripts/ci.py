@@ -5,13 +5,17 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -89,6 +93,58 @@ TEST_PATTERNS = ("tests/**", "pytest.ini", ".test-baseline.json")
 
 class CIError(RuntimeError):
     """A deterministic CI configuration or execution failure."""
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+class MetricsRecorder:
+    """Record metrics without allowing write errors to hide test failures."""
+
+    def __init__(self, path: str | None):
+        self.path = Path(path) if path else None
+        self._handle = None
+        self.error: OSError | None = None
+        self.sequence = 0
+        if self.path is not None:
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                self._handle = self.path.open("a", encoding="utf-8")
+            except OSError as exc:
+                raise CIError(f"metrics_write_error: {exc}") from exc
+
+    def record(self, record_type: str, **fields: Any) -> None:
+        if self._handle is None or self.error is not None:
+            return
+        self.sequence += 1
+        payload = {
+            "schema_version": 1,
+            "record_type": record_type,
+            "sequence": self.sequence,
+            "recorded_at": utc_now(),
+            **fields,
+        }
+        try:
+            self._handle.write(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
+            self._handle.flush()
+        except OSError as exc:
+            self.error = exc
+
+    def close(self) -> None:
+        if self._handle is None:
+            return
+        try:
+            self._handle.close()
+        except OSError as exc:
+            if self.error is None:
+                self.error = exc
+        finally:
+            self._handle = None
+
+
+def metrics_contract_hash() -> str:
+    return hashlib.sha256(SUITE_FILE.read_bytes()).hexdigest()
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -214,16 +270,59 @@ def expand_command(command: list[str]) -> list[str]:
 
 
 def run_command(
-    command: list[str], *, cwd: Path, env: dict[str, str], timeout_seconds: int
+    command: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    timeout_seconds: int,
+    metrics: MetricsRecorder | None = None,
+    invocation_id: str = "",
+    suite_name: str = "",
+    command_index: int = 0,
 ) -> None:
     expanded = expand_command(command)
     print(f"+ {' '.join(expanded)}", flush=True)
     started = time.monotonic()
+    started_at = utc_now()
+    if metrics:
+        metrics.record(
+            "command_start",
+            invocation_id=invocation_id,
+            suite=suite_name,
+            command_index=command_index,
+            executable=Path(expanded[0]).name,
+            started_at=started_at,
+            timeout_seconds=timeout_seconds,
+        )
     try:
         result = subprocess.run(expanded, cwd=cwd, env=env, check=False, timeout=timeout_seconds)
     except subprocess.TimeoutExpired as exc:
+        if metrics:
+            metrics.record(
+                "command_terminal",
+                invocation_id=invocation_id,
+                suite=suite_name,
+                command_index=command_index,
+                started_at=started_at,
+                completed_at=utc_now(),
+                duration_seconds=round(time.monotonic() - started, 6),
+                outcome="timeout",
+                return_code=None,
+            )
         raise CIError(f"Command exceeded {timeout_seconds}s: {' '.join(expanded)}") from exc
     elapsed = time.monotonic() - started
+    if metrics:
+        metrics.record(
+            "command_terminal",
+            invocation_id=invocation_id,
+            suite=suite_name,
+            command_index=command_index,
+            started_at=started_at,
+            completed_at=utc_now(),
+            duration_seconds=round(elapsed, 6),
+            outcome="success" if result.returncode == 0 else "failure",
+            return_code=result.returncode,
+        )
     print(f"  completed in {elapsed:.1f}s", flush=True)
     if result.returncode:
         raise CIError(f"Command failed with exit code {result.returncode}: {' '.join(expanded)}")
@@ -252,19 +351,66 @@ def candidate_test_file_count(target: str) -> int:
     return len(files)
 
 
-def run_collection_suite(name: str, suite: dict[str, Any], env: dict[str, str]) -> None:
+def run_collection_suite(
+    name: str,
+    suite: dict[str, Any],
+    env: dict[str, str],
+    *,
+    metrics: MetricsRecorder | None = None,
+    invocation_id: str = "",
+) -> None:
     target = suite["collection_target"]
     command = [sys.executable, "-m", "pytest", target, "--collect-only", "-q"]
     print(f"+ {' '.join(command)}", flush=True)
-    result = subprocess.run(
-        command,
-        cwd=PROJECT_ROOT,
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=suite["timeout_seconds"],
-    )
+    started = time.monotonic()
+    started_at = utc_now()
+    if metrics:
+        metrics.record(
+            "command_start",
+            invocation_id=invocation_id,
+            suite=name,
+            command_index=0,
+            executable=Path(command[0]).name,
+            command_kind="pytest_collection",
+            started_at=started_at,
+            timeout_seconds=suite["timeout_seconds"],
+        )
+    try:
+        result = subprocess.run(
+            command,
+            cwd=PROJECT_ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=suite["timeout_seconds"],
+        )
+    except subprocess.TimeoutExpired:
+        if metrics:
+            metrics.record(
+                "command_terminal",
+                invocation_id=invocation_id,
+                suite=name,
+                command_index=0,
+                started_at=started_at,
+                completed_at=utc_now(),
+                duration_seconds=round(time.monotonic() - started, 6),
+                outcome="timeout",
+                return_code=None,
+            )
+        raise
+    if metrics:
+        metrics.record(
+            "command_terminal",
+            invocation_id=invocation_id,
+            suite=name,
+            command_index=0,
+            started_at=started_at,
+            completed_at=utc_now(),
+            duration_seconds=round(time.monotonic() - started, 6),
+            outcome="success" if result.returncode == 0 else "failure",
+            return_code=result.returncode,
+        )
     output = result.stdout + result.stderr
     print("\n".join(output.splitlines()[-40:]))
     if result.returncode:
@@ -286,34 +432,87 @@ def run_collection_suite(name: str, suite: dict[str, Any], env: dict[str, str]) 
     )
 
 
-def run_suite(name: str, config: dict[str, Any]) -> None:
+def run_suite(
+    name: str,
+    config: dict[str, Any],
+    *,
+    metrics: MetricsRecorder | None = None,
+    invocation_id: str = "",
+) -> None:
     suites = config["suites"]
     if name not in suites:
         raise CIError(f"Unknown suite {name!r}; choose from: {', '.join(sorted(suites))}")
     suite = suites[name]
     print(f"\n=== {name}: {suite['description']} ===", flush=True)
+    suite_started_at = utc_now()
+    suite_started = time.monotonic()
+    if metrics:
+        metrics.record(
+            "suite_start",
+            invocation_id=invocation_id,
+            suite=name,
+            started_at=suite_started_at,
+            timeout_seconds=suite["timeout_seconds"],
+        )
     # Keep the isolated HOME below the checkout. On macOS the system temp
     # directory resolves through /private/var, which Open ACE deliberately
     # rejects as a workspace root; GitHub's Linux runner would not expose that
     # failure. A checkout-local temporary HOME is safe on both platforms and
     # is removed after the suite.
-    with tempfile.TemporaryDirectory(prefix=f".openace-ci-{name}-", dir=PROJECT_ROOT) as home:
-        env = isolated_environment(home, suite.get("preserve_database_environment", False))
-        if "collection_target" in suite:
-            run_collection_suite(name, suite, env)
-            return
-        suite_cwd = PROJECT_ROOT / suite.get("working_directory", ".")
-        suite_started = time.monotonic()
-        for definition in suite.get("commands", []):
-            if isinstance(definition, dict):
-                command = definition["command"]
-                cwd = PROJECT_ROOT / definition.get("working_directory", ".")
+    try:
+        with tempfile.TemporaryDirectory(prefix=f".openace-ci-{name}-", dir=PROJECT_ROOT) as home:
+            env = isolated_environment(home, suite.get("preserve_database_environment", False))
+            if "collection_target" in suite:
+                run_collection_suite(name, suite, env, metrics=metrics, invocation_id=invocation_id)
             else:
-                command = definition
-                cwd = suite_cwd
-            elapsed = time.monotonic() - suite_started
-            remaining = max(1, int(suite["timeout_seconds"] - elapsed))
-            run_command(command, cwd=cwd, env=env, timeout_seconds=remaining)
+                suite_cwd = PROJECT_ROOT / suite.get("working_directory", ".")
+                for command_index, definition in enumerate(suite.get("commands", [])):
+                    if isinstance(definition, dict):
+                        command = definition["command"]
+                        cwd = PROJECT_ROOT / definition.get("working_directory", ".")
+                    else:
+                        command = definition
+                        cwd = suite_cwd
+                    elapsed = time.monotonic() - suite_started
+                    remaining = max(1, int(suite["timeout_seconds"] - elapsed))
+                    run_command(
+                        command,
+                        cwd=cwd,
+                        env=env,
+                        timeout_seconds=remaining,
+                        metrics=metrics,
+                        invocation_id=invocation_id,
+                        suite_name=name,
+                        command_index=command_index,
+                    )
+    except Exception as exc:
+        if metrics:
+            metrics.record(
+                "suite_terminal",
+                invocation_id=invocation_id,
+                suite=name,
+                started_at=suite_started_at,
+                completed_at=utc_now(),
+                duration_seconds=round(time.monotonic() - suite_started, 6),
+                outcome=(
+                    "timeout"
+                    if isinstance(exc, subprocess.TimeoutExpired) or "exceeded" in str(exc).lower()
+                    else "failure"
+                ),
+                timeout_seconds=suite["timeout_seconds"],
+            )
+        raise
+    if metrics:
+        metrics.record(
+            "suite_terminal",
+            invocation_id=invocation_id,
+            suite=name,
+            started_at=suite_started_at,
+            completed_at=utc_now(),
+            duration_seconds=round(time.monotonic() - suite_started, 6),
+            outcome="success",
+            timeout_seconds=suite["timeout_seconds"],
+        )
 
 
 def write_github_outputs(selected: list[str]) -> None:
@@ -378,9 +577,80 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def execute_suites(
+    names: list[str], config: dict[str, Any], *, action: str, metrics: MetricsRecorder
+) -> None:
+    invocation_id = str(uuid.uuid4())
+    invocation_started_at = utc_now()
+    invocation_started = time.monotonic()
+    outcomes = dict.fromkeys(names, "planned")
+    metrics.record(
+        "invocation_start",
+        invocation_id=invocation_id,
+        action=action,
+        requested_suites=names,
+        started_at=invocation_started_at,
+        contract_sha256=metrics_contract_hash(),
+        python_version=platform.python_version(),
+        platform=platform.platform(),
+        ci=os.environ.get("CI", "").lower() == "true",
+    )
+    for position, name in enumerate(names):
+        metrics.record(
+            "suite_plan",
+            invocation_id=invocation_id,
+            suite=name,
+            position=position,
+        )
+
+    primary: Exception | None = None
+    for name in names:
+        if primary is not None:
+            outcomes[name] = "not_started_due_to_previous_failure"
+            metrics.record(
+                "suite_terminal",
+                invocation_id=invocation_id,
+                suite=name,
+                outcome=outcomes[name],
+                duration_seconds=0,
+            )
+            continue
+        try:
+            run_suite(name, config, metrics=metrics, invocation_id=invocation_id)
+            outcomes[name] = "success"
+        except Exception as exc:
+            outcomes[name] = (
+                "timeout"
+                if isinstance(exc, subprocess.TimeoutExpired) or "exceeded" in str(exc).lower()
+                else "failure"
+            )
+            primary = exc
+
+    metrics.record(
+        "invocation_terminal",
+        invocation_id=invocation_id,
+        action=action,
+        requested_suites=names,
+        suite_outcomes=outcomes,
+        started_at=invocation_started_at,
+        completed_at=utc_now(),
+        duration_seconds=round(time.monotonic() - invocation_started, 6),
+        outcome="failure" if primary else "success",
+    )
+    metrics.close()
+    if primary is not None:
+        if metrics.error is not None:
+            raise CIError(f"{primary}; metrics_write_error: {metrics.error}") from primary
+        raise primary
+    if metrics.error is not None:
+        raise CIError(f"metrics_write_error: {metrics.error}")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    metrics: MetricsRecorder | None = None
     try:
+        metrics = MetricsRecorder(os.environ.get("OPENACE_CI_METRICS_FILE"))
         config = load_config()
         if args.action == "list":
             for name, suite in sorted(config["suites"].items()):
@@ -390,8 +660,7 @@ def main(argv: list[str] | None = None) -> int:
             check_toolchain(config, strict=args.strict)
             return 0
         if args.action == "run":
-            for name in args.suites:
-                run_suite(name, config)
+            execute_suites(args.suites, config, action="run", metrics=metrics)
             return 0
 
         files = args.files if args.action == "detect" and args.files else changed_files(args.base)
@@ -402,12 +671,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.github_output:
                 write_github_outputs(selected)
             return 0
-        for name in selected:
-            run_suite(name, config)
+        execute_suites(selected, config, action="pr", metrics=metrics)
         return 0
     except (CIError, KeyError, OSError, subprocess.TimeoutExpired) as exc:
         print(f"CI ERROR: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if metrics is not None:
+            metrics.close()
 
 
 if __name__ == "__main__":
