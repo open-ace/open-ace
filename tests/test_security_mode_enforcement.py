@@ -102,8 +102,13 @@ class TestProductionCapablePathDetection:
 
     def test_emergency_rollback_expired(self, monkeypatch, caplog):
         """Test expired emergency rollback flag is ignored."""
-        reset_security_mode_cache()
         import logging
+
+        # Issue #2331: Set caplog level BEFORE resetting cache to ensure handler is attached
+        # when the module is re-imported during reset
+        caplog.set_level(logging.ERROR, "app.utils.security_mode")
+
+        reset_security_mode_cache()
 
         # Set flag with an old timestamp (more than 30 days ago)
         monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE", "1")
@@ -112,23 +117,21 @@ class TestProductionCapablePathDetection:
         # Mock is_test_context to return False so we can test the expiration logic
         monkeypatch.setattr("app.utils.security_mode.is_test_context", lambda: False)
 
-        # Issue #2331: Use caplog.set_level() for reliable capture in CI
-        # caplog.at_level() context manager may not work reliably in all environments
-        caplog.set_level(logging.ERROR, "app.utils.security_mode")
         is_production_capable_path()
 
         # Expired flag should be ignored - verify expiration error is logged
         assert any(
             "EMERGENCY ROLLBACK FLAG EXPIRED" in record.message for record in caplog.records
         ), f"Expected EXPIRED error in logs, got: {[r.message for r in caplog.records]}"
-        # Flag is ignored, so production-capable checks continue
-        # Since we're in test context mocked to False, result depends on other indicators
-        # The important thing is the expired flag didn't make it non-production-capable
 
     def test_emergency_rollback_missing_timestamp(self, monkeypatch, caplog):
         """Test emergency rollback flag without timestamp is ignored."""
-        reset_security_mode_cache()
         import logging
+
+        # Issue #2331: Set caplog level BEFORE resetting cache to ensure handler is attached
+        caplog.set_level(logging.ERROR, "app.utils.security_mode")
+
+        reset_security_mode_cache()
 
         monkeypatch.setenv("OPENACE_ALLOW_IMPLICIT_MODE", "1")
         # Don't set OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP
@@ -136,8 +139,6 @@ class TestProductionCapablePathDetection:
         # Mock is_test_context to return False so we can test the flag logic
         monkeypatch.setattr("app.utils.security_mode.is_test_context", lambda: False)
 
-        # Issue #2331: Use caplog.set_level() for reliable capture in CI
-        caplog.set_level(logging.ERROR, "app.utils.security_mode")
         is_production_capable_path()
 
         # Flag should be ignored due to missing timestamp
