@@ -189,34 +189,28 @@ class TestSQL001:
     """Tests for boolean = integer detection."""
 
     def test_detect_simple_bool_equals_int(self):
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             query = "SELECT * FROM users WHERE is_active = 1"
-        """
-        )
+        """)
         violations = _check_sql001(code, "test.py")
         assert len(violations) == 1
         assert violations[0]["rule"] == "SQL001"
         assert "is_active" in violations[0]["message"]
 
     def test_detect_with_table_alias(self):
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             query = "SELECT * FROM users u WHERE u.is_active = 1"
-        """
-        )
+        """)
         violations = _check_sql001(code, "test.py")
         assert len(violations) == 1
         assert violations[0]["rule"] == "SQL001"
 
     def test_detect_int_variable_pattern(self):
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             is_active_int = 1 if is_active else 0
             query = "INSERT INTO users (is_active) VALUES (?)"
             cursor.execute(query, (is_active_int,))
-        """
-        )
+        """)
         violations = _check_sql001(code, "test.py")
         assert len(violations) == 1
         assert violations[0]["rule"] == "SQL001"
@@ -227,121 +221,99 @@ class TestSQL001:
         # Note: the variable name must end in _int/_val for base extraction to work.
         # audit_log_val -> audit_log (not a boolean field name) would NOT be detected.
         # Use a name where base extraction yields a boolean field name.
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             is_enabled_int = 1 if settings_dict.get("is_enabled", True) else 0
             cursor.execute("INSERT INTO settings (is_enabled) VALUES (?)", (is_enabled_int,))
-        """
-        )
+        """)
         violations = _check_sql001(code, "test.py")
         assert len(violations) == 1
         assert violations[0]["rule"] == "SQL001"
         assert "is_enabled_int" in violations[0]["message"]
 
     def test_int_variable_not_used_in_sql_no_violation(self):  # #20
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             is_ready_int = 1 if is_ready else 0
             print(is_ready_int)
-        """
-        )
+        """)
         violations = _check_sql001(code, "test.py")
         assert len(violations) == 0
 
     def test_no_cascading_replace_bug(self):  # #26, #29
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             is_valid_int = 1 if is_valid else 0
             cursor.execute("INSERT INTO t (is_valid) VALUES (?)", (is_valid_int,))
-        """
-        )
+        """)
         violations = _check_sql001(code, "test.py")
         assert len(violations) == 1
         assert "is_valid" in violations[0]["message"]
 
     def test_no_violation_with_adapt_boolean(self):
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             query = f"SELECT * FROM users WHERE {adapt_boolean_condition('is_active', True)}"
-        """
-        )
+        """)
         violations = _check_sql001(code, "test.py")
         assert len(violations) == 0
 
     def test_no_violation_python_ternary_non_boolean(self):
         """Python ternary with non-boolean variable name is not flagged."""
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             count = 1 if flag else 0
-        """
-        )
+        """)
         violations = _check_sql001(code, "test.py")
         assert len(violations) == 0
 
     def test_no_violation_comment_line(self):
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             # is_active = 1 is used in SQLite
-        """
-        )
+        """)
         violations = _check_sql001(code, "test.py")
         assert len(violations) == 0
 
     def test_detect_multiple_in_same_file(self):
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             query1 = "SELECT * FROM users WHERE is_active = 1"
             query2 = "SELECT * FROM projects WHERE is_shared = 0"
-        """
-        )
+        """)
         violations = _check_sql001(code, "test.py")
         assert len(violations) == 2
 
     def test_detect_enabled_field(self):
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             query = "SELECT * FROM config WHERE email_enabled = 1"
-        """
-        )
+        """)
         violations = _check_sql001(code, "test.py")
         assert len(violations) == 1
 
     def test_line_number_correct(self):
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             # line 1
             # line 2
             query = "WHERE is_active = 1"
-        """
-        )
+        """)
         violations = _check_sql001(code, "test.py")
         assert violations[0]["line"] == 3
 
     def test_int_variable_in_execute_params(self):  # #33/#35
         """Variable in execute() params on separate line from SQL string."""
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             is_shared_int = 1 if is_shared else 0
             cursor = self.db.execute(
                 "INSERT INTO projects (is_shared) VALUES (?)",
                 (is_shared_int,),
             )
-        """
-        )
+        """)
         violations = _check_sql001(code, "test.py")
         assert len(violations) == 1
         assert "is_shared_int" in violations[0]["message"]
 
     def test_int_variable_in_underscore_execute(self):  # #36
         """Variable in _execute() helper call."""
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             is_active_val = 1 if is_active else 0
             _execute(
                 cursor, "UPDATE users SET is_active = ?", (is_active_val,)
             )
-        """
-        )
+        """)
         violations = _check_sql001(code, "test.py")
         assert len(violations) == 1
         assert "is_active_val" in violations[0]["message"]
@@ -356,60 +328,48 @@ class TestSQL003:
     """Tests for LIKE without escape_like detection."""
 
     def test_detect_like_question_mark(self):
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             conditions.append("name LIKE ?")
-        """
-        )
+        """)
         violations = _check_sql003(code, "test.py")
         assert len(violations) == 1
         assert violations[0]["rule"] == "SQL003"
 
     def test_detect_like_percent_s(self):
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             query = "SELECT * FROM users WHERE name LIKE %s"
-        """
-        )
+        """)
         violations = _check_sql003(code, "test.py")
         assert len(violations) == 1
 
     def test_detect_like_param_function(self):
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             conditions.append(f"title LIKE {_param()}")
-        """
-        )
+        """)
         violations = _check_sql003(code, "test.py")
         assert len(violations) == 1
 
     def test_no_violation_with_escape_like(self):
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             value = escape_like(user_input)
             conditions.append("name LIKE ?")
             params.append(value)
-        """
-        )
+        """)
         violations = _check_sql003(code, "test.py")
         assert len(violations) == 0
 
     def test_no_violation_comment_line(self):
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             # Use LIKE ? for pattern matching
-        """
-        )
+        """)
         violations = _check_sql003(code, "test.py")
         assert len(violations) == 0
 
     def test_line_number_correct(self):
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             # line 1
             conditions.append("name LIKE ?")
-        """
-        )
+        """)
         violations = _check_sql003(code, "test.py")
         assert violations[0]["line"] == 2
 
@@ -455,46 +415,38 @@ class TestSQL004:
     """
 
     def test_escape_like_without_escape_clause(self):  # ①
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             value = escape_like(user_input)
             conditions.append("name LIKE ?")
-            """
-        )
+            """)
         violations = _check_sql004(code, "test.py")
         assert len(violations) == 1
         assert violations[0]["rule"] == "SQL004"
 
     def test_same_line_escape_clause_ok(self):  # ②
-        code = textwrap.dedent(
-            r"""\
+        code = textwrap.dedent(r"""\
             value = escape_like(user_input)
             conditions.append("name LIKE ? ESCAPE '\\'")
-            """
-        )
+            """)
         violations = _check_sql004(code, "test.py")
         assert len(violations) == 0
 
     def test_multiline_escape_clause_ok(self):  # ③ — mirrors session_manager:908-909
         """ESCAPE on the line below LIKE must be recognized (forward window)."""
-        code = textwrap.dedent(
-            r"""\
+        code = textwrap.dedent(r"""\
             value = escape_like(identity_value)
             query = "SELECT * FROM t WHERE metadata LIKE ?"
             "ESCAPE '\\'"
-            """
-        )
+            """)
         violations = _check_sql004(code, "test.py")
         assert len(violations) == 0
 
     def test_like_without_escape_like_nearby_not_flagged(self):  # ④
         """A raw LIKE (no escape_like nearby) is SQL003's concern, not SQL004's."""
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             conditions.append("name LIKE ?")
             params.append("hardcoded%")
-            """
-        )
+            """)
         violations = _check_sql004(code, "test.py")
         assert len(violations) == 0
 
@@ -506,14 +458,12 @@ class TestSQL004:
         is an accepted edge case (absent in the current codebase) and is
         documented here to pin the behavior.
         """
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             safe = escape_like(q)
             conditions.append("a LIKE ?")
             conditions.append("b LIKE ?")
             params.extend([safe, "hardcoded%"])
-            """
-        )
+            """)
         violations = _check_sql004(code, "test.py")
         assert len(violations) == 2
 
@@ -530,13 +480,11 @@ class TestSQL004:
 
     def test_not_like_excluded(self):  # mirrors workspace.py:557 webui:%
         """Hardcoded NOT LIKE exclusion patterns don't need ESCAPE."""
-        code = textwrap.dedent(
-            """\
+        code = textwrap.dedent("""\
             # escape_like not needed: hard-coded pattern, no user input
             conditions.append("session_id NOT LIKE ?")
             params.append("webui:%")
-            """
-        )
+            """)
         violations = _check_sql004(code, "test.py")
         assert len(violations) == 0
 
@@ -552,15 +500,13 @@ class TestSQL004:
 
     def test_forward_window_boundary(self):
         """ESCAPE 3 lines below LIKE (beyond the +2 forward window) is flagged."""
-        code = textwrap.dedent(
-            r"""\
+        code = textwrap.dedent(r"""\
             value = escape_like(q)
             query = "x LIKE ?"
             y = 1
             z = 2
             "ESCAPE '\\'"
-            """
-        )
+            """)
         violations = _check_sql004(code, "test.py")
         # ESCAPE is on line 5, LIKE on line 2 → distance 3 (> forward window 2)
         assert len(violations) == 1
@@ -621,14 +567,10 @@ class TestBaseline:
 class TestCheckFile:
     def test_mixed_violations(self, tmp_path):
         f = tmp_path / "example.py"
-        f.write_text(
-            textwrap.dedent(
-                """\
+        f.write_text(textwrap.dedent("""\
             query = "SELECT * FROM users WHERE is_active = 1"
             conditions.append("name LIKE ?")
-        """
-            )
-        )
+        """))
         violations = check_file(f)
         rules = {v["rule"] for v in violations}
         assert "SQL001" in rules
@@ -636,16 +578,12 @@ class TestCheckFile:
 
     def test_clean_file(self, tmp_path):
         f = tmp_path / "clean.py"
-        f.write_text(
-            textwrap.dedent(
-                """\
+        f.write_text(textwrap.dedent("""\
             query = f"SELECT * FROM users WHERE {adapt_boolean_condition('is_active', True)}"
             value = escape_like(name)
             conditions.append("name LIKE ? ESCAPE '\\\\'")
             params.append(value)
-        """
-            )
-        )
+        """))
         violations = check_file(f)
         assert len(violations) == 0
 

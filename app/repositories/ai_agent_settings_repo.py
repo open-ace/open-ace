@@ -81,15 +81,13 @@ class AiAgentSettingsRepo:
                     str_value = str(value) if not isinstance(value, str) else value
 
                     cursor.execute(
-                        adapt_sql(
-                            """
+                        adapt_sql("""
                             INSERT INTO ai_agent_settings (setting_key, setting_value, updated_at)
                             VALUES (?, ?, CURRENT_TIMESTAMP)
                             ON CONFLICT(setting_key) DO UPDATE SET
                                 setting_value = excluded.setting_value,
                                 updated_at = CURRENT_TIMESTAMP
-                            """
-                        ),
+                            """),
                         (key, str_value),
                     )
 

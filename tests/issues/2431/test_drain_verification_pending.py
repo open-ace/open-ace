@@ -41,14 +41,12 @@ class _SQLiteDB:
 def _repository_with_parked_row(tmp_path) -> AutonomousWorkflowRepository:
     db_path = str(tmp_path / "parked.db")
     with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            """CREATE TABLE autonomous_workflows (
+        conn.execute("""CREATE TABLE autonomous_workflows (
                 workflow_id TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL
-            )"""
-        )
+            )""")
         conn.executemany(
             "INSERT INTO autonomous_workflows VALUES (?, ?, ?, ?)",
             [

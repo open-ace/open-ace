@@ -266,14 +266,12 @@ class AlertTransactionManager:
                 # Write to quota_alerts table
                 quota_data = alert_data.to_quota_alerts_dict()
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                         INSERT INTO quota_alerts
                         (user_id, alert_type, quota_type, period, threshold,
                          current_usage, quota_limit, percentage, message)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """
-                    ),
+                    """),
                     (
                         quota_data["user_id"],
                         quota_data["alert_type"],
@@ -290,14 +288,12 @@ class AlertTransactionManager:
                 # Write to alerts table
                 alerts_data = alert_data.to_alerts_dict()
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                         INSERT INTO alerts
                         (alert_id, alert_type, severity, title, message, user_id,
                          username, metadata, created_at, read, action_url, action_text)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """
-                    ),
+                    """),
                     (
                         alert_id,
                         alerts_data["alert_type"],
@@ -334,12 +330,10 @@ class AlertTransactionManager:
 
         # Check quota_alerts
         quota_result = self.db.fetch_one(
-            adapt_sql(
-                """
+            adapt_sql("""
                 SELECT COUNT(*) as count FROM quota_alerts
                 WHERE user_id = ? AND quota_type = ? AND created_at >= ?
-            """
-            ),
+            """),
             (user_id, quota_type, threshold_str),
         )
 
@@ -374,12 +368,10 @@ class AlertTransactionManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                         INSERT INTO alert_creation_failures (alert_data, retry_count, status)
                         VALUES (?, 0, 'pending')
-                    """
-                    ),
+                    """),
                     (json.dumps(alert_data.__dict__),),
                 )
                 conn.commit()
@@ -389,15 +381,13 @@ class AlertTransactionManager:
     def get_pending_failures(self, limit: int = 100) -> list[AlertCreationFailure]:
         """Get pending failures from the queue."""
         rows = self.db.fetch_all(
-            adapt_sql(
-                """
+            adapt_sql("""
                 SELECT * FROM alert_creation_failures
                 WHERE status IN ('pending', 'retrying')
                 AND retry_count < ?
                 ORDER BY created_at ASC
                 LIMIT ?
-            """
-            ),
+            """),
             (ALERT_COMPENSATION_MAX_RETRIES, limit),
         )
 
@@ -438,13 +428,11 @@ class AlertTransactionManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                         UPDATE alert_creation_failures
                         SET retry_count = ?, last_retry_at = ?, status = ?
                         WHERE id = ?
-                    """
-                    ),
+                    """),
                     (
                         new_retry_count,
                         datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
@@ -462,8 +450,7 @@ class AlertTransactionManager:
 
     def get_failure_stats(self) -> dict:
         """Get statistics about the failure queue."""
-        result = self.db.fetch_one(
-            """
+        result = self.db.fetch_one("""
             SELECT
                 COUNT(*) as total,
                 SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
@@ -471,8 +458,7 @@ class AlertTransactionManager:
                 SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
                 SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success
             FROM alert_creation_failures
-            """
-        )
+            """)
 
         return (
             dict(result)

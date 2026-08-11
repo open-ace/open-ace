@@ -142,15 +142,13 @@ def test_cleanup_lock_does_not_break_stale_live_agent_lease(tmp_path):
     """A 60-minute verifier remains protected past the generic 30-minute TTL."""
     db_path = str(tmp_path / "cleanup-lock.db")
     conn = sqlite3.connect(db_path)
-    conn.execute(
-        """CREATE TABLE autonomous_workflows (
+    conn.execute("""CREATE TABLE autonomous_workflows (
             workflow_id TEXT PRIMARY KEY,
             status TEXT NOT NULL,
             locked_at TEXT,
             locked_by TEXT,
             agent_pid INTEGER
-        )"""
-    )
+        )""")
     stale = (datetime.now(timezone.utc) - timedelta(minutes=31)).strftime("%Y-%m-%d %H:%M:%S")
     conn.executemany(
         "INSERT INTO autonomous_workflows VALUES (?, ?, ?, ?, ?)",
