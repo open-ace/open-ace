@@ -80,20 +80,20 @@ function Get-DetectedProxyUrl {
 # ============================================================================
 function Read-SettingsJson {
     param([string]$Path)
-    
+
     if (-not (Test-Path $Path)) {
         return @{}
     }
-    
+
     $bytes = [System.IO.File]::ReadAllBytes($Path)
     $content = [System.Text.Encoding]::UTF8.GetString($bytes)
-    
+
     # Check for UTF-8 BOM (EF BB BF)
     if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
         Write-Warn "settings.json has UTF-8 BOM, stripping it"
         $content = $content.Substring(1)  # Remove BOM character
     }
-    
+
     try {
         $settings = $content | ConvertFrom-Json
         # Convert to hashtable for easier manipulation
@@ -137,10 +137,10 @@ function Write-SettingsJson {
         [string]$Path,
         [hashtable]$Settings
     )
-    
+
     # Convert hashtable to JSON
     $json = $Settings | ConvertTo-Json -Depth 10
-    
+
     # Write using .NET UTF-8 encoding without BOM
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
@@ -157,7 +157,7 @@ if ($Status) {
         $settings = Read-SettingsJson $settingsFile
         $proxy = $settings["http.proxy"]
         $strictSSL = $settings["http.proxyStrictSSL"]
-        
+
         if ($proxy) {
             Write-Ok "Proxy configured: $proxy"
             Write-Host "  http.proxyStrictSSL: $strictSSL" -ForegroundColor Gray
@@ -166,7 +166,7 @@ if ($Status) {
             Write-Host "  To configure: run this script without -Status" -ForegroundColor Gray
         }
     }
-    
+
     # Show detected proxy
     $detected = Get-DetectedProxyUrl
     if ($detected) {
@@ -185,7 +185,7 @@ if ($Clear) {
         Write-Warn "settings.json not found, nothing to clear"
         exit 0
     }
-    
+
     $settings = Read-SettingsJson $settingsFile
     if ($settings.ContainsKey("http.proxy")) {
         $settings.Remove("http.proxy")
@@ -195,7 +195,7 @@ if ($Clear) {
         $settings.Remove("http.proxyStrictSSL")
         Write-Info "Removing http.proxyStrictSSL"
     }
-    
+
     Write-SettingsJson $settingsFile $settings
     Write-Ok "Proxy settings cleared from $settingsFile"
     exit 0
