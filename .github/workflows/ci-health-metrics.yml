@@ -1,0 +1,58 @@
+name: CI Health Metrics
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '18 6 * * *'
+      timezone: Asia/Singapore
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: ci-health-metrics
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    name: Collect CI health metrics
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Collect bounded Actions history
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p test-results/ci-health
+          python scripts/ci/github_actions_metrics.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --output-json test-results/ci-health/report.json \
+            --output-markdown test-results/ci-health/report.md \
+            2>&1 | tee test-results/ci-health/collector.log
+
+      - name: Publish CI health summary
+        if: always()
+        run: |
+          if [ -f test-results/ci-health/report.md ]; then
+            cat test-results/ci-health/report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "CI health collection failed; see collector artifact." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload CI health evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-health-metrics
+          path: test-results/ci-health/
+          if-no-files-found: error
+          retention-days: 90

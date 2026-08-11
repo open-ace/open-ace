@@ -24,6 +24,8 @@ import hmac
 import logging
 import os
 import time
+import uuid
+from dataclasses import dataclass
 from functools import wraps
 from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import unquote
@@ -1298,3 +1300,320 @@ def _log_cross_tenant_operation(
         )
     except Exception as e:
         logger.warning(f"Failed to log cross-tenant operation: {e}")
+
+
+# ── ActorScope and Tenant Authorization (Issue #2327) ─────────────────────
+
+
+@dataclass(frozen=True)
+class ActorScope:
+    """
+    已验证的 actor 授权上下文（不可变对象）。
+
+    Issue #2327: 为 API Key 管理建立集中式 tenant scope 授权原语。
+
+    Attributes:
+        user_id: 用户 ID（必须为正整数）
+        role: 用户角色（admin, platform_admin, tenant_admin）
+        actor_tenant_id: actor 所属的租户 ID（可能为 None）
+        target_tenant_id: 目标租户 ID（必须为正整数）
+        is_cross_tenant: 是否跨租户操作
+        request_id: 请求 ID（用于审计追踪）
+    """
+
+    user_id: int
+    role: str
+    actor_tenant_id: int | None
+    target_tenant_id: int
+    is_cross_tenant: bool
+    request_id: str | None
+
+    def validate_for_read(self) -> None:
+        """验证是否允许读操作"""
+        self._validate_common()
+
+    def validate_for_write(self) -> None:
+        """验证是否允许写操作"""
+        self._validate_common()
+        # 写操作额外检查
+        if self.target_tenant_id <= 0:
+            raise ValueError(f"Invalid target_tenant_id for write: {self.target_tenant_id}")
+
+    def _validate_common(self) -> None:
+        """通用验证"""
+        if self.user_id <= 0:
+            raise ValueError(f"Invalid user_id: {self.user_id}")
+        if not self.role or self.role not in ("admin", "platform_admin", "tenant_admin"):
+            raise ValueError(f"Invalid role: {self.role}")
+        if self.target_tenant_id <= 0:
+            raise ValueError(f"Invalid target_tenant_id: {self.target_tenant_id}")
+
+    @classmethod
+    def from_actor_and_target(
+        cls,
+        actor: dict,
+        target_tenant_id: int,
+        request_id: str | None = None,
+    ) -> ActorScope:
+        """
+        工厂方法：从 actor dict 和目标租户构造 ActorScope。
+
+        Args:
+            actor: 当前用户信息字典（包含 id, role, tenant_id）
+            target_tenant_id: 目标租户 ID
+            request_id: 请求 ID（用于审计追踪）
+
+        Returns:
+            构造好的 ActorScope 对象
+
+        Raises:
+            ValueError: 如果 actor 信息无效
+        """
+        user_id = actor.get("id")
+        role = actor.get("role")
+        actor_tenant_id = actor.get("tenant_id")
+
+        # 基础验证
+        if not user_id or user_id <= 0:
+            raise ValueError(f"Invalid actor user_id: {user_id}")
+        if not role:
+            raise ValueError("Actor role is required")
+
+        is_cross_tenant = actor_tenant_id is not None and target_tenant_id != actor_tenant_id
+
+        return cls(
+            user_id=user_id,
+            role=role,
+            actor_tenant_id=actor_tenant_id,
+            target_tenant_id=target_tenant_id,
+            is_cross_tenant=is_cross_tenant,
+            request_id=request_id,
+        )
+
+
+def resolve_authorized_target_tenant(
+    actor: dict,
+    requested_tenant_id: int | None,
+    enforce_boundary: bool = True,
+) -> tuple[int | None, str | None]:
+    """
+    解析并验证授权的目标租户 ID。
+
+    Issue #2327: 建立统一、fail-closed 的 API Key actor/target tenant 授权模型。
+
+    授权规则：
+    1. tenant_admin:
+       - 强制租户边界：忽略 requested_tenant_id，始终使用 actor.tenant_id
+       - 如果 requested_tenant_id 与 actor.tenant_id 不同，返回 403 错误消息
+       - 如果 actor.tenant_id 为 None，返回错误（tenant_admin 必须有 tenant）
+
+    2. platform_admin / legacy admin:
+       - 必须显式提供 requested_tenant_id（fail closed）
+       - 验证 requested_tenant_id 为正整数
+       - 返回 requested_tenant_id 用于后续操作
+
+    3. 其他角色：
+       - 返回错误（无权限）
+
+    Args:
+        actor: 当前用户信息字典（包含 id, role, tenant_id）
+        requested_tenant_id: 请求中指定的 tenant_id（可能为 None）
+        enforce_boundary: 是否强制租户边界（tenant_admin 必须匹配）
+
+    Returns:
+        (target_tenant_id, error_message):
+        - 成功：(目标租户 ID, None)
+        - 失败：(None, 错误消息)
+    """
+    role = actor.get("role")
+
+    # 验证角色是否为管理员
+    if role not in ("admin", "platform_admin", "tenant_admin"):
+        return None, "Admin access required"
+
+    # tenant_admin: 强制租户边界
+    if role == "tenant_admin":
+        actor_tenant_id = actor.get("tenant_id")
+
+        # tenant_admin 必须有 tenant_id
+        if actor_tenant_id is None:
+            return None, "Tenant admin must have tenant_id"
+
+        # 如果客户端提供了 tenant_id，检查是否匹配
+        if requested_tenant_id is not None:
+            if enforce_boundary and requested_tenant_id != actor_tenant_id:
+                return None, "Cross-tenant access denied"
+
+        # 始终使用 actor 的 tenant_id
+        return actor_tenant_id, None
+
+    # platform_admin / legacy admin: 必须显式提供 tenant_id
+    # Issue #2327: fail closed - 不允许无边界平台权限
+    if requested_tenant_id is None:
+        return None, "Target tenant_id is required"
+
+    # 验证 tenant_id 为正整数
+    try:
+        requested_tenant_id = int(requested_tenant_id)
+        if requested_tenant_id <= 0:
+            return None, "Invalid tenant_id"
+    except (TypeError, ValueError):
+        return None, "Invalid tenant_id"
+
+    return requested_tenant_id, None
+
+
+def require_actor_scope(require_write: bool = True):
+    """
+    装饰器：验证 Service 方法接收有效的 ActorScope。
+
+    Issue #2327: Service/Repository 层写操作必须接收已经验证的 actor scope。
+
+    Args:
+        require_write: 是否要求写权限验证（默认 True）
+
+    Usage:
+        @require_actor_scope()
+        def store_api_key(self, scope: ActorScope, ...):
+            ...
+
+        @require_actor_scope(require_write=False)
+        def list_api_keys(self, scope: ActorScope):
+            ...
+
+    强制机制：
+    - 类型检查：确保参数是 ActorScope 类型
+    - 自动验证：调用方法前自动执行验证
+    - 清晰错误：提供明确的错误消息
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, scope: ActorScope, *args, **kwargs):
+            if not isinstance(scope, ActorScope):
+                raise TypeError(
+                    f"Service method {func.__name__} must receive ActorScope, "
+                    f"got {type(scope).__name__}"
+                )
+
+            # 执行验证
+            if require_write:
+                scope.validate_for_write()
+            else:
+                scope.validate_for_read()
+
+            return func(self, scope, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def api_key_admin_required(f=None):
+    """
+    装饰器：API Key 管理专用授权。
+
+    Issue #2327: 建立统一、fail-closed 的 API Key actor/target tenant 授权模型。
+
+    封装：
+    1. 身份认证（复用 _extract_session_token）
+    2. 角色检查（admin/platform_admin/tenant_admin）
+    3. tenant scope 授权（调用 resolve_authorized_target_tenant）
+    4. 设置 g.target_tenant_id 和 g.actor_scope
+    5. 跨租户审计（platform admin 场景）
+
+    错误响应：
+    - 401: 未认证
+    - 403: 无权限或跨租户访问被拒绝
+    - 400: tenant_id 缺失或无效
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # 1. 身份认证（复用 admin_required 的逻辑）
+            token = _extract_session_token()
+            if not token:
+                return jsonify({"error": "Authentication required"}), 401
+
+            user = _load_user_from_token(token)
+            if not user:
+                return jsonify({"error": "Invalid or expired session"}), 401
+
+            user_role = user.get("role")
+            if user_role not in ("admin", "platform_admin", "tenant_admin"):
+                return jsonify({"error": "Admin access required"}), 403
+
+            # 2. 提取请求中的 tenant_id
+            # Issue #2327: 请求 tenant_id 是"目标选择"而非"授权凭据"
+            requested_tenant_id = None
+
+            # 从 URL path 参数提取（如 /api/api-keys/<key_id> 不需要 tenant_id in path）
+            # 从 request body 提取（POST/PUT）
+            if request.is_json:
+                try:
+                    body_tenant_id = request.json.get("tenant_id")
+                    if body_tenant_id is not None:
+                        requested_tenant_id = int(body_tenant_id)
+                except (TypeError, ValueError):
+                    return jsonify({"error": "Invalid tenant_id in request body"}), 400
+
+            # 从 query parameter 提取（GET）
+            if requested_tenant_id is None:
+                query_tenant_id = request.args.get("tenant_id", type=int)
+                if query_tenant_id is not None:
+                    requested_tenant_id = query_tenant_id
+
+            # 3. tenant scope 授权
+            target_tenant_id, error_message = resolve_authorized_target_tenant(
+                user, requested_tenant_id, enforce_boundary=True
+            )
+
+            if error_message:
+                # 根据错误类型返回不同的状态码
+                if "required" in error_message.lower():
+                    return jsonify({"error": error_message}), 400
+                elif "denied" in error_message.lower():
+                    return jsonify({"error": error_message}), 403
+                else:
+                    return jsonify({"error": error_message}), 400
+
+            # 4. 创建 ActorScope 并设置到 Flask g
+            # assert target_tenant_id is not None: resolve_authorized_target_tenant 在错误时会提前返回
+            assert (
+                target_tenant_id is not None
+            ), "target_tenant_id must not be None after authorization"
+            request_id = str(uuid.uuid4())
+            actor_scope = ActorScope.from_actor_and_target(
+                actor=user,
+                target_tenant_id=target_tenant_id,
+                request_id=request_id,
+            )
+
+            g.user = user
+            g.user_id = user.get("id")
+            g.user_role = user_role
+            g.tenant_id = user.get("tenant_id")
+            g.target_tenant_id = target_tenant_id
+            g.actor_scope = actor_scope
+
+            # 5. 跨租户审计（platform admin 场景）
+            if actor_scope.is_cross_tenant:
+                try:
+                    _log_cross_tenant_operation(
+                        actor_user_id=actor_scope.user_id,
+                        actor_tenant_id=actor_scope.actor_tenant_id,
+                        target_tenant_id=actor_scope.target_tenant_id,
+                        action=f"{request.method} {request.path}",
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to log cross-tenant operation: {e}")
+                    # 不因审计失败而阻止业务操作
+
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    if f is not None:
+        return decorator(f)
+    return decorator

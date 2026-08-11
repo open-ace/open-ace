@@ -826,7 +826,7 @@ async def _run_server(port: int) -> None:
         output_task.cancel()
         try:
             await asyncio.wait_for(output_task, timeout=OUTPUT_TASK_SHUTDOWN_TIMEOUT)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "Output relay task did not finish within %.1fs; "
                 "leaving cleanup to the agent-layer proc.kill() watchdog",

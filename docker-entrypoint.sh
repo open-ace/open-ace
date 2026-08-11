@@ -1095,13 +1095,13 @@ def create_system_user(username):
             print(f'  Home directory ownership correct: {user_home}')
 
     # Sync SSH keys if mounted (Issue #1122)
-    # 【安全加固 Issue #2182】使用独立的 Python 脚本实现安全同步
-    sync_ssh_keys_safe(username)
+    # 【安全加固 Issue #2182 + #2328】使用独立的 Python 脚本实现安全同步（fail-closed）
+    sync_ssh_keys_secure(username)
 
 
-def sync_ssh_keys_safe(username):
+def sync_ssh_keys_secure(username):
     \"\"\"
-    安全同步 SSH 密钥（Issue #2182）
+    安全同步 SSH 密钥（Issue #2182 + #2328 - fail-closed）
 
     使用独立的 Python 脚本 /usr/local/bin/openace-ssh-sync 实现：
     - 白名单机制：默认只允许 known_hosts 等安全文件
@@ -1111,108 +1111,150 @@ def sync_ssh_keys_safe(username):
     - Owner/Group 验证：确保同步文件的 owner 正确
     - 审计日志：记录所有同步操作
     - 升级检测：检测并处理旧版本复制的私钥
+
+    FAIL-CLOSED: 当脚本不可用或失败时，不执行任何同步，返回失败状态。
+    Open ACE 不会将 root 私钥传播给工作区用户。
+
+    Returns:
+        0: Success
+        1: Failure (script missing/failed/timed out/exception)
     \"\"\"
     root_ssh = '/root/.ssh'
     user_ssh = f'/home/{username}/.ssh'
 
     # Skip if SSH keys not mounted
     if not os.path.isdir(root_ssh):
-        return
+        return 0
 
-    # 检查是否有新的安全同步脚本
     ssh_sync_script = '/usr/local/bin/openace-ssh-sync'
 
-    if os.path.isfile(ssh_sync_script) and os.access(ssh_sync_script, os.X_OK):
-        # 使用新的安全同步脚本
-        print(f'  Using secure SSH key sync for {username}')
+    # Validate script exists and is executable
+    if not os.path.isfile(ssh_sync_script):
+        _log_sync_failure(username, "script_missing",
+                          f"{ssh_sync_script} not found")
+        return 1
 
-        try:
-            # 检测 legacy 私钥（如果配置）
-            upgrade_action = os.environ.get('OPENACE_SSH_UPGRADE_ACTION', 'backup')
+    if not os.access(ssh_sync_script, os.X_OK):
+        _log_sync_failure(username, "script_not_executable",
+                          f"{ssh_sync_script} not executable")
+        return 1
 
-            # 调用 Python 脚本进行安全同步
-            result = subprocess.run(
-                [
-                    ssh_sync_script,
-                    '--user', username,
-                    '--upgrade-action', upgrade_action,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-
-            if result.returncode == 0:
-                print(f'  SSH keys securely synced to {user_ssh}')
-                if result.stdout:
-                    print(f'    {result.stdout.strip()}')
-            else:
-                print(f'  WARNING: SSH key sync failed: {result.stderr.strip()}')
-                # 回退到旧的同步逻辑（保持兼容性）
-                _sync_ssh_keys_legacy(username)
-
-        except subprocess.TimeoutExpired:
-            print(f'  WARNING: SSH key sync timed out')
-            # 回退到旧的同步逻辑（保持兼容性）
-            _sync_ssh_keys_legacy(username)
-        except Exception as e:
-            print(f'  WARNING: SSH key sync error: {e}')
-            # 回退到旧的同步逻辑（保持兼容性）
-            _sync_ssh_keys_legacy(username)
-    else:
-        # 脚本不存在，使用旧的同步逻辑（向后兼容）
-        print(f'  WARNING: Secure SSH sync script not found, using legacy sync')
-        _sync_ssh_keys_legacy(username)
-
-
-def _sync_ssh_keys_legacy(username):
-    \"\"\"
-    旧的 SSH 密钥同步逻辑（向后兼容）
-
-    注意：这个函数存在安全问题，仅在新脚本不可用时使用
-    Issue #2182 标记为待移除
-    \"\"\"
-    import shutil
-    import stat
-
-    root_ssh = '/root/.ssh'
-    user_ssh = f'/home/{username}/.ssh'
-
-    # Skip if SSH keys not mounted
-    if not os.path.isdir(root_ssh):
-        return
-
-    # Check if root_ssh has any files
+    # Execute secure sync
     try:
-        files = os.listdir(root_ssh)
-        if not files:
-            return
-    except OSError:
-        return
+        upgrade_action = os.environ.get('OPENACE_SSH_UPGRADE_ACTION', 'backup')
+        timeout_seconds = int(os.environ.get('OPENACE_SSH_SYNC_TIMEOUT_SECONDS', '30'))
 
-    # 【安全加固 Issue #2182】警告：以下逻辑存在安全风险
-    # 仅在新脚本不可用时使用，应该在后续版本移除
-    print(f'  WARNING: Using legacy SSH key sync (insecure)')
+        result = subprocess.run(
+            [
+                ssh_sync_script,
+                '--user', username,
+                '--upgrade-action', upgrade_action,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds
+        )
 
-    # Create user's .ssh directory
-    os.makedirs(user_ssh, exist_ok=True)
+        if result.returncode == 0:
+            print(f'  SSH keys securely synced to {user_ssh}')
+            if result.stdout:
+                print(f'    {result.stdout.strip()}')
+            return 0
+        else:
+            _log_sync_failure(username, "script_failed", result.stderr.strip())
+            return 1
 
-    # Copy SSH files
-    for filename in files:
-        src = os.path.join(root_ssh, filename)
-        dst = os.path.join(user_ssh, filename)
+    except subprocess.TimeoutExpired:
+        _log_sync_failure(username, "script_timeout",
+                          f"Script execution exceeded {timeout_seconds} seconds")
+        return 1
 
-        if os.path.isfile(src):
-            shutil.copy2(src, dst)
-            # 私钥文件：600，其他：644
-            if filename.startswith('id_') and not filename.endswith('.pub'):
-                os.chmod(dst, stat.S_IRUSR)
-            else:
-                os.chmod(dst, stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+    except Exception as e:
+        _log_sync_failure(username, "script_exception", str(e))
+        return 1
 
-    # Set ownership
-    subprocess.run(['chown', '-R', f'{username}:{username}', user_ssh], capture_output=True)
-    print(f'  SSH keys synced to {user_ssh} (legacy mode)')
+
+def _log_sync_failure(username, reason, details):
+    \"\"\"Log sync failure to multiple channels for operational visibility\"\"\"
+    import json
+    import sys
+    from datetime import datetime
+
+    timestamp = datetime.now().isoformat()
+
+    # 1. Structured JSON log (machine-readable)
+    log_entry = {
+        "timestamp": timestamp,
+        "event": "SSH_SYNC_FAILURE",
+        "user": username,
+        "reason": reason,
+        "details": details,
+        "severity": "ERROR",
+        "remediation": _get_remediation_hint(reason)
+    }
+
+    try:
+        log_file = "/var/log/openace/ssh-sync-failure.json"
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
+        with open(log_file, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+    except Exception:
+        # Fallback to stderr if file logging fails
+        pass
+
+    # 2. Human-readable warning file (for operators)
+    try:
+        warning_file = "/var/log/openace/ssh-sync-failure.warning"
+        os.makedirs(os.path.dirname(warning_file), exist_ok=True)
+
+        with open(warning_file, "w") as f:
+            f.write(f"[{timestamp}] SSH Sync Failure\n")
+            f.write(f"User: {username}\n")
+            f.write(f"Reason: {reason}\n")
+            f.write(f"Details: {details}\n")
+            remediation = _get_remediation_hint(reason)
+            f.write(f"\nRemediation:\n{remediation}\n")
+    except Exception:
+        # Fallback to stderr if warning file creation fails
+        pass
+
+    # 3. Console output
+    print(f"  ERROR: SSH key sync failed for {username}", file=sys.stderr)
+    print(f"  Reason: {reason}", file=sys.stderr)
+    print(f"  Details: {details}", file=sys.stderr)
+    print(f"  See /var/log/openace/ssh-sync-failure.warning for details", file=sys.stderr)
+
+
+def _get_remediation_hint(reason):
+    \"\"\"Return remediation guidance based on failure reason\"\"\"
+    hints = {
+        "script_missing": (
+            "Ensure /usr/local/bin/openace-ssh-sync is installed.\n"
+            "For Docker: ensure the script is COPYed in Dockerfile.\n"
+            "For package installation: ensure the package installs the script."
+        ),
+        "script_not_executable": (
+            "Run: chmod +x /usr/local/bin/openace-ssh-sync"
+        ),
+        "script_failed": (
+            "Check /var/log/openace/ssh-sync.log for details.\n"
+            "Common causes: permission errors, invalid whitelist config."
+        ),
+        "script_timeout": (
+            "Script took too long. Check for:\n"
+            "- Large number of files in /root/.ssh\n"
+            "- Slow filesystem\n"
+            "- Increase timeout via OPENACE_SSH_SYNC_TIMEOUT_SECONDS"
+        ),
+        "script_exception": (
+            "Unexpected error. Check:\n"
+            "- Python version >= 3.10\n"
+            "- PyYAML package installed\n"
+            "- /var/log/openace/ directory writable"
+        )
+    }
+    return hints.get(reason, "Check logs for details.")
 
 try:
     conn = psycopg2.connect(os.environ['DATABASE_URL'])

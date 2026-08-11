@@ -217,7 +217,7 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple[Any, Any] | Non
     machine = agent_mgr.get_machine(machine_id)
     if machine and machine.get("created_at"):
         try:
-            from datetime import datetime, timezone
+            from datetime import datetime
 
             created_at = machine["created_at"]
             if isinstance(created_at, str):
@@ -3875,15 +3875,13 @@ def remote_vscode_proxy(vscode_id, path=""):
     headers = {k: v for k, v in request.headers if k.lower() != "host"}
 
     # Add code-server password auth if available.
-    # code-server's password auth is COOKIE-based only: its `authenticated`
-    # middleware checks the session cookie and ignores HTTP Basic Auth. Log in
-    # once with cs_password and reuse the session cookie for proxied requests
-    # (cached in the vscode session info; shared with the WS bridge).
-    from app.modules.workspace.vscode_proxy import ensure_cs_cookie
+    # code-server accepts HTTP Basic Auth with format: base64(":password")
+    cs_password = info.get("cs_password", "")
+    if cs_password:
+        import base64 as _b64
 
-    cs_cookie = ensure_cs_cookie(info, original_http_url, vscode_id)
-    if cs_cookie:
-        headers["Cookie"] = cs_cookie
+        auth_value = _b64.b64encode(f":{cs_password}".encode()).decode()
+        headers["Authorization"] = f"Basic {auth_value}"
 
     # Get request body
     body = request.get_data()

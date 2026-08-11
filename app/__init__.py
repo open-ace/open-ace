@@ -583,6 +583,7 @@ def create_app(config=None):
             check_database_connection,
             check_encryption_registry,
             check_initialization_status,
+            check_ssh_sync_failure,
             check_workspace_directory,
             run_check_with_timeout,
         )
@@ -600,6 +601,7 @@ def create_app(config=None):
             "encryption_keys": {"status": "unknown"},
             "init_status": {"status": "unknown"},
             "security_mode": {"status": "unknown"},
+            "ssh_sync": {"status": "unknown"},
         }
 
         status_code = 200
@@ -727,6 +729,14 @@ def create_app(config=None):
         init_result = check_initialization_status()
         checks["init_status"] = init_result
         if init_result.get("status") != "ok":
+            status_code = 503
+
+        # Check for SSH sync failure (Issue #2328)
+        # If secure SSH sync fails, the container should report not ready
+        # to ensure operational visibility of the failure
+        ssh_sync_result = check_ssh_sync_failure()
+        checks["ssh_sync"] = ssh_sync_result
+        if ssh_sync_result.get("status") != "ok":
             status_code = 503
 
         # Build response

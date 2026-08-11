@@ -209,8 +209,8 @@ class SessionMessage:
 def _format_dt(dt):
     """Format datetime as ISO 8601 string.
 
-    - Timezone-aware datetimes preserve their timezone info (e.g., +00:00 for UTC).
-    - Naive datetimes get +00:00 appended because this codebase stores UTC values
+    - Timezone-aware datetimes preserve their timezone info (e.g., +00:00 for timezone.utc).
+    - Naive datetimes get +00:00 appended because this codebase stores timezone.utc values
       as naive datetimes (via datetime.now(timezone.utc).replace(tzinfo=None)).
     """
     if dt is None:
@@ -1222,7 +1222,7 @@ class SessionManager:
 
         The cursor round-trips through the HTTP layer, so the timestamp must be
         a stable string that, when fed back into ``WHERE timestamp < ?``, matches
-        stored rows exactly. We therefore return the naive-UTC ISO form (no
+        stored rows exactly. We therefore return the naive-timezone.utc ISO form (no
         timezone suffix) that ``add_message`` writes, rather than the
         display-formatted value produced by ``_format_dt`` (which appends
         ``+00:00`` and would break lexicographic comparison against stored
@@ -1561,7 +1561,7 @@ class SessionManager:
                 increment_session_usage (avoids double-count); non-autonomous
                 callers (remote, session_sync) keep True as they rely on this.
             timestamp: Optional source timestamp. When omitted, store the current
-                UTC time. Historical sync/import paths should pass the original
+                timezone.utc time. Historical sync/import paths should pass the original
                 message timestamp so transcript order remains stable.
 
         Returns:
