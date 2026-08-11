@@ -834,14 +834,19 @@ class RemoteSessionManager:
             return False
 
         # Store user message in session
+        session = self._session_manager.get_session(session_id)
+        tenant_id = getattr(session, "tenant_id", None) if session else None
         stored = self._session_manager.append_transcript_message(
             session_id=session_id,
             role="user",
             content=content,
             source="remote_live",
+            tenant_id=tenant_id,
         )
         if getattr(stored, "_was_inserted", False):
-            self._session_manager.increment_session_usage(session_id, message_delta=1)
+            self._session_manager.increment_session_usage(
+                session_id, message_delta=1, tenant_id=tenant_id
+            )
         self._save_to_daily_messages(session_id, "user", content)
 
         command = {
@@ -1274,14 +1279,19 @@ class RemoteSessionManager:
             if is_complete:
                 self._flush_assistant_buffer(session_id)
         elif stream == "system" and is_complete and data.strip():
+            session = self._session_manager.get_session(session_id)
+            tenant_id = getattr(session, "tenant_id", None) if session else None
             stored = self._session_manager.append_transcript_message(
                 session_id=session_id,
                 role="system",
                 content=data,
                 source="remote_live",
+                tenant_id=tenant_id,
             )
             if getattr(stored, "_was_inserted", False):
-                self._session_manager.increment_session_usage(session_id, message_delta=1)
+                self._session_manager.increment_session_usage(
+                    session_id, message_delta=1, tenant_id=tenant_id
+                )
             self._save_to_daily_messages(session_id, "system", data)
 
     def _accumulate_assistant_text(self, session_id: str, data: str) -> None:
@@ -1573,6 +1583,7 @@ class RemoteSessionManager:
             total_tokens_delta=total,
             total_input_delta=input_tokens,
             total_output_delta=output_tokens,
+            tenant_id=session.tenant_id if session else None,
         )
 
         # Record the durable usage event with model/provider attribution
