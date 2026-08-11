@@ -2,6 +2,7 @@
 
 Handles gevent initialization for tests that import scheduler_worker.
 """
+
 from __future__ import annotations
 
 import os
