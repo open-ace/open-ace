@@ -114,15 +114,29 @@ def _required_contexts(gh, pr_number: int, base_branch: str) -> set[str] | None:
 
 
 def _blocking_pending(gh, checks: list[dict], pr_number: int, base_branch: str) -> list[dict]:
-    """Pending checks that actually gate the merge (issue #2428).
+    """Pending checks to defer the merge for (issue #2428).
 
-    The required/optional split still applies to *pending*: a slow non-required
-    job (``Critical PR E2E``, ``Full E2E``) must not defer the merge every
-    scheduler cycle. (The failure-targeting path dropped its required-filter in
-    #27 — aggregate gates made it wrong — but pending is different: a
-    non-required pending check never blocks the merge, so waiting on one is pure
-    latency.) ``ReadinessService._partition_checks`` documents the same rule.
-    Degrades to "all pending block" when the required set cannot be observed.
+    Only a pending REQUIRED check defers: a slow non-required job
+    (``Critical PR E2E``, ``Full E2E``) must not re-defer the merge every
+    scheduler cycle. ``ReadinessService._partition_checks`` documents the same
+    rule. Degrades to "all pending block" when the required set cannot be
+    observed.
+
+    Unlike the failure path — which dropped its required-filter in #27 because
+    aggregate gates made ``failing ∩ required`` return only the unrepairable
+    gate — the pending filter is kept. Dropping it would re-defer every cycle on
+    slow non-required jobs, and a pending required check is usually observable:
+    an aggregate gate (e.g. ``PR Gate``) reports its own status as pending while
+    its underlying jobs run, so the filter normally catches the wait.
+
+    Known gap (pre-existing, rare): under an aggregate gate, a pending
+    *underlying* job whose name is not in the literal required set (e.g.
+    ``test (3.10)`` while ``required == {'PR Gate'}``) is classified as
+    non-blocking. In the narrow window before the gate's own pending status
+    propagates, the merge can be attempted, rejected, and paused at the policy
+    branch instead of deferred. The gate's pending status prevents this in the
+    common case; left for a follow-up rather than expanding this change (a full
+    fix trades off over-deferring on slow non-required jobs).
     """
     pending = [c for c in checks if c.get("bucket") == "pending"]
     if not pending:
