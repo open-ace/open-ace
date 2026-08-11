@@ -8,12 +8,29 @@ Issue #2184: Multi-provider usage recording with unified sink.
 from __future__ import annotations
 
 import logging
+import time
+from collections import defaultdict
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from app.modules.workspace.usage_evidence import UsageEvidence
 
 logger = logging.getLogger(__name__)
+
+# Module-level error dedup cache for MessageRecordingSink exceptions
+# Same error type+message within 5 minutes is logged only once
+_error_log_cache: dict[str, float] = defaultdict(float)
+ERROR_LOG_INTERVAL = 300  # 5 minutes
+
+
+def _should_log_error(error_key: str) -> bool:
+    """Check if error should be logged (dedup within 5 minutes)."""
+    now = time.time()
+    last_time = _error_log_cache.get(error_key, 0)
+    if now - last_time >= ERROR_LOG_INTERVAL:
+        _error_log_cache[error_key] = now
+        return True
+    return False
 
 
 class UsageSink(Protocol):
@@ -305,7 +322,19 @@ class MessageRecordingSink:
 
             return True
         except Exception as e:
-            logger.debug("MessageRecordingSink failed (non-critical): %s", e)
+            # Log error with dedup to avoid log storm (same error logged once per 5 min)
+            error_key = f"{type(e).__name__}:{str(e)[:100]}"
+            if _should_log_error(error_key):
+                logger.error(
+                    "MessageRecordingSink failed: %s",
+                    e,
+                    extra={
+                        "session_id": evidence.session_id,
+                        "tenant_id": evidence.tenant_id,
+                        "error_type": type(e).__name__,
+                    },
+                    exc_info=True,
+                )
             return True  # Non-critical
 
 
@@ -425,8 +454,19 @@ def _record_messages_internal(
                         )
                         if getattr(stored, "_was_inserted", False):
                             message_delta += 1
-    except Exception:
-        logger.debug("Failed to record messages", exc_info=True)
+    except Exception as e:
+        # Log error with dedup (session_id context from caller)
+        error_key = f"record_messages:{type(e).__name__}:{str(e)[:100]}"
+        if _should_log_error(error_key):
+            logger.error(
+                "Failed to record messages: %s",
+                e,
+                extra={
+                    "session_id": session_id,
+                    "error_type": type(e).__name__,
+                },
+                exc_info=True,
+            )
 
     return message_delta
 
