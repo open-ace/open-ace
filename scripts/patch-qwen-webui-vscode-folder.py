@@ -72,7 +72,10 @@ def main() -> int:
             return 1
         data = data.replace(OLD_FOLDER_ENCODE, NEW_FOLDER_ENCODE)
         patched = True
-        print("[patch-qwen-webui-vscode-folder] patched folder=${encodeURIComponent(n)}", file=sys.stderr)
+        print(
+            "[patch-qwen-webui-vscode-folder] patched folder=${encodeURIComponent(n)}",
+            file=sys.stderr,
+        )
 
     # Try pattern 2: folder=${encodeURIComponent(e)
     if OLD_FOLDER_TEMPLATE in data:
@@ -84,12 +87,17 @@ def main() -> int:
             return 1
         data = data.replace(OLD_FOLDER_TEMPLATE, NEW_FOLDER_TEMPLATE)
         patched = True
-        print("[patch-qwen-webui-vscode-folder] patched folder=${encodeURIComponent(e)}", file=sys.stderr)
+        print(
+            "[patch-qwen-webui-vscode-folder] patched folder=${encodeURIComponent(e)}",
+            file=sys.stderr,
+        )
 
     if not patched:
         # Check if already patched
         if NEW_FOLDER_ENCODE in data or NEW_FOLDER_TEMPLATE in data:
-            print("[patch-qwen-webui-vscode-folder] bundle already patched, skipping", file=sys.stderr)
+            print(
+                "[patch-qwen-webui-vscode-folder] bundle already patched, skipping", file=sys.stderr
+            )
             return 0
         print(
             "[patch-qwen-webui-vscode-folder] no folder pattern found — version drift?",
@@ -112,7 +120,10 @@ def main() -> int:
         script_src = f'src="/assets/{basename}"'
         busted_src = f'src="/assets/{basename}?{CACHE_BUST}"'
         if busted_src in html:
-            print("[patch-qwen-webui-vscode-folder] index.html cache-bust already applied", file=sys.stderr)
+            print(
+                "[patch-qwen-webui-vscode-folder] index.html cache-bust already applied",
+                file=sys.stderr,
+            )
         elif script_src in html:
             html = html.replace(script_src, busted_src)
             with open(INDEX_HTML, "w", encoding="utf-8") as f:
@@ -127,10 +138,12 @@ def main() -> int:
                 html = html[:idx] + busted_src + html[end:]
                 with open(INDEX_HTML, "w", encoding="utf-8") as f:
                     f.write(html)
-                print("[patch-qwen-webui-vscode-folder] index.html cache-bust bumped", file=sys.stderr)
+                print(
+                    "[patch-qwen-webui-vscode-folder] index.html cache-bust bumped", file=sys.stderr
+                )
             else:
                 print(
-                    f"[patch-qwen-webui-vscode-folder] script src not found in index.html",
+                    "[patch-qwen-webui-vscode-folder] script src not found in index.html",
                     file=sys.stderr,
                 )
     except OSError as exc:
