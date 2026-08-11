@@ -593,7 +593,7 @@ def create_app(config=None):
             load_pilot_metadata,
         )
 
-        checks: dict[str, dict[str, str | bool | None]] = {
+        checks: dict[str, dict[str, str | bool | None | list]] = {
             "database": {"status": "unknown"},
             "schema_version": {"status": "unknown", "compatible": False},
             "config_dir": {"status": "unknown"},
