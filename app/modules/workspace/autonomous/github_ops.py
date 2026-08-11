@@ -1437,10 +1437,10 @@ class GitHubOps:
         github.com through a failover proxy) resolved to "source blind".
 
         That is not a harmless degradation: a blind probe makes
-        ``get_branch_protection`` raise, ``_blocking_failures`` then treats
-        *every* failing check as blocking, and the workflow burns its bounded
-        CI-repair budget on checks that never gated the merge — the precise
-        failure this issue exists to remove. So transient errors are retried
+        ``get_branch_protection`` raise, ``_blocking_pending`` then treats
+        *every* pending check as blocking, and a slow non-required job re-defers
+        the merge every scheduler cycle — the precise failure this issue exists
+        to remove. So transient errors are retried
         here on the same schedule ``_run_gh`` uses for its checked calls.
         """
         result = self._run_gh(args, repo_scoped=False, check=False)
@@ -1504,7 +1504,7 @@ class GitHubOps:
         an org-level ruleset stacked on repo-level ones can push the
         ``required_status_checks`` rule past the first page. Without
         ``--paginate`` that reads as "no required checks", which makes
-        ``_blocking_failures`` repair every failing check. Verified against the
+        ``_blocking_pending`` treat every pending check as blocking. Verified against the
         live API: ``?per_page=1`` on this repo returns a ``Link: rel="next"``
         header, so the pagination is real and not hypothetical.
         """
@@ -1557,10 +1557,12 @@ class GitHubOps:
         other not) does NOT raise, so the required set can *understate*. That is
         deliberate. GitHub is the final gate — understating produces a rejected
         merge attempt and a visible policy pause, whereas raising makes
-        ``_blocking_failures`` treat every failing check as blocking and burn
-        the bounded CI-repair budget, which is the exact #2428 failure this
-        method exists to remove. Over-reporting blindness is the more damaging
-        error here, not the safer one.
+        ``_blocking_pending`` treat every pending check as blocking and re-defer
+        the merge each cycle on slow non-required jobs, which is the
+        #2428-shaped failure this method exists to remove (the failure-targeting
+        filter was removed in #27, but the pending split still depends on this
+        set). Over-reporting blindness is the more damaging error here, not the
+        safer one.
         """
         repo = self.get_repo_name()
         contexts, classic_err = self._classic_required_contexts(repo, branch)

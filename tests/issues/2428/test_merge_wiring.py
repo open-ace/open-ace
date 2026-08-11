@@ -1,26 +1,23 @@
-"""Issue #2428: pin the required/optional split to the live merge path.
+"""Merge-phase CI-repair targeting (#2428 → #27).
 
-``test_blocking_failures_filter.py`` imports ``_blocking_failures`` directly and
-proves the helper's logic. That says nothing about whether ``merge.handle``
-actually calls it — and the bug this issue exists to fix was precisely that:
-``ReadinessService.collect_actionable_ci_failures`` already implemented the
-split correctly, and nothing ever called it, so the live merge path repaired
-every failing check for months.
+CI-repair targets EVERY failing check, not just the required ones. The
+``#2428`` required-filter (``failing ∩ required``) was removed because
+``#2455`` made the repo's required check an aggregate gate (``PR Gate``) whose
+own failure is only a summary of its underlying jobs — the filter then returned
+just the (unrepairable) gate, or nothing on a propagation lag, and workflows
+stalled at the merge-policy pause instead of repairing the real failures.
 
-Shipping ``_blocking_failures`` with only direct-import coverage would recreate
-that exact exposure. A review of PR #2430 confirmed it: reverting BOTH call
-sites in ``phases/merge.py`` back to
+The #2428 concern — spending the bounded repair budget on checks that do not
+gate the merge — is retained by the ``mergeable_state == "unstable"``
+short-circuit in ``handle``: a PR that is mergeable despite failing non-required
+checks is merged directly, so CI-repair is only reached when a required check
+is actually failing (every failing check at that point is a real merge-gating
+failure). These tests drive ``merge.handle`` end to end to pin that contract.
 
-    failed = [c for c in checks if c.get("bucket") == "fail"]
-
-left 240 tests passing. These tests drive ``merge.handle`` end to end so that
-mutation fails.
-
-The concrete production incident: workflow ``2d0c317d`` (issue #2328, PR #2425)
-burned all five CI-repair rounds and died reporting ``test (3.13)`` — a check
-``main`` does not require. Required on this repo is exactly
-``lint``, ``test (3.10/3.11/3.12)``, ``build`` (verified against the live
-ruleset API).
+History: workflow ``2d0c317d`` (issue #2328, PR #2425) once burned all five
+CI-repair rounds on ``test (3.13)`` — the original #2428 incident. That exact
+shape (only a non-required check red, PR mergeable) is now caught by the
+unstable short-circuit rather than a required-filter.
 """
 
 from __future__ import annotations
@@ -35,7 +32,9 @@ from app.modules.workspace.autonomous.phase_contract import WorkflowContext
 from app.modules.workspace.autonomous.phases import merge as merge_phase
 
 # The live required set for open-ace/open-ace main, from
-# `gh api repos/open-ace/open-ace/rules/branches/main`.
+# `gh api repos/open-ace/open-ace/rules/branches/main`. Still used by the
+# pending-check path (_blocking_pending), which filters pending checks the same
+# way #2428 filtered failures.
 REQUIRED = ["lint", "test (3.10)", "test (3.11)", "test (3.12)", "build"]
 
 
@@ -49,7 +48,7 @@ def _ctx(workflow: dict) -> WorkflowContext:
     )
 
 
-def _deps(*, checks, required=REQUIRED, merge_raises=None, protection_raises=None):
+def _deps(*, checks, required=REQUIRED, merge_raises=None):
     host = MagicMock(name="host")
     host.perform_git_cleanup.return_value = ("completed", "")
     host.validate_pre_merge_change_scope.return_value = ""
@@ -58,15 +57,11 @@ def _deps(*, checks, required=REQUIRED, merge_raises=None, protection_raises=Non
 
     gh = MagicMock(name="gh")
     # "clean" (not "unstable") so the handler enters the sync + CI-repair block;
-    # an unstable PR skips that block entirely via a pre-existing #2034 path.
+    # an unstable PR skips that block entirely via the #2034 path. Tests that
+    # need the unstable short-circuit override this below.
     gh.get_pr_merge_state.return_value = {"mergeable": True, "mergeable_state": "clean"}
     gh.get_pr_checks.return_value = checks
-    if protection_raises is not None:
-        gh.get_branch_protection.side_effect = protection_raises
-    else:
-        gh.get_branch_protection.return_value = {
-            "required_status_checks": {"contexts": list(required)}
-        }
+    gh.get_branch_protection.return_value = {"required_status_checks": {"contexts": list(required)}}
     gh.merge_pr.side_effect = merge_raises
     gh.merge_pr.return_value = None
 
@@ -100,21 +95,23 @@ def _wf(base: str | None = None) -> dict:
 # ── call site 1: the pre-merge check query ────────────────────────────────
 
 
-def test_non_required_failure_neither_repairs_nor_blocks_the_merge():
-    """The #2328 incident, as a test.
+def test_non_required_failure_on_unstable_pr_neither_repairs_nor_blocks():
+    """The wf227/#2328 shape: only a non-required check is red, PR is mergeable.
 
-    `test (3.13)` failing must not consume a CI-repair round and must not stop
-    the merge. Reverting call site 1 to the unfiltered comprehension makes
-    start_ci_repair_round fire and merge_pr never run.
+    CI-repair must not fire and the merge must proceed. #2428 held this with a
+    required-filter; #27 removed that filter (aggregate gates made it wrong), so
+    the protection now lives in the ``mergeable_state='unstable'`` short-circuit
+    in handle().
     """
     deps, host, gh = _deps(checks=[{"name": "test (3.13)", "bucket": "fail"}])
+    gh.get_pr_merge_state.return_value = {"mergeable": True, "mergeable_state": "unstable"}
     merge_phase.handle(_ctx(_wf()), deps)
     host.start_ci_repair_round.assert_not_called()
     gh.merge_pr.assert_called_once()
 
 
 def test_required_failure_still_starts_a_repair_round_and_defers():
-    """The filter must not swing the other way: a required failure still gates."""
+    """A required failure still gates the merge and starts a repair round."""
     deps, host, gh = _deps(checks=[{"name": "lint", "bucket": "fail"}])
     result = merge_phase.handle(_ctx(_wf()), deps)
     host.start_ci_repair_round.assert_called_once()
@@ -122,7 +119,12 @@ def test_required_failure_still_starts_a_repair_round_and_defers():
     assert result.outcome == "retry"
 
 
-def test_mixed_failures_repair_only_the_blocking_ones():
+def test_all_failing_checks_are_repaired():
+    """#27: CI-repair targets every failing check. The required-filter that
+    previously skipped non-required failures (test (3.13), Critical PR E2E) was
+    removed — aggregate gates make it wrong, and the unstable short-circuit
+    already keeps non-gating failures out of this path.
+    """
     deps, host, gh = _deps(
         checks=[
             {"name": "test (3.13)", "bucket": "fail"},
@@ -132,18 +134,17 @@ def test_mixed_failures_repair_only_the_blocking_ones():
     )
     merge_phase.handle(_ctx(_wf()), deps)
     host.start_ci_repair_round.assert_called_once()
-    repaired = [c.get("name") for c in host.start_ci_repair_round.call_args[0][2]]
-    assert repaired == ["build"], f"repaired non-blocking checks: {repaired}"
+    repaired = {c.get("name") for c in host.start_ci_repair_round.call_args[0][2]}
+    assert repaired == {"test (3.13)", "build", "Critical PR E2E"}
 
 
-# ── call site 2: the post-rejection refresh ───────────────────────────────
+# ── call site 2: the post-rejection refresh ─────────────────────────────
 
 
-def test_non_required_failure_on_the_rejection_refresh_does_not_repair():
-    """Call site 2 is reached only after merge_pr is rejected.
-
-    Covered separately because reverting site 1 and site 2 are independent
-    mutations — the review confirmed each survives the suite on its own.
+def test_failing_check_on_rejection_refresh_triggers_repair():
+    """Call site 2 is reached only after merge_pr is rejected. Any failing check
+    on the refresh triggers a repair round (the filter that previously skipped
+    non-required ones like postgres-test is gone).
     """
     deps, host, gh = _deps(
         checks=[],
@@ -154,7 +155,9 @@ def test_non_required_failure_on_the_rejection_refresh_does_not_repair():
         [{"name": "postgres-test", "bucket": "fail"}],  # refresh after rejection
     ]
     merge_phase.handle(_ctx(_wf()), deps)
-    host.start_ci_repair_round.assert_not_called()
+    host.start_ci_repair_round.assert_called_once()
+    repaired = [c.get("name") for c in host.start_ci_repair_round.call_args[0][2]]
+    assert repaired == ["postgres-test"]
 
 
 def test_required_failure_on_the_rejection_refresh_does_repair():
@@ -170,7 +173,7 @@ def test_required_failure_on_the_rejection_refresh_does_repair():
     host.start_ci_repair_round.assert_called_once()
 
 
-# ── the pending split (same bug class, other four lines) ──────────────────
+# ── the pending split (required-pending still defers; optional does not) ──
 
 
 def test_non_required_pending_check_does_not_defer_the_merge():
@@ -193,38 +196,15 @@ def test_required_pending_check_still_defers_the_merge():
 def test_required_checks_are_read_for_the_prs_actual_base_branch():
     """Hardcoding "main" reports the wrong required set for any other base.
 
-    Without this the mocked gh ignores the argument, so `get_branch_protection("master")`
-    survives every test in the suite.
+    get_branch_protection is now called only by the pending-check path
+    (_blocking_pending), so drive it with a pending check.
     """
-    deps, host, gh = _deps(checks=[{"name": "lint", "bucket": "fail"}])
+    deps, host, gh = _deps(checks=[{"name": "build", "bucket": "pending"}])
     merge_phase.handle(_ctx(_wf(base="release/1.x")), deps)
     assert gh.get_branch_protection.call_args[0][0] == "release/1.x"
 
 
 def test_base_branch_defaults_to_main_when_unset():
-    deps, host, gh = _deps(checks=[{"name": "lint", "bucket": "fail"}])
+    deps, host, gh = _deps(checks=[{"name": "build", "bucket": "pending"}])
     merge_phase.handle(_ctx(_wf()), deps)
     assert gh.get_branch_protection.call_args[0][0] == "main"
-
-
-# ── degradation: an unobservable required set must fail closed ────────────
-
-
-def test_undeterminable_required_set_repairs_everything():
-    """Fail closed on blindness: better a wasted repair round than a bad merge.
-
-    Note this is exactly the path that reproduces the original bug, which is why
-    github_ops retries transient probe failures before giving up.
-    """
-    deps, host, gh = _deps(
-        checks=[{"name": "test (3.13)", "bucket": "fail"}],
-        protection_raises=GitHubOpsError("could not determine required checks"),
-    )
-    merge_phase.handle(_ctx(_wf()), deps)
-    host.start_ci_repair_round.assert_called_once()
-
-
-def test_branch_with_no_required_checks_repairs_everything():
-    deps, host, gh = _deps(checks=[{"name": "test (3.13)", "bucket": "fail"}], required=[])
-    merge_phase.handle(_ctx(_wf()), deps)
-    host.start_ci_repair_round.assert_called_once()
