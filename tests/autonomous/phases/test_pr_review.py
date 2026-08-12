@@ -329,3 +329,39 @@ def test_pre_review_scope_violation_returns_failed():
     assert isinstance(result, PhaseResult)
     assert result.outcome == "failed"
     assert "scope violation" in result.structured_error.get("message", "")
+
+
+def test_ensure_branch_and_push_commits_uncommitted_changes_before_push():
+    """Uncommitted changes left after the dev phase's auto-commit (a review-fix
+    retry, a merge-main sync on a prior round) must be committed before push.
+    Otherwise the branch HEAD carries nothing new and create_pr 422s with "No
+    commits between main and branch" (#2468 fa40beec, #2477 b6348aac)."""
+    gh = _gh()
+    gh.get_current_branch.return_value = "feature-x"
+    gh.has_uncommitted_changes.return_value = True
+    host = _host()
+
+    pr_review_phase._ensure_branch_and_push(gh, host, "feature-x", "feat-sha", "main-sha")
+
+    gh.git_add_all.assert_called_once()
+    gh.git_commit.assert_called_once()
+    gh.git_push.assert_called_once()
+    # Ordering: stage the pending changes BEFORE the push.
+    kinds = [c[0] for c in gh.mock_calls if c[0] in ("git_add_all", "git_commit", "git_push")]
+    assert kinds.index("git_add_all") < kinds.index("git_push")
+    assert kinds.index("git_commit") < kinds.index("git_push")
+
+
+def test_ensure_branch_and_push_skips_commit_when_worktree_clean():
+    """A clean worktree must not get an empty safety commit (avoids noise / the
+    'nothing to commit' error path). Only stage when there are pending changes."""
+    gh = _gh()
+    gh.get_current_branch.return_value = "feature-x"
+    gh.has_uncommitted_changes.return_value = False
+    host = _host()
+
+    pr_review_phase._ensure_branch_and_push(gh, host, "feature-x", "feat-sha", "main-sha")
+
+    gh.git_add_all.assert_not_called()
+    gh.git_commit.assert_not_called()
+    gh.git_push.assert_called_once()

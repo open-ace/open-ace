@@ -98,3 +98,19 @@ def test_prompt_reinforces_json_only_at_end():
     )
     # Trailing reinforcement so glm doesn't drift into prose at the end.
     assert "ONLY" in prompt
+
+
+def test_extraction_prompt_puts_snapshot_first_in_template():
+    """When the issue has no snapshot (extraction required), glm-5 routinely
+    returns verdicts but omits the `snapshot` field — burning infra-retries
+    (cd939cbf #2349). The JSON template shown BEFORE the extraction instruction
+    primed glm to copy its empty `snapshot` slot. Put `snapshot` FIRST in the
+    template + tell glm to output it first so it's produced before verdicts
+    consume attention/budget."""
+    snap = AcceptanceSnapshot()  # empty → extraction required
+    prompt = _prompt(snap)
+    fenced = prompt.split("```json", 1)[1].split("```", 1)[0]
+    assert fenced.index('"snapshot"') < fenced.index(
+        '"verdicts"'
+    ), "extraction-case template must list `snapshot` before `verdicts`"
+    assert "FIRST" in prompt or "first" in prompt

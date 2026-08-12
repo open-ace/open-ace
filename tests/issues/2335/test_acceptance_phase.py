@@ -226,3 +226,124 @@ def test_snapshot_persistence_round_trips_source_and_confidence():
     assert reloaded.source == "convention"
     assert reloaded.confidence == "high"
     assert reloaded.required_paths == ["app/x.py"]
+
+
+# --- Surface rejection/inconclusive verdicts to humans (issue comment + milestone) ---
+
+
+def test_rejected_posts_human_readable_comment():
+    """A rejected verdict must be surfaced as a GitHub comment so the issue
+    author sees WHAT failed + what to fix — not a silent DB-only pause."""
+    wf = {
+        "id": 1,
+        "github_issue_number": 42,
+        "github_pr_number": 99,
+        "base_commit_sha": "base",
+        "verification_merge_sha": "merge",
+        "issue_acceptance_hash": "h1",
+        "verification_status": None,
+        "issue_acceptance_snapshot": None,
+        "dev_round": 1,
+    }
+    gh = MagicMock()
+    gh.get_issue.return_value = {"body": "## Scope\n- `app/services/retention.py`"}
+    gh.get_changed_files.return_value = []  # scope gate rejects (required path missing)
+    deps = _deps(gh=gh)
+    deps.host.run_verification_agent.return_value = {"verdicts": [], "snapshot": None}
+    av.handle(_ctx(wf), deps)
+    deps.gh.add_issue_comment.assert_called_once()
+    issue_no, comment = deps.gh.add_issue_comment.call_args.args
+    assert issue_no == 42
+    assert "❌" in comment or "not verified" in comment.lower()
+    assert "retention.py" in comment  # the rejected required path is named
+
+
+def test_indeterminate_posts_human_readable_comment():
+    wf = {
+        "id": 1,
+        "github_issue_number": 42,
+        "github_pr_number": 99,
+        "base_commit_sha": "base",
+        "verification_merge_sha": "merge",
+        "issue_acceptance_hash": "h1",
+        "verification_status": None,
+        "issue_acceptance_snapshot": None,
+    }
+    gh = MagicMock()
+    gh.get_issue.return_value = {"body": "## Scope\n- `app/x.py`"}
+    gh.get_changed_files.return_value = ["app/x.py"]  # scope gate confirmed
+    deps = _deps(gh=gh)
+    deps.host.run_verification_agent.return_value = {
+        "verdicts": [
+            {
+                "item": "unclear criterion",
+                "verdict": "indeterminate",
+                "evidence": [{"ref": "verifier:missing", "note": "no concrete proof"}],
+                "rationale": "",
+            }
+        ],
+        "snapshot": None,
+    }
+    av.handle(_ctx(wf), deps)
+    deps.gh.add_issue_comment.assert_called_once()
+    _, comment = deps.gh.add_issue_comment.call_args.args
+    assert "⚠️" in comment or "inconclusive" in comment.lower()
+    assert "unclear criterion" in comment
+
+
+def test_format_report_comment_confirmed_uses_check_mark():
+    from app.modules.workspace.autonomous.phases.acceptance_verification import (
+        _format_report_comment,
+    )
+
+    report = {
+        "status": "confirmed",
+        "merge_sha": "s",
+        "verified_by": "v",
+        "scope": [{"item": "app/x.py", "verdict": "confirmed"}],
+        "gates": [],
+        "verifier": [],
+    }
+    assert "✅" in _format_report_comment(report)
+
+
+def test_format_report_comment_rejected_lists_failed_items():
+    from app.modules.workspace.autonomous.phases.acceptance_verification import (
+        _format_report_comment,
+    )
+
+    report = {
+        "status": "rejected",
+        "merge_sha": "s",
+        "verified_by": "v",
+        "scope": [
+            {
+                "item": "app/utils/datetime_utils.py",
+                "verdict": "rejected",
+                "evidence": [{"ref": "missing:datetime", "note": "absent"}],
+            }
+        ],
+        "gates": [
+            {"item": "regression:decorators", "verdict": "rejected", "rationale": "dec regressed"}
+        ],
+        "verifier": [],
+    }
+    comment = _format_report_comment(report)
+    assert "❌" in comment
+    assert "datetime_utils.py" in comment
+    assert "regression:decorators" in comment
+
+
+def test_acceptance_milestone_summary_includes_rejected_items():
+    from app.modules.workspace.autonomous.phases.acceptance_verification import (
+        _acceptance_milestone,
+    )
+
+    report = {
+        "status": "rejected",
+        "scope": [{"item": "app/utils/datetime_utils.py", "verdict": "rejected"}],
+        "gates": [],
+        "verifier": [],
+    }
+    ms = _acceptance_milestone(workflow_id="wf", attempt=1, status="rejected", report=report)
+    assert "datetime_utils.py" in ms["result_summary"]

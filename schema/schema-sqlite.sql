@@ -955,6 +955,11 @@ CREATE TABLE scheduler_runs (
  leader_host TEXT
 );
 
+CREATE TABLE schema_metadata (
+ initialized_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ schema_version TEXT
+);
+
 CREATE TABLE security_settings (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  setting_key TEXT NOT NULL,
@@ -1352,29 +1357,6 @@ CREATE TABLE users (
  tenant_version integer DEFAULT 1 NOT NULL,
     CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
     CONSTRAINT chk_2332_users_role_valid CHECK ((role IN ('platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
-);
-
-CREATE TABLE users_backup_2332 (
- id integer,
- username TEXT,
- password_hash TEXT,
- email TEXT,
- is_admin INTEGER,
- is_active INTEGER,
- created_at TIMESTAMP,
- last_login TIMESTAMP,
- role TEXT,
- daily_token_quota integer,
- monthly_token_quota integer,
- daily_request_quota integer,
- monthly_request_quota integer,
- deleted_at TIMESTAMP,
- system_account text,
- tenant_id integer,
- must_change_password INTEGER,
- avatar_url TEXT,
- auto_mapping_enabled INTEGER,
- tenant_version integer
 );
 
 CREATE TABLE web_user_auth_sessions (

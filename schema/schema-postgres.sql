@@ -1419,6 +1419,11 @@ CREATE SEQUENCE scheduler_runs_id_seq
     CACHE 1;
 
 ALTER SEQUENCE scheduler_runs_id_seq OWNED BY scheduler_runs.id;
+CREATE TABLE schema_metadata (
+    initialized_at timestamp without time zone DEFAULT now() NOT NULL,
+    schema_version character varying(64)
+);
+
 CREATE TABLE security_settings (
     id integer NOT NULL,
     setting_key character varying(100) NOT NULL,
@@ -2075,29 +2080,6 @@ CREATE TABLE users (
     tenant_version integer DEFAULT 1 NOT NULL,
     CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role)::text = 'tenant_admin'::text) AND (tenant_id IS NULL)))),
     CONSTRAINT chk_2332_users_role_valid CHECK (((role)::text = ANY ((ARRAY['platform_admin'::character varying, 'tenant_admin'::character varying, 'manager'::character varying, 'user'::character varying, 'readonly'::character varying])::text[])))
-);
-
-CREATE TABLE users_backup_2332 (
-    id integer,
-    username character varying,
-    password_hash character varying,
-    email character varying,
-    is_admin boolean,
-    is_active boolean,
-    created_at timestamp without time zone,
-    last_login timestamp without time zone,
-    role character varying,
-    daily_token_quota integer,
-    monthly_token_quota integer,
-    daily_request_quota integer,
-    monthly_request_quota integer,
-    deleted_at timestamp without time zone,
-    system_account text,
-    tenant_id integer,
-    must_change_password boolean,
-    avatar_url character varying(500),
-    auto_mapping_enabled boolean,
-    tenant_version integer
 );
 
 CREATE SEQUENCE users_id_seq

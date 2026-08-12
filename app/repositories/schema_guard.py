@@ -4,13 +4,14 @@ This module provides version checking and compatibility validation for database
 schema, ensuring that production deployments only run against properly migrated
 databases.
 
-Issue: #2190
+Issue: #2190, #2330
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import warnings
 from typing import TYPE_CHECKING, Any
 
 import sqlalchemy as sa
@@ -20,10 +21,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Minimum supported schema revision (baseline)
+# DEPRECATED: Minimum supported schema revision (baseline)
+# This constant is kept for backward compatibility but should not be used.
+# Use SchemaCompatibilityService instead.
 MIN_SUPPORTED_REVISION = "baseline_2026_06_23"
 
-# Compatibility window: number of revisions back we can support
+# DEPRECATED: Compatibility window constant
+# Use OPENACE_COMPATIBILITY_POLICY environment variable instead.
 SCHEMA_COMPATIBILITY_WINDOW = 10
 
 
@@ -120,6 +124,10 @@ def _table_exists(connection: Any, table_name: str) -> bool:
 def get_database_revision(connection: Connection) -> str | None:
     """Get the current Alembic revision from the database.
 
+    DEPRECATED: This function only returns a single revision and cannot detect
+    multiple heads. Use SchemaCompatibilityService._get_current_database_heads()
+    instead.
+
     Args:
         connection: Database connection (SQLAlchemy Connection or PgConnectionWrapper)
 
@@ -127,6 +135,13 @@ def get_database_revision(connection: Connection) -> str | None:
         Current revision string, or None if alembic_version table doesn't exist
         (fresh database) or has no rows.
     """
+    warnings.warn(
+        "get_database_revision() is deprecated. "
+        "Use SchemaCompatibilityService._get_current_database_heads() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     # Check if alembic_version table exists.
     # We cannot use sa.inspect() here because the caller may pass a raw
     # psycopg2 connection wrapped in PgConnectionWrapper, which is not
@@ -166,84 +181,86 @@ def check_schema_compatibility(
 ) -> None:
     """Check if database schema is compatible with application requirements.
 
+    DEPRECATED: This function is deprecated. Use SchemaCompatibilityService instead.
+    This wrapper maintains backward compatibility during the transition period.
+
     Args:
         connection: SQLAlchemy database connection
-        min_revision: Minimum required schema revision
+        min_revision: Minimum required schema revision (DEPRECATED, ignored)
         skip_check: If True, skip the check (for emergency scenarios)
 
     Raises:
         SchemaCompatibilityError: If schema is not compatible
         RuntimeError: If alembic_version table is in corrupted state
+
+    Issue: #2330 - Refactored to use SchemaCompatibilityService
     """
     # Emergency bypass - must be explicitly enabled
     if skip_check or os.environ.get("OPENACE_SKIP_SCHEMA_CHECK") == "true":
         logger.warning(
             "Schema compatibility check SKIPPED (OPENACE_SKIP_SCHEMA_CHECK=true). "
-            "This should only be used in emergency scenarios!"
+            "This should only be used in emergency scenarios! "
+            "Use OPENACE_EMERGENCY_SCHEMA_BYPASS instead."
         )
         return
 
-    current_revision = get_database_revision(connection)
+    # Import here to avoid circular dependency
+    from app.services.schema_compatibility_service import get_schema_compatibility_service
+    from app.services.schema_compatibility_types import CompatibilityPolicy
 
-    # Fresh database (no alembic_version table) - allow through
-    # The install path will create schema from baseline and stamp version
-    if current_revision is None:
-        logger.info(
-            "Fresh database detected (no alembic_version). "
-            "Schema will be initialized from baseline."
-        )
-        return
+    # Use new service
+    service = get_schema_compatibility_service()
 
-    # Check if current revision meets minimum requirement
-    # We use a simple heuristic: if the revision is not at least baseline,
-    # it's considered incompatible. Revision IDs are timestamps, so we can
-    # compare them lexicographically. However, we need to handle edge cases
-    # where the revision ID doesn't follow the expected pattern.
-    #
-    # A revision is considered compatible if:
-    # 1. It matches the min_revision exactly, OR
-    # 2. It's a known valid revision (starts with a timestamp pattern)
-    #    and is lexicographically >= min_revision, OR
-    # 3. It's a custom/unknown revision (in which case we reject it)
-    if current_revision == min_revision:
-        logger.info(f"Database schema version check passed: {current_revision}")
-        return
+    # For backward compatibility, use SUPPORT_ANCESTRY policy in development mode
+    # This allows any revision in the baseline lineage (not just head)
+    # But use REQUIRE_HEAD in production for strict checking
+    env_mode = get_environment_mode()
+    if env_mode == "production":
+        policy = CompatibilityPolicy.REQUIRE_HEAD
+    else:
+        # Development mode: use SUPPORT_ANCESTRY for backward compatibility
+        # This allows any revision descended from baseline, matching old string-based heuristic
+        policy = CompatibilityPolicy.SUPPORT_ANCESTRY
 
-    # Heuristic: valid revisions typically start with a date pattern (YYYYMMDD)
-    # or are the baseline. Unknown revisions are rejected.
-    if not (current_revision.startswith("20") or current_revision == "baseline_2026_06_23"):
-        # Unknown revision format - reject it
+    result = service.check_database_compatibility(connection, policy)
+
+    if not result.is_compatible:
+        # Convert to SchemaCompatibilityError for backward compatibility
+        error_msg = result.diagnostic_message or "Schema compatibility check failed"
+
+        # Try to get current revision from various sources
+        current_rev = None
+        if result.current_heads and len(result.current_heads) > 0:
+            current_rev = result.current_heads[0]
+
+        # If we don't have revision info but error message contains it, extract it
+        if current_rev is None and result.diagnostic_message:
+            # Try to extract revision from error message
+            # Pattern: "identified by 'revision_id'" or "revision 'revision_id'"
+            import re
+
+            match = re.search(r"identified by '([^']+)'", result.diagnostic_message)
+            if match:
+                current_rev = match.group(1)
+            else:
+                # Alternative pattern: "revision 'revision_id'"
+                match = re.search(
+                    r"revision[^']*'([^']+)'", result.diagnostic_message, re.IGNORECASE
+                )
+                if match:
+                    current_rev = match.group(1)
+
         raise SchemaCompatibilityError(
-            f"Database schema revision '{current_revision}' is not recognized. "
-            f"Minimum supported revision is '{min_revision}'. "
-            f"Run 'alembic upgrade head' to migrate database.",
-            current_revision=current_revision,
-            min_revision=min_revision,
+            error_msg,
+            current_revision=current_rev,
+            min_revision=MIN_SUPPORTED_REVISION,
         )
 
-    # Known revision format - check if it's at least baseline
-    # SPECIAL CASE: baseline starts with 'b', timestamp revisions start with '20'
-    # Lexicographical comparison fails here: '2' < 'b', so "20260802" < "baseline"
-    # We handle this explicitly: any timestamp revision (starts with '20') is
-    # assumed to be >= baseline because baseline is the starting point.
-    if current_revision.startswith("20") and min_revision.startswith("baseline"):
-        # Timestamp revision (starts with '20') is always >= baseline
-        # because baseline is the starting point and timestamp revisions come after
-        logger.info(f"Database schema version check passed: {current_revision}")
-        return
-
-    # For other cases, use lexicographical comparison
-    # (e.g., comparing two timestamp revisions)
-    if current_revision < min_revision:
-        raise SchemaCompatibilityError(
-            f"Database schema revision '{current_revision}' is below minimum "
-            f"supported revision '{min_revision}'. "
-            f"Run 'alembic upgrade head' to migrate database.",
-            current_revision=current_revision,
-            min_revision=min_revision,
-        )
-
-    logger.info(f"Database schema version check passed: {current_revision}")
+    # Log success
+    if result.current_heads:
+        logger.info(f"Database schema version check passed: {result.current_heads[0]}")
+    else:
+        logger.info("Database schema version check passed")
 
 
 def get_environment_mode() -> str:

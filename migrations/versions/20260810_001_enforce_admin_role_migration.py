@@ -690,6 +690,20 @@ def upgrade() -> None:
     checksum = _calculate_checksum(connection)
     _record_migration_metadata(connection, checksum)
 
+    # Step 7: Cleanup temporary tables
+    log.info("Step 7: Cleaning up temporary tables...")
+    try:
+        connection.execute(sa.text("DROP TABLE IF EXISTS users_backup_2332"))
+        log.info("Dropped backup table users_backup_2332")
+    except Exception as e:
+        log.warning(f"Could not drop backup table: {e}")
+
+    try:
+        connection.execute(sa.text("DROP TABLE IF EXISTS migration_metadata"))
+        log.info("Dropped migration_metadata table")
+    except Exception as e:
+        log.warning(f"Could not drop migration_metadata table: {e}")
+
     log.info("Migration completed successfully")
 
 

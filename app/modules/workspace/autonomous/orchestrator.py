@@ -7,6 +7,8 @@ through its phases: preparation -> planning -> development ->
 pr_review -> report -> wait -> (loop or merge).
 """
 
+from __future__ import annotations
+
 import grp
 import json
 import logging
@@ -39,7 +41,7 @@ from app.modules.workspace.autonomous.artifact_text import (
     sanitize_artifact_text,
 )
 from app.modules.workspace.autonomous.command_evidence.recorder import emit_command_evidence
-from app.modules.workspace.autonomous.command_evidence.scope import (  # noqa: E402,F401; Re-imported for the legacy heuristic (_has_passing_test_tool_result) and; any in-module callers; the structured verdict (test_verdict) imports them; directly from scope to avoid a circular import (#2046 Phase B).
+from app.modules.workspace.autonomous.command_evidence.scope import (  # noqa: E402, F401; Re-imported for the legacy heuristic (_has_passing_test_tool_result) and; any in-module callers; the structured verdict (test_verdict) imports them; directly from scope to avoid a circular import (#2046 Phase B).
     _normalize_test_command,
     _pytest_scope_covers,
     _pytest_test_scope,
@@ -2431,7 +2433,7 @@ class AutonomousOrchestrator:
         return LegacyPosixProvider()
 
     @property
-    def _git_workspace(self) -> "GitWorkspaceService":
+    def _git_workspace(self) -> GitWorkspaceService:
         """Lazily attach the git-workspace service (#2044 Phase B T5).
 
         Mirrors ``_evidence``: unit tests that build the orchestrator via
@@ -2682,7 +2684,7 @@ class AutonomousOrchestrator:
 
     def recover_worktree_branch(
         self,
-        gh: "GitHubOps",
+        gh: GitHubOps,
         expected_branch: str,
         before_head: str,
         before_main_head: str,
@@ -2696,7 +2698,7 @@ class AutonomousOrchestrator:
 
     def _recover_worktree_branch(
         self,
-        gh: "GitHubOps",
+        gh: GitHubOps,
         expected_branch: str,
         before_head: str,
         before_main_head: str,
@@ -2755,7 +2757,7 @@ class AutonomousOrchestrator:
         )
         return f"recovered worktree onto {expected_branch} after read-only agent branch switch"
 
-    def _ancestor_check(self, gh: "GitHubOps", a: str, b: str) -> bool | None:
+    def _ancestor_check(self, gh: GitHubOps, a: str, b: str) -> bool | None:
         """Return True if ``a`` is an ancestor of ``b``, False if not, None on
         a git error.
 
@@ -5192,7 +5194,7 @@ class AutonomousOrchestrator:
         return True
 
     def _branch_contains_main(
-        self, gh: "GitHubOps", pr_head_sha: str, branch_name: str = ""
+        self, gh: GitHubOps, pr_head_sha: str, branch_name: str = ""
     ) -> bool | None:
         """Whether the PR branch already contains current main.
 
@@ -5214,9 +5216,7 @@ class AutonomousOrchestrator:
         main_head = gh.resolve_commit("FETCH_HEAD")
         return self._ancestor_check(gh, main_head, pr_head_sha)
 
-    def _ensure_pr_head_local(
-        self, gh: "GitHubOps", pr_head_sha: str, branch_name: str = ""
-    ) -> bool:
+    def _ensure_pr_head_local(self, gh: GitHubOps, pr_head_sha: str, branch_name: str = "") -> bool:
         """Ensure ``pr_head_sha`` is present in the local object DB.
 
         ``get_pr_head_sha`` queries the GitHub API for the SHA without fetching
@@ -7936,7 +7936,8 @@ class AutonomousOrchestrator:
                 "criteria yourself, then return them in the `snapshot` field. Infer "
                 "required_paths from the bug/stack trace, and write a concrete, checkable "
                 "checklist (one statement per acceptance point). Without `snapshot` populated, "
-                "your verdict is INVALID and verification cannot proceed.\n\n"
+                "your verdict is INVALID and verification cannot proceed.\n"
+                "Output the `snapshot` object as the FIRST key in your JSON, before `verdicts`.\n\n"
             )
             # Valid JSON token (the object shape) so the fenced template glm
             # copies stays parseable — never interpolate prose into the value.
@@ -7945,10 +7946,25 @@ class AutonomousOrchestrator:
                 '"closure_constraints": false}'
             )
             snapshot_note = "Populate `snapshot` with the criteria you derived above."
+            # Snapshot FIRST in the template: the empty-`snapshot` slot shown
+            # before the extraction instruction primed glm to copy it empty and
+            # omit the field (cd939cbf #2349). Listing it first + the FIRST-key
+            # instruction above nudge glm to derive it before verdicts consume
+            # attention/budget.
+            json_template = (
+                '{"snapshot": ' + snapshot_token + ", "
+                '"verdicts": [{"item": "...", "verdict": "confirmed|rejected|indeterminate", '
+                '"evidence": [{"ref": "file:line|git-diff", "note": "..."}], "rationale": "..."}]}'
+            )
         else:
             extraction_section = ""
             snapshot_token = "null"
             snapshot_note = "Leave `snapshot` null — the criteria above are authoritative."
+            json_template = (
+                '{"verdicts": [{"item": "...", "verdict": "confirmed|rejected|indeterminate", '
+                '"evidence": [{"ref": "file:line|git-diff", "note": "..."}], "rationale": "..."}], '
+                '"snapshot": null}'
+            )
         return (
             "You are an INDEPENDENT acceptance verifier. The issue must NOT be considered done "
             "just because a PR merged. Verify the MERGED code (merge commit "
@@ -7960,9 +7976,7 @@ class AutonomousOrchestrator:
             "note under 60 characters (terse evidence fits the output budget and avoids a "
             "truncated, unparseable response).\n"
             "```json\n"
-            '{"verdicts": [{"item": "...", "verdict": "confirmed|rejected|indeterminate", '
-            '"evidence": [{"ref": "file:line|git-diff", "note": "..."}], "rationale": "..."}], '
-            f'"snapshot": {snapshot_token}}}\n'
+            f"{json_template}\n"
             "```\n\n"
             f"Acceptance snapshot:\n{snap_dump}\n\n"
             f"{extraction_section}"
@@ -11363,7 +11377,7 @@ class AutonomousOrchestrator:
                     message = str(result.structured_error.get("message") or "")
                 raise WorkflowPaused(message)
 
-    def _sync_worktree_to_pr_remote_head(self, wt_gh: "GitHubOps", branch_name: str) -> None:
+    def _sync_worktree_to_pr_remote_head(self, wt_gh: GitHubOps, branch_name: str) -> None:
         return self._git_workspace.sync_worktree_to_pr_remote_head(wt_gh, branch_name)
 
     def _resolve_merge_conflicts(self, gh: GitHubOps, branch_name: str, pr_number: int):

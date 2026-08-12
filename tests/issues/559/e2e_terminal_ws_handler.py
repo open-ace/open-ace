@@ -22,10 +22,18 @@ PROJECT_ROOT = os.path.dirname(
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-# gevent monkey-patch must come before other third-party imports
+# gevent monkey-patch is needed only when this file runs as a standalone script
+# (``python tests/issues/559/e2e_terminal_ws_handler.py``). Under pytest the
+# module is *imported* during collection, and a process-wide monkey-patch at
+# import time corrupts every subsequently-collected test in the shard: gevent
+# greenlets + native threading/asyncio deadlock in ways ``--timeout`` cannot
+# interrupt, hanging the whole shard until the job is cancelled (see #2457).
+# Guarding on ``__main__`` keeps collection side-effect-free; ``main()``
+# applies the patch before the script's own server/asyncio work runs.
 from gevent import monkey
 
-monkey.patch_all()
+if __name__ == "__main__":
+    monkey.patch_all()
 
 
 def log(stage, msg):
