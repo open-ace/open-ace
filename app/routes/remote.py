@@ -45,6 +45,24 @@ MAX_RAW_CONTENT_LENGTH = 100000
 MAX_MESSAGE_LENGTH = 50000
 
 # ════════════════════════════════════════════
+# Issue #2532: Sensitive response field constants
+# ════════════════════════════════════════════
+
+# Fields that indicate sensitive token data in JSON responses.
+# When these fields are present, security headers are added to prevent
+# caching and referrer leakage.
+SENSITIVE_RESPONSE_FIELDS: frozenset[str] = frozenset(
+    {
+        "agent_token",
+        "registration_token",
+    }
+)
+
+# Maximum response body size to check for sensitive fields (10KB).
+# Larger responses are skipped to avoid performance impact.
+_SENSITIVE_FIELD_CHECK_MAX_SIZE = 10240
+
+# ════════════════════════════════════════════
 # Issue #2531: Session state check constants
 # ════════════════════════════════════════════
 
@@ -259,16 +277,42 @@ def load_user():
 
 @remote_bp.after_request
 def add_security_headers(response: Response) -> Response:
-    """Add security headers for responses with token in query parameters.
+    """Add security headers for responses with token in query parameters or body.
 
     Issue #1896: Set Referrer-Policy and Cache-Control headers to prevent
     token leakage through browser history, referer headers, and caches.
+
+    Issue #2532: Also detect sensitive fields in JSON response body
+    (agent_token, registration_token) and add security headers accordingly.
     """
     # Check if request has token in query parameters
     if request.args.get("token"):
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         response.headers.setdefault("Cache-Control", "no-store, no-cache, must-revalidate")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
+
+    # Issue #2532: Check JSON response body for sensitive fields
+    # Only check JSON responses, skip SSE streams and file downloads
+    content_type = response.content_type or ""
+    if content_type.startswith("application/json"):
+        # Skip large responses to avoid performance impact
+        if response.content_length and response.content_length > _SENSITIVE_FIELD_CHECK_MAX_SIZE:
+            return response
+
+        try:
+            data = response.get_json(silent=True)
+            if data and isinstance(data, dict):
+                # Check if response contains sensitive fields
+                if any(key in SENSITIVE_RESPONSE_FIELDS for key in data):
+                    response.headers.setdefault("Referrer-Policy", "no-referrer")
+                    response.headers.setdefault(
+                        "Cache-Control", "no-store, no-cache, must-revalidate"
+                    )
+                    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        except Exception:
+            # Silently skip on JSON parse errors - don't affect normal responses
+            pass
+
     return response
 
 
