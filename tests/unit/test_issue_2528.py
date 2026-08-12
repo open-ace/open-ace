@@ -10,7 +10,6 @@ Covers:
 """
 
 import contextlib
-import json
 import os
 import sqlite3
 import sys
@@ -21,12 +20,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-issue-2528")
 
 
+@pytest.mark.regression
+@pytest.mark.issue(2528)
 class TestHeartbeatMonitorStateTracking:
     """Test heartbeat monitor state tracking for observability."""
 
@@ -108,10 +109,9 @@ class TestHeartbeatMonitorStateTracking:
 
     def test_state_variables_initialized(self, temp_db):
         """Test that heartbeat state variables are initialized in __init__."""
-        from app.modules.workspace.remote_agent_manager import RemoteAgentManager, get_remote_agent_manager
-
         # Reset singleton
         import app.modules.workspace.remote_agent_manager as ram_mod
+        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
 
         ram_mod._agent_manager = None
 
@@ -125,9 +125,8 @@ class TestHeartbeatMonitorStateTracking:
 
     def test_check_heartbeats_updates_state(self, temp_db):
         """Test that _check_heartbeats updates state tracking variables."""
-        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
-
         import app.modules.workspace.remote_agent_manager as ram_mod
+        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
 
         ram_mod._agent_manager = None
 
@@ -141,7 +140,13 @@ class TestHeartbeatMonitorStateTracking:
                 "INSERT INTO remote_machines "
                 "(machine_id, machine_name, status, last_heartbeat, created_at, updated_at) "
                 "VALUES (?, ?, 'online', ?, ?, ?)",
-                ("test-machine-1", "Test Machine 1", now.isoformat(), now.isoformat(), now.isoformat()),
+                (
+                    "test-machine-1",
+                    "Test Machine 1",
+                    now.isoformat(),
+                    now.isoformat(),
+                    now.isoformat(),
+                ),
             )
             conn.commit()
 
@@ -161,9 +166,8 @@ class TestHeartbeatMonitorStateTracking:
 
     def test_get_heartbeat_monitor_status(self, temp_db):
         """Test get_heartbeat_monitor_status returns correct status."""
-        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
-
         import app.modules.workspace.remote_agent_manager as ram_mod
+        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
 
         ram_mod._agent_manager = None
 
@@ -185,6 +189,8 @@ class TestHeartbeatMonitorStateTracking:
         assert status["last_check_time"] is not None
 
 
+@pytest.mark.regression
+@pytest.mark.issue(2528)
 class TestLazyHeartbeatCheck:
     """Test lazy heartbeat check in _row_to_machine()."""
 
@@ -236,9 +242,8 @@ class TestLazyHeartbeatCheck:
 
     def test_lazy_check_marks_stale_as_offline(self, temp_db):
         """Test that stale heartbeat machines are marked offline in returned data."""
-        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
-
         import app.modules.workspace.remote_agent_manager as ram_mod
+        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
 
         ram_mod._agent_manager = None
 
@@ -254,7 +259,13 @@ class TestLazyHeartbeatCheck:
                 "INSERT INTO remote_machines "
                 "(machine_id, machine_name, status, last_heartbeat, created_at, updated_at) "
                 "VALUES (?, ?, 'idle', ?, ?, ?)",
-                ("stale-machine-1", "Stale Machine", stale_heartbeat.isoformat(), now.isoformat(), now.isoformat()),
+                (
+                    "stale-machine-1",
+                    "Stale Machine",
+                    stale_heartbeat.isoformat(),
+                    now.isoformat(),
+                    now.isoformat(),
+                ),
             )
             conn.commit()
 
@@ -266,13 +277,14 @@ class TestLazyHeartbeatCheck:
 
         assert machine is not None
         assert machine["status"] == "offline", f"Expected offline, got {machine['status']}"
-        assert machine["connected"] is False, f"Expected connected=False, got {machine['connected']}"
+        assert (
+            machine["connected"] is False
+        ), f"Expected connected=False, got {machine['connected']}"
 
     def test_lazy_check_keeps_fresh_as_is(self, temp_db):
         """Test that machines with fresh heartbeat keep their status."""
-        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
-
         import app.modules.workspace.remote_agent_manager as ram_mod
+        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
 
         ram_mod._agent_manager = None
 
@@ -288,7 +300,13 @@ class TestLazyHeartbeatCheck:
                 "INSERT INTO remote_machines "
                 "(machine_id, machine_name, status, last_heartbeat, created_at, updated_at) "
                 "VALUES (?, ?, 'idle', ?, ?, ?)",
-                ("fresh-machine-1", "Fresh Machine", fresh_heartbeat.isoformat(), now.isoformat(), now.isoformat()),
+                (
+                    "fresh-machine-1",
+                    "Fresh Machine",
+                    fresh_heartbeat.isoformat(),
+                    now.isoformat(),
+                    now.isoformat(),
+                ),
             )
             conn.commit()
 
@@ -304,9 +322,8 @@ class TestLazyHeartbeatCheck:
 
     def test_lazy_check_ignores_already_offline(self, temp_db):
         """Test that offline machines are not affected by lazy check."""
-        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
-
         import app.modules.workspace.remote_agent_manager as ram_mod
+        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
 
         ram_mod._agent_manager = None
 
@@ -322,7 +339,13 @@ class TestLazyHeartbeatCheck:
                 "INSERT INTO remote_machines "
                 "(machine_id, machine_name, status, last_heartbeat, created_at, updated_at) "
                 "VALUES (?, ?, 'offline', ?, ?, ?)",
-                ("offline-machine-1", "Offline Machine", stale_heartbeat.isoformat(), now.isoformat(), now.isoformat()),
+                (
+                    "offline-machine-1",
+                    "Offline Machine",
+                    stale_heartbeat.isoformat(),
+                    now.isoformat(),
+                    now.isoformat(),
+                ),
             )
             conn.commit()
 
@@ -334,9 +357,8 @@ class TestLazyHeartbeatCheck:
 
     def test_lazy_check_handles_null_heartbeat(self, temp_db):
         """Test that machines with null heartbeat don't cause errors."""
-        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
-
         import app.modules.workspace.remote_agent_manager as ram_mod
+        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
 
         ram_mod._agent_manager = None
 
@@ -362,6 +384,8 @@ class TestLazyHeartbeatCheck:
         assert machine["status"] == "idle"  # No lazy check for null heartbeat
 
 
+@pytest.mark.regression
+@pytest.mark.issue(2528)
 class TestHeartbeatTimezoneHandling:
     """Test timezone handling for last_heartbeat comparison."""
 
@@ -413,9 +437,8 @@ class TestHeartbeatTimezoneHandling:
 
     def test_utc_with_z_suffix(self, temp_db):
         """Test that UTC timestamps with Z suffix are handled correctly."""
-        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
-
         import app.modules.workspace.remote_agent_manager as ram_mod
+        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
 
         ram_mod._agent_manager = None
 
@@ -444,9 +467,8 @@ class TestHeartbeatTimezoneHandling:
 
     def test_utc_with_timezone_offset(self, temp_db):
         """Test that timestamps with timezone offset are handled correctly."""
-        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
-
         import app.modules.workspace.remote_agent_manager as ram_mod
+        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
 
         ram_mod._agent_manager = None
 
@@ -463,7 +485,13 @@ class TestHeartbeatTimezoneHandling:
                 "INSERT INTO remote_machines "
                 "(machine_id, machine_name, status, last_heartbeat, created_at, updated_at) "
                 "VALUES (?, ?, 'idle', ?, ?, ?)",
-                ("tz-machine-2", "TZ Machine 2", stale_heartbeat_offset, now.isoformat(), now.isoformat()),
+                (
+                    "tz-machine-2",
+                    "TZ Machine 2",
+                    stale_heartbeat_offset,
+                    now.isoformat(),
+                    now.isoformat(),
+                ),
             )
             conn.commit()
 
@@ -474,6 +502,8 @@ class TestHeartbeatTimezoneHandling:
         assert machine["status"] == "offline"
 
 
+@pytest.mark.regression
+@pytest.mark.issue(2528)
 class TestHeartbeatStatusEndpoint:
     """Test /api/remote/heartbeat-status endpoint."""
 
@@ -544,12 +574,11 @@ class TestHeartbeatStatusEndpoint:
     def test_endpoint_returns_status(self, temp_db):
         """Test that endpoint returns heartbeat monitor status."""
         from flask import Flask
-        from unittest.mock import patch, MagicMock
-
-        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
 
         # Reset singleton
         import app.modules.workspace.remote_agent_manager as ram_mod
+        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
+
         ram_mod._agent_manager = None
 
         # Create manager and run a heartbeat check
