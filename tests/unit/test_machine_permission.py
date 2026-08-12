@@ -1062,7 +1062,11 @@ def test_route_create_session_body_machine_id_still_works():
 def test_route_get_machine_path_machine_id_overrides_query():
     """Query machine_id must not let a user with access to A read machine B's
     details. ``get_machine`` uses @machine_access_required + path arg, so the
-    decorator must authorize by the path machine_id."""
+    decorator must authorize by the path machine_id.
+
+    Issue #2538: Cross-tenant access (user without tenant accessing tenant machine)
+    returns 404 to avoid leaking machine existence.
+    """
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -1070,6 +1074,8 @@ def test_route_get_machine_path_machine_id_overrides_query():
     # User 3 has 'user' access to machine-a only. Before the fix, query
     # ?machine_id=mid-machine-a would authorize against A while the route
     # returned B's details.
+    # Issue #2538: User 3 has no tenant, machine-b has tenant 1.
+    # This is cross-tenant access, so returns 404 (not 403).
     with app.test_client() as client:
         resp = _auth_get(
             client,
@@ -1077,8 +1083,8 @@ def test_route_get_machine_path_machine_id_overrides_query():
             "test-token-3-user",  # user of A, no access to B
         )
         assert (
-            resp.status_code == 403
-        ), f"expected 403, got {resp.status_code}, body={resp.get_json()}"
+            resp.status_code == 404
+        ), f"expected 404, got {resp.status_code}, body={resp.get_json()}"
 
 
 def test_route_browse_path_machine_id_overrides_query():
