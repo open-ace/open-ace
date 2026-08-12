@@ -2,10 +2,19 @@
 """Check database schema compatibility using Alembic revision graph.
 
 Issue #2330: Refactored to use SchemaCompatibilityService with Alembic graph validation.
+Issue #2534: Fixed regression where REQUIRE_HEAD blocked migrations in production.
 
 This checker is invoked by the package/Docker install scripts immediately
 before ``alembic upgrade head``. It exits non-zero when the database schema
 is incompatible with the application requirements.
+
+Policy Behavior:
+    - Default (--policy require_head): Uses SUPPORT_ANCESTRY for pre-migration check.
+      This allows any revision in the baseline lineage, enabling alembic upgrade head
+      to apply missing migrations.
+    - Runtime checks (web/scheduler startup) use check_schema_compatibility() in
+      schema_guard.py, which applies REQUIRE_HEAD to ensure services only run on
+      fully migrated databases.
 
 Fresh databases (no ``alembic_version`` table) are allowed through in development
 mode; production mode requires explicit migration before startup.
@@ -107,10 +116,11 @@ def main() -> int:
         "support_ancestry": CompatibilityPolicy.SUPPORT_ANCESTRY,
     }
 
-    # For backward compatibility, use SUPPORT_ANCESTRY in development mode
-    # This allows any revision in the baseline lineage (not just head)
-    env_mode = get_environment_mode()
-    if args.policy == "require_head" and env_mode == "development":
+    # Pre-migration check should always use SUPPORT_ANCESTRY
+    # to allow alembic upgrade head to apply missing migrations.
+    # REQUIRE_HEAD is only appropriate for runtime checks (web/scheduler startup).
+    # See Issue #2534 for the regression this fixes.
+    if args.policy == "require_head":
         policy = CompatibilityPolicy.SUPPORT_ANCESTRY
     else:
         policy = policy_map[args.policy]
