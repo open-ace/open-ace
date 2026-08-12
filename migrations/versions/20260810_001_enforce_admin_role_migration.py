@@ -96,13 +96,17 @@ def _calculate_checksum(conn: sa.engine.Connection) -> str:
     Returns:
         SHA256 hash of role counts.
     """
-    result = conn.execute(sa.text("""
+    result = conn.execute(
+        sa.text(
+            """
             SELECT role, COUNT(*) as count
             FROM users
             WHERE role IN ('admin', 'platform_admin', 'tenant_admin')
             GROUP BY role
             ORDER BY role
-        """))
+        """
+        )
+    )
 
     components = []
     for row in result:
@@ -120,22 +124,30 @@ def _check_migration_metadata(conn: sa.engine.Connection) -> tuple[bool, str | N
     """
     # Check if migration_metadata table exists
     try:
-        result = conn.execute(sa.text("""
+        result = conn.execute(
+            sa.text(
+                """
                 SELECT EXISTS (
                     SELECT 1 FROM information_schema.tables
                     WHERE table_name = 'migration_metadata'
                 )
-            """))
+            """
+            )
+        )
         table_exists = result.scalar()
     except Exception:
         # SQLite doesn't have information_schema, use sqlite_master
         try:
-            result = conn.execute(sa.text("""
+            result = conn.execute(
+                sa.text(
+                    """
                     SELECT EXISTS (
                         SELECT 1 FROM sqlite_master
                         WHERE type='table' AND name='migration_metadata'
                     )
-                """))
+                """
+                )
+            )
             table_exists = result.scalar()
         except Exception:
             table_exists = False
@@ -145,10 +157,12 @@ def _check_migration_metadata(conn: sa.engine.Connection) -> tuple[bool, str | N
 
     # Check for this migration's record
     result = conn.execute(
-        sa.text("""
+        sa.text(
+            """
             SELECT checksum FROM migration_metadata
             WHERE migration_id = :migration_id
-        """),
+        """
+        ),
         {"migration_id": MIGRATION_ID},
     )
 
@@ -165,13 +179,15 @@ def _record_migration_metadata(conn: sa.engine.Connection, checksum: str) -> Non
     if dialect == "postgresql":
         # Use JSONB for PostgreSQL
         conn.execute(
-            sa.text("""
+            sa.text(
+                """
                 INSERT INTO migration_metadata (migration_id, migration_name, checksum, details)
                 VALUES (:migration_id, :migration_name, :checksum, CAST(:details AS jsonb))
                 ON CONFLICT (migration_id) DO UPDATE SET
                     checksum = EXCLUDED.checksum,
                     details = EXCLUDED.details
-            """),
+            """
+            ),
             {
                 "migration_id": MIGRATION_ID,
                 "migration_name": "enforce_admin_role_migration",
@@ -182,11 +198,13 @@ def _record_migration_metadata(conn: sa.engine.Connection, checksum: str) -> Non
     else:
         # SQLite: store details as text
         conn.execute(
-            sa.text("""
+            sa.text(
+                """
                 INSERT OR REPLACE INTO migration_metadata
                 (migration_id, migration_name, checksum, details)
                 VALUES (:migration_id, :migration_name, :checksum, :details)
-            """),
+            """
+            ),
             {
                 "migration_id": MIGRATION_ID,
                 "migration_name": "enforce_admin_role_migration",
@@ -201,7 +219,9 @@ def _create_migration_metadata_table(conn: sa.engine.Connection) -> None:
     dialect = conn.dialect.name
 
     if dialect == "postgresql":
-        conn.execute(sa.text("""
+        conn.execute(
+            sa.text(
+                """
                 CREATE TABLE IF NOT EXISTS migration_metadata (
                     migration_id VARCHAR(100) PRIMARY KEY,
                     migration_name VARCHAR(200) NOT NULL,
@@ -209,10 +229,14 @@ def _create_migration_metadata_table(conn: sa.engine.Connection) -> None:
                     checksum VARCHAR(64),
                     details JSONB
                 )
-            """))
+            """
+            )
+        )
     else:
         # SQLite
-        conn.execute(sa.text("""
+        conn.execute(
+            sa.text(
+                """
                 CREATE TABLE IF NOT EXISTS migration_metadata (
                     migration_id VARCHAR(100) PRIMARY KEY,
                     migration_name VARCHAR(200) NOT NULL,
@@ -220,7 +244,9 @@ def _create_migration_metadata_table(conn: sa.engine.Connection) -> None:
                     checksum VARCHAR(64),
                     details TEXT
                 )
-            """))
+            """
+            )
+        )
 
 
 def _preflight_validation(conn: sa.engine.Connection, whitelist: list[str]) -> list[dict]:
@@ -237,11 +263,15 @@ def _preflight_validation(conn: sa.engine.Connection, whitelist: list[str]) -> l
     # This prevents security vulnerability if API Keys are global in some deployments
     try:
         if dialect == "postgresql":
-            result = conn.execute(sa.text("""
+            result = conn.execute(
+                sa.text(
+                    """
                     SELECT column_name
                     FROM information_schema.columns
                     WHERE table_name = 'api_keys'
-                """))
+                """
+                )
+            )
             api_key_columns = {row[0] for row in result}
         else:
             result = conn.execute(sa.text("PRAGMA table_info(api_keys)"))
@@ -274,11 +304,15 @@ def _preflight_validation(conn: sa.engine.Connection, whitelist: list[str]) -> l
     # Check if tenants table has is_active and deleted_at columns
     if dialect == "postgresql":
         # Check tenants table schema
-        result = conn.execute(sa.text("""
+        result = conn.execute(
+            sa.text(
+                """
                 SELECT column_name
                 FROM information_schema.columns
                 WHERE table_name = 'tenants'
-            """))
+            """
+            )
+        )
         tenant_columns = {row[0] for row in result}
     else:
         # SQLite: check pragma_table_info
@@ -297,7 +331,9 @@ def _preflight_validation(conn: sa.engine.Connection, whitelist: list[str]) -> l
         tenant_valid = "1=1"  # No validation if columns don't exist
 
     # Check for orphan tenant admins
-    result = conn.execute(sa.text(f"""
+    result = conn.execute(
+        sa.text(
+            f"""
             SELECT u.id, u.username, u.tenant_id
             FROM users u
             WHERE u.role = 'admin'
@@ -307,7 +343,9 @@ def _preflight_validation(conn: sa.engine.Connection, whitelist: list[str]) -> l
                   WHERE t.id = u.tenant_id
                     AND {tenant_valid}
               )
-        """))
+        """
+        )
+    )
 
     for row in result:
         problems.append(
@@ -325,14 +363,16 @@ def _preflight_validation(conn: sa.engine.Connection, whitelist: list[str]) -> l
     whitelist_condition, whitelist_params = _build_whitelist_condition(whitelist, "u")
 
     result = conn.execute(
-        sa.text(f"""
+        sa.text(
+            f"""
             SELECT u.id, u.username
             FROM users u
             WHERE u.role = 'admin'
               AND u.tenant_id IS NULL
               AND u.id != 1
               AND NOT ({whitelist_condition})
-        """),
+        """
+        ),
         whitelist_params,
     )
 
@@ -372,11 +412,15 @@ def _invalidate_admin_sessions(conn: sa.engine.Connection) -> dict[str, int]:
     if has_sessions:
         # Check for is_active column
         if conn.dialect.name == "postgresql":
-            result = conn.execute(sa.text("""
+            result = conn.execute(
+                sa.text(
+                    """
                     SELECT column_name
                     FROM information_schema.columns
                     WHERE table_name = 'sessions' AND column_name = 'is_active'
-                """))
+                """
+                )
+            )
             has_is_active = result.fetchone() is not None
         else:
             result = conn.execute(sa.text("PRAGMA table_info(sessions)"))
@@ -387,14 +431,18 @@ def _invalidate_admin_sessions(conn: sa.engine.Connection) -> dict[str, int]:
 
     # For each table with is_active, invalidate admin sessions
     for table in session_tables:
-        result = conn.execute(sa.text(f"""
+        result = conn.execute(
+            sa.text(
+                f"""
                 UPDATE {table}
                 SET is_active = false
                 WHERE user_id IN (
                     SELECT id FROM users WHERE role = 'admin'
                 )
                 AND is_active = true
-            """))
+            """
+            )
+        )
         counts[table] = result.rowcount
 
     return counts
@@ -411,12 +459,16 @@ def _classify_admin_accounts(
     results = {"tenant_admin_count": 0, "platform_admin_count": 0, "remaining_admin_count": 0}
 
     # Step 1: Classify admin + tenant_id NOT NULL → tenant_admin
-    result = conn.execute(sa.text("""
+    result = conn.execute(
+        sa.text(
+            """
             UPDATE users
             SET role = 'tenant_admin'
             WHERE role = 'admin'
               AND tenant_id IS NOT NULL
-        """))
+        """
+        )
+    )
     results["tenant_admin_count"] = result.rowcount
     log.info(f"Classified {results['tenant_admin_count']} accounts as tenant_admin")
 
@@ -431,13 +483,15 @@ def _classify_admin_accounts(
     proven_condition = f"({whitelist_condition} OR {heuristic_condition})"
 
     result = conn.execute(
-        sa.text(f"""
+        sa.text(
+            f"""
             UPDATE users
             SET role = 'platform_admin'
             WHERE role = 'admin'
               AND tenant_id IS NULL
               AND {proven_condition}
-        """),
+        """
+        ),
         whitelist_params,
     )
     results["platform_admin_count"] = result.rowcount
@@ -470,17 +524,25 @@ def _apply_constraints(conn: sa.engine.Connection) -> None:
         )
 
         # Add new constraints with issue-prefixed names
-        conn.execute(sa.text("""
+        conn.execute(
+            sa.text(
+                """
                 ALTER TABLE users
                 ADD CONSTRAINT chk_2332_users_role_valid
                 CHECK (role IN ('platform_admin', 'tenant_admin', 'manager', 'user', 'readonly'))
-            """))
+            """
+            )
+        )
 
-        conn.execute(sa.text("""
+        conn.execute(
+            sa.text(
+                """
                 ALTER TABLE users
                 ADD CONSTRAINT chk_2332_tenant_admin_requires_tenant
                 CHECK (NOT (role = 'tenant_admin' AND tenant_id IS NULL))
-            """))
+            """
+            )
+        )
 
         log.info("Applied CHECK constraints for PostgreSQL")
     else:
@@ -555,14 +617,20 @@ def upgrade() -> None:
         dialect = connection.dialect.name
         if dialect == "postgresql":
             # PostgreSQL: can use SELECT * and preserves column order
-            connection.execute(sa.text("""
+            connection.execute(
+                sa.text(
+                    """
                     CREATE TABLE IF NOT EXISTS users_backup_2332 AS
                     SELECT * FROM users WHERE role = 'admin'
-                    """))
+                    """
+                )
+            )
         else:
             # SQLite: create table with explicit column definitions to preserve types
             # CREATE TABLE AS SELECT loses type information in SQLite
-            connection.execute(sa.text("""
+            connection.execute(
+                sa.text(
+                    """
                     CREATE TABLE IF NOT EXISTS users_backup_2332 (
                         id INTEGER,
                         username TEXT,
@@ -585,16 +653,22 @@ def upgrade() -> None:
                         auto_mapping_enabled INTEGER,
                         tenant_version INTEGER
                     )
-                    """))
+                    """
+                )
+            )
             # Insert data after creating the table
-            connection.execute(sa.text("""
+            connection.execute(
+                sa.text(
+                    """
                     INSERT INTO users_backup_2332
                     SELECT id, username, password_hash, email, is_admin, is_active,
                            created_at, last_login, role, daily_token_quota, monthly_token_quota,
                            daily_request_quota, monthly_token_quota, deleted_at, system_account,
                            tenant_id, must_change_password, avatar_url, auto_mapping_enabled, tenant_version
                     FROM users WHERE role = 'admin'
-                    """))
+                    """
+                )
+            )
     except Exception as e:
         log.warning(f"Could not create backup table: {e}")
 
@@ -628,20 +702,28 @@ def downgrade() -> None:
 
     # Step 1: Restore roles from backup table
     try:
-        result = connection.execute(sa.text("""
+        result = connection.execute(
+            sa.text(
+                """
                 UPDATE users
                 SET role = 'admin'
                 WHERE id IN (SELECT id FROM users_backup_2332)
-            """))
+            """
+            )
+        )
         log.info(f"Restored {result.rowcount} accounts to admin role")
     except Exception as e:
         log.warning(f"Could not restore from backup: {e}")
         # Fallback: restore all platform_admin and tenant_admin to admin
-        result = connection.execute(sa.text("""
+        result = connection.execute(
+            sa.text(
+                """
                 UPDATE users
                 SET role = 'admin'
                 WHERE role IN ('platform_admin', 'tenant_admin')
-            """))
+            """
+            )
+        )
         log.info(f"Restored {result.rowcount} accounts to admin role (fallback)")
 
     # Step 2: Remove constraints
