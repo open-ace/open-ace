@@ -37,3 +37,4 @@ def is_placeholder_value(value: str) -> bool:
     if not value:
         return False
     return any(re.search(pattern, value, re.IGNORECASE) for pattern in PLACEHOLDER_PATTERNS)
+
