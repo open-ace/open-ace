@@ -1045,9 +1045,7 @@ def handle_llm_proxy_request(
                     )
             except Exception as e:
                 # On any error, fall back to webui aggregate session
-                logger.warning(
-                    "Failed to get active sessions, using webui aggregate: %s", e
-                )
+                logger.warning("Failed to get active sessions, using webui aggregate: %s", e)
 
     try:
         from app.modules.governance.quota_manager import QuotaManager
