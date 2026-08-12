@@ -79,3 +79,62 @@ def test_last_fenced_block_wins_when_agent_prefaces_a_partial():
     )
     result = _extract(text)
     assert result == {"verdicts": [{"item": "a", "verdict": "confirmed"}]}
+
+
+# --- Truncation recovery (prod: glm-5 sometimes starts JSON but the output is
+# cut off mid-object — token-budget exhaustion leaves an unbalanced fence).
+# Recovery must keep the COMPLETE leading verdicts and drop the trailing
+# incomplete one. Safe: a dropped checklist verdict becomes indeterminate
+# downstream (never a false confirmed). #2394/#2328/#2349 infra-exhaustion.
+
+
+def test_truncated_fenced_json_recovers_complete_prefix():
+    # Model wrote verdict "a" fully, then ran out of tokens mid-"rejected" on "b".
+    text = (
+        "Based on my verification:\n```json\n"
+        '{"verdicts": [{"item": "a", "verdict": "confirmed"}, '
+        '{"item": "b", "verdict": "reject'
+    )
+    result = _extract(text)
+    assert result is not None
+    items = [v["item"] for v in result["verdicts"]]
+    assert "a" in items  # complete verdict recovered
+    assert "b" not in items  # incomplete trailing verdict dropped
+
+
+def test_truncated_unfenced_json_recovers():
+    # Prose preface + an unfenced JSON object cut off before the closing brace.
+    text = (
+        "Here is my assessment: "
+        '{"verdicts": [{"item": "a", "verdict": "confirmed"}, '
+        '{"item": "b", "verdict": "rejected"}'
+    )
+    result = _extract(text)
+    assert result is not None
+    assert result["verdicts"] == [
+        {"item": "a", "verdict": "confirmed"},
+        {"item": "b", "verdict": "rejected"},
+    ]
+
+
+def test_truncation_mid_evidence_keeps_complete_verdict_prefix():
+    # Truncation inside a verdict's evidence array: keep the verdict with the
+    # evidence completed so far, drop the dangling incomplete ref.
+    text = (
+        "```json\n"
+        '{"verdicts": [{"item": "a", "verdict": "confirmed", '
+        '"evidence": [{"ref": "file.py:10"}, {"ref": "file.py'
+    )
+    result = _extract(text)
+    assert result is not None
+    assert len(result["verdicts"]) == 1
+    assert result["verdicts"][0]["item"] == "a"
+    # The first complete evidence ref survived; the truncated one is gone.
+    refs = [e["ref"] for e in result["verdicts"][0]["evidence"]]
+    assert "file.py:10" in refs
+
+
+def test_truncated_object_with_no_complete_element_returns_none():
+    # Cut off before ANY complete verdict — nothing safe to recover.
+    text = '```json\n{"verdicts": [{"item": "a", "verdict": "conf'
+    assert _extract(text) is None
