@@ -7,8 +7,9 @@ Tests the state checking logic for remote session operations:
 - Unknown/null status should return 500
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 class TestCheckSessionState:
