@@ -478,10 +478,8 @@ class TestHeartbeatStatusEndpoint:
     """Test /api/remote/heartbeat-status endpoint."""
 
     @pytest.fixture
-    def app(self):
-        """Create a test Flask app."""
-        import tempfile
-
+    def temp_db(self):
+        """Create a temporary database for testing."""
         db_file = tempfile.mktemp(suffix=".db")
 
         import app.repositories.database as db_mod
@@ -506,77 +504,86 @@ class TestHeartbeatStatusEndpoint:
             "created_at TIMESTAMP, "
             "updated_at TIMESTAMP)"
         )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS agent_sessions ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "session_id TEXT NOT NULL UNIQUE, "
+            "session_type TEXT DEFAULT 'chat', "
+            "title TEXT, "
+            "tool_name TEXT, "
+            "host_name TEXT, "
+            "user_id INTEGER, "
+            "status TEXT DEFAULT 'active', "
+            "context TEXT, "
+            "settings TEXT, "
+            "project_id TEXT, "
+            "project_path TEXT, "
+            "total_tokens INTEGER DEFAULT 0, "
+            "total_input_tokens INTEGER DEFAULT 0, "
+            "total_output_tokens INTEGER DEFAULT 0, "
+            "message_count INTEGER DEFAULT 0, "
+            "request_count INTEGER DEFAULT 0, "
+            "model TEXT, "
+            "tags TEXT, "
+            "workspace_type TEXT DEFAULT 'local', "
+            "remote_machine_id TEXT, "
+            "paused_at TIMESTAMP, "
+            "created_at TIMESTAMP, "
+            "updated_at TIMESTAMP, "
+            "completed_at TIMESTAMP, "
+            "expires_at TIMESTAMP)"
+        )
         conn.commit()
         conn.close()
 
-        from flask import Flask
-
-        from app.auth.decorators import admin_required
-        from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
-
-        app = Flask(__name__)
-        app.config["TESTING"] = True
-        app.config["SECRET_KEY"] = "test-secret-key"
-
-        # Mock admin_required to bypass auth
-        def mock_admin_required(f):
-            def decorated(*args, **kwargs):
-                from flask import g
-
-                g.user = {"id": 1, "role": "admin", "username": "test-admin"}
-                return f(*args, **kwargs)
-
-            decorated.__name__ = f.__name__
-            return decorated
-
-        # Register blueprint with mocked decorator
-        from app.routes.remote import remote_bp
-
-        # Temporarily replace admin_required
-        original_admin_required = None
-        for attr_name in dir(remote_bp):
-            attr = getattr(remote_bp, attr_name)
-            if callable(attr) and hasattr(attr, "__name__") and attr.__name__ == "admin_required":
-                original_admin_required = attr
-                break
-
-        # Create a test client that bypasses auth
-        app.test_client_class = type(
-            "TestClient",
-            (app.test_client_class,),
-            {
-                "open": lambda self, *args, **kwargs: super(type(self), self).open(*args, **kwargs),
-            },
-        )
-
-        app.register_blueprint(remote_bp, url_prefix="/api/remote")
-
-        yield app
+        yield db_file
 
         with contextlib.suppress(OSError):
             os.unlink(db_file)
 
-    def test_endpoint_returns_status(self, app):
+    def test_endpoint_returns_status(self, temp_db):
         """Test that endpoint returns heartbeat monitor status."""
-        from flask import g
-        from unittest.mock import patch
+        from flask import Flask
+        from unittest.mock import patch, MagicMock
 
-        # Mock g.user for admin_required
-        with app.test_client() as client:
-            with patch("flask.g") as mock_g:
-                mock_g.user = {"id": 1, "role": "admin"}
+        from app.modules.workspace.remote_agent_manager import RemoteAgentManager
 
-                response = client.get("/api/remote/heartbeat-status")
+        # Reset singleton
+        import app.modules.workspace.remote_agent_manager as ram_mod
+        ram_mod._agent_manager = None
 
-                # Should return 200 OK (bypassing auth in test)
-                assert response.status_code in (200, 401)  # 401 if auth not properly mocked
+        # Create manager and run a heartbeat check
+        mgr = RemoteAgentManager(db_path=temp_db)
+        mgr._check_heartbeats()
 
-                if response.status_code == 200:
-                    data = response.get_json()
-                    assert data["success"] is True
-                    assert "heartbeat_monitor" in data
-                    assert "is_running" in data["heartbeat_monitor"]
-                    assert "check_count" in data["heartbeat_monitor"]
+        # Create minimal Flask app for request context
+        app = Flask(__name__)
+        app.config["SECRET_KEY"] = "test-secret-key"
+
+        # Mock get_remote_agent_manager to return our manager
+        with patch("app.routes.remote.get_remote_agent_manager", return_value=mgr):
+            # Import after mock is set up
+            from app.routes.remote import get_heartbeat_status
+
+            # Use test_request_context to provide request context
+            with app.test_request_context():
+                # Mock the admin_required decorator's auth checks
+                with patch("app.auth.decorators._extract_session_token", return_value="test-token"):
+                    with patch(
+                        "app.auth.decorators._load_user_from_token",
+                        return_value={"id": 1, "role": "admin", "username": "test-admin"},
+                    ):
+                        response = get_heartbeat_status()
+
+                        # Verify response structure
+                        # Response from Flask route is a Response object
+                        assert response.status_code == 200
+                        data = response.get_json()
+                        assert data["success"] is True
+                        assert "heartbeat_monitor" in data
+                        assert "is_running" in data["heartbeat_monitor"]
+                        assert "check_count" in data["heartbeat_monitor"]
+                        assert data["heartbeat_monitor"]["check_count"] >= 1
 
 
 if __name__ == "__main__":
