@@ -161,9 +161,13 @@ def setup_test_data(mgr):
 
         now = "2026-01-01T00:00:00"
 
-        # 3 machines
-        for _i, name in enumerate(["machine-a", "machine-b", "machine-c"]):
-            mid = f"mid-{name}"
+        # 3 machines with valid UUID machine_id (Issue #2540)
+        machine_uuids = {
+            "machine-a": "a1b2c3d4-1234-5678-9abc-def012345678",
+            "machine-b": "b2c3d4e5-1234-5678-9abc-def012345679",
+            "machine-c": "c3d4e5f6-1234-5678-9abc-def01234567a",
+        }
+        for name, mid in machine_uuids.items():
             cursor.execute(
                 "INSERT INTO remote_machines (machine_id, machine_name, status, tenant_id, created_at, updated_at) "
                 "VALUES (?, ?, 'online', 1, ?, ?)",
@@ -190,25 +194,25 @@ def setup_test_data(mgr):
         cursor.execute(
             "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
             "VALUES (?, ?, ?, 1, ?)",
-            ("mid-machine-a", 2, "admin", now),
+            ("a1b2c3d4-1234-5678-9abc-def012345678", 2, "admin", now),
         )
         # User 2: regular user on machine-b
         cursor.execute(
             "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
             "VALUES (?, ?, ?, 1, ?)",
-            ("mid-machine-b", 2, "user", now),
+            ("b2c3d4e5-1234-5678-9abc-def012345679", 2, "user", now),
         )
         # User 3: regular user on machine-a
         cursor.execute(
             "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
             "VALUES (?, ?, ?, 1, ?)",
-            ("mid-machine-a", 3, "user", now),
+            ("a1b2c3d4-1234-5678-9abc-def012345678", 3, "user", now),
         )
         # User 4: machine admin on machine-b
         cursor.execute(
             "INSERT INTO machine_assignments (machine_id, user_id, permission, granted_by, granted_at) "
             "VALUES (?, ?, ?, 1, ?)",
-            ("mid-machine-b", 4, "admin", now),
+            ("b2c3d4e5-1234-5678-9abc-def012345679", 4, "admin", now),
         )
 
         conn.commit()
@@ -225,7 +229,7 @@ def test_check_user_access_returns_permission():
     setup_test_data(mgr)
 
     # User 2 is admin on machine-a
-    perm = mgr.check_user_access("mid-machine-a", 2)
+    perm = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 2)
     assert perm == "admin", f"expected 'admin', got {perm!r}"
 
 
@@ -234,7 +238,7 @@ def test_check_user_access_returns_none_for_unassigned():
     mgr = make_manager()
     setup_test_data(mgr)
 
-    perm = mgr.check_user_access("mid-machine-a", 99)
+    perm = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 99)
     assert perm is None, f"expected None, got {perm!r}"
 
 
@@ -243,7 +247,7 @@ def test_check_user_access_returns_user_permission():
     mgr = make_manager()
     setup_test_data(mgr)
 
-    perm = mgr.check_user_access("mid-machine-a", 3)
+    perm = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 3)
     assert perm == "user", f"expected 'user', got {perm!r}"
 
 
@@ -252,7 +256,7 @@ def test_get_user_permission():
     mgr = make_manager()
     setup_test_data(mgr)
 
-    perm = mgr.get_user_permission("mid-machine-b", 2)
+    perm = mgr.get_user_permission("b2c3d4e5-1234-5678-9abc-def012345679", 2)
     assert perm == "user", f"expected 'user', got {perm!r}"
 
 
@@ -266,9 +270,9 @@ def test_list_machines_with_user_id_has_permission():
     perms = {m["machine_id"]: m.get("current_user_permission") for m in machines}
 
     assert (
-        perms.get("mid-machine-a") == "admin"
-        and perms.get("mid-machine-b") == "user"
-        and perms.get("mid-machine-c") is None
+        perms.get("a1b2c3d4-1234-5678-9abc-def012345678") == "admin"
+        and perms.get("b2c3d4e5-1234-5678-9abc-def012345679") == "user"
+        and perms.get("c3d4e5f6-1234-5678-9abc-def01234567a") is None
     ), f"unexpected permissions: {perms}"
 
 
@@ -290,9 +294,11 @@ def test_assign_user_as_machine_admin():
     setup_test_data(mgr)
 
     # User 2 (machine admin on machine-a) assigns user 5
-    success = mgr.assign_user("mid-machine-a", 5, granted_by=2, permission="user")
+    success = mgr.assign_user(
+        "a1b2c3d4-1234-5678-9abc-def012345678", 5, granted_by=2, permission="user"
+    )
     assert success, "assign_user returned False"
-    perm = mgr.check_user_access("mid-machine-a", 5)
+    perm = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 5)
     assert perm == "user", f"expected 'user', got {perm!r}"
 
 
@@ -302,8 +308,8 @@ def test_revoke_user_as_machine_admin():
     setup_test_data(mgr)
 
     # Revoke user 3 from machine-a
-    success = mgr.revoke_user("mid-machine-a", 3)
-    perm = mgr.check_user_access("mid-machine-a", 3)
+    success = mgr.revoke_user("a1b2c3d4-1234-5678-9abc-def012345678", 3)
+    perm = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 3)
     assert success and perm is None, f"success={success}, perm={perm!r}"
 
 
@@ -315,8 +321,8 @@ def test_revoke_admin_by_machine_admin():
     setup_test_data(mgr)
 
     # Data layer doesn't enforce permission check; the route does
-    success = mgr.revoke_user("mid-machine-a", 2)  # user 2 is admin
-    perm = mgr.check_user_access("mid-machine-a", 2)
+    success = mgr.revoke_user("a1b2c3d4-1234-5678-9abc-def012345678", 2)  # user 2 is admin
+    perm = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 2)
     # Data layer should succeed - route enforces the restriction
     assert success and perm is None, f"success={success}, perm={perm!r}"
 
@@ -326,8 +332,8 @@ def test_backwards_compat_truthiness():
     mgr = make_manager()
     setup_test_data(mgr)
 
-    assigned = mgr.check_user_access("mid-machine-a", 2)
-    unassigned = mgr.check_user_access("mid-machine-a", 99)
+    assigned = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 2)
+    unassigned = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 99)
 
     assert assigned and not unassigned, f"assigned={assigned!r}, unassigned={unassigned!r}"
 
@@ -338,9 +344,9 @@ def test_permission_isolation_across_machines():
     setup_test_data(mgr)
 
     # User 2 is admin on machine-a, user on machine-b, not on machine-c
-    perm_a = mgr.check_user_access("mid-machine-a", 2)
-    perm_b = mgr.check_user_access("mid-machine-b", 2)
-    perm_c = mgr.check_user_access("mid-machine-c", 2)
+    perm_a = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 2)
+    perm_b = mgr.check_user_access("b2c3d4e5-1234-5678-9abc-def012345679", 2)
+    perm_c = mgr.check_user_access("c3d4e5f6-1234-5678-9abc-def01234567a", 2)
 
     assert (
         perm_a == "admin" and perm_b == "user" and perm_c is None
@@ -352,8 +358,10 @@ def test_assign_user_with_admin_permission():
     mgr = make_manager()
     setup_test_data(mgr)
 
-    success = mgr.assign_user("mid-machine-a", 5, granted_by=1, permission="admin")
-    perm = mgr.check_user_access("mid-machine-a", 5)
+    success = mgr.assign_user(
+        "a1b2c3d4-1234-5678-9abc-def012345678", 5, granted_by=1, permission="admin"
+    )
+    perm = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 5)
     assert success and perm == "admin", f"success={success}, perm={perm!r}"
 
 
@@ -444,12 +452,12 @@ def test_route_assign_by_system_admin():
     with app.test_client() as client:
         resp = _auth_post(
             client,
-            "/api/remote/machines/mid-machine-a/assign",
+            "/api/remote/machines/a1b2c3d4-1234-5678-9abc-def012345678/assign",
             "test-token-1-admin",
             json={"user_id": 5, "permission": "admin"},
         )
         assert resp.status_code == 200, f"status={resp.status_code}, body={resp.get_json()}"
-        perm = mgr.check_user_access("mid-machine-a", 5)
+        perm = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 5)
         assert perm == "admin", f"permission={perm!r}, expected 'admin'"
 
 
@@ -462,12 +470,12 @@ def test_route_assign_by_machine_admin():
     with app.test_client() as client:
         resp = _auth_post(
             client,
-            "/api/remote/machines/mid-machine-a/assign",
+            "/api/remote/machines/a1b2c3d4-1234-5678-9abc-def012345678/assign",
             "test-token-2-user",
             json={"user_id": 5, "permission": "admin"},
         )
         assert resp.status_code == 200, f"status={resp.status_code}, body={resp.get_json()}"
-        perm = mgr.check_user_access("mid-machine-a", 5)
+        perm = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 5)
         assert perm == "user", f"permission={perm!r}, expected 'user' (forced)"
 
 
@@ -480,7 +488,7 @@ def test_route_assign_by_regular_user():
     with app.test_client() as client:
         resp = _auth_post(
             client,
-            "/api/remote/machines/mid-machine-a/assign",
+            "/api/remote/machines/a1b2c3d4-1234-5678-9abc-def012345678/assign",
             "test-token-3-user",
             json={"user_id": 5, "permission": "user"},
         )
@@ -496,7 +504,7 @@ def test_route_assign_by_unassigned_user():
     with app.test_client() as client:
         resp = _auth_post(
             client,
-            "/api/remote/machines/mid-machine-a/assign",
+            "/api/remote/machines/a1b2c3d4-1234-5678-9abc-def012345678/assign",
             "test-token-99-user",
             json={"user_id": 5, "permission": "user"},
         )
@@ -511,10 +519,12 @@ def test_route_revoke_by_machine_admin():
 
     with app.test_client() as client:
         resp = _auth_delete(
-            client, "/api/remote/machines/mid-machine-a/assign/3", "test-token-2-user"
+            client,
+            "/api/remote/machines/a1b2c3d4-1234-5678-9abc-def012345678/assign/3",
+            "test-token-2-user",
         )
         assert resp.status_code == 200, f"status={resp.status_code}, body={resp.get_json()}"
-        perm = mgr.check_user_access("mid-machine-a", 3)
+        perm = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 3)
         assert perm is None, f"user 3 still has permission: {perm!r}"
 
 
@@ -525,9 +535,11 @@ def test_route_revoke_admin_by_machine_admin():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        mgr.assign_user("mid-machine-a", 4, granted_by=1, permission="admin")
+        mgr.assign_user("a1b2c3d4-1234-5678-9abc-def012345678", 4, granted_by=1, permission="admin")
         resp = _auth_delete(
-            client, "/api/remote/machines/mid-machine-a/assign/4", "test-token-2-user"
+            client,
+            "/api/remote/machines/a1b2c3d4-1234-5678-9abc-def012345678/assign/4",
+            "test-token-2-user",
         )
         assert resp.status_code == 403, f"expected 403, got {resp.status_code}"
 
@@ -540,10 +552,12 @@ def test_route_revoke_admin_by_system_admin():
 
     with app.test_client() as client:
         resp = _auth_delete(
-            client, "/api/remote/machines/mid-machine-a/assign/2", "test-token-1-admin"
+            client,
+            "/api/remote/machines/a1b2c3d4-1234-5678-9abc-def012345678/assign/2",
+            "test-token-1-admin",
         )
         assert resp.status_code == 200, f"status={resp.status_code}, body={resp.get_json()}"
-        perm = mgr.check_user_access("mid-machine-a", 2)
+        perm = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 2)
         assert perm is None, f"admin still has permission: {perm!r}"
 
 
@@ -554,7 +568,11 @@ def test_route_get_users_by_machine_admin():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_get(client, "/api/remote/machines/mid-machine-a/users", "test-token-2-user")
+        resp = _auth_get(
+            client,
+            "/api/remote/machines/a1b2c3d4-1234-5678-9abc-def012345678/users",
+            "test-token-2-user",
+        )
         data = resp.get_json()
         assert (
             resp.status_code == 200 and len(data.get("users", [])) >= 1
@@ -568,7 +586,11 @@ def test_route_get_users_by_regular_user():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_get(client, "/api/remote/machines/mid-machine-a/users", "test-token-3-user")
+        resp = _auth_get(
+            client,
+            "/api/remote/machines/a1b2c3d4-1234-5678-9abc-def012345678/users",
+            "test-token-3-user",
+        )
         assert resp.status_code == 403, f"expected 403, got {resp.status_code}"
 
 
@@ -584,7 +606,8 @@ def test_route_list_machines_includes_permission():
         machines = data.get("machines", [])
         perms = {m["machine_id"]: m.get("current_user_permission") for m in machines}
         assert (
-            perms.get("mid-machine-a") == "admin" and perms.get("mid-machine-b") == "user"
+            perms.get("a1b2c3d4-1234-5678-9abc-def012345678") == "admin"
+            and perms.get("b2c3d4e5-1234-5678-9abc-def012345679") == "user"
         ), f"unexpected permissions: {perms}"
 
 
@@ -595,11 +618,17 @@ def test_route_deregister_system_admin_only():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        resp = _auth_delete(client, "/api/remote/machines/mid-machine-a", "test-token-2-user")
+        resp = _auth_delete(
+            client, "/api/remote/machines/a1b2c3d4-1234-5678-9abc-def012345678", "test-token-2-user"
+        )
         assert resp.status_code == 403, f"expected 403, got {resp.status_code}"
 
     with app.test_client() as client:
-        resp2 = _auth_delete(client, "/api/remote/machines/mid-machine-c", "test-token-1-admin")
+        resp2 = _auth_delete(
+            client,
+            "/api/remote/machines/c3d4e5f6-1234-5678-9abc-def01234567a",
+            "test-token-1-admin",
+        )
         assert resp2.status_code == 200, f"system admin got {resp2.status_code}"
 
 
@@ -706,7 +735,7 @@ def _patched_session_env(mgr):
     from app.modules.workspace.remote_session_manager import RemoteSessionManager
 
     ram_mod._agent_manager = mgr
-    mgr._connections["mid-machine-a"] = True
+    mgr._connections["a1b2c3d4-1234-5678-9abc-def012345678"] = True
     mgr.send_command = MagicMock(return_value=True)
 
     original_get = rsm_mod.get_remote_agent_manager
@@ -754,7 +783,9 @@ def test_route_session_access_owner():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        result, session_mgr, patches = _create_session_for_test(mgr, 3, "mid-machine-a")
+        result, session_mgr, patches = _create_session_for_test(
+            mgr, 3, "a1b2c3d4-1234-5678-9abc-def012345678"
+        )
         assert result, "session creation failed"
 
         sid = result["session_id"]
@@ -776,7 +807,9 @@ def test_route_session_access_machine_admin():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        result, session_mgr, patches = _create_session_for_test(mgr, 3, "mid-machine-a")
+        result, session_mgr, patches = _create_session_for_test(
+            mgr, 3, "a1b2c3d4-1234-5678-9abc-def012345678"
+        )
         assert result, "session creation failed"
 
         sid = result["session_id"]
@@ -800,7 +833,9 @@ def test_route_session_access_denied_other_user():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        result, session_mgr, patches = _create_session_for_test(mgr, 2, "mid-machine-a")
+        result, session_mgr, patches = _create_session_for_test(
+            mgr, 2, "a1b2c3d4-1234-5678-9abc-def012345678"
+        )
         assert result, "session creation failed"
 
         sid = result["session_id"]
@@ -822,7 +857,9 @@ def test_route_session_access_unassigned_user():
     app = _make_app(mgr)
 
     with app.test_client() as client:
-        result, session_mgr, patches = _create_session_for_test(mgr, 2, "mid-machine-a")
+        result, session_mgr, patches = _create_session_for_test(
+            mgr, 2, "a1b2c3d4-1234-5678-9abc-def012345678"
+        )
         assert result, "session creation failed"
 
         sid = result["session_id"]
@@ -849,14 +886,17 @@ def test_route_create_session_by_unassigned_user():
     app = _make_app(mgr)
 
     # Simulate machine connection
-    mgr._connections["mid-machine-a"] = True
+    mgr._connections["a1b2c3d4-1234-5678-9abc-def012345678"] = True
 
     with app.test_client() as client:
         resp = _auth_post(
             client,
             "/api/remote/sessions",
             "test-token-99-user",  # Unassigned user without tenant
-            json={"machine_id": "mid-machine-a", "project_path": "/home/test"},
+            json={
+                "machine_id": "a1b2c3d4-1234-5678-9abc-def012345678",
+                "project_path": "/home/test",
+            },
         )
         assert (
             resp.status_code == 404
@@ -879,7 +919,7 @@ def test_route_create_session_by_assigned_user():
             "/api/remote/sessions",
             "test-token-3-user",  # regular user assigned to machine-a
             json={
-                "machine_id": "mid-machine-a",
+                "machine_id": "a1b2c3d4-1234-5678-9abc-def012345678",
                 "project_path": "/home/test",
                 "cli_tool": "claude-code",
             },
@@ -906,7 +946,7 @@ def test_route_create_session_by_machine_admin():
             "/api/remote/sessions",
             "test-token-2-user",  # machine-admin of machine-a
             json={
-                "machine_id": "mid-machine-a",
+                "machine_id": "a1b2c3d4-1234-5678-9abc-def012345678",
                 "project_path": "/home/test",
                 "cli_tool": "claude-code",
             },
@@ -930,7 +970,7 @@ def test_route_browse_by_unassigned_user():
     with app.test_client() as client:
         resp = _auth_get(
             client,
-            "/api/remote/machines/mid-machine-a/browse",
+            "/api/remote/machines/a1b2c3d4-1234-5678-9abc-def012345678/browse",
             "test-token-99-user",  # Unassigned user without tenant
         )
         assert (
@@ -978,17 +1018,21 @@ def test_route_assign_path_machine_id_overrides_body():
     app = _make_app(mgr)
 
     # User 2 is admin of machine-a but only a user on machine-b. Before the
-    # fix, sending machine_id=mid-machine-a in the body authorized against A
+    # fix, sending machine_id=a1b2c3d4-1234-5678-9abc-def012345678 in the body authorized against A
     # while the route assigned the user to B (path).
     with app.test_client() as client:
         resp = _auth_post(
             client,
-            "/api/remote/machines/mid-machine-b/assign",
+            "/api/remote/machines/b2c3d4e5-1234-5678-9abc-def012345679/assign",
             "test-token-2-user",  # machine-admin of A, plain user of B
-            json={"user_id": 99, "permission": "user", "machine_id": "mid-machine-a"},
+            json={
+                "user_id": 99,
+                "permission": "user",
+                "machine_id": "a1b2c3d4-1234-5678-9abc-def012345678",
+            },
         )
         # Path (B) wins: user 2 is not a machine-admin of B -> 403, and B stays unchanged.
-        untouched = mgr.check_user_access("mid-machine-b", 99)
+        untouched = mgr.check_user_access("b2c3d4e5-1234-5678-9abc-def012345679", 99)
         assert resp.status_code == 403 and untouched is None, (
             f"expected 403 and no mutation, got status={resp.status_code}, "
             f"perm_on_b={untouched!r}, body={resp.get_json()}"
@@ -1007,12 +1051,12 @@ def test_route_revoke_path_machine_id_overrides_body():
     with app.test_client() as client:
         resp = _auth_delete(
             client,
-            "/api/remote/machines/mid-machine-b/assign/3",
+            "/api/remote/machines/b2c3d4e5-1234-5678-9abc-def012345679/assign/3",
             "test-token-2-user",  # machine-admin of A, plain user of B
-            json={"machine_id": "mid-machine-a"},
+            json={"machine_id": "a1b2c3d4-1234-5678-9abc-def012345678"},
         )
         # user 3 must still be assigned to A (untouched, since the revoke was denied).
-        still_assigned_on_a = mgr.check_user_access("mid-machine-a", 3)
+        still_assigned_on_a = mgr.check_user_access("a1b2c3d4-1234-5678-9abc-def012345678", 3)
         assert resp.status_code == 403 and still_assigned_on_a == "user", (
             f"expected 403, got status={resp.status_code}, " f"perm_on_a={still_assigned_on_a!r}"
         )
@@ -1027,7 +1071,7 @@ def test_route_get_users_path_machine_id_overrides_query():
     with app.test_client() as client:
         resp = _auth_get(
             client,
-            "/api/remote/machines/mid-machine-b/users?machine_id=mid-machine-a",
+            "/api/remote/machines/b2c3d4e5-1234-5678-9abc-def012345679/users?machine_id=a1b2c3d4-1234-5678-9abc-def012345678",
             "test-token-2-user",  # machine-admin of A, plain user of B
         )
         assert (
@@ -1049,7 +1093,7 @@ def test_route_create_session_body_machine_id_still_works():
             "/api/remote/sessions",
             "test-token-3-user",
             json={
-                "machine_id": "mid-machine-a",
+                "machine_id": "a1b2c3d4-1234-5678-9abc-def012345678",
                 "project_path": "/tmp/p",
                 "cli_tool": "claude-code",
             },
@@ -1072,14 +1116,14 @@ def test_route_get_machine_path_machine_id_overrides_query():
     app = _make_app(mgr)
 
     # User 3 has 'user' access to machine-a only. Before the fix, query
-    # ?machine_id=mid-machine-a would authorize against A while the route
+    # ?machine_id=a1b2c3d4-1234-5678-9abc-def012345678 would authorize against A while the route
     # returned B's details.
     # Issue #2538: User 3 has no tenant, machine-b has tenant 1.
     # This is cross-tenant access, so returns 404 (not 403).
     with app.test_client() as client:
         resp = _auth_get(
             client,
-            "/api/remote/machines/mid-machine-b?machine_id=mid-machine-a",
+            "/api/remote/machines/b2c3d4e5-1234-5678-9abc-def012345679?machine_id=a1b2c3d4-1234-5678-9abc-def012345678",
             "test-token-3-user",  # user of A, no access to B
         )
         assert (
@@ -1101,7 +1145,7 @@ def test_route_browse_path_machine_id_overrides_query():
     with app.test_client() as client:
         resp = _auth_get(
             client,
-            "/api/remote/machines/mid-machine-b/browse?machine_id=mid-machine-a",
+            "/api/remote/machines/b2c3d4e5-1234-5678-9abc-def012345679/browse?machine_id=a1b2c3d4-1234-5678-9abc-def012345678",
             "test-token-3-user",  # user of A, no access to B
         )
         # Issue #2538: Cross-tenant access returns 404 (not 403)

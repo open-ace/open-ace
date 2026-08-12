@@ -345,6 +345,9 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple[Any, Any] | Non
     can still authenticate without a Bearer token, but with an expiry
     deadline and a clear_legacy_mode transition on first Bearer use.
 
+    Note: Callers should validate machine_id format before calling this function.
+    The callers (agent_message, usage_report) already perform UUID validation.
+
     Returns:
         (is_legacy, None) if legacy mode applies.
         (False, error_response) if not legacy and no Bearer provided.
@@ -358,7 +361,10 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple[Any, Any] | Non
         # If this was a legacy machine, clear the flag
         if agent_mgr.is_legacy_machine(machine_id):
             agent_mgr.clear_legacy_mode(machine_id)
-            logger.info("Legacy mode cleared for machine %s after Bearer auth", machine_id[:8])
+            logger.info(
+                "Legacy mode cleared for machine %s after Bearer auth",
+                safe_machine_id_prefix(machine_id),
+            )
         return False, None
 
     # No Bearer header — check if legacy mode is allowed
@@ -389,7 +395,7 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple[Any, Any] | Non
 
     logger.warning(
         "Legacy auth (no Bearer) accepted for machine %s — deadline approaching",
-        machine_id[:8],
+        safe_machine_id_prefix(machine_id),
     )
     return True, None
 
@@ -620,13 +626,94 @@ def _extract_machine_id():
     return machine_id
 
 
+# Issue #2540: UUID pattern for machine_id validation
+_UUID_PATTERN = re.compile(
+    r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", re.IGNORECASE
+)
+
+
+def _validate_machine_id_format(machine_id: Any) -> tuple[bool, tuple | None]:
+    """Validate machine_id is a valid UUID string.
+
+    Issue #2540: Prevents int/float/invalid-string inputs that would cause
+    TypeError in slice operations (machine_id[:8]).
+
+    Args:
+        machine_id: The machine_id value to validate.
+
+    Returns:
+        (True, None) if valid UUID string.
+        (False, error_response) if invalid format.
+    """
+    if machine_id is None:
+        return False, (
+            jsonify(
+                {
+                    "error": "machine_id must be a valid UUID string",
+                    "hint": "use 'machine_id' field (UUID) from GET /api/remote/machines, not 'id' (integer)",
+                }
+            ),
+            400,
+        )
+
+    # Must be a string
+    if not isinstance(machine_id, str):
+        return False, (
+            jsonify(
+                {
+                    "error": "machine_id must be a valid UUID string",
+                    "hint": "use 'machine_id' field (UUID) from GET /api/remote/machines, not 'id' (integer)",
+                }
+            ),
+            400,
+        )
+
+    # Must match UUID format
+    if not _UUID_PATTERN.match(machine_id):
+        return False, (
+            jsonify(
+                {
+                    "error": "machine_id must be a valid UUID string",
+                    "hint": "use 'machine_id' field (UUID) from GET /api/remote/machines, not 'id' (integer)",
+                }
+            ),
+            400,
+        )
+
+    return True, None
+
+
+def safe_machine_id_prefix(machine_id: Any) -> str:
+    """Safely extract first 8 chars of machine_id for logging/display.
+
+    Issue #2540: Type-safe slice to prevent TypeError when machine_id
+    is not a string (e.g., int passed instead of UUID string).
+
+    Args:
+        machine_id: Any value (expected to be UUID string, but may be int/None).
+
+    Returns:
+        First 8 characters of string representation, or "unknown" if None/empty.
+    """
+    if not machine_id:
+        return "unknown"
+    return str(machine_id)[:8]
+
+
 def _check_machine_access(machine_id):
     """Check if user has access to machine. Returns error or None.
 
     Issue #2538: Added tenant isolation check for unassigned users.
+    Issue #2540: Added UUID format validation to prevent TypeError.
     """
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
+
+    # Issue #2540: Validate machine_id is a valid UUID string
+    is_valid, format_error = _validate_machine_id_format(machine_id)
+    if not is_valid:
+        return format_error
+
     if User.is_admin_role(g.user.get("role")):
         return None
 
@@ -1989,6 +2076,11 @@ def agent_message():
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
 
+    # Issue #2540: Validate machine_id is a valid UUID string
+    is_valid, format_error = _validate_machine_id_format(machine_id)
+    if not is_valid:
+        return format_error
+
     # ===== Bearer token authentication =====
     # All message types except "register" require a valid Bearer token
     # (or legacy mode fallback for pre-existing machines).
@@ -2419,7 +2511,7 @@ def agent_message():
             if not agent_mgr.is_connected(machine_id):
                 logger.warning(
                     "session_sync: machine %s is not connected, skipping user_id resolution",
-                    machine_id[:8],
+                    safe_machine_id_prefix(machine_id),
                 )
             else:
                 try:
@@ -2441,7 +2533,7 @@ def agent_message():
                 except Exception as e:
                     logger.warning(
                         "Failed to resolve user_id from machine_assignments for machine=%s: %s",
-                        machine_id[:8],
+                        safe_machine_id_prefix(machine_id),
                         e,
                     )
 
@@ -2454,7 +2546,7 @@ def agent_message():
                     tool_name=tool_name,
                     project_path=project_path or "",
                     model=model,
-                    host_name=machine_id[:8],
+                    host_name=safe_machine_id_prefix(machine_id),
                     user_id=sync_user_id,
                     context={
                         "workspace_type": "terminal",
@@ -2617,7 +2709,7 @@ def agent_message():
                                     (
                                         date_str,
                                         tool_name,
-                                        machine_id[:8],
+                                        safe_machine_id_prefix(machine_id),
                                         message_id,
                                         role,
                                         content[:MAX_MESSAGE_LENGTH],
@@ -2646,7 +2738,7 @@ def agent_message():
                                     (
                                         date_str,
                                         tool_name,
-                                        machine_id[:8],
+                                        safe_machine_id_prefix(machine_id),
                                         message_id,
                                         role,
                                         content[:MAX_MESSAGE_LENGTH],
@@ -2739,8 +2831,16 @@ def start_terminal():
     # Get machine info for title/hostname
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
-    machine_name = machine.get("machine_name", machine_id[:8]) if machine else machine_id[:8]
-    hostname = machine.get("hostname", machine_id[:8]) if machine else machine_id[:8]
+    machine_name = (
+        machine.get("machine_name", safe_machine_id_prefix(machine_id))
+        if machine
+        else safe_machine_id_prefix(machine_id)
+    )
+    hostname = (
+        machine.get("hostname", safe_machine_id_prefix(machine_id))
+        if machine
+        else safe_machine_id_prefix(machine_id)
+    )
     tenant_id = machine.get("tenant_id", 1) if machine else 1
 
     # Generate terminal ID and proxy tokens for multiple providers
@@ -2913,8 +3013,16 @@ def start_cli_terminal():
 
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
-    machine_name = machine.get("machine_name", machine_id[:8]) if machine else machine_id[:8]
-    hostname = machine.get("hostname", machine_id[:8]) if machine else machine_id[:8]
+    machine_name = (
+        machine.get("machine_name", safe_machine_id_prefix(machine_id))
+        if machine
+        else safe_machine_id_prefix(machine_id)
+    )
+    hostname = (
+        machine.get("hostname", safe_machine_id_prefix(machine_id))
+        if machine
+        else safe_machine_id_prefix(machine_id)
+    )
     tenant_id = machine.get("tenant_id", 1) if machine else 1
     terminal_id = str(uuid.uuid4())
 
@@ -3198,7 +3306,7 @@ def get_terminal_status(terminal_id):
     logger.info(
         "get_terminal_status: terminal=%s, machine=%s, has_proxy_token=%s",
         terminal_id[:8],
-        machine_id[:8],
+        safe_machine_id_prefix(machine_id),
         bool(proxy_token),
     )
 
@@ -3647,6 +3755,12 @@ def usage_report():
     machine_id = data.get("machine_id")
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
+
+    # Issue #2540: Validate machine_id is a valid UUID string
+    is_valid, format_error = _validate_machine_id_format(machine_id)
+    if not is_valid:
+        return format_error
+
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
     if not machine:
@@ -3680,7 +3794,10 @@ def usage_report():
             return bearer_error
         if agent_mgr.is_legacy_machine(machine_id):
             agent_mgr.clear_legacy_mode(machine_id)
-            logger.info("Legacy mode cleared for machine %s after Bearer auth", machine_id[:8])
+            logger.info(
+                "Legacy mode cleared for machine %s after Bearer auth",
+                safe_machine_id_prefix(machine_id),
+            )
     else:
         _, legacy_error = _check_legacy_fallback(machine_id)
         if legacy_error:
@@ -3698,7 +3815,7 @@ def usage_report():
             return legacy_error
         logger.warning(
             "Usage report accepted for legacy machine %s (no Bearer token)",
-            machine_id[:8],
+            safe_machine_id_prefix(machine_id),
         )
     return _process_authenticated_usage_report(data, machine_id, client_ip)
 
