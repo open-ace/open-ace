@@ -65,6 +65,12 @@ class RemoteAgent:
             explicit_insecure=explicit_insecure,
             ca_bundle_path=ca_bundle_path,
         )
+
+        # Issue #2530 Phase 2: Recover token version if needed
+        # If config has agent_token but no last_token_version, sync from server
+        if self.config.agent_token and self.config.last_token_version is None:
+            self._sync_token_version_from_server()
+
         self._executor = ProcessExecutor(
             server_url=self.config.server_url,
             output_callback=self._on_session_output,
@@ -679,23 +685,265 @@ class RemoteAgent:
     def _cmd_rotate_token(self, data: dict[str, Any]) -> None:
         """Handle a rotate_token command from the server.
 
+        Issue #2530: Implements version-based command filtering to prevent
+        rollback to revoked tokens. Only applies token if token_version is
+        higher than the locally stored last_token_version.
+
+        Issue #2530 Phase 2: Validates token via probe before applying.
+        Uses initial random delay and exponential backoff retry to avoid
+        thundering herd when many agents rotate simultaneously.
+
         The server pushes a new agent token after an admin rotates it.
         The agent updates its local config so subsequent requests use
         the new token.
         """
         new_token = data.get("new_token")
+        token_version = data.get("token_version")
+
         if not new_token or len(new_token) < 16:
             logger.warning("rotate_token: new_token missing or too short, ignoring")
             return
 
+        # Issue #2530: Version-based filtering
+        # Only apply if token_version is higher than last applied version
+        last_version = self.config.last_token_version
+        if token_version is not None and last_version is not None:
+            if token_version <= last_version:
+                logger.warning(
+                    "rotate_token: ignoring older/duplicate token_version=%d (last=%d)",
+                    token_version,
+                    last_version,
+                )
+                return
+
+        # Issue #2530 Phase 2: Probe token before applying
+        # This prevents applying revoked tokens that were stale commands
+        # Skip probing if environment variable is set (for testing)
+        if os.environ.get("OPENACE_SKIP_TOKEN_PROBE") != "1":
+            if not self._probe_token(new_token, token_version):
+                logger.error(
+                    "rotate_token: token validation failed for version=%s, not applying",
+                    token_version or "unknown",
+                )
+                # Send error response to server if possible
+                self._send_token_rotation_error(token_version, "validation_failed")
+                return
+
         old_prefix = (self.config.agent_token or "")[:8]
         self.config.save_agent_token(new_token)
+
+        # Update last_token_version if provided
+        if token_version is not None:
+            self.config.update({"last_token_version": token_version})
+            self.config.save()
+            logger.info(
+                "Agent token rotated (old prefix=%s..., new prefix=%s..., version=%d). "
+                "Config updated. Subsequent requests will use the new token.",
+                old_prefix,
+                new_token[:8],
+                token_version,
+            )
+        else:
+            logger.info(
+                "Agent token rotated (old prefix=%s..., new prefix=%s...). "
+                "Config updated. Subsequent requests will use the new token.",
+                old_prefix,
+                new_token[:8],
+            )
+
+    def _probe_token(self, token: str, token_version: int | None = None) -> bool:
+        """Probe the server to validate a token before applying it.
+
+        Issue #2530 Phase 2: Validates token via heartbeat probe.
+        Uses initial random delay and exponential backoff retry.
+
+        Args:
+            token: The token to validate.
+            token_version: Optional version for logging.
+
+        Returns:
+            True if token is valid (200 response), False otherwise.
+        """
+        import random
+
+        # Issue #2530: Initial random delay (0-1 second)
+        # This avoids thundering herd when many agents rotate simultaneously
+        initial_delay = random.uniform(0, 1)
         logger.info(
-            "Agent token rotated (old prefix=%s..., new prefix=%s...). "
-            "Config updated. Subsequent requests will use the new token.",
-            old_prefix,
-            new_token[:8],
+            "Probing token validity (version=%s) in %.2fs",
+            token_version,
+            initial_delay,
         )
+        time.sleep(initial_delay)
+
+        # Exponential backoff retry: 1s, 2s, 4s
+        max_attempts = 3
+        base_delay = 1
+
+        for attempt in range(max_attempts):
+            try:
+                # Send heartbeat probe with the new token
+                url = f"{self.config.server_url}/api/remote/heartbeat"
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                }
+                payload = {
+                    "type": "heartbeat",
+                    "machine_id": self.config.machine_id,
+                }
+
+                # Use TLS config for verification
+                verify = self._get_tls_verify()
+
+                response = requests.post(
+                    url,
+                    json=payload,
+                    headers=headers,
+                    timeout=10,
+                    verify=verify,
+                )
+
+                if response.status_code == 200:
+                    logger.info(
+                        "Token probe succeeded (version=%s, attempt=%d)",
+                        token_version,
+                        attempt + 1,
+                    )
+                    return True
+                elif response.status_code == 401:
+                    # Token is invalid or revoked
+                    logger.warning(
+                        "Token probe failed with 401 (version=%s, attempt=%d)",
+                        token_version,
+                        attempt + 1,
+                    )
+                    # Don't retry on 401 - the token is definitively invalid
+                    return False
+                else:
+                    logger.warning(
+                        "Token probe failed with status %d (version=%s, attempt=%d)",
+                        response.status_code,
+                        token_version,
+                        attempt + 1,
+                    )
+
+            except requests.RequestException as e:
+                logger.warning(
+                    "Token probe network error (version=%s, attempt=%d): %s",
+                    token_version,
+                    attempt + 1,
+                    e,
+                )
+
+            # Retry with exponential backoff + jitter
+            if attempt < max_attempts - 1:
+                delay = base_delay * (2**attempt) + random.uniform(0, 1)
+                logger.info(
+                    "Retrying token probe in %.2fs (attempt=%d)",
+                    delay,
+                    attempt + 2,
+                )
+                time.sleep(delay)
+
+        # All retries failed
+        logger.error(
+            "Token probe failed after %d attempts (version=%s)",
+            max_attempts,
+            token_version,
+        )
+        return False
+
+    def _send_token_rotation_error(self, token_version: int | None, error_reason: str) -> None:
+        """Send token rotation error report to the server.
+
+        Issue #2530 Phase 2: Reports rotation failures to server for monitoring.
+
+        Args:
+            token_version: The version that failed.
+            error_reason: Reason for failure.
+        """
+        try:
+            url = f"{self.config.server_url}/api/remote/command_response"
+            headers = {
+                "Authorization": f"Bearer {self.config.agent_token}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "machine_id": self.config.machine_id,
+                "command_type": "rotate_token",
+                "status": "failed",
+                "error": f"Token validation failed: {error_reason}",
+                "token_version": token_version,
+            }
+
+            verify = self._get_tls_verify()
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=10,
+                verify=verify,
+            )
+
+            if response.status_code != 200:
+                logger.warning(
+                    "Failed to send token rotation error report: status %d",
+                    response.status_code,
+                )
+        except requests.RequestException as e:
+            logger.warning("Failed to send token rotation error report: %s", e)
+
+    def _get_tls_verify(self) -> bool | str:
+        """Get TLS verification setting for requests.
+
+        Returns:
+            True/False for verify flag, or path to CA bundle.
+        """
+        if self._tls_config.ca_bundle_path:
+            return self._tls_config.ca_bundle_path
+        return not self._tls_config.skip_verify
+
+    def _sync_token_version_from_server(self) -> None:
+        """Sync token version from server after restart.
+
+        Issue #2530 Phase 2: If agent restarts without last_token_version,
+        query the server to get the version for the current token.
+        """
+        try:
+            logger.info("Syncing token version from server...")
+
+            url = f"{self.config.server_url}/api/remote/token_info"
+            headers = {
+                "Authorization": f"Bearer {self.config.agent_token}",
+                "Content-Type": "application/json",
+            }
+
+            verify = self._get_tls_verify()
+            response = requests.post(
+                url,
+                json={"machine_id": self.config.machine_id},
+                headers=headers,
+                timeout=10,
+                verify=verify,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                token_version = data.get("token_version")
+                if token_version is not None:
+                    self.config.update({"last_token_version": token_version})
+                    self.config.save()
+                    logger.info("Synced token version from server: %d", token_version)
+                else:
+                    logger.warning("Server did not return token_version")
+            else:
+                logger.warning(
+                    "Failed to sync token version from server: status %d",
+                    response.status_code,
+                )
+        except Exception as e:
+            logger.warning("Failed to sync token version from server: %s", e)
 
     def _cmd_start_session(self, data: dict[str, Any]) -> None:
         """Handle a start_session command."""
