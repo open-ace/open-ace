@@ -47,10 +47,21 @@ def ensure_cs_cookie(info: dict, original_http_url: str, vscode_id: str) -> str:
     obtained by logging in once with the stored ``cs_password``. The cookie is
     cached on the session ``info`` dict for reuse across proxied requests.
 
+    Trust boundary: ``cs_password`` is code-server's OWN instance password (not
+    an end-user credential), and ``original_http_url`` is the code-server base
+    URL the proxy already streams all traffic to via ``build_target_url``, so
+    POSTing the password to ``<url>/login`` is not a new SSRF surface — the
+    proxy is already trusted to point there.
+
+    Caching tradeoff: the cookie is reused for the session's lifetime and is
+    not proactively refreshed (a /login per proxied request is infeasible for a
+    VSCode asset stream). If it expires mid-session the caller fails soft — it
+    proxies without a cookie and code-server returns its own 401 (re-auth), so
+    the worst case is a login prompt, never a crash.
+
     Returns the ``cookie=<value>`` header string, or ``""`` when no password is
-    configured or the login fails (the caller then proxies without a cookie and
-    lets code-server return its own 401). Never raises — a broken login must
-    not take down the proxy endpoint.
+    configured or the login fails. Never raises — a broken login must not take
+    down the proxy endpoint.
     """
     cs_password = (info or {}).get("cs_password", "")
     if not cs_password:
