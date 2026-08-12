@@ -425,10 +425,33 @@ def _validate_usage_report_binding(
 
 
 def _require_machine_admin(machine_id):
-    """Check system admin or machine admin. Returns error or None."""
+    """Check system admin or machine admin. Returns error or None.
+
+    Issue #2538: Added tenant isolation check for non-admin users.
+    """
     if User.is_admin_role(g.user.get("role")):
         return None
+
     mgr = get_remote_agent_manager()
+
+    # Issue #2538: Tenant isolation check before permission check
+    machine = mgr.get_machine(machine_id)
+    if not machine:
+        return jsonify({"error": "Machine not found"}), 404
+
+    machine_tenant_id = machine.get("tenant_id")
+    user_tenant_id = g.user.get("tenant_id")
+
+    if machine_tenant_id is not None:
+        if user_tenant_id is None or machine_tenant_id != user_tenant_id:
+            logger.warning(
+                "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
+                "machine_id=%s, machine_tenant=%s, endpoint=%s",
+                g.user.get("id"), user_tenant_id, machine_id, machine_tenant_id,
+                request.endpoint
+            )
+            return jsonify({"error": "Machine not found"}), 404
+
     perm = mgr.get_user_permission(machine_id, g.user["id"])
     if perm != "admin":
         return jsonify({"error": "Machine admin permission required"}), 403
@@ -469,12 +492,35 @@ def _extract_machine_id():
 
 
 def _check_machine_access(machine_id):
-    """Check if user has access to machine. Returns error or None."""
+    """Check if user has access to machine. Returns error or None.
+
+    Issue #2538: Added tenant isolation check for non-admin users.
+    """
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
     if User.is_admin_role(g.user.get("role")):
         return None
+
     mgr = get_remote_agent_manager()
+
+    # Issue #2538: Tenant isolation check before permission check
+    machine = mgr.get_machine(machine_id)
+    if not machine:
+        return jsonify({"error": "Machine not found"}), 404
+
+    machine_tenant_id = machine.get("tenant_id")
+    user_tenant_id = g.user.get("tenant_id")
+
+    if machine_tenant_id is not None:
+        if user_tenant_id is None or machine_tenant_id != user_tenant_id:
+            logger.warning(
+                "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
+                "machine_id=%s, machine_tenant=%s, endpoint=%s",
+                g.user.get("id"), user_tenant_id, machine_id, machine_tenant_id,
+                request.endpoint
+            )
+            return jsonify({"error": "Machine not found"}), 404
+
     if not mgr.check_user_access(machine_id, g.user["id"]):
         return jsonify({"error": "Permission denied"}), 403
     return None
@@ -525,7 +571,19 @@ def _check_machine_tenant_access(machine_id: str) -> tuple[dict | None, tuple | 
             return None, (jsonify({"error": "Machine not found"}), 404)
         return machine, None
 
-    # Non-admin: check user access
+    # Non-admin: check tenant isolation first (Issue #2538)
+    # Ensure cross-tenant access returns 404, not 403
+    if machine_tenant_id is not None:
+        if user_tenant_id is None or machine_tenant_id != user_tenant_id:
+            logger.warning(
+                "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
+                "machine_id=%s, machine_tenant=%s, endpoint=%s",
+                g.user.get("id"), user_tenant_id, machine_id, machine_tenant_id,
+                request.endpoint
+            )
+            return None, (jsonify({"error": "Machine not found"}), 404)
+
+    # Then check user assignment
     if not agent_mgr.check_user_access(machine_id, g.user["id"]):
         return None, (jsonify({"error": "Permission denied"}), 403)
 
