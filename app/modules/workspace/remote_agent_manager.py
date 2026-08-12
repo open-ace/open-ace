@@ -1075,14 +1075,17 @@ class RemoteAgentManager:
             # Use machine_id converted to bigint for lock key
             if is_postgresql():
                 # Convert machine_id (UUID string) to integer for lock key
-                # Use first 16 hex chars (64 bits) for consistent mapping
+                # Use SHA256 hash for consistent mapping across processes
+                import hashlib
+
                 try:
-                    # Extract hex from UUID format (remove dashes)
-                    machine_id_hex = machine_id.replace("-", "")[:16]
-                    lock_key = int(machine_id_hex, 16)
+                    # Use SHA256 hash for consistent lock key across processes
+                    # Take first 16 hex chars (64 bits) for bigint range
+                    hash_bytes = hashlib.sha256(machine_id.encode()).digest()
+                    lock_key = int.from_bytes(hash_bytes[:8], byteorder="big")
                 except (ValueError, AttributeError):
-                    # Fallback: hash the machine_id string
-                    lock_key = abs(hash(machine_id))
+                    # Fallback: use a deterministic hash
+                    lock_key = int(hashlib.sha256(machine_id.encode()).hexdigest()[:16], 16)
 
                 # Set lock timeout and acquire advisory lock
                 cursor.execute("SET LOCAL lock_timeout = '30s'")

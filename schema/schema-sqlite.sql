@@ -108,7 +108,8 @@ CREATE TABLE agent_tokens (
  is_revoked INTEGER DEFAULT 0,
  revoked_at TIMESTAMP,
  revoked_by integer,
- rotated_at TIMESTAMP
+ rotated_at TIMESTAMP,
+ token_version INTEGER DEFAULT 0 NOT NULL
 );
 
 CREATE TABLE aggregation_history (
@@ -1566,6 +1567,8 @@ CREATE INDEX idx_agent_sessions_user_id ON agent_sessions (user_id);
 CREATE INDEX idx_agent_tokens_hash ON agent_tokens (token_hash);
 
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens (machine_id);
+
+CREATE INDEX idx_agent_tokens_machine_version ON agent_tokens (machine_id, token_version);
 
 CREATE INDEX idx_aggregation_history_status ON aggregation_history (status);
 

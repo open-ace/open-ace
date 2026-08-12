@@ -156,7 +156,8 @@ CREATE TABLE agent_tokens (
     is_revoked boolean DEFAULT false,
     revoked_at timestamp without time zone,
     revoked_by integer,
-    rotated_at timestamp without time zone
+    rotated_at timestamp without time zone,
+    token_version bigint DEFAULT 0 NOT NULL
 );
 
 CREATE SEQUENCE agent_tokens_id_seq
@@ -2820,6 +2821,8 @@ CREATE INDEX idx_agent_tokens_hash ON agent_tokens USING btree (token_hash);
 --
 
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens USING btree (machine_id);
+
+CREATE INDEX idx_agent_tokens_machine_version ON agent_tokens USING btree (machine_id, token_version);
 
 CREATE INDEX idx_aggregation_history_status ON aggregation_history USING btree (status);
 

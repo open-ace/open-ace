@@ -1650,7 +1650,7 @@ def get_token_info():
     agent_mgr = get_remote_agent_manager()
 
     # Get token version from database
-    from app.repositories.database import is_postgresql
+    from app.repositories.database import _param, adapt_boolean_value
     from app.modules.workspace.agent_token import hash_token
 
     token_hash_val = hash_token(bearer_token)
@@ -1658,13 +1658,13 @@ def get_token_info():
     with agent_mgr.db.connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            """
+            f"""
             SELECT token_version
             FROM agent_tokens
-            WHERE token_hash = %s AND machine_id = %s AND is_revoked = %s
+            WHERE token_hash = {_param()} AND machine_id = {_param()} AND is_revoked = {_param()}
             LIMIT 1
             """,
-            (token_hash_val, machine_id, False),
+            (token_hash_val, machine_id, adapt_boolean_value(False)),
         )
         row = cursor.fetchone()
 
