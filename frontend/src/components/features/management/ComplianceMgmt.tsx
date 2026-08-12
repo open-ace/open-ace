@@ -929,8 +929,7 @@ export const ComplianceMgmt: React.FC = () => {
             </div>
           )}
         </Modal>
-
-        </>
+      </>
     );
   };
 
