@@ -109,7 +109,7 @@ CREATE TABLE agent_tokens (
  revoked_at TIMESTAMP,
  revoked_by integer,
  rotated_at TIMESTAMP,
- token_version INTEGER DEFAULT 0 NOT NULL
+ token_version INTEGER DEFAULT '0' NOT NULL
 );
 
 CREATE TABLE aggregation_history (
@@ -585,14 +585,6 @@ CREATE TABLE machine_assignments (
  permission text DEFAULT 'user',
  granted_by integer,
  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE migration_metadata (
- migration_id TEXT PRIMARY KEY NOT NULL,
- migration_name TEXT NOT NULL,
- applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- checksum TEXT,
- details TEXT
 );
 
 CREATE TABLE model_gateway_config (

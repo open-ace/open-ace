@@ -2977,19 +2977,16 @@ def _check_usage_report_rate_limit(agent_mgr: Any, key: str, limit: int) -> bool
     with agent_mgr.db.connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            adapt_sql(
-                """
+            adapt_sql("""
                 INSERT INTO usage_report_rate_limits
                     (rate_key, window_started_at, request_count, updated_at)
                 VALUES (?, ?, 0, ?)
                 ON CONFLICT(rate_key) DO NOTHING
-                """
-            ),
+                """),
             (key, now, now),
         )
         cursor.execute(
-            adapt_sql(
-                """
+            adapt_sql("""
                 UPDATE usage_report_rate_limits
                 SET request_count = CASE
                         WHEN window_started_at <= ? THEN 1
@@ -3002,8 +2999,7 @@ def _check_usage_report_rate_limit(agent_mgr: Any, key: str, limit: int) -> bool
                     updated_at = ?
                 WHERE rate_key = ?
                 RETURNING request_count
-                """
-            ),
+                """),
             (cutoff, cutoff, now, now, key),
         )
         row = cursor.fetchone()
@@ -3091,15 +3087,13 @@ def _claim_usage_report(
     with agent_mgr.db.connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            adapt_sql(
-                """
+            adapt_sql("""
                 INSERT INTO usage_report_receipts
                     (report_id, session_id, machine_id, user_id, tenant_id,
                      payload_hash, status, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, 'processing', ?, ?)
                 ON CONFLICT(report_id) DO NOTHING
-                """
-            ),
+                """),
             (
                 report_id,
                 session_id,
