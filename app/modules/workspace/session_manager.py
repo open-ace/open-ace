@@ -1626,12 +1626,14 @@ class SessionManager:
 
                 content_filter = _get_content_filter()
 
-                # Get user_id from session for audit logging
+                # Get user_id and username from session for audit logging
                 cursor.execute(
                     f"""
-                    SELECT user_id FROM agent_sessions
-                    WHERE session_id = {_param()}
-                    {f"AND tenant_id = {_param()}" if has_session_tenant else ""}
+                    SELECT a.user_id, u.username
+                    FROM agent_sessions a
+                    LEFT JOIN users u ON a.user_id = u.id
+                    WHERE a.session_id = {_param()}
+                    {f"AND a.tenant_id = {_param()}" if has_session_tenant else ""}
                     """,
                     (
                         session_id,
@@ -1640,6 +1642,7 @@ class SessionManager:
                 )
                 filter_session_row = cursor.fetchone()
                 filter_user_id = filter_session_row["user_id"] if filter_session_row else None
+                filter_username = filter_session_row["username"] if filter_session_row else None
 
                 # Get tenant-specific sensitive keyword config
                 tenant_config = _get_tenant_sensitive_keyword_config(int(effective_tenant_id))
@@ -1654,6 +1657,8 @@ class SessionManager:
                     audit_logger.log_action(
                         action=audit_action,
                         user_id=filter_user_id,
+                        username=filter_username,
+                        tenant_id=effective_tenant_id,
                         resource_type="ai_output",
                         severity="medium",
                         details={
