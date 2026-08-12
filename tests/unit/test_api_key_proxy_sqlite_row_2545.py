@@ -11,7 +11,6 @@ Verifies that these methods work correctly with sqlite3.Row objects.
 import json
 import os
 import tempfile
-from base64 import b64encode
 from unittest.mock import patch
 
 import pytest

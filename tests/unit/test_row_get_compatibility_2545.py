@@ -8,10 +8,9 @@ Tests the _row_get() static method for handling various row types:
 - tuple-like objects
 """
 
+import os
 import sqlite3
 import tempfile
-
-import pytest
 
 from app.modules.workspace.api_key_proxy import APIKeyProxyService
 
@@ -35,8 +34,6 @@ class TestRowGetCompatibility:
     def test_row_get_with_sqlite_row(self):
         """Test _row_get() returns correct value for sqlite3.Row."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            import os
-
             db_path = os.path.join(tmpdir, "test.db")
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
@@ -75,8 +72,6 @@ class TestRowGetCompatibility:
     def test_row_get_with_sqlite_row_null_values(self):
         """Test _row_get() handles NULL values correctly in sqlite3.Row."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            import os
-
             db_path = os.path.join(tmpdir, "test.db")
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row
