@@ -203,6 +203,17 @@ class TestIdempotency:
 class TestPathValidation:
     """Verify project_path validation in create_workflow."""
 
+    @pytest.fixture(autouse=True)
+    def _allow_quota(self):
+        """These tests exercise path validation, not the quota gate. Stub
+        QuotaManager to allow-by-default so the (real, DB-backed) quota check
+        doesn't reach the test's schema-less DB and spuriously 429 before path
+        validation runs (the #2457 assert-429 cluster)."""
+        mock = MagicMock()
+        mock.return_value.check_quota.return_value = {"allowed": True, "reason": None}
+        with patch("app.modules.governance.quota_manager.QuotaManager", mock):
+            yield
+
     def _make_client(self):
         """Create Flask test client with test DB."""
         import tempfile
