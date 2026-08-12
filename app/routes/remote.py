@@ -821,6 +821,7 @@ def rotate_machine_token(machine_id):
     Rotate the agent token for a machine. System admin only.
 
     Issue #2180: Validate machine tenant access.
+    Issue #2530: Include token_version and rotated_at in command payload.
 
     Revokes all existing tokens and issues a new one. If the existing
     tokens were already revoked (i.e., the machine was previously
@@ -842,11 +843,14 @@ def rotate_machine_token(machine_id):
         return jsonify({"error": "Machine not found"}), 404
 
     new_token = result["new_token"]
+    token_version = result.get("token_version", 0)
+    rotated_at = result.get("rotated_at", "")
 
     # AGENT_TOKEN_ROTATE audit event
     details = {
         "machine_id": machine_id,
         "rotated_by": g.user["id"],
+        "token_version": token_version,
     }
     if result.get("unrevoked"):
         details["unrevoke"] = True
@@ -862,6 +866,7 @@ def rotate_machine_token(machine_id):
     )
 
     # Push rotate_token command to agent so it updates its local config.
+    # Issue #2530: Include token_version for version-based filtering.
     # send_command() only enqueues — check if agent is online to determine
     # whether the new token will be delivered immediately or needs manual update.
     agent_mgr.send_command(
@@ -869,6 +874,8 @@ def rotate_machine_token(machine_id):
         {
             "command": "rotate_token",
             "new_token": new_token,
+            "token_version": token_version,
+            "rotated_at": rotated_at,
         },
     )
     is_online = agent_mgr.is_connected(machine_id)
@@ -883,6 +890,7 @@ def rotate_machine_token(machine_id):
         {
             "success": True,
             "agent_token": new_token,
+            "token_version": token_version,
             "message": msg,
         }
     )
@@ -1616,6 +1624,59 @@ def agent_websocket():
         ),
         410,
     )
+
+
+@remote_bp.route("/token_info", methods=["POST"])
+def get_token_info():
+    """
+    Get token version information for an agent.
+
+    Issue #2530 Phase 2: Used by agents to sync token version after restart.
+    Returns the token_version for the current valid token.
+
+    Requires valid Bearer token authentication.
+    """
+    data = request.get_json() or {}
+    machine_id = data.get("machine_id")
+
+    if not machine_id:
+        return jsonify({"error": "machine_id is required"}), 400
+
+    # Validate Bearer token
+    bearer_token, bearer_error = _validate_agent_bearer(machine_id)
+    if bearer_error:
+        return bearer_error
+
+    agent_mgr = get_remote_agent_manager()
+
+    # Get token version from database
+    from app.modules.workspace.agent_token import hash_token
+    from app.repositories.database import _param, adapt_boolean_value
+
+    token_hash_val = hash_token(bearer_token)
+
+    with agent_mgr.db.connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT token_version
+            FROM agent_tokens
+            WHERE token_hash = {_param()} AND machine_id = {_param()} AND is_revoked = {_param()}
+            LIMIT 1
+            """,
+            (token_hash_val, machine_id, adapt_boolean_value(False)),
+        )
+        row = cursor.fetchone()
+
+    if row:
+        return jsonify(
+            {
+                "success": True,
+                "token_version": row["token_version"],
+            }
+        )
+    else:
+        return jsonify({"error": "Token not found or revoked"}), 404
 
 
 @remote_bp.route("/agent/message", methods=["POST"])
