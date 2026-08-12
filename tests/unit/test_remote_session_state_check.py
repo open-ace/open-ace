@@ -12,6 +12,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+# Mock database initialization before importing app modules
+# This prevents "no such column: tenant_id" errors in CI environments
+@pytest.fixture(scope="module", autouse=True)
+def _mock_database_init():
+    """Mock database initialization to avoid schema issues in unit tests."""
+    with patch("app.repositories.schema_init.ensure_all_tables"):
+        with patch("app.repositories.schema_init.load_schema_from_file"):
+            yield
+
+
 class TestCheckSessionState:
     """Tests for _check_session_state function."""
 
