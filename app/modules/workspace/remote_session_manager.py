@@ -1759,18 +1759,12 @@ class RemoteSessionManager:
 
         # Backfill cli_session_id if provided and not already set
         if cli_session_id and not session.cli_session_id:
-            try:
-                session.cli_session_id = cli_session_id
-                logger.info(
-                    "Backfilled cli_session_id=%s for session %s",
-                    cli_session_id[:8],
-                    session_id[:8],
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to backfill cli_session_id for session %s",
-                    session_id[:8],
-                )
+            session.cli_session_id = cli_session_id
+            logger.info(
+                "Backfilled cli_session_id=%s for session %s",
+                cli_session_id[:8],
+                session_id[:8],
+            )
 
         self._session_manager.update_session(session)
 

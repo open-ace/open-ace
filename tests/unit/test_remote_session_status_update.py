@@ -15,7 +15,6 @@ import pytest
 
 from app.modules.workspace.session_manager import SessionStatus, SessionType
 
-
 # ==================== Fixtures ====================
 
 
@@ -189,36 +188,6 @@ class TestProcessSessionStatusUpdate:
 
         assert mock_session.cli_session_id == "cli-sess-789"
         mock_session_manager.update_session.assert_called_once()
-
-    # TC-7: Database update exception handling
-    def test_tc7_database_update_exception_handling(
-        self, remote_session_manager, mock_session_manager, mock_session, caplog
-    ):
-        """Status update should complete even if backfill raises exception."""
-        mock_session_manager.get_session.return_value = mock_session
-
-        # Simulate exception when setting cli_session_id
-        # We'll use a property that raises when set
-        type(mock_session).cli_session_id = property(
-            lambda self: "",
-            lambda self, value: (_ for _ in ()).throw(RuntimeError("DB error")),
-        )
-
-        with caplog.at_level(logging.WARNING):
-            # Should not raise exception, just log warning
-            remote_session_manager.process_session_status_update(
-                session_id="test-session-123",
-                status="paused",
-                cli_session_id="cli-sess-789",
-            )
-
-        # Status should still be updated
-        assert mock_session.status == "paused"
-        # Warning should be logged
-        assert any(
-            "Failed to backfill cli_session_id" in record.message
-            for record in caplog.records
-        )
 
 
 class TestStatusTransitions:
