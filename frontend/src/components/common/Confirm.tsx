@@ -14,6 +14,8 @@
 import React from 'react';
 import { create } from 'zustand';
 import { ConfirmModal } from './Modal';
+import { useLanguage } from '@/store';
+import { t } from '@/i18n';
 
 export type ConfirmVariant = 'danger' | 'warning' | 'primary';
 
@@ -67,6 +69,7 @@ export const ConfirmHost: React.FC = () => {
   const open = useConfirmStore((state) => state.open);
   const options = useConfirmStore((state) => state.options);
   const settle = useConfirmStore((state) => state.settle);
+  const language = useLanguage();
 
   return (
     <ConfirmModal
@@ -75,8 +78,8 @@ export const ConfirmHost: React.FC = () => {
       onConfirm={() => settle(true)}
       title={options.title ?? ''}
       message={options.message}
-      confirmText={options.confirmText}
-      cancelText={options.cancelText}
+      confirmText={options.confirmText ?? t('confirm', language)}
+      cancelText={options.cancelText ?? t('cancel', language)}
       variant={options.variant}
     />
   );
