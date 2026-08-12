@@ -425,33 +425,11 @@ def _validate_usage_report_binding(
 
 
 def _require_machine_admin(machine_id):
-    """Check system admin or machine admin. Returns error or None.
-
-    Issue #2538: Added tenant isolation check for non-admin users.
-    """
+    """Check system admin or machine admin. Returns error or None."""
     if User.is_admin_role(g.user.get("role")):
         return None
 
     mgr = get_remote_agent_manager()
-
-    # Issue #2538: Tenant isolation check before permission check
-    machine = mgr.get_machine(machine_id)
-    if not machine:
-        return jsonify({"error": "Machine not found"}), 404
-
-    machine_tenant_id = machine.get("tenant_id")
-    user_tenant_id = g.user.get("tenant_id")
-
-    if machine_tenant_id is not None:
-        if user_tenant_id is None or machine_tenant_id != user_tenant_id:
-            logger.warning(
-                "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
-                "machine_id=%s, machine_tenant=%s, endpoint=%s",
-                g.user.get("id"), user_tenant_id, machine_id, machine_tenant_id,
-                request.endpoint
-            )
-            return jsonify({"error": "Machine not found"}), 404
-
     perm = mgr.get_user_permission(machine_id, g.user["id"])
     if perm != "admin":
         return jsonify({"error": "Machine admin permission required"}), 403
@@ -494,7 +472,7 @@ def _extract_machine_id():
 def _check_machine_access(machine_id):
     """Check if user has access to machine. Returns error or None.
 
-    Issue #2538: Added tenant isolation check for non-admin users.
+    Issue #2538: Added tenant isolation check for unassigned users.
     """
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
@@ -503,7 +481,15 @@ def _check_machine_access(machine_id):
 
     mgr = get_remote_agent_manager()
 
-    # Issue #2538: Tenant isolation check before permission check
+    # Check if user is assigned to this machine
+    # Assigned users have explicit permission and should not be blocked by tenant isolation
+    user_permission = mgr.get_user_permission(machine_id, g.user["id"])
+    if user_permission:
+        # User is explicitly assigned - allow access regardless of tenant
+        return None
+
+    # User is not assigned - check tenant isolation before denying access
+    # Issue #2538: Cross-tenant access by unassigned users should return 404
     machine = mgr.get_machine(machine_id)
     if not machine:
         return jsonify({"error": "Machine not found"}), 404
@@ -516,14 +502,16 @@ def _check_machine_access(machine_id):
             logger.warning(
                 "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
                 "machine_id=%s, machine_tenant=%s, endpoint=%s",
-                g.user.get("id"), user_tenant_id, machine_id, machine_tenant_id,
-                request.endpoint
+                g.user.get("id"),
+                user_tenant_id,
+                machine_id,
+                machine_tenant_id,
+                request.endpoint,
             )
             return jsonify({"error": "Machine not found"}), 404
 
-    if not mgr.check_user_access(machine_id, g.user["id"]):
-        return jsonify({"error": "Permission denied"}), 403
-    return None
+    # User is not assigned and tenant isolation passed - permission denied
+    return jsonify({"error": "Permission denied"}), 403
 
 
 def _check_machine_tenant_access(machine_id: str) -> tuple[dict | None, tuple | None]:
@@ -571,6 +559,13 @@ def _check_machine_tenant_access(machine_id: str) -> tuple[dict | None, tuple | 
             return None, (jsonify({"error": "Machine not found"}), 404)
         return machine, None
 
+    # Machine admin: check if user has admin permission on this machine
+    # Machine admins are granted access through explicit assignment,
+    # which is a legitimate cross-tenant access mechanism.
+    user_perm = agent_mgr.get_user_permission(machine_id, g.user["id"])
+    if user_perm == "admin":
+        return machine, None
+
     # Non-admin: check tenant isolation first (Issue #2538)
     # Ensure cross-tenant access returns 404, not 403
     if machine_tenant_id is not None:
@@ -578,8 +573,11 @@ def _check_machine_tenant_access(machine_id: str) -> tuple[dict | None, tuple | 
             logger.warning(
                 "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
                 "machine_id=%s, machine_tenant=%s, endpoint=%s",
-                g.user.get("id"), user_tenant_id, machine_id, machine_tenant_id,
-                request.endpoint
+                g.user.get("id"),
+                user_tenant_id,
+                machine_id,
+                machine_tenant_id,
+                request.endpoint,
             )
             return None, (jsonify({"error": "Machine not found"}), 404)
 
@@ -2786,8 +2784,11 @@ def attach_terminal(terminal_id):
                 logger.warning(
                     "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
                     "machine_id=%s, machine_tenant=%s, endpoint=%s",
-                    g.user.get("id"), user_tenant_id, machine_id, machine_tenant_id,
-                    request.endpoint
+                    g.user.get("id"),
+                    user_tenant_id,
+                    machine_id,
+                    machine_tenant_id,
+                    request.endpoint,
                 )
                 return jsonify({"error": "Machine not found"}), 404
 
@@ -2950,8 +2951,11 @@ def get_terminal_status(terminal_id):
                 logger.warning(
                     "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
                     "machine_id=%s, machine_tenant=%s, endpoint=%s",
-                    g.user.get("id"), user_tenant_id, machine_id, machine_tenant_id,
-                    request.endpoint
+                    g.user.get("id"),
+                    user_tenant_id,
+                    machine_id,
+                    machine_tenant_id,
+                    request.endpoint,
                 )
                 return jsonify({"error": "Machine not found"}), 404
 
@@ -3542,8 +3546,11 @@ def create_remote_directory(machine_id):
                 logger.warning(
                     "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
                     "machine_id=%s, machine_tenant=%s, endpoint=%s",
-                    g.user.get("id"), user_tenant_id, machine_id, machine_tenant_id,
-                    request.endpoint
+                    g.user.get("id"),
+                    user_tenant_id,
+                    machine_id,
+                    machine_tenant_id,
+                    request.endpoint,
                 )
                 return jsonify({"error": "Machine not found"}), 404
 
@@ -3652,8 +3659,11 @@ def _dispatch_remote_git_command(machine_id, command, required_params):
                 logger.warning(
                     "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
                     "machine_id=%s, machine_tenant=%s, endpoint=%s",
-                    g.user.get("id"), user_tenant_id, machine_id, machine_tenant_id,
-                    request.endpoint
+                    g.user.get("id"),
+                    user_tenant_id,
+                    machine_id,
+                    machine_tenant_id,
+                    request.endpoint,
                 )
                 return jsonify({"error": "Machine not found"}), 404
 
@@ -3838,8 +3848,11 @@ def remote_vscode_status(vscode_id):
                 logger.warning(
                     "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
                     "machine_id=%s, machine_tenant=%s, endpoint=%s",
-                    g.user.get("id"), user_tenant_id, machine_id, machine_tenant_id,
-                    request.endpoint
+                    g.user.get("id"),
+                    user_tenant_id,
+                    machine_id,
+                    machine_tenant_id,
+                    request.endpoint,
                 )
                 return jsonify({"error": "Machine not found"}), 404
 
@@ -3891,8 +3904,11 @@ def remote_vscode_attach(vscode_id):
                 logger.warning(
                     "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
                     "machine_id=%s, machine_tenant=%s, endpoint=%s",
-                    g.user.get("id"), user_tenant_id, machine_id, machine_tenant_id,
-                    request.endpoint
+                    g.user.get("id"),
+                    user_tenant_id,
+                    machine_id,
+                    machine_tenant_id,
+                    request.endpoint,
                 )
                 return jsonify({"error": "Machine not found"}), 404
 

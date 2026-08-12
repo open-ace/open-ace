@@ -221,7 +221,9 @@ class TestSessionAccessReturnCode:
             g.user = user
 
             # Mock session manager to return session in different tenant
-            with patch("app.modules.workspace.session_access.get_remote_session_manager") as mock_mgr:
+            with patch(
+                "app.modules.workspace.session_access.get_remote_session_manager"
+            ) as mock_mgr:
                 mock_status = {
                     "session_id": "session-1",
                     "tenant_id": 1,  # Different tenant
@@ -237,7 +239,9 @@ class TestSessionAccessReturnCode:
                 mock_mgr.return_value._session_manager.get_session.return_value = mock_session
 
                 # Mock remote agent manager
-                with patch("app.modules.workspace.session_access.get_remote_agent_manager") as mock_agent_mgr:
+                with patch(
+                    "app.modules.workspace.session_access.get_remote_agent_manager"
+                ) as mock_agent_mgr:
                     mock_agent_mgr.return_value.get_user_permission.return_value = None
 
                     session, error = check_session_access("session-1")

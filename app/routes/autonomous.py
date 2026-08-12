@@ -2021,8 +2021,11 @@ def get_available_models():
                 logger.warning(
                     "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
                     "machine_id=%s, machine_tenant=%s, endpoint=%s",
-                    g.user.get("id"), user_tenant_id, machine_id, machine_tenant_id,
-                    request.endpoint
+                    g.user.get("id"),
+                    user_tenant_id,
+                    machine_id,
+                    machine_tenant_id,
+                    request.endpoint,
                 )
                 return (
                     jsonify({"success": False, "error": "Machine not found"}),

@@ -839,7 +839,11 @@ def test_route_session_access_unassigned_user():
 
 
 def test_route_create_session_by_unassigned_user():
-    """P1-1: Unassigned users cannot create sessions (security fix)."""
+    """P1-1: Unassigned users cannot create sessions (security fix).
+
+    Issue #2538: Cross-tenant access (user without tenant accessing tenant machine)
+    should return 404 to avoid leaking machine existence.
+    """
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -851,12 +855,12 @@ def test_route_create_session_by_unassigned_user():
         resp = _auth_post(
             client,
             "/api/remote/sessions",
-            "test-token-99-user",  # Unassigned user
+            "test-token-99-user",  # Unassigned user without tenant
             json={"machine_id": "mid-machine-a", "project_path": "/home/test"},
         )
         assert (
-            resp.status_code == 403
-        ), f"expected 403, got {resp.status_code}, body={resp.get_json()}"
+            resp.status_code == 404
+        ), f"expected 404, got {resp.status_code}, body={resp.get_json()}"
 
 
 def test_route_create_session_by_assigned_user():
@@ -914,7 +918,11 @@ def test_route_create_session_by_machine_admin():
 
 
 def test_route_browse_by_unassigned_user():
-    """P1-1: Unassigned users cannot browse machine files."""
+    """P1-1: Unassigned users cannot browse machine files.
+
+    Issue #2538: Cross-tenant access (user without tenant accessing tenant machine)
+    should return 404 to avoid leaking machine existence.
+    """
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -923,11 +931,11 @@ def test_route_browse_by_unassigned_user():
         resp = _auth_get(
             client,
             "/api/remote/machines/mid-machine-a/browse",
-            "test-token-99-user",  # Unassigned user
+            "test-token-99-user",  # Unassigned user without tenant
         )
         assert (
-            resp.status_code == 403
-        ), f"expected 403, got {resp.status_code}, body={resp.get_json()}"
+            resp.status_code == 404
+        ), f"expected 404, got {resp.status_code}, body={resp.get_json()}"
 
 
 @pytest.mark.xfail(
