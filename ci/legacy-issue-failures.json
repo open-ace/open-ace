@@ -134,7 +134,7 @@
       "issue_number": "1140",
       "nodeid": "tests/issues/1140/test_zcode_dev_mode_and_session.py::test_session_line_updates_even_on_resume",
       "outcome": "failure",
-      "summary": "AssertionError: _run_agent must not skip session line update on resume \u2014 see #525 where dev resumed a dead planning session forever"
+      "summary": "AssertionError: _run_agent must not skip session line update on resume — see #525 where dev resumed a dead planning session forever"
     },
     {
       "category": "assertion_failure",
@@ -262,7 +262,7 @@
       "issue_number": "1395",
       "nodeid": "tests/issues/1395/test_cross_user_permissions.py::test_isolated_wrapper_can_handle_signals_while_waiting_for_agent",
       "outcome": "failure",
-      "summary": "assert 'trap cleanup_isolated EXIT' in '#!/bin/bash\\n# openace-run-as \u2014 cross-user agent launcher for AI autonomous development.\\n#\\n# Problem (Issue #1395): the open-ace service runs as the `openace\u2026"
+      "summary": "assert 'trap cleanup_isolated EXIT' in '#!/bin/bash\\n# openace-run-as — cross-user agent launcher for AI autonomous development.\\n#\\n# Problem (Issue #1395): the open-ace service runs as the `openace…"
     },
     {
       "category": "assertion_failure",
@@ -270,7 +270,7 @@
       "issue_number": "1395",
       "nodeid": "tests/issues/1395/test_cross_user_permissions.py::test_isolated_wrapper_normalizes_recovered_acls_before_git_baseline",
       "outcome": "failure",
-      "summary": "assert 'signature_registry=\"/run/openace-agent-git-signature-${target_uid}\"' in '#!/bin/bash\\n# openace-run-as \u2014 cross-user agent launcher for AI autonomous development.\\n#\\n# Problem (Issue #1395): \u2026"
+      "summary": "assert 'signature_registry=\"/run/openace-agent-git-signature-${target_uid}\"' in '#!/bin/bash\\n# openace-run-as — cross-user agent launcher for AI autonomous development.\\n#\\n# Problem (Issue #1395): …"
     },
     {
       "category": "test_body_exception",
@@ -1449,20 +1449,20 @@
       "summary": "AssertionError: Create failed: 401 {\"error\":\"Authentication required\"}"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "517",
       "nodeid": "tests/issues/517/e2e_codex_real_session.py::test_session_restore",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: agent_sessions"
+      "summary": "AssertionError: No codex sessions to test restore"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "517",
       "nodeid": "tests/issues/517/e2e_codex_real_session.py::test_session_sync_verification",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: agent_sessions"
+      "summary": "AssertionError: No codex sessions in agent_sessions"
     },
     {
       "category": "assertion_failure",
@@ -1478,7 +1478,7 @@
       "issue_number": "52",
       "nodeid": "tests/issues/52/test_issue52.py::test_database_migration",
       "outcome": "failure",
-      "summary": "AssertionError: linux_account \u5b57\u6bb5\u672a\u6dfb\u52a0\u5230 users \u8868"
+      "summary": "AssertionError: linux_account 字段未添加到 users 表"
     },
     {
       "category": "assertion_failure",
@@ -1494,7 +1494,7 @@
       "issue_number": "52",
       "nodeid": "tests/issues/52/test_issue52.py::test_update_user_with_linux_account",
       "outcome": "failure",
-      "summary": "AssertionError: \u521b\u5efa\u7528\u6237\u5931\u8d25"
+      "summary": "AssertionError: 创建用户失败"
     },
     {
       "category": "test_body_exception",
@@ -1686,7 +1686,7 @@
       "issue_number": "673",
       "nodeid": "tests/issues/673/test_session_filter_params.py::test_api_endpoint_integration",
       "outcome": "failure",
-      "summary": "AssertionError: API \u8fd4\u56de 401"
+      "summary": "AssertionError: API 返回 401"
     },
     {
       "category": "setup_error",
@@ -1737,20 +1737,20 @@
       "summary": "assert False"
     },
     {
-      "category": "setup_error",
-      "exception_type": "TypeError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "716",
       "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsBranch::test_delete_branch",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+      "outcome": "failure",
+      "summary": "AssertionError: assert 4 == 2"
     },
     {
-      "category": "setup_error",
-      "exception_type": "TypeError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "716",
       "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_add_all",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+      "outcome": "failure",
+      "summary": "AssertionError: assert 'add' in ['git', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', ...]"
     },
     {
       "category": "assertion_failure",
@@ -1969,68 +1969,68 @@
       "summary": "AssertionError: dev milestone should be completed when salvaged"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_allows_different_commits",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: assert 2 == 0"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_auto_commit_failure_falls_back_to_fail",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: Expected 'git_commit' to have been called once. Called 0 times."
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_auto_commits_uncommitted_changes",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: Expected 'git_add_all' to have been called once. Called 0 times."
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_detects_no_code_changes",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: assert 'no code changes' in 'cannot establish a trusted git context before agent execution'"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_skip_check_when_agent_fails",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: assert 'timeout' in 'cannot establish a trusted git context before agent execution'"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_skip_check_when_commit_unavailable",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: assert 2 == 0"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestFinalPlanAnnotation::test_final_plan_includes_last_review",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: assert False"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestFinalPlanAnnotation::test_final_plan_without_review",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: assert False"
     },
     {
       "category": "test_body_exception",
@@ -2049,12 +2049,12 @@
       "summary": "sqlite3.OperationalError: no such table: users"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestPlanningPromptConstraints::test_initial_plan_prompt_forbids_full_code",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "assert 0 >= 1"
     },
     {
       "category": "test_body_exception",
@@ -2297,12 +2297,12 @@
       "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "786",
       "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_run_gh_no_env_when_not_configured",
       "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+      "summary": "AssertionError: assert 'env' not in {'cwd': '/tmp', 'capture_output': True, 'text': True, 'timeout': 120, ...}"
     },
     {
       "category": "test_body_exception",
@@ -2406,7 +2406,7 @@
       "issue_number": "814",
       "nodeid": "tests/issues/814/test_worktree_path_selfheal.py::TestEnsureWorktreeSelfHeal::test_no_update_when_path_already_canonical",
       "outcome": "failure",
-      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='140600398512272'> != auto-dev/1390d553) with uncommitted changes.\u2026"
+      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='140600398512272'> != auto-dev/1390d553) with uncommitted changes.…"
     },
     {
       "category": "test_body_exception",
@@ -2414,7 +2414,7 @@
       "issue_number": "814",
       "nodeid": "tests/issues/814/test_worktree_path_selfheal.py::TestEnsureWorktreeSelfHeal::test_normalizes_stale_dotdot_path_when_valid",
       "outcome": "failure",
-      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='140600663599696'> != auto-dev/1390d553) with uncommitted changes.\u2026"
+      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='140600663599696'> != auto-dev/1390d553) with uncommitted changes.…"
     },
     {
       "category": "test_body_exception",
@@ -2558,7 +2558,7 @@
       "issue_number": "913",
       "nodeid": "tests/issues/913/test_pr909_review_feedback.py::TestGetCheckFailureExcerpt::test_ci_repair_context_skips_excerpt_failure",
       "outcome": "failure",
-      "summary": "assert '\u5931\u8d25\u6458\u5f55' not in \"PR #42 \u5728\u5408\u5e76\u524d...9180888144'>\""
+      "summary": "assert '失败摘录' not in \"PR #42 在合并前...9180888144'>\""
     },
     {
       "category": "test_body_exception",
@@ -2614,7 +2614,7 @@
       "issue_number": "987",
       "nodeid": "tests/issues/987/test_prompt_truncation.py::TestPostGithubComment::test_long_body_capped_with_notice",
       "outcome": "failure",
-      "summary": "AssertionError: assert '\u622a\u65ad' in 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\u2026"
+      "summary": "AssertionError: assert '截断' in 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB…"
     },
     {
       "category": "test_body_exception",
@@ -2667,12 +2667,14 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
+    "prune_note": "Targeted prune of 83 comparator-resolved nodeids (#2457 re-sync: object.__new__/723/#2332/ensure_cs_cookie/716-no-such-table) from run 31596249646; shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
+    "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
+    "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
     "run_contract": "extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure",
     "source_run": "31382049159",
-    "source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31382049159",
-    "prune_note": "Targeted prune of 83 comparator-resolved nodeids (#2457 re-sync: object.__new__/723/#2332/ensure_cs_cookie/716-no-such-table) from run 31596249646; shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646"
+    "source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31382049159"
   },
   "schema": "openace-legacy-issue-failures",
   "selection": "not postgres",
