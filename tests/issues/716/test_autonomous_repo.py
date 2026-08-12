@@ -25,34 +25,18 @@ def auto_db(tmp_path):
             # Create users table (required by FK)
             conn = db.get_connection()
             try:
+                from app.repositories.schema_init import load_schema_from_file
+
+                # Load the FULL authoritative schema (incl. users.deleted_at) on the empty
+                # DB FIRST, then seed. Do NOT hand-CREATE an old users table — load_schema's
+                # CREATE TABLE IF NOT EXISTS will not add the missing column to an existing
+                # table (legacy tests/issues escape hatch).
+                load_schema_from_file(db_url=db.db_url, dialect="sqlite")
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS users (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        username TEXT UNIQUE NOT NULL,
-                        email TEXT UNIQUE NOT NULL,
-                        password_hash TEXT NOT NULL,
-                        role TEXT DEFAULT 'user',
-                        is_active INTEGER DEFAULT 1,
-                        created_at TEXT,
-                        updated_at TEXT
-                    )
-                    """
-                )
-                # Insert a test user
                 cursor.execute(
                     "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
                     ("testuser", "test@test.com", "hash123", "user"),
                 )
-                conn.commit()
-
-                # Create autonomous tables (with try/except per statement,
-                # mirroring schema_init — ALTER TABLE may fail on duplicate
-                # columns for fresh DBs where CREATE TABLE already added them)
-                from app.repositories.schema_init import load_schema_from_file
-
-                load_schema_from_file(db_url=db.db_url, dialect="sqlite")
                 conn.commit()
             finally:
                 conn.close()
