@@ -2659,8 +2659,6 @@ class RemoteAgentManager:
             - interval_seconds: Heartbeat check interval
             - timeout_seconds: Heartbeat timeout threshold
         """
-        import time
-
         now = time.time()
         # Consider monitor running if last check was within 2x the interval
         # (allowing some slack for scheduling delays)
