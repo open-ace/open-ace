@@ -25,21 +25,14 @@ def auto_db(tmp_path):
             db = Database(db_url=f"sqlite:///{db_path}")
             conn = db.get_connection()
             try:
+                from app.repositories.schema_init import load_schema_from_file
+
+                # Create the FULL authoritative schema (incl. users.deleted_at) on the
+                # empty DB FIRST, then seed. Do NOT hand-CREATE an old users table —
+                # load_schema's CREATE TABLE IF NOT EXISTS will not add the missing
+                # column to an already-existing table (legacy tests/issues escape hatch).
+                load_schema_from_file(db_url=db.db_url, dialect="sqlite")
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS users (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        username TEXT UNIQUE NOT NULL,
-                        email TEXT UNIQUE NOT NULL,
-                        password_hash TEXT NOT NULL,
-                        role TEXT DEFAULT 'user',
-                        is_active INTEGER DEFAULT 1,
-                        created_at TEXT,
-                        updated_at TEXT
-                    )
-                    """
-                )
                 cursor.execute(
                     "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
                     ("admin", "admin@test.com", "hash123", "admin"),
@@ -48,11 +41,6 @@ def auto_db(tmp_path):
                     "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
                     ("testuser", "test@test.com", "hash456", "user"),
                 )
-                conn.commit()
-
-                from app.repositories.schema_init import load_schema_from_file
-
-                load_schema_from_file(db_url=db.db_url, dialect="sqlite")
                 conn.commit()
             finally:
                 conn.close()
@@ -79,11 +67,19 @@ def _mock_auth(user_id=1, role="admin"):
 
 
 @pytest.fixture
-def client(auto_db):
+def client(auto_db, monkeypatch):
     """Create a Flask test client with session cookie set."""
     from app import create_app
+    from app.repositories.user_repo import UserRepository
 
+    # create_app()'s ensure_all_tables() picks its DB from get_database_url()
+    # (DATABASE_URL), which defaults to the dev Postgres DB locally; and the
+    # module-global user_repo (app.routes.autonomous) binds Database() once at
+    # import. Point both at auto_db's seeded SQLite DB so the app and the route
+    # share the fixture's database. monkeypatch auto-restores both.
+    monkeypatch.setenv("DATABASE_URL", auto_db.db_url)
     app = create_app({"TESTING": True})
+    monkeypatch.setattr("app.routes.autonomous.user_repo", UserRepository(db=auto_db))
     with app.app_context():
         c = app.test_client()
         c.set_cookie("session_token", "test-token")
