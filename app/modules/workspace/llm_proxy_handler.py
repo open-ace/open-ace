@@ -1026,26 +1026,27 @@ def handle_llm_proxy_request(
         # Issue #2464: If using webui aggregate session, check for user's active session
         # When user creates a session via /work, route WebUI messages to that session
         if session_id.startswith("webui:"):
-            from app.modules.workspace.session_manager import get_session_manager
+            try:
+                from app.modules.workspace.session_manager import get_session_manager
 
-            sm = get_session_manager()
-            active_sessions = sm.get_active_sessions(user_id=user_id, tenant_id=tenant_id)
-            # Filter out webui aggregate sessions, get the most recent non-webui session
-            non_webui_sessions = [
-                s for s in active_sessions if not s.session_id.startswith("webui:")
-            ]
-            if non_webui_sessions:
-                # Use the most recently updated session
-                # Sort by updated_at (falling back to created_at for typing safety)
-                def _sort_key(s) -> float:
-                    ts = s.updated_at or s.created_at
-                    return ts.timestamp() if ts else 0.0
-
-                non_webui_sessions.sort(key=_sort_key, reverse=True)
-                session_id = non_webui_sessions[0].session_id
-                logger.debug(
-                    "Using user's active session %s instead of webui aggregate",
-                    session_id[:8],
+                sm = get_session_manager()
+                active_sessions = sm.get_active_sessions(user_id=user_id, tenant_id=tenant_id)
+                # Filter out webui aggregate sessions, get the most recent non-webui session
+                # get_active_sessions already returns sessions sorted by updated_at DESC
+                non_webui_sessions = [
+                    s for s in active_sessions if not s.session_id.startswith("webui:")
+                ]
+                if non_webui_sessions:
+                    # First result is the most recently updated (SQL ORDER BY updated_at DESC)
+                    session_id = non_webui_sessions[0].session_id
+                    logger.debug(
+                        "Using user's active session %s instead of webui aggregate",
+                        session_id[:8],
+                    )
+            except Exception as e:
+                # On any error, fall back to webui aggregate session
+                logger.warning(
+                    "Failed to get active sessions, using webui aggregate: %s", e
                 )
 
     try:
