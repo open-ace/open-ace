@@ -80,18 +80,22 @@ GH_PATH=$(which gh 2>/dev/null || echo "/usr/bin/gh")
 # Resolve WebUI path
 WEBUI_PATH=$(which qwen-code-webui 2>/dev/null || echo "/usr/bin/qwen-code-webui")
 
-# Validate required wrappers exist and are executable
+# Validate required wrappers exist and are executable (skip in dry-run mode)
+# In dry-run mode, we're testing the output format, not actual installation
 WEBUI_LAUNCH_WRAPPER="/usr/local/bin/openace-webui-launch"
-if [[ ! -x "$WEBUI_LAUNCH_WRAPPER" ]]; then
-    echo "ERROR: Required wrapper not executable: $WEBUI_LAUNCH_WRAPPER" >&2
-    echo "       WebUI launcher wrapper must be installed before generating sudoers" >&2
-    exit 2
-fi
-
 RUN_AS_WRAPPER="/usr/local/bin/openace-run-as"
-if [[ ! -x "$RUN_AS_WRAPPER" ]]; then
-    echo "ERROR: Required wrapper not executable: $RUN_AS_WRAPPER" >&2
-    exit 2
+
+if [[ "$DRY_RUN" != true ]]; then
+    if [[ ! -x "$WEBUI_LAUNCH_WRAPPER" ]]; then
+        echo "ERROR: Required wrapper not executable: $WEBUI_LAUNCH_WRAPPER" >&2
+        echo "       WebUI launcher wrapper must be installed before generating sudoers" >&2
+        exit 2
+    fi
+
+    if [[ ! -x "$RUN_AS_WRAPPER" ]]; then
+        echo "ERROR: Required wrapper not executable: $RUN_AS_WRAPPER" >&2
+        exit 2
+    fi
 fi
 
 # ============================================================================
@@ -105,10 +109,12 @@ WEBUI_RULES="${RUN_USER} ALL=(ALL) NOPASSWD: ${WEBUI_LAUNCH_WRAPPER} * \"${WEBUI
 WRAPPER_RULE="${RUN_USER} ALL=(root) NOPASSWD: ${RUN_AS_WRAPPER} --isolated *"
 
 # Build security wrapper rules
+# In dry-run mode, show all expected wrappers for testing
+# In production mode, only include wrappers that actually exist
 SECURITY_WRAPPERS_RULES=""
 for wrapper in openace-chown openace-useradd openace-cat openace-mkdir openace-write-as openace-rm; do
     wrapper_path="/usr/local/bin/${wrapper}"
-    if [[ -x "$wrapper_path" ]]; then
+    if [[ "$DRY_RUN" = true ]] || [[ -x "$wrapper_path" ]]; then
         SECURITY_WRAPPERS_RULES="${SECURITY_WRAPPERS_RULES}
 ${RUN_USER} ALL=(root) NOPASSWD: ${wrapper_path} *"
     fi
