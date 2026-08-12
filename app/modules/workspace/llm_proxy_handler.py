@@ -1023,6 +1023,26 @@ def handle_llm_proxy_request(
     else:
         session_id = str(token_payload["session_id"])
 
+        # Issue #2464: If using webui aggregate session, check for user's active session
+        # When user creates a session via /work, route WebUI messages to that session
+        if session_id.startswith("webui:"):
+            from app.modules.workspace.session_manager import get_session_manager
+
+            sm = get_session_manager()
+            active_sessions = sm.get_active_sessions(user_id=user_id, tenant_id=tenant_id)
+            # Filter out webui aggregate sessions, get the most recent non-webui session
+            non_webui_sessions = [
+                s for s in active_sessions if not s.session_id.startswith("webui:")
+            ]
+            if non_webui_sessions:
+                # Use the most recently updated session
+                non_webui_sessions.sort(key=lambda s: s.updated_at or s.created_at, reverse=True)
+                session_id = non_webui_sessions[0].session_id
+                logger.debug(
+                    "Using user's active session %s instead of webui aggregate",
+                    session_id[:8],
+                )
+
     try:
         from app.modules.governance.quota_manager import QuotaManager
 
