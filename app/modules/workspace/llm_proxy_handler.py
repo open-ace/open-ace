@@ -1036,7 +1036,12 @@ def handle_llm_proxy_request(
             ]
             if non_webui_sessions:
                 # Use the most recently updated session
-                non_webui_sessions.sort(key=lambda s: s.updated_at or s.created_at, reverse=True)
+                # Sort by updated_at (falling back to created_at for typing safety)
+                def _sort_key(s) -> float:
+                    ts = s.updated_at or s.created_at
+                    return ts.timestamp() if ts else 0.0
+
+                non_webui_sessions.sort(key=_sort_key, reverse=True)
                 session_id = non_webui_sessions[0].session_id
                 logger.debug(
                     "Using user's active session %s instead of webui aggregate",
