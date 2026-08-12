@@ -549,6 +549,11 @@ class GitHubOps:
         """
         self._verify_trusted_git_context()
         kwargs = self._build_subprocess_kwargs()
+
+        # 【Issue #2334】审计日志：记录 gh 操作
+        actor = pwd.getpwuid(os.getuid()).pw_name if os.getuid() else "unknown"
+        start_time = time.time()
+        command_str = " ".join(["gh"] + args)
         # gh has no `-c <key>=<val>` flag, so on the same-user path we trust the
         # canonical repo via GIT_CONFIG_COUNT env (per-command, never written to
         # a config file). This replaces the old global ``safe.directory *``.
@@ -636,6 +641,20 @@ class GitHubOps:
                         time.sleep(GIT_NETWORK_RETRY_INTERVAL)
                         continue
                     raise err
+                # 【Issue #2334】审计日志：成功完成
+                duration_ms = int((time.time() - start_time) * 1000)
+                # Determine target user: account if sudo, None if running as current user
+                target_user = account if needs_sudo and not api_as_service else None
+                _log_sudo_audit(
+                    event="sudo_gh",
+                    actor=actor,
+                    target_user=target_user,
+                    cwd=self.repo_path,
+                    command=command_str,
+                    command_class="gh",
+                    result="success",
+                    duration_ms=duration_ms,
+                )
                 return result
             except subprocess.TimeoutExpired:
                 if attempt < GIT_NETWORK_RETRY_COUNT - 1:

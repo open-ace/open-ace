@@ -444,6 +444,37 @@ class TestAuditLogging:
                 "_run_gh should log operations for audit trail"
             )
 
+    def test_github_ops_git_calls_audit_log(self):
+        """github_ops._run_git should call _log_sudo_audit."""
+        text = GITHUB_OPS_PY.read_text()
+
+        run_git_match = re.search(
+            r"def _run_git\(self.*?\n(.*?)(?=\n    def |\nclass |\Z)",
+            text,
+            re.DOTALL
+        )
+        assert run_git_match, "_run_git method not found"
+        run_git_body = run_git_match.group(1)
+        assert "_log_sudo_audit" in run_git_body, (
+            "_run_git should call _log_sudo_audit for audit trail (Issue #2334)"
+        )
+
+    def test_github_ops_gh_calls_audit_log(self):
+        """github_ops._run_gh should call _log_sudo_audit."""
+        text = GITHUB_OPS_PY.read_text()
+
+        # Match _run_gh method with multi-line signature
+        run_gh_match = re.search(
+            r"def _run_gh\(.*?\n(.*?)(?=\n    def |\nclass |\Z)",
+            text,
+            re.DOTALL
+        )
+        assert run_gh_match, "_run_gh method not found"
+        run_gh_body = run_gh_match.group(1)
+        assert "_log_sudo_audit" in run_gh_body, (
+            "_run_gh should call _log_sudo_audit for audit trail (Issue #2334)"
+        )
+
 
 class TestGeneratorSyntax:
     """Tests for generator script syntax."""
