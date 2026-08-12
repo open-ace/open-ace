@@ -26,6 +26,7 @@ from app.repositories.database import Database, release_postgresql_connection
 from app.repositories.user_repo import UserRepository
 from app.services._org_sync_lock import force_release_lock, get_running_sync_state
 from app.utils.config import get_config_value
+from app.utils.placeholder import is_placeholder_value
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,13 @@ class FeishuOrgSyncService:
         app_secret = str(config.get("app_secret") or "").strip()
         if not app_id or not app_secret:
             raise ValueError("Feishu app_id and app_secret must be configured before syncing")
+
+        # Issue #2370: Detect placeholder config values
+        if is_placeholder_value(app_id) or is_placeholder_value(app_secret):
+            raise ValueError(
+                "Feishu app_id and app_secret appear to be placeholder values "
+                "(e.g., <FEISHU_APP_ID>). Please configure real credentials."
+            )
 
         # Issue #2179: Fail-Closed - 必须显式配置同步目标租户
         effective_tenant_id = tenant_id or config.get("org_sync_tenant_id")
