@@ -626,6 +626,35 @@ def register_machine():
     )
 
 
+# ==================== Heartbeat Monitor Status (Issue #2528) ====================
+
+
+@remote_bp.route("/heartbeat-status", methods=["GET"])
+@admin_required
+def get_heartbeat_status():
+    """Get heartbeat monitor status for diagnostics.
+
+    Issue #2528: Added for observability and health monitoring.
+
+    Returns:
+        JSON with heartbeat monitor status including:
+        - last_check_time: ISO timestamp of last heartbeat check
+        - check_count: Number of heartbeat checks performed
+        - is_running: Whether heartbeat monitor appears to be running
+        - interval_seconds: Heartbeat check interval
+        - timeout_seconds: Heartbeat timeout threshold
+    """
+    agent_mgr = get_remote_agent_manager()
+    status = agent_mgr.get_heartbeat_monitor_status()
+
+    return jsonify(
+        {
+            "success": True,
+            "heartbeat_monitor": status,
+        }
+    )
+
+
 @remote_bp.route("/machines", methods=["GET"])
 def list_machines():
     """

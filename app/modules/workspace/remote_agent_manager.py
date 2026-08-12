@@ -201,6 +201,11 @@ class RemoteAgentManager:
         # Log rate limiting cache for is_session_ended DB failures (Issue #1823)
         # {session_id_minute: True} - limits logging to once per minute per session
         self._log_rate_limit_cache: dict[str, int] = {}
+        # Heartbeat monitor state tracking (Issue #2528)
+        # Last heartbeat check timestamp (seconds since epoch)
+        self._last_heartbeat_check_time: float = 0.0
+        # Heartbeat check execution count
+        self._heartbeat_check_count: int = 0
         # (removed _last_rotate_unrevoked — rotate_agent_token now returns the info)
         self._restore_in_memory_state()
         # Defer session cleanup to heartbeat monitor instead of running on startup.
@@ -255,18 +260,31 @@ class RemoteAgentManager:
             logger.warning("Failed to restore in-memory state: %s", e)
 
     def _start_heartbeat_monitor(self) -> None:
-        """Start background thread for heartbeat monitoring."""
+        """Start background thread for heartbeat monitoring.
+
+        Issue #2528: Added startup confirmation and state tracking for observability.
+        """
 
         def monitor():
+            logger.info("Heartbeat monitor coroutine started")
+            check_count = 0
             while True:
                 try:
                     self._check_heartbeats()
+                    check_count += 1
+                    # Log every 10 checks for observability (DEBUG level to avoid log spam)
+                    if check_count % 10 == 0:
+                        logger.debug(
+                            "Heartbeat monitor running, check_count=%d, last_check_time=%s",
+                            check_count,
+                            self._last_heartbeat_check_time,
+                        )
                 except Exception as e:
-                    logger.error(f"Heartbeat monitor error: {e}")
+                    logger.error("Heartbeat monitor error: %s", e)
                 gevent.sleep(self.HEARTBEAT_CHECK_INTERVAL)
 
-        gevent.spawn(monitor)
-        logger.info("Heartbeat monitor started")
+        greenlet = gevent.spawn(monitor)
+        logger.info("Heartbeat monitor spawned, greenlet=%s", greenlet)
 
     def _start_retention_cleanup(self) -> None:
         """Start background task for retention cleanup (Issue #1823).
@@ -453,7 +471,12 @@ class RemoteAgentManager:
 
         Also cleans up remote sessions that have been offline longer than
         the recovery window, allowing reconnection for brief disconnects.
+
+        Issue #2528: Added state tracking for observability.
         """
+        # Record check start time for observability (Issue #2528)
+        check_start_time = time.time()
+
         recovery_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
             seconds=self.SESSION_RECOVERY_WINDOW_SECONDS
         )
@@ -526,6 +549,16 @@ class RemoteAgentManager:
 
         # Clean up sessions paused too long (>4 hours)
         self._cleanup_stale_paused_sessions()
+
+        # Update heartbeat monitor state tracking (Issue #2528)
+        self._last_heartbeat_check_time = time.time()
+        self._heartbeat_check_count += 1
+        elapsed_ms = int((time.time() - check_start_time) * 1000)
+        logger.debug(
+            "Heartbeat check completed, count=%d, elapsed=%dms",
+            self._heartbeat_check_count,
+            elapsed_ms,
+        )
 
     def _cleanup_stale_paused_sessions(self) -> None:
         """Stop sessions that have been paused for more than 4 hours."""
@@ -2613,8 +2646,47 @@ class RemoteAgentManager:
 
         logger.info("RemoteAgentManager shutdown complete")
 
+    def get_heartbeat_monitor_status(self) -> dict[str, Any]:
+        """Get heartbeat monitor status for health check endpoint.
+
+        Issue #2528: Added for observability and diagnostics.
+
+        Returns:
+            Dict with:
+            - last_check_time: ISO timestamp of last heartbeat check
+            - check_count: Number of heartbeat checks performed
+            - is_running: Whether heartbeat monitor appears to be running
+            - interval_seconds: Heartbeat check interval
+            - timeout_seconds: Heartbeat timeout threshold
+        """
+        now = time.time()
+        # Consider monitor running if last check was within 2x the interval
+        # (allowing some slack for scheduling delays)
+        is_running = (
+            self._last_heartbeat_check_time > 0
+            and (now - self._last_heartbeat_check_time) < 2 * self.HEARTBEAT_CHECK_INTERVAL
+        )
+
+        last_check_iso = None
+        if self._last_heartbeat_check_time > 0:
+            last_check_iso = datetime.fromtimestamp(
+                self._last_heartbeat_check_time, tz=timezone.utc
+            ).isoformat()
+
+        return {
+            "last_check_time": last_check_iso,
+            "check_count": self._heartbeat_check_count,
+            "is_running": is_running,
+            "interval_seconds": self.HEARTBEAT_CHECK_INTERVAL,
+            "timeout_seconds": self.HEARTBEAT_TIMEOUT_SECONDS,
+        }
+
     def _row_to_machine(self, row) -> dict[str, Any]:
-        """Convert a database row to machine dict."""
+        """Convert a database row to machine dict.
+
+        Issue #2528: Added lazy heartbeat check to correct status/connected
+        when last_heartbeat is stale but database status hasn't been updated yet.
+        """
 
         def get_value(key: str):
             if isinstance(row, dict):
@@ -2633,15 +2705,56 @@ class RemoteAgentManager:
 
         from app.utils.datetime_utils import ensure_utc_suffix
 
+        # Get base values
+        machine_id = get_value("machine_id") or ""
+        status = get_value("status") or "offline"
+        last_heartbeat_str = get_value("last_heartbeat")
+        connected = self.is_connected(machine_id)
+
+        # Issue #2528: Lazy heartbeat check
+        # If status is not offline but last_heartbeat is stale, correct the values
+        # This ensures frontend shows correct status even when heartbeat monitor
+        # hasn't run yet or is delayed
+        if status != "offline" and last_heartbeat_str:
+            try:
+                # Parse last_heartbeat timestamp
+                last_heartbeat_dt = datetime.fromisoformat(
+                    last_heartbeat_str.replace("Z", "+00:00")
+                )
+                if last_heartbeat_dt.tzinfo is None:
+                    last_heartbeat_dt = last_heartbeat_dt.replace(tzinfo=timezone.utc)
+
+                # Check if heartbeat is stale (exceeds timeout threshold)
+                now_utc = datetime.now(timezone.utc)
+                heartbeat_age_seconds = (now_utc - last_heartbeat_dt).total_seconds()
+
+                if heartbeat_age_seconds > self.HEARTBEAT_TIMEOUT_SECONDS:
+                    # Correct status and connected for stale heartbeat
+                    status = "offline"
+                    connected = False
+                    logger.debug(
+                        "Lazy heartbeat check: machine %s marked offline (age=%ds > %ds)",
+                        machine_id[:8],
+                        int(heartbeat_age_seconds),
+                        self.HEARTBEAT_TIMEOUT_SECONDS,
+                    )
+            except (ValueError, TypeError) as e:
+                # If timestamp parsing fails, leave status unchanged
+                logger.debug(
+                    "Failed to parse last_heartbeat for machine %s: %s",
+                    machine_id[:8],
+                    e,
+                )
+
         return {
             "id": get_value("id"),
-            "machine_id": get_value("machine_id"),
+            "machine_id": machine_id,
             "machine_name": get_value("machine_name"),
             "hostname": get_value("hostname"),
             "os_type": get_value("os_type"),
             "os_version": get_value("os_version"),
             "ip_address": get_value("ip_address"),
-            "status": get_value("status") or "offline",
+            "status": status,
             "agent_version": get_value("agent_version"),
             "capabilities": capabilities,
             "cli_path": get_value("cli_path"),
@@ -2650,8 +2763,8 @@ class RemoteAgentManager:
             "created_by": get_value("created_by"),
             "created_at": ensure_utc_suffix(get_value("created_at")),
             "updated_at": ensure_utc_suffix(get_value("updated_at")),
-            "last_heartbeat": ensure_utc_suffix(get_value("last_heartbeat")),
-            "connected": self.is_connected(get_value("machine_id") or ""),
+            "last_heartbeat": ensure_utc_suffix(last_heartbeat_str),
+            "connected": connected,
         }
 
 
