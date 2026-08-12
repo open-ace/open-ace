@@ -212,22 +212,18 @@ class TestNoShellSyntax:
                     continue
                 # Check for shell control flow that shouldn't be in sudoers
                 # Pattern: line starting with 'if' or containing 'else' as command
-                if re.match(r"^\s*if\s+\[", line):
-                    raise AssertionError(
-                        f"Shell syntax 'if [' found in sudoers heredoc at line {i}: {line}"
-                    )
-                if re.match(r"^\s*then\s*$", line):
-                    raise AssertionError(
-                        f"Shell syntax 'then' found in sudoers heredoc at line {i}: {line}"
-                    )
-                if re.match(r"^\s*else\s*$", line):
-                    raise AssertionError(
-                        f"Shell syntax 'else' found in sudoers heredoc at line {i}: {line}"
-                    )
-                if re.match(r"^\s*fi\s*$", line):
-                    raise AssertionError(
-                        f"Shell syntax 'fi' found in sudoers heredoc at line {i}: {line}"
-                    )
+                assert not re.match(
+                    r"^\s*if\s+\[", line
+                ), f"Shell syntax 'if [' found in sudoers heredoc at line {i}: {line}"
+                assert not re.match(
+                    r"^\s*then\s*$", line
+                ), f"Shell syntax 'then' found in sudoers heredoc at line {i}: {line}"
+                assert not re.match(
+                    r"^\s*else\s*$", line
+                ), f"Shell syntax 'else' found in sudoers heredoc at line {i}: {line}"
+                assert not re.match(
+                    r"^\s*fi\s*$", line
+                ), f"Shell syntax 'fi' found in sudoers heredoc at line {i}: {line}"
 
     def test_no_shell_syntax_in_generator_output(self):
         """Generator output must not contain shell control statements."""
@@ -280,21 +276,24 @@ class TestDangerousVerbsBlocked:
         for cmd in gh_safe_commands:
             if "gh api" in cmd and "--jq" not in cmd:
                 # Allow specific whitelisted paths
-                if "api user" not in cmd and "api repos/*" not in cmd:
-                    raise AssertionError(f"Arbitrary gh api must NOT be in GH_SAFE: {cmd}")
+                assert (
+                    "api user" in cmd or "api repos/*" in cmd
+                ), f"Arbitrary gh api must NOT be in GH_SAFE: {cmd}"
 
     def test_git_force_push_not_in_whitelist(self):
         """git push --force must NOT be in GIT_SAFE (except force-with-lease)."""
         text = GENERATE_SUDOERS_SH.read_text()
         git_safe_commands = _extract_cmnd_alias(text, "GIT_SAFE")
 
-        for cmd in git_safe_commands:
-            # --force-with-lease is allowed (Issue #1854)
-            if "--force-with-lease" in cmd:
-                continue
-            # Bare --force is not allowed
-            if "push" in cmd and "--force" in cmd and "--force-with-lease" not in cmd:
-                raise AssertionError(f"git push --force must NOT be in GIT_SAFE: {cmd}")
+        # Filter out allowed --force-with-lease variants
+        forbidden_commands = [
+            cmd
+            for cmd in git_safe_commands
+            if "push" in cmd and "--force" in cmd and "--force-with-lease" not in cmd
+        ]
+        assert (
+            not forbidden_commands
+        ), f"git push --force must NOT be in GIT_SAFE: {forbidden_commands}"
 
 
 class TestWebuiLauncherNoFallback:
