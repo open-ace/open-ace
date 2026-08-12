@@ -34,6 +34,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # Import new SchemaCompatibilityService
+from app.repositories.schema_guard import get_environment_mode
 from app.services.schema_compatibility_service import get_schema_compatibility_service
 from app.services.schema_compatibility_types import CompatibilityPolicy, SchemaErrorCategory
 from migrations.baseline import BASELINE_REVISION
@@ -151,7 +152,7 @@ def main() -> int:
                     )
                 else:
                     print(
-                        f"Database schema compatible (fresh database in {env_mode} mode)\n"
+                        f"Database schema compatible (fresh database)\n"
                         f"Policy: {policy.value}"
                     )
                 return 0
