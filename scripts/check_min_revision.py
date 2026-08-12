@@ -34,7 +34,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # Import new SchemaCompatibilityService
-from app.repositories.schema_guard import get_environment_mode
 from app.services.schema_compatibility_service import get_schema_compatibility_service
 from app.services.schema_compatibility_types import CompatibilityPolicy, SchemaErrorCategory
 from migrations.baseline import BASELINE_REVISION
@@ -124,9 +123,6 @@ def main() -> int:
         policy = CompatibilityPolicy.SUPPORT_ANCESTRY
     else:
         policy = policy_map[args.policy]
-
-    # Determine environment mode
-    env_mode = get_environment_mode()
 
     # Create database engine
     engine = sa.create_engine(database_url)
