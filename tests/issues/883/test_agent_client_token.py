@@ -43,7 +43,17 @@ class TestSaveAgentToken:
 
         # Verify persisted to disk
         with open(config_file) as f:
-            data = json.load(f)
+            content = f.read()
+
+        # Issue #2530: Config file now has checksum line
+        # Parse without checksum line
+        lines = content.strip().split("\n")
+        if lines[-1].startswith("# checksum: "):
+            json_content = "\n".join(lines[:-1])
+        else:
+            json_content = content
+
+        data = json.loads(json_content)
         assert data["agent_token"] == "abc123def456"
 
     def test_save_agent_token_overwrites_existing(self, tmp_path):
@@ -66,7 +76,16 @@ class TestSaveAgentToken:
 
         # Verify on disk
         with open(config_file) as f:
-            data = json.load(f)
+            content = f.read()
+
+        # Issue #2530: Config file now has checksum line
+        lines = content.strip().split("\n")
+        if lines[-1].startswith("# checksum: "):
+            json_content = "\n".join(lines[:-1])
+        else:
+            json_content = content
+
+        data = json.loads(json_content)
         assert data["agent_token"] == "new_token_123"
 
     def test_save_agent_token_preserves_other_fields(self, tmp_path):
@@ -84,7 +103,16 @@ class TestSaveAgentToken:
         config.save_agent_token("tok_abc")
 
         with open(config_file) as f:
-            data = json.load(f)
+            content = f.read()
+
+        # Issue #2530: Config file now has checksum line
+        lines = content.strip().split("\n")
+        if lines[-1].startswith("# checksum: "):
+            json_content = "\n".join(lines[:-1])
+        else:
+            json_content = content
+
+        data = json.loads(json_content)
 
         assert data["agent_token"] == "tok_abc"
         assert data["server_url"] == "http://example.com"
@@ -183,44 +211,77 @@ class TestAgentRotateToken:
 
     def test_cmd_rotate_token_updates_config(self, tmp_path):
         """_cmd_rotate_token should update agent_token in config."""
-        agent = self._make_agent(tmp_path)
-        config_file = tmp_path / "config.json"
+        # Issue #2530: Skip token probing for unit tests
+        os.environ["OPENACE_SKIP_TOKEN_PROBE"] = "1"
 
-        agent._cmd_rotate_token(
-            {"command": "rotate_token", "new_token": "new_token_xyz_abcdef012345"}
-        )
+        try:
+            agent = self._make_agent(tmp_path)
+            config_file = tmp_path / "config.json"
 
-        assert agent.config.agent_token == "new_token_xyz_abcdef012345"
+            agent._cmd_rotate_token(
+                {"command": "rotate_token", "new_token": "new_token_xyz_abcdef012345"}
+            )
 
-        # Verify persisted to disk
-        with open(config_file) as f:
-            data = json.load(f)
-        assert data["agent_token"] == "new_token_xyz_abcdef012345"
+            assert agent.config.agent_token == "new_token_xyz_abcdef012345"
+
+            # Verify persisted to disk
+            with open(config_file) as f:
+                content = f.read()
+
+            # Issue #2530: Config file now has checksum line
+            lines = content.strip().split("\n")
+            if lines[-1].startswith("# checksum: "):
+                json_content = "\n".join(lines[:-1])
+            else:
+                json_content = content
+
+            data = json.loads(json_content)
+            assert data["agent_token"] == "new_token_xyz_abcdef012345"
+        finally:
+            del os.environ["OPENACE_SKIP_TOKEN_PROBE"]
 
     def test_cmd_rotate_token_missing_new_token(self, tmp_path):
         """_cmd_rotate_token should log warning if new_token missing."""
-        agent = self._make_agent(tmp_path)
+        # Issue #2530: Skip token probing for unit tests
+        os.environ["OPENACE_SKIP_TOKEN_PROBE"] = "1"
 
-        # Should not crash, token should remain unchanged
-        agent._cmd_rotate_token({"command": "rotate_token"})
-        assert agent.config.agent_token == "old_token_abc"
+        try:
+            agent = self._make_agent(tmp_path)
+
+            # Should not crash, token should remain unchanged
+            agent._cmd_rotate_token({"command": "rotate_token"})
+            assert agent.config.agent_token == "old_token_abc"
+        finally:
+            del os.environ["OPENACE_SKIP_TOKEN_PROBE"]
 
     def test_handle_command_dispatches_rotate_token(self, tmp_path):
         """_handle_command should dispatch rotate_token correctly."""
-        agent = self._make_agent(tmp_path)
+        # Issue #2530: Skip token probing for unit tests
+        os.environ["OPENACE_SKIP_TOKEN_PROBE"] = "1"
 
-        agent._handle_command(
-            {
-                "command": "rotate_token",
-                "new_token": "dispatched_new_token_abcdef",
-            }
-        )
+        try:
+            agent = self._make_agent(tmp_path)
 
-        assert agent.config.agent_token == "dispatched_new_token_abcdef"
+            agent._handle_command(
+                {
+                    "command": "rotate_token",
+                    "new_token": "dispatched_new_token_abcdef",
+                }
+            )
+
+            assert agent.config.agent_token == "dispatched_new_token_abcdef"
+        finally:
+            del os.environ["OPENACE_SKIP_TOKEN_PROBE"]
 
     def test_cmd_rotate_token_too_short_rejected(self, tmp_path):
         """_cmd_rotate_token should reject tokens shorter than 16 chars."""
-        agent = self._make_agent(tmp_path)
+        # Issue #2530: Skip token probing for unit tests
+        os.environ["OPENACE_SKIP_TOKEN_PROBE"] = "1"
 
-        agent._cmd_rotate_token({"command": "rotate_token", "new_token": "short"})
-        assert agent.config.agent_token == "old_token_abc"
+        try:
+            agent = self._make_agent(tmp_path)
+
+            agent._cmd_rotate_token({"command": "rotate_token", "new_token": "short"})
+            assert agent.config.agent_token == "old_token_abc"
+        finally:
+            del os.environ["OPENACE_SKIP_TOKEN_PROBE"]
