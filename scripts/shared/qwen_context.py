@@ -51,4 +51,4 @@ def is_qwen_system_context(content) -> bool:
         return True
     if _PHASE_HEADER_RE.search(text):
         return True
-    return _STARTUP_REMINDER_RE.search(text) and "This is the Qwen Code" in text
+    return _STARTUP_REMINDER_RE.search(text) is not None and "This is the Qwen Code" in text
