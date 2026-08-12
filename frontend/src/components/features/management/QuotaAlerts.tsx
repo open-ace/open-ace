@@ -310,15 +310,15 @@ export const QuotaAlerts: React.FC = () => {
     return alerts.filter((alert) => {
       if (typeFilter && alert.type !== typeFilter) return false;
       if (severityFilter && alert.severity !== severityFilter) return false;
-      if (readFilter === 'read' && !alert.is_read) return false;
-      if (readFilter === 'unread' && alert.is_read) return false;
+      if (readFilter === 'read' && !alert.read) return false;
+      if (readFilter === 'unread' && alert.read) return false;
       return true;
     });
   }, [alerts, typeFilter, severityFilter, readFilter]);
 
   const alertStats = useMemo(() => {
     const total = filteredAlerts.length;
-    const unread = filteredAlerts.filter((a) => !a.is_read).length;
+    const unread = filteredAlerts.filter((a) => !a.read).length;
     const critical = filteredAlerts.filter((a) => a.severity === 'critical').length;
     return { total, unread, critical };
   }, [filteredAlerts]);
@@ -326,7 +326,7 @@ export const QuotaAlerts: React.FC = () => {
   const handleMarkAsRead = async (alertId: string) => {
     try {
       await alertsApi.markAsRead(alertId);
-      setAlerts((prev) => prev.map((a) => (a.id === alertId ? { ...a, is_read: true } : a)));
+      setAlerts((prev) => prev.map((a) => (a.alert_id === alertId ? { ...a, read: true } : a)));
       setUnreadCount((prev) => Math.max(0, prev - 1));
     } catch (err) {
       console.error('Failed to mark alert as read:', err);
@@ -336,7 +336,7 @@ export const QuotaAlerts: React.FC = () => {
   const handleMarkAllAsRead = async () => {
     try {
       await alertsApi.markAllAsRead();
-      setAlerts((prev) => prev.map((a) => ({ ...a, is_read: true })));
+      setAlerts((prev) => prev.map((a) => ({ ...a, read: true })));
       setUnreadCount(0);
     } catch (err) {
       console.error('Failed to mark all as read:', err);
@@ -348,7 +348,7 @@ export const QuotaAlerts: React.FC = () => {
     if (!(await confirm({ message: t('confirmDeleteAlert', language), variant: 'danger' }))) return;
     try {
       await alertsApi.deleteAlert(alertId);
-      setAlerts((prev) => prev.filter((a) => a.id !== alertId));
+      setAlerts((prev) => prev.filter((a) => a.alert_id !== alertId));
     } catch (err) {
       console.error('Failed to delete alert:', err);
     }
@@ -799,10 +799,10 @@ export const QuotaAlerts: React.FC = () => {
                 </thead>
                 <tbody>
                   {filteredAlerts.map((alert) => (
-                    <tr key={alert.id} className={cn(!alert.is_read && 'table-warning')}>
+                    <tr key={alert.alert_id} className={cn(!alert.read && 'table-warning')}>
                       <td>
                         <strong>{alert.title}</strong>
-                        {!alert.is_read && (
+                        {!alert.read && (
                           <Badge variant="primary" className="ms-2">
                             {t('new', language)}
                           </Badge>
@@ -831,11 +831,11 @@ export const QuotaAlerts: React.FC = () => {
                       </td>
                       <td>
                         <div className="btn-group btn-group-sm">
-                          {!alert.is_read && (
+                          {!alert.read && (
                             <Button
                               variant="outline-primary"
                               size="sm"
-                              onClick={() => handleMarkAsRead(alert.id)}
+                              onClick={() => handleMarkAsRead(alert.alert_id)}
                               title={t('markAsRead', language) ?? 'Mark as Read'}
                             >
                               <i className="bi bi-check" />
@@ -844,7 +844,7 @@ export const QuotaAlerts: React.FC = () => {
                           <Button
                             variant="outline-danger"
                             size="sm"
-                            onClick={() => handleDeleteAlert(alert.id)}
+                            onClick={() => handleDeleteAlert(alert.alert_id)}
                             title={t('delete', language) ?? 'Delete'}
                           >
                             <i className="bi bi-trash" />
