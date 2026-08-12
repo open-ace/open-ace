@@ -962,6 +962,16 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "i18n_key": "actionAgentReconnect",
                 },
                 {
+                    "value": "agent_token_rotate_confirmed",
+                    "label": "Token Rotate Confirmed",
+                    "i18n_key": "actionAgentTokenRotateConfirmed",
+                },
+                {
+                    "value": "agent_token_force_revoked",
+                    "label": "Token Force Revoked",
+                    "i18n_key": "actionAgentTokenForceRevoked",
+                },
+                {
                     "value": "usage_report_accepted",
                     "label": "Usage Report Accepted",
                     "i18n_key": "actionUsageReportAccepted",

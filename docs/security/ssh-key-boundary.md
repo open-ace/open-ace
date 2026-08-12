@@ -1,6 +1,18 @@
 # SSH 密钥同步安全边界
 
-**关联 Issue**: #2182
+**关联 Issue**: #2182, #2328
+
+## 安全保证
+
+**Open ACE 不会将 root 私钥传播给工作区用户。**
+
+当安全 SSH 同步不可用或失败时，系统会：
+1. 跳过所有文件同步（不会回退到旧的同步逻辑）
+2. 写入结构化安全日志到 `/var/log/openace/ssh-sync-failure.json`
+3. 创建部署告警文件 `/var/log/openace/ssh-sync-failure.warning`
+4. 返回非零退出状态码表示失败
+
+**任何情况下**，系统都不会回退到复制 root 私钥的实现。这是 fail-closed（失败时关闭）安全原则的核心。
 
 ## 概述
 

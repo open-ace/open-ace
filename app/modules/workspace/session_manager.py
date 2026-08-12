@@ -209,8 +209,8 @@ class SessionMessage:
 def _format_dt(dt):
     """Format datetime as ISO 8601 string.
 
-    - Timezone-aware datetimes preserve their timezone info (e.g., +00:00 for UTC).
-    - Naive datetimes get +00:00 appended because this codebase stores UTC values
+    - Timezone-aware datetimes preserve their timezone info (e.g., +00:00 for timezone.utc).
+    - Naive datetimes get +00:00 appended because this codebase stores timezone.utc values
       as naive datetimes (via datetime.now(timezone.utc).replace(tzinfo=None)).
     """
     if dt is None:
@@ -1222,7 +1222,7 @@ class SessionManager:
 
         The cursor round-trips through the HTTP layer, so the timestamp must be
         a stable string that, when fed back into ``WHERE timestamp < ?``, matches
-        stored rows exactly. We therefore return the naive-UTC ISO form (no
+        stored rows exactly. We therefore return the naive-timezone.utc ISO form (no
         timezone suffix) that ``add_message`` writes, rather than the
         display-formatted value produced by ``_format_dt`` (which appends
         ``+00:00`` and would break lexicographic comparison against stored
@@ -1561,7 +1561,7 @@ class SessionManager:
                 increment_session_usage (avoids double-count); non-autonomous
                 callers (remote, session_sync) keep True as they rely on this.
             timestamp: Optional source timestamp. When omitted, store the current
-                UTC time. Historical sync/import paths should pass the original
+                timezone.utc time. Historical sync/import paths should pass the original
                 message timestamp so transcript order remains stable.
 
         Returns:
@@ -1626,12 +1626,14 @@ class SessionManager:
 
                 content_filter = _get_content_filter()
 
-                # Get user_id from session for audit logging
+                # Get user_id and username from session for audit logging
                 cursor.execute(
                     f"""
-                    SELECT user_id FROM agent_sessions
-                    WHERE session_id = {_param()}
-                    {f"AND tenant_id = {_param()}" if has_session_tenant else ""}
+                    SELECT a.user_id, u.username
+                    FROM agent_sessions a
+                    LEFT JOIN users u ON a.user_id = u.id
+                    WHERE a.session_id = {_param()}
+                    {f"AND a.tenant_id = {_param()}" if has_session_tenant else ""}
                     """,
                     (
                         session_id,
@@ -1640,6 +1642,7 @@ class SessionManager:
                 )
                 filter_session_row = cursor.fetchone()
                 filter_user_id = filter_session_row["user_id"] if filter_session_row else None
+                filter_username = filter_session_row["username"] if filter_session_row else None
 
                 # Get tenant-specific sensitive keyword config
                 tenant_config = _get_tenant_sensitive_keyword_config(int(effective_tenant_id))
@@ -1654,6 +1657,8 @@ class SessionManager:
                     audit_logger.log_action(
                         action=audit_action,
                         user_id=filter_user_id,
+                        username=filter_username,
+                        tenant_id=effective_tenant_id,
                         resource_type="ai_output",
                         severity="medium",
                         details={

@@ -390,6 +390,38 @@ class ContentFilter:
         """
         self.invalidate_cache()
 
+    @staticmethod
+    def _luhn_check(value: str) -> bool:
+        """Luhn checksum — True if *value* is a plausible credit-card number.
+
+        Real cards (typically 15-16 digits) satisfy Luhn; commit SHAs and
+        timestamp-IDs (also 15 digits) do not. Used to suppress false-positive
+        credit-card matches that 403-blocked autonomous workflows (#2499).
+        """
+        digits = [int(c) for c in value if c.isdigit()]
+        if len(digits) < 12:
+            return False
+        total = 0
+        for i, d in enumerate(reversed(digits)):
+            if i % 2 == 1:
+                d *= 2
+                if d > 9:
+                    d -= 9
+            total += d
+        return total % 10 == 0
+
+    _DATE_LIKE = re.compile(r"\+?\d{4}([-\s/.]\d{1,2}){0,2}\Z")
+
+    @classmethod
+    def _looks_like_date(cls, value: str) -> bool:
+        """True if *value* is a date (YYYY-MM-DD / YYYY-MM), not a phone number.
+
+        International-phone false positives on dates like 2026-08-12 (#2499) are
+        dropped; real phones (which don't follow a 4-digit-year + short-groups
+        shape) are unaffected.
+        """
+        return bool(cls._DATE_LIKE.match(value.strip()))
+
     def check_content(
         self,
         content: str,
@@ -498,6 +530,15 @@ class ContentFilter:
         # Then check built-in PII patterns
         for pattern_name, compiled_pattern in self.compiled_patterns.items():
             matches = compiled_pattern.findall(content)
+            # Post-match false-positive suppression (#2499): autonomous prompts
+            # legitimately contain 15-digit commit SHAs / timestamp-IDs (matched
+            # as credit cards → critical → block) and dates like 2026-08-12
+            # (matched as international phones). Drop those before they enter
+            # matched_rules / escalate risk — real cards/phones are unaffected.
+            if matches and pattern_name in ("pii_credit_card", "pii_credit_card_amex"):
+                matches = [m for m in matches if self._luhn_check(m)]
+            elif matches and pattern_name == "pii_phone_intl":
+                matches = [m for m in matches if not self._looks_like_date(m)]
             if matches:
                 risk = self.risk_mapping.get(pattern_name, "medium")
                 matched_rules.append(

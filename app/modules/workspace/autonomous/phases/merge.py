@@ -129,14 +129,16 @@ def _blocking_pending(gh, checks: list[dict], pr_number: int, base_branch: str) 
     an aggregate gate (e.g. ``PR Gate``) reports its own status as pending while
     its underlying jobs run, so the filter normally catches the wait.
 
-    Known gap (pre-existing, rare): under an aggregate gate, a pending
-    *underlying* job whose name is not in the literal required set (e.g.
-    ``test (3.10)`` while ``required == {'PR Gate'}``) is classified as
-    non-blocking. In the narrow window before the gate's own pending status
-    propagates, the merge can be attempted, rejected, and paused at the policy
-    branch instead of deferred. The gate's pending status prevents this in the
-    common case; left for a follow-up rather than expanding this change (a full
-    fix trades off over-deferring on slow non-required jobs).
+    Note on the aggregate-gate propagation window: a pending *underlying* job
+    whose name is not in the literal required set (e.g. ``test (3.10)`` while
+    ``required == {'PR Gate'}``) is classified non-blocking HERE — this filter
+    governs only the pre-merge / post-rejection *required*-pending deferral,
+    where over-deferring on slow non-required jobs is the cost (#2428). In the
+    narrow window before the gate's own pending status propagates, such a job
+    used to reach the policy-pause branch and freeze the workflow. That freeze
+    is now prevented by the post-rejection transient guard in :func:`handle`
+    (any pending check OR ``mergeable_state == "unknown"`` defers before the
+    pause), so the gap no longer strands workflows.
     """
     pending = [c for c in checks if c.get("bucket") == "pending"]
     if not pending:
@@ -370,27 +372,42 @@ def handle(ctx, deps) -> PhaseResult:
                 or is_conflict_rejection
                 or (mergeable is False and not mergeable_state)
             )
-            # GitHub's mergeability cache can report a stale "dirty"
-            # immediately after a synchronization push, before the
-            # synthetic merge commit is recomputed. The PR branch already
-            # contains main in that case, so verifying ancestry avoids a
-            # no-op merge that fails with "made no commit". Only the
-            # cache-derived "dirty" path needs the probe; text evidence
-            # and a definitive non-mergeable branch are authoritative.
+            # Any mergeability signal — cache-derived "dirty", conflict-
+            # rejection text, or a definitive non-mergeable state — can be
+            # stale after a prior merge cycle already synced the branch with
+            # main (e.g. a conflicts-resolved push). When the branch already
+            # contains main there is no real git conflict, so probing ancestry
+            # avoids a no-op resolve that merges "Already up to date" and
+            # terminally fails with "made no commit" (workflow e274ec0e/#2467:
+            # a later cycle re-entered resolve on a branch a prior cycle had
+            # already pushed, failing on a PR that was genuinely mergeable).
+            # ``branch_contains_main`` is a ground-truth git check — main as
+            # an ancestor means no conflict is possible — so it overrules even
+            # authoritative-looking text. When the rejection is a stale
+            # *conflict* signal, defer so GitHub recomputes mergeability; when
+            # it is a *policy* block, fall through to the policy handler below
+            # (the block is independent of any git conflict).
             if (
                 is_real_conflict
-                and mergeable_state == "dirty"
-                and not is_conflict_rejection
-                and mergeable is not False
                 and pr_head_sha
                 and deps.host.branch_contains_main(gh, pr_head_sha, branch_name) is True
             ):
-                logger.info(
-                    "PR #%s mergeable_state=dirty is stale (branch has main); "
-                    "deferring to policy/check path",
-                    pr_number,
-                )
-                is_real_conflict = False
+                if is_policy_rejection:
+                    logger.info(
+                        "PR #%s: branch has main (no git conflict possible); "
+                        "the merge rejection is policy (state=%s), deferring "
+                        "to policy handling",
+                        pr_number,
+                        mergeable_state or "unknown",
+                    )
+                    is_real_conflict = False
+                else:
+                    logger.info(
+                        "PR #%s: conflict signal is stale (branch already has "
+                        "main); deferring for GitHub to recompute mergeability",
+                        pr_number,
+                    )
+                    return PhaseResult.retry()
             if is_real_conflict:
                 try:
                     # Authoritative conflict evidence wins over generic
@@ -419,8 +436,51 @@ def handle(ctx, deps) -> PhaseResult:
                     raise
 
             if is_policy_rejection:
-                # With no failed/pending checks and no conflict evidence,
-                # repository policy requires external action (approval,
+                # A "policy" rejection text overlaps two situations GitHub
+                # reports with the same "repository rule violations" /
+                # "required status check" wording:
+                #
+                #  (a) a required status check is still PENDING for this head
+                #      — most often right after a sync/repair push, while an
+                #      aggregate required gate (whatever the repo names it)
+                #      has not yet propagated its own pending status.
+                #      ``_blocking_pending`` only defers for a pending check in
+                #      the required set, so it misses a pending *underlying*
+                #      job (e.g. ``test (3.10)`` under an aggregate gate) in
+                #      that window; GitHub concurrently reports ``blocked`` and
+                #      the workflow froze at a manual-recovery pause it could
+                #      never recover from (#27 follow-up; cf. 50ba8724 /
+                #      c0758607 / cd939cbf / 1c1b63f0).
+                #  (b) a genuine non-CI block (missing review, draft, required
+                #      signing) where every check has settled.
+                #
+                # Only (b) warrants a manual-recovery pause. (a) is transient:
+                # any pending check, or GitHub still computing
+                # (``mergeable_state == "unknown"``), means CI has not settled
+                # — keep polling instead of freezing. In practice this is
+                # bounded: pending checks complete and the unknown state
+                # resolves within minutes, so a workflow does not loop here
+                # indefinitely. A permanently-absent required context (a repo
+                # misconfig — required context with no provider) has no pending
+                # check and a known ``blocked`` state, so it still pauses for a
+                # human to fix the ruleset. ``PhaseResult.retry`` does not
+                # increment any counter, so the formal backstop for a
+                # degenerate stuck-pending/unknown (e.g. a runner that never
+                # times out, or a GitHub incident) is the
+                # monitor-autonomous-workflows sweep that re-classifies a
+                # workflow stuck in this phase.
+                any_pending = any(c.get("bucket") == "pending" for c in refreshed_checks)
+                if any_pending or mergeable_state == "unknown":
+                    logger.info(
+                        "PR #%s: merge rejected by policy but CI has not "
+                        "settled (state=%s, any_pending=%s); deferring",
+                        pr_number,
+                        mergeable_state or "unknown",
+                        any_pending,
+                    )
+                    return PhaseResult.retry()
+                # No pending checks and GitHub has finished computing, yet
+                # repository policy still requires external action (approval,
                 # marking ready, or a rule change). Persist a manually
                 # recoverable pause instead of retrying forever.
                 state_label = mergeable_state or "unknown"

@@ -108,7 +108,8 @@ CREATE TABLE agent_tokens (
  is_revoked INTEGER DEFAULT 0,
  revoked_at TIMESTAMP,
  revoked_by integer,
- rotated_at TIMESTAMP
+ rotated_at TIMESTAMP,
+ token_version INTEGER DEFAULT '0' NOT NULL
 );
 
 CREATE TABLE aggregation_history (
@@ -924,7 +925,9 @@ CREATE TABLE scheduler_leaders (
  last_run_at TIMESTAMP,
  run_count integer DEFAULT 0 NOT NULL,
  skip_count integer DEFAULT 0 NOT NULL,
- fail_count integer DEFAULT 0 NOT NULL
+ fail_count integer DEFAULT 0 NOT NULL,
+ fencing_token INTEGER,
+ lock_strategy TEXT
 );
 
 CREATE TABLE scheduler_runs (
@@ -936,7 +939,18 @@ CREATE TABLE scheduler_runs (
  status TEXT NOT NULL,
  duration_ms integer,
  error_message text,
- metrics text
+ metrics text,
+ lock_strategy TEXT,
+ fencing_token INTEGER,
+ lock_acquired_at TIMESTAMP,
+ lock_released_at TIMESTAMP,
+ skip_reason text,
+ leader_host TEXT
+);
+
+CREATE TABLE schema_metadata (
+ initialized_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ schema_version TEXT
 );
 
 CREATE TABLE security_settings (
@@ -1334,8 +1348,8 @@ CREATE TABLE users (
  avatar_url TEXT,
  auto_mapping_enabled INTEGER DEFAULT 1,
  tenant_version integer DEFAULT 1 NOT NULL,
-    CONSTRAINT chk_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
-    CONSTRAINT chk_users_role CHECK ((role IN ('admin', 'platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
+    CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
+    CONSTRAINT chk_2332_users_role_valid CHECK ((role IN ('platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
 );
 
 CREATE TABLE web_user_auth_sessions (
@@ -1545,6 +1559,8 @@ CREATE INDEX idx_agent_sessions_user_id ON agent_sessions (user_id);
 CREATE INDEX idx_agent_tokens_hash ON agent_tokens (token_hash);
 
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens (machine_id);
+
+CREATE INDEX idx_agent_tokens_machine_version ON agent_tokens (machine_id, token_version);
 
 CREATE INDEX idx_aggregation_history_status ON aggregation_history (status);
 

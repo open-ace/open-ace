@@ -325,7 +325,27 @@ class AutonomousScheduler:
         Issue #1573: For workflows in preparation phase without a branch_name,
         use a temporary key based on workflow_id to ensure conflict checking works
         even before preparation creates the branch.
+
+        Acceptance verification is exempt from the project_path lock: it runs
+        in its own ``git worktree add --detach`` checkout of the merged commit
+        (isolated, read-only, no branch checkout), and its persisted
+        ``worktree_path`` is empty (the verify worktree is created internally
+        and not persisted). Without this exemption the project_path fallback
+        below would key it on the shared repo and serialize it with same-repo
+        merge/dev workflows for the verifier's full agent run (10-90 min),
+        starving peers (workflow e274ec0e waited ~90 min behind cd939cbf).
+        git worktrees are designed for concurrent use (isolated index/HEAD,
+        append-only object store), so a detached verify worktree does not race
+        with a same-repo peer's worktree. The verifier's only other shared-repo
+        touch is a read-only ``git fetch`` (refs + FETCH_HEAD, which git
+        serializes internally); it does no push/branch/reset/commit on shared
+        refs. The per-workflow token still prevents the same verification from
+        being double-advanced.
         """
+        if wf.get("current_phase") == "acceptance_verification":
+            wf_id = wf.get("workflow_id", "")
+            return (f"acceptance:{wf_id}", "")
+
         workspace = wf.get("worktree_path") or wf.get("project_path") or ""
         branch = wf.get("branch_name") or ""
 

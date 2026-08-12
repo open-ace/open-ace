@@ -217,7 +217,7 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple[Any, Any] | Non
     machine = agent_mgr.get_machine(machine_id)
     if machine and machine.get("created_at"):
         try:
-            from datetime import datetime, timezone
+            from datetime import datetime
 
             created_at = machine["created_at"]
             if isinstance(created_at, str):
@@ -626,6 +626,35 @@ def register_machine():
     )
 
 
+# ==================== Heartbeat Monitor Status (Issue #2528) ====================
+
+
+@remote_bp.route("/heartbeat-status", methods=["GET"])
+@admin_required
+def get_heartbeat_status():
+    """Get heartbeat monitor status for diagnostics.
+
+    Issue #2528: Added for observability and health monitoring.
+
+    Returns:
+        JSON with heartbeat monitor status including:
+        - last_check_time: ISO timestamp of last heartbeat check
+        - check_count: Number of heartbeat checks performed
+        - is_running: Whether heartbeat monitor appears to be running
+        - interval_seconds: Heartbeat check interval
+        - timeout_seconds: Heartbeat timeout threshold
+    """
+    agent_mgr = get_remote_agent_manager()
+    status = agent_mgr.get_heartbeat_monitor_status()
+
+    return jsonify(
+        {
+            "success": True,
+            "heartbeat_monitor": status,
+        }
+    )
+
+
 @remote_bp.route("/machines", methods=["GET"])
 def list_machines():
     """
@@ -793,6 +822,7 @@ def rotate_machine_token(machine_id):
 
     Issue #2180: Validate machine tenant access.
     Issue #2499: Support immediate and delayed revocation modes.
+    Issue #2530: Include token_version and rotated_at in command payload.
 
     Args:
         immediate (bool): If True, immediately revoke old token (emergency mode).
@@ -823,6 +853,8 @@ def rotate_machine_token(machine_id):
 
     new_token = result["new_token"]
     rotation_id = result.get("rotation_id", "")
+    token_version = result.get("token_version", 0)
+    rotated_at = result.get("rotated_at", "")
     mode = "immediate" if immediate else "delayed"
 
     # AGENT_TOKEN_ROTATE audit event
@@ -830,6 +862,7 @@ def rotate_machine_token(machine_id):
         "machine_id": machine_id,
         "rotated_by": g.user["id"],
         "rotation_id": rotation_id,
+        "token_version": token_version,
         "mode": mode,
     }
     if result.get("unrevoked"):
@@ -845,9 +878,10 @@ def rotate_machine_token(machine_id):
         details=details,
     )
 
-    # Issue #2499: Only push command for delayed mode
+# Issue #2499: Only push command for delayed mode
     if not immediate:
         # Push rotate_token command to agent so it updates its local config.
+        # Issue #2530: Include token_version for version-based filtering.
         # send_command() only enqueues — check if agent is online to determine
         # whether the new token will be delivered immediately or needs manual update.
         agent_mgr.send_command(
@@ -856,6 +890,8 @@ def rotate_machine_token(machine_id):
                 "command": "rotate_token",
                 "new_token": new_token,
                 "rotation_id": rotation_id,
+                "token_version": token_version,
+                "rotated_at": rotated_at,
                 "timeout": result.get("timeout", 300),
             },
         )
@@ -882,6 +918,7 @@ def rotate_machine_token(machine_id):
             "success": True,
             "agent_token": new_token,
             "rotation_id": rotation_id,
+            "token_version": token_version,
             "message": msg,
             "mode": mode,
         }
@@ -1616,6 +1653,59 @@ def agent_websocket():
         ),
         410,
     )
+
+
+@remote_bp.route("/token_info", methods=["POST"])
+def get_token_info():
+    """
+    Get token version information for an agent.
+
+    Issue #2530 Phase 2: Used by agents to sync token version after restart.
+    Returns the token_version for the current valid token.
+
+    Requires valid Bearer token authentication.
+    """
+    data = request.get_json() or {}
+    machine_id = data.get("machine_id")
+
+    if not machine_id:
+        return jsonify({"error": "machine_id is required"}), 400
+
+    # Validate Bearer token
+    bearer_token, bearer_error = _validate_agent_bearer(machine_id)
+    if bearer_error:
+        return bearer_error
+
+    agent_mgr = get_remote_agent_manager()
+
+    # Get token version from database
+    from app.modules.workspace.agent_token import hash_token
+    from app.repositories.database import _param, adapt_boolean_value
+
+    token_hash_val = hash_token(bearer_token)
+
+    with agent_mgr.db.connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"""
+            SELECT token_version
+            FROM agent_tokens
+            WHERE token_hash = {_param()} AND machine_id = {_param()} AND is_revoked = {_param()}
+            LIMIT 1
+            """,
+            (token_hash_val, machine_id, adapt_boolean_value(False)),
+        )
+        row = cursor.fetchone()
+
+    if row:
+        return jsonify(
+            {
+                "success": True,
+                "token_version": row["token_version"],
+            }
+        )
+    else:
+        return jsonify({"error": "Token not found or revoked"}), 404
 
 
 @remote_bp.route("/agent/message", methods=["POST"])
@@ -3947,13 +4037,15 @@ def remote_vscode_proxy(vscode_id, path=""):
     headers = {k: v for k, v in request.headers if k.lower() != "host"}
 
     # Add code-server password auth if available.
-    # code-server accepts HTTP Basic Auth with format: base64(":password")
-    cs_password = info.get("cs_password", "")
-    if cs_password:
-        import base64 as _b64
+    # code-server's password auth is COOKIE-based only: its `authenticated`
+    # middleware checks the session cookie and ignores HTTP Basic Auth. Log in
+    # once with cs_password and reuse the session cookie for proxied requests
+    # (cached in the vscode session info; shared with the WS bridge).
+    from app.modules.workspace.vscode_proxy import ensure_cs_cookie
 
-        auth_value = _b64.b64encode(f":{cs_password}".encode()).decode()
-        headers["Authorization"] = f"Basic {auth_value}"
+    cs_cookie = ensure_cs_cookie(info, original_http_url, vscode_id)
+    if cs_cookie:
+        headers["Cookie"] = cs_cookie
 
     # Get request body
     body = request.get_data()

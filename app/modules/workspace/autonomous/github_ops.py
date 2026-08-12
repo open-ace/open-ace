@@ -6,6 +6,8 @@ Wraps the `gh` CLI for repo, issue, branch, worktree, and PR operations.
 All methods invoke gh/git via subprocess and return parsed results.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -80,6 +82,28 @@ def _is_transient_error(stderr: str, returncode: int) -> bool:
         return False
     combined = f"{stderr}".lower()
     return any(kw in combined for kw in _TRANSIENT_ERROR_KEYWORDS)
+
+
+# --force-with-lease recovery: a push rejected with these markers means the
+# local remote-tracking ref is stale relative to the actual remote — typically
+# because the auto-dev worktree was recreated after a failure cleanup (so its
+# ``refs/remotes/origin/<branch>`` lags the real tip), or a concurrent push to
+# the same single-owner branch. A targeted ``git fetch`` refreshes the lease so
+# one retry succeeds. Network errors are deliberately excluded: fetching cannot
+# fix them, and the orchestrator Layer-2 retry remains the backstop for those.
+# ``constants._TRANSIENT_ORCHESTRATOR_KEYWORDS`` already classifies these
+# transient; this predicate narrows to the lease-refresh subset.
+_FORCE_WITH_LEASE_REFRESH_KEYWORDS = (
+    "stale info",
+    "fetch first",
+    "non-fast-forward",
+)
+
+
+def _is_stale_lease_rejection(err_str: str) -> bool:
+    """Whether a force-with-lease push failure is a recoverable stale lease."""
+    combined = f"{err_str}".lower()
+    return any(kw in combined for kw in _FORCE_WITH_LEASE_REFRESH_KEYWORDS)
 
 
 # Failure markers used to locate the real error lines inside a long pre-commit /
@@ -367,6 +391,27 @@ class GitHubOps:
             # Cannot determine the current user; assume cross-user to stay safe.
             return True
         return current_user != self.system_account
+
+    def _run_as_account(
+        self, argv: list[str], *, timeout: int = 180
+    ) -> subprocess.CompletedProcess:
+        """Run a non-git shell command as ``system_account`` (#23).
+
+        Mirrors ONLY the ``sudo -u`` wrapping of :meth:`_run_git` — not its
+        trusted-git-context machinery (``safe.directory``/hooksPath/fsmonitor),
+        which is git-specific; this runs ``mkdir``/``ln`` for the node_modules
+        shim. No ``cwd`` is accepted: under ``sudo -u`` the service user cannot
+        ``chdir`` into a user-private worktree (the PermissionError of #1421),
+        so callers must pass absolute paths. When the service already runs as
+        ``system_account`` (``_needs_sudo()`` False — single-user/CI), the
+        command runs directly.
+        """
+        if self._needs_sudo():
+            assert self.system_account is not None  # _needs_sudo() guarantees non-empty
+            cmd: list[str] = ["sudo", "-u", self.system_account, *argv]
+        else:
+            cmd = list(argv)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
     def _resolve_owner_repo(self) -> str | None:
         """Resolve the ``owner/repo`` slug for the local repo's origin remote.
@@ -2416,7 +2461,34 @@ class GitHubOps:
             args.append(branch)
         if force_with_lease:
             args.append("--force-with-lease")
-        self._run_git(args)
+        try:
+            self._run_git(args)
+        except GitHubOpsError as e:
+            if not (force_with_lease and _is_stale_lease_rejection(str(e))):
+                raise
+            # The push was rejected because our remote-tracking ref is stale
+            # relative to the actual remote (recreated worktree / concurrent
+            # push). Refresh the lease with a targeted fetch and retry once —
+            # the local auto-dev branch is authoritative for this workflow, so
+            # overwriting the remote after a fresh fetch is the intended
+            # semantics. Without this recovery the orchestrator's Layer-2 retry
+            # re-runs the identical push and loops to exhaustion (reproducer:
+            # ee678c63, a reset worktree whose stale ref never refreshed).
+            logger.warning(
+                "force-with-lease stale lease for %s; fetching %s and retrying",
+                target,
+                remote,
+            )
+            if not target:
+                # No validated branch to refresh (should not happen: the
+                # force_with_lease guard above resolves target) — propagate.
+                raise e
+            try:
+                self._run_git(["fetch", remote, target])
+            except GitHubOpsError as fetch_err:
+                logger.warning("lease-refresh fetch failed: %s", fetch_err)
+                raise e from fetch_err
+            self._run_git(args)
 
     def git_init(self) -> None:
         """Initialize a git repository."""

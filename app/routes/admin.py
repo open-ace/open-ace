@@ -615,7 +615,7 @@ def api_sync_feishu_org():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         logger.exception("Failed to sync Feishu org: %s", e)
-        return jsonify({"error": "Failed to sync Feishu org"}), 500
+        return jsonify({"error": "Failed to sync Feishu org", "detail": str(e)}), 500
 
 
 @admin_bp.route("/admin/dingtalk/sync", methods=["POST"])
@@ -640,7 +640,7 @@ def api_sync_dingtalk_org():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         logger.exception("Failed to sync DingTalk org: %s", e)
-        return jsonify({"error": "Failed to sync DingTalk org"}), 500
+        return jsonify({"error": "Failed to sync DingTalk org", "detail": str(e)}), 500
 
 
 def _org_sync_lock_state_payload(provider: str, key: int) -> dict:

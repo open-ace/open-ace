@@ -742,6 +742,23 @@ def _gateway_error_response(resp: Any, gateway_key: str) -> tuple[Response, int]
         )
 
 
+def _is_autonomous_request(token_payload: dict | None) -> bool:
+    """Whether a proxy request originates from the autonomous agent runner.
+
+    The autonomous proxy token is minted with ``session_type="agent"``
+    (agent_runner.py); that claim rides in the validated token payload
+    (api_key_proxy.generate_proxy_token). Autonomous prompts are
+    system-generated/trusted and inherently carry commit SHAs, dates, and code
+    that the user-content filter's PII detectors false-positive on (15-digit
+    SHAs → credit cards → 403 block, #2499). Such requests skip the governance
+    content filter, which exists for user-submitted chat — not the system's own
+    prompts to its model.
+    """
+    if token_payload is None:
+        return False
+    return token_payload.get("session_type") == "agent"
+
+
 def _check_content_filter(
     user_id: int,
     username: str | None,
@@ -1023,6 +1040,30 @@ def handle_llm_proxy_request(
     else:
         session_id = str(token_payload["session_id"])
 
+        # Issue #2464: If using webui aggregate session, check for user's active session
+        # When user creates a session via /work, route WebUI messages to that session
+        if session_id.startswith("webui:"):
+            try:
+                from app.modules.workspace.session_manager import get_session_manager
+
+                sm = get_session_manager()
+                active_sessions = sm.get_active_sessions(user_id=user_id, tenant_id=tenant_id)
+                # Filter out webui aggregate sessions, get the most recent non-webui session
+                # get_active_sessions already returns sessions sorted by updated_at DESC
+                non_webui_sessions = [
+                    s for s in active_sessions if not s.session_id.startswith("webui:")
+                ]
+                if non_webui_sessions:
+                    # First result is the most recently updated (SQL ORDER BY updated_at DESC)
+                    session_id = non_webui_sessions[0].session_id
+                    logger.debug(
+                        "Using user's active session %s instead of webui aggregate",
+                        session_id[:8],
+                    )
+            except Exception as e:
+                # On any error, fall back to webui aggregate session
+                logger.warning("Failed to get active sessions, using webui aggregate: %s", e)
+
     try:
         from app.modules.governance.quota_manager import QuotaManager
 
@@ -1057,13 +1098,25 @@ def handle_llm_proxy_request(
     # ── Content filter check for user input ──────────────────────────────
     # Check user messages for sensitive content before forwarding to LLM.
     # Block: return 403, Warn: log and continue, Redact: modify content.
-    username = g.user.get("username") if hasattr(g, "user") else None
-    content_filter_result = _check_content_filter(
-        user_id=user_id,
-        username=username,
-        request_body=request.get_data(),
-        tenant_id=tenant_id,
-    )
+    # Autonomous agent requests (session_type="agent") are exempt: their
+    # prompts are system-generated and inherently carry SHAs/dates/code that
+    # the PII detectors false-positive on — filtering them 403-blocked glm-5
+    # autonomous workflows (#2499). The filter governs user-submitted chat.
+    if _is_autonomous_request(token_payload):
+        logger.debug(
+            "Skipping content filter for autonomous agent request " "(user_id=%s, tenant_id=%s)",
+            user_id,
+            tenant_id,
+        )
+        content_filter_result = None
+    else:
+        username = g.user.get("username") if hasattr(g, "user") else None
+        content_filter_result = _check_content_filter(
+            user_id=user_id,
+            username=username,
+            request_body=request.get_data(),
+            tenant_id=tenant_id,
+        )
     if isinstance(content_filter_result, tuple):
         # Block: return error response
         return content_filter_result

@@ -8,6 +8,7 @@ Environment variables take precedence over the config file.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -60,10 +61,26 @@ class AgentConfig:
         # Load config file if it exists
         if self._config_path.exists():
             try:
-                with open(self._config_path) as f:
-                    file_config = json.load(f)
-                self._data.update(file_config)
-                logger.info("Loaded config from %s", self._config_path)
+                # Issue #2530: Try to load with checksum validation
+                content = self._config_path.read_text()
+                loaded = self._load_with_checksum_validation(content)
+                if loaded:
+                    self._data.update(loaded)
+                    logger.info("Loaded config from %s", self._config_path)
+                else:
+                    # Checksum validation failed, try backup
+                    logger.warning("Checksum validation failed, trying backup")
+                    backup_path = self._config_path.with_suffix(".json.bak")
+                    if backup_path.exists():
+                        backup_content = backup_path.read_text()
+                        loaded = self._load_with_checksum_validation(backup_content)
+                        if loaded:
+                            self._data.update(loaded)
+                            logger.info("Loaded config from backup %s", backup_path)
+                        else:
+                            logger.error("Backup config also corrupted, using defaults")
+                    else:
+                        logger.error("No backup config found, using defaults")
             except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to load config file %s: %s", self._config_path, e)
         else:
@@ -98,6 +115,62 @@ class AgentConfig:
                     logger.debug("Override %s from env var %s", config_key, env_key)
                 except (ValueError, TypeError) as e:
                     logger.warning("Invalid env var %s=%r: %s", env_key, value, e)
+
+    def _load_with_checksum_validation(self, content: str) -> dict | None:
+        """Validate and load config content with checksum verification.
+
+        Issue #2530: Validates file integrity using SHA256 checksum.
+        The checksum line is the last line in format: # checksum: <sha256_hex>
+
+        Args:
+            content: The file content to validate and load.
+
+        Returns:
+            Parsed config dict if valid, None if checksum mismatch.
+        """
+        lines = content.strip().split("\n")
+
+        # Check if file has checksum line
+        if not lines or not lines[-1].startswith("# checksum: "):
+            # No checksum line, parse as-is (backward compatibility)
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                return None
+
+        # Extract checksum
+        checksum_line = lines[-1]
+        try:
+            expected_checksum = checksum_line.split(": ", 1)[1].strip()
+        except (IndexError, ValueError):
+            logger.warning("Malformed checksum line: %s", checksum_line)
+            # Fall back to parsing entire file (backward compatibility)
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                return None
+
+        # Content without checksum line
+        content_without_checksum = "\n".join(lines[:-1])
+
+        # Calculate checksum
+        actual_checksum = hashlib.sha256(content_without_checksum.encode()).hexdigest()
+
+        # Validate
+        if actual_checksum != expected_checksum:
+            logger.warning(
+                "Checksum mismatch: expected=%s, actual=%s",
+                expected_checksum[:16],
+                actual_checksum[:16],
+            )
+            return None
+
+        # Parse the JSON content (without checksum line)
+        try:
+            return json.loads(content_without_checksum)
+        except json.JSONDecodeError as e:
+            logger.warning("Failed to parse JSON: %s", e)
+            return None
 
     # --- Required settings ---
 
@@ -145,6 +218,16 @@ class AgentConfig:
         self._data["machine_id"] = mid
         self._save_machine_id(mid)
         return mid
+
+    @property
+    def last_token_version(self) -> int | None:
+        """
+        Last successfully applied token version.
+
+        Issue #2530: Used for version-based command filtering to prevent
+        rollback to revoked tokens. None if no token has been applied yet.
+        """
+        return self._data.get("last_token_version")
 
     # --- Optional / tuning settings ---
 
@@ -227,11 +310,35 @@ class AgentConfig:
             logger.warning("Failed to save machine_id: %s", e)
 
     def save(self) -> None:
-        """Save current configuration to the config file."""
+        """Save current configuration to the config file.
+
+        Issue #2530: Uses atomic write with backup and checksum.
+        """
         try:
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            with open(self._config_path, "w") as f:
-                json.dump(self._data, f, indent=2)
+
+            # Prepare content
+            content_json = json.dumps(self._data, indent=2)
+
+            # Calculate checksum
+            checksum = hashlib.sha256(content_json.encode()).hexdigest()
+            content_with_checksum = f"{content_json}\n# checksum: {checksum}\n"
+
+            # Write to temporary file first
+            temp_path = self._config_path.with_suffix(".json.tmp")
+            temp_path.write_text(content_with_checksum)
+
+            # Create backup if config exists
+            if self._config_path.exists():
+                backup_path = self._config_path.with_suffix(".json.bak")
+                try:
+                    shutil.copy2(self._config_path, backup_path)
+                except OSError as e:
+                    logger.warning("Failed to create backup: %s", e)
+
+            # Atomic rename
+            temp_path.replace(self._config_path)
+
             logger.info("Saved config to %s", self._config_path)
         except OSError as e:
             logger.warning("Failed to save config: %s", e)

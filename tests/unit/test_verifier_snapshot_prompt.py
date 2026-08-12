@@ -58,3 +58,59 @@ def test_prompt_fenced_snapshot_token_is_valid_json_both_cases():
     # No prose leaked into the value position.
     assert '"snapshot": null ' not in full_prompt
     assert '"snapshot": the' not in empty_prompt
+
+
+# --- glm-5 prose-instead-of-json compliance (prod 2026-08-12): the verifier
+# repeatedly emitted a markdown report ("## 验收总结 ✅9/10") and never produced
+# the fenced JSON block, stranding workflows with infra_error "not valid JSON".
+# The prompt must make JSON-only output unmissable and cap evidence so the JSON
+# fits the output budget (avoids truncation too).
+
+
+def test_prompt_leads_with_json_only_contract_before_snapshot():
+    prompt = _prompt(
+        AcceptanceSnapshot(required_paths=["app/x.py"], checklist=["done"], source="convention")
+    )
+    # A JSON-only mandate exists and appears BEFORE the acceptance snapshot dump
+    # so glm sees the format contract first, not last.
+    contract = "fenced JSON object"
+    assert contract in prompt
+    assert prompt.index(contract) < prompt.index("Acceptance snapshot")
+    # Explicit prohibition of prose/preamble.
+    lower = prompt.lower()
+    assert "nothing else" in lower or "no prose" in lower
+
+
+def test_prompt_caps_evidence_verbosity():
+    # Verbose evidence (5-11 refs/verdict, long notes) ballooned the JSON and
+    # exhausted the output budget mid-object. Cap refs + note length.
+    prompt = _prompt(
+        AcceptanceSnapshot(required_paths=["app/x.py"], checklist=["done"], source="convention")
+    )
+    lower = prompt.lower()
+    assert "at most 2" in lower or "at most two" in lower
+    assert "60 character" in lower or "60-char" in lower
+
+
+def test_prompt_reinforces_json_only_at_end():
+    prompt = _prompt(
+        AcceptanceSnapshot(required_paths=["app/x.py"], checklist=["done"], source="convention")
+    )
+    # Trailing reinforcement so glm doesn't drift into prose at the end.
+    assert "ONLY" in prompt
+
+
+def test_extraction_prompt_puts_snapshot_first_in_template():
+    """When the issue has no snapshot (extraction required), glm-5 routinely
+    returns verdicts but omits the `snapshot` field — burning infra-retries
+    (cd939cbf #2349). The JSON template shown BEFORE the extraction instruction
+    primed glm to copy its empty `snapshot` slot. Put `snapshot` FIRST in the
+    template + tell glm to output it first so it's produced before verdicts
+    consume attention/budget."""
+    snap = AcceptanceSnapshot()  # empty → extraction required
+    prompt = _prompt(snap)
+    fenced = prompt.split("```json", 1)[1].split("```", 1)[0]
+    assert fenced.index('"snapshot"') < fenced.index(
+        '"verdicts"'
+    ), "extraction-case template must list `snapshot` before `verdicts`"
+    assert "FIRST" in prompt or "first" in prompt

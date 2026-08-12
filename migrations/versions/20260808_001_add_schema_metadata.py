@@ -1,0 +1,96 @@
+"""Add schema_metadata table for database-level guard.
+
+Revision ID: 20260808_001_add_schema_metadata
+Revises:
+Create Date: 2026-08-08
+
+Issue: #2330 - Database-level guard for schema compatibility
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from datetime import datetime, timezone
+
+import sqlalchemy as sa
+from alembic import op
+
+# revision identifiers, used by Alembic.
+revision: str = "20260808_001_add_schema_metadata"
+down_revision: str | None = "20260805_010_acceptance_verification_columns"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+def upgrade() -> None:
+    """Add schema_metadata table for database initialization tracking."""
+    conn = op.get_bind()
+    dialect = conn.dialect.name
+
+    # Check if table already exists (idempotent migration)
+    if dialect == "postgresql":
+        result = conn.execute(
+            sa.text(
+                "SELECT EXISTS ("
+                "  SELECT 1 FROM information_schema.tables "
+                "  WHERE table_schema = 'public' "
+                "  AND table_name = 'schema_metadata'"
+                ")"
+            )
+        )
+        table_exists = result.scalar()
+    else:
+        # SQLite
+        result = conn.execute(
+            sa.text(
+                "SELECT EXISTS ("
+                "  SELECT 1 FROM sqlite_master "
+                "  WHERE type='table' AND name='schema_metadata'"
+                ")"
+            )
+        )
+        table_exists = result.scalar()
+
+    if table_exists:
+        # Table already exists, skip creation (idempotent)
+        return
+
+    # Create table with dialect-specific syntax
+    if dialect == "postgresql":
+        # PostgreSQL: use native TIMESTAMP type
+        op.execute(
+            """
+            CREATE TABLE schema_metadata (
+                initialized_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                schema_version VARCHAR(64)
+            )
+            """
+        )
+    else:
+        # SQLite and others: use dialect-agnostic approach with default
+        op.create_table(
+            "schema_metadata",
+            sa.Column(
+                "initialized_at",
+                sa.DateTime(),
+                nullable=False,
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+            ),
+            sa.Column("schema_version", sa.String(64), nullable=True),
+        )
+
+    # Insert initialization record with current timestamp
+    # Use datetime.now() for cross-dialect compatibility
+    current_time = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        sa.text(
+            "INSERT INTO schema_metadata (initialized_at, schema_version) "
+            "VALUES (:ts, 'baseline_2026_06_23')"
+        ),
+        {"ts": current_time},
+    )
+
+
+def downgrade() -> None:
+    """Remove schema_metadata table."""
+    op.execute("DROP TABLE IF EXISTS schema_metadata")

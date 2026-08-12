@@ -79,6 +79,8 @@ AUTH_DECORATORS: set[str] = {
     "platform_admin_required",
     "tenant_admin_required",
     "same_tenant_or_platform_admin",
+    # Issue #2327: API Key management authorization decorator
+    "api_key_admin_required",
 }
 
 AUTH_INLINE_CALLS: set[str] = {
