@@ -839,7 +839,11 @@ def test_route_session_access_unassigned_user():
 
 
 def test_route_create_session_by_unassigned_user():
-    """P1-1: Unassigned users cannot create sessions (security fix)."""
+    """P1-1: Unassigned users cannot create sessions (security fix).
+
+    Issue #2538: Cross-tenant access (user without tenant accessing tenant machine)
+    should return 404 to avoid leaking machine existence.
+    """
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -851,12 +855,12 @@ def test_route_create_session_by_unassigned_user():
         resp = _auth_post(
             client,
             "/api/remote/sessions",
-            "test-token-99-user",  # Unassigned user
+            "test-token-99-user",  # Unassigned user without tenant
             json={"machine_id": "mid-machine-a", "project_path": "/home/test"},
         )
         assert (
-            resp.status_code == 403
-        ), f"expected 403, got {resp.status_code}, body={resp.get_json()}"
+            resp.status_code == 404
+        ), f"expected 404, got {resp.status_code}, body={resp.get_json()}"
 
 
 def test_route_create_session_by_assigned_user():
@@ -914,7 +918,11 @@ def test_route_create_session_by_machine_admin():
 
 
 def test_route_browse_by_unassigned_user():
-    """P1-1: Unassigned users cannot browse machine files."""
+    """P1-1: Unassigned users cannot browse machine files.
+
+    Issue #2538: Cross-tenant access (user without tenant accessing tenant machine)
+    should return 404 to avoid leaking machine existence.
+    """
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -923,11 +931,11 @@ def test_route_browse_by_unassigned_user():
         resp = _auth_get(
             client,
             "/api/remote/machines/mid-machine-a/browse",
-            "test-token-99-user",  # Unassigned user
+            "test-token-99-user",  # Unassigned user without tenant
         )
         assert (
-            resp.status_code == 403
-        ), f"expected 403, got {resp.status_code}, body={resp.get_json()}"
+            resp.status_code == 404
+        ), f"expected 404, got {resp.status_code}, body={resp.get_json()}"
 
 
 @pytest.mark.xfail(
@@ -1054,7 +1062,11 @@ def test_route_create_session_body_machine_id_still_works():
 def test_route_get_machine_path_machine_id_overrides_query():
     """Query machine_id must not let a user with access to A read machine B's
     details. ``get_machine`` uses @machine_access_required + path arg, so the
-    decorator must authorize by the path machine_id."""
+    decorator must authorize by the path machine_id.
+
+    Issue #2538: Cross-tenant access (user without tenant accessing tenant machine)
+    returns 404 to avoid leaking machine existence.
+    """
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -1062,6 +1074,8 @@ def test_route_get_machine_path_machine_id_overrides_query():
     # User 3 has 'user' access to machine-a only. Before the fix, query
     # ?machine_id=mid-machine-a would authorize against A while the route
     # returned B's details.
+    # Issue #2538: User 3 has no tenant, machine-b has tenant 1.
+    # This is cross-tenant access, so returns 404 (not 403).
     with app.test_client() as client:
         resp = _auth_get(
             client,
@@ -1069,13 +1083,17 @@ def test_route_get_machine_path_machine_id_overrides_query():
             "test-token-3-user",  # user of A, no access to B
         )
         assert (
-            resp.status_code == 403
-        ), f"expected 403, got {resp.status_code}, body={resp.get_json()}"
+            resp.status_code == 404
+        ), f"expected 404, got {resp.status_code}, body={resp.get_json()}"
 
 
 def test_route_browse_path_machine_id_overrides_query():
     """Query machine_id must not let a user with access to A browse machine B's
-    files. ``browse_remote_directory`` uses @machine_access_required + path arg."""
+    files. ``browse_remote_directory`` uses @machine_access_required + path arg.
+
+    Issue #2538: Cross-tenant access (user without tenant accessing tenant machine)
+    returns 404 to avoid leaking machine existence.
+    """
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -1086,6 +1104,8 @@ def test_route_browse_path_machine_id_overrides_query():
             "/api/remote/machines/mid-machine-b/browse?machine_id=mid-machine-a",
             "test-token-3-user",  # user of A, no access to B
         )
+        # Issue #2538: Cross-tenant access returns 404 (not 403)
+        # User 3 has no tenant, machine-b has tenant 1
         assert (
-            resp.status_code == 403
-        ), f"expected 403, got {resp.status_code}, body={resp.get_json()}"
+            resp.status_code == 404
+        ), f"expected 404, got {resp.status_code}, body={resp.get_json()}"
