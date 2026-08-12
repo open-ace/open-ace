@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import os
+import sys
 import tempfile
 import time
 import uuid
@@ -19,6 +20,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+
+# Add remote-agent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "remote-agent"))
 
 # Test fixtures
 from app.modules.workspace.remote_agent_manager import (
@@ -418,7 +422,7 @@ class TestAtomicConfigWrite:
 
     def test_atomic_write_creates_file(self):
         """Test that atomic write creates config file."""
-        from remote_agent.config import AgentConfig
+        from config import AgentConfig
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.json"
@@ -438,7 +442,7 @@ class TestAtomicConfigWrite:
 
     def test_atomic_write_creates_backup(self):
         """Test that atomic write creates backup of existing config."""
-        from remote_agent.config import AgentConfig
+        from config import AgentConfig
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.json"
@@ -463,7 +467,7 @@ class TestAtomicConfigWrite:
 
     def test_atomic_write_is_atomic(self):
         """Test that atomic write doesn't corrupt config on failure."""
-        from remote_agent.config import AgentConfig
+        from config import AgentConfig
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.json"
