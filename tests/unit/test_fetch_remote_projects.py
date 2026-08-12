@@ -169,3 +169,83 @@ class TestSessionHistorySync:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestIsValidProjectPath:
+    """Tests for _is_valid_project_path function (Issue #2510)."""
+
+    def test_windows_user_home_is_invalid(self):
+        """Windows user home directory should be filtered out."""
+        from app.routes.projects import _is_valid_project_path
+
+        assert _is_valid_project_path(r"C:\Users\fan_q") is False
+        assert _is_valid_project_path("C:\\Users\\fan_q\\") is False  # noqa: E501
+        assert _is_valid_project_path(r"C:\Users\Administrator") is False
+
+    def test_windows_system_directory_is_invalid(self):
+        """Windows system directories should be filtered out."""
+        from app.routes.projects import _is_valid_project_path
+
+        assert _is_valid_project_path(r"C:\Windows\System32") is False
+        assert _is_valid_project_path(r"C:\Windows") is False
+
+    def test_linux_user_home_is_invalid(self):
+        """Linux user home directories should be filtered out."""
+        from app.routes.projects import _is_valid_project_path
+
+        assert _is_valid_project_path("/root") is False
+        assert _is_valid_project_path("/root/") is False
+        assert _is_valid_project_path("/home/user") is False
+        assert _is_valid_project_path("/home/qlfan/") is False
+
+    def test_valid_project_paths_are_accepted(self):
+        """Valid project paths should pass the filter."""
+        from app.routes.projects import _is_valid_project_path
+
+        # Windows project paths
+        assert _is_valid_project_path(r"C:\workspace") is True
+        assert _is_valid_project_path(r"C:\workspace\project1") is True
+        assert _is_valid_project_path(r"C:\Users\fan_q\project") is True
+        assert _is_valid_project_path(r"C:\Users\fan_q\.zcode\v2") is True
+
+        # Linux project paths
+        assert _is_valid_project_path("/home/user/project") is True
+        assert _is_valid_project_path("/root/workspace") is True
+        assert _is_valid_project_path("/opt/projects/app") is True
+
+    def test_fetch_remote_projects_filters_non_project_paths(self):
+        """Test that _fetch_remote_projects filters out non-project paths."""
+        from app.routes.projects import _fetch_remote_projects
+
+        mock_db = MagicMock()
+        mock_db.fetch_all.return_value = [
+            # Should be filtered out: Windows user home
+            {"project_path": r"C:\Users\fan_q", "remote_machine_id": "win-1"},
+            # Should be filtered out: Windows system directory
+            {"project_path": r"C:\Windows\System32", "remote_machine_id": "win-1"},
+            # Should be included: Valid project
+            {"project_path": r"C:\workspace", "remote_machine_id": "win-1"},
+            # Should be included: Subdirectory under user home (valid project)
+            {"project_path": r"C:\Users\fan_q\project", "remote_machine_id": "win-1"},
+            # Should be filtered out: Linux user home
+            {"project_path": "/home/qlfan", "remote_machine_id": "linux-1"},
+            # Should be included: Linux project
+            {"project_path": "/home/qlfan/workspace/open-ace", "remote_machine_id": "linux-1"},
+        ]
+
+        with (
+            patch("app.repositories.database.Database", return_value=mock_db),
+            patch("app.routes.projects.get_current_tenant_id", return_value=1),
+        ):
+            result = _fetch_remote_projects(user_id=1)
+
+        # Only 3 valid projects should be returned
+        paths = [r["path"] for r in result]
+        assert len(result) == 3
+        assert r"C:\workspace" in paths
+        assert r"C:\Users\fan_q\project" in paths
+        assert "/home/qlfan/workspace/open-ace" in paths
+        # Filtered out
+        assert r"C:\Users\fan_q" not in paths
+        assert r"C:\Windows\System32" not in paths
+        assert "/home/qlfan" not in paths

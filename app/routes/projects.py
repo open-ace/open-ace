@@ -10,6 +10,7 @@ import logging
 import os
 import platform
 import pwd
+import re
 import subprocess
 
 from flask import Blueprint, g, jsonify, request
@@ -170,6 +171,32 @@ def api_get_projects():
     )
 
 
+# Patterns for paths that should NOT be shown as projects
+# These are user home directories, system directories, or other non-project paths
+_NON_PROJECT_PATH_PATTERNS = [
+    # Windows user home: C:\Users\xxx or C:\Users\xxx\
+    r"^[A-Za-z]:\\Users\\[^\\]+\\?$",
+    # Windows system directory: C:\Windows or C:\Windows\*
+    r"^[A-Za-z]:\\Windows(?:\\|$)",
+    # Linux root home
+    r"^/root/?$",
+    # Linux user home: /home/xxx or /home/xxx/
+    r"^/home/[^/]+/?$",
+]
+
+
+def _is_valid_project_path(path: str) -> bool:
+    """Check if path is a valid project path (not a user/system directory).
+
+    Filters out paths that are user home directories or system directories,
+    which should not be displayed as projects in the project picker.
+    """
+    for pattern in _NON_PROJECT_PATH_PATTERNS:
+        if re.match(pattern, path):
+            return False
+    return True
+
+
 def _fetch_remote_projects(user_id: int) -> list[dict]:
     r"""Return deduplicated remote/terminal workspace projects for a user.
 
@@ -196,6 +223,9 @@ def _fetch_remote_projects(user_id: int) -> list[dict]:
     for r in rows:
         path = r["project_path"]
         if not path or path in {o["path"] for o in out}:
+            continue
+        # Filter out non-project paths (user home, system directories)
+        if not _is_valid_project_path(path):
             continue
         name = path.replace("\\", "/").rstrip("/").split("/")[-1] or path
         out.append(
