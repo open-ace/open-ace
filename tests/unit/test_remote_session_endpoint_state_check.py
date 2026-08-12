@@ -26,6 +26,7 @@ class TestSendRemoteMessageEndpoint:
                 )
 
                 from app.routes.remote import send_remote_message
+
                 response = send_remote_message("test-session")
 
                 assert response[1] == 409
@@ -47,6 +48,7 @@ class TestSendRemoteMessageEndpoint:
                 )
 
                 from app.routes.remote import send_remote_message
+
                 response = send_remote_message("test-session")
 
                 assert response[1] == 409
@@ -71,6 +73,7 @@ class TestAbortRemoteRequestEndpoint:
                 )
 
                 from app.routes.remote import abort_remote_request
+
                 response = abort_remote_request("test-session")
 
                 # Response object has status_code attribute
@@ -94,6 +97,7 @@ class TestAbortRemoteRequestEndpoint:
                     mock_mgr.return_value.abort_request.return_value = True
 
                     from app.routes.remote import abort_remote_request
+
                     response = abort_remote_request("test-session")
 
                     # Should call underlying method, not return early
@@ -118,6 +122,7 @@ class TestStopRemoteSessionEndpoint:
                 )
 
                 from app.routes.remote import stop_remote_session
+
                 response = stop_remote_session("test-session")
 
                 assert response.status_code == 200
@@ -140,6 +145,7 @@ class TestStopRemoteSessionEndpoint:
                     mock_mgr.return_value.stop_session.return_value = True
 
                     from app.routes.remote import stop_remote_session
+
                     response = stop_remote_session("test-session")
 
                     # Should call underlying method
@@ -164,6 +170,7 @@ class TestGetRemoteSessionEndpoint:
                 )
 
                 from app.routes.remote import get_remote_session
+
                 response = get_remote_session("test-session")
 
                 assert response[1] == 409
@@ -184,6 +191,7 @@ class TestGetRemoteSessionEndpoint:
                 )
 
                 from app.routes.remote import get_remote_session
+
                 response = get_remote_session("test-session")
 
                 assert response[1] == 409

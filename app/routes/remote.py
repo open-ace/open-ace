@@ -117,11 +117,13 @@ def _check_session_state(session_info: dict, operation: str) -> tuple | None:
             request.remote_addr or "unknown",
         )
         return (
-            jsonify({
-                "success": False,
-                "error": _STATE_MESSAGES.get(status, "Session is paused"),
-                "session_status": status,
-            }),
+            jsonify(
+                {
+                    "success": False,
+                    "error": _STATE_MESSAGES.get(status, "Session is paused"),
+                    "session_status": status,
+                }
+            ),
             409,
         )
 
@@ -136,16 +138,19 @@ def _check_session_state(session_info: dict, operation: str) -> tuple | None:
             request.remote_addr or "unknown",
         )
         return (
-            jsonify({
-                "success": False,
-                "error": _STATE_MESSAGES.get(status, "Remote session has ended"),
-                "session_status": status,
-            }),
+            jsonify(
+                {
+                    "success": False,
+                    "error": _STATE_MESSAGES.get(status, "Remote session has ended"),
+                    "session_status": status,
+                }
+            ),
             409,
         )
 
     # Active state: allowed
     return None
+
 
 # Module-level audit logger instance
 audit_logger = AuditLogger()
@@ -1209,14 +1214,17 @@ def get_remote_session(session_id):
         # Issue #2531: Return explicit error for ended/paused sessions with 409 status
         status = result.get("status")
         if status in _ENDED_STATES or status in _PAUSED_STATES:
-            return jsonify(
-                {
-                    "success": False,
-                    "session": result,
-                    "error": _STATE_MESSAGES.get(status, "Remote session has ended"),
-                    "session_status": status,
-                }
-            ), 409
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "session": result,
+                        "error": _STATE_MESSAGES.get(status, "Remote session has ended"),
+                        "session_status": status,
+                    }
+                ),
+                409,
+            )
         return jsonify({"success": True, "session": result})
     return jsonify({"error": "Session not found"}), 404
 
