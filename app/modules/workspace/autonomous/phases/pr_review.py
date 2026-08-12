@@ -132,6 +132,18 @@ def _ensure_branch_and_push(gh, host, branch_name, entry_feature_head, entry_mai
             raise RuntimeError(
                 f"Branch mismatch before push: expected {branch_name}, actual {current_branch}"
             )
+    # Safety net: commit any uncommitted changes before push so the branch HEAD
+    # carries them. The dev phase auto-commits agent work, but changes made
+    # after that commit (a review-fix retry, a merge-main sync on a prior
+    # round) can stay uncommitted — create_pr then 422s with "No commits
+    # between main and branch" (#2468 fa40beec, #2477 b6348aac).
+    if gh.has_uncommitted_changes():
+        gh.git_add_all()
+        gh.git_commit("auto: stage pending changes before push", no_verify=True)
+        logger.info(
+            "Workflow %s pr_review: staged uncommitted changes before push",
+            host.workflow_id[:8],
+        )
     gh.git_push(branch=branch_name, force_with_lease=True)
 
 
