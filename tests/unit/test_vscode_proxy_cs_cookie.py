@@ -48,6 +48,19 @@ def test_login_extracts_and_caches_cookie():
     assert kwargs["allow_redirects"] is False
 
 
+def test_login_clears_shared_cookie_jar():
+    """A successful /login must clear the shared session's cookie jar so a
+    code-server cookie can't leak into a later no-password vscode session on
+    the same host (requests cookie jars are host- but not port-scoped). The
+    cookie is cached on ``info`` and injected via an explicit header, so the
+    jar is not needed after extraction."""
+    info = {"cs_password": "pw"}
+    with patch.object(vscode_proxy, "_proxy_session") as sess:
+        sess.post.return_value = _resp(set_cookie="cookie=session-key; Path=/")
+        vscode_proxy.ensure_cs_cookie(info, "http://remote:8080", "vs1")
+        sess.cookies.clear.assert_called_once()
+
+
 def test_login_failure_is_swallowed():
     info = {"cs_password": "pw"}
     with patch.object(vscode_proxy, "_proxy_session") as sess:

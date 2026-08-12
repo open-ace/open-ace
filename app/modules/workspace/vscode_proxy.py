@@ -80,6 +80,12 @@ def ensure_cs_cookie(info: dict, original_http_url: str, vscode_id: str) -> str:
     except requests.RequestException as exc:
         logger.warning("ensure_cs_cookie: /login failed for vscode %s: %s", vscode_id, exc)
         return ""
+    # The cookie jar is populated only as a side effect of the login POST; the
+    # caller injects the cookie via an explicit Cookie header (cached in
+    # info["cs_cookie"]). Clear the shared jar so its host-scoped (but not
+    # port-scoped) cookie can't leak into a later no-password vscode session
+    # proxied to a different code-server instance on the same host.
+    _proxy_session.cookies.clear()
     set_cookie = resp.headers.get("Set-Cookie", "")
     if not set_cookie:
         return ""
