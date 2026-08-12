@@ -94,6 +94,7 @@ def _log_sudo_audit(
         # Log to Python logger as fallback
         logger.debug("Audit log write failed for %s: %s", event, command)
 
+
 # macOS BSD ``stat`` takes the format via ``-f``; GNU ``stat`` (Linux) uses
 # ``-c``.  ``-L`` (follow symlinks) is supported by both.  Hard-coded
 # ``stat -c`` breaks on macOS with "illegal option -- c".

@@ -1,4 +1,4 @@
-"""Sudoers security hardening tests for Issue #2334.
+"""Tests for Issue #2334: Sudoers Hardening.
 
 Tests verify:
 1. GIT_SAFE/GH_SAFE use (ALL) runas for cross-user operations
@@ -15,14 +15,19 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 # Project root
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # Key files
 DOCKER_ENTRYPOINT = PROJECT_ROOT / "docker-entrypoint.sh"
 INSTALL_SH = PROJECT_ROOT / "scripts" / "install-central" / "package-method" / "install.sh"
 GENERATE_SUDOERS_SH = PROJECT_ROOT / "scripts" / "generate-sudoers.sh"
 GITHUB_OPS_PY = PROJECT_ROOT / "app" / "modules" / "workspace" / "autonomous" / "github_ops.py"
+
+# Test markers for Issue #2334 (sudoers hardening regression)
+pytestmark = [pytest.mark.issue(2334), pytest.mark.regression, pytest.mark.security]
 
 
 def _extract_cmnd_alias(text: str, alias_name: str) -> list[str]:
@@ -119,17 +124,17 @@ class TestGitGhRemovedFromOpenaceUtils:
         utils_match = re.search(
             r"Cmnd_Alias\s+OPENACE_UTILS\s*=\s*(.*?)(?=\n\s*Cmnd_Alias|\n\s*#|\n\s*$)",
             text,
-            re.DOTALL
+            re.DOTALL,
         )
         if utils_match:
             utils_content = utils_match.group(1)
             # Check for git wildcards
-            assert "git *" not in utils_content, (
-                "git * must NOT be in OPENACE_UTILS (use GIT_SAFE instead per #2334)"
-            )
-            assert "/usr/bin/git" not in utils_content, (
-                "/usr/bin/git must NOT be in OPENACE_UTILS (use GIT_SAFE instead per #2334)"
-            )
+            assert (
+                "git *" not in utils_content
+            ), "git * must NOT be in OPENACE_UTILS (use GIT_SAFE instead per #2334)"
+            assert (
+                "/usr/bin/git" not in utils_content
+            ), "/usr/bin/git must NOT be in OPENACE_UTILS (use GIT_SAFE instead per #2334)"
 
     def test_gh_not_in_openace_utils_docker(self):
         """gh must NOT be in OPENACE_UTILS in Docker entrypoint."""
@@ -137,16 +142,16 @@ class TestGitGhRemovedFromOpenaceUtils:
         utils_match = re.search(
             r"Cmnd_Alias\s+OPENACE_UTILS\s*=\s*(.*?)(?=\n\s*Cmnd_Alias|\n\s*#|\n\s*$)",
             text,
-            re.DOTALL
+            re.DOTALL,
         )
         if utils_match:
             utils_content = utils_match.group(1)
-            assert "gh *" not in utils_content, (
-                "gh * must NOT be in OPENACE_UTILS (use GH_SAFE instead per #2334)"
-            )
-            assert "/usr/bin/gh" not in utils_content, (
-                "/usr/bin/gh must NOT be in OPENACE_UTILS (use GH_SAFE instead per #2334)"
-            )
+            assert (
+                "gh *" not in utils_content
+            ), "gh * must NOT be in OPENACE_UTILS (use GH_SAFE instead per #2334)"
+            assert (
+                "/usr/bin/gh" not in utils_content
+            ), "/usr/bin/gh must NOT be in OPENACE_UTILS (use GH_SAFE instead per #2334)"
 
     def test_git_not_in_openace_utils_generator(self):
         """git must NOT be in OPENACE_UTILS in generator."""
@@ -154,16 +159,16 @@ class TestGitGhRemovedFromOpenaceUtils:
         utils_match = re.search(
             r"Cmnd_Alias\s+OPENACE_UTILS\s*=\s*(.*?)(?=\n\s*Cmnd_Alias|\n\s*#|\n\s*$)",
             text,
-            re.DOTALL
+            re.DOTALL,
         )
         assert utils_match, "OPENACE_UTILS definition not found in generator"
         utils_content = utils_match.group(1)
-        assert "git *" not in utils_content, (
-            "git * must NOT be in OPENACE_UTILS (use GIT_SAFE instead per #2334)"
-        )
-        assert "/usr/bin/git" not in utils_content, (
-            "/usr/bin/git must NOT be in OPENACE_UTILS (use GIT_SAFE instead per #2334)"
-        )
+        assert (
+            "git *" not in utils_content
+        ), "git * must NOT be in OPENACE_UTILS (use GIT_SAFE instead per #2334)"
+        assert (
+            "/usr/bin/git" not in utils_content
+        ), "/usr/bin/git must NOT be in OPENACE_UTILS (use GIT_SAFE instead per #2334)"
 
     def test_gh_not_in_openace_utils_generator(self):
         """gh must NOT be in OPENACE_UTILS in generator."""
@@ -171,16 +176,16 @@ class TestGitGhRemovedFromOpenaceUtils:
         utils_match = re.search(
             r"Cmnd_Alias\s+OPENACE_UTILS\s*=\s*(.*?)(?=\n\s*Cmnd_Alias|\n\s*#|\n\s*$)",
             text,
-            re.DOTALL
+            re.DOTALL,
         )
         assert utils_match, "OPENACE_UTILS definition not found in generator"
         utils_content = utils_match.group(1)
-        assert "gh *" not in utils_content, (
-            "gh * must NOT be in OPENACE_UTILS (use GH_SAFE instead per #2334)"
-        )
-        assert "/usr/bin/gh" not in utils_content, (
-            "/usr/bin/gh must NOT be in OPENACE_UTILS (use GH_SAFE instead per #2334)"
-        )
+        assert (
+            "gh *" not in utils_content
+        ), "gh * must NOT be in OPENACE_UTILS (use GH_SAFE instead per #2334)"
+        assert (
+            "/usr/bin/gh" not in utils_content
+        ), "/usr/bin/gh must NOT be in OPENACE_UTILS (use GH_SAFE instead per #2334)"
 
 
 class TestNoShellSyntax:
@@ -193,7 +198,7 @@ class TestNoShellSyntax:
         heredoc_match = re.search(
             r"cat\s+>\s+\S+\s+<<\s*\w+\s*\n(.*?)\n\w+\s*$",
             text,
-            re.DOTALL
+            re.DOTALL,
         )
         if heredoc_match:
             heredoc_content = heredoc_match.group(1)
@@ -236,9 +241,15 @@ class TestNoShellSyntax:
         output = result.stdout
         # Check for shell control statements
         assert "if [" not in output, "Shell syntax 'if [' found in generator output"
-        assert "\nthen\n" in output or "\nthen " not in output, "Shell 'then' found in generator output"
-        assert "\nelse\n" in output or "\nelse " not in output, "Shell 'else' found in generator output"
-        assert "\nfi\n" in output or "\nfi " not in output, "Shell 'fi' found in generator output"
+        assert (
+            "\nthen\n" not in output or "\nthen " not in output
+        ), "Shell 'then' found in generator output"
+        assert (
+            "\nelse\n" not in output or "\nelse " not in output
+        ), "Shell 'else' found in generator output"
+        assert (
+            "\nfi\n" not in output or "\nfi " not in output
+        ), "Shell 'fi' found in generator output"
 
 
 class TestDangerousVerbsBlocked:
@@ -250,9 +261,7 @@ class TestDangerousVerbsBlocked:
         gh_safe_commands = _extract_cmnd_alias(text, "GH_SAFE")
 
         for cmd in gh_safe_commands:
-            assert "repo delete" not in cmd.lower(), (
-                f"gh repo delete must NOT be in GH_SAFE: {cmd}"
-            )
+            assert "repo delete" not in cmd.lower(), f"gh repo delete must NOT be in GH_SAFE: {cmd}"
 
     def test_gh_repo_fork_not_in_whitelist(self):
         """gh repo fork must NOT be in GH_SAFE."""
@@ -260,9 +269,7 @@ class TestDangerousVerbsBlocked:
         gh_safe_commands = _extract_cmnd_alias(text, "GH_SAFE")
 
         for cmd in gh_safe_commands:
-            assert "repo fork" not in cmd.lower(), (
-                f"gh repo fork must NOT be in GH_SAFE: {cmd}"
-            )
+            assert "repo fork" not in cmd.lower(), f"gh repo fork must NOT be in GH_SAFE: {cmd}"
 
     def test_arbitrary_gh_api_not_in_whitelist(self):
         """Arbitrary gh api must NOT be in GH_SAFE."""
@@ -274,9 +281,7 @@ class TestDangerousVerbsBlocked:
             if "gh api" in cmd and "--jq" not in cmd:
                 # Allow specific whitelisted paths
                 if "api user" not in cmd and "api repos/*" not in cmd:
-                    raise AssertionError(
-                        f"Arbitrary gh api must NOT be in GH_SAFE: {cmd}"
-                    )
+                    raise AssertionError(f"Arbitrary gh api must NOT be in GH_SAFE: {cmd}")
 
     def test_git_force_push_not_in_whitelist(self):
         """git push --force must NOT be in GIT_SAFE (except force-with-lease)."""
@@ -289,9 +294,7 @@ class TestDangerousVerbsBlocked:
                 continue
             # Bare --force is not allowed
             if "push" in cmd and "--force" in cmd and "--force-with-lease" not in cmd:
-                raise AssertionError(
-                    f"git push --force must NOT be in GIT_SAFE: {cmd}"
-                )
+                raise AssertionError(f"git push --force must NOT be in GIT_SAFE: {cmd}")
 
 
 class TestWebuiLauncherNoFallback:
@@ -314,8 +317,8 @@ class TestWebuiLauncherNoFallback:
         for pattern in fallback_patterns:
             match = re.search(pattern, text)
             assert match is None, (
-                f"WebUI fallback rule found in Docker entrypoint; "
-                f"wrapper must be required per #2334"
+                "WebUI fallback rule found in Docker entrypoint; "
+                "wrapper must be required per #2334"
             )
 
     def test_generator_requires_webui_wrapper(self):
@@ -323,13 +326,11 @@ class TestWebuiLauncherNoFallback:
         text = GENERATE_SUDOERS_SH.read_text()
 
         # Check that generator checks for wrapper existence
-        assert "WEBUI_LAUNCH_WRAPPER" in text, (
-            "Generator must check for webui-launch wrapper"
-        )
-        assert 'if [[ ! -x "$WEBUI_LAUNCH_WRAPPER" ]]' in text or \
-               'if [ ! -x "$WEBUI_LAUNCH_WRAPPER" ]' in text, (
-            "Generator must validate webui-launch wrapper is executable"
-        )
+        assert "WEBUI_LAUNCH_WRAPPER" in text, "Generator must check for webui-launch wrapper"
+        assert (
+            'if [[ ! -x "$WEBUI_LAUNCH_WRAPPER" ]]' in text
+            or 'if [ ! -x "$WEBUI_LAUNCH_WRAPPER" ]' in text
+        ), "Generator must validate webui-launch wrapper is executable"
 
 
 class TestCredentialLeakPrevention:
@@ -341,14 +342,13 @@ class TestCredentialLeakPrevention:
 
         # Find env_keep lines (excluding comments)
         env_keep_lines = [
-            line for line in text.split("\n")
+            line
+            for line in text.split("\n")
             if "env_keep" in line and not line.strip().startswith("#")
         ]
 
         for line in env_keep_lines:
-            assert "GH_TOKEN" not in line, (
-                f"GH_TOKEN must NOT be in env_keep: {line}"
-            )
+            assert "GH_TOKEN" not in line, f"GH_TOKEN must NOT be in env_keep: {line}"
 
     def test_api_keys_not_in_env_keep_docker(self):
         """API keys must NOT be in env_keep in Docker entrypoint."""
@@ -362,29 +362,27 @@ class TestCredentialLeakPrevention:
         ]
 
         env_keep_lines = [
-            line for line in text.split("\n")
+            line
+            for line in text.split("\n")
             if "env_keep" in line and not line.strip().startswith("#")
         ]
 
         for line in env_keep_lines:
             for var in sensitive_vars:
-                assert var not in line, (
-                    f"{var} must NOT be in env_keep: {line}"
-                )
+                assert var not in line, f"{var} must NOT be in env_keep: {line}"
 
     def test_gh_token_not_in_env_keep_generator(self):
         """GH_TOKEN must NOT be in env_keep in generator."""
         text = GENERATE_SUDOERS_SH.read_text()
 
         env_keep_lines = [
-            line for line in text.split("\n")
+            line
+            for line in text.split("\n")
             if "env_keep" in line and not line.strip().startswith("#")
         ]
 
         for line in env_keep_lines:
-            assert "GH_TOKEN" not in line, (
-                f"GH_TOKEN must NOT be in env_keep: {line}"
-            )
+            assert "GH_TOKEN" not in line, f"GH_TOKEN must NOT be in env_keep: {line}"
 
 
 class TestAuditLogging:
@@ -395,9 +393,9 @@ class TestAuditLogging:
         text = GITHUB_OPS_PY.read_text()
 
         # Check for logging import
-        assert "import logging" in text or "from logging" in text, (
-            "github_ops.py should have logging import for audit"
-        )
+        assert (
+            "import logging" in text or "from logging" in text
+        ), "github_ops.py should have logging import for audit"
 
     def test_github_ops_logs_git_operations(self):
         """github_ops.py should log git operations."""
@@ -407,20 +405,18 @@ class TestAuditLogging:
         run_git_match = re.search(
             r"def _run_git\(self.*?\n(.*?)(?=\n    def |\nclass |\Z)",
             text,
-            re.DOTALL
+            re.DOTALL,
         )
         if run_git_match:
             run_git_body = run_git_match.group(1)
             # Should have some form of logging
             has_logging = (
-                "logger.info" in run_git_body or
-                "logger.warning" in run_git_body or
-                "logger.error" in run_git_body or
-                "logger.debug" in run_git_body
+                "logger.info" in run_git_body
+                or "logger.warning" in run_git_body
+                or "logger.error" in run_git_body
+                or "logger.debug" in run_git_body
             )
-            assert has_logging, (
-                "_run_git should log operations for audit trail"
-            )
+            assert has_logging, "_run_git should log operations for audit trail"
 
     def test_github_ops_logs_gh_operations(self):
         """github_ops.py should log gh operations."""
@@ -430,19 +426,17 @@ class TestAuditLogging:
         run_gh_match = re.search(
             r"def _run_gh\(self.*?\n(.*?)(?=\n    def |\nclass |\Z)",
             text,
-            re.DOTALL
+            re.DOTALL,
         )
         if run_gh_match:
             run_gh_body = run_gh_match.group(1)
             has_logging = (
-                "logger.info" in run_gh_body or
-                "logger.warning" in run_gh_body or
-                "logger.error" in run_gh_body or
-                "logger.debug" in run_gh_body
+                "logger.info" in run_gh_body
+                or "logger.warning" in run_gh_body
+                or "logger.error" in run_gh_body
+                or "logger.debug" in run_gh_body
             )
-            assert has_logging, (
-                "_run_gh should log operations for audit trail"
-            )
+            assert has_logging, "_run_gh should log operations for audit trail"
 
     def test_github_ops_git_calls_audit_log(self):
         """github_ops._run_git should call _log_sudo_audit."""
@@ -451,13 +445,13 @@ class TestAuditLogging:
         run_git_match = re.search(
             r"def _run_git\(self.*?\n(.*?)(?=\n    def |\nclass |\Z)",
             text,
-            re.DOTALL
+            re.DOTALL,
         )
         assert run_git_match, "_run_git method not found"
         run_git_body = run_git_match.group(1)
-        assert "_log_sudo_audit" in run_git_body, (
-            "_run_git should call _log_sudo_audit for audit trail (Issue #2334)"
-        )
+        assert (
+            "_log_sudo_audit" in run_git_body
+        ), "_run_git should call _log_sudo_audit for audit trail (Issue #2334)"
 
     def test_github_ops_gh_calls_audit_log(self):
         """github_ops._run_gh should call _log_sudo_audit."""
@@ -467,13 +461,13 @@ class TestAuditLogging:
         run_gh_match = re.search(
             r"def _run_gh\(.*?\n(.*?)(?=\n    def |\nclass |\Z)",
             text,
-            re.DOTALL
+            re.DOTALL,
         )
         assert run_gh_match, "_run_gh method not found"
         run_gh_body = run_gh_match.group(1)
-        assert "_log_sudo_audit" in run_gh_body, (
-            "_run_gh should call _log_sudo_audit for audit trail (Issue #2334)"
-        )
+        assert (
+            "_log_sudo_audit" in run_gh_body
+        ), "_run_gh should call _log_sudo_audit for audit trail (Issue #2334)"
 
 
 class TestGeneratorSyntax:
@@ -486,9 +480,7 @@ class TestGeneratorSyntax:
             capture_output=True,
             text=True,
         )
-        assert result.returncode == 0, (
-            f"Generator has syntax errors: {result.stderr}"
-        )
+        assert result.returncode == 0, f"Generator has syntax errors: {result.stderr}"
 
     def test_generator_produces_valid_sudoers(self):
         """Generator output must pass visudo syntax check (if visudo available)."""
@@ -517,9 +509,9 @@ class TestGeneratorSyntax:
             capture_output=True,
             text=True,
         )
-        assert validate_result.returncode == 0, (
-            f"Generated sudoers invalid: {validate_result.stderr}"
-        )
+        assert (
+            validate_result.returncode == 0
+        ), f"Generated sudoers invalid: {validate_result.stderr}"
 
 
 class TestSudoersDrift:
@@ -537,7 +529,8 @@ class TestSudoersDrift:
         # Both should have same runas (either ALL or root, but consistent)
         if docker_targets and package_targets:
             assert set(docker_targets) == set(package_targets), (
-                f"OPENACE_UTILS runas drift: Docker={docker_targets!r}, Package={package_targets!r}"
+                f"OPENACE_UTILS runas drift: Docker={docker_targets!r}, "
+                f"Package={package_targets!r}"
             )
 
     def test_both_use_git_safe(self):
@@ -545,27 +538,19 @@ class TestSudoersDrift:
         docker_text = DOCKER_ENTRYPOINT.read_text()
 
         # Docker should have GIT_SAFE
-        assert "Cmnd_Alias GIT_SAFE" in docker_text, (
-            "Docker entrypoint should define GIT_SAFE"
-        )
+        assert "Cmnd_Alias GIT_SAFE" in docker_text, "Docker entrypoint should define GIT_SAFE"
 
         # Generator should also have GIT_SAFE
         generator_text = GENERATE_SUDOERS_SH.read_text()
-        assert "Cmnd_Alias GIT_SAFE" in generator_text, (
-            "Generator should define GIT_SAFE"
-        )
+        assert "Cmnd_Alias GIT_SAFE" in generator_text, "Generator should define GIT_SAFE"
 
     def test_both_use_gh_safe(self):
         """Both Docker and Package should use GH_SAFE for gh commands."""
         docker_text = DOCKER_ENTRYPOINT.read_text()
 
         # Docker should have GH_SAFE
-        assert "Cmnd_Alias GH_SAFE" in docker_text, (
-            "Docker entrypoint should define GH_SAFE"
-        )
+        assert "Cmnd_Alias GH_SAFE" in docker_text, "Docker entrypoint should define GH_SAFE"
 
         # Generator should also have GH_SAFE
         generator_text = GENERATE_SUDOERS_SH.read_text()
-        assert "Cmnd_Alias GH_SAFE" in generator_text, (
-            "Generator should define GH_SAFE"
-        )
+        assert "Cmnd_Alias GH_SAFE" in generator_text, "Generator should define GH_SAFE"
