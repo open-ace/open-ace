@@ -2005,12 +2005,36 @@ def get_available_models():
         agent_mgr = get_remote_agent_manager()
         # Guard the machine before reading it — a caller must not read an
         # arbitrary machine's tenant/model list. Mirrors workspace.py:244.
-        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+        # Issue #2538: Tenant isolation check before permission check
+        machine = agent_mgr.get_machine(machine_id)
+        if not machine:
             return (
-                jsonify({"success": False, "error": "Machine not found or access denied"}),
+                jsonify({"success": False, "error": "Machine not found"}),
                 404,
             )
-        machine = agent_mgr.get_machine(machine_id) or {}
+
+        machine_tenant_id = machine.get("tenant_id")
+        user_tenant_id = g.user.get("tenant_id")
+
+        if machine_tenant_id is not None:
+            if user_tenant_id is None or machine_tenant_id != user_tenant_id:
+                logger.warning(
+                    "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
+                    "machine_id=%s, machine_tenant=%s, endpoint=%s",
+                    g.user.get("id"), user_tenant_id, machine_id, machine_tenant_id,
+                    request.endpoint
+                )
+                return (
+                    jsonify({"success": False, "error": "Machine not found"}),
+                    404,
+                )
+
+        if not agent_mgr.check_user_access(machine_id, g.user["id"]):
+            return (
+                jsonify({"success": False, "error": "Permission denied"}),
+                403,
+            )
+
         tenant_id = machine.get("tenant_id", 1)
 
     try:
