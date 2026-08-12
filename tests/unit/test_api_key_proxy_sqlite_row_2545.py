@@ -57,10 +57,12 @@ class TestCollectToolKeySettingsSqliteRow:
                         "test-hash",
                         1,
                         json.dumps(["qwen-code"]),
-                        json.dumps({"qwen-code": {"modelProviders": {"openai": [{"id": "glm-5"}]}}}),
+                        json.dumps(
+                            {"qwen-code": {"modelProviders": {"openai": [{"id": "glm-5"}]}}}
+                        ),
                         "remote",
                         200,  # priority
-                        50,   # weight
+                        50,  # weight
                     ),
                 )
                 conn.commit()
@@ -83,8 +85,8 @@ class TestCollectToolKeySettingsSqliteRow:
 
         # Verify rank tuple contains correct priority/weight (negated for sorting)
         assert rank[0] == -200  # -priority
-        assert rank[1] == -50   # -weight
-        assert rank[2] == 1     # key_id
+        assert rank[1] == -50  # -weight
+        assert rank[2] == 1  # key_id
 
         # Verify settings contain expected data
         assert "modelProviders" in settings
@@ -140,7 +142,7 @@ class TestCollectToolKeySettingsSqliteRow:
                 rank, settings = ranked[0]
 
                 # NULL priority/weight should be converted to 0/100 defaults
-                assert rank[0] == 0    # -priority (default 0)
+                assert rank[0] == 0  # -priority (default 0)
                 assert rank[1] == -100  # -weight (default 100)
 
         reset_registry()
@@ -186,7 +188,9 @@ class TestResolveApiKeyFromKeyIdsSqliteRow:
                         "https://api.example.com/v1",
                         1,
                         json.dumps(["qwen-code"]),
-                        json.dumps({"qwen-code": {"modelProviders": {"openai": [{"id": "glm-5"}]}}}),
+                        json.dumps(
+                            {"qwen-code": {"modelProviders": {"openai": [{"id": "glm-5"}]}}}
+                        ),
                         "remote",
                         100,  # priority
                         200,  # weight
@@ -306,7 +310,7 @@ class TestNullPriorityWeightHandling:
     def test_null_weight_converts_to_100(self):
         """Verify NULL weight is converted to 100 (default)."""
         # Simulate the behavior: int(None or 100) == 100
-        result = int(None or 100)
+        result = int(None or 100)  # noqa: SIM222
         assert result == 100
 
     def test_row_get_behavior_matches_dict_get(self):
