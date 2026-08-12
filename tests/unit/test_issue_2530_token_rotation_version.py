@@ -11,6 +11,7 @@ Covers:
 """
 
 import hashlib
+import importlib.util
 import json
 import os
 import sys
@@ -21,14 +22,24 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # Add remote-agent directory to path so we can import config module
-AGENT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "remote-agent")
+AGENT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "remote-agent")
 AGENT_DIR = os.path.abspath(AGENT_DIR)
 if AGENT_DIR not in sys.path:
     sys.path.insert(0, AGENT_DIR)
 
-from config import AgentConfig
+# Dynamically load config module from remote-agent/config.py
+# to avoid conflict with scripts/shared/config.py
+config_path = os.path.join(AGENT_DIR, "config.py")
+spec = importlib.util.spec_from_file_location("agent_config", config_path)
+agent_config = importlib.util.module_from_spec(spec)
+sys.modules["agent_config"] = agent_config
+spec.loader.exec_module(agent_config)
+
+AgentConfig = agent_config.AgentConfig
 
 
+@pytest.mark.issue(2530)
+@pytest.mark.regression
 class TestAgentVersionFiltering:
     """Test version-based command filtering in Agent."""
 
@@ -119,6 +130,8 @@ class TestAgentVersionFiltering:
             del os.environ["OPENACE_SKIP_TOKEN_PROBE"]
 
 
+@pytest.mark.issue(2530)
+@pytest.mark.regression
 class TestAgentConfigChecksum:
     """Test atomic write and checksum validation in AgentConfig."""
 
@@ -211,6 +224,8 @@ class TestAgentConfigChecksum:
         assert json_content["agent_token"] == "initial_token"
 
 
+@pytest.mark.issue(2530)
+@pytest.mark.regression
 class TestAgentTokenProbe:
     """Test token probe validation in Agent."""
 
