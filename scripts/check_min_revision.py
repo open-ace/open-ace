@@ -152,8 +152,7 @@ def main() -> int:
                     )
                 else:
                     print(
-                        f"Database schema compatible (fresh database)\n"
-                        f"Policy: {policy.value}"
+                        f"Database schema compatible (fresh database)\n" f"Policy: {policy.value}"
                     )
                 return 0
 
