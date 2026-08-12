@@ -47,6 +47,7 @@ class TestCrossTenantMachineAccess:
         Cross-tenant machine access should return 404, not 403.
 
         Issue #2538: Prevent information leakage about machine existence.
+        Issue #2540: Updated to use valid UUID format for machine_id.
         """
         # User in tenant 2 trying to access machine in tenant 1
         user = {
@@ -58,14 +59,14 @@ class TestCrossTenantMachineAccess:
         }
 
         machine_data = {
-            "machine_id": "machine-1",
+            "machine_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
             "tenant_id": 1,
             "status": "online",
         }
 
         # Test _check_machine_access
         result = self._invoke_check_machine_access(
-            user, "machine-1", machine_data, user_permission=None
+            user, "a1b2c3d4-e5f6-7890-abcd-ef1234567890", machine_data, user_permission=None
         )
         assert result is not None
         assert result[1] == 404
@@ -76,6 +77,7 @@ class TestCrossTenantMachineAccess:
         Same-tenant machine access should succeed.
 
         Issue #2538: Verify normal access still works.
+        Issue #2540: Updated to use valid UUID format for machine_id.
         """
         # User in tenant 1 accessing machine in tenant 1
         user = {
@@ -87,7 +89,7 @@ class TestCrossTenantMachineAccess:
         }
 
         machine_data = {
-            "machine_id": "machine-1",
+            "machine_id": "b1c2d3e4-f5a6-7890-bcde-f12345678901",
             "tenant_id": 1,
             "status": "online",
         }
@@ -95,7 +97,7 @@ class TestCrossTenantMachineAccess:
         # Test _check_machine_access
         # User has permission on same-tenant machine
         result = self._invoke_check_machine_access(
-            user, "machine-1", machine_data, user_permission="user"
+            user, "b1c2d3e4-f5a6-7890-bcde-f12345678901", machine_data, user_permission="user"
         )
         assert result is None  # Success
 
@@ -104,6 +106,7 @@ class TestCrossTenantMachineAccess:
         Machine without tenant_id should allow access (backward compatibility).
 
         Issue #2538: Maintain compatibility with legacy data.
+        Issue #2540: Updated to use valid UUID format for machine_id.
         """
         user = {
             "id": 1,
@@ -114,7 +117,7 @@ class TestCrossTenantMachineAccess:
         }
 
         machine_data = {
-            "machine_id": "machine-legacy",
+            "machine_id": "c1d2e3f4-a5b6-7890-cdef-123456789012",
             "tenant_id": None,  # No tenant
             "status": "online",
         }
@@ -122,7 +125,7 @@ class TestCrossTenantMachineAccess:
         # Test _check_machine_access
         # User has permission on legacy (no-tenant) machine
         result = self._invoke_check_machine_access(
-            user, "machine-legacy", machine_data, user_permission="user"
+            user, "c1d2e3f4-a5b6-7890-cdef-123456789012", machine_data, user_permission="user"
         )
         assert result is None  # Success
 
@@ -131,6 +134,7 @@ class TestCrossTenantMachineAccess:
         User without tenant_id should not access tenant-scoped machine.
 
         Issue #2538: Security isolation for tenant-less users.
+        Issue #2540: Updated to use valid UUID format for machine_id.
         """
         user = {
             "id": 1,
@@ -141,7 +145,7 @@ class TestCrossTenantMachineAccess:
         }
 
         machine_data = {
-            "machine_id": "machine-1",
+            "machine_id": "d1e2f3a4-b5c6-7890-defa-234567890123",
             "tenant_id": 1,
             "status": "online",
         }
@@ -149,7 +153,7 @@ class TestCrossTenantMachineAccess:
         # Test _check_machine_access
         # User without tenant has no permission on tenant machine
         result = self._invoke_check_machine_access(
-            user, "machine-1", machine_data, user_permission=None
+            user, "d1e2f3a4-b5c6-7890-defa-234567890123", machine_data, user_permission=None
         )
         assert result is not None
         assert result[1] == 404
@@ -159,6 +163,7 @@ class TestCrossTenantMachineAccess:
         Platform admin should bypass tenant isolation.
 
         Issue #2538: Verify admin access unchanged.
+        Issue #2540: Updated to use valid UUID format for machine_id.
         """
         user = {
             "id": 1,
@@ -169,7 +174,7 @@ class TestCrossTenantMachineAccess:
         }
 
         machine_data = {
-            "machine_id": "machine-1",
+            "machine_id": "e1f2a3b4-c5d6-7890-efab-345678901234",
             "tenant_id": 1,
             "status": "online",
         }
@@ -177,7 +182,7 @@ class TestCrossTenantMachineAccess:
         # Test _check_machine_access
         # Platform admin bypasses all checks
         result = self._invoke_check_machine_access(
-            user, "machine-1", machine_data, user_permission=None
+            user, "e1f2a3b4-c5d6-7890-efab-345678901234", machine_data, user_permission=None
         )
         assert result is None  # Success
 
@@ -186,6 +191,7 @@ class TestCrossTenantMachineAccess:
         Tenant admin cross-tenant access should return 404.
 
         Issue #2538: Verify tenant_admin isolation (existing behavior).
+        Issue #2540: Updated to use valid UUID format for machine_id.
         """
         user = {
             "id": 1,
@@ -196,13 +202,15 @@ class TestCrossTenantMachineAccess:
         }
 
         machine_data = {
-            "machine_id": "machine-1",
+            "machine_id": "f1a2b3c4-d5e6-7890-fabc-456789012345",
             "tenant_id": 1,
             "status": "online",
         }
 
         # Test _check_machine_tenant_access
-        machine, error = self._invoke_check_machine_tenant_access(user, "machine-1", machine_data)
+        machine, error = self._invoke_check_machine_tenant_access(
+            user, "f1a2b3c4-d5e6-7890-fabc-456789012345", machine_data
+        )
         assert machine is None
         assert error is not None
         assert error[1] == 404
@@ -219,6 +227,7 @@ class TestSessionAccessReturnCode:
         Cross-tenant session access should return 404.
 
         Issue #2538: Prevent session existence leakage.
+        Issue #2540: Updated to use valid UUID format for machine_id.
         """
         from app.modules.workspace.session_access import check_session_access
 
@@ -243,7 +252,7 @@ class TestSessionAccessReturnCode:
                     "session_id": "session-1",
                     "tenant_id": 1,  # Different tenant
                     "user_id": 1,
-                    "machine_id": "machine-1",
+                    "machine_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
                 }
                 mock_mgr.return_value.get_session_status.return_value = mock_status
 

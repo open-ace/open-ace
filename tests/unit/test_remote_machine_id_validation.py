@@ -161,6 +161,7 @@ class TestTerminalStartWithInvalidMachineId:
 
         # Register the remote blueprint
         from app.routes.remote import remote_bp
+
         app.register_blueprint(remote_bp, url_prefix="/api/remote")
 
         return app
@@ -177,9 +178,7 @@ class TestTerminalStartWithInvalidMachineId:
         This test verifies that authentication is required before reaching validation.
         """
         response = client.post(
-            "/api/remote/terminal/start",
-            json={"machine_id": 1},
-            content_type="application/json"
+            "/api/remote/terminal/start", json={"machine_id": 1}, content_type="application/json"
         )
 
         # Should return 401 (unauthorized) because no auth provided
@@ -194,7 +193,7 @@ class TestTerminalStartWithInvalidMachineId:
         response = client.post(
             "/api/remote/agent/message",
             json={"machine_id": 1, "type": "heartbeat"},
-            content_type="application/json"
+            content_type="application/json",
         )
 
         # Should return 400 (bad request), not 500 (internal server error)
@@ -207,7 +206,7 @@ class TestTerminalStartWithInvalidMachineId:
         response = client.post(
             "/api/remote/agent/message",
             json={"machine_id": "not-a-uuid", "type": "heartbeat"},
-            content_type="application/json"
+            content_type="application/json",
         )
 
         assert response.status_code == 400
@@ -222,7 +221,7 @@ class TestTerminalStartWithInvalidMachineId:
         response = client.post(
             "/api/remote/terminal/cli/start",
             json={"machine_id": 1},
-            content_type="application/json"
+            content_type="application/json",
         )
 
         # Should return 401 (unauthorized) because no auth provided
@@ -234,9 +233,7 @@ class TestTerminalStartWithInvalidMachineId:
         Issue #2540: usage_report should validate UUID format before checking machine existence.
         """
         response = client.post(
-            "/api/remote/usage-report",
-            json={"machine_id": 1},
-            content_type="application/json"
+            "/api/remote/usage-report", json={"machine_id": 1}, content_type="application/json"
         )
 
         # Should return 400 (bad request), not 401/500
@@ -249,7 +246,7 @@ class TestTerminalStartWithInvalidMachineId:
         response = client.post(
             "/api/remote/usage-report",
             json={"machine_id": "not-a-uuid"},
-            content_type="application/json"
+            content_type="application/json",
         )
 
         assert response.status_code == 400

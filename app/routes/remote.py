@@ -317,7 +317,10 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple[Any, Any] | Non
         # If this was a legacy machine, clear the flag
         if agent_mgr.is_legacy_machine(machine_id):
             agent_mgr.clear_legacy_mode(machine_id)
-            logger.info("Legacy mode cleared for machine %s after Bearer auth", safe_machine_id_prefix(machine_id))
+            logger.info(
+                "Legacy mode cleared for machine %s after Bearer auth",
+                safe_machine_id_prefix(machine_id),
+            )
         return False, None
 
     # No Bearer header — check if legacy mode is allowed
@@ -600,30 +603,36 @@ def _validate_machine_id_format(machine_id: Any) -> tuple[bool, tuple | None]:
     """
     if machine_id is None:
         return False, (
-            jsonify({
-                "error": "machine_id must be a valid UUID string",
-                "hint": "use 'machine_id' field (UUID) from GET /api/remote/machines, not 'id' (integer)"
-            }),
+            jsonify(
+                {
+                    "error": "machine_id must be a valid UUID string",
+                    "hint": "use 'machine_id' field (UUID) from GET /api/remote/machines, not 'id' (integer)",
+                }
+            ),
             400,
         )
 
     # Must be a string
     if not isinstance(machine_id, str):
         return False, (
-            jsonify({
-                "error": "machine_id must be a valid UUID string",
-                "hint": "use 'machine_id' field (UUID) from GET /api/remote/machines, not 'id' (integer)"
-            }),
+            jsonify(
+                {
+                    "error": "machine_id must be a valid UUID string",
+                    "hint": "use 'machine_id' field (UUID) from GET /api/remote/machines, not 'id' (integer)",
+                }
+            ),
             400,
         )
 
     # Must match UUID format
     if not _UUID_PATTERN.match(machine_id):
         return False, (
-            jsonify({
-                "error": "machine_id must be a valid UUID string",
-                "hint": "use 'machine_id' field (UUID) from GET /api/remote/machines, not 'id' (integer)"
-            }),
+            jsonify(
+                {
+                    "error": "machine_id must be a valid UUID string",
+                    "hint": "use 'machine_id' field (UUID) from GET /api/remote/machines, not 'id' (integer)",
+                }
+            ),
             400,
         )
 
@@ -2778,8 +2787,16 @@ def start_terminal():
     # Get machine info for title/hostname
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
-    machine_name = machine.get("machine_name", safe_machine_id_prefix(machine_id)) if machine else safe_machine_id_prefix(machine_id)
-    hostname = machine.get("hostname", safe_machine_id_prefix(machine_id)) if machine else safe_machine_id_prefix(machine_id)
+    machine_name = (
+        machine.get("machine_name", safe_machine_id_prefix(machine_id))
+        if machine
+        else safe_machine_id_prefix(machine_id)
+    )
+    hostname = (
+        machine.get("hostname", safe_machine_id_prefix(machine_id))
+        if machine
+        else safe_machine_id_prefix(machine_id)
+    )
     tenant_id = machine.get("tenant_id", 1) if machine else 1
 
     # Generate terminal ID and proxy tokens for multiple providers
@@ -2952,8 +2969,16 @@ def start_cli_terminal():
 
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
-    machine_name = machine.get("machine_name", safe_machine_id_prefix(machine_id)) if machine else safe_machine_id_prefix(machine_id)
-    hostname = machine.get("hostname", safe_machine_id_prefix(machine_id)) if machine else safe_machine_id_prefix(machine_id)
+    machine_name = (
+        machine.get("machine_name", safe_machine_id_prefix(machine_id))
+        if machine
+        else safe_machine_id_prefix(machine_id)
+    )
+    hostname = (
+        machine.get("hostname", safe_machine_id_prefix(machine_id))
+        if machine
+        else safe_machine_id_prefix(machine_id)
+    )
     tenant_id = machine.get("tenant_id", 1) if machine else 1
     terminal_id = str(uuid.uuid4())
 
@@ -3725,7 +3750,10 @@ def usage_report():
             return bearer_error
         if agent_mgr.is_legacy_machine(machine_id):
             agent_mgr.clear_legacy_mode(machine_id)
-            logger.info("Legacy mode cleared for machine %s after Bearer auth", safe_machine_id_prefix(machine_id))
+            logger.info(
+                "Legacy mode cleared for machine %s after Bearer auth",
+                safe_machine_id_prefix(machine_id),
+            )
     else:
         _, legacy_error = _check_legacy_fallback(machine_id)
         if legacy_error:
