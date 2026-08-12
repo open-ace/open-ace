@@ -8,7 +8,6 @@ Configuration is stored in ~/.open-ace/config.json under the "feishu" key.
 import json
 import logging
 import os
-import re
 import shutil
 import threading
 from typing import Any
@@ -23,25 +22,9 @@ logger = logging.getLogger(__name__)
 _config_lock = threading.Lock()
 
 # Feishu API endpoint for tenant_access_token
+from app.utils.placeholder import is_placeholder_value
+
 FEISHU_AUTH_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
-
-# Placeholder patterns to detect template values
-PLACEHOLDER_PATTERNS = [
-    r"<FEISHU_APP_ID>",
-    r"<FEISHU_APP_SECRET>",
-    r"<APP_ID>",
-    r"<APP_SECRET>",
-    r"your_app_id",
-    r"your_app_secret",
-    r"cli_xxxxxxxxxxxxxxxx",
-]
-
-
-def _is_placeholder(value: str) -> bool:
-    """Check if a value is a placeholder/template value."""
-    if not value:
-        return False
-    return any(re.search(pattern, value, re.IGNORECASE) for pattern in PLACEHOLDER_PATTERNS)
 
 
 def _mask_app_secret(app_secret: str | None) -> str:
@@ -147,9 +130,9 @@ class FeishuConfigService:
         app_secret = app_secret.strip()
 
         # Check for placeholder values
-        if _is_placeholder(app_id):
+        if is_placeholder_value(app_id):
             raise ValueError("app_id appears to be a placeholder value, please use a real App ID")
-        if _is_placeholder(app_secret):
+        if is_placeholder_value(app_secret):
             raise ValueError(
                 "app_secret appears to be a placeholder value, please use a real App Secret"
             )
@@ -225,7 +208,7 @@ class FeishuConfigService:
             }
 
         # Check for placeholder values
-        if _is_placeholder(app_id) or _is_placeholder(app_secret):
+        if is_placeholder_value(app_id) or is_placeholder_value(app_secret):
             return {
                 "success": False,
                 "message": "App ID or App Secret appears to be a placeholder value",
