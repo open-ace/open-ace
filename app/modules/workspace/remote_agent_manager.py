@@ -221,6 +221,8 @@ class RemoteAgentManager:
         self._start_heartbeat_monitor()
         # Start retention cleanup for remote_runtime tables (Issue #1823)
         self._start_retention_cleanup()
+        # Issue #2499: Start pending revoke token cleanup
+        self._start_pending_revoke_cleanup()
 
     def _restore_in_memory_state(self) -> None:
         """Restore _session_machines and _session_end_flags from DB after restart.
@@ -300,6 +302,19 @@ class RemoteAgentManager:
             self.RETENTION_CLEANUP_INTERVAL_SECONDS,
             self.RETENTION_BATCH_SIZE,
         )
+
+    def _start_pending_revoke_cleanup(self) -> None:
+        """Start background task for pending_revoke token cleanup.
+
+        Issue #2499: Periodically force-revokes expired pending_revoke tokens.
+        """
+        try:
+            from app.services.pending_revoke_cleanup import start_pending_revoke_cleanup
+
+            start_pending_revoke_cleanup(self.db)
+            logger.info("Pending revoke token cleanup scheduler started")
+        except Exception as e:
+            logger.warning("Failed to start pending revoke cleanup: %s", e)
 
     def _run_retention_cleanup(self) -> None:
         """Run retention cleanup for remote_runtime tables (Issue #1823).
@@ -973,13 +988,16 @@ class RemoteAgentManager:
         """
         token_hash_val = hash_token(token)
 
+        # Issue #2499: Use appropriate NOW() function for database type
+        now_expr = "NOW()" if is_postgresql() else "datetime('now')"
+
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 f"""
                 SELECT id, machine_id, is_revoked, pending_revoke, revoke_after,
                        CASE
-                           WHEN pending_revoke = {_param()} AND revoke_after > NOW()
+                           WHEN pending_revoke = {_param()} AND revoke_after > {now_expr}
                            THEN {_param()}
                            ELSE {_param()}
                        END AS is_temporarily_valid

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 # revision identifiers, used by Alembic.
 revision = "20260811_001"
-down_revision = "baseline_2026_06_23"
+down_revision = "20260810_001_enforce_admin_role_migration"
 branch_labels = None
 depends_on = None
 
