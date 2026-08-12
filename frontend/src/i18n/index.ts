@@ -982,6 +982,8 @@ export const translations: Record<Language, Translations> = {
     smtpSetupGuide3: 'Enter the sender email address',
     smtpSetupGuide4:
       'Click "Test Connection" to verify the configuration before enabling email notifications',
+    smtpSetupGuide4QuotaPrefix: 'Please test the connection on the',
+    smtpSetupGuide4QuotaSuffix: 'page first before enabling email notifications',
     smtpPort465AutoSSL: 'Port 465 automatically uses SSL connection',
     smtpSslConnectionSuccess: 'SMTP SSL connection test successful',
     smtpStarttlsConnectionSuccess: 'SMTP STARTTLS connection test successful',
@@ -2797,6 +2799,8 @@ export const translations: Record<Language, Translations> = {
     smtpSetupGuide2: '如果需要认证，输入 SMTP 凭证',
     smtpSetupGuide3: '输入发件人邮箱地址',
     smtpSetupGuide4: '点击"测试连接"验证配置后再启用邮件通知',
+    smtpSetupGuide4QuotaPrefix: '请先在',
+    smtpSetupGuide4QuotaSuffix: '页面测试连接成功后，再启用邮件通知',
     smtpPort465AutoSSL: '端口 465 自动使用 SSL 连接',
     smtpSslConnectionSuccess: 'SMTP SSL 连接测试成功',
     smtpStarttlsConnectionSuccess: 'SMTP STARTTLS 连接测试成功',

@@ -8,6 +8,7 @@
  */
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { cn } from '@/utils';
 import { useQuotaUsage, useQuotaStats, useUpdateQuota, usePageRefresh } from '@/hooks';
 import { useLanguage } from '@/store';
@@ -910,7 +911,11 @@ export const QuotaAlerts: React.FC = () => {
                     }
                     placeholder="your@email.com"
                   />
-                  <small className="text-muted">{t('smtpSetupGuide4', language)}</small>
+                  <small className="text-muted">
+                    {t('smtpSetupGuide4QuotaPrefix', language)}{' '}
+                    <Link to="/manage/settings/smtp">{t('smtpConfiguration', language)}</Link>{' '}
+                    {t('smtpSetupGuide4QuotaSuffix', language)}
+                  </small>
                 </div>
               )}
               <div className="col-12">
