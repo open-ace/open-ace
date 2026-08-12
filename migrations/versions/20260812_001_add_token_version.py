@@ -58,18 +58,25 @@ def upgrade() -> None:
         )
 
     # Create index on (machine_id, token_version) for efficient version queries
-    op.create_index(
-        "idx_agent_tokens_machine_version",
-        "agent_tokens",
-        ["machine_id", "token_version"],
-        unique=False,
-    )
+    # Check if index already exists (e.g., from schema.sql bootstrap)
+    inspector = sa.inspect(bind)
+    indexes = inspector.get_indexes("agent_tokens")
+    index_names = [idx["name"] for idx in indexes]
+
+    if "idx_agent_tokens_machine_version" not in index_names:
+        op.create_index(
+            "idx_agent_tokens_machine_version",
+            "agent_tokens",
+            ["machine_id", "token_version"],
+            unique=False,
+        )
 
     # Create trigger to auto-set token_version during migration period
     # This ensures new tokens created during migration get correct version numbers
     if dialect == "postgresql":
         # PostgreSQL: Use plpgsql trigger
-        op.execute("""
+        op.execute(
+            """
             CREATE OR REPLACE FUNCTION set_token_version_trigger()
             RETURNS TRIGGER AS $$
             BEGIN
@@ -82,14 +89,17 @@ def upgrade() -> None:
                 RETURN NEW;
             END;
             $$ LANGUAGE plpgsql;
-        """)
+        """
+        )
 
-        op.execute("""
+        op.execute(
+            """
             CREATE TRIGGER trigger_set_token_version
             BEFORE INSERT ON agent_tokens
             FOR EACH ROW
             EXECUTE FUNCTION set_token_version_trigger();
-        """)
+        """
+        )
 
 
 def downgrade() -> None:

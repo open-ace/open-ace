@@ -1650,8 +1650,8 @@ def get_token_info():
     agent_mgr = get_remote_agent_manager()
 
     # Get token version from database
-    from app.repositories.database import _param, adapt_boolean_value
     from app.modules.workspace.agent_token import hash_token
+    from app.repositories.database import _param, adapt_boolean_value
 
     token_hash_val = hash_token(bearer_token)
 
@@ -1669,10 +1669,12 @@ def get_token_info():
         row = cursor.fetchone()
 
     if row:
-        return jsonify({
-            "success": True,
-            "token_version": row["token_version"],
-        })
+        return jsonify(
+            {
+                "success": True,
+                "token_version": row["token_version"],
+            }
+        )
     else:
         return jsonify({"error": "Token not found or revoked"}), 404
 

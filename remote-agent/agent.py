@@ -699,7 +699,6 @@ class RemoteAgent:
         """
         new_token = data.get("new_token")
         token_version = data.get("token_version")
-        rotated_at = data.get("rotated_at")
 
         if not new_token or len(new_token) < 16:
             logger.warning("rotate_token: new_token missing or too short, ignoring")
@@ -839,7 +838,7 @@ class RemoteAgent:
 
             # Retry with exponential backoff + jitter
             if attempt < max_attempts - 1:
-                delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                delay = base_delay * (2**attempt) + random.uniform(0, 1)
                 logger.info(
                     "Retrying token probe in %.2fs (attempt=%d)",
                     delay,
@@ -855,9 +854,7 @@ class RemoteAgent:
         )
         return False
 
-    def _send_token_rotation_error(
-        self, token_version: int | None, error_reason: str
-    ) -> None:
+    def _send_token_rotation_error(self, token_version: int | None, error_reason: str) -> None:
         """Send token rotation error report to the server.
 
         Issue #2530 Phase 2: Reports rotation failures to server for monitoring.
@@ -905,10 +902,7 @@ class RemoteAgent:
         """
         if self._tls_config.ca_bundle_path:
             return self._tls_config.ca_bundle_path
-        elif self._tls_config.skip_verify:
-            return False
-        else:
-            return True
+        return not self._tls_config.skip_verify
 
     def _sync_token_version_from_server(self) -> None:
         """Sync token version from server after restart.

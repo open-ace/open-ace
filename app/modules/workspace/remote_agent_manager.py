@@ -958,9 +958,7 @@ class RemoteAgentManager:
             "created_by": row["created_by"],
         }
 
-    def _create_agent_token(
-        self, machine_id: str, token_version: int | None = None
-    ) -> str:
+    def _create_agent_token(self, machine_id: str, token_version: int | None = None) -> str:
         """Generate and store a new agent token for a machine.
 
         Args:
@@ -1535,23 +1533,25 @@ class RemoteAgentManager:
 
                     command_type = row["command_type"] or payload.get("command", "")
                     if command_type == "rotate_token":
-                        rotate_token_commands.append({
-                            "id": row["id"],
-                            "payload": payload,
-                            "token_version": payload.get("token_version", 0),
-                        })
+                        rotate_token_commands.append(
+                            {
+                                "id": row["id"],
+                                "payload": payload,
+                                "token_version": payload.get("token_version", 0),
+                            }
+                        )
                     else:
-                        other_commands.append({
-                            "id": row["id"],
-                            "payload": payload,
-                        })
+                        other_commands.append(
+                            {
+                                "id": row["id"],
+                                "payload": payload,
+                            }
+                        )
 
                 # For rotate_token commands: only keep the latest one
                 if len(rotate_token_commands) > 1:
                     # Sort by token_version descending to find the latest
-                    rotate_token_commands.sort(
-                        key=lambda x: x["token_version"], reverse=True
-                    )
+                    rotate_token_commands.sort(key=lambda x: x["token_version"], reverse=True)
                     latest_rotate = rotate_token_commands[0]
                     expired_ids = [cmd["id"] for cmd in rotate_token_commands[1:]]
 
