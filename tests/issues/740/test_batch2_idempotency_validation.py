@@ -208,17 +208,32 @@ class TestPathValidation:
         """These tests exercise path validation, not the quota/rate gate. Stub
         QuotaManager to allow-by-default so the (real, DB-backed) quota check
         doesn't reach the test's schema-less DB and spuriously 429 before path
-        validation runs, and reset the module-global workflow rate limiter
+        validation runs, reset the module-global workflow rate limiter
         (``_workflow_rate_limiter`` accumulates per-user hits across the whole
         pytest session, so without a reset these create-workflow requests are
-        429'd once earlier tests in the shard exhaust the 10/hour budget — the
-        #2457 assert-429 cluster)."""
+        429'd once earlier tests in the shard exhaust the 10/hour budget), and
+        stub the module-level ``user_repo.get_user_by_id`` (its db binds at
+        import to a CI db with no users table, so the route's user lookup past
+        path validation 500s once the reset lets valid-path requests through).
+        The #2457 assert-429 / assert-500 cluster."""
         from app.routes.autonomous import _workflow_rate_limiter
 
         _workflow_rate_limiter._hits.clear()
-        mock = MagicMock()
-        mock.return_value.check_quota.return_value = {"allowed": True, "reason": None}
-        with patch("app.modules.governance.quota_manager.QuotaManager", mock):
+        qmock = MagicMock()
+        qmock.return_value.check_quota.return_value = {"allowed": True, "reason": None}
+        with (
+            patch("app.modules.governance.quota_manager.QuotaManager", qmock),
+            patch(
+                "app.routes.autonomous.user_repo.get_user_by_id",
+                return_value={
+                    "id": 1,
+                    "username": "admin",
+                    "system_account": "",
+                    "role": "admin",
+                    "tenant_id": None,
+                },
+            ),
+        ):
             yield
 
     def _make_client(self):
