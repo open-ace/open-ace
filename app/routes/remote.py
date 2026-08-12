@@ -51,10 +51,12 @@ MAX_MESSAGE_LENGTH = 50000
 # Fields that indicate sensitive token data in JSON responses.
 # When these fields are present, security headers are added to prevent
 # caching and referrer leakage.
-SENSITIVE_RESPONSE_FIELDS: frozenset[str] = frozenset({
-    "agent_token",
-    "registration_token",
-})
+SENSITIVE_RESPONSE_FIELDS: frozenset[str] = frozenset(
+    {
+        "agent_token",
+        "registration_token",
+    }
+)
 
 # Maximum response body size to check for sensitive fields (10KB).
 # Larger responses are skipped to avoid performance impact.
@@ -301,9 +303,11 @@ def add_security_headers(response: Response) -> Response:
             data = response.get_json(silent=True)
             if data and isinstance(data, dict):
                 # Check if response contains sensitive fields
-                if any(key in SENSITIVE_RESPONSE_FIELDS for key in data.keys()):
+                if any(key in SENSITIVE_RESPONSE_FIELDS for key in data):
                     response.headers.setdefault("Referrer-Policy", "no-referrer")
-                    response.headers.setdefault("Cache-Control", "no-store, no-cache, must-revalidate")
+                    response.headers.setdefault(
+                        "Cache-Control", "no-store, no-cache, must-revalidate"
+                    )
                     response.headers.setdefault("X-Content-Type-Options", "nosniff")
         except Exception:
             # Silently skip on JSON parse errors - don't affect normal responses

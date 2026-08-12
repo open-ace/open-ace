@@ -20,7 +20,7 @@ from flask import Flask, Response, jsonify, request
 from werkzeug.test import Client
 
 # Import the module under test
-from app.routes.remote import add_security_headers, SENSITIVE_RESPONSE_FIELDS
+from app.routes.remote import SENSITIVE_RESPONSE_FIELDS, add_security_headers
 
 
 @pytest.mark.issue(2532)
