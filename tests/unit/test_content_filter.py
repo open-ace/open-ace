@@ -583,3 +583,57 @@ class TestCacheWithDatabaseRules:
         initial_hits = cf._cache_hits
         cf.check_content("another 456")
         assert cf._cache_hits > initial_hits
+
+
+class TestPiiFalsePositiveSuppression:
+    """Built-in PII detectors must not flag the digit-runs autonomous prompts
+    legitimately contain — 15-digit commit SHAs / timestamp-IDs (matched as
+    Amex credit cards → critical → block) and dates like 2026-08-12 (matched as
+    international phones). Regression for #2499 (glm-5 autonomous workflows
+    403-blocked by the content filter)."""
+
+    @pytest.mark.regression
+    def test_credit_card_amex_sha_not_flagged(self):
+        """A 15-digit commit SHA / timestamp-ID is NOT an Amex card (fails Luhn)
+        and must not be blocked."""
+        cf = ContentFilter(config={"block_high_risk": True})
+        result = cf.check_content("Commit 140506586314800 applied")
+        assert result.passed is True
+        assert not any(r["type"] == "pii_credit_card_amex" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_credit_card_amex_real_card_still_flagged(self):
+        """A valid-Luhn Amex test PAN is still detected + blocked."""
+        cf = ContentFilter(config={"block_high_risk": True})
+        result = cf.check_content("Card 378282246310005")
+        assert result.passed is False
+        assert any(r["type"] == "pii_credit_card_amex" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_credit_card_visa_real_card_still_flagged(self):
+        """A valid-Luhn Visa test PAN is still detected (16-digit card type)."""
+        cf = ContentFilter(config={"block_high_risk": True})
+        result = cf.check_content("Card 4111-1111-1111-1111")
+        assert result.passed is False
+        assert any(r["type"] == "pii_credit_card" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_phone_intl_date_not_flagged(self):
+        """A date like 2026-08-12 is not an international phone number."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Created 2026-08-12 by auto-dev")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_phone_intl_slash_date_not_flagged(self):
+        """Slash-separated dates (2026/08/12) are not phones either."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Built on 2026/08/12")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    def test_phone_intl_real_phone_still_flagged(self):
+        """A real international phone number is still detected."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Call +86 138 0013 8000 now")
+        assert any(r["type"] == "pii_phone_intl" for r in result.matched_rules)

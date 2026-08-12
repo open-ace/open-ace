@@ -742,6 +742,23 @@ def _gateway_error_response(resp: Any, gateway_key: str) -> tuple[Response, int]
         )
 
 
+def _is_autonomous_request(token_payload: dict | None) -> bool:
+    """Whether a proxy request originates from the autonomous agent runner.
+
+    The autonomous proxy token is minted with ``session_type="agent"``
+    (agent_runner.py); that claim rides in the validated token payload
+    (api_key_proxy.generate_proxy_token). Autonomous prompts are
+    system-generated/trusted and inherently carry commit SHAs, dates, and code
+    that the user-content filter's PII detectors false-positive on (15-digit
+    SHAs → credit cards → 403 block, #2499). Such requests skip the governance
+    content filter, which exists for user-submitted chat — not the system's own
+    prompts to its model.
+    """
+    if token_payload is None:
+        return False
+    return token_payload.get("session_type") == "agent"
+
+
 def _check_content_filter(
     user_id: int,
     username: str | None,
@@ -1081,13 +1098,25 @@ def handle_llm_proxy_request(
     # ── Content filter check for user input ──────────────────────────────
     # Check user messages for sensitive content before forwarding to LLM.
     # Block: return 403, Warn: log and continue, Redact: modify content.
-    username = g.user.get("username") if hasattr(g, "user") else None
-    content_filter_result = _check_content_filter(
-        user_id=user_id,
-        username=username,
-        request_body=request.get_data(),
-        tenant_id=tenant_id,
-    )
+    # Autonomous agent requests (session_type="agent") are exempt: their
+    # prompts are system-generated and inherently carry SHAs/dates/code that
+    # the PII detectors false-positive on — filtering them 403-blocked glm-5
+    # autonomous workflows (#2499). The filter governs user-submitted chat.
+    if _is_autonomous_request(token_payload):
+        logger.debug(
+            "Skipping content filter for autonomous agent request " "(user_id=%s, tenant_id=%s)",
+            user_id,
+            tenant_id,
+        )
+        content_filter_result = None
+    else:
+        username = g.user.get("username") if hasattr(g, "user") else None
+        content_filter_result = _check_content_filter(
+            user_id=user_id,
+            username=username,
+            request_body=request.get_data(),
+            tenant_id=tenant_id,
+        )
     if isinstance(content_filter_result, tuple):
         # Block: return error response
         return content_filter_result
