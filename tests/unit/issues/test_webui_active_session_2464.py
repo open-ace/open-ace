@@ -15,7 +15,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from flask import Flask
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -239,6 +238,7 @@ class TestMultipleActiveSessions:
         older_session = _mock_session("uuid-session-old", updated_at=now)
         # Newer session: 1 minute later
         from datetime import timedelta
+
         newer_time = now + timedelta(minutes=1)
         newer_session = _mock_session("uuid-session-new", updated_at=newer_time)
         mock_sm = MagicMock()
