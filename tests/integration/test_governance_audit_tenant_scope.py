@@ -23,6 +23,7 @@ def _insert_admin(tmp_db, username: str, tenant_id: int) -> int:
         INSERT INTO users (username, email, password_hash, role, tenant_id)
         VALUES (?, ?, ?, ?, ?)
         """,
+        # Issue #2332: 'admin' role no longer valid, use 'tenant_admin' for tenant-scoped admins
         (username, f"{username}@example.com", "hashed_pw", "tenant_admin", tenant_id),
     )
     return int(cursor.lastrowid)
@@ -36,6 +37,7 @@ def _login_as(monkeypatch, user_id: int, tenant_id: int, username: str) -> None:
         lambda token: {
             "id": user_id,
             "username": username,
+            # Issue #2332: 'admin' role no longer valid
             "role": "tenant_admin",
             "tenant_id": tenant_id,
         },

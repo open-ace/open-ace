@@ -612,15 +612,63 @@ def upgrade() -> None:
     # Step 3: Create backup
     log.info("Step 3: Creating backup...")
     try:
-        connection.execute(
-            sa.text(
-                """
-                CREATE TABLE IF NOT EXISTS users_backup_2332 AS
-                SELECT * FROM users WHERE role = 'admin'
-            """
+        # Create table with explicit column list for consistent ordering
+        # across PostgreSQL and SQLite (CREATE TABLE AS SELECT can reorder columns in SQLite)
+        dialect = connection.dialect.name
+        if dialect == "postgresql":
+            # PostgreSQL: can use SELECT * and preserves column order
+            connection.execute(
+                sa.text(
+                    """
+                    CREATE TABLE IF NOT EXISTS users_backup_2332 AS
+                    SELECT * FROM users WHERE role = 'admin'
+                    """
+                )
             )
-        )
-        log.info("Backup table created")
+        else:
+            # SQLite: create table with explicit column definitions to preserve types
+            # CREATE TABLE AS SELECT loses type information in SQLite
+            connection.execute(
+                sa.text(
+                    """
+                    CREATE TABLE IF NOT EXISTS users_backup_2332 (
+                        id INTEGER,
+                        username TEXT,
+                        password_hash TEXT,
+                        email TEXT,
+                        is_admin INTEGER,
+                        is_active INTEGER,
+                        created_at TIMESTAMP,
+                        last_login TIMESTAMP,
+                        role TEXT,
+                        daily_token_quota INTEGER,
+                        monthly_token_quota INTEGER,
+                        daily_request_quota INTEGER,
+                        monthly_request_quota INTEGER,
+                        deleted_at TIMESTAMP,
+                        system_account TEXT,
+                        tenant_id INTEGER,
+                        must_change_password INTEGER,
+                        avatar_url TEXT,
+                        auto_mapping_enabled INTEGER,
+                        tenant_version INTEGER
+                    )
+                    """
+                )
+            )
+            # Insert data after creating the table
+            connection.execute(
+                sa.text(
+                    """
+                    INSERT INTO users_backup_2332
+                    SELECT id, username, password_hash, email, is_admin, is_active,
+                           created_at, last_login, role, daily_token_quota, monthly_token_quota,
+                           daily_request_quota, monthly_token_quota, deleted_at, system_account,
+                           tenant_id, must_change_password, avatar_url, auto_mapping_enabled, tenant_version
+                    FROM users WHERE role = 'admin'
+                    """
+                )
+            )
     except Exception as e:
         log.warning(f"Could not create backup table: {e}")
 

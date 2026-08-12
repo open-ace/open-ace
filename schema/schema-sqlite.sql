@@ -586,6 +586,14 @@ CREATE TABLE machine_assignments (
  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE migration_metadata (
+ migration_id TEXT PRIMARY KEY NOT NULL,
+ migration_name TEXT NOT NULL,
+ applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ checksum TEXT,
+ details TEXT
+);
+
 CREATE TABLE model_gateway_config (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  mode text DEFAULT 'direct',
@@ -924,7 +932,9 @@ CREATE TABLE scheduler_leaders (
  last_run_at TIMESTAMP,
  run_count integer DEFAULT 0 NOT NULL,
  skip_count integer DEFAULT 0 NOT NULL,
- fail_count integer DEFAULT 0 NOT NULL
+ fail_count integer DEFAULT 0 NOT NULL,
+ fencing_token INTEGER,
+ lock_strategy TEXT
 );
 
 CREATE TABLE scheduler_runs (
@@ -936,7 +946,13 @@ CREATE TABLE scheduler_runs (
  status TEXT NOT NULL,
  duration_ms integer,
  error_message text,
- metrics text
+ metrics text,
+ lock_strategy TEXT,
+ fencing_token INTEGER,
+ lock_acquired_at TIMESTAMP,
+ lock_released_at TIMESTAMP,
+ skip_reason text,
+ leader_host TEXT
 );
 
 CREATE TABLE schema_metadata (

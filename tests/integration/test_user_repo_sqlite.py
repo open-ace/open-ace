@@ -89,6 +89,7 @@ class TestUserUpdateTenantId:
             user_id,
             username="charlie_updated",
             email="charlie@new.com",
+            # Issue #2332: 'admin' role no longer valid, use 'tenant_admin'
             role="tenant_admin",
             tenant_id=tenant2_id,
         )
@@ -175,6 +176,7 @@ class TestUserCRUD:
         repo = UserRepository(db=tmp_db)
         user_id = _insert_user(tmp_db, username="grace")
 
+        # Issue #2332: 'admin' role no longer valid, use 'manager'
         result = repo.update_user(user_id, role="manager")
         assert result is True
 

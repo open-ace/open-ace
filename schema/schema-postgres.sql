@@ -751,6 +751,13 @@ CREATE SEQUENCE email_notification_logs_id_seq
     CACHE 1;
 
 ALTER SEQUENCE email_notification_logs_id_seq OWNED BY email_notification_logs.id;
+CREATE SEQUENCE fencing_token_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
 CREATE TABLE hourly_stats (
     date character varying(10) NOT NULL,
     hour integer NOT NULL,
@@ -863,6 +870,14 @@ CREATE SEQUENCE machine_assignments_id_seq
     CACHE 1;
 
 ALTER SEQUENCE machine_assignments_id_seq OWNED BY machine_assignments.id;
+CREATE TABLE migration_metadata (
+    migration_id character varying(100) NOT NULL,
+    migration_name character varying(200) NOT NULL,
+    applied_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    checksum character varying(64),
+    details jsonb
+);
+
 CREATE TABLE model_gateway_config (
     id integer NOT NULL,
     mode text DEFAULT 'direct'::text,
@@ -1372,7 +1387,9 @@ CREATE TABLE scheduler_leaders (
     last_run_at timestamp without time zone,
     run_count integer DEFAULT 0 NOT NULL,
     skip_count integer DEFAULT 0 NOT NULL,
-    fail_count integer DEFAULT 0 NOT NULL
+    fail_count integer DEFAULT 0 NOT NULL,
+    fencing_token bigint,
+    lock_strategy character varying(20)
 );
 
 CREATE TABLE scheduler_runs (
@@ -1384,7 +1401,13 @@ CREATE TABLE scheduler_runs (
     status character varying(20) NOT NULL,
     duration_ms integer,
     error_message text,
-    metrics text
+    metrics text,
+    lock_strategy character varying(20),
+    fencing_token bigint,
+    lock_acquired_at timestamp without time zone,
+    lock_released_at timestamp without time zone,
+    skip_reason text,
+    leader_host character varying(255)
 );
 
 CREATE SEQUENCE scheduler_runs_id_seq
@@ -2443,6 +2466,9 @@ ALTER TABLE ONLY machine_assignments
 
 ALTER TABLE ONLY machine_assignments
     ADD CONSTRAINT machine_assignments_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY migration_metadata
+    ADD CONSTRAINT migration_metadata_pkey PRIMARY KEY (migration_id);
 
 ALTER TABLE ONLY model_gateway_config
     ADD CONSTRAINT model_gateway_config_pkey PRIMARY KEY (id);
