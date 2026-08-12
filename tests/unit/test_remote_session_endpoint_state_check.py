@@ -73,9 +73,7 @@ class TestAbortRemoteRequestEndpoint:
                 {"session_id": "test-session", "status": "paused"},
                 None,
             )
-            with patch(
-                "app.routes.remote.get_remote_session_manager"
-            ) as mock_mgr:
+            with patch("app.routes.remote.get_remote_session_manager") as mock_mgr:
                 mock_mgr.return_value.abort_request.return_value = True
 
                 from app.routes.remote import abort_remote_request
@@ -113,9 +111,7 @@ class TestStopRemoteSessionEndpoint:
                 {"session_id": "test-session", "status": "paused"},
                 None,
             )
-            with patch(
-                "app.routes.remote.get_remote_session_manager"
-            ) as mock_mgr:
+            with patch("app.routes.remote.get_remote_session_manager") as mock_mgr:
                 mock_mgr.return_value.stop_session.return_value = True
 
                 from app.routes.remote import stop_remote_session
