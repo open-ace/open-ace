@@ -171,7 +171,8 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
       parts.push(`${t('nextRefresh', language)}: ${countdown}`);
     }
 
-    return parts.join('\n');
+    // Return timing info if available, otherwise fallback to default tooltip
+    return parts.length > 0 ? parts.join('\n') : t('autoRefresh', language);
   };
 
   /**
