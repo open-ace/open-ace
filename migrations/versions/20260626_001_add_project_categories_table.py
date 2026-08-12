@@ -32,7 +32,8 @@ def upgrade() -> None:
 
     if conn.dialect.name == "postgresql":
         # PostgreSQL version
-        op.execute("""
+        op.execute(
+            """
             CREATE TABLE IF NOT EXISTS project_categories (
                 id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -42,13 +43,15 @@ def upgrade() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            """)
+            """
+        )
         op.execute(
             "CREATE INDEX IF NOT EXISTS idx_project_categories_sort_order ON project_categories (sort_order)"
         )
     else:
         # SQLite version
-        op.execute("""
+        op.execute(
+            """
             CREATE TABLE IF NOT EXISTS project_categories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -58,7 +61,8 @@ def upgrade() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            """)
+            """
+        )
         op.execute(
             "CREATE INDEX IF NOT EXISTS idx_project_categories_sort_order ON project_categories (sort_order)"
         )

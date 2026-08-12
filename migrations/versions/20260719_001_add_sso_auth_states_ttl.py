@@ -125,34 +125,40 @@ def upgrade() -> None:
 
             # Backfill existing rows: expires_at = created_at + 10min
             # Handle NULL created_at by using current timestamp
-            op.execute(f"""
+            op.execute(
+                f"""
                 UPDATE sso_auth_states
                 SET expires_at = COALESCE(
                     created_at + INTERVAL '{DEFAULT_TTL_SECONDS} seconds',
                     NOW() + INTERVAL '{DEFAULT_TTL_SECONDS} seconds'
                 )
                 WHERE expires_at IS NULL
-            """)
+            """
+            )
 
             # Set NOT NULL constraint
             op.execute("ALTER TABLE sso_auth_states ALTER COLUMN expires_at SET NOT NULL")
         else:
             # SQLite: Add column with default for new rows, backfill existing
-            op.execute(f"""
+            op.execute(
+                f"""
                 ALTER TABLE sso_auth_states
                 ADD COLUMN expires_at TIMESTAMP NOT NULL DEFAULT
                     (datetime('now', '+{DEFAULT_TTL_SECONDS} seconds'))
-            """)
+            """
+            )
 
             # Backfill existing rows using created_at
-            op.execute(f"""
+            op.execute(
+                f"""
                 UPDATE sso_auth_states
                 SET expires_at = datetime(
                     COALESCE(created_at, datetime('now')),
                     '+{DEFAULT_TTL_SECONDS} seconds'
                 )
                 WHERE expires_at IS NULL OR expires_at = ''
-            """)
+            """
+            )
     else:
         log.info("expires_at column already exists, skipping")
 

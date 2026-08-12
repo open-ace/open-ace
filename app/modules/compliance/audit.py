@@ -392,12 +392,14 @@ class AuditAnalyzer:
                 cursor = conn.cursor()
                 # Query agent_sessions for this user
                 cursor.execute(
-                    adapt_sql("""
+                    adapt_sql(
+                        """
                     SELECT session_id, created_at, message_count, total_tokens, tool_name
                     FROM agent_sessions
                     WHERE user_id = ? AND created_at >= ? AND created_at <= ?
                     ORDER BY created_at DESC
-                    """),
+                    """
+                    ),
                     (user_id, start_time.isoformat(), end_time.isoformat()),
                 )
                 sessions_data = cursor.fetchall()

@@ -26,7 +26,8 @@ def auto_db(tmp_path):
             conn = db.get_connection()
             try:
                 cursor = conn.cursor()
-                cursor.execute("""
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS users (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         username TEXT UNIQUE NOT NULL,
@@ -37,7 +38,8 @@ def auto_db(tmp_path):
                         created_at TEXT,
                         updated_at TEXT
                     )
-                    """)
+                    """
+                )
                 cursor.execute(
                     "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
                     ("admin", "admin@test.com", "hash123", "admin"),

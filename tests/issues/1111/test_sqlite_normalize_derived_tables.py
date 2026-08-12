@@ -151,7 +151,8 @@ def test_sqlite_upgrade_merges_qwen_alias_rows_before_normalization(tmp_path):
         },
     ]
 
-    alias_counts = conn.execute("""
+    alias_counts = conn.execute(
+        """
         SELECT COUNT(*)
         FROM (
             SELECT tool_name FROM daily_stats
@@ -161,7 +162,8 @@ def test_sqlite_upgrade_merges_qwen_alias_rows_before_normalization(tmp_path):
             SELECT tool_name FROM usage_summary
         )
         WHERE tool_name IN ('qwen-code', 'qwen-code-cli')
-        """).fetchone()[0]
+        """
+    ).fetchone()[0]
     assert alias_counts == 0
     conn.close()
 
@@ -296,10 +298,12 @@ def test_sqlite_upgrade_rebuilds_claude_summary_with_distinct_day_count(tmp_path
         },
     ]
 
-    alias_counts = conn.execute("""
+    alias_counts = conn.execute(
+        """
         SELECT COUNT(*)
         FROM usage_summary
         WHERE tool_name = 'claude-code'
-        """).fetchone()[0]
+        """
+    ).fetchone()[0]
     assert alias_counts == 0
     conn.close()

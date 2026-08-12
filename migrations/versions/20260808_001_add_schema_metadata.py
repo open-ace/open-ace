@@ -58,12 +58,14 @@ def upgrade() -> None:
     # Create table with dialect-specific syntax
     if dialect == "postgresql":
         # PostgreSQL: use native TIMESTAMP type
-        op.execute("""
+        op.execute(
+            """
             CREATE TABLE schema_metadata (
                 initialized_at TIMESTAMP NOT NULL DEFAULT NOW(),
                 schema_version VARCHAR(64)
             )
-            """)
+            """
+        )
     else:
         # SQLite and others: use dialect-agnostic approach with default
         op.create_table(

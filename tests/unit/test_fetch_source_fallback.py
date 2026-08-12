@@ -48,7 +48,8 @@ def _init_dest_schema(db_path: Path) -> None:
     """Destination tables — session_messages has ``source`` but NOT
     ``external_message_id``, forcing the has_source fallback branch."""
     conn = sqlite3.connect(str(db_path))
-    conn.executescript("""
+    conn.executescript(
+        """
         CREATE TABLE users (
             id INTEGER PRIMARY KEY,
             username TEXT,
@@ -111,7 +112,8 @@ def _init_dest_schema(db_path: Path) -> None:
             sender_name TEXT,
             timestamp TEXT
         );
-        """)
+        """
+    )
     conn.execute(
         "INSERT INTO users (id, username, system_account, email) VALUES (1, 'rhuang', 'rhuang', 'r@x')"
     )

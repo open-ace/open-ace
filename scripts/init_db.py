@@ -40,20 +40,24 @@ def create_default_tenant(
     try:
         # Create tenant
         cursor.execute(
-            db._convert_sql("""
+            db._convert_sql(
+                """
                 INSERT INTO tenants (id, name, slug, status, plan)
                 VALUES (?, ?, ?, 'active', 'standard')
-            """),
+            """
+            ),
             (tenant_id, name, slug),
         )
 
         # Create tenant_quotas
         cursor.execute(
-            db._convert_sql("""
+            db._convert_sql(
+                """
                 INSERT INTO tenant_quotas (tenant_id, daily_token_limit, monthly_token_limit,
                     daily_request_limit, monthly_request_limit, max_users, max_sessions_per_user)
                 VALUES (?, 10000000, 300000000, 10000, 300000, 100, 10)
-            """),
+            """
+            ),
             (tenant_id,),
         )
 
@@ -68,11 +72,13 @@ def create_default_tenant(
             bool_false = 0
 
         cursor.execute(
-            db._convert_sql("""
+            db._convert_sql(
+                """
                 INSERT INTO tenant_settings (tenant_id, content_filter_enabled, audit_log_enabled,
                     audit_log_retention_days, data_retention_days, sso_enabled)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """),
+            """
+            ),
             (tenant_id, bool_true, bool_true, 90, 365, bool_false),
         )
 

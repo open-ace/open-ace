@@ -22,7 +22,8 @@ class TestRetentionExecutionRepository:
         # Create retention_executions table directly for testing
         with db.connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS retention_executions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     execution_id TEXT UNIQUE NOT NULL,
@@ -49,7 +50,8 @@ class TestRetentionExecutionRepository:
                     max_records_override INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            """)
+            """
+            )
             # Clean table before test
             cursor.execute("DELETE FROM retention_executions")
             conn.commit()

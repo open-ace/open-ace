@@ -222,7 +222,8 @@ def test_remote_runtime_state_migration_idempotent_when_tables_preexist(tmp_path
     # both tables (and one of their indexes) to mimic a schema.sql bootstrap.
     command.upgrade(alembic_cfg, "20260717_004_scope_usage_and_audit_to_tenant")
     conn = sqlite3.connect(db_path)
-    conn.executescript("""
+    conn.executescript(
+        """
         CREATE TABLE remote_runtime_commands (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             command_id TEXT NOT NULL UNIQUE,
@@ -249,7 +250,8 @@ def test_remote_runtime_state_migration_idempotent_when_tables_preexist(tmp_path
         );
         CREATE INDEX idx_remote_runtime_commands_expires
             ON remote_runtime_commands (expires_at);
-        """)
+        """
+    )
     conn.commit()
     conn.close()
 

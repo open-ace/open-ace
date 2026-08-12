@@ -181,7 +181,8 @@ def _load_fetch_zcode(tmp_db_url: str):
 def _init_dest_schema(db_path: Path) -> None:
     """Minimal destination schema fetch_zcode writes to."""
     conn = sqlite3.connect(str(db_path))
-    conn.executescript("""
+    conn.executescript(
+        """
         CREATE TABLE users (
             id INTEGER PRIMARY KEY,
             username TEXT,
@@ -232,7 +233,8 @@ def _init_dest_schema(db_path: Path) -> None:
             sender_name TEXT,
             timestamp TEXT
         );
-        """)
+        """
+    )
     conn.commit()
     conn.close()
 

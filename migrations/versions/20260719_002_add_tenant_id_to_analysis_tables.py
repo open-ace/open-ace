@@ -198,24 +198,34 @@ def upgrade() -> None:
         # the project_path backfill matches ~0 rows anyway (format mismatch,
         # see PR #1885), the practical impact is nil — flagged here so the
         # behavior change is explicit, not accidental.
-        conn.execute(sa.text("""
+        conn.execute(
+            sa.text(
+                """
                 UPDATE daily_messages
                 SET tenant_id = u.tenant_id
                 FROM users u
                 WHERE daily_messages.tenant_id IS NULL
                   AND daily_messages.user_id = u.id
-                """))
-        conn.execute(sa.text("""
+                """
+            )
+        )
+        conn.execute(
+            sa.text(
+                """
                 UPDATE daily_messages
                 SET tenant_id = p.tenant_id
                 FROM projects p
                 WHERE daily_messages.tenant_id IS NULL
                   AND daily_messages.project_path = p.path
-                """))
+                """
+            )
+        )
     else:
         # SQLite: no UPDATE ... FROM / no CONCURRENTLY; keep correlated
         # subqueries (small tables, not a concern).
-        conn.execute(sa.text("""
+        conn.execute(
+            sa.text(
+                """
                 UPDATE daily_messages
                 SET tenant_id = (
                     SELECT users.tenant_id
@@ -223,8 +233,12 @@ def upgrade() -> None:
                     WHERE users.id = daily_messages.user_id
                 )
                 WHERE tenant_id IS NULL AND user_id IS NOT NULL
-                """))
-        conn.execute(sa.text("""
+                """
+            )
+        )
+        conn.execute(
+            sa.text(
+                """
                 UPDATE daily_messages
                 SET tenant_id = (
                     SELECT projects.tenant_id
@@ -232,7 +246,9 @@ def upgrade() -> None:
                     WHERE projects.path = daily_messages.project_path
                 )
                 WHERE tenant_id IS NULL AND project_path IS NOT NULL
-                """))
+                """
+            )
+        )
 
 
 def downgrade() -> None:

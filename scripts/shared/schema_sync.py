@@ -277,12 +277,14 @@ def sqlite_snapshot_from_db(
     table_filter = "" if include_alembic_version else "AND name != 'alembic_version'"
 
     tables: dict[str, list[dict[str, Any]]] = {}
-    for row in conn.execute(f"""
+    for row in conn.execute(
+        f"""
         SELECT name
         FROM sqlite_master
         WHERE type = 'table' AND name NOT LIKE 'sqlite_%' {table_filter}
         ORDER BY name
-        """).fetchall():
+        """
+    ).fetchall():
         table_name = str(row["name"])
         columns = []
         for col in conn.execute(f"PRAGMA table_info({table_name})").fetchall():

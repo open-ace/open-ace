@@ -34,11 +34,13 @@ def post_baseline_revision() -> str:
 
 def _stamp_sqlite(db_path, revision: str | None) -> None:
     conn = sqlite3.connect(db_path)
-    conn.executescript("""
+    conn.executescript(
+        """
         CREATE TABLE alembic_version (
             version_num TEXT PRIMARY KEY
         )
-        """)
+        """
+    )
     if revision is not None:
         conn.execute("INSERT INTO alembic_version(version_num) VALUES (?)", (revision,))
     conn.commit()

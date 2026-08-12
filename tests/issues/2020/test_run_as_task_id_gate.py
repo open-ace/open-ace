@@ -20,14 +20,16 @@ _WRAPPER = _ROOT / "scripts" / "openace-run-as.sh"
 def _fake_validator(tmp_path: Path, behavior: str) -> Path:
     script = tmp_path / f"fake-validator-{behavior}"
     script.write_text(
-        textwrap.dedent(f"""\
+        textwrap.dedent(
+            f"""\
             #!/usr/bin/env bash
             case "{behavior}" in
               accept)         exit 0 ;;
               reject_account) echo "openace-validate-launch: reject_account" >&2; exit 1 ;;
               *)              exit 2 ;;
             esac
-            """),
+            """
+        ),
         encoding="utf-8",
     )
     script.chmod(0o755)

@@ -30,14 +30,18 @@ def upgrade() -> None:
     if conn.dialect.name != "postgresql":
         return
 
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE tenant_quotas
         ALTER COLUMN daily_token_limit TYPE bigint
-        """)
-    op.execute("""
+        """
+    )
+    op.execute(
+        """
         ALTER TABLE tenant_quotas
         ALTER COLUMN monthly_token_limit TYPE bigint
-        """)
+        """
+    )
 
 
 def downgrade() -> None:
@@ -52,13 +56,17 @@ def downgrade() -> None:
     if conn.dialect.name != "postgresql":
         return
 
-    op.execute("""
+    op.execute(
+        """
         ALTER TABLE tenant_quotas
         ALTER COLUMN daily_token_limit TYPE integer
         USING daily_token_limit::integer
-        """)
-    op.execute("""
+        """
+    )
+    op.execute(
+        """
         ALTER TABLE tenant_quotas
         ALTER COLUMN monthly_token_limit TYPE integer
         USING monthly_token_limit::integer
-        """)
+        """
+    )

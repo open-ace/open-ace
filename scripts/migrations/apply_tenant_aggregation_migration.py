@@ -25,10 +25,12 @@ def apply_migration():
         cursor = conn.cursor()
 
         # Check if already applied
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT name FROM sqlite_master
             WHERE type='table' AND name='aggregation_history'
-        """)
+        """
+        )
 
         if cursor.fetchone():
             print("Migration already applied. Skipping...")
@@ -38,7 +40,8 @@ def apply_migration():
 
         # 1. Create aggregation_history table
         print("Creating aggregation_history table...")
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS aggregation_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 type VARCHAR(50) NOT NULL,
@@ -52,7 +55,8 @@ def apply_migration():
                 completed_at DATETIME,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
-        """)
+        """
+        )
 
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_aggregation_history_type_date ON aggregation_history(type, start_date, end_date)"
@@ -63,7 +67,8 @@ def apply_migration():
 
         # 2. Create tenant_period_history table
         print("Creating tenant_period_history table...")
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS tenant_period_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tenant_id INTEGER NOT NULL,
@@ -76,7 +81,8 @@ def apply_migration():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
             )
-        """)
+        """
+        )
 
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_tenant_period_history_tenant ON tenant_period_history(tenant_id)"
@@ -87,7 +93,8 @@ def apply_migration():
 
         # 3. Create tenant_plans table
         print("Creating tenant_plans table...")
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS tenant_plans (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name VARCHAR(100) NOT NULL UNIQUE,
@@ -101,7 +108,8 @@ def apply_migration():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
-        """)
+        """
+        )
 
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_tenant_plans_slug ON tenant_plans(slug)")
         cursor.execute(
@@ -110,7 +118,8 @@ def apply_migration():
 
         # 4. Create alerts_history table
         print("Creating alerts_history table...")
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS alerts_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 alert_type VARCHAR(50) NOT NULL,
@@ -125,7 +134,8 @@ def apply_migration():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
             )
-        """)
+        """
+        )
 
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_alerts_history_type ON alerts_history(alert_type)"
@@ -139,7 +149,8 @@ def apply_migration():
 
         # 5. Create consistency_violations table
         print("Creating consistency_violations table...")
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS consistency_violations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tenant_id INTEGER,
@@ -154,7 +165,8 @@ def apply_migration():
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
             )
-        """)
+        """
+        )
 
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_consistency_violations_tenant ON consistency_violations(tenant_id)"

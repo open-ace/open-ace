@@ -43,14 +43,18 @@ def upgrade() -> None:
             sa.Column("tenant_id", sa.Integer(), nullable=False, server_default="1"),
         )
 
-    conn.execute(sa.text("""
+    conn.execute(
+        sa.text(
+            """
             UPDATE agent_sessions
             SET tenant_id = COALESCE(
                 (SELECT users.tenant_id FROM users WHERE users.id = agent_sessions.user_id),
                 tenant_id,
                 1
             )
-            """))
+            """
+        )
+    )
 
     agent_session_indexes = _index_names(inspector, "agent_sessions")
     if "idx_agent_sessions_tenant_user" not in agent_session_indexes:
@@ -75,7 +79,9 @@ def upgrade() -> None:
             sa.Column("tenant_id", sa.Integer(), nullable=False, server_default="1"),
         )
 
-    conn.execute(sa.text("""
+    conn.execute(
+        sa.text(
+            """
             UPDATE session_messages
             SET tenant_id = COALESCE(
                 (
@@ -86,7 +92,9 @@ def upgrade() -> None:
                 tenant_id,
                 1
             )
-            """))
+            """
+        )
+    )
 
     session_message_indexes = _index_names(inspector, "session_messages")
     if "idx_session_messages_tenant_session" not in session_message_indexes:

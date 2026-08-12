@@ -238,7 +238,8 @@ class TestSMPTPasswordEncryptionFlow(unittest.TestCase):
 
         try:
             conn = sqlite3.connect(db_path)
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE smtp_settings (
                     id INTEGER PRIMARY KEY,
                     smtp_host TEXT,
@@ -252,7 +253,8 @@ class TestSMPTPasswordEncryptionFlow(unittest.TestCase):
                     created_at TIMESTAMP,
                     updated_at TIMESTAMP
                 )
-            """)
+            """
+            )
             conn.commit()
             conn.close()
 

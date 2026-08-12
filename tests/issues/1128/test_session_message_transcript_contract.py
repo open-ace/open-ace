@@ -126,7 +126,8 @@ def test_ensure_tables_migrates_legacy_session_messages_schema(tmp_path, monkeyp
     monkeypatch.setattr(sm_mod, "is_postgresql", lambda: False)
     db_path = tmp_path / "legacy_session_messages.db"
     conn = sqlite3.connect(str(db_path))
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE agent_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL UNIQUE,
@@ -149,8 +150,10 @@ def test_ensure_tables_migrates_legacy_session_messages_schema(tmp_path, monkeyp
             completed_at TIMESTAMP,
             expires_at TIMESTAMP
         )
-        """)
-    conn.execute("""
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE session_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL,
@@ -161,7 +164,8 @@ def test_ensure_tables_migrates_legacy_session_messages_schema(tmp_path, monkeyp
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             metadata TEXT
         )
-        """)
+        """
+    )
     conn.commit()
     conn.close()
 

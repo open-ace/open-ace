@@ -45,12 +45,16 @@ class ModelGatewayConfigRepository:
         """Get the gateway config for display (API key masked, ciphertext removed)."""
         conn = self._get_connection()
         cursor = conn.cursor()
-        cursor.execute(adapt_sql("""
+        cursor.execute(
+            adapt_sql(
+                """
                 SELECT id, mode, base_url, encrypted_api_key, encryption_version,
                        model_prefix_mode, model_prefix, created_by, created_at, updated_at
                 FROM model_gateway_config
                 ORDER BY id DESC LIMIT 1
-                """))
+                """
+            )
+        )
         row = cursor.fetchone()
         conn.close()
         if not row:
@@ -73,11 +77,15 @@ class ModelGatewayConfigRepository:
         """Get the decrypted gateway config for runtime forwarding (planner use)."""
         conn = self._get_connection()
         cursor = conn.cursor()
-        cursor.execute(adapt_sql("""
+        cursor.execute(
+            adapt_sql(
+                """
                 SELECT mode, base_url, encrypted_api_key, model_prefix_mode, model_prefix
                 FROM model_gateway_config
                 ORDER BY id DESC LIMIT 1
-                """))
+                """
+            )
+        )
         row = cursor.fetchone()
         conn.close()
         if not row:

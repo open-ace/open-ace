@@ -125,22 +125,26 @@ def test_sync_creates_users_teams_memberships_and_sso_links(sync_env):
     assert [team["name"] for team in teams] == ["Engineering", "QA"]
     assert all(DINGTALK_PROVIDER_NAME in team["settings"] for team in teams)
 
-    identities = db.fetch_all("""
+    identities = db.fetch_all(
+        """
         SELECT provider_name, provider_user_id
         FROM sso_identities
         ORDER BY provider_user_id ASC
-        """)
+        """
+    )
     assert identities == [
         {"provider_name": DINGTALK_PROVIDER_NAME, "provider_user_id": "manager123"},
         {"provider_name": DINGTALK_PROVIDER_NAME, "provider_user_id": "staff456"},
     ]
 
-    memberships = db.fetch_all("""
+    memberships = db.fetch_all(
+        """
         SELECT tm.user_id, t.name AS team_name
         FROM team_members tm
         JOIN teams t ON t.team_id = tm.team_id
         ORDER BY team_name ASC
-        """)
+        """
+    )
     assert [row["team_name"] for row in memberships] == ["Engineering", "QA"]
 
 

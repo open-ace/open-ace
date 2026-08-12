@@ -79,21 +79,25 @@ def table_exists(connection: Connection, table_name: str) -> bool:
     """Return whether a table exists in the current database."""
     if connection.dialect.name == "postgresql":
         result = connection.execute(
-            sa.text("""
+            sa.text(
+                """
                 SELECT 1
                 FROM information_schema.tables
                 WHERE table_schema = 'public' AND table_name = :table_name
-                """),
+                """
+            ),
             {"table_name": table_name},
         )
         return result.scalar() is not None
 
     result = connection.execute(
-        sa.text("""
+        sa.text(
+            """
             SELECT 1
             FROM sqlite_master
             WHERE type = 'table' AND name = :table_name
-            """),
+            """
+        ),
         {"table_name": table_name},
     )
     return result.scalar() is not None

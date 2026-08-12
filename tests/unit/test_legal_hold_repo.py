@@ -22,7 +22,8 @@ class TestLegalHoldRepository:
         # Create legal_holds table directly for testing
         with db.connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS legal_holds (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     tenant_id INTEGER NOT NULL,
@@ -38,7 +39,8 @@ class TestLegalHoldRepository:
                     lifted_at TIMESTAMP,
                     lift_reason TEXT
                 )
-            """)
+            """
+            )
             # Clean table before test
             cursor.execute("DELETE FROM legal_holds")
             conn.commit()

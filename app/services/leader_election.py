@@ -474,19 +474,23 @@ def check_scheduler_tables_exist(db: Database) -> bool:
     """
     try:
         if db.is_postgresql:
-            result = db.fetch_one("""
+            result = db.fetch_one(
+                """
                 SELECT COUNT(*) as count
                 FROM information_schema.tables
                 WHERE table_name IN ('scheduler_leaders', 'scheduler_runs')
-                """)
+                """
+            )
             return result is not None and result.get("count", 0) == 2
         else:
             # SQLite
-            result = db.fetch_one("""
+            result = db.fetch_one(
+                """
                 SELECT COUNT(*) as count
                 FROM sqlite_master
                 WHERE type='table' AND name IN ('scheduler_leaders', 'scheduler_runs')
-                """)
+                """
+            )
             return result is not None and result.get("count", 0) == 2
     except Exception as e:
         logger.error(f"Failed to check scheduler tables: {e}")

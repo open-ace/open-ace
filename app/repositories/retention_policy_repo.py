@@ -46,11 +46,13 @@ class RetentionPolicyRepository:
         # Try tenant-level policy first
         if tenant_id is not None:
             row = self.db.fetch_one(
-                adapt_sql(f"""
+                adapt_sql(
+                    f"""
                     SELECT * FROM retention_policies
                     WHERE tenant_id = ? AND data_type = ? AND {adapt_boolean_condition('enabled', True)}
                     ORDER BY version DESC LIMIT 1
-                """),
+                """
+                ),
                 (tenant_id, data_type),
             )
             if row:
@@ -58,11 +60,13 @@ class RetentionPolicyRepository:
 
         # Fallback to global default
         row = self.db.fetch_one(
-            adapt_sql(f"""
+            adapt_sql(
+                f"""
                 SELECT * FROM retention_policies
                 WHERE tenant_id IS NULL AND data_type = ? AND {adapt_boolean_condition('enabled', True)}
                 ORDER BY version DESC LIMIT 1
-            """),
+            """
+            ),
             (data_type,),
         )
         if row:
@@ -87,35 +91,43 @@ class RetentionPolicyRepository:
         if tenant_id is not None:
             if include_disabled:
                 rows = self.db.fetch_all(
-                    adapt_sql("""
+                    adapt_sql(
+                        """
                         SELECT * FROM retention_policies
                         WHERE tenant_id = ?
                         ORDER BY data_type, version DESC
-                    """),
+                    """
+                    ),
                     (tenant_id,),
                 )
             else:
                 rows = self.db.fetch_all(
-                    adapt_sql(f"""
+                    adapt_sql(
+                        f"""
                         SELECT * FROM retention_policies
                         WHERE tenant_id = ? AND {adapt_boolean_condition('enabled', True)}
                         ORDER BY data_type, version DESC
-                    """),
+                    """
+                    ),
                     (tenant_id,),
                 )
         else:
             if include_disabled:
-                rows = self.db.fetch_all("""
+                rows = self.db.fetch_all(
+                    """
                     SELECT * FROM retention_policies
                     WHERE tenant_id IS NULL
                     ORDER BY data_type, version DESC
-                """)
+                """
+                )
             else:
-                rows = self.db.fetch_all(f"""
+                rows = self.db.fetch_all(
+                    f"""
                     SELECT * FROM retention_policies
                     WHERE tenant_id IS NULL AND {adapt_boolean_condition('enabled', True)}
                     ORDER BY data_type, version DESC
-                """)
+                """
+                )
 
         return [self._row_to_dict(row) for row in rows]
 
@@ -159,13 +171,15 @@ class RetentionPolicyRepository:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql("""
+                adapt_sql(
+                    """
                     INSERT INTO retention_policies (
                         tenant_id, data_type, retention_days, action, version,
                         archive_target, archive_config, anonymize_fields,
                         backup_before_anonymize, created_by, created_at, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """),
+                """
+                ),
                 (
                     tenant_id,
                     data_type,
@@ -254,11 +268,13 @@ class RetentionPolicyRepository:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql(f"""
+                adapt_sql(
+                    f"""
                     UPDATE retention_policies
                     SET {', '.join(updates)}
                     WHERE id = ?
-                """),
+                """
+                ),
                 params,
             )
             conn.commit()
@@ -304,10 +320,12 @@ class RetentionPolicyRepository:
         """
         if tenant_id is not None:
             row = self.db.fetch_one(
-                adapt_sql("""
+                adapt_sql(
+                    """
                     SELECT MAX(version) as max_version FROM retention_policies
                     WHERE tenant_id = ? AND data_type = ?
-                """),
+                """
+                ),
                 (tenant_id, data_type),
             )
         else:

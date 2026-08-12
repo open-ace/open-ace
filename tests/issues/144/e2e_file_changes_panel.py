@@ -378,45 +378,55 @@ def run_tests():
         pause(2)
 
         # 找到正确的 localStorage key
-        storage_key = page.evaluate("""() => {
+        storage_key = page.evaluate(
+            """() => {
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
                 if (key && (key.includes('ace') || key.includes('storage'))) return key;
             }
             return null;
-        }""")
+        }"""
+        )
         log("localStorage key", str(storage_key))
 
         if storage_key:
             # 关闭面板
-            page.evaluate(f"""() => {{
+            page.evaluate(
+                f"""() => {{
                 const store = JSON.parse(localStorage.getItem('{storage_key}') || '{{}}');
                 if (store.state) {{
                     store.state.showFileChangesPanel = false;
                     localStorage.setItem('{storage_key}', JSON.stringify(store));
                 }}
-            }}""")
-            stored_val = page.evaluate(f"""() => {{
+            }}"""
+            )
+            stored_val = page.evaluate(
+                f"""() => {{
                 const store = JSON.parse(localStorage.getItem('{storage_key}') || '{{}}');
                 return store.state?.showFileChangesPanel;
-            }}""")
+            }}"""
+            )
             check("localStorage 中面板设为 false", not stored_val)
 
             # 验证 Workspace 的 getEffectiveUrl 会读到 false
             check("getEffectiveUrl 会读到 false", not stored_val)
 
             # 恢复
-            page.evaluate(f"""() => {{
+            page.evaluate(
+                f"""() => {{
                 const store = JSON.parse(localStorage.getItem('{storage_key}') || '{{}}');
                 if (store.state) {{
                     store.state.showFileChangesPanel = true;
                     localStorage.setItem('{storage_key}', JSON.stringify(store));
                 }}
-            }}""")
-            restored = page.evaluate(f"""() => {{
+            }}"""
+            )
+            restored = page.evaluate(
+                f"""() => {{
                 const store = JSON.parse(localStorage.getItem('{storage_key}') || '{{}}');
                 return store.state?.showFileChangesPanel;
-            }}""")
+            }}"""
+            )
             check("恢复后 localStorage 为 true", restored)
             log("恢复", f"showFileChangesPanel = {restored}")
             shot(page, "15_panel_setting_verified")

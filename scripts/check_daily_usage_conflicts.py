@@ -22,7 +22,8 @@ from app.repositories.database import Database
 def find_conflicts() -> list:
     """Find groups of rows with same (date, tool, host) but different tenant."""
     db = Database()
-    rows = db.fetch_all("""
+    rows = db.fetch_all(
+        """
         SELECT
             date,
             tool_name,
@@ -33,14 +34,16 @@ def find_conflicts() -> list:
         GROUP BY date, tool_name, host_name
         HAVING COUNT(DISTINCT COALESCE(tenant_id, 1)) > 1
         ORDER BY tenant_count DESC, date DESC
-        """)
+        """
+    )
     return rows if rows else []
 
 
 def count_conflict_rows() -> int:
     """Count total rows involved in conflicts."""
     db = Database()
-    result = db.fetch_one("""
+    result = db.fetch_one(
+        """
         SELECT COUNT(*) as count
         FROM daily_usage du
         INNER JOIN (
@@ -52,7 +55,8 @@ def count_conflict_rows() -> int:
         ON du.date = conflicts.date
            AND du.tool_name = conflicts.tool_name
            AND du.host_name = conflicts.host_name
-        """)
+        """
+    )
     return result["count"] if result else 0
 
 

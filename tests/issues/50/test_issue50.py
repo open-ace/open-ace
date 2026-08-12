@@ -39,10 +39,12 @@ async def main():
         print("\n2. Checking menu items visibility...")
 
         # Check for work mode nav items
-        nav_items_text = await page.evaluate("""() => {
+        nav_items_text = await page.evaluate(
+            """() => {
             const all = document.querySelectorAll('button, a');
             return Array.from(all).map(el => el.textContent.trim()).filter(t => t);
-        }""")
+        }"""
+        )
 
         menu_items = {
             "Workspace": "Workspace",

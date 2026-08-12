@@ -39,10 +39,12 @@ async def main():
         print("\n2. Checking menu items visibility...")
 
         # Check for manage mode nav items
-        nav_items_text = await page.evaluate("""() => {
+        nav_items_text = await page.evaluate(
+            """() => {
             const items = document.querySelectorAll('.manage-sidebar .nav-item');
             return Array.from(items).map(el => el.textContent.trim());
-        }""")
+        }"""
+        )
 
         menu_items = {
             "Dashboard": "Dashboard",

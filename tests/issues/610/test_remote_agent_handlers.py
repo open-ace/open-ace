@@ -352,14 +352,16 @@ class TestCmdGitDiff:
         test_file = tmp_path / "src.py"
         test_file.write_text("print('modified')\n")
 
-        diff_output = textwrap.dedent("""\
+        diff_output = textwrap.dedent(
+            """\
             diff --git a/src.py b/src.py
             --- a/src.py
             +++ b/src.py
             @@ -1 +1 @@
             -print('original')
             +print('modified')
-        """)
+        """
+        )
         original_content = "print('original')\n"
 
         calls = {
@@ -395,11 +397,13 @@ class TestCmdGitDiff:
         """Diff for a deleted file: full_path does not exist on disk."""
         agent = _make_agent()
 
-        diff_output = textwrap.dedent("""\
+        diff_output = textwrap.dedent(
+            """\
             diff --git a/gone.py b/gone.py
             --- a/gone.py
             +++ /dev/null
-        """)
+        """
+        )
         original_content = "old content\n"
 
         calls = {

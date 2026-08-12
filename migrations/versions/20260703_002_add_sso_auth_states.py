@@ -64,7 +64,8 @@ def upgrade() -> None:
     # representation depending on the SQLite library version (#1815 CI drift).
     conn = op.get_bind()
     if conn.dialect.name == "postgresql":
-        op.execute("""
+        op.execute(
+            """
             CREATE TABLE sso_auth_states (
                 state TEXT PRIMARY KEY,
                 code_verifier TEXT NOT NULL,
@@ -73,9 +74,11 @@ def upgrade() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL '600 seconds')
             )
-            """)
+            """
+        )
     else:
-        op.execute("""
+        op.execute(
+            """
             CREATE TABLE sso_auth_states (
                 state TEXT PRIMARY KEY,
                 code_verifier TEXT NOT NULL,
@@ -84,7 +87,8 @@ def upgrade() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP NOT NULL DEFAULT (datetime('now', '+600 seconds'))
             )
-            """)
+            """
+        )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_sso_auth_states_expires ON sso_auth_states(expires_at)"
     )

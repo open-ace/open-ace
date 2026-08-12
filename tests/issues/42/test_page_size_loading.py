@@ -108,7 +108,8 @@ async def test_page_size_loading():
                 print("\n[Step 6] Changing Page Size...")
 
                 # Set up a listener to detect if "No sessions found" appears
-                await page.evaluate("""
+                await page.evaluate(
+                    """
                     window.noSessionsFound = false;
                     window.loadingShown = false;
 
@@ -134,18 +135,21 @@ async def test_page_size_loading():
                             characterData: true
                         });
                     }
-                """)
+                """
+                )
 
                 # Change page size using JavaScript
                 print("  Triggering page size change via JavaScript...")
-                await page.evaluate("""
+                await page.evaluate(
+                    """
                     () => {
                         const table = Tabulator.findTable('#conversation-history-table')[0];
                         if (table) {
                             table.setPageSize(50);
                         }
                     }
-                """)
+                """
+                )
 
                 time.sleep(0.5)
 
@@ -155,12 +159,14 @@ async def test_page_size_loading():
                 print(f"✓ Screenshot saved: {screenshot_path}")
 
                 # Check what was shown during loading
-                result = await page.evaluate("""
+                result = await page.evaluate(
+                    """
                     ({
                         noSessionsFound: window.noSessionsFound,
                         loadingShown: window.loadingShown
                     })
-                """)
+                """
+                )
 
                 print(f"  'No sessions found' shown: {result['noSessionsFound']}")
                 print(f"  Loading state shown: {result['loadingShown']}")
@@ -183,12 +189,14 @@ async def test_page_size_loading():
                 print(f"✓ Screenshot saved: {screenshot_path}")
 
                 # Verify page size was changed
-                new_page_size = await page.evaluate("""
+                new_page_size = await page.evaluate(
+                    """
                     () => {
                         const table = Tabulator.findTable('#conversation-history-table')[0];
                         return table ? table.getPageSize() : null;
                     }
-                """)
+                """
+                )
                 print(f"  New Page Size: {new_page_size}")
 
                 if new_page_size == 50:

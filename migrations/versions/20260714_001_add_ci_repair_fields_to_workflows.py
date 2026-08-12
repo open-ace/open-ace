@@ -52,7 +52,8 @@ def upgrade() -> None:
             sa.Column("last_ci_failure_signature", sa.Text(), nullable=True, server_default=""),
         )
 
-    op.execute("""
+    op.execute(
+        """
         UPDATE autonomous_workflows
         SET preferred_worktree_path = CASE
             WHEN worktree_path IS NOT NULL AND worktree_path != '' THEN worktree_path
@@ -63,7 +64,8 @@ def upgrade() -> None:
             ELSE COALESCE(preferred_worktree_path, '')
         END
         WHERE preferred_worktree_path IS NULL OR preferred_worktree_path = ''
-        """)
+        """
+    )
 
 
 def downgrade() -> None:

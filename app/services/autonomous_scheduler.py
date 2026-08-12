@@ -290,11 +290,13 @@ class AutonomousScheduler:
                 import app.repositories.database as _db_mod
 
                 cursor.execute(
-                    _db_mod.adapt_sql("""
+                    _db_mod.adapt_sql(
+                        """
                         UPDATE autonomous_workflows
                         SET locked_at = NULL, locked_by = NULL
                         WHERE workflow_id = ?
-                        """),
+                        """
+                    ),
                     (workflow_id,),
                 )
                 conn.commit()

@@ -50,7 +50,8 @@ class SMTPConfigRepository:
 
         # JOIN with users table to get created_by_username
         if is_postgresql():
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT s.id, s.smtp_host, s.smtp_port, s.smtp_user, s.encrypted_password,
                        s.encryption_version, s.from_address, s.use_tls, s.is_verified,
                        s.last_verified_at, s.created_at, s.updated_at, s.created_by,
@@ -58,17 +59,20 @@ class SMTPConfigRepository:
                 FROM smtp_settings s
                 LEFT JOIN users u ON s.created_by = u.id
                 ORDER BY s.id DESC LIMIT 1
-            """)
+            """
+            )
         else:
             # SQLite: use subquery for consistency with other repository patterns
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT s.id, s.smtp_host, s.smtp_port, s.smtp_user, s.encrypted_password,
                        s.encryption_version, s.from_address, s.use_tls, s.is_verified,
                        s.last_verified_at, s.created_at, s.updated_at, s.created_by,
                        (SELECT u.username FROM users u WHERE u.id = s.created_by) as created_by_username
                 FROM smtp_settings s
                 ORDER BY s.id DESC LIMIT 1
-            """)
+            """
+            )
 
         row = cursor.fetchone()
         conn.close()
@@ -104,13 +108,17 @@ class SMTPConfigRepository:
         conn = self._get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(adapt_sql("""
+        cursor.execute(
+            adapt_sql(
+                """
                 SELECT id, smtp_host, smtp_port, smtp_user, encrypted_password,
                        encryption_version, from_address, use_tls, is_verified,
                        last_verified_at
                 FROM smtp_settings
                 ORDER BY id DESC LIMIT 1
-            """))
+            """
+            )
+        )
 
         row = cursor.fetchone()
         conn.close()
@@ -250,11 +258,13 @@ class SMTPConfigRepository:
         cursor = conn.cursor()
 
         cursor.execute(
-            adapt_sql("""
+            adapt_sql(
+                """
                 UPDATE smtp_settings
                 SET is_verified = ?, last_verified_at = ?, updated_at = ?
                 WHERE id = ?
-            """),
+            """
+            ),
             (
                 is_verified if is_postgresql() else (1 if is_verified else 0),
                 datetime.now(timezone.utc).replace(tzinfo=None),

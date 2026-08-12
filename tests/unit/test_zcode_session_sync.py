@@ -39,7 +39,8 @@ def sync_mod():
 def _build_db(db_path: Path) -> None:
     """Create a minimal ZCode-schema DB with test data."""
     conn = sqlite3.connect(str(db_path))
-    conn.executescript("""
+    conn.executescript(
+        """
         CREATE TABLE session (
             id text primary key,
             directory text not null,
@@ -68,7 +69,8 @@ def _build_db(db_path: Path) -> None:
             output_tokens integer not null default 0,
             PRIMARY KEY (session_id, turn_id)
         );
-        """)
+        """
+    )
     conn.commit()
     conn.close()
 
