@@ -7876,6 +7876,13 @@ class AutonomousOrchestrator:
             verify_wf["worktree_path"] = checkout_path
             verify_wf["project_path"] = checkout_path
             verify_wf["branch_strategy"] = "worktree"
+            # The checkout is a `git worktree add --detach` on merged main, NOT
+            # the dev branch. Clear branch_name so _resolve_effective_repo_context
+            # yields an empty expected_branch — otherwise the post-run
+            # repo-integrity check (detached HEAD != auto-dev/<id>) false-flags a
+            # repo_integrity_violation ("Agent changed the workflow branch").
+            # The repo-escape guard is a separate check and still applies.
+            verify_wf["branch_name"] = ""
             result = self._run_agent(
                 verify_wf,
                 session_line="verification",
