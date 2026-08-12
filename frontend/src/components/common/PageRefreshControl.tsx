@@ -246,7 +246,7 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
               {showAutoRefreshToggle && (
                 <li>
                   <div className="dropdown-item-text">
-                    <div className="form-check form-switch">
+                    <div className="form-check form-switch" title={t('autoRefresh', language)}>
                       <input
                         className="form-check-input"
                         type="checkbox"
@@ -342,7 +342,10 @@ export const PageRefreshControl: React.FC<PageRefreshControlProps> = ({
 
       {/* Auto refresh toggle */}
       {showAutoRefreshToggle && (
-        <div className="form-check form-switch d-flex align-items-center mb-0">
+        <div
+          className="form-check form-switch d-flex align-items-center mb-0"
+          title={t('autoRefresh', language)}
+        >
           <input
             className="form-check-input"
             type="checkbox"
