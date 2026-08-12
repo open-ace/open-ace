@@ -51,19 +51,21 @@ def remote_session_manager(mock_session_manager, mock_agent_manager):
     """Create a RemoteSessionManager with mocked dependencies."""
     from app.modules.workspace.remote_session_manager import RemoteSessionManager
 
-    with patch(
-        "app.modules.workspace.remote_session_manager.SessionManager",
-        return_value=mock_session_manager,
-    ), patch(
-        "app.modules.workspace.remote_session_manager.get_remote_agent_manager",
-        return_value=mock_agent_manager,
-    ), patch(
-        "app.modules.workspace.remote_session_manager.APIKeyProxyService"
-    ), patch("app.modules.workspace.remote_session_manager.MessageRepository"), patch(
-        "app.modules.workspace.remote_session_manager.UserRepository"
-    ), patch(
-        "app.modules.workspace.remote_session_manager.get_run_recorder"
-    ), patch("app.modules.workspace.remote_session_manager.get_evaluator"):
+    with (
+        patch(
+            "app.modules.workspace.remote_session_manager.SessionManager",
+            return_value=mock_session_manager,
+        ),
+        patch(
+            "app.modules.workspace.remote_session_manager.get_remote_agent_manager",
+            return_value=mock_agent_manager,
+        ),
+        patch("app.modules.workspace.remote_session_manager.APIKeyProxyService"),
+        patch("app.modules.workspace.remote_session_manager.MessageRepository"),
+        patch("app.modules.workspace.remote_session_manager.UserRepository"),
+        patch("app.modules.workspace.remote_session_manager.get_run_recorder"),
+        patch("app.modules.workspace.remote_session_manager.get_evaluator"),
+    ):
         mgr = RemoteSessionManager()
         mgr._session_manager = mock_session_manager
         mgr._agent_manager = mock_agent_manager
@@ -126,9 +128,7 @@ class TestProcessSessionStatusUpdate:
         mock_session_manager.update_session.assert_called_once_with(mock_session)
 
     # TC-4: Session does not exist
-    def test_tc4_session_not_exist(
-        self, remote_session_manager, mock_session_manager
-    ):
+    def test_tc4_session_not_exist(self, remote_session_manager, mock_session_manager):
         """Method should return silently when session does not exist."""
         mock_session_manager.get_session.return_value = None
 
@@ -264,9 +264,7 @@ class TestBackfillLogging:
                 cli_session_id="cli-sess-789",
             )
 
-        assert any(
-            "Backfilled cli_session_id" in record.message for record in caplog.records
-        )
+        assert any("Backfilled cli_session_id" in record.message for record in caplog.records)
 
     def test_no_backfill_when_session_has_cli_id(
         self, remote_session_manager, mock_session_manager, mock_session, caplog
@@ -283,6 +281,4 @@ class TestBackfillLogging:
             )
 
         # Should not log backfill since session already has cli_session_id
-        assert not any(
-            "Backfilled cli_session_id" in record.message for record in caplog.records
-        )
+        assert not any("Backfilled cli_session_id" in record.message for record in caplog.records)

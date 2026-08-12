@@ -1724,7 +1724,11 @@ class RemoteSessionManager:
         )
 
     def process_session_status_update(
-        self, session_id: str, status: str, pid: int | None = None, cli_session_id: str | None = None
+        self,
+        session_id: str,
+        status: str,
+        pid: int | None = None,
+        cli_session_id: str | None = None,
     ) -> None:
         """Process a session status update from a remote agent."""
         session = self._session_manager.get_session(session_id)
