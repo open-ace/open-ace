@@ -39,6 +39,46 @@ _proxy_session = requests.Session()
 _proxy_session.trust_env = False
 
 
+def ensure_cs_cookie(info: dict, original_http_url: str, vscode_id: str) -> str:
+    """Ensure we have a code-server session cookie for HTTP-proxy auth.
+
+    code-server's ``authenticated`` middleware checks the session cookie and
+    ignores HTTP Basic Auth, so the HTTP reverse proxy must present the cookie
+    obtained by logging in once with the stored ``cs_password``. The cookie is
+    cached on the session ``info`` dict for reuse across proxied requests.
+
+    Returns the ``cookie=<value>`` header string, or ``""`` when no password is
+    configured or the login fails (the caller then proxies without a cookie and
+    lets code-server return its own 401). Never raises — a broken login must
+    not take down the proxy endpoint.
+    """
+    cs_password = (info or {}).get("cs_password", "")
+    if not cs_password:
+        return ""
+    cached = info.get("cs_cookie")
+    if cached:
+        return cached
+    login_url = original_http_url.rstrip("/") + "/login"
+    try:
+        resp = _proxy_session.post(
+            login_url,
+            data={"password": cs_password},
+            timeout=10,
+            allow_redirects=False,
+        )
+    except requests.RequestException as exc:
+        logger.warning("ensure_cs_cookie: /login failed for vscode %s: %s", vscode_id, exc)
+        return ""
+    set_cookie = resp.headers.get("Set-Cookie", "")
+    if not set_cookie:
+        return ""
+    # First cookie pair only (e.g. "cookie=<session>"); drop attrs like Path/HttpOnly.
+    cookie_pair = set_cookie.split(";", 1)[0].strip()
+    if cookie_pair:
+        info["cs_cookie"] = cookie_pair
+    return cookie_pair
+
+
 def _prepare_request_headers(headers: dict, target_url: str) -> dict:
     """Build upstream request headers for code-server.
 
