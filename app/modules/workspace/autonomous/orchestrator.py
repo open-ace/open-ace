@@ -7936,7 +7936,8 @@ class AutonomousOrchestrator:
                 "criteria yourself, then return them in the `snapshot` field. Infer "
                 "required_paths from the bug/stack trace, and write a concrete, checkable "
                 "checklist (one statement per acceptance point). Without `snapshot` populated, "
-                "your verdict is INVALID and verification cannot proceed.\n\n"
+                "your verdict is INVALID and verification cannot proceed.\n"
+                "Output the `snapshot` object as the FIRST key in your JSON, before `verdicts`.\n\n"
             )
             # Valid JSON token (the object shape) so the fenced template glm
             # copies stays parseable — never interpolate prose into the value.
@@ -7945,10 +7946,25 @@ class AutonomousOrchestrator:
                 '"closure_constraints": false}'
             )
             snapshot_note = "Populate `snapshot` with the criteria you derived above."
+            # Snapshot FIRST in the template: the empty-`snapshot` slot shown
+            # before the extraction instruction primed glm to copy it empty and
+            # omit the field (cd939cbf #2349). Listing it first + the FIRST-key
+            # instruction above nudge glm to derive it before verdicts consume
+            # attention/budget.
+            json_template = (
+                '{"snapshot": ' + snapshot_token + ", "
+                '"verdicts": [{"item": "...", "verdict": "confirmed|rejected|indeterminate", '
+                '"evidence": [{"ref": "file:line|git-diff", "note": "..."}], "rationale": "..."}]}'
+            )
         else:
             extraction_section = ""
             snapshot_token = "null"
             snapshot_note = "Leave `snapshot` null — the criteria above are authoritative."
+            json_template = (
+                '{"verdicts": [{"item": "...", "verdict": "confirmed|rejected|indeterminate", '
+                '"evidence": [{"ref": "file:line|git-diff", "note": "..."}], "rationale": "..."}], '
+                '"snapshot": null}'
+            )
         return (
             "You are an INDEPENDENT acceptance verifier. The issue must NOT be considered done "
             "just because a PR merged. Verify the MERGED code (merge commit "
@@ -7960,9 +7976,7 @@ class AutonomousOrchestrator:
             "note under 60 characters (terse evidence fits the output budget and avoids a "
             "truncated, unparseable response).\n"
             "```json\n"
-            '{"verdicts": [{"item": "...", "verdict": "confirmed|rejected|indeterminate", '
-            '"evidence": [{"ref": "file:line|git-diff", "note": "..."}], "rationale": "..."}], '
-            f'"snapshot": {snapshot_token}}}\n'
+            f"{json_template}\n"
             "```\n\n"
             f"Acceptance snapshot:\n{snap_dump}\n\n"
             f"{extraction_section}"
