@@ -939,6 +939,11 @@ CREATE TABLE scheduler_runs (
  metrics text
 );
 
+CREATE TABLE schema_metadata (
+ initialized_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ schema_version TEXT
+);
+
 CREATE TABLE security_settings (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  setting_key TEXT NOT NULL,
@@ -1334,8 +1339,8 @@ CREATE TABLE users (
  avatar_url TEXT,
  auto_mapping_enabled INTEGER DEFAULT 1,
  tenant_version integer DEFAULT 1 NOT NULL,
-    CONSTRAINT chk_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
-    CONSTRAINT chk_users_role CHECK ((role IN ('admin', 'platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
+    CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
+    CONSTRAINT chk_2332_users_role_valid CHECK ((role IN ('platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
 );
 
 CREATE TABLE web_user_auth_sessions (

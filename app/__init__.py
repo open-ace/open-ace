@@ -370,34 +370,64 @@ def create_app(config=None):
     # Register blueprints
     register_blueprints(app)
 
-    # Schema initialization: distinguish production vs development paths (Issue #2190)
+    # Schema initialization: distinguish production vs development paths (Issue #2190, #2330)
     from app.repositories.database import is_postgresql
-    from app.repositories.schema_guard import (
-        SchemaCompatibilityError,
-        check_schema_compatibility,
-        get_environment_mode,
-    )
+    from app.repositories.schema_guard import get_environment_mode
+    from app.services.schema_compatibility_service import get_schema_compatibility_service
+    from app.services.schema_compatibility_types import CompatibilityPolicy, SchemaErrorCategory
 
     env_mode = get_environment_mode()
 
     if is_postgresql() and env_mode == "production":
-        # PostgreSQL production path: check schema version, do NOT execute DDL
+        # PostgreSQL production path: check schema version using Alembic graph (Issue #2330)
         from app.repositories.database import Database
 
         db = Database()
         conn = db.get_connection()
         try:
-            check_schema_compatibility(conn)
-        except SchemaCompatibilityError as e:
+            # Use new SchemaCompatibilityService
+            service = get_schema_compatibility_service()
+            result = service.check_database_compatibility(conn, CompatibilityPolicy.REQUIRE_HEAD)
+
+            if not result.is_compatible:
+                # Format error based on category
+                error_msg = result.diagnostic_message or "Schema compatibility check failed"
+
+                if result.bypass_active:
+                    # Bypass is active - log warning but allow startup
+                    logger.warning(
+                        f"Schema compatibility BYPASSED for emergency: {result.bypass_reason}. "
+                        f"Database may be incompatible."
+                    )
+                    # Return early - don't log "passed" message after bypass
+                    return
+                else:
+                    # No bypass - fail closed
+                    logger.error(f"Schema compatibility check failed: {error_msg}")
+
+                    # Provide specific guidance based on error category
+                    if result.error_category == SchemaErrorCategory.FRESH_DATABASE:
+                        guidance = (
+                            "\n\nFresh database detected in production. "
+                            "Web workers must not start on uninitialized database. "
+                            "Run migration job first: alembic upgrade head"
+                        )
+                    elif result.error_category == SchemaErrorCategory.BEHIND_HEAD:
+                        guidance = (
+                            f"\n\nMissing migrations: {len(result.missing_migrations)}\n"
+                            f"Run: alembic upgrade head"
+                        )
+                    else:
+                        guidance = "\n\nRun: alembic upgrade head"
+
+                    raise RuntimeError(f"Database schema is not compatible: {error_msg}{guidance}")
+
+        except Exception as e:
             logger.error(f"Schema compatibility check failed: {e}")
-            raise RuntimeError(
-                f"Database schema is not compatible. {e}\n"
-                f"Current revision: {e.current_revision}\n"
-                f"Minimum required: {e.min_revision}\n"
-                "Run 'alembic upgrade head' to migrate database."
-            )
+            raise RuntimeError(f"Database schema compatibility check failed: {e}")
         finally:
             conn.close()
+
         logger.info("Production schema version check passed")
     else:
         # SQLite development path: allow bootstrap
@@ -502,7 +532,7 @@ def create_app(config=None):
 
         return jsonify(results), status_code
 
-    # Readiness check endpoint (Issue #2186, #2190)
+    # Readiness check endpoint (Issue #2186, #2190, #2330)
     @app.route("/readyz")
     def readiness_check():
         """Readiness check endpoint for Kubernetes and load balancers.
@@ -510,15 +540,13 @@ def create_app(config=None):
         Checks database connection, schema version compatibility, config directory,
         workspace directory, encryption keys, and initialization status.
         Returns HTTP 503 if any critical check fails.
+
+        Issue #2330: Uses SchemaCompatibilityService with Alembic graph validation
         """
         from app.repositories.database import Database, is_postgresql
-        from app.repositories.schema_guard import (
-            MIN_SUPPORTED_REVISION,
-            SchemaCompatibilityError,
-            check_schema_compatibility,
-            get_database_revision,
-            get_environment_mode,
-        )
+        from app.repositories.schema_guard import get_environment_mode
+        from app.services.schema_compatibility_service import get_schema_compatibility_service
+        from app.services.schema_compatibility_types import CompatibilityPolicy
         from app.utils.health_checks import (
             check_config_directory,
             check_database_connection,
@@ -547,38 +575,55 @@ def create_app(config=None):
         if db_result.get("status") != "ok":
             status_code = 503
 
-        # Check schema version (PostgreSQL production only)
+        # Check schema version using SchemaCompatibilityService (Issue #2330)
         if is_postgresql() and get_environment_mode() == "production":
             try:
                 db = Database()
                 conn = db.get_connection()
                 try:
-                    current_revision = get_database_revision(conn)
+                    # Use new SchemaCompatibilityService
+                    service = get_schema_compatibility_service()
+                    result = service.check_database_compatibility(
+                        conn, CompatibilityPolicy.REQUIRE_HEAD
+                    )
 
-                    checks["schema_version"]["current"] = current_revision
-                    checks["schema_version"]["required"] = MIN_SUPPORTED_REVISION
+                    # Populate check results
+                    if result.current_heads:
+                        checks["schema_version"]["current"] = result.current_heads[0]
+                    else:
+                        checks["schema_version"]["current"] = None
 
-                    if current_revision is None:
-                        # Fresh database
-                        checks["schema_version"]["status"] = "fresh"
+                    checks["schema_version"]["expected"] = result.expected_head
+                    checks["schema_version"]["bypass_active"] = result.bypass_active
+
+                    if result.bypass_active:
+                        # Bypass is active - report degraded status
+                        checks["schema_version"]["status"] = "bypass"
+                        checks["schema_version"]["compatible"] = False  # Bypass means degraded
+                        checks["schema_version"]["bypass_reason"] = result.bypass_reason
+                        checks["schema_version"]["error_category"] = "emergency_bypass"
+                        status_code = 503  # Always return 503 when bypass is active
+                        logger.warning(
+                            "Schema compatibility BYPASSED - readiness returning 503. "
+                            f"Reason: {result.bypass_reason}"
+                        )
+                    elif result.is_compatible:
+                        checks["schema_version"]["status"] = "ok"
                         checks["schema_version"]["compatible"] = True
                     else:
-                        # Delegate to schema_guard's compatibility logic, which
-                        # correctly treats timestamp revisions (e.g. 20260805_001)
-                        # as >= the "baseline_*" starting point. A plain string
-                        # comparison here ("2026..." < "baseline...") always
-                        # reported incompatible and kept /readyz at 503 forever.
-                        try:
-                            check_schema_compatibility(conn)
-                            checks["schema_version"]["status"] = "ok"
-                            checks["schema_version"]["compatible"] = True
-                        except SchemaCompatibilityError as exc:
-                            checks["schema_version"]["status"] = "incompatible"
-                            checks["schema_version"]["compatible"] = False
-                            checks["schema_version"]["error"] = str(exc)
-                            status_code = 503
+                        checks["schema_version"]["status"] = "incompatible"
+                        checks["schema_version"]["compatible"] = False
+                        checks["schema_version"]["error"] = result.diagnostic_message
+                        if result.error_category:
+                            checks["schema_version"]["error_category"] = result.error_category.value
+                        if result.missing_migrations:
+                            checks["schema_version"]["missing_migrations"] = len(
+                                result.missing_migrations
+                            )
+                        status_code = 503
+
                 finally:
-                    conn.close()  # Ensure connection is always closed
+                    conn.close()
 
             except Exception as e:
                 from app.utils.health_checks import _sanitize_error_message
