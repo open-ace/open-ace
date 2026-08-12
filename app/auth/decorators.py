@@ -904,6 +904,8 @@ def _extract_target_tenant_id() -> int | None:
 
     Returns:
         int | None: Target tenant ID or None if cannot determine
+
+    Issue #2511: Only read request body for methods that have body (POST/PUT/PATCH).
     """
     target_tenant_id = None
     sources = []
@@ -913,16 +915,19 @@ def _extract_target_tenant_id() -> int | None:
         target_tenant_id = request.view_args["tenant_id"]
         sources.append(("url", target_tenant_id))
 
-    # 2. Request body (POST/PUT)
-    if request.is_json:
-        try:
-            body_tenant_id = request.json.get("tenant_id")
+    # 2. Request body (POST/PUT/PATCH only)
+    # Issue #2511: Only read body for methods that have body to avoid BadRequest on GET
+    if request.method in ("POST", "PUT", "PATCH") and request.is_json:
+        body = request.get_json(silent=True)
+        if isinstance(body, dict):
+            body_tenant_id = body.get("tenant_id")
             if body_tenant_id is not None:
-                sources.append(("body", int(body_tenant_id)))
-                if target_tenant_id is None:
-                    target_tenant_id = int(body_tenant_id)
-        except (TypeError, ValueError):
-            pass
+                try:
+                    sources.append(("body", int(body_tenant_id)))
+                    if target_tenant_id is None:
+                        target_tenant_id = int(body_tenant_id)
+                except (TypeError, ValueError):
+                    pass
 
     # 3. Query parameter
     query_tenant_id = request.args.get("tenant_id", type=int)
@@ -1546,17 +1551,20 @@ def api_key_admin_required(f=None):
 
             # 2. 提取请求中的 tenant_id
             # Issue #2327: 请求 tenant_id 是"目标选择"而非"授权凭据"
+            # Issue #2511: 只在 POST/PUT/PATCH 方法时读取 body，避免 GET 请求解析空 body 失败
             requested_tenant_id = None
 
             # 从 URL path 参数提取（如 /api/api-keys/<key_id> 不需要 tenant_id in path）
-            # 从 request body 提取（POST/PUT）
-            if request.is_json:
-                try:
-                    body_tenant_id = request.json.get("tenant_id")
+            # 从 request body 提取（POST/PUT/PATCH only）
+            if request.method in ("POST", "PUT", "PATCH") and request.is_json:
+                body = request.get_json(silent=True)
+                if isinstance(body, dict):
+                    body_tenant_id = body.get("tenant_id")
                     if body_tenant_id is not None:
-                        requested_tenant_id = int(body_tenant_id)
-                except (TypeError, ValueError):
-                    return jsonify({"error": "Invalid tenant_id in request body"}), 400
+                        try:
+                            requested_tenant_id = int(body_tenant_id)
+                        except (TypeError, ValueError):
+                            return jsonify({"error": "Invalid tenant_id in request body"}), 400
 
             # 从 query parameter 提取（GET）
             if requested_tenant_id is None:
