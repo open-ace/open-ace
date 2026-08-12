@@ -2212,6 +2212,117 @@ def _extract_verifier_json(text: str) -> dict | None:
             start = s.find("{", start + 1)
         return None
 
+    def _outer_balanced(s: str) -> str | None:
+        # Balanced { ... } starting at the FIRST { only — no skip-to-next.
+        # _first_balanced skips an unbalanced outer object and returns the
+        # first *inner* balanced object, which on a truncated root is a single
+        # verdict dict (no `verdicts` wrapper). _outer_balanced distinguishes
+        # "the outer object closed cleanly" from "it was truncated mid-object".
+        start = s.find("{")
+        if start == -1:
+            return None
+        depth = 0
+        in_str = False
+        escaped = False
+        for i in range(start, len(s)):
+            ch = s[i]
+            if escaped:
+                escaped = False
+                continue
+            if ch == "\\":
+                escaped = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return s[start : i + 1]
+        return None
+
+    def _closing_for(prefix: str) -> str | None:
+        # Close chars needed to balance prefix's still-open container stack
+        # (string-aware). Returns None when the prefix is malformed or ends
+        # inside an unterminated string (closing that would fabricate content).
+        stack: list[str] = []
+        in_str = False
+        escaped = False
+        for ch in prefix:
+            if escaped:
+                escaped = False
+                continue
+            if ch == "\\":
+                escaped = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch in "{[":
+                stack.append(ch)
+            elif ch == "}":
+                if not stack or stack[-1] != "{":
+                    return None
+                stack.pop()
+            elif ch == "]":
+                if not stack or stack[-1] != "[":
+                    return None
+                stack.pop()
+        if in_str:
+            return None
+        return "".join("}" if c == "{" else "]" for c in reversed(stack))
+
+    def _repair_truncated_json_object(s: str) -> dict | None:
+        # Recover a JSON object the agent truncated mid-token (output-budget
+        # cut left it unbalanced). Records "safe" cut points — right after a
+        # structurally complete ``}``/``]`` that a separator or EOF follows —
+        # and for each (longest first) takes the prefix, appends the reverse
+        # of the open-container stack to close it, strips trailing commas, and
+        # tries to parse. Conservative: whatever the model was mid-way through
+        # is dropped, so an uncovered checklist item aggregates to indeterminate
+        # downstream (never a false confirmed). Returns None when nothing
+        # complete can be recovered. (#2394/#2328/#2349 infra-exhaustion.)
+        body = (s or "").strip()
+        brace0 = body.find("{")
+        if brace0 == -1:
+            return None
+        body = body[brace0:]
+        in_str = False
+        escaped = False
+        cuts: list[int] = []
+        for i, ch in enumerate(body):
+            if escaped:
+                escaped = False
+                continue
+            if ch == "\\":
+                escaped = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch in "}]":
+                j = i + 1
+                while j < len(body) and body[j].isspace():
+                    j += 1
+                if j >= len(body) or body[j] in ",}]":
+                    cuts.append(i + 1)
+        for cut in sorted(set(cuts), reverse=True):
+            closers = _closing_for(body[:cut])
+            if closers is None:
+                continue
+            parsed = _try_parse(_strip_trailing_commas(body[:cut] + closers))
+            if parsed is not None:
+                return parsed
+        return None
+
     # 1) Prefer fenced ```json ... ``` regions (non-greedy per fence pair so two
     #    blocks don't merge). The LAST region wins — the agent may preface with
     #    an earlier partial draft. Within a region, take its first balanced {}.
@@ -2222,13 +2333,28 @@ def _extract_verifier_json(text: str) -> dict | None:
             parsed = _try_parse(obj)
             if parsed is not None:
                 return parsed
+        # A fenced region that opened JSON but never balanced (token-budget cut)
+        # before its closing fence: recover the complete prefix.
+        repaired = _repair_truncated_json_object(region.group(1))
+        if repaired is not None:
+            return repaired
 
-    # 2) No usable fenced region → balanced { ... } over the WHOLE text
-    #    (prose-wrapped / unfenced output). NOTE: this returns the FIRST
-    #    balanced object — if the agent writes prose with a JSON-shaped
-    #    reasoning object before the real verdict, that first object wins.
-    #    Bounded risk: a non-verdict dict lacks `verdicts`/`snapshot` and
-    #    downstream aggregates to indeterminate (never a false confirmed).
+    # 2) Whole-text OUTER object balanced? (prose-wrapped / unfenced output.)
+    obj = _outer_balanced(text)
+    if obj is not None:
+        parsed = _try_parse(obj)
+        if parsed is not None:
+            return parsed
+    # Truncated outer object (unbalanced root) — recover the complete prefix
+    # before falling back to any inner object.
+    repaired = _repair_truncated_json_object(text)
+    if repaired is not None:
+        return repaired
+    # 3) Last resort: a balanced object later in the text — the agent wrote
+    #    prose with a JSON-shaped reasoning object before the real verdict and
+    #    never produced the wrapper. Bounded risk: a non-verdict dict lacks
+    #    `verdicts`/`snapshot` and downstream aggregates to indeterminate
+    #    (never a false confirmed).
     obj = _first_balanced(text)
     if obj is not None:
         parsed = _try_parse(obj)
@@ -7819,20 +7945,26 @@ class AutonomousOrchestrator:
         return (
             "You are an INDEPENDENT acceptance verifier. The issue must NOT be considered done "
             "just because a PR merged. Verify the MERGED code (merge commit "
-            f"{merge_sha}, base {base_sha}) against this acceptance snapshot.\n\n"
+            f"{merge_sha}, base {base_sha}).\n\n"
+            "## OUTPUT FORMAT (mandatory)\n"
+            "Respond with a SINGLE fenced JSON object and NOTHING else. Do NOT write a summary, "
+            "heading, markdown report, or any prose before or after it — your first output after "
+            "the opening fence must be `{`. Keep each verdict to at most 2 evidence refs and each "
+            "note under 60 characters (terse evidence fits the output budget and avoids a "
+            "truncated, unparseable response).\n"
+            "```json\n"
+            '{"verdicts": [{"item": "...", "verdict": "confirmed|rejected|indeterminate", '
+            '"evidence": [{"ref": "file:line|git-diff", "note": "..."}], "rationale": "..."}], '
+            f'"snapshot": {snapshot_token}}}\n'
+            "```\n\n"
             f"Acceptance snapshot:\n{snap_dump}\n\n"
             f"{extraction_section}"
             "For each required_paths entry, confirm it was actually changed (use git diff/log). "
             "For each checklist item, determine confirmed/rejected/indeterminate against the merged "
             "code with a concrete file:line or git-diff evidence ref. Be CONSERVATIVE: if you cannot "
             "find concrete evidence, return indeterminate, not confirmed.\n\n"
-            "Reply with ONLY a fenced JSON block:\n"
-            "```json\n"
-            '{"verdicts": [{"item": "...", "verdict": "confirmed|rejected|indeterminate", '
-            '"evidence": [{"ref": "file:line|git-diff", "note": "..."}], "rationale": "..."}], '
-            f'"snapshot": {snapshot_token}}}\n'
-            "```\n"
-            f"{snapshot_note}"
+            f"{snapshot_note}\n"
+            "Output ONLY the fenced JSON object — no prose, no explanations."
         )
 
     def _parse_verifier_output(self, result) -> dict:

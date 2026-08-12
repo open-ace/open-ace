@@ -18,7 +18,7 @@ describe('ApiClient', () => {
   });
 
   describe('get', () => {
-    it('should make a GET request', async () => {
+    it('should make a GET request without Content-Type header (Issue #2511)', async () => {
       const mockData = { message: 'success' };
       vi.mocked(fetch).mockResolvedValueOnce({
         ok: true,
@@ -28,11 +28,12 @@ describe('ApiClient', () => {
 
       const result = await client.get('/api/test');
 
+      // Issue #2511: GET requests should NOT have Content-Type header since there's no body
       expect(fetch).toHaveBeenCalledWith(
         '/api/test',
         expect.objectContaining({
           method: 'GET',
-          headers: expect.objectContaining({
+          headers: expect.not.objectContaining({
             'Content-Type': 'application/json',
           }),
         })
@@ -68,7 +69,7 @@ describe('ApiClient', () => {
   });
 
   describe('post', () => {
-    it('should make a POST request with body', async () => {
+    it('should make a POST request with body and Content-Type header (Issue #2511)', async () => {
       const mockData = { id: 1 };
       const requestBody = { name: 'test' };
       vi.mocked(fetch).mockResolvedValueOnce({
@@ -79,11 +80,15 @@ describe('ApiClient', () => {
 
       const result = await client.post('/api/test', requestBody);
 
+      // Issue #2511: POST requests WITH body should have Content-Type header
       expect(fetch).toHaveBeenCalledWith(
         '/api/test',
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify(requestBody),
+          headers: expect.objectContaining({
+            'Content-Type': 'application/json',
+          }),
         })
       );
       expect(result).toEqual(mockData);
