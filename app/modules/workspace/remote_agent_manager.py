@@ -1236,7 +1236,7 @@ class RemoteAgentManager:
             True if confirmation succeeded, False otherwise.
         """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        now_ts = int(now.timestamp())
+        now_ts = int(time.time())
 
         # Verify timestamp (5-minute window for replay protection)
         if abs(now_ts - timestamp) > 300:

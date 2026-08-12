@@ -43,10 +43,16 @@ class TestTokenRotation:
         db = MagicMock()
         conn = MagicMock()
         cursor = MagicMock()
+
+        # Setup the chain: db.connection() -> conn, conn.cursor() -> cursor
+        db.connection.return_value.__enter__ = Mock(return_value=conn)
+        db.connection.return_value.__exit__ = Mock(return_value=False)
         conn.cursor.return_value = cursor
-        conn.__enter__ = Mock(return_value=conn)
-        conn.__exit__ = Mock(return_value=False)
-        db.connection.return_value = conn
+
+        # Store conn and cursor as attributes for test access
+        db._mock_conn = conn
+        db._mock_cursor = cursor
+
         return db
 
     @pytest.fixture
@@ -56,7 +62,8 @@ class TestTokenRotation:
         with patch.object(RemoteAgentManager, '_restore_in_memory_state'):
             with patch.object(RemoteAgentManager, '_start_heartbeat_monitor'):
                 with patch.object(RemoteAgentManager, '_start_retention_cleanup'):
-                    manager = RemoteAgentManager(mock_db)
+                    with patch('app.modules.workspace.remote_agent_manager.Database', return_value=mock_db):
+                        manager = RemoteAgentManager()
         return manager
 
     def test_rotate_token_immediate_mode(self, manager, mock_db):
@@ -65,9 +72,8 @@ class TestTokenRotation:
         rotated_by = 1
 
         # Mock database responses
-        cursor = mock_db.connection.return_value.cursor.return_value
-        cursor.fetchone.return_value = {"machine_id": machine_id}
-        cursor.fetchall.return_value = []
+        mock_db._mock_cursor.fetchone.return_value = {"machine_id": machine_id}
+        mock_db._mock_cursor.fetchall.return_value = []
 
         # Execute immediate rotation
         result = manager.rotate_agent_token(
@@ -89,9 +95,8 @@ class TestTokenRotation:
         rotated_by = 1
 
         # Mock database responses
-        cursor = mock_db.connection.return_value.cursor.return_value
-        cursor.fetchone.return_value = {"machine_id": machine_id}
-        cursor.fetchall.return_value = []
+        mock_db._mock_cursor.fetchone.return_value = {"machine_id": machine_id}
+        mock_db._mock_cursor.fetchall.return_value = []
 
         # Execute delayed rotation
         result = manager.rotate_agent_token(
@@ -112,8 +117,7 @@ class TestTokenRotation:
         machine_id = str(uuid.uuid4())
 
         # Mock database to return None (machine not found)
-        cursor = mock_db.connection.return_value.cursor.return_value
-        cursor.fetchone.return_value = None
+        mock_db._mock_cursor.fetchone.return_value = None
 
         # Execute rotation
         result = manager.rotate_agent_token(machine_id=machine_id)
@@ -141,8 +145,7 @@ class TestTokenRotation:
         custom_timeout = 600  # 10 minutes
 
         # Mock database to return custom timeout
-        cursor = mock_db.connection.return_value.cursor.return_value
-        cursor.fetchone.return_value = {"token_revoke_timeout": custom_timeout}
+        mock_db._mock_cursor.fetchone.return_value = {"token_revoke_timeout": custom_timeout}
 
         # Get timeout
         timeout = manager._get_token_revoke_timeout(machine_id)
@@ -155,13 +158,12 @@ class TestTokenRotation:
         machine_id = str(uuid.uuid4())
 
         # Test minimum clamp
-        cursor = mock_db.connection.return_value.cursor.return_value
-        cursor.fetchone.return_value = {"token_revoke_timeout": 10}  # Too low
+        mock_db._mock_cursor.fetchone.return_value = {"token_revoke_timeout": 10}  # Too low
         timeout = manager._get_token_revoke_timeout(machine_id)
         assert timeout == MIN_TOKEN_REVOKE_TIMEOUT
 
         # Test maximum clamp
-        cursor.fetchone.return_value = {"token_revoke_timeout": 5000}  # Too high
+        mock_db._mock_cursor.fetchone.return_value = {"token_revoke_timeout": 5000}  # Too high
         timeout = manager._get_token_revoke_timeout(machine_id)
         assert timeout == MAX_TOKEN_REVOKE_TIMEOUT
 
@@ -175,10 +177,16 @@ class TestConfirmTokenRotation:
         db = MagicMock()
         conn = MagicMock()
         cursor = MagicMock()
+
+        # Setup the chain: db.connection() -> conn, conn.cursor() -> cursor
+        db.connection.return_value.__enter__ = Mock(return_value=conn)
+        db.connection.return_value.__exit__ = Mock(return_value=False)
         conn.cursor.return_value = cursor
-        conn.__enter__ = Mock(return_value=conn)
-        conn.__exit__ = Mock(return_value=False)
-        db.connection.return_value = conn
+
+        # Store conn and cursor as attributes for test access
+        db._mock_conn = conn
+        db._mock_cursor = cursor
+
         return db
 
     @pytest.fixture
@@ -187,7 +195,8 @@ class TestConfirmTokenRotation:
         with patch.object(RemoteAgentManager, '_restore_in_memory_state'):
             with patch.object(RemoteAgentManager, '_start_heartbeat_monitor'):
                 with patch.object(RemoteAgentManager, '_start_retention_cleanup'):
-                    manager = RemoteAgentManager(mock_db)
+                    with patch('app.modules.workspace.remote_agent_manager.Database', return_value=mock_db):
+                        manager = RemoteAgentManager()
         return manager
 
     def test_confirm_rotation_valid_signature(self, manager, mock_db):
@@ -206,8 +215,7 @@ class TestConfirmTokenRotation:
         ).hexdigest()
 
         # Mock database
-        cursor = mock_db.connection.return_value.cursor.return_value
-        cursor.fetchone.return_value = {"id": 1, "machine_id": machine_id}
+        mock_db._mock_cursor.fetchone.return_value = {"id": 1, "machine_id": machine_id}
 
         # Confirm rotation
         result = manager.confirm_token_rotation(
@@ -287,8 +295,7 @@ class TestConfirmTokenRotation:
         ).hexdigest()
 
         # Mock database to return None (already processed)
-        cursor = mock_db.connection.return_value.cursor.return_value
-        cursor.fetchone.return_value = None
+        mock_db._mock_cursor.fetchone.return_value = None
 
         # Confirm rotation (should succeed for idempotency)
         result = manager.confirm_token_rotation(
@@ -312,10 +319,16 @@ class TestValidateAgentToken:
         db = MagicMock()
         conn = MagicMock()
         cursor = MagicMock()
+
+        # Setup the chain: db.connection() -> conn, conn.cursor() -> cursor
+        db.connection.return_value.__enter__ = Mock(return_value=conn)
+        db.connection.return_value.__exit__ = Mock(return_value=False)
         conn.cursor.return_value = cursor
-        conn.__enter__ = Mock(return_value=conn)
-        conn.__exit__ = Mock(return_value=False)
-        db.connection.return_value = conn
+
+        # Store conn and cursor as attributes for test access
+        db._mock_conn = conn
+        db._mock_cursor = cursor
+
         return db
 
     @pytest.fixture
@@ -324,7 +337,8 @@ class TestValidateAgentToken:
         with patch.object(RemoteAgentManager, '_restore_in_memory_state'):
             with patch.object(RemoteAgentManager, '_start_heartbeat_monitor'):
                 with patch.object(RemoteAgentManager, '_start_retention_cleanup'):
-                    manager = RemoteAgentManager(mock_db)
+                    with patch('app.modules.workspace.remote_agent_manager.Database', return_value=mock_db):
+                        manager = RemoteAgentManager()
         return manager
 
     def test_validate_normal_token(self, manager, mock_db):
@@ -334,8 +348,7 @@ class TestValidateAgentToken:
         machine_id = str(uuid.uuid4())
 
         # Mock database
-        cursor = mock_db.connection.return_value.cursor.return_value
-        cursor.fetchone.return_value = {
+        mock_db._mock_cursor.fetchone.return_value = {
             "id": 1,
             "machine_id": machine_id,
             "is_revoked": False,
@@ -356,8 +369,7 @@ class TestValidateAgentToken:
         machine_id = str(uuid.uuid4())
 
         # Mock database
-        cursor = mock_db.connection.return_value.cursor.return_value
-        cursor.fetchone.return_value = {
+        mock_db._mock_cursor.fetchone.return_value = {
             "id": 1,
             "machine_id": machine_id,
             "is_revoked": False,
@@ -378,8 +390,7 @@ class TestValidateAgentToken:
         machine_id = str(uuid.uuid4())
 
         # Mock database
-        cursor = mock_db.connection.return_value.cursor.return_value
-        cursor.fetchone.return_value = {
+        mock_db._mock_cursor.fetchone.return_value = {
             "id": 1,
             "machine_id": machine_id,
             "is_revoked": False,
@@ -400,8 +411,7 @@ class TestValidateAgentToken:
         machine_id = str(uuid.uuid4())
 
         # Mock database
-        cursor = mock_db.connection.return_value.cursor.return_value
-        cursor.fetchone.return_value = {
+        mock_db._mock_cursor.fetchone.return_value = {
             "id": 1,
             "machine_id": machine_id,
             "is_revoked": True,
