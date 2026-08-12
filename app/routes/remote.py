@@ -193,16 +193,14 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple[Any, Any] | Non
     can still authenticate without a Bearer token, but with an expiry
     deadline and a clear_legacy_mode transition on first Bearer use.
 
+    Note: Callers should validate machine_id format before calling this function.
+    The callers (agent_message, usage_report) already perform UUID validation.
+
     Returns:
         (is_legacy, None) if legacy mode applies.
         (False, error_response) if not legacy and no Bearer provided.
         (False, None) if Bearer is present (caller should validate normally).
     """
-    # Issue #2540: Validate machine_id format before slice operations
-    is_valid, format_error = _validate_machine_id_format(machine_id)
-    if not is_valid:
-        return False, format_error
-
     agent_mgr = get_remote_agent_manager()
 
     # If an Authorization header is present, clear legacy mode and use Bearer
@@ -3518,6 +3516,12 @@ def usage_report():
     machine_id = data.get("machine_id")
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
+
+    # Issue #2540: Validate machine_id is a valid UUID string
+    is_valid, format_error = _validate_machine_id_format(machine_id)
+    if not is_valid:
+        return format_error
+
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
     if not machine:

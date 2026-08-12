@@ -228,6 +228,34 @@ class TestTerminalStartWithInvalidMachineId:
         # Should return 401 (unauthorized) because no auth provided
         assert response.status_code == 401
 
+    def test_usage_report_with_int_machine_id_returns_400(self, client):
+        """POST /usage-report with int machine_id should return 400, not 401.
+
+        Issue #2540: usage_report should validate UUID format before checking machine existence.
+        """
+        response = client.post(
+            "/api/remote/usage-report",
+            json={"machine_id": 1},
+            content_type="application/json"
+        )
+
+        # Should return 400 (bad request), not 401/500
+        assert response.status_code == 400
+        json_data = response.get_json()
+        assert "machine_id must be a valid UUID" in json_data.get("error", "")
+
+    def test_usage_report_with_invalid_uuid_returns_400(self, client):
+        """POST /usage-report with invalid UUID format should return 400."""
+        response = client.post(
+            "/api/remote/usage-report",
+            json={"machine_id": "not-a-uuid"},
+            content_type="application/json"
+        )
+
+        assert response.status_code == 400
+        json_data = response.get_json()
+        assert "machine_id must be a valid UUID" in json_data.get("error", "")
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
