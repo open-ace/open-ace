@@ -302,7 +302,19 @@ class APIKeyProxyService:
 
     @staticmethod
     def _row_get(row: Any, key: str, default: Any = None) -> Any:
-        """Read a value from sqlite Row / dict / tuple-like objects."""
+        """Read a value from sqlite Row / dict / tuple-like objects.
+
+        Design intent: Handles sqlite3.Row, dict, and None types uniformly,
+        avoiding direct .get() calls which are not supported by sqlite3.Row.
+
+        Args:
+            row: Database row object (sqlite3.Row, dict, or None).
+            key: Column/key name to read.
+            default: Default value if key not found or row is None.
+
+        Returns:
+            The value if found, else default.
+        """
         if row is None:
             return default
         if isinstance(row, dict):
@@ -1313,8 +1325,8 @@ class APIKeyProxyService:
                 continue
 
             key_id = int(row["id"])
-            priority = int(row.get("priority") or 0)
-            weight = int(row.get("weight") or 100)
+            priority = int(type(self)._row_get(row, "priority") or 0)
+            weight = int(type(self)._row_get(row, "weight") or 100)
 
             # Build settings for this key
             try:
@@ -1488,10 +1500,18 @@ class APIKeyProxyService:
             matches.append(dict(row))
         return matches
 
-    def _get_tool_settings_from_row(self, row: dict[str, Any], tool_name: str) -> dict[str, Any]:
-        """Extract non-sensitive tool settings from a DB row."""
+    def _get_tool_settings_from_row(self, row: "sqlite3.Row | dict[str, Any]", tool_name: str) -> dict[str, Any]:
+        """Extract non-sensitive tool settings from a DB row.
+
+        Args:
+            row: Database row (sqlite3.Row or dict) containing cli_settings field.
+            tool_name: CLI tool name to extract settings for.
+
+        Returns:
+            Dict with tool-specific settings.
+        """
         canonical_tool = normalize_tool_name(tool_name)
-        cli_settings_str = row.get("cli_settings") or "{}"
+        cli_settings_str = type(self)._row_get(row, "cli_settings") or "{}"
         try:
             cli_settings = json.loads(cli_settings_str) if cli_settings_str else {}
         except json.JSONDecodeError:
@@ -1527,8 +1547,8 @@ class APIKeyProxyService:
 
         for row in rows:
             key_id = int(row["id"])
-            priority = int(row.get("priority") or 0)
-            weight = int(row.get("weight") or 100)
+            priority = int(type(self)._row_get(row, "priority") or 0)
+            weight = int(type(self)._row_get(row, "weight") or 100)
             settings = self._get_tool_settings_from_row(row, tool_name)
             ranked_settings.append(((-priority, -weight, key_id), deepcopy(settings)))
 
@@ -1554,11 +1574,11 @@ class APIKeyProxyService:
             candidate_keys.append(
                 {
                     "key_id": key_id,
-                    "key_name": row.get("key_name", f"Key-{key_id}"),
-                    "provider": row.get("provider", ""),
+                    "key_name": type(self)._row_get(row, "key_name") or f"Key-{key_id}",
+                    "provider": type(self)._row_get(row, "provider") or "",
                     "priority": priority,
                     "weight": weight,
-                    "scope": row.get("scope") or scope,
+                    "scope": type(self)._row_get(row, "scope") or scope,
                     "supported_model_ids": sorted(set(supported_model_ids)),
                 }
             )
@@ -1875,12 +1895,12 @@ class APIKeyProxyService:
             candidates.append(
                 {
                     "id": int(row["id"]),
-                    "priority": int(row.get("priority") or 0),
-                    "weight": int(row.get("weight") or 100),
+                    "priority": int(type(self)._row_get(row, "priority") or 0),
+                    "weight": int(type(self)._row_get(row, "weight") or 100),
                     "api_key": api_key,
-                    "base_url": row.get("base_url"),
-                    "cli_settings": row.get("cli_settings"),
-                    "resolved_ips": row.get("resolved_ips"),
+                    "base_url": type(self)._row_get(row, "base_url"),
+                    "cli_settings": type(self)._row_get(row, "cli_settings"),
+                    "resolved_ips": type(self)._row_get(row, "resolved_ips"),
                 }
             )
 
