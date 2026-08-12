@@ -44,6 +44,114 @@ logger = logging.getLogger(__name__)
 MAX_RAW_CONTENT_LENGTH = 100000
 MAX_MESSAGE_LENGTH = 50000
 
+# ════════════════════════════════════════════
+# Issue #2531: Session state check constants
+# ════════════════════════════════════════════
+
+# Feature flag for rollback: set to "false" to disable state checks
+ENABLE_SESSION_STATE_CHECK = os.environ.get("ENABLE_SESSION_STATE_CHECK", "true").lower() == "true"
+
+# Session states
+_ALLOWED_STATES = {"active"}
+_PAUSED_STATES = {"paused"}
+_ENDED_STATES = frozenset({"completed", "stopped", "error"})
+_KNOWN_STATES = _ALLOWED_STATES | _PAUSED_STATES | _ENDED_STATES
+
+# Error messages for each state
+_STATE_MESSAGES = {
+    "paused": "Session is paused, please resume first",
+    "completed": "Remote session has ended",
+    "stopped": "Remote session has been stopped",
+    "error": "Remote session encountered an error",
+}
+
+
+def _check_session_state(session_info: dict, operation: str) -> tuple | None:
+    """Check if session state allows the operation.
+
+    Issue #2531: Returns error response if session is paused, ended, or has unknown status.
+
+    Args:
+        session_info: Dict with session status and metadata.
+        operation: Operation name for audit logging.
+
+    Returns:
+        None: Session is active, operation allowed.
+        (jsonify, 409): Session is paused or ended, operation rejected.
+        (jsonify, 500): Session status is unknown or missing, system error.
+    """
+    status = session_info.get("status")
+
+    # Status missing: system error
+    if status is None:
+        logger.error(
+            "Session %s status is None for operation %s - possible data corruption",
+            session_info.get("session_id", "unknown")[:8],
+            operation,
+        )
+        return (
+            jsonify({"success": False, "error": "Session status unavailable"}),
+            500,
+        )
+
+    # Unknown status: system error
+    if status not in _KNOWN_STATES:
+        logger.warning(
+            "Unknown session status '%s' for session %s operation %s",
+            status,
+            session_info.get("session_id", "unknown")[:8],
+            operation,
+        )
+        return (
+            jsonify({"success": False, "error": f"Unknown session status: {status}"}),
+            500,
+        )
+
+    # Paused state: business rejection
+    if status in _PAUSED_STATES:
+        logger.warning(
+            "Attempted %s on paused session %s by user %s from %s",
+            operation,
+            session_info.get("session_id", "unknown")[:8],
+            g.user.get("id") if g.get("user") else "unknown",
+            request.remote_addr or "unknown",
+        )
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": _STATE_MESSAGES.get(status, "Session is paused"),
+                    "session_status": status,
+                }
+            ),
+            409,
+        )
+
+    # Ended state: business rejection
+    if status in _ENDED_STATES:
+        logger.warning(
+            "Attempted %s on %s session %s by user %s from %s",
+            operation,
+            status,
+            session_info.get("session_id", "unknown")[:8],
+            g.user.get("id") if g.get("user") else "unknown",
+            request.remote_addr or "unknown",
+        )
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": _STATE_MESSAGES.get(status, "Remote session has ended"),
+                    "session_status": status,
+                }
+            ),
+            409,
+        )
+
+    # Active state: allowed
+    return None
+
+
 # Module-level audit logger instance
 audit_logger = AuditLogger()
 
@@ -1239,20 +1347,19 @@ def get_remote_session(session_id):
                 if not (_msg_role(m) == "user" and is_qwen_system_context(_msg_content(m)))
             ]
 
-        # Return explicit error for ended sessions so frontend can handle properly
+        # Issue #2531: Return explicit error for ended/paused sessions with 409 status
         status = result.get("status")
-        if status in ("completed", "stopped", "error"):
-            status_messages = {
-                "completed": "Remote session has ended",
-                "stopped": "Remote session has been stopped",
-                "error": "Remote session encountered an error",
-            }
-            return jsonify(
-                {
-                    "success": False,
-                    "session": result,
-                    "error": status_messages.get(status, "Remote session has ended"),
-                }
+        if status in _ENDED_STATES or status in _PAUSED_STATES:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "session": result,
+                        "error": _STATE_MESSAGES.get(status, "Remote session has ended"),
+                        "session_status": status,
+                    }
+                ),
+                409,
             )
         return jsonify({"success": True, "session": result})
     return jsonify({"error": "Session not found"}), 404
@@ -1262,9 +1369,15 @@ def get_remote_session(session_id):
 def send_remote_message(session_id):
     """Send a message to a remote session."""
 
-    _, access_error = _check_session_access(session_id)
+    session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Check session state before sending message
+    if ENABLE_SESSION_STATE_CHECK:
+        state_error = _check_session_state(session_info, "send_message")
+        if state_error:
+            return state_error
 
     data = request.get_json() or {}
     content = data.get("content", "")
@@ -1297,9 +1410,15 @@ def send_remote_message(session_id):
 def update_remote_session_model(session_id):
     """Switch the model of an active remote session."""
 
-    _, access_error = _check_session_access(session_id)
+    session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Check session state before updating model
+    if ENABLE_SESSION_STATE_CHECK:
+        state_error = _check_session_state(session_info, "update_model")
+        if state_error:
+            return state_error
 
     data = request.get_json() or {}
     model = data.get("model")
@@ -1318,9 +1437,22 @@ def update_remote_session_model(session_id):
 def abort_remote_request(session_id):
     """Abort the current in-progress request without stopping the session."""
 
-    _, access_error = _check_session_access(session_id)
+    session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Idempotent handling for ended sessions
+    if ENABLE_SESSION_STATE_CHECK:
+        status = session_info.get("status")
+        # Only ended sessions return success immediately (idempotent)
+        if status in _ENDED_STATES:
+            return jsonify({"success": True})
+        # Log unknown status but continue with underlying method
+        if status is None or status not in _KNOWN_STATES:
+            logger.error(
+                "Attempted abort on unknown status session %s",
+                session_id[:8],
+            )
 
     payload = request.get_json(silent=True) or {}
     reason = payload.get("reason", "user")
@@ -1337,9 +1469,23 @@ def abort_remote_request(session_id):
 def stop_remote_session(session_id):
     """Stop a remote session."""
 
-    _, access_error = _check_session_access(session_id)
+    session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Idempotent handling for ended/paused sessions
+    if ENABLE_SESSION_STATE_CHECK:
+        status = session_info.get("status")
+        # Ended sessions: already stopped, return success (idempotent)
+        if status in _ENDED_STATES:
+            return jsonify({"success": True})
+        # Paused sessions: can be stopped (will unbind machine_id)
+        # Unknown status: log and continue with underlying method
+        if status is None or status not in _KNOWN_STATES:
+            logger.error(
+                "Attempted stop on unknown status session %s",
+                session_id[:8],
+            )
 
     session_mgr = get_remote_session_manager()
     success = session_mgr.stop_session(session_id)
@@ -1353,9 +1499,15 @@ def stop_remote_session(session_id):
 def pause_remote_session(session_id):
     """Pause a remote session."""
 
-    _, access_error = _check_session_access(session_id)
+    session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Check session state before pausing
+    if ENABLE_SESSION_STATE_CHECK:
+        state_error = _check_session_state(session_info, "pause_session")
+        if state_error:
+            return state_error
 
     session_mgr = get_remote_session_manager()
     success = session_mgr.pause_session(session_id)
@@ -1369,9 +1521,15 @@ def pause_remote_session(session_id):
 def resume_remote_session(session_id):
     """Resume a paused remote session."""
 
-    _, access_error = _check_session_access(session_id)
+    session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Check session state before resuming
+    if ENABLE_SESSION_STATE_CHECK:
+        state_error = _check_session_state(session_info, "resume_session")
+        if state_error:
+            return state_error
 
     session_mgr = get_remote_session_manager()
     success = session_mgr.resume_session(session_id)
@@ -1399,6 +1557,12 @@ def send_permission_response(session_id):
     session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Check session state before sending permission response
+    if ENABLE_SESSION_STATE_CHECK:
+        state_error = _check_session_state(session_info, "send_permission_response")
+        if state_error:
+            return state_error
 
     data = request.get_json() or {}
     request_id = data.get("request_id")
@@ -1449,6 +1613,12 @@ def send_interaction_response(session_id):
     session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Check session state before sending interaction response
+    if ENABLE_SESSION_STATE_CHECK:
+        state_error = _check_session_state(session_info, "send_interaction_response")
+        if state_error:
+            return state_error
 
     data = request.get_json() or {}
     msg_id = data.get("msg_id")
