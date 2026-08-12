@@ -2,8 +2,25 @@
  * Tests for the global confirm dialog store and useConfirm accessor.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { useConfirmStore, useConfirm } from './Confirm';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { useConfirmStore, useConfirm, ConfirmHost } from './Confirm';
+
+// Mock language hook
+vi.mock('@/store', () => ({
+  useLanguage: () => 'zh',
+}));
+
+// Mock i18n
+vi.mock('@/i18n', () => ({
+  t: (key: string, lang: string) => {
+    const translations: Record<string, Record<string, string>> = {
+      en: { confirm: 'Confirm', cancel: 'Cancel' },
+      zh: { confirm: '确认', cancel: '取消' },
+    };
+    return translations[lang]?.[key] ?? key;
+  },
+}));
 
 describe('Confirm global store', () => {
   beforeEach(() => {
@@ -51,5 +68,60 @@ describe('useConfirm accessor', () => {
     const a = useConfirm();
     const b = useConfirm();
     expect(a).toBe(b);
+  });
+});
+
+describe('ConfirmHost i18n defaults', () => {
+  beforeEach(() => {
+    useConfirmStore.setState({ open: false, options: { message: '' }, resolve: null });
+  });
+
+  it('uses translated defaults when confirmText/cancelText are not provided', () => {
+    // Open the dialog without explicit button text
+    useConfirmStore.getState().confirm({ message: 'Are you sure?' });
+
+    render(<ConfirmHost />);
+
+    // Should show Chinese translations (mocked language is 'zh')
+    expect(screen.getByRole('button', { name: '确认' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument();
+  });
+
+  it('uses explicit confirmText/cancelText when provided', () => {
+    // Open the dialog with explicit button text
+    useConfirmStore.getState().confirm({
+      message: 'Delete item?',
+      confirmText: 'Yes, delete',
+      cancelText: 'No, keep',
+    });
+
+    render(<ConfirmHost />);
+
+    // Should show the explicit text, not translations
+    expect(screen.getByRole('button', { name: 'Yes, delete' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'No, keep' })).toBeInTheDocument();
+    // Translated defaults should NOT be present
+    expect(screen.queryByRole('button', { name: '确认' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument();
+  });
+
+  it('settles false when cancel button is clicked', () => {
+    const promise = useConfirmStore.getState().confirm({ message: 'Confirm?' });
+    render(<ConfirmHost />);
+
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+
+    expect(useConfirmStore.getState().open).toBe(false);
+    return expect(promise).resolves.toBe(false);
+  });
+
+  it('settles true when confirm button is clicked', async () => {
+    const promise = useConfirmStore.getState().confirm({ message: 'Confirm?' });
+    render(<ConfirmHost />);
+
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    expect(useConfirmStore.getState().open).toBe(false);
+    expect(await promise).toBe(true);
   });
 });
