@@ -9,6 +9,7 @@ import hashlib
 import logging
 import os
 import signal
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -38,7 +39,9 @@ DEFAULT_GRAPH_TRAVERSAL_TIMEOUT = 5
 _script_directory_cache: dict[str, ScriptDirectory] = {}
 
 # Bypass state tracking (process lifetime)
+# Protected by _bypass_states_lock for thread safety in multi-worker deployments
 _bypass_states: dict[str, BypassState] = {}
+_bypass_states_lock = threading.Lock()
 
 
 class SchemaCompatibilityService:
@@ -454,26 +457,28 @@ class SchemaCompatibilityService:
         db_hash = hashlib.sha256(db_url.encode()).hexdigest()
 
         # Check rate limiting (1 bypass per hour per database)
+        # Use lock to protect _bypass_states in multi-worker deployments
         current_time = time.time()
-        if db_hash in _bypass_states:
-            last_bypass = _bypass_states[db_hash]
+        with _bypass_states_lock:
+            if db_hash in _bypass_states:
+                last_bypass = _bypass_states[db_hash]
 
-            # Check if bypass has expired
-            if last_bypass.expires_at and current_time > last_bypass.expires_at:
-                logger.warning(
-                    f"Emergency bypass has expired. "
-                    f"Expired at: {last_bypass.expires_at}, Current: {current_time}"
-                )
-                return BypassState(is_active=False)
+                # Check if bypass has expired
+                if last_bypass.expires_at and current_time > last_bypass.expires_at:
+                    logger.warning(
+                        f"Emergency bypass has expired. "
+                        f"Expired at: {last_bypass.expires_at}, Current: {current_time}"
+                    )
+                    return BypassState(is_active=False)
 
-            # Check rate limiting
-            if last_bypass.enabled_at and (current_time - last_bypass.enabled_at) < 3600:
-                logger.warning(
-                    f"Emergency bypass rate limited for database. "
-                    f"Last bypass: {last_bypass.enabled_at}, "
-                    f"Current: {current_time}"
-                )
-                return BypassState(is_active=False)
+                # Check rate limiting
+                if last_bypass.enabled_at and (current_time - last_bypass.enabled_at) < 3600:
+                    logger.warning(
+                        f"Emergency bypass rate limited for database. "
+                        f"Last bypass: {last_bypass.enabled_at}, "
+                        f"Current: {current_time}"
+                    )
+                    return BypassState(is_active=False)
 
         # Check expiry
         expiry_hours = int(os.environ.get("OPENACE_EMERGENCY_BYPASS_EXPIRY_HOURS", "24"))
@@ -488,8 +493,9 @@ class SchemaCompatibilityService:
             reason="operator_initiated",
         )
 
-        # Store bypass state
-        _bypass_states[db_hash] = bypass_state
+        # Store bypass state (with lock)
+        with _bypass_states_lock:
+            _bypass_states[db_hash] = bypass_state
 
         # Log audit event
         logger.critical(
@@ -664,7 +670,16 @@ class SchemaCompatibilityService:
 
 @contextmanager
 def timeout_context(seconds: int):
-    """Context manager for timeout using signal."""
+    """Context manager for timeout using signal.
+
+    Note: This implementation uses Unix signals (SIGALRM) and will not
+    enforce timeouts on Windows systems. On Windows, the operation will
+    run without timeout protection. This is acceptable for the current
+    use case (graph traversal) which typically completes in <100ms.
+
+    Args:
+        seconds: Timeout duration in seconds
+    """
 
     def timeout_handler(signum, frame):
         raise TimeoutError(f"Operation timed out after {seconds} seconds")

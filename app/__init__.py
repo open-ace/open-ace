@@ -399,6 +399,8 @@ def create_app(config=None):
                         f"Schema compatibility BYPASSED for emergency: {result.bypass_reason}. "
                         f"Database may be incompatible."
                     )
+                    # Return early - don't log "passed" message after bypass
+                    return
                 else:
                     # No bypass - fail closed
                     logger.error(f"Schema compatibility check failed: {error_msg}")
