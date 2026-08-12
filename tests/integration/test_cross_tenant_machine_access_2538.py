@@ -16,7 +16,7 @@ class TestCrossTenantMachineAccess:
     Issue #2538: Cross-tenant access should return 404, not 403.
     """
 
-    def _invoke_check_machine_access(self, user, machine_id, machine_data):
+    def _invoke_check_machine_access(self, user, machine_id, machine_data, user_permission=None):
         """Invoke _check_machine_access under minimal app context."""
         from app.routes.remote import _check_machine_access
 
@@ -26,6 +26,7 @@ class TestCrossTenantMachineAccess:
             g.user = user
             with patch("app.routes.remote.get_remote_agent_manager") as mock_mgr:
                 mock_mgr.return_value.get_machine.return_value = machine_data
+                mock_mgr.return_value.get_user_permission.return_value = user_permission
                 mock_mgr.return_value.check_user_access.return_value = True
                 return _check_machine_access(machine_id)
 
@@ -63,7 +64,9 @@ class TestCrossTenantMachineAccess:
         }
 
         # Test _check_machine_access
-        result = self._invoke_check_machine_access(user, "machine-1", machine_data)
+        result = self._invoke_check_machine_access(
+            user, "machine-1", machine_data, user_permission=None
+        )
         assert result is not None
         assert result[1] == 404
         assert "Machine not found" in result[0].get_json()["error"]
@@ -90,7 +93,10 @@ class TestCrossTenantMachineAccess:
         }
 
         # Test _check_machine_access
-        result = self._invoke_check_machine_access(user, "machine-1", machine_data)
+        # User has permission on same-tenant machine
+        result = self._invoke_check_machine_access(
+            user, "machine-1", machine_data, user_permission="user"
+        )
         assert result is None  # Success
 
     def test_no_tenant_machine_allows_access(self):
@@ -114,7 +120,10 @@ class TestCrossTenantMachineAccess:
         }
 
         # Test _check_machine_access
-        result = self._invoke_check_machine_access(user, "machine-legacy", machine_data)
+        # User has permission on legacy (no-tenant) machine
+        result = self._invoke_check_machine_access(
+            user, "machine-legacy", machine_data, user_permission="user"
+        )
         assert result is None  # Success
 
     def test_user_without_tenant_cannot_access_tenant_machine(self):
@@ -138,7 +147,10 @@ class TestCrossTenantMachineAccess:
         }
 
         # Test _check_machine_access
-        result = self._invoke_check_machine_access(user, "machine-1", machine_data)
+        # User without tenant has no permission on tenant machine
+        result = self._invoke_check_machine_access(
+            user, "machine-1", machine_data, user_permission=None
+        )
         assert result is not None
         assert result[1] == 404
 
@@ -163,7 +175,10 @@ class TestCrossTenantMachineAccess:
         }
 
         # Test _check_machine_access
-        result = self._invoke_check_machine_access(user, "machine-1", machine_data)
+        # Platform admin bypasses all checks
+        result = self._invoke_check_machine_access(
+            user, "machine-1", machine_data, user_permission=None
+        )
         assert result is None  # Success
 
     def test_tenant_admin_cross_tenant_returns_404(self):

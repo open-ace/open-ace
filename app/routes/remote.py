@@ -481,19 +481,22 @@ def _check_machine_access(machine_id):
 
     mgr = get_remote_agent_manager()
 
+    # Get machine data first for tenant isolation check
+    machine = mgr.get_machine(machine_id)
+    if not machine:
+        return jsonify({"error": "Machine not found"}), 404
+
     # Check if user is assigned to this machine
     # Assigned users have explicit permission and should not be blocked by tenant isolation
+    # Issue #2538: Machine admins are granted access through explicit assignment,
+    # which is a legitimate cross-tenant access mechanism.
     user_permission = mgr.get_user_permission(machine_id, g.user["id"])
-    if user_permission:
+    if user_permission and user_permission in ("admin", "user"):
         # User is explicitly assigned - allow access regardless of tenant
         return None
 
     # User is not assigned - check tenant isolation before denying access
     # Issue #2538: Cross-tenant access by unassigned users should return 404
-    machine = mgr.get_machine(machine_id)
-    if not machine:
-        return jsonify({"error": "Machine not found"}), 404
-
     machine_tenant_id = machine.get("tenant_id")
     user_tenant_id = g.user.get("tenant_id")
 
