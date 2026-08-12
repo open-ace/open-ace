@@ -171,14 +171,12 @@ def setup_test_data(mgr):
             )
 
         # Create a users table for the LEFT JOIN in get_machine_assignments
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY,
                 username TEXT NOT NULL
             )
-        """
-        )
+        """)
         for uid in [1, 2, 3, 4, 5, 99]:
             cursor.execute(
                 "INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)",
@@ -1089,7 +1087,11 @@ def test_route_get_machine_path_machine_id_overrides_query():
 
 def test_route_browse_path_machine_id_overrides_query():
     """Query machine_id must not let a user with access to A browse machine B's
-    files. ``browse_remote_directory`` uses @machine_access_required + path arg."""
+    files. ``browse_remote_directory`` uses @machine_access_required + path arg.
+
+    Issue #2538: Cross-tenant access (user without tenant accessing tenant machine)
+    returns 404 to avoid leaking machine existence.
+    """
     mgr = make_manager()
     setup_test_data(mgr)
     app = _make_app(mgr)
@@ -1100,6 +1102,8 @@ def test_route_browse_path_machine_id_overrides_query():
             "/api/remote/machines/mid-machine-b/browse?machine_id=mid-machine-a",
             "test-token-3-user",  # user of A, no access to B
         )
+        # Issue #2538: Cross-tenant access returns 404 (not 403)
+        # User 3 has no tenant, machine-b has tenant 1
         assert (
-            resp.status_code == 403
-        ), f"expected 403, got {resp.status_code}, body={resp.get_json()}"
+            resp.status_code == 404
+        ), f"expected 404, got {resp.status_code}, body={resp.get_json()}"
