@@ -665,13 +665,12 @@ class GitHubOps:
         start_time = time.time()
         command_str = " ".join(["git"] + args)
 
-        try:
-            trusted_args: list[str] = []
-            if self._trusted_git_dir:
-                trusted_args = [
-                    f"--git-dir={self._trusted_git_dir}",
-                    f"--work-tree={self._trusted_work_tree or os.path.realpath(self.repo_path)}",
-                ]
+        trusted_args: list[str] = []
+        if self._trusted_git_dir:
+            trusted_args = [
+                f"--git-dir={self._trusted_git_dir}",
+                f"--work-tree={self._trusted_work_tree or os.path.realpath(self.repo_path)}",
+            ]
         # Trust the canonical repo via per-command ``-c`` (never the global
         # ``safe.directory *`` that used to be written via
         # _ensure_safe_directory). git's dubious-ownership check covers every
