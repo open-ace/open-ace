@@ -345,7 +345,8 @@ def get_environment_mode() -> str:
         # Force development mode for safety
         import os
 
-        if "OPENACE_SECURITY_MODE" not in os.environ:
+        current_mode = os.environ.get("OPENACE_SECURITY_MODE", "").strip()
+        if not current_mode:
             os.environ["OPENACE_SECURITY_MODE"] = "development"
         mode = get_security_mode()
         return mode.value

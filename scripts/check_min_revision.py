@@ -114,8 +114,9 @@ def main() -> int:
         # Running in test context - ensure development mode if not explicitly set
         import os
 
-        if not os.environ.get("OPENACE_SECURITY_MODE"):
-            os.environ.setdefault("OPENACE_SECURITY_MODE", "development")
+        current_mode = os.environ.get("OPENACE_SECURITY_MODE", "").strip()
+        if not current_mode:
+            os.environ["OPENACE_SECURITY_MODE"] = "development"
 
     args = build_parser().parse_args()
     database_url = args.database_url or _get_db_url()

@@ -56,9 +56,10 @@ from scripts.shared.config import WEB_HOST, WEB_PORT
 
 if __name__ == "__main__":
     # Issue #2331: Local development mode injection
-    # If OPENACE_SECURITY_MODE is not set, inject development mode
+    # If OPENACE_SECURITY_MODE is not set or empty, inject development mode
     # This allows local development without explicit configuration
-    if "OPENACE_SECURITY_MODE" not in os.environ:
+    current_mode = os.environ.get("OPENACE_SECURITY_MODE", "").strip()
+    if not current_mode:
         print("=" * 60)
         print("  LOCAL DEVELOPMENT MODE")
         print("  Setting OPENACE_SECURITY_MODE=development")
