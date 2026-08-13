@@ -204,14 +204,17 @@ def test_check_session_access_denies_null_tenant_machine_admin(sqlite_db, monkey
         class _StubRemoteMgr:
             def __init__(self):
                 self._session_manager = manager
-                self._data = {"session_id": "tenant-two-session", "machine_id": "M1"}
+                self._data = {
+                    "session_id": "tenant-two-session",
+                    "machine_id": "90849a28-ea5d-503e-afe1-f2cea0832770",
+                }
 
             def get_session_status(self, session_id):
                 return self._data if session_id == "tenant-two-session" else None
 
         class _StubAgentMgr:
             def get_user_permission(self, machine_id, user_id):
-                # Null-tenant user 99 is an "admin" of machine M1 — the unguarded
+                # Null-tenant user 99 is an "admin" of machine 90849a28 — the unguarded
                 # machine-admin branch would let them in before the fix.
                 return "admin"
 
@@ -223,5 +226,10 @@ def test_check_session_access_denies_null_tenant_machine_admin(sqlite_db, monkey
             "null-tenant machine-admin must be denied (fail closed), not admitted via the "
             "untenant-scoped machine-admin branch"
         )
+        # Issue #2538 changed the null-tenant denial from 403 to 404 ("Session
+        # not found") so a caller without a tenant cannot learn the session
+        # exists. The fail-closed property #1789 guards (a null-tenant user is
+        # never admitted) is preserved and in fact strengthened: #2538's check
+        # fires before the machine-admin branch is even reached.
         status_code = error[1]
-        assert status_code == 403, f"expected 403, got {status_code}"
+        assert status_code == 404, f"expected 404, got {status_code}"
