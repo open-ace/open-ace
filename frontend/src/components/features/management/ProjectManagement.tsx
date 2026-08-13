@@ -2,11 +2,14 @@
  * ProjectManagement Component - Project management page
  *
  * Issue #1278: Project view with categorized workspace grouping
+ * Issue #2572: Project category management UI
  *
  * Features:
  * - Categorized project list with aggregated statistics
  * - Expandable rows to view workspace details
  * - Delete projects
+ * - Category management (create, edit, activate/deactivate)
+ * - Filter by category
  */
 
 import React, { useState, useEffect, useMemo, startTransition } from 'react';
@@ -28,7 +31,11 @@ import {
 import { getAllProjectStats, deleteProject, type ProjectStats } from '@/api/projects';
 import { listProjectCategories, type ProjectCategory } from '@/api/projectCategories';
 import { formatDateTime, createMatcherConfig } from '@/utils';
-import { usePageRefresh } from '@/hooks';
+import { usePageRefresh, useAuth } from '@/hooks';
+import { isAdmin } from '@/utils/permissions';
+import { CategoryManageModal } from './CategoryManageModal';
+import { CategoryFilter } from './CategoryFilter';
+import { CategoryEditModal } from './CategoryEditModal';
 
 type CategorySortKey = 'name' | 'total_workspaces' | 'total_users' | 'total_tokens' | 'last_access';
 type SortDirection = 'asc' | 'desc';
@@ -186,6 +193,9 @@ function categorizeProjects(
 
 export const ProjectManagement: React.FC = () => {
   const language = useLanguage();
+  const { user: authUser } = useAuth();
+  const canManageCategories = isAdmin(authUser);
+
   const [stats, setStats] = useState<ProjectStats[]>([]);
   const [categories, setCategories] = useState<ProjectCategory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -196,6 +206,16 @@ export const ProjectManagement: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [sortKey, setSortKey] = useState<CategorySortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // Category management modal state
+  const [showCategoryManageModal, setShowCategoryManageModal] = useState(false);
+
+  // Category filter state
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | 'all'>('all');
+
+  // Quick edit category state
+  const [quickEditCategory, setQuickEditCategory] = useState<ProjectCategory | null>(null);
+  const [showQuickEditModal, setShowQuickEditModal] = useState(false);
 
   // Page refresh control
   const pageRefresh = usePageRefresh({
@@ -251,15 +271,28 @@ export const ProjectManagement: React.FC = () => {
     [stats, categories]
   );
 
-  // Summary statistics (aggregated from categories)
+  // Filtered stats based on selected category
+  const filteredStats = useMemo(() => {
+    if (selectedCategoryId === 'all') {
+      return categorizedStats;
+    }
+    return categorizedStats.filter((c) => c.category_id === selectedCategoryId);
+  }, [categorizedStats, selectedCategoryId]);
+
+  // Handle category change callback
+  const handleCategoryChange = () => {
+    fetchData();
+  };
+
+  // Summary statistics (aggregated from filtered categories)
   const summary = useMemo(() => {
-    const totalCategories = categorizedStats.length;
-    const totalWorkspaces = categorizedStats.reduce((sum, c) => sum + c.total_workspaces, 0);
-    const totalUsers = categorizedStats.reduce((sum, c) => sum + c.total_users, 0);
-    const totalTokens = categorizedStats.reduce((sum, c) => sum + c.total_tokens, 0);
-    const totalDuration = categorizedStats.reduce((sum, c) => sum + c.total_duration_seconds, 0);
+    const totalCategories = filteredStats.length;
+    const totalWorkspaces = filteredStats.reduce((sum, c) => sum + c.total_workspaces, 0);
+    const totalUsers = filteredStats.reduce((sum, c) => sum + c.total_users, 0);
+    const totalTokens = filteredStats.reduce((sum, c) => sum + c.total_tokens, 0);
+    const totalDuration = filteredStats.reduce((sum, c) => sum + c.total_duration_seconds, 0);
     return { totalCategories, totalWorkspaces, totalUsers, totalTokens, totalDuration };
-  }, [categorizedStats]);
+  }, [filteredStats]);
 
   const handleSort = (key: CategorySortKey) => {
     startTransition(() => {
@@ -273,8 +306,8 @@ export const ProjectManagement: React.FC = () => {
   };
 
   const sortedCategorizedStats = useMemo(() => {
-    if (!sortKey) return categorizedStats;
-    return [...categorizedStats].sort((a, b) => {
+    if (!sortKey) return filteredStats;
+    return [...filteredStats].sort((a, b) => {
       let cmp: number;
       if (sortKey === 'name') {
         cmp = a.category_name.localeCompare(b.category_name);
@@ -289,7 +322,7 @@ export const ProjectManagement: React.FC = () => {
       }
       return sortDirection === 'asc' ? cmp : -cmp;
     });
-  }, [categorizedStats, sortKey, sortDirection]);
+  }, [filteredStats, sortKey, sortDirection]);
 
   const toggleExpand = (categoryName: string) => {
     setExpandedCategories((prev) => {
@@ -330,13 +363,25 @@ export const ProjectManagement: React.FC = () => {
       {/* Page Header */}
       <div className="page-header d-flex justify-content-between align-items-center mb-4">
         <h2>{t('projectManagement', language)}</h2>
-        <PageRefreshControl
-          refresh={pageRefresh}
-          compact={true}
-          showAutoRefreshToggle={false}
-          showIntervalSelector={false}
-          showLastRefreshTime={true}
-        />
+        <div className="d-flex align-items-center gap-2">
+          {canManageCategories && (
+            <Button
+              variant="outline-primary"
+              size="sm"
+              onClick={() => setShowCategoryManageModal(true)}
+            >
+              <i className="bi bi-gear me-1" />
+              {t('manageCategories', language)}
+            </Button>
+          )}
+          <PageRefreshControl
+            refresh={pageRefresh}
+            compact={true}
+            showAutoRefreshToggle={false}
+            showIntervalSelector={false}
+            showLastRefreshTime={true}
+          />
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -374,6 +419,17 @@ export const ProjectManagement: React.FC = () => {
           />
         </div>
       </div>
+
+      {/* Category Filter */}
+      {categories.filter((c) => c.is_active).length > 0 && (
+        <div className="mb-3">
+          <CategoryFilter
+            categories={categories}
+            value={selectedCategoryId}
+            onChange={setSelectedCategoryId}
+          />
+        </div>
+      )}
 
       {/* Project Categories List */}
       {categorizedStats.length === 0 ? (
@@ -623,6 +679,28 @@ export const ProjectManagement: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Category Management Modal */}
+      <CategoryManageModal
+        isOpen={showCategoryManageModal}
+        onClose={() => setShowCategoryManageModal(false)}
+        onChange={handleCategoryChange}
+      />
+
+      {/* Quick Edit Category Modal */}
+      <CategoryEditModal
+        isOpen={showQuickEditModal}
+        onClose={() => {
+          setShowQuickEditModal(false);
+          setQuickEditCategory(null);
+        }}
+        onSuccess={() => {
+          handleCategoryChange();
+          setShowQuickEditModal(false);
+          setQuickEditCategory(null);
+        }}
+        category={quickEditCategory}
+      />
     </div>
   );
 };
