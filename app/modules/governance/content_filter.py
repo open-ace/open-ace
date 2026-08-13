@@ -136,6 +136,9 @@ class ContentFilter:
         custom_patterns: dict[str, str] | None = None,
         custom_keywords: list[str] | None = None,
         governance_repo: GovernanceRepository | None = None,
+        rule_loader=None,
+        rule_cache=None,
+        trigger_log_buffer=None,
     ):
         """
         Initialize content filter.
@@ -148,9 +151,13 @@ class ContentFilter:
                 - log_matches: Log all matches (default: True)
                 - block_sensitive_keyword: Block sensitive keyword matches (default: False)
                 - sensitive_keyword_match_mode: Match mode ('word_boundary' or 'substring')
+                - match_strategy: Matching strategy ('all', 'first', 'highest')
             custom_patterns: Additional regex patterns to match.
             custom_keywords: Additional keywords to detect.
             governance_repo: Optional GovernanceRepository for database rules.
+            rule_loader: Optional RuleLoader instance.
+            rule_cache: Optional RuleCache instance.
+            trigger_log_buffer: Optional TriggerLogBuffer instance.
         """
         self.config = config or {}
         self.enabled = self.config.get("enabled", True)
@@ -161,11 +168,17 @@ class ContentFilter:
         self.sensitive_keyword_match_mode = self.config.get(
             "sensitive_keyword_match_mode", "word_boundary"
         )
+        self.match_strategy = self.config.get("match_strategy", "all")
 
         # Database rules integration
         self.governance_repo = governance_repo
         self._rules_cache: list[dict[str, Any]] | None = None
         self._cache_valid: bool = False
+
+        # New modular components
+        self.rule_loader = rule_loader
+        self.rule_cache = rule_cache
+        self.trigger_log_buffer = trigger_log_buffer
 
         # Compiled regex cache for database rules (LRU cache)
         self._compiled_rules_cache: OrderedDict[tuple[str, int], re.Pattern] = OrderedDict()
@@ -289,13 +302,25 @@ class ContentFilter:
 
         return validated
 
-    def _load_rules_from_db(self) -> list[dict[str, Any]]:
+    def _load_rules_from_db(self, tenant_id: int | None = None) -> list[dict[str, Any]]:
         """
         Load filter rules from database.
 
+        Args:
+            tenant_id: Optional tenant ID for multi-tenant filtering.
+
         Returns:
-            List of enabled filter rules.
+            List of enabled and approved filter rules, sorted by priority.
         """
+        # Use modular RuleLoader if available
+        if self.rule_loader is not None:
+            return self.rule_loader.load_rules(
+                tenant_id=tenant_id,
+                include_test=False,
+                approval_status="approved"
+            )
+
+        # Fallback to legacy implementation
         if self.governance_repo is None:
             return []
 
@@ -306,7 +331,25 @@ class ContentFilter:
         # Load rules from database (I/O operation outside lock)
         try:
             rules = self.governance_repo.get_filter_rules()
-            enabled_rules = [r for r in rules if r.get("is_enabled", True)]
+
+            # Apply filters
+            enabled_rules = [
+                r for r in rules
+                if r.get("is_enabled", True)
+                and not r.get("is_test", False)
+                and r.get("approval_status") == "approved"
+            ]
+
+            # Apply tenant filtering
+            if tenant_id is not None:
+                enabled_rules = [
+                    r for r in enabled_rules
+                    if r.get("tenant_id") is None or r.get("tenant_id") == tenant_id
+                ]
+
+            # Sort by priority (lower number = higher priority)
+            enabled_rules = sorted(enabled_rules, key=lambda r: r.get("priority", 100))
+
         except Exception as e:
             logger.error(f"Failed to load filter rules from database: {e}")
             return []
@@ -427,6 +470,8 @@ class ContentFilter:
         content: str,
         context: dict[str, Any] | None = None,
         tenant_config: dict[str, Any] | None = None,
+        tenant_id: int | None = None,
+        match_strategy: str | None = None,
     ) -> FilterResult:
         """
         Check content for sensitive information.
@@ -438,6 +483,8 @@ class ContentFilter:
                 keyword filtering. Allows runtime override of:
                 - block_sensitive_keyword: Whether to block (default: instance config)
                 - sensitive_keyword_match_mode: 'word_boundary' or 'substring'
+            tenant_id: Optional tenant ID for multi-tenant filtering.
+            match_strategy: Optional matching strategy override ('all', 'first', 'highest').
 
         Returns:
             FilterResult: Result of the filtering check.
@@ -447,6 +494,9 @@ class ContentFilter:
 
         if not content:
             return FilterResult(passed=True, risk_level="low", action="none")
+
+        # Determine matching strategy
+        strategy = match_strategy or self.match_strategy
 
         # Validate and apply tenant config for sensitive keyword behavior
         validated_config = self._validate_tenant_config(tenant_config)
@@ -458,8 +508,10 @@ class ContentFilter:
         overall_action = "none"  # Track the most severe action
         redacted = content
 
-        # First check database rules (user-configured rules)
-        db_rules = self._load_rules_from_db()
+        # Load database rules with new filtering logic
+        db_rules = self._load_rules_from_db(tenant_id=tenant_id)
+
+        # Process database rules according to match strategy
         for rule in db_rules:
             rule_pattern = rule.get("pattern", "")
             rule_type = rule.get("type", "keyword")
@@ -467,6 +519,7 @@ class ContentFilter:
             rule_severity = rule.get("severity", "medium")
             rule_id = rule.get("id")
             rule_description = rule.get("description", "")
+            is_test = rule.get("is_test", False)
 
             if not rule_pattern:
                 continue
@@ -492,18 +545,31 @@ class ContentFilter:
                     continue
 
                 if matches:
-                    matched_rules.append(
-                        {
-                            "id": rule_id,
-                            "type": rule_type,
-                            "pattern": rule_pattern,
-                            "action": rule_action,
-                            "severity": rule_severity,
-                            "count": len(matches),
-                            "description": rule_description,
-                            "source": "database",
-                        }
-                    )
+                    matched_rule_entry = {
+                        "id": rule_id,
+                        "type": rule_type,
+                        "pattern": rule_pattern,
+                        "action": rule_action,
+                        "severity": rule_severity,
+                        "count": len(matches),
+                        "description": rule_description,
+                        "source": "database",
+                        "is_test": is_test,
+                        "priority": rule.get("priority", 100),
+                    }
+
+                    matched_rules.append(matched_rule_entry)
+
+                    # Record trigger log if buffer is available
+                    if self.trigger_log_buffer and context:
+                        self.trigger_log_buffer.add(
+                            rule_id=rule_id,
+                            action_taken=rule_action,
+                            matched_content_hash=self.trigger_log_buffer.compute_content_hash(content),
+                            session_id=context.get("session_id"),
+                            user_id=context.get("user_id"),
+                            tenant_id=tenant_id
+                        )
 
                     # Update overall risk and action
                     overall_risk = self._update_risk_level(overall_risk, rule_severity)
@@ -522,6 +588,11 @@ class ContentFilter:
                             )
                             if compiled_keyword is not None:
                                 redacted = compiled_keyword.sub("***", redacted)
+
+                    # Check match strategy for early termination
+                    if strategy == "first":
+                        # Stop after first match
+                        break
 
             except re.error as e:
                 logger.error(f"Invalid regex pattern in rule {rule_id}: {e}")
@@ -596,12 +667,36 @@ class ContentFilter:
         # Determine passed based on action
         passed = overall_action != "block"
 
-        # Log if enabled
+        # Apply match strategy filtering
+        if strategy == "highest" and matched_rules:
+            # Keep only the highest priority rule (lowest priority number)
+            min_priority = min(r.get("priority", 100) for r in matched_rules)
+            matched_rules = [r for r in matched_rules if r.get("priority", 100) == min_priority]
+
+        # Dynamic log level based on rule properties
         if self.log_matches and matched_rules:
-            logger.warning(
-                f"Content filter matched: {len(matched_rules)} rules, "
-                f"risk={overall_risk}, action={overall_action}, passed={passed}"
-            )
+            # Check if any rule is a test rule
+            has_test_rule = any(r.get("is_test", False) for r in matched_rules)
+
+            if has_test_rule:
+                # Test rules: use DEBUG level
+                logger.debug(
+                    f"Content filter matched: {len(matched_rules)} rules, "
+                    f"risk={overall_risk}, action={overall_action}, passed={passed}, "
+                    f"(includes test rules)"
+                )
+            elif overall_risk in ["high", "critical"]:
+                # High risk: use WARNING level
+                logger.warning(
+                    f"Content filter matched: {len(matched_rules)} rules, "
+                    f"risk={overall_risk}, action={overall_action}, passed={passed}"
+                )
+            else:
+                # Low/medium risk: use INFO level
+                logger.info(
+                    f"Content filter matched: {len(matched_rules)} rules, "
+                    f"risk={overall_risk}, action={overall_action}, passed={passed}"
+                )
 
         # Generate message and suggestion
         message = None
