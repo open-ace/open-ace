@@ -89,7 +89,7 @@ def _make_client():
         cursor.execute(
             "INSERT INTO users (id, username, email, password_hash, role, tenant_id) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (1, "admin", "admin@test.com", "hash", "admin", None),
+            (1, "admin", "admin@test.com", "hash", "platform_admin", None),
         )
         cursor.execute(
             "INSERT INTO users (id, username, email, password_hash, role, tenant_id) "

@@ -59,6 +59,13 @@ def _make_orchestrator(wf_data, milestones=None):
         orch.repo = mock_repo
         orch.emitter = MagicMock()
         orch._gh = MagicMock()
+        # _run_agent resolves the workflow owner's system account via a real
+        # UserRepository query (resolved in user_repo's own namespace, so the
+        # orchestrator.Database patch above does not cover it). These tests
+        # exercise session wiring, not account resolution, so stub it to avoid
+        # hitting the DB (the #2457 "no such table: users" cluster under the
+        # SQLite CI lane).
+        orch._resolve_system_account = lambda wf: None
         # These tests exercise session wiring, not the privileged git-context
         # guard. Keep repository validation deterministic and in scope.
         orch._snapshot_repo_context = MagicMock(

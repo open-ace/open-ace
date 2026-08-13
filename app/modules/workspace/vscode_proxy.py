@@ -39,6 +39,63 @@ _proxy_session = requests.Session()
 _proxy_session.trust_env = False
 
 
+def ensure_cs_cookie(info: dict, original_http_url: str, vscode_id: str) -> str:
+    """Ensure we have a code-server session cookie for HTTP-proxy auth.
+
+    code-server's ``authenticated`` middleware checks the session cookie and
+    ignores HTTP Basic Auth, so the HTTP reverse proxy must present the cookie
+    obtained by logging in once with the stored ``cs_password``. The cookie is
+    cached on the session ``info`` dict for reuse across proxied requests.
+
+    Trust boundary: ``cs_password`` is code-server's OWN instance password (not
+    an end-user credential), and ``original_http_url`` is the code-server base
+    URL the proxy already streams all traffic to via ``build_target_url``, so
+    POSTing the password to ``<url>/login`` is not a new SSRF surface — the
+    proxy is already trusted to point there.
+
+    Caching tradeoff: the cookie is reused for the session's lifetime and is
+    not proactively refreshed (a /login per proxied request is infeasible for a
+    VSCode asset stream). If it expires mid-session the caller fails soft — it
+    proxies without a cookie and code-server returns its own 401 (re-auth), so
+    the worst case is a login prompt, never a crash.
+
+    Returns the ``cookie=<value>`` header string, or ``""`` when no password is
+    configured or the login fails. Never raises — a broken login must not take
+    down the proxy endpoint.
+    """
+    cs_password = (info or {}).get("cs_password", "")
+    if not cs_password:
+        return ""
+    cached = info.get("cs_cookie")
+    if cached:
+        return cached
+    login_url = original_http_url.rstrip("/") + "/login"
+    try:
+        resp = _proxy_session.post(
+            login_url,
+            data={"password": cs_password},
+            timeout=10,
+            allow_redirects=False,
+        )
+    except requests.RequestException as exc:
+        logger.warning("ensure_cs_cookie: /login failed for vscode %s: %s", vscode_id, exc)
+        return ""
+    # The cookie jar is populated only as a side effect of the login POST; the
+    # caller injects the cookie via an explicit Cookie header (cached in
+    # info["cs_cookie"]). Clear the shared jar so its host-scoped (but not
+    # port-scoped) cookie can't leak into a later no-password vscode session
+    # proxied to a different code-server instance on the same host.
+    _proxy_session.cookies.clear()
+    set_cookie = resp.headers.get("Set-Cookie", "")
+    if not set_cookie:
+        return ""
+    # First cookie pair only (e.g. "cookie=<session>"); drop attrs like Path/HttpOnly.
+    cookie_pair = set_cookie.split(";", 1)[0].strip()
+    if cookie_pair:
+        info["cs_cookie"] = cookie_pair
+    return cookie_pair
+
+
 def _prepare_request_headers(headers: dict, target_url: str) -> dict:
     """Build upstream request headers for code-server.
 
