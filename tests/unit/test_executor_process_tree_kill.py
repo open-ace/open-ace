@@ -278,8 +278,8 @@ class TestCircuitBreakingForStoppedSessions:
         from app.modules.workspace.llm_proxy_handler import (
             _stopped_sessions_cache,
             _stopped_sessions_cache_lock,
-            mark_session_stopped,
             is_session_stopped,
+            mark_session_stopped,
         )
 
         # Clear cache
@@ -297,13 +297,10 @@ class TestCircuitBreakingForStoppedSessions:
                     session_id = f"session-{thread_id}-{i}"
                     mark_session_stopped(session_id)
                     is_session_stopped(session_id)
-            except Exception as e:
+            except Exception as e:  # allow-swallow: test framework error handling
                 errors.append(e)
 
-        threads = [
-            threading.Thread(target=worker, args=(i,))
-            for i in range(num_threads)
-        ]
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(num_threads)]
 
         for t in threads:
             t.start()

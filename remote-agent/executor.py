@@ -609,8 +609,6 @@ class SessionProcess:
                     pass
 
             # Wait for termination
-            import time
-
             gone, alive = psutil.wait_procs(children, timeout=3.0)
 
             # Force kill any remaining

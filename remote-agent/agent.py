@@ -224,8 +224,7 @@ class RemoteAgent:
 
                     # Second, verify it looks like a CLI process using precise patterns
                     is_cli_process = any(
-                        re.search(pattern, cmdline_str, re.IGNORECASE)
-                        for pattern in cli_patterns
+                        re.search(pattern, cmdline_str, re.IGNORECASE) for pattern in cli_patterns
                     )
 
                     if not is_cli_process:

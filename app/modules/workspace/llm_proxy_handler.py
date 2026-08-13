@@ -64,7 +64,8 @@ def _cleanup_stopped_sessions_cache_locked() -> None:
     global _stopped_sessions_cache
     now = time.time()
     expired = [
-        sid for sid, ts in _stopped_sessions_cache.items()
+        sid
+        for sid, ts in _stopped_sessions_cache.items()
         if now - ts > _STOPPED_SESSION_TTL_SECONDS
     ]
     for sid in expired:
