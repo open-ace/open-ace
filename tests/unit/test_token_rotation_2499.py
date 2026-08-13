@@ -492,17 +492,19 @@ class TestIntegration:
     """Integration tests for token rotation flow."""
 
     @pytest.mark.integration
+    @pytest.mark.skip(reason="Requires real database connection")
     def test_full_rotation_flow(self):
         """Test complete rotation flow: rotate -> confirm -> validate."""
         # This would require a real database connection
         # Marked as integration test to skip in unit test runs
-        pass
+        assert False, "Integration test placeholder"
 
     @pytest.mark.integration
+    @pytest.mark.skip(reason="Requires real database connection")
     def test_concurrent_rotation(self):
         """Test concurrent rotation requests are handled correctly."""
         # This would require a real database connection
-        pass
+        assert False, "Integration test placeholder"
 
 
 if __name__ == "__main__":
