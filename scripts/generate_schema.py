@@ -648,6 +648,9 @@ def convert_to_sqlite(postgres_sql):
                 i += 1
                 continue
 
+            # Remove WHERE clause for SQLite (partial indexes are not fully compatible)
+            full_idx = re.sub(r"\s+WHERE\s+.*$", "", full_idx, flags=re.IGNORECASE)
+
             output_lines.append(f"{full_idx};")
             output_lines.append("")
             i += 1
