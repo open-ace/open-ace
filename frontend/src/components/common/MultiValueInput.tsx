@@ -5,6 +5,8 @@
  */
 
 import React, { useCallback } from 'react';
+import { useLanguage } from '@/store';
+import { t } from '@/i18n';
 import { cn } from '@/utils';
 import { Button } from './Button';
 
@@ -53,6 +55,8 @@ export const MultiValueInput: React.FC<MultiValueInputProps> = ({
   disabled,
   className,
 }) => {
+  const language = useLanguage();
+
   const handleAdd = useCallback(() => {
     if (value.length < maxItems && !disabled) {
       onChange([...value, '']);
