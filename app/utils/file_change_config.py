@@ -15,7 +15,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -181,7 +181,7 @@ class RedisConfig:
     host: str = "localhost"
     port: int = 6379
     db: int = 0
-    password: Optional[str] = None
+    password: str | None = None
     lock_timeout_seconds: int = 300
 
 
@@ -198,10 +198,10 @@ class AlertRuleConfig:
     """Single alert rule configuration."""
 
     enabled: bool = True
-    threshold_percent: Optional[float] = None
-    threshold_ms: Optional[int] = None
-    threshold_size: Optional[int] = None
-    threshold_per_day: Optional[int] = None
+    threshold_percent: float | None = None
+    threshold_ms: int | None = None
+    threshold_size: int | None = None
+    threshold_per_day: int | None = None
     severity: str = "warning"
     notifications: list[str] = field(default_factory=lambda: ["log"])
 
