@@ -598,7 +598,11 @@ def test_git_entry_acl_restore_preserves_exact_integrity(tmp_path):
     wrapper = Path("scripts/openace-run-as.sh").read_text(encoding="utf-8")
     function_start = wrapper.index("    normalize_group_class_signature() {")
     function_end = function_start
-    for _ in range(6):
+    # Extract every consecutive helper from normalize_group_class_signature
+    # through verify_and_restore_git_entry. The count must track the number of
+    # helpers defined in that span (bumped to 7 when
+    # signatures_differ_only_by_inode was inserted between them for #2529).
+    for _ in range(7):
         function_end = wrapper.index("\n    }\n", function_end + 1) + len("\n    }")
     signature_functions = dedent(wrapper[function_start:function_end])
     project = tmp_path / "project"
