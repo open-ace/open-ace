@@ -86,9 +86,13 @@ class TestRefreshTrustedGitContext:
         assert refreshed["git_identity"] != "999:999"
 
     def test_refresh_does_not_raise_on_missing_repo(self, orchestrator, tmp_path):
-        """If the repo path doesn't exist, refresh silently returns."""
+        """If the repo path doesn't exist, refresh silently returns (best-effort)
+        WITHOUT registering a trusted context for the bogus path."""
         bogus = str(tmp_path / "nonexistent")
+        assert not os.path.exists(bogus)  # precondition
+        # Must not raise, and must not register a context for a non-repo path
         orchestrator._refresh_trusted_git_context(bogus, system_account=None)
+        assert os.path.realpath(bogus) not in GitHubOps._trusted_git_contexts
 
     def test_stale_context_does_not_block_git_after_refresh(self, git_repo, orchestrator):
         """Simulate the false-positive: a stale trusted context (from a prior
