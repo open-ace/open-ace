@@ -98,6 +98,20 @@ def upgrade() -> None:
         # SQLite doesn't support partial indexes, create regular indexes
         # Check if indexes exist before creating
         existing_indexes = [idx["name"] for idx in inspector.get_indexes("agent_tokens")]
+        if "idx_agent_tokens_one_active_per_machine" not in existing_indexes:
+            op.create_index(
+                "idx_agent_tokens_one_active_per_machine",
+                "agent_tokens",
+                ["machine_id"],
+                unique=True,
+            )
+        if "idx_agent_tokens_pending_revoke_timeout" not in existing_indexes:
+            op.create_index(
+                "idx_agent_tokens_pending_revoke_timeout",
+                "agent_tokens",
+                ["revoke_after"],
+                unique=False,
+            )
         if "idx_agent_tokens_machine_pending" not in existing_indexes:
             op.create_index(
                 "idx_agent_tokens_machine_pending",

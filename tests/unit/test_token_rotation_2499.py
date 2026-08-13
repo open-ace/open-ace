@@ -129,9 +129,8 @@ class TestTokenRotation:
         """Test getting default token revoke timeout."""
         machine_id = str(uuid.uuid4())
 
-        # Mock database to return None for timeout config
-        cursor = mock_db.connection.return_value.cursor.return_value
-        cursor.fetchone.return_value = None
+        # Mock database to return empty result for timeout config
+        mock_db._mock_cursor.fetchone.return_value = {}
 
         # Get timeout
         timeout = manager._get_token_revoke_timeout(machine_id)
