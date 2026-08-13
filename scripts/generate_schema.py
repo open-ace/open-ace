@@ -611,6 +611,10 @@ def convert_to_sqlite(postgres_sql):
             # Convert PostgreSQL pattern operators to SQLite-compatible ones
             full_idx = full_idx.replace(" !~~ ", " NOT LIKE ")
             full_idx = full_idx.replace(" ~~ ", " LIKE ")
+            # Convert PostgreSQL boolean literals in WHERE clauses: false -> 0, true -> 1
+            # Match 'false' and 'true' as standalone words (not part of identifiers)
+            full_idx = re.sub(r"\bfalse\b", "0", full_idx)
+            full_idx = re.sub(r"\btrue\b", "1", full_idx)
             # Convert boolean comparisons in WHERE: (role)::text = 'assistant'::text -> role = 'assistant'
             full_idx = re.sub(r"\((\w+)\)::text\s*=\s*'([^']*)'::text", r"\1 = '\2'", full_idx)
             # Convert (user_id IS NOT NULL) AND ... in WHERE
