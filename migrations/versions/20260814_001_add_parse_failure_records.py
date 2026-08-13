@@ -64,17 +64,11 @@ def upgrade() -> None:
             sa.Column("tool_name", sa.String(64), nullable=False),
             sa.Column("tool_input", sa.Text(), nullable=False),
             sa.Column("error", sa.Text(), nullable=False),
-            sa.Column(
-                "timestamp", sa.DateTime(timezone=True), nullable=False
-            ),
+            sa.Column("timestamp", sa.DateTime(timezone=True), nullable=False),
             sa.Column("retry_count", sa.Integer(), server_default="0", nullable=False),
-            sa.Column(
-                "last_retry_at", sa.DateTime(timezone=True), nullable=True
-            ),
+            sa.Column("last_retry_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("resolved", sa.Boolean(), server_default="false", nullable=False),
-            sa.Column(
-                "created_at", sa.DateTime(timezone=True), nullable=False
-            ),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         )
 
     # Create indexes for efficient queries
@@ -95,13 +89,23 @@ def upgrade() -> None:
     )
 
     # Index on resolved for finding unresolved failures
-    op.create_index(
-        "idx_parse_failure_unresolved",
-        "parse_failure_records",
-        ["resolved"],
-        unique=False,
-        postgresql_where=sa.text("resolved = false"),
-    )
+    if dialect == "postgresql":
+        op.create_index(
+            "idx_parse_failure_unresolved",
+            "parse_failure_records",
+            ["resolved"],
+            unique=False,
+            postgresql_where=sa.text("resolved = false"),
+        )
+    else:
+        # SQLite partial index (supports true/false literals)
+        op.create_index(
+            "idx_parse_failure_unresolved",
+            "parse_failure_records",
+            ["resolved"],
+            unique=False,
+            sqlite_where=sa.text("resolved = false"),
+        )
 
     # Index on created_at for cleanup queries
     op.create_index(
