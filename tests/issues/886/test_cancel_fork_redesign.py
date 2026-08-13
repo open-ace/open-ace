@@ -100,7 +100,7 @@ def auto_db(tmp_path):
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO users (username, email, password_hash, role) " "VALUES (?, ?, ?, ?)",
-                ("admin", "admin@test.com", "hash123", "admin"),
+                ("admin", "admin@test.com", "hash123", "platform_admin"),
             )
             conn.commit()
         finally:

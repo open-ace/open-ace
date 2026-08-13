@@ -8,10 +8,10 @@ import type { StoreApiKeyRequest, UpdateApiKeyRequest, CreateRemoteSessionReques
 
 // ==================== Machine Hooks ====================
 
-export function useMachines() {
+export function useMachines(tenantId?: number) {
   return useQuery({
-    queryKey: ['remote', 'machines'],
-    queryFn: () => remoteApi.listMachines(),
+    queryKey: tenantId !== undefined ? ['remote', 'machines', tenantId] : ['remote', 'machines'],
+    queryFn: () => remoteApi.listMachines(tenantId),
     refetchInterval: 30000, // 每 30 秒自动刷新，匹配心跳更新频率
   });
 }

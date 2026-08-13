@@ -3458,6 +3458,16 @@ class AutonomousOrchestrator:
                     # Use merge-base as the effective round base for scope validation.
                     # This only counts changes in the PR branch, not merge-introduced changes.
                     commit_before = effective_base
+                    # The merge's upstream files must also be excluded from the
+                    # CUMULATIVE range. Without this, a workflow that is many
+                    # commits behind main and syncs via a merge commit would
+                    # have its stale ``base_commit_sha`` (the branch-creation
+                    # point) produce a cumulative diff counting the merge's
+                    # hundreds of upstream files -> a false "scope exceeded".
+                    # We read cumulative_base from the workflow below; override
+                    # the in-memory view so it uses the merge-base too.
+                    wf = dict(wf)
+                    wf["base_commit_sha"] = effective_base
                     logger.info(
                         "Merge commit detected: using merge-base %s as effective round base",
                         effective_base[:12],

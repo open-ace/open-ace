@@ -136,6 +136,12 @@ def _make_orchestrator(wf_data):
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
 
+    # _run_agent → _resolve_system_account constructs a fresh UserRepository
+    # (bypassing the mocked orch.repo) that hits the real, schema-less test DB.
+    # Stub it so the no-such-table: users error doesn't crash these session-
+    # wiring tests before they reach their assertions (same fix as #716/#723).
+    orch._resolve_system_account = lambda wf: None
+
     return orch, mock_repo
 
 

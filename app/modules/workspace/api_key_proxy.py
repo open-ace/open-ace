@@ -1313,8 +1313,9 @@ class APIKeyProxyService:
                 continue
 
             key_id = int(row["id"])
-            priority = int(row.get("priority") or 0)
-            weight = int(row.get("weight") or 100)
+            # Issue #2545: Use _row_get() for sqlite3.Row compatibility
+            priority = int(self._row_get(row, "priority") or 0)
+            weight = int(self._row_get(row, "weight") or 100)
 
             # Build settings for this key
             try:
@@ -1872,15 +1873,16 @@ class APIKeyProxyService:
             except Exception as exc:
                 logger.warning("Failed to decrypt API key %s: %s", row["id"], exc)
                 continue
+            # Issue #2545: Use _row_get() for sqlite3.Row compatibility
             candidates.append(
                 {
                     "id": int(row["id"]),
-                    "priority": int(row.get("priority") or 0),
-                    "weight": int(row.get("weight") or 100),
+                    "priority": int(self._row_get(row, "priority") or 0),
+                    "weight": int(self._row_get(row, "weight") or 100),
                     "api_key": api_key,
-                    "base_url": row.get("base_url"),
-                    "cli_settings": row.get("cli_settings"),
-                    "resolved_ips": row.get("resolved_ips"),
+                    "base_url": self._row_get(row, "base_url"),
+                    "cli_settings": self._row_get(row, "cli_settings"),
+                    "resolved_ips": self._row_get(row, "resolved_ips"),
                 }
             )
 

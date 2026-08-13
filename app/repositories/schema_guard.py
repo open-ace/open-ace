@@ -93,6 +93,48 @@ def _execute_scalar(connection: Any, query: str) -> Any:
     return result.scalar()
 
 
+def _execute_all(connection: Any, query: str) -> list[Any]:
+    """Execute a query and return all rows, compatible with all connection types.
+
+    Like :func:`_execute_scalar` but returns every row instead of just the first
+    value.  Normalises ``RealDictCursor`` dict rows to tuples so that positional
+    indexing (``row[0]``) works consistently across backends.
+
+    Supports:
+    - SQLAlchemy ``Connection`` (has ``.execute()``, no ``.cursor()``)
+    - ``PgConnectionWrapper`` / psycopg2 (has ``.cursor()``, no ``.execute()``)
+    - ``sqlite3.Connection`` (has both ``.cursor()`` and ``.execute()``)
+
+    Args:
+        connection: Database connection object.
+        query: SQL query to execute.
+
+    Returns:
+        List of rows.  Dict rows (from ``RealDictCursor``) are converted to
+        tuples so that ``row[0]`` always returns the first column.
+    """
+    if hasattr(connection, "cursor") and not hasattr(connection, "execute"):
+        # Raw psycopg2 / PgConnectionWrapper (has .cursor(), no .execute())
+        cursor = connection.cursor()
+        try:
+            cursor.execute(query)
+            rows = cursor.fetchall()
+        finally:
+            cursor.close()
+        # Normalise RealDictCursor dict rows to tuples for positional indexing
+        if rows and isinstance(rows[0], dict):
+            return [tuple(row.values()) for row in rows]
+        return rows
+    elif hasattr(connection, "cursor") and hasattr(connection, "execute"):
+        # sqlite3 raw connection (has both .cursor() and .execute())
+        # Use .execute() directly for consistency with SQLAlchemy path
+        pass  # fall through to the SQLAlchemy-like path below
+
+    # SQLAlchemy Connection (or sqlite3 via .execute())
+    result = connection.execute(sa.text(query))
+    return result.fetchall()
+
+
 def _table_exists(connection: Any, table_name: str) -> bool:
     """Check if a table exists, compatible with both SQLAlchemy and raw connections.
 

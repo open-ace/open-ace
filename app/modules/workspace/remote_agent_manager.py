@@ -201,6 +201,11 @@ class RemoteAgentManager:
         # Log rate limiting cache for is_session_ended DB failures (Issue #1823)
         # {session_id_minute: True} - limits logging to once per minute per session
         self._log_rate_limit_cache: dict[str, int] = {}
+        # Heartbeat monitor state tracking (Issue #2528)
+        # Last heartbeat check timestamp (seconds since epoch)
+        self._last_heartbeat_check_time: float = 0.0
+        # Heartbeat check execution count
+        self._heartbeat_check_count: int = 0
         # (removed _last_rotate_unrevoked — rotate_agent_token now returns the info)
         self._restore_in_memory_state()
         # Defer session cleanup to heartbeat monitor instead of running on startup.
@@ -255,18 +260,31 @@ class RemoteAgentManager:
             logger.warning("Failed to restore in-memory state: %s", e)
 
     def _start_heartbeat_monitor(self) -> None:
-        """Start background thread for heartbeat monitoring."""
+        """Start background thread for heartbeat monitoring.
+
+        Issue #2528: Added startup confirmation and state tracking for observability.
+        """
 
         def monitor():
+            logger.info("Heartbeat monitor coroutine started")
+            check_count = 0
             while True:
                 try:
                     self._check_heartbeats()
+                    check_count += 1
+                    # Log every 10 checks for observability (DEBUG level to avoid log spam)
+                    if check_count % 10 == 0:
+                        logger.debug(
+                            "Heartbeat monitor running, check_count=%d, last_check_time=%s",
+                            check_count,
+                            self._last_heartbeat_check_time,
+                        )
                 except Exception as e:
-                    logger.error(f"Heartbeat monitor error: {e}")
+                    logger.error("Heartbeat monitor error: %s", e)
                 gevent.sleep(self.HEARTBEAT_CHECK_INTERVAL)
 
-        gevent.spawn(monitor)
-        logger.info("Heartbeat monitor started")
+        greenlet = gevent.spawn(monitor)
+        logger.info("Heartbeat monitor spawned, greenlet=%s", greenlet)
 
     def _start_retention_cleanup(self) -> None:
         """Start background task for retention cleanup (Issue #1823).
@@ -453,7 +471,12 @@ class RemoteAgentManager:
 
         Also cleans up remote sessions that have been offline longer than
         the recovery window, allowing reconnection for brief disconnects.
+
+        Issue #2528: Added state tracking for observability.
         """
+        # Record check start time for observability (Issue #2528)
+        check_start_time = time.time()
+
         recovery_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
             seconds=self.SESSION_RECOVERY_WINDOW_SECONDS
         )
@@ -526,6 +549,16 @@ class RemoteAgentManager:
 
         # Clean up sessions paused too long (>4 hours)
         self._cleanup_stale_paused_sessions()
+
+        # Update heartbeat monitor state tracking (Issue #2528)
+        self._last_heartbeat_check_time = time.time()
+        self._heartbeat_check_count += 1
+        elapsed_ms = int((time.time() - check_start_time) * 1000)
+        logger.debug(
+            "Heartbeat check completed, count=%d, elapsed=%dms",
+            self._heartbeat_check_count,
+            elapsed_ms,
+        )
 
     def _cleanup_stale_paused_sessions(self) -> None:
         """Stop sessions that have been paused for more than 4 hours."""
@@ -925,8 +958,12 @@ class RemoteAgentManager:
             "created_by": row["created_by"],
         }
 
-    def _create_agent_token(self, machine_id: str) -> str:
+    def _create_agent_token(self, machine_id: str, token_version: int | None = None) -> str:
         """Generate and store a new agent token for a machine.
+
+        Args:
+            machine_id: The machine to create token for.
+            token_version: Optional token version. If None, auto-increments.
 
         Returns:
             The plaintext agent token (shown once to the caller).
@@ -937,16 +974,33 @@ class RemoteAgentManager:
 
         with self.db.connection() as conn:
             cursor = conn.cursor()
+
+            # Auto-increment version if not provided
+            if token_version is None:
+                cursor.execute(
+                    f"""
+                    SELECT COALESCE(MAX(token_version), 0) + 1 AS next_version
+                    FROM agent_tokens WHERE machine_id = {_param()}
+                    """,
+                    (machine_id,),
+                )
+                row = cursor.fetchone()
+                token_version = row["next_version"] if row else 1
+
             cursor.execute(
                 f"""
-                INSERT INTO agent_tokens (token_hash, machine_id, created_at)
-                VALUES ({_param()}, {_param()}, {_param()})
+                INSERT INTO agent_tokens (token_hash, machine_id, token_version, created_at)
+                VALUES ({_param()}, {_param()}, {_param()}, {_param()})
             """,
-                (token_hash_val, machine_id, now),
+                (token_hash_val, machine_id, token_version, now),
             )
             conn.commit()
 
-        logger.info("Issued agent token for machine %s", machine_id[:8])
+        logger.info(
+            "Issued agent token for machine %s (version=%d)",
+            machine_id[:8],
+            token_version,
+        )
         return token
 
     def validate_agent_token(self, token: str, machine_id: str) -> bool:
@@ -990,7 +1044,7 @@ class RemoteAgentManager:
 
     def rotate_agent_token(
         self, machine_id: str, rotated_by: int | None = None
-    ) -> dict[str, str | bool] | None:
+    ) -> dict[str, str | bool | int] | None:
         """Rotate the agent token for a machine.
 
         Revokes all existing tokens for the machine and issues a new one.
@@ -998,17 +1052,45 @@ class RemoteAgentManager:
         previously revoked), the revocation is silently lifted — this is
         an intentional admin action tracked via audit logging.
 
+        Issue #2530: Uses Advisory Lock for multi-instance concurrency control
+        and returns token_version for version-based command filtering.
+
         Args:
             machine_id: The machine whose token to rotate.
             rotated_by: User ID who initiated the rotation.
 
         Returns:
-            New plaintext agent token, or None if machine not found.
+            Dict with new_token, token_version, rotated_at, and unrevoked flag,
+            or None if machine not found.
         """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now_iso = now.isoformat()
 
         with self._lock, self.db.connection() as conn:
             cursor = conn.cursor()
+
+            # Issue #2530: Acquire Advisory Lock for multi-instance concurrency control
+            # Use machine_id converted to bigint for lock key
+            if is_postgresql():
+                # Convert machine_id (UUID string) to integer for lock key
+                # Use SHA256 hash for consistent mapping across processes
+                import hashlib
+
+                try:
+                    # Use SHA256 hash for consistent lock key across processes
+                    # Take first 16 hex chars (64 bits) for bigint range
+                    hash_bytes = hashlib.sha256(machine_id.encode()).digest()
+                    lock_key = int.from_bytes(hash_bytes[:8], byteorder="big")
+                except (ValueError, AttributeError):
+                    # Fallback: use a deterministic hash
+                    lock_key = int(hashlib.sha256(machine_id.encode()).hexdigest()[:16], 16)
+
+                # Set lock timeout and acquire advisory lock
+                cursor.execute("SET LOCAL lock_timeout = '30s'")
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(%s)",
+                    (lock_key,),
+                )
 
             # Verify machine exists
             cursor.execute(
@@ -1021,13 +1103,14 @@ class RemoteAgentManager:
             # Revoke all existing active tokens for this machine
             cursor.execute(
                 f"""
-                SELECT id, is_revoked FROM agent_tokens
+                SELECT id, is_revoked, token_version FROM agent_tokens
                 WHERE machine_id = {_param()}
             """,
                 (machine_id,),
             )
             existing = cursor.fetchall()
             any_unrevoked = False
+            current_max_version = 0
             for row in existing:
                 is_revoked = row["is_revoked"]
                 if is_postgresql():
@@ -1036,6 +1119,9 @@ class RemoteAgentManager:
                     is_revoked = bool(is_revoked)
                 if not is_revoked:
                     any_unrevoked = True
+                # Track max version
+                if row["token_version"]:
+                    current_max_version = max(current_max_version, row["token_version"])
 
             # Mark all existing tokens as revoked
             cursor.execute(
@@ -1046,23 +1132,32 @@ class RemoteAgentManager:
             """,
                 (
                     adapt_boolean_value(True),
-                    now.isoformat(),
+                    now_iso,
                     rotated_by,
                     machine_id,
                     adapt_boolean_value(False),
                 ),
             )
 
+            # Calculate next version
+            next_version = current_max_version + 1
+
             conn.commit()
 
         # Track if rotate also lifted a prior revocation (audit detail)
         had_revoked_tokens = len(existing) > 0 and not any_unrevoked
 
-        # Issue a new token
-        new_token = self._create_agent_token(machine_id)
-        logger.info("Rotated agent token for machine %s", machine_id[:8])
+        # Issue a new token with version
+        new_token = self._create_agent_token(machine_id, next_version)
+        logger.info(
+            "Rotated agent token for machine %s (version=%d)",
+            machine_id[:8],
+            next_version,
+        )
         return {
             "new_token": new_token,
+            "token_version": next_version,
+            "rotated_at": now_iso,
             "unrevoked": had_revoked_tokens,
         }
 
@@ -1374,6 +1469,10 @@ class RemoteAgentManager:
         Claims both pending commands and timed-out delivered commands.
         Uses batch UPDATE for efficiency. Fixed NULL handling for delivered_at.
 
+        Issue #2530: Implements lazy cleanup for rotate_token commands.
+        Only returns the latest rotate_token command (by token_version) and
+        marks older ones as 'expired' to prevent rollback to revoked tokens.
+
         Returns:
             List of claimed command payloads.
         """
@@ -1392,7 +1491,7 @@ class RemoteAgentManager:
                 # Added delivered_at IS NOT NULL check to avoid NULL value trap
                 cursor.execute(
                     f"""
-                    SELECT id, payload
+                    SELECT id, payload, command_type
                     FROM remote_runtime_commands
                     WHERE machine_id = {_param()}
                       AND (
@@ -1414,8 +1513,119 @@ class RemoteAgentManager:
                 if not rows:
                     return claimed
 
+                # Issue #2530: Lazy cleanup for rotate_token commands
+                # Group by command_type and handle rotate_token specially
+                rotate_token_commands = []
+                other_commands = []
+
+                for row in rows:
+                    try:
+                        payload = json.loads(row["payload"])
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        logger.warning(
+                            "Skipping corrupt remote command payload id=%s",
+                            row["id"],
+                        )
+                        continue
+
+                    if not isinstance(payload, dict):
+                        continue
+
+                    command_type = row["command_type"] or payload.get("command", "")
+                    if command_type == "rotate_token":
+                        rotate_token_commands.append(
+                            {
+                                "id": row["id"],
+                                "payload": payload,
+                                "token_version": payload.get("token_version", 0),
+                            }
+                        )
+                    else:
+                        other_commands.append(
+                            {
+                                "id": row["id"],
+                                "payload": payload,
+                            }
+                        )
+
+                # For rotate_token commands: only keep the latest one
+                if len(rotate_token_commands) > 1:
+                    # Sort by token_version descending to find the latest
+                    rotate_token_commands.sort(key=lambda x: x["token_version"], reverse=True)
+                    latest_rotate = rotate_token_commands[0]
+                    expired_ids = [cmd["id"] for cmd in rotate_token_commands[1:]]
+
+                    # Mark older rotate_token commands as expired
+                    if expired_ids:
+                        expired_placeholders = ", ".join([_param()] * len(expired_ids))
+                        cursor.execute(
+                            f"""
+                            UPDATE remote_runtime_commands
+                            SET status = 'expired'
+                            WHERE id IN ({expired_placeholders})
+                            """,
+                            expired_ids,
+                        )
+                        logger.info(
+                            "Marked %d expired rotate_token commands for machine %s",
+                            len(expired_ids),
+                            machine_id[:8],
+                        )
+
+                    # Only claim the latest rotate_token command
+                    rotate_to_claim = [latest_rotate]
+                else:
+                    rotate_to_claim = rotate_token_commands
+
+                # Issue #2530 Phase 2: Validate rotate_token command before claiming
+                # Check if the token in the command is still active
+                if rotate_to_claim:
+                    latest_rotate_cmd = rotate_to_claim[0]
+                    token_version_in_cmd = latest_rotate_cmd["token_version"]
+
+                    # Query the database to check if this token version is still active
+                    cursor.execute(
+                        f"""
+                        SELECT id FROM agent_tokens
+                        WHERE machine_id = {_param()}
+                          AND token_version = {_param()}
+                          AND is_revoked = {_param()}
+                        LIMIT 1
+                        """,
+                        (
+                            machine_id,
+                            token_version_in_cmd,
+                            adapt_boolean_value(False),
+                        ),
+                    )
+                    active_token = cursor.fetchone()
+
+                    # If token is not active (revoked or not found), mark command as expired
+                    if not active_token:
+                        logger.warning(
+                            "rotate_token command version=%d for machine %s is invalid (token not active)",
+                            token_version_in_cmd,
+                            machine_id[:8],
+                        )
+                        cursor.execute(
+                            f"""
+                            UPDATE remote_runtime_commands
+                            SET status = 'expired'
+                            WHERE id = {_param()}
+                            """,
+                            (latest_rotate_cmd["id"],),
+                        )
+                        # Don't claim this command
+                        rotate_to_claim = []
+
+                # Combine rotate_token and other commands to claim
+                all_to_claim = rotate_to_claim + other_commands
+
+                if not all_to_claim:
+                    return claimed
+
                 # Batch UPDATE with single statement (Issue #1823)
-                command_ids = [row["id"] for row in rows]
+                command_ids = [cmd["id"] for cmd in all_to_claim]
                 id_placeholders = ", ".join([_param()] * len(command_ids))
 
                 cursor.execute(
@@ -1428,18 +1638,9 @@ class RemoteAgentManager:
                     [now_iso] + command_ids,
                 )
 
-                # Parse payloads for successfully claimed commands
-                for row in rows:
-                    try:
-                        payload = json.loads(row["payload"])
-                    except (TypeError, ValueError, json.JSONDecodeError):
-                        logger.warning(
-                            "Skipping corrupt remote command payload id=%s",
-                            row["id"],
-                        )
-                        continue
-                    if isinstance(payload, dict):
-                        claimed.append(payload)
+                # Collect claimed payloads
+                for cmd in all_to_claim:
+                    claimed.append(cmd["payload"])
 
                 conn.commit()
         except Exception as e:
@@ -2613,8 +2814,47 @@ class RemoteAgentManager:
 
         logger.info("RemoteAgentManager shutdown complete")
 
+    def get_heartbeat_monitor_status(self) -> dict[str, Any]:
+        """Get heartbeat monitor status for health check endpoint.
+
+        Issue #2528: Added for observability and diagnostics.
+
+        Returns:
+            Dict with:
+            - last_check_time: ISO timestamp of last heartbeat check
+            - check_count: Number of heartbeat checks performed
+            - is_running: Whether heartbeat monitor appears to be running
+            - interval_seconds: Heartbeat check interval
+            - timeout_seconds: Heartbeat timeout threshold
+        """
+        now = time.time()
+        # Consider monitor running if last check was within 2x the interval
+        # (allowing some slack for scheduling delays)
+        is_running = (
+            self._last_heartbeat_check_time > 0
+            and (now - self._last_heartbeat_check_time) < 2 * self.HEARTBEAT_CHECK_INTERVAL
+        )
+
+        last_check_iso = None
+        if self._last_heartbeat_check_time > 0:
+            last_check_iso = datetime.fromtimestamp(
+                self._last_heartbeat_check_time, tz=timezone.utc
+            ).isoformat()
+
+        return {
+            "last_check_time": last_check_iso,
+            "check_count": self._heartbeat_check_count,
+            "is_running": is_running,
+            "interval_seconds": self.HEARTBEAT_CHECK_INTERVAL,
+            "timeout_seconds": self.HEARTBEAT_TIMEOUT_SECONDS,
+        }
+
     def _row_to_machine(self, row) -> dict[str, Any]:
-        """Convert a database row to machine dict."""
+        """Convert a database row to machine dict.
+
+        Issue #2528: Added lazy heartbeat check to correct status/connected
+        when last_heartbeat is stale but database status hasn't been updated yet.
+        """
 
         def get_value(key: str):
             if isinstance(row, dict):
@@ -2633,15 +2873,56 @@ class RemoteAgentManager:
 
         from app.utils.datetime_utils import ensure_utc_suffix
 
+        # Get base values
+        machine_id = get_value("machine_id") or ""
+        status = get_value("status") or "offline"
+        last_heartbeat_str = get_value("last_heartbeat")
+        connected = self.is_connected(machine_id)
+
+        # Issue #2528: Lazy heartbeat check
+        # If status is not offline but last_heartbeat is stale, correct the values
+        # This ensures frontend shows correct status even when heartbeat monitor
+        # hasn't run yet or is delayed
+        if status != "offline" and last_heartbeat_str:
+            try:
+                # Parse last_heartbeat timestamp
+                last_heartbeat_dt = datetime.fromisoformat(
+                    last_heartbeat_str.replace("Z", "+00:00")
+                )
+                if last_heartbeat_dt.tzinfo is None:
+                    last_heartbeat_dt = last_heartbeat_dt.replace(tzinfo=timezone.utc)
+
+                # Check if heartbeat is stale (exceeds timeout threshold)
+                now_utc = datetime.now(timezone.utc)
+                heartbeat_age_seconds = (now_utc - last_heartbeat_dt).total_seconds()
+
+                if heartbeat_age_seconds > self.HEARTBEAT_TIMEOUT_SECONDS:
+                    # Correct status and connected for stale heartbeat
+                    status = "offline"
+                    connected = False
+                    logger.debug(
+                        "Lazy heartbeat check: machine %s marked offline (age=%ds > %ds)",
+                        machine_id[:8],
+                        int(heartbeat_age_seconds),
+                        self.HEARTBEAT_TIMEOUT_SECONDS,
+                    )
+            except (ValueError, TypeError) as e:
+                # If timestamp parsing fails, leave status unchanged
+                logger.debug(
+                    "Failed to parse last_heartbeat for machine %s: %s",
+                    machine_id[:8],
+                    e,
+                )
+
         return {
             "id": get_value("id"),
-            "machine_id": get_value("machine_id"),
+            "machine_id": machine_id,
             "machine_name": get_value("machine_name"),
             "hostname": get_value("hostname"),
             "os_type": get_value("os_type"),
             "os_version": get_value("os_version"),
             "ip_address": get_value("ip_address"),
-            "status": get_value("status") or "offline",
+            "status": status,
             "agent_version": get_value("agent_version"),
             "capabilities": capabilities,
             "cli_path": get_value("cli_path"),
@@ -2650,8 +2931,8 @@ class RemoteAgentManager:
             "created_by": get_value("created_by"),
             "created_at": ensure_utc_suffix(get_value("created_at")),
             "updated_at": ensure_utc_suffix(get_value("updated_at")),
-            "last_heartbeat": ensure_utc_suffix(get_value("last_heartbeat")),
-            "connected": self.is_connected(get_value("machine_id") or ""),
+            "last_heartbeat": ensure_utc_suffix(last_heartbeat_str),
+            "connected": connected,
         }
 
 

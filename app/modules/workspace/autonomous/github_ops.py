@@ -154,6 +154,28 @@ def _is_transient_error(stderr: str, returncode: int) -> bool:
     return any(kw in combined for kw in _TRANSIENT_ERROR_KEYWORDS)
 
 
+# --force-with-lease recovery: a push rejected with these markers means the
+# local remote-tracking ref is stale relative to the actual remote — typically
+# because the auto-dev worktree was recreated after a failure cleanup (so its
+# ``refs/remotes/origin/<branch>`` lags the real tip), or a concurrent push to
+# the same single-owner branch. A targeted ``git fetch`` refreshes the lease so
+# one retry succeeds. Network errors are deliberately excluded: fetching cannot
+# fix them, and the orchestrator Layer-2 retry remains the backstop for those.
+# ``constants._TRANSIENT_ORCHESTRATOR_KEYWORDS`` already classifies these
+# transient; this predicate narrows to the lease-refresh subset.
+_FORCE_WITH_LEASE_REFRESH_KEYWORDS = (
+    "stale info",
+    "fetch first",
+    "non-fast-forward",
+)
+
+
+def _is_stale_lease_rejection(err_str: str) -> bool:
+    """Whether a force-with-lease push failure is a recoverable stale lease."""
+    combined = f"{err_str}".lower()
+    return any(kw in combined for kw in _FORCE_WITH_LEASE_REFRESH_KEYWORDS)
+
+
 # Failure markers used to locate the real error lines inside a long pre-commit /
 # pytest / mypy log. The tail-only approach drops errors that sit in the middle
 # of the output (e.g. mypy failing while later hooks keep printing).
@@ -2546,7 +2568,34 @@ class GitHubOps:
             args.append(branch)
         if force_with_lease:
             args.append("--force-with-lease")
-        self._run_git(args)
+        try:
+            self._run_git(args)
+        except GitHubOpsError as e:
+            if not (force_with_lease and _is_stale_lease_rejection(str(e))):
+                raise
+            # The push was rejected because our remote-tracking ref is stale
+            # relative to the actual remote (recreated worktree / concurrent
+            # push). Refresh the lease with a targeted fetch and retry once —
+            # the local auto-dev branch is authoritative for this workflow, so
+            # overwriting the remote after a fresh fetch is the intended
+            # semantics. Without this recovery the orchestrator's Layer-2 retry
+            # re-runs the identical push and loops to exhaustion (reproducer:
+            # ee678c63, a reset worktree whose stale ref never refreshed).
+            logger.warning(
+                "force-with-lease stale lease for %s; fetching %s and retrying",
+                target,
+                remote,
+            )
+            if not target:
+                # No validated branch to refresh (should not happen: the
+                # force_with_lease guard above resolves target) — propagate.
+                raise e
+            try:
+                self._run_git(["fetch", remote, target])
+            except GitHubOpsError as fetch_err:
+                logger.warning("lease-refresh fetch failed: %s", fetch_err)
+                raise e from fetch_err
+            self._run_git(args)
 
     def git_init(self) -> None:
         """Initialize a git repository."""
