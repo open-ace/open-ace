@@ -160,6 +160,7 @@ class TestListCliSessionIdsForProject:
         ]:
             sm.create_session(
                 session_id=sid,
+                tenant_id=1,
                 session_type="workflow",
                 title="t",
                 tool_name="claude-code",
