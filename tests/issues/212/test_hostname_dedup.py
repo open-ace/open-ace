@@ -132,6 +132,21 @@ def make_manager():
     conn.execute(
         "CREATE TABLE IF NOT EXISTS users (" "id INTEGER PRIMARY KEY, " "username TEXT NOT NULL)"
     )
+    # registration_tokens is required by create_registration_token() and the
+    # consume/validate/cleanup paths in RemoteAgentManager; without it every
+    # test calling create_token() crashes with 'no such table' (the #2457
+    # 9-test cluster). Mirrors schema/schema-sqlite.sql:784-793.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS registration_tokens ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "token_hash TEXT NOT NULL UNIQUE, "
+        "tenant_id INTEGER NOT NULL, "
+        "created_by INTEGER NOT NULL, "
+        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+        "expires_at TIMESTAMP, "
+        "is_consumed INTEGER DEFAULT 0, "
+        "consumed_at TIMESTAMP)"
+    )
     conn.execute("INSERT OR IGNORE INTO users (id, username) VALUES (1, 'admin')")
     conn.execute("INSERT OR IGNORE INTO users (id, username) VALUES (2, 'user2')")
     conn.execute("INSERT OR IGNORE INTO users (id, username) VALUES (3, 'user3')")
@@ -238,6 +253,31 @@ def get_machine(mgr, machine_id):
 # ════════════════════════════════════════════
 #  Tests
 # ════════════════════════════════════════════
+
+
+def test_fixture_creates_registration_tokens_table():
+    """Lock the registration_tokens escape hatch (#2457).
+
+    make_manager() must create the registration_tokens table, or every test
+    that calls create_token() crashes with 'no such table: registration_tokens'
+    (the prior 9-test cluster). A direct schema assertion fails fast and
+    clearly at the fixture level instead of cascading 9 cryptic
+    OperationalError crashes if the table is ever dropped.
+    """
+    mgr = make_manager()
+    with mgr.db.connection() as conn:
+        row = (
+            conn.cursor()
+            .execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='registration_tokens'"
+            )
+            .fetchone()
+        )
+    assert row is not None, (
+        "make_manager() must create the registration_tokens table "
+        "(create_registration_token reads/writes it)"
+    )
 
 
 def test_new_machine_no_duplicate():

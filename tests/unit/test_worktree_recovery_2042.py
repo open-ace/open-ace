@@ -250,8 +250,13 @@ def test_ensure_worktree_1999_guard_fails_closed_on_divergence():
     def fake_gh_ctor(path, **kw):
         return wt_gh if path.endswith("wf-2042") else main_gh
 
+    # Use a MagicMock so classmethods called by _refresh_trusted_git_context
+    # (clear/register_trusted_git_context) resolve to mock attrs instead of
+    # raising AttributeError on a plain function. side_effect preserves the
+    # path-conditional dispatch used by the test. (#2565)
+    fake_gh_cls = MagicMock(side_effect=fake_gh_ctor)
     with (
-        patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", fake_gh_ctor),
+        patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", fake_gh_cls),
         patch("os.path.realpath", side_effect=lambda p: p),
     ):
         with pytest.raises(RuntimeError, match="diverges from verified head"):
@@ -302,8 +307,11 @@ def test_ensure_worktree_never_uses_origin_main_for_missing_branch():
         MagicMock(),  # worktree add -b <branch> <path> <head>
     ]
 
+    # MagicMock so _refresh_trusted_git_context's classmethods resolve (#2565);
+    # side_effect preserves the original "always return main_gh" dispatch.
+    fake_gh_cls = MagicMock(side_effect=lambda _p, **_kw: main_gh)
     with (
-        patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", lambda _p, **_kw: main_gh),
+        patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", fake_gh_cls),
         patch("os.path.realpath", side_effect=lambda p: p),
     ):
         result = orch._ensure_worktree(wf)
