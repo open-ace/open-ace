@@ -448,8 +448,9 @@ def api_update_user_quota(user_id):
     if not tenant_id:
         return jsonify({"error": "User has no tenant assigned"}), 400
 
-    # Step 3: Determine if this is a quota increase or decrease
+    # Step 3: Determine which quota fields are increasing
     # Decision D3: For quota decreases, skip tenant allocation check
+    # For mixed updates (some increase, some decrease), only validate increasing fields
     new_daily_token = data.get("daily_token_quota")
     new_monthly_token = data.get("monthly_token_quota")
     new_daily_request = data.get("daily_request_quota")
@@ -460,23 +461,25 @@ def api_update_user_quota(user_id):
     current_daily_request = current_user.get("daily_request_quota")
     current_monthly_request = current_user.get("monthly_request_quota")
 
-    # Check if all new quotas are less than or equal to current quotas (decrease or no change)
-    is_quota_decrease_or_same = True
-    if new_daily_token is not None and current_daily_token is not None:
-        if new_daily_token > current_daily_token:
-            is_quota_decrease_or_same = False
-    if new_monthly_token is not None and current_monthly_token is not None:
-        if new_monthly_token > current_monthly_token:
-            is_quota_decrease_or_same = False
-    if new_daily_request is not None and current_daily_request is not None:
-        if new_daily_request > current_daily_request:
-            is_quota_decrease_or_same = False
-    if new_monthly_request is not None and current_monthly_request is not None:
-        if new_monthly_request > current_monthly_request:
-            is_quota_decrease_or_same = False
+    # Helper function to check if a quota value is increasing
+    def is_quota_increase(new_val: int | None, current_val: int | None) -> bool:
+        """Check if quota value is increasing (needs validation)."""
+        if new_val is None:
+            return False  # No change or setting to unlimited
+        if current_val is None:
+            return True  # Setting from unlimited to limited - needs validation
+        return new_val > current_val
 
-    # Step 4: If quota increase, validate tenant allocation with locking
-    if not is_quota_decrease_or_same:
+    # Check which fields are increasing
+    has_increase = (
+        is_quota_increase(new_daily_token, current_daily_token)
+        or is_quota_increase(new_monthly_token, current_monthly_token)
+        or is_quota_increase(new_daily_request, current_daily_request)
+        or is_quota_increase(new_monthly_request, current_monthly_request)
+    )
+
+    # Step 4: If any quota increase, validate tenant allocation with locking
+    if has_increase:
         db = Database()
 
         try:
