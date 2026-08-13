@@ -273,20 +273,20 @@ def validate_tenant_allocation(
         result["error"] = "Cannot set unlimited quota for a tenant with quota limits"
         return result
 
-    # Calculate currently allocated quota (excluding current user and null values)
+    # Calculate currently allocated quota (excluding current user)
+    # Each quota field handles NULL values independently using conditional aggregation
     # Token quotas are stored in M units
     allocated_row = db.fetch_one(
         """
         SELECT
-            COALESCE(SUM(daily_token_quota), 0) as daily_token,
-            COALESCE(SUM(monthly_token_quota), 0) as monthly_token,
-            COALESCE(SUM(daily_request_quota), 0) as daily_request,
-            COALESCE(SUM(monthly_request_quota), 0) as monthly_request
+            COALESCE(SUM(CASE WHEN daily_token_quota IS NOT NULL THEN daily_token_quota ELSE 0 END), 0) as daily_token,
+            COALESCE(SUM(CASE WHEN monthly_token_quota IS NOT NULL THEN monthly_token_quota ELSE 0 END), 0) as monthly_token,
+            COALESCE(SUM(CASE WHEN daily_request_quota IS NOT NULL THEN daily_request_quota ELSE 0 END), 0) as daily_request,
+            COALESCE(SUM(CASE WHEN monthly_request_quota IS NOT NULL THEN monthly_request_quota ELSE 0 END), 0) as monthly_request
         FROM users
         WHERE tenant_id = ?
           AND is_active = 1
           AND (id IS NULL OR id != ?)
-          AND daily_token_quota IS NOT NULL
     """,
         (tenant_id, user_id or 0),
     )
