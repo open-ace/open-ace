@@ -18,12 +18,82 @@ import subprocess
 import sys
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
 from app.utils.workspace import OPENACE_RM_WRAPPER
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# 【Issue #2334】审计日志配置
+# ============================================================================
+# 结构化审计日志，记录 git/gh 操作用于安全审计
+# 格式：JSON lines，包含 actor、target_user、cwd、command、result 等
+AUDIT_LOG_PATH = os.environ.get("OPENACE_SUDOERS_AUDIT_LOG", "/var/log/openace/sudoers-audit.log")
+
+
+def _log_sudo_audit(
+    event: str,
+    actor: str,
+    target_user: str | None,
+    cwd: str,
+    command: str,
+    command_class: str,
+    workflow_id: str | None = None,
+    request_id: str | None = None,
+    result: str = "attempt",
+    duration_ms: int | None = None,
+) -> None:
+    """Write structured audit log entry for sudo git/gh operations.
+
+    Per Issue #2334, all git/gh operations through github_ops must have
+    audit logging. This function writes JSON lines to the audit log
+    without containing any secrets.
+
+    Args:
+        event: Event type (e.g., "sudo_git", "sudo_gh")
+        actor: The user invoking the operation
+        target_user: The target user for sudo (system_account or None)
+        cwd: Current working directory
+        command: The command being executed
+        command_class: Classification (e.g., "git", "gh")
+        workflow_id: Optional workflow ID
+        request_id: Optional request ID
+        result: Result status ("attempt", "success", "failure")
+        duration_ms: Optional duration in milliseconds
+    """
+    import threading
+
+    audit_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "event": event,
+        "actor": actor,
+        "target_user": target_user or "",
+        "cwd": cwd,
+        "command": command,
+        "command_class": command_class,
+        "workflow_id": workflow_id or "",
+        "request_id": request_id or "",
+        "result": result,
+        "duration_ms": duration_ms or 0,
+        "thread_id": threading.current_thread().name,
+    }
+
+    # Write to audit log file
+    try:
+        log_dir = os.path.dirname(AUDIT_LOG_PATH)
+        if log_dir and not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+
+        with open(AUDIT_LOG_PATH, "a") as f:
+            f.write(json.dumps(audit_entry) + "\n")
+    except Exception:
+        # Fail silently - audit logging should not break operations
+        # Log to Python logger as fallback
+        logger.debug("Audit log write failed for %s: %s", event, command)
+
 
 # macOS BSD ``stat`` takes the format via ``-f``; GNU ``stat`` (Linux) uses
 # ``-c``.  ``-L`` (follow symlinks) is supported by both.  Hard-coded
@@ -502,6 +572,11 @@ class GitHubOps:
         """
         self._verify_trusted_git_context()
         kwargs = self._build_subprocess_kwargs()
+
+        # 【Issue #2334】审计日志：记录 gh 操作
+        actor = pwd.getpwuid(os.getuid()).pw_name if os.getuid() else "unknown"
+        start_time = time.time()
+        command_str = " ".join(["gh"] + args)
         # gh has no `-c <key>=<val>` flag, so on the same-user path we trust the
         # canonical repo via GIT_CONFIG_COUNT env (per-command, never written to
         # a config file). This replaces the old global ``safe.directory *``.
@@ -589,6 +664,20 @@ class GitHubOps:
                         time.sleep(GIT_NETWORK_RETRY_INTERVAL)
                         continue
                     raise err
+                # 【Issue #2334】审计日志：成功完成
+                duration_ms = int((time.time() - start_time) * 1000)
+                # Determine target user: account if sudo, None if running as current user
+                target_user = account if needs_sudo and not api_as_service else None
+                _log_sudo_audit(
+                    event="sudo_gh",
+                    actor=actor,
+                    target_user=target_user,
+                    cwd=self.repo_path,
+                    command=command_str,
+                    command_class="gh",
+                    result="success",
+                    duration_ms=duration_ms,
+                )
                 return result
             except subprocess.TimeoutExpired:
                 if attempt < GIT_NETWORK_RETRY_COUNT - 1:
@@ -612,6 +701,12 @@ class GitHubOps:
         self._verify_trusted_git_context()
         kwargs = self._build_subprocess_kwargs()
         account = self.system_account
+
+        # 【Issue #2334】审计日志：记录 git 操作
+        actor = pwd.getpwuid(os.getuid()).pw_name if os.getuid() else "unknown"
+        start_time = time.time()
+        command_str = " ".join(["git"] + args)
+
         trusted_args: list[str] = []
         if self._trusted_git_dir:
             trusted_args = [
@@ -695,6 +790,18 @@ class GitHubOps:
                         time.sleep(GIT_NETWORK_RETRY_INTERVAL)
                         continue
                     raise err
+                # 【Issue #2334】审计日志：成功完成
+                duration_ms = int((time.time() - start_time) * 1000)
+                _log_sudo_audit(
+                    event="sudo_git",
+                    actor=actor,
+                    target_user=account,
+                    cwd=self.repo_path,
+                    command=command_str,
+                    command_class="git",
+                    result="success",
+                    duration_ms=duration_ms,
+                )
                 return result
             except subprocess.TimeoutExpired:
                 if attempt < GIT_NETWORK_RETRY_COUNT - 1:
