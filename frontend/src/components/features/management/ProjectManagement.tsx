@@ -33,6 +33,7 @@ import { listProjectCategories, type ProjectCategory } from '@/api/projectCatego
 import { formatDateTime, createMatcherConfig } from '@/utils';
 import { usePageRefresh, useAuth } from '@/hooks';
 import { isAdmin } from '@/utils/permissions';
+import { matchesPatterns } from '@/utils/categoryConflictDetection';
 import { CategoryManageModal } from './CategoryManageModal';
 import { CategoryFilter } from './CategoryFilter';
 
@@ -92,12 +93,6 @@ function extractProjectName(path: string): string {
   return parts[parts.length - 1] || 'unknown'; // Fallback
 }
 
-// Match project path against patterns (case-insensitive, contains match)
-function matchCategory(projectPath: string, patterns: string[]): boolean {
-  const lowerPath = projectPath.toLowerCase();
-  return patterns.some((p) => p && lowerPath.includes(p.toLowerCase()));
-}
-
 // Categorize projects into groups
 function categorizeProjects(
   stats: ProjectStats[],
@@ -116,7 +111,7 @@ function categorizeProjects(
 
     for (const stat of stats) {
       if (matchedProjectIds.has(stat.project_id)) continue;
-      if (matchCategory(stat.project_path, category.key_patterns)) {
+      if (matchesPatterns(stat.project_path, category.key_patterns)) {
         workspaces.push(stat);
         matchedProjectIds.add(stat.project_id);
       }
