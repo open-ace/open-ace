@@ -38,7 +38,7 @@ class RuleLoader:
         self,
         tenant_id: int | None = None,
         include_test: bool = False,
-        approval_status: str | None = "approved"
+        approval_status: str | None = "approved",
     ) -> list[dict[str, Any]]:
         """
         从数据库加载规则。
@@ -64,7 +64,7 @@ class RuleLoader:
                 all_rules,
                 tenant_id=tenant_id,
                 include_test=include_test,
-                approval_status=approval_status
+                approval_status=approval_status,
             )
 
             # 检查有效期
@@ -90,7 +90,7 @@ class RuleLoader:
         rules: list[dict[str, Any]],
         tenant_id: int | None = None,
         include_test: bool = False,
-        approval_status: str | None = "approved"
+        approval_status: str | None = "approved",
     ) -> list[dict[str, Any]]:
         """
         过滤规则。

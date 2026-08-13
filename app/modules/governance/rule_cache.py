@@ -32,7 +32,7 @@ class RuleCache:
         rule_loader: RuleLoader,
         governance_repo=None,
         initial_poll_interval: float = 5.0,
-        max_poll_interval: float = 60.0
+        max_poll_interval: float = 60.0,
     ):
         """
         初始化规则缓存管理器。
@@ -166,8 +166,8 @@ class RuleCache:
                     action,
                     tenant_id,
                     datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-                    False
-                )
+                    False,
+                ),
             )
 
             conn.commit()
@@ -258,10 +258,7 @@ class RuleCache:
 
             else:
                 # 无更新，增加轮询间隔（指数退避）
-                self._poll_interval = min(
-                    self._poll_interval * 1.5,
-                    self._max_poll_interval
-                )
+                self._poll_interval = min(self._poll_interval * 1.5, self._max_poll_interval)
 
         except Exception as e:
             logger.error(f"Failed to check sync events: {e}")

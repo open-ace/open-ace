@@ -315,9 +315,7 @@ class ContentFilter:
         # Use modular RuleLoader if available
         if self.rule_loader is not None:
             return self.rule_loader.load_rules(
-                tenant_id=tenant_id,
-                include_test=False,
-                approval_status="approved"
+                tenant_id=tenant_id, include_test=False, approval_status="approved"
             )
 
         # Fallback to legacy implementation
@@ -334,7 +332,8 @@ class ContentFilter:
 
             # Apply filters
             enabled_rules = [
-                r for r in rules
+                r
+                for r in rules
                 if r.get("is_enabled", True)
                 and not r.get("is_test", False)
                 and r.get("approval_status", "approved") == "approved"
@@ -343,7 +342,8 @@ class ContentFilter:
             # Apply tenant filtering
             if tenant_id is not None:
                 enabled_rules = [
-                    r for r in enabled_rules
+                    r
+                    for r in enabled_rules
                     if r.get("tenant_id") is None or r.get("tenant_id") == tenant_id
                 ]
 
@@ -565,10 +565,12 @@ class ContentFilter:
                         self.trigger_log_buffer.add(
                             rule_id=rule_id,
                             action_taken=rule_action,
-                            matched_content_hash=self.trigger_log_buffer.compute_content_hash(content),
+                            matched_content_hash=self.trigger_log_buffer.compute_content_hash(
+                                content
+                            ),
                             session_id=context.get("session_id"),
                             user_id=context.get("user_id"),
-                            tenant_id=tenant_id
+                            tenant_id=tenant_id,
                         )
 
                     # Update overall risk and action

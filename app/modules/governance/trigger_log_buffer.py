@@ -28,10 +28,7 @@ class TriggerLogBuffer:
     """
 
     def __init__(
-        self,
-        batch_size: int = 100,
-        flush_interval: float = 5.0,
-        max_buffer_size: int = 10000
+        self, batch_size: int = 100, flush_interval: float = 5.0, max_buffer_size: int = 10000
     ):
         """
         初始化触发日志缓冲器。
@@ -68,7 +65,7 @@ class TriggerLogBuffer:
         matched_content_hash: str | None = None,
         session_id: str | None = None,
         user_id: int | None = None,
-        tenant_id: int | None = None
+        tenant_id: int | None = None,
     ):
         """
         添加触发日志到缓冲区。
@@ -168,7 +165,7 @@ class TriggerLogBuffer:
                         entry["session_id"],
                         entry["user_id"],
                         entry["tenant_id"],
-                    )
+                    ),
                 )
 
             conn.commit()
