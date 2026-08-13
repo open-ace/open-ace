@@ -147,9 +147,14 @@ class SessionProcess:
         self._stdout_thread.start()
         self._stderr_thread.start()
 
-        # Issue #2547: Snapshot child processes for reliable termination
-        # Wait briefly for CLI to spawn its internal processes
-        self._snapshot_child_processes()
+        # Issue #2547: Snapshot child processes in background thread
+        # to avoid blocking startup (performance optimization)
+        if self._psutil_available and self.is_running:
+            threading.Thread(
+                target=self._snapshot_child_processes,
+                name=f"snapshot-{self.session_id[:8]}",
+                daemon=True,
+            ).start()
 
     def _snapshot_child_processes(self) -> None:
         """
@@ -159,33 +164,37 @@ class SessionProcess:
         detach from the process group (setsid/detached). By capturing
         the process tree early, we can terminate them later even if
         they become orphan processes (PPID=1).
+
+        This method runs in a background thread to avoid blocking startup.
         """
         if not self._psutil_available:
-            return
-        if not self.is_running:
             return
 
         import time
 
         import psutil
 
-        # Wait briefly for CLI to spawn its internal processes
-        time.sleep(0.5)
-
-        try:
-            parent = psutil.Process(self.process.pid)
-            children = parent.children(recursive=True)
-            self._child_pids = {p.pid for p in children}
-            if self._child_pids:
-                logger.debug(
-                    "Session %s: captured %d child process(es): %s",
-                    self.session_id[:8],
-                    len(self._child_pids),
-                    sorted(self._child_pids),
-                )
-        except (psutil.NoSuchProcess, ProcessLookupError, PermissionError):
-            # Process may have exited or we lack permission
-            pass
+        # Poll for child processes (up to 1 second total)
+        # This avoids blocking while still capturing spawned processes
+        for attempt in range(10):
+            if not self.is_running:
+                return
+            try:
+                parent = psutil.Process(self.process.pid)
+                children = parent.children(recursive=True)
+                if children:
+                    self._child_pids = {p.pid for p in children}
+                    logger.debug(
+                        "Session %s: captured %d child process(es): %s",
+                        self.session_id[:8],
+                        len(self._child_pids),
+                        sorted(self._child_pids),
+                    )
+                    return
+            except (psutil.NoSuchProcess, ProcessLookupError, PermissionError):
+                # Process may have exited or we lack permission
+                return
+            time.sleep(0.1)
 
     @staticmethod
     def _extract_stream_session_id(parsed: dict[str, Any]) -> str:
@@ -624,11 +633,6 @@ class SessionProcess:
         completes. This helps identify cases where process termination
         may not have fully succeeded.
         """
-        import time
-
-        # Brief wait for process to fully terminate
-        time.sleep(0.1)
-
         if self.process.poll() is None:
             # Process is still running - this shouldn't happen
             logger.error(

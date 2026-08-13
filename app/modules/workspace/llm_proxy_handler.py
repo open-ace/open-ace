@@ -25,36 +25,43 @@ _content_filter_instance = None
 # Issue #2547: Stopped sessions cache for request circuit breaking
 # When a session is stopped, we add its ID here to reject subsequent
 # LLM requests from orphan processes (PPID=1) that may still be retrying.
+import threading
 import time
 
 _stopped_sessions_cache: dict[str, float] = {}  # session_id -> timestamp
+_stopped_sessions_cache_lock = threading.Lock()
 _STOPPED_SESSION_TTL_SECONDS = 60  # How long to reject requests after stop
 
 
 def mark_session_stopped(session_id: str) -> None:
     """Mark a session as stopped to trigger request circuit breaking."""
     global _stopped_sessions_cache
-    _stopped_sessions_cache[session_id] = time.time()
-    logger.info("Session %s marked as stopped for request circuit breaking", session_id[:8])
-    # Clean up expired entries
-    _cleanup_stopped_sessions_cache()
+    with _stopped_sessions_cache_lock:
+        _stopped_sessions_cache[session_id] = time.time()
+        logger.info("Session %s marked as stopped for request circuit breaking", session_id[:8])
+        # Clean up expired entries
+        _cleanup_stopped_sessions_cache_locked()
 
 
 def is_session_stopped(session_id: str) -> bool:
     """Check if a session is in the stopped sessions cache."""
     global _stopped_sessions_cache
-    timestamp = _stopped_sessions_cache.get(session_id)
-    if timestamp is None:
-        return False
-    # Check if entry has expired
-    if time.time() - timestamp > _STOPPED_SESSION_TTL_SECONDS:
-        del _stopped_sessions_cache[session_id]
-        return False
-    return True
+    with _stopped_sessions_cache_lock:
+        timestamp = _stopped_sessions_cache.get(session_id)
+        if timestamp is None:
+            return False
+        # Check if entry has expired
+        if time.time() - timestamp > _STOPPED_SESSION_TTL_SECONDS:
+            del _stopped_sessions_cache[session_id]
+            return False
+        return True
 
 
-def _cleanup_stopped_sessions_cache() -> None:
-    """Remove expired entries from the stopped sessions cache."""
+def _cleanup_stopped_sessions_cache_locked() -> None:
+    """Remove expired entries from the stopped sessions cache.
+
+    Must be called while holding _stopped_sessions_cache_lock.
+    """
     global _stopped_sessions_cache
     now = time.time()
     expired = [

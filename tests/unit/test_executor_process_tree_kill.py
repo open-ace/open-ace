@@ -16,10 +16,18 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Add remote-agent to path for imports
-_remote_agent_dir = Path(__file__).parent.parent.parent / "remote-agent"
-if _remote_agent_dir.exists():
-    sys.path.insert(0, str(_remote_agent_dir))
+# Use project root for imports (works regardless of working directory)
+_project_root = Path(__file__).parent.parent.parent
+_remote_agent_dir = _project_root / "remote-agent"
+
+# Add paths to sys.path if not already present
+_project_root_str = str(_project_root)
+_remote_agent_str = str(_remote_agent_dir)
+
+if _project_root_str not in sys.path:
+    sys.path.insert(0, _project_root_str)
+if _remote_agent_str not in sys.path:
+    sys.path.insert(0, _remote_agent_str)
 
 
 class MockProcess:
@@ -54,7 +62,7 @@ class TestSessionProcessTreeTermination:
     @pytest.fixture(autouse=True)
     def setup_executor(self):
         """Set up executor module for testing."""
-        # Import executor module
+        # Import executor module from remote-agent directory
         try:
             import executor as executor_module
 
@@ -192,12 +200,11 @@ class TestSessionProcessTreeTermination:
         # Process is still running (poll returns None)
         mock_process.returncode = None
 
-        with patch("time.sleep"):
-            with patch.object(mock_process, "kill") as mock_kill:
-                session._verify_process_terminated()
+        with patch.object(mock_process, "kill") as mock_kill:
+            session._verify_process_terminated()
 
-                # Should have called kill to force terminate
-                mock_kill.assert_called_once()
+            # Should have called kill to force terminate
+            mock_kill.assert_called_once()
 
 
 class TestCircuitBreakingForStoppedSessions:
@@ -207,25 +214,30 @@ class TestCircuitBreakingForStoppedSessions:
         """Test that marking session stopped adds it to cache."""
         from app.modules.workspace.llm_proxy_handler import (
             _stopped_sessions_cache,
+            _stopped_sessions_cache_lock,
             mark_session_stopped,
         )
 
-        # Clear cache first
-        _stopped_sessions_cache.clear()
+        # Clear cache first (thread-safe)
+        with _stopped_sessions_cache_lock:
+            _stopped_sessions_cache.clear()
 
         mark_session_stopped("test-session-abc")
 
-        assert "test-session-abc" in _stopped_sessions_cache
+        with _stopped_sessions_cache_lock:
+            assert "test-session-abc" in _stopped_sessions_cache
 
     def test_is_session_stopped_returns_true_for_stopped(self):
         """Test that is_session_stopped returns True for stopped sessions."""
         from app.modules.workspace.llm_proxy_handler import (
             _stopped_sessions_cache,
+            _stopped_sessions_cache_lock,
             is_session_stopped,
             mark_session_stopped,
         )
 
-        _stopped_sessions_cache.clear()
+        with _stopped_sessions_cache_lock:
+            _stopped_sessions_cache.clear()
         mark_session_stopped("test-session-xyz")
 
         assert is_session_stopped("test-session-xyz") is True
@@ -238,11 +250,13 @@ class TestCircuitBreakingForStoppedSessions:
         from app.modules.workspace.llm_proxy_handler import (
             _STOPPED_SESSION_TTL_SECONDS,
             _stopped_sessions_cache,
+            _stopped_sessions_cache_lock,
             is_session_stopped,
             mark_session_stopped,
         )
 
-        _stopped_sessions_cache.clear()
+        with _stopped_sessions_cache_lock:
+            _stopped_sessions_cache.clear()
 
         # Mark session as stopped
         mark_session_stopped("test-session-expire")
@@ -251,12 +265,53 @@ class TestCircuitBreakingForStoppedSessions:
         assert is_session_stopped("test-session-expire") is True
 
         # Simulate TTL expiration by setting timestamp to past
-        _stopped_sessions_cache["test-session-expire"] = (
-            time.time() - _STOPPED_SESSION_TTL_SECONDS - 10
-        )
+        with _stopped_sessions_cache_lock:
+            _stopped_sessions_cache["test-session-expire"] = (
+                time.time() - _STOPPED_SESSION_TTL_SECONDS - 10
+            )
 
         # Should now return False (expired)
         assert is_session_stopped("test-session-expire") is False
+
+    def test_concurrent_access_is_thread_safe(self):
+        """Test that concurrent access to stopped sessions cache is thread-safe."""
+        from app.modules.workspace.llm_proxy_handler import (
+            _stopped_sessions_cache,
+            _stopped_sessions_cache_lock,
+            mark_session_stopped,
+            is_session_stopped,
+        )
+
+        # Clear cache
+        with _stopped_sessions_cache_lock:
+            _stopped_sessions_cache.clear()
+
+        # Concurrent access test
+        errors = []
+        num_threads = 10
+        num_operations = 100
+
+        def worker(thread_id: int):
+            try:
+                for i in range(num_operations):
+                    session_id = f"session-{thread_id}-{i}"
+                    mark_session_stopped(session_id)
+                    is_session_stopped(session_id)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=worker, args=(i,))
+            for i in range(num_threads)
+        ]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # No race conditions should have occurred
+        assert not errors, f"Thread safety errors: {errors}"
 
 
 class TestAgentOrphanProcessCleanup:
@@ -282,10 +337,12 @@ class TestProcessTerminationIntegration:
         """Test that stopping session marks it in circuit breaker cache."""
         from app.modules.workspace.llm_proxy_handler import (
             _stopped_sessions_cache,
+            _stopped_sessions_cache_lock,
             mark_session_stopped,
         )
 
-        _stopped_sessions_cache.clear()
+        with _stopped_sessions_cache_lock:
+            _stopped_sessions_cache.clear()
 
         session_id = "test-integration-session"
 
@@ -293,10 +350,12 @@ class TestProcessTerminationIntegration:
         mark_session_stopped(session_id)
 
         # Verify it's in cache
-        assert session_id in _stopped_sessions_cache
+        with _stopped_sessions_cache_lock:
+            assert session_id in _stopped_sessions_cache
 
         # Clean up
-        _stopped_sessions_cache.clear()
+        with _stopped_sessions_cache_lock:
+            _stopped_sessions_cache.clear()
 
     def test_multiple_stop_calls_are_safe(self):
         """Test that multiple stop() calls on same session are safe."""
@@ -304,7 +363,9 @@ class TestProcessTerminationIntegration:
 
         # Import SessionProcess if available
         try:
-            from executor import SessionProcess
+            import executor
+
+            SessionProcess = executor.SessionProcess
         except ImportError:
             pytest.skip("Could not import executor module")
 

@@ -186,6 +186,20 @@ class RemoteAgent:
         persisted_session_ids = set(meta.keys())
         cleaned_pids = []
 
+        # More precise CLI process patterns to avoid false positives
+        # (e.g., avoid matching "claude" text editor)
+        import re
+
+        cli_patterns = [
+            r"/usr/bin/qwen\b",  # qwen CLI typical path
+            r"/usr/local/bin/qwen\b",
+            r"node.*qwen-code-cli",
+            r"node.*qwen\b",
+            r"claude-code\b",
+            r"codex\s+--",  # codex with CLI flags
+            r"zcode\b.*--",  # zcode with CLI flags
+        ]
+
         # Scan all processes for CLI processes matching our sessions
         try:
             for proc in psutil.process_iter(["pid", "ppid", "cmdline", "name"]):
@@ -195,28 +209,40 @@ class RemoteAgent:
                         continue
 
                     cmdline = proc.info.get("cmdline") or []
-                    cmdline_str = " ".join(cmdline).lower()
+                    cmdline_str = " ".join(cmdline)
 
-                    # Check if this is a qwen/claude/codex CLI process
-                    cli_tools = ["qwen", "claude", "codex", "zcode"]
-                    if not any(tool in cmdline_str for tool in cli_tools):
-                        continue
-
-                    # Check if cmdline contains any of our session IDs
+                    # First, check if cmdline contains any of our session IDs
+                    # This is the primary filter to avoid killing unrelated processes
+                    matched_session_id = None
                     for session_id in persisted_session_ids:
                         if session_id in cmdline_str:
-                            logger.info(
-                                "Terminating orphan CLI process %d (session %s): %s",
-                                proc.info["pid"],
-                                session_id[:8],
-                                cmdline_str[:100],
-                            )
-                            try:
-                                proc.terminate()
-                                cleaned_pids.append(proc.info["pid"])
-                            except (psutil.NoSuchProcess, PermissionError):
-                                pass
+                            matched_session_id = session_id
                             break
+
+                    if not matched_session_id:
+                        continue
+
+                    # Second, verify it looks like a CLI process using precise patterns
+                    is_cli_process = any(
+                        re.search(pattern, cmdline_str, re.IGNORECASE)
+                        for pattern in cli_patterns
+                    )
+
+                    if not is_cli_process:
+                        continue
+
+                    # Log and terminate the orphan process
+                    logger.info(
+                        "Terminating orphan CLI process %d (session %s): %s",
+                        proc.info["pid"],
+                        matched_session_id[:8],
+                        cmdline_str[:200],  # Log full command for debugging
+                    )
+                    try:
+                        proc.terminate()
+                        cleaned_pids.append(proc.info["pid"])
+                    except (psutil.NoSuchProcess, PermissionError):
+                        pass
 
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     continue
