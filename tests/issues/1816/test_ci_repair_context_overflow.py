@@ -491,6 +491,10 @@ def test_empty_review_or_summary_fails_closed(empty_stage):
                     '批准\nREVIEW_RESULT: {"verdict":"APPROVE",' '"blocking_findings":[]}'
                 ),
             ),
+            # fb680a17 retries an empty summary ONCE on a fresh session before
+            # failing closed; the retry must also come back empty so the
+            # fail-closed assertions below still hold for the summary stage.
+            empty,
             empty,
         ]
     orch._run_agent_with_context_recovery = MagicMock(side_effect=results)
