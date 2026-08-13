@@ -4,9 +4,10 @@ Unit tests for Trigger Log Buffer module.
 Tests for log buffering, batch writing, and reliability.
 """
 
-import pytest
-from unittest.mock import Mock, MagicMock, patch
 import threading
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 from app.modules.governance.trigger_log_buffer import TriggerLogBuffer
 
@@ -32,7 +33,7 @@ class TestTriggerLogBuffer:
             matched_content_hash="abc123",
             session_id="session-123",
             user_id=1,
-            tenant_id=1
+            tenant_id=1,
         )
 
         assert buffer._buffer.qsize() == 1
@@ -43,7 +44,7 @@ class TestTriggerLogBuffer:
         buffer = TriggerLogBuffer(batch_size=3, max_buffer_size=100)
 
         # Mock _write_to_database
-        with patch.object(buffer, '_write_to_database') as mock_write:
+        with patch.object(buffer, "_write_to_database") as mock_write:
             mock_write.return_value = None
 
             # Add entries
@@ -53,6 +54,7 @@ class TestTriggerLogBuffer:
 
             # Give time for the flush to be triggered
             import time
+
             time.sleep(0.1)
 
             # Should have triggered flush (write method called)
@@ -82,7 +84,7 @@ class TestTriggerLogBuffer:
         buffer.add(rule_id=2, action_taken="warn")
 
         # Mock _write_to_database
-        with patch.object(buffer, '_write_to_database') as mock_write:
+        with patch.object(buffer, "_write_to_database") as mock_write:
             mock_write.return_value = None
 
             buffer.force_flush()
@@ -97,7 +99,7 @@ class TestTriggerLogBuffer:
         buffer.add(rule_id=1, action_taken="warn")
 
         # Mock _write_to_database to raise error
-        with patch.object(buffer, '_write_to_database') as mock_write:
+        with patch.object(buffer, "_write_to_database") as mock_write:
             mock_write.side_effect = Exception("Database error")
 
             buffer._flush_batch()
@@ -126,7 +128,7 @@ class TestTriggerLogBuffer:
 
         # Verify atexit was called (this is a side effect)
         # We can't easily test the actual exit behavior
-        assert hasattr(buffer, 'force_flush')
+        assert hasattr(buffer, "force_flush")
 
     def test_concurrent_adds(self):
         """Test concurrent additions to buffer."""
@@ -173,7 +175,7 @@ class TestTriggerLogBufferDatabase:
             }
         ]
 
-        with patch('app.repositories.database.get_connection') as mock_conn:
+        with patch("app.repositories.database.get_connection") as mock_conn:
             mock_cursor = Mock()
             mock_conn.return_value.cursor.return_value = mock_cursor
 
@@ -186,10 +188,19 @@ class TestTriggerLogBufferDatabase:
         """Test rollback on database error."""
         buffer = TriggerLogBuffer()
 
-        batch = [{"rule_id": 1, "matched_content_hash": "abc", "matched_at": "2026-08-13",
-                  "action_taken": "warn", "session_id": None, "user_id": None, "tenant_id": None}]
+        batch = [
+            {
+                "rule_id": 1,
+                "matched_content_hash": "abc",
+                "matched_at": "2026-08-13",
+                "action_taken": "warn",
+                "session_id": None,
+                "user_id": None,
+                "tenant_id": None,
+            }
+        ]
 
-        with patch('app.repositories.database.get_connection') as mock_conn:
+        with patch("app.repositories.database.get_connection") as mock_conn:
             mock_cursor = Mock()
             mock_cursor.execute.side_effect = Exception("DB error")
             mock_conn.return_value.cursor.return_value = mock_cursor

@@ -4,9 +4,10 @@ Integration tests for content filter enhancements.
 Tests for is_test filtering, approval_status, tenant isolation, and priority.
 """
 
-import pytest
 from datetime import datetime, timedelta
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 from app.modules.governance.content_filter import ContentFilter, FilterResult
 from app.repositories.governance_repo import GovernanceRepository
@@ -311,11 +312,13 @@ class TestContentFilterEnhancements:
         filter = ContentFilter(governance_repo=mock_repo, config={"log_matches": True})
 
         # Trigger test rule
-        with patch('app.modules.governance.content_filter.logger') as mock_logger:
+        with patch("app.modules.governance.content_filter.logger") as mock_logger:
             result = filter.check_content("test keyword")
 
             # Should use debug level for test rules
             assert mock_logger.debug.called or not mock_logger.warning.called
+            # Test rules should not block content
+            assert result.passed
 
 
 class TestContentFilterValidity:

@@ -35,10 +35,7 @@ class RuleVersionManager:
         self.governance_repo = governance_repo
 
     def create_version(
-        self,
-        rule_id: int,
-        user_id: int,
-        change_reason: str | None = None
+        self, rule_id: int, user_id: int, change_reason: str | None = None
     ) -> int | None:
         """
         为规则创建版本快照。
@@ -70,13 +67,12 @@ class RuleVersionManager:
                 version_number=next_version,
                 snapshot=snapshot,
                 user_id=user_id,
-                change_reason=change_reason
+                change_reason=change_reason,
             )
 
             if version_id:
                 logger.info(
-                    f"Created version {next_version} for rule {rule_id} "
-                    f"by user {user_id}"
+                    f"Created version {next_version} for rule {rule_id} " f"by user {user_id}"
                 )
 
             return version_id
@@ -85,12 +81,7 @@ class RuleVersionManager:
             logger.error(f"Failed to create version for rule {rule_id}: {e}")
             return None
 
-    def get_versions(
-        self,
-        rule_id: int,
-        limit: int = 50,
-        offset: int = 0
-    ) -> list[dict[str, Any]]:
+    def get_versions(self, rule_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         """
         获取规则的版本历史。
 
@@ -121,14 +112,16 @@ class RuleVersionManager:
 
             versions = []
             for row in rows:
-                versions.append({
-                    "id": row[0],
-                    "rule_id": row[1],
-                    "version_number": row[2],
-                    "created_by": row[3],
-                    "created_at": row[4],
-                    "change_reason": row[5],
-                })
+                versions.append(
+                    {
+                        "id": row[0],
+                        "rule_id": row[1],
+                        "version_number": row[2],
+                        "created_by": row[3],
+                        "created_at": row[4],
+                        "change_reason": row[5],
+                    }
+                )
 
             return versions
 
@@ -137,11 +130,7 @@ class RuleVersionManager:
             return []
 
     def rollback_to_version(
-        self,
-        rule_id: int,
-        version_number: int,
-        user_id: int,
-        rollback_reason: str | None = None
+        self, rule_id: int, version_number: int, user_id: int, rollback_reason: str | None = None
     ) -> bool:
         """
         回滚规则到指定版本。
@@ -167,9 +156,7 @@ class RuleVersionManager:
 
             # 恢复规则
             success = self._restore_rule_from_snapshot(
-                rule_id=rule_id,
-                snapshot=snapshot,
-                new_approval_status=new_approval_status
+                rule_id=rule_id, snapshot=snapshot, new_approval_status=new_approval_status
             )
 
             if not success:
@@ -179,7 +166,7 @@ class RuleVersionManager:
             self.create_version(
                 rule_id=rule_id,
                 user_id=user_id,
-                change_reason=f"Rollback to version {version_number}: {rollback_reason}"
+                change_reason=f"Rollback to version {version_number}: {rollback_reason}",
             )
 
             # 记录审批日志
@@ -187,12 +174,11 @@ class RuleVersionManager:
                 rule_id=rule_id,
                 version_number=version_number,
                 user_id=user_id,
-                rollback_reason=rollback_reason
+                rollback_reason=rollback_reason,
             )
 
             logger.info(
-                f"Rolled back rule {rule_id} to version {version_number} "
-                f"by user {user_id}"
+                f"Rolled back rule {rule_id} to version {version_number} " f"by user {user_id}"
             )
 
             return True
@@ -230,7 +216,7 @@ class RuleVersionManager:
     def _create_snapshot(self, rule: dict[str, Any]) -> dict[str, Any]:
         """创建规则快照"""
         # 移除不需要的字段
-        snapshot = {k: v for k, v in rule.items() if k not in ['id', 'created_at', 'updated_at']}
+        snapshot = {k: v for k, v in rule.items() if k not in ["id", "created_at", "updated_at"]}
         return snapshot
 
     def _save_version(
@@ -239,7 +225,7 @@ class RuleVersionManager:
         version_number: int,
         snapshot: dict[str, Any],
         user_id: int,
-        change_reason: str | None
+        change_reason: str | None,
     ) -> int | None:
         """保存版本到数据库"""
         try:
@@ -264,8 +250,8 @@ class RuleVersionManager:
                         json.dumps(snapshot),
                         user_id,
                         datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-                        change_reason
-                    )
+                        change_reason,
+                    ),
                 )
 
                 row = cursor.fetchone()
@@ -286,8 +272,8 @@ class RuleVersionManager:
                         json.dumps(snapshot),
                         user_id,
                         datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-                        change_reason
-                    )
+                        change_reason,
+                    ),
                 )
 
                 version_id = cursor.lastrowid
@@ -318,7 +304,9 @@ class RuleVersionManager:
 
             if row:
                 snapshot_json = row[0]
-                return json.loads(snapshot_json) if isinstance(snapshot_json, str) else snapshot_json
+                return (
+                    json.loads(snapshot_json) if isinstance(snapshot_json, str) else snapshot_json
+                )
 
             return None
 
@@ -343,10 +331,7 @@ class RuleVersionManager:
             return "pending"
 
     def _restore_rule_from_snapshot(
-        self,
-        rule_id: int,
-        snapshot: dict[str, Any],
-        new_approval_status: str
+        self, rule_id: int, snapshot: dict[str, Any], new_approval_status: str
     ) -> bool:
         """从快照恢复规则"""
         try:
@@ -354,10 +339,7 @@ class RuleVersionManager:
             update_data = {**snapshot}
             update_data["approval_status"] = new_approval_status
 
-            success = self.governance_repo.update_filter_rule(
-                rule_id=rule_id,
-                **update_data
-            )
+            success = self.governance_repo.update_filter_rule(rule_id=rule_id, **update_data)
 
             return success
 
@@ -366,11 +348,7 @@ class RuleVersionManager:
             return False
 
     def _log_rollback(
-        self,
-        rule_id: int,
-        version_number: int,
-        user_id: int,
-        rollback_reason: str | None
+        self, rule_id: int, version_number: int, user_id: int, rollback_reason: str | None
     ):
         """记录回滚到审批日志"""
         try:
@@ -398,8 +376,8 @@ class RuleVersionManager:
                     "rollback",
                     user_id,
                     datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
-                    json.dumps(details)
-                )
+                    json.dumps(details),
+                ),
             )
 
             conn.commit()

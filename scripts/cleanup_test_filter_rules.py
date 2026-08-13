@@ -26,7 +26,12 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 from app import create_app
-from app.repositories.database import get_connection, adapt_sql
+from app.repositories.database import (
+    adapt_boolean_condition,
+    adapt_boolean_value,
+    adapt_sql,
+    get_connection,
+)
 
 
 def check_environment():
@@ -48,10 +53,12 @@ def get_test_rules(conn):
     """获取所有测试规则"""
     cursor = conn.cursor()
 
-    query = adapt_sql("""
+    # Use adapt_boolean_condition for cross-database compatibility
+    is_test_condition = adapt_boolean_condition("is_test", True)
+    query = adapt_sql(f"""
         SELECT id, pattern, description, type, severity, action, created_at
         FROM content_filter_rules
-        WHERE is_test = 1 OR is_test = TRUE
+        WHERE {is_test_condition}
         ORDER BY created_at DESC
     """)
 
@@ -111,12 +118,14 @@ def disable_test_rules(conn, rule_ids):
     cursor = conn.cursor()
 
     for rule_id in rule_ids:
+        # Use adapt_boolean_value for cross-database compatibility
+        is_enabled_value = adapt_boolean_value(False)
         query = adapt_sql("""
             UPDATE content_filter_rules
-            SET is_enabled = 0
+            SET is_enabled = ?
             WHERE id = ?
         """)
-        cursor.execute(query, (rule_id,))
+        cursor.execute(query, (is_enabled_value, rule_id))
 
     conn.commit()
     print(f"\n✅ 已禁用 {len(rule_ids)} 条测试规则")
@@ -171,8 +180,8 @@ def log_cleanup_action(conn, rule_ids, action, user="system"):
                 "localhost",
                 "cleanup_script",
                 None,
-                1
-            )
+                1,
+            ),
         )
 
     conn.commit()
@@ -183,23 +192,11 @@ def main():
     parser = argparse.ArgumentParser(
         description="清理测试内容过滤规则",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        epilog=__doc__,
     )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="跳过确认提示"
-    )
-    parser.add_argument(
-        "--disable",
-        action="store_true",
-        help="禁用测试规则（默认）"
-    )
-    parser.add_argument(
-        "--delete",
-        action="store_true",
-        help="删除测试规则"
-    )
+    parser.add_argument("--force", action="store_true", help="跳过确认提示")
+    parser.add_argument("--disable", action="store_true", help="禁用测试规则（默认）")
+    parser.add_argument("--delete", action="store_true", help="删除测试规则")
 
     args = parser.parse_args()
 

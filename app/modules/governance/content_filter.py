@@ -12,9 +12,12 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from app.repositories.governance_repo import GovernanceRepository
+
+if TYPE_CHECKING:
+    from app.modules.governance.rule_loader import RuleLoader
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +139,7 @@ class ContentFilter:
         custom_patterns: dict[str, str] | None = None,
         custom_keywords: list[str] | None = None,
         governance_repo: GovernanceRepository | None = None,
-        rule_loader=None,
+        rule_loader: "RuleLoader | None" = None,
         rule_cache=None,
         trigger_log_buffer=None,
     ):

@@ -117,6 +117,7 @@ def rate_limit(max_requests: int = 10, window: int = 60):
     Returns:
         装饰器函数
     """
+
     def decorator(f: Callable) -> Callable:
         @functools.wraps(f)
         def decorated_function(*args, **kwargs):
@@ -135,7 +136,7 @@ def rate_limit(max_requests: int = 10, window: int = 60):
                 return {
                     "error": "Rate limit exceeded",
                     "message": f"Maximum {max_requests} requests per {window} seconds",
-                    "remaining": remaining
+                    "remaining": remaining,
                 }, 429
 
             return f(*args, **kwargs)

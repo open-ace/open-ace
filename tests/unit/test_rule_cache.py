@@ -4,10 +4,11 @@ Unit tests for Rule Cache module.
 Tests for caching, invalidation, and sync polling.
 """
 
-import pytest
-from datetime import datetime
-from unittest.mock import Mock, MagicMock, patch
 import threading
+from datetime import datetime
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 from app.modules.governance.rule_cache import RuleCache
 from app.modules.governance.rule_loader import RuleLoader
@@ -28,9 +29,7 @@ class TestRuleCache:
     def test_get_rules_from_cache(self):
         """Test retrieving rules from cache."""
         mock_loader = Mock()
-        mock_loader.load_rules.return_value = [
-            {"id": 1, "pattern": "test", "priority": 100}
-        ]
+        mock_loader.load_rules.return_value = [{"id": 1, "pattern": "test", "priority": 100}]
 
         cache = RuleCache(rule_loader=mock_loader)
 
@@ -177,7 +176,7 @@ class TestRuleCacheSynchronization:
         cache = RuleCache(rule_loader=mock_loader, governance_repo=mock_repo)
 
         # Mock database connection
-        with patch('app.repositories.database.get_connection') as mock_conn:
+        with patch("app.repositories.database.get_connection") as mock_conn:
             mock_cursor = Mock()
             mock_conn.return_value.cursor.return_value = mock_cursor
 

@@ -15,10 +15,10 @@ logger = logging.getLogger(__name__)
 
 # 角色定义
 RULE_ROLES = {
-    "creator": "rule_creator",        # 规则创建者
-    "approver": "rule_approver",      # 规则审批者
-    "admin": "rule_admin",            # 规则管理员
-    "system_admin": "system_admin",   # 系统管理员
+    "creator": "rule_creator",  # 规则创建者
+    "approver": "rule_approver",  # 规则审批者
+    "admin": "rule_admin",  # 规则管理员
+    "system_admin": "system_admin",  # 系统管理员
 }
 
 
@@ -90,6 +90,7 @@ def require_role(required_role: str):
     Returns:
         装饰器函数
     """
+
     def decorator(f: Callable) -> Callable:
         @functools.wraps(f)
         def decorated_function(*args, **kwargs):
@@ -100,7 +101,7 @@ def require_role(required_role: str):
                 )
                 return {
                     "error": "Permission denied",
-                    "message": f"Requires {required_role} role"
+                    "message": f"Requires {required_role} role",
                 }, 403
 
             return f(*args, **kwargs)
@@ -163,6 +164,7 @@ def require_tenant_access():
     Returns:
         装饰器函数
     """
+
     def decorator(f: Callable) -> Callable:
         @functools.wraps(f)
         def decorated_function(*args, **kwargs):

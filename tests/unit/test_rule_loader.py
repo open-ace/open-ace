@@ -4,9 +4,10 @@ Unit tests for RuleLoader module.
 Tests for rule loading, filtering, and tenant isolation.
 """
 
-import pytest
 from datetime import datetime, timedelta
-from unittest.mock import Mock, MagicMock
+from unittest.mock import MagicMock, Mock
+
+import pytest
 
 from app.modules.governance.rule_loader import RuleLoader
 
@@ -77,9 +78,27 @@ class TestRuleLoader:
         """Test tenant isolation."""
         mock_repo = Mock()
         mock_repo.get_filter_rules.return_value = [
-            {"id": 1, "is_enabled": True, "is_test": False, "approval_status": "approved", "tenant_id": 1},
-            {"id": 2, "is_enabled": True, "is_test": False, "approval_status": "approved", "tenant_id": 2},
-            {"id": 3, "is_enabled": True, "is_test": False, "approval_status": "approved", "tenant_id": None},  # Global rule
+            {
+                "id": 1,
+                "is_enabled": True,
+                "is_test": False,
+                "approval_status": "approved",
+                "tenant_id": 1,
+            },
+            {
+                "id": 2,
+                "is_enabled": True,
+                "is_test": False,
+                "approval_status": "approved",
+                "tenant_id": 2,
+            },
+            {
+                "id": 3,
+                "is_enabled": True,
+                "is_test": False,
+                "approval_status": "approved",
+                "tenant_id": None,
+            },  # Global rule
         ]
 
         loader = RuleLoader(governance_repo=mock_repo)
@@ -99,9 +118,27 @@ class TestRuleLoader:
         """Test that rules are sorted by priority."""
         mock_repo = Mock()
         mock_repo.get_filter_rules.return_value = [
-            {"id": 1, "is_enabled": True, "is_test": False, "approval_status": "approved", "priority": 100},
-            {"id": 2, "is_enabled": True, "is_test": False, "approval_status": "approved", "priority": 10},
-            {"id": 3, "is_enabled": True, "is_test": False, "approval_status": "approved", "priority": 50},
+            {
+                "id": 1,
+                "is_enabled": True,
+                "is_test": False,
+                "approval_status": "approved",
+                "priority": 100,
+            },
+            {
+                "id": 2,
+                "is_enabled": True,
+                "is_test": False,
+                "approval_status": "approved",
+                "priority": 10,
+            },
+            {
+                "id": 3,
+                "is_enabled": True,
+                "is_test": False,
+                "approval_status": "approved",
+                "priority": 50,
+            },
         ]
 
         loader = RuleLoader(governance_repo=mock_repo)
@@ -121,17 +158,41 @@ class TestRuleLoader:
         mock_repo = Mock()
         mock_repo.get_filter_rules.return_value = [
             # Valid rule
-            {"id": 1, "is_enabled": True, "is_test": False, "approval_status": "approved",
-             "valid_from": None, "valid_until": None},
+            {
+                "id": 1,
+                "is_enabled": True,
+                "is_test": False,
+                "approval_status": "approved",
+                "valid_from": None,
+                "valid_until": None,
+            },
             # Already expired
-            {"id": 2, "is_enabled": True, "is_test": False, "approval_status": "approved",
-             "valid_from": past, "valid_until": past},
+            {
+                "id": 2,
+                "is_enabled": True,
+                "is_test": False,
+                "approval_status": "approved",
+                "valid_from": past,
+                "valid_until": past,
+            },
             # Not yet valid
-            {"id": 3, "is_enabled": True, "is_test": False, "approval_status": "approved",
-             "valid_from": future, "valid_until": future + timedelta(days=1)},
+            {
+                "id": 3,
+                "is_enabled": True,
+                "is_test": False,
+                "approval_status": "approved",
+                "valid_from": future,
+                "valid_until": future + timedelta(days=1),
+            },
             # Currently valid
-            {"id": 4, "is_enabled": True, "is_test": False, "approval_status": "approved",
-             "valid_from": past, "valid_until": future},
+            {
+                "id": 4,
+                "is_enabled": True,
+                "is_test": False,
+                "approval_status": "approved",
+                "valid_from": past,
+                "valid_until": future,
+            },
         ]
 
         loader = RuleLoader(governance_repo=mock_repo)
