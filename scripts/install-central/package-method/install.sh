@@ -4200,7 +4200,7 @@ install_local() {
 
         # Use nohup to run in background and save PID
         print_info "Starting web server on $host:$port as user '$DEPLOY_USER'..."
-        if ! su - "$DEPLOY_USER" -c "cd '$target_path' && AI_TOKEN_WEB_PORT=$port AI_TOKEN_WEB_HOST=$host nohup python3 server.py > logs/server.log 2>&1 & echo \$! > logs/server.pid"; then
+        if ! su - "$DEPLOY_USER" -c "cd '$target_path' && { AI_TOKEN_WEB_PORT=$port AI_TOKEN_WEB_HOST=$host nohup python3 server.py > '$target_path/logs/server.log' 2>&1 & echo \$! > '$pid_file'; }"; then
             print_error "Failed to start server as user '$DEPLOY_USER'"
             print_info "Check if user exists: id $DEPLOY_USER"
             echo ""
@@ -4343,7 +4343,7 @@ install_deploy() {
             # Start the server in background as the correct user
             print_info "Starting web server on $host:$port as user '$DEPLOY_USER' on remote..."
             local pid_file="$target_path/logs/server.pid"
-            if ! ssh "$remote" "su - '$DEPLOY_USER' -c \"cd '$target_path' && AI_TOKEN_WEB_PORT=$port AI_TOKEN_WEB_HOST=$host nohup python3 server.py > logs/server.log 2>&1 & echo \\\$! > logs/server.pid\""; then
+            if ! ssh "$remote" "su - '$DEPLOY_USER' -c \"cd '$target_path' && { AI_TOKEN_WEB_PORT=$port AI_TOKEN_WEB_HOST=$host nohup python3 server.py > '$target_path/logs/server.log' 2>&1 & echo \\\$! > '$pid_file'; }\""; then
                 print_error "Failed to start server on remote as user '$DEPLOY_USER'"
                 print_info "Check if user exists on remote: ssh $remote 'id $DEPLOY_USER'"
                 echo ""
