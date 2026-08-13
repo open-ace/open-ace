@@ -1174,6 +1174,12 @@ class RemoteSessionManager:
 
         self._agent_manager.send_command(machine_id, command)
 
+        # Issue #2547: Mark session as stopped for request circuit breaking
+        # This prevents orphan processes from continuing to send requests
+        from app.modules.workspace.llm_proxy_handler import mark_session_stopped
+
+        mark_session_stopped(session_id)
+
         # Complete session
         self._session_manager.complete_session(session_id)
         self._agent_manager.unbind_session(session_id)
