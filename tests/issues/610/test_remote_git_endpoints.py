@@ -93,7 +93,7 @@ def mock_agent_mgr():
     mgr = MagicMock()
     mgr.check_user_access.return_value = True
     mgr.get_machine.return_value = {
-        "machine_id": "machine-001",
+        "machine_id": "83ce1ab1-5506-5836-9a77-cc5af1ccf7a5",
         "machine_name": "Test Machine",
         "status": "online",
     }
@@ -141,7 +141,9 @@ class TestRemoteGitStatus:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_status("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_status("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 401
                     assert data["error"] == "Unauthorized"
 
@@ -155,7 +157,9 @@ class TestRemoteGitStatus:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_status("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_status("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 401
                     assert data["error"] == "Unauthorized"
 
@@ -172,7 +176,9 @@ class TestRemoteGitStatus:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_status("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_status("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 403
                     assert data["error"] == "Access denied"
 
@@ -189,7 +195,9 @@ class TestRemoteGitStatus:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_status("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_status("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 404
                     assert data["error"] == "Machine not found"
 
@@ -206,7 +214,9 @@ class TestRemoteGitStatus:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_status("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_status("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 503
                     assert data["success"] is False
                     assert "not connected" in data["error"].lower()
@@ -223,7 +233,9 @@ class TestRemoteGitStatus:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_status("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_status("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 504
                     assert data["success"] is False
                     assert "timeout" in data["error"].lower()
@@ -241,7 +253,9 @@ class TestRemoteGitStatus:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_status("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_status("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 400
                     assert data["success"] is False
                     assert "path" in data["error"].lower()
@@ -268,7 +282,9 @@ class TestRemoteGitStatus:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_status("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_status("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 200
                     assert data["success"] is True
                     assert data["result"]["branch"] == "main"
@@ -291,14 +307,14 @@ class TestRemoteGitStatus:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    remote_module.remote_git_status("machine-001")
+                    remote_module.remote_git_status("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
 
                     mock_agent_mgr.send_command.assert_called_once()
                     call_args = mock_agent_mgr.send_command.call_args
                     machine_id = call_args[0][0]
                     command = call_args[0][1]
 
-                    assert machine_id == "machine-001"
+                    assert machine_id == "83ce1ab1-5506-5836-9a77-cc5af1ccf7a5"
                     assert command["type"] == "command"
                     assert command["command"] == "git_status"
                     assert command["project_path"] == "/home/user/myproject"
@@ -320,7 +336,9 @@ class TestRemoteGitStatus:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_status("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_status("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 200
                     assert data["success"] is False
                     assert "not installed" in data["error"]
@@ -342,7 +360,9 @@ class TestRemoteGitStatus:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_status("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_status("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 200
                     assert data["success"] is True
 
@@ -366,7 +386,9 @@ class TestRemoteGitDiff:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_diff("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_diff("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 401
 
     def test_non_admin_no_access_returns_403(
@@ -382,7 +404,9 @@ class TestRemoteGitDiff:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_diff("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_diff("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 403
                     assert data["error"] == "Access denied"
 
@@ -399,7 +423,9 @@ class TestRemoteGitDiff:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_diff("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_diff("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 404
                     assert data["error"] == "Machine not found"
 
@@ -416,7 +442,9 @@ class TestRemoteGitDiff:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_diff("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_diff("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 503
 
     def test_agent_timeout_returns_504(self, flask_app, remote_module, mock_agent_mgr, admin_user):
@@ -430,7 +458,9 @@ class TestRemoteGitDiff:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_diff("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_diff("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 504
 
     def test_missing_path_param_returns_400(
@@ -446,7 +476,9 @@ class TestRemoteGitDiff:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_diff("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_diff("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 400
                     assert data["success"] is False
                     assert "path" in data["error"].lower()
@@ -465,7 +497,9 @@ class TestRemoteGitDiff:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_diff("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_diff("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 400
                     assert data["success"] is False
                     assert "file" in data["error"].lower()
@@ -477,7 +511,9 @@ class TestRemoteGitDiff:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_diff("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_diff("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 400
 
     def test_successful_git_diff_response(
@@ -506,7 +542,9 @@ class TestRemoteGitDiff:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_diff("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_diff("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 200
                     assert data["success"] is True
                     assert "diff --git" in data["result"]["diff"]
@@ -527,14 +565,14 @@ class TestRemoteGitDiff:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    remote_module.remote_git_diff("machine-001")
+                    remote_module.remote_git_diff("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
 
                     mock_agent_mgr.send_command.assert_called_once()
                     call_args = mock_agent_mgr.send_command.call_args
                     machine_id = call_args[0][0]
                     command = call_args[0][1]
 
-                    assert machine_id == "machine-001"
+                    assert machine_id == "83ce1ab1-5506-5836-9a77-cc5af1ccf7a5"
                     assert command["command"] == "git_diff"
                     assert command["project_path"] == "/home/user/project"
                     assert command["file"] == "src/main.py"
@@ -556,7 +594,9 @@ class TestRemoteGitDiff:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_diff("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_diff("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 200
                     assert data["success"] is False
                     assert "not installed" in data["error"]
@@ -581,7 +621,9 @@ class TestRemoteGitFile:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_file("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_file("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 401
 
     def test_non_admin_no_access_returns_403(
@@ -597,7 +639,9 @@ class TestRemoteGitFile:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_file("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_file("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 403
 
     def test_machine_not_found_returns_404(
@@ -613,7 +657,9 @@ class TestRemoteGitFile:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_file("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_file("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 404
 
     def test_agent_not_connected_returns_503(
@@ -629,7 +675,9 @@ class TestRemoteGitFile:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_file("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_file("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 503
 
     def test_agent_timeout_returns_504(self, flask_app, remote_module, mock_agent_mgr, admin_user):
@@ -643,7 +691,9 @@ class TestRemoteGitFile:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_file("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_file("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 504
 
     def test_missing_path_param_returns_400(
@@ -658,7 +708,9 @@ class TestRemoteGitFile:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_file("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_file("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 400
 
     def test_missing_file_param_returns_400(
@@ -673,7 +725,9 @@ class TestRemoteGitFile:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_file("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_file("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 400
 
     def test_successful_git_file_response(
@@ -694,7 +748,9 @@ class TestRemoteGitFile:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_file("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_file("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 200
                     assert data["success"] is True
                     assert "import os" in data["result"]["content"]
@@ -716,14 +772,14 @@ class TestRemoteGitFile:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    remote_module.remote_git_file("machine-001")
+                    remote_module.remote_git_file("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
 
                     mock_agent_mgr.send_command.assert_called_once()
                     call_args = mock_agent_mgr.send_command.call_args
                     machine_id = call_args[0][0]
                     command = call_args[0][1]
 
-                    assert machine_id == "machine-001"
+                    assert machine_id == "83ce1ab1-5506-5836-9a77-cc5af1ccf7a5"
                     assert command["command"] == "git_file"
                     assert command["project_path"] == "/home/user/project"
                     assert command["file"] == "README.md"
@@ -745,7 +801,9 @@ class TestRemoteGitFile:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    data, status = parse_response(remote_module.remote_git_file("machine-001"))
+                    data, status = parse_response(
+                        remote_module.remote_git_file("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    )
                     assert status == 200
                     assert data["success"] is False
                     assert "not found" in data["error"].lower()
@@ -766,7 +824,7 @@ class TestGitResultMessageHandler:
                 method="POST",
                 json={
                     "type": "git_result",
-                    "machine_id": "machine-001",
+                    "machine_id": "83ce1ab1-5506-5836-9a77-cc5af1ccf7a5",
                     "request_id": "req-abc-123",
                     "success": True,
                     "result": {"branch": "main", "files": []},
@@ -796,7 +854,7 @@ class TestGitResultMessageHandler:
                 method="POST",
                 json={
                     "type": "git_result",
-                    "machine_id": "machine-001",
+                    "machine_id": "83ce1ab1-5506-5836-9a77-cc5af1ccf7a5",
                     "request_id": "req-err-456",
                     "success": False,
                     "error": "git is not installed on this machine",
@@ -823,7 +881,7 @@ class TestGitResultMessageHandler:
                 method="POST",
                 json={
                     "type": "git_result",
-                    "machine_id": "machine-001",
+                    "machine_id": "83ce1ab1-5506-5836-9a77-cc5af1ccf7a5",
                     "success": True,
                     "result": {"diff": ""},
                 },
@@ -845,7 +903,7 @@ class TestGitResultMessageHandler:
                 method="POST",
                 json={
                     "type": "git_result",
-                    "machine_id": "machine-001",
+                    "machine_id": "83ce1ab1-5506-5836-9a77-cc5af1ccf7a5",
                     "request_id": "req-null-789",
                     "success": True,
                 },
@@ -907,7 +965,7 @@ class TestAccessControlEdgeCases:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    remote_module.remote_git_status("machine-001")
+                    remote_module.remote_git_status("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
                     # check_user_access should NOT be called for admin
                     mock_agent_mgr.check_user_access.assert_not_called()
 
@@ -929,8 +987,10 @@ class TestAccessControlEdgeCases:
                 with patch.object(
                     remote_module, "get_remote_agent_manager", return_value=mock_agent_mgr
                 ):
-                    remote_module.remote_git_status("machine-001")
-                    mock_agent_mgr.check_user_access.assert_called_once_with("machine-001", 42)
+                    remote_module.remote_git_status("83ce1ab1-5506-5836-9a77-cc5af1ccf7a5")
+                    mock_agent_mgr.check_user_access.assert_called_once_with(
+                        "83ce1ab1-5506-5836-9a77-cc5af1ccf7a5", 42
+                    )
 
 
 if __name__ == "__main__":
