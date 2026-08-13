@@ -34,8 +34,7 @@ def db():
     cursor = conn.cursor()
 
     # Create scheduler_leaders table
-    cursor.execute(
-        """
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS scheduler_leaders (
             job_name TEXT PRIMARY KEY,
             leader_id TEXT NOT NULL,
@@ -48,12 +47,10 @@ def db():
             skip_count INTEGER DEFAULT 0,
             fail_count INTEGER DEFAULT 0
         )
-    """
-    )
+    """)
 
     # Create scheduler_runs table
-    cursor.execute(
-        """
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS scheduler_runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_name TEXT NOT NULL,
@@ -65,8 +62,7 @@ def db():
             error_message TEXT,
             metrics TEXT
         )
-    """
-    )
+    """)
 
     # Create indexes
     cursor.execute(

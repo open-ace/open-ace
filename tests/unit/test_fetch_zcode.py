@@ -63,8 +63,7 @@ def _load_fetch_zcode(tmp_db_url: str):
 def _build_zcode_source_db(db_path: Path) -> None:
     """Create a minimal ZCode-schema DB (session/message/part/turn_usage)."""
     conn = sqlite3.connect(str(db_path))
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE session (
             id text primary key,
             directory text not null,
@@ -99,8 +98,7 @@ def _build_zcode_source_db(db_path: Path) -> None:
             computed_total_tokens integer not null default 0,
             PRIMARY KEY (session_id, turn_id)
         );
-        """
-    )
+        """)
     conn.commit()
     conn.close()
 
@@ -181,8 +179,7 @@ def _insert_turn_usage(
 def _init_dest_schema(db_path: Path) -> None:
     """Create the destination tables fetch_zcode writes to (minimal subset)."""
     conn = sqlite3.connect(str(db_path))
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE users (
             id INTEGER PRIMARY KEY,
             username TEXT,
@@ -256,8 +253,7 @@ def _init_dest_schema(db_path: Path) -> None:
         );
         CREATE UNIQUE INDEX idx_daily_messages_unique
         ON daily_messages (date, tool_name, host_name, message_id);
-        """
-    )
+        """)
     conn.commit()
     conn.close()
 

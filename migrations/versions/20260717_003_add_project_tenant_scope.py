@@ -42,9 +42,7 @@ def upgrade() -> None:
             sa.Column("tenant_id", sa.Integer(), nullable=False, server_default="1"),
         )
 
-    conn.execute(
-        sa.text(
-            """
+    conn.execute(sa.text("""
             UPDATE projects
             SET tenant_id = COALESCE(
                 (SELECT users.tenant_id FROM users WHERE users.id = projects.created_by),
@@ -60,9 +58,7 @@ def upgrade() -> None:
                 tenant_id,
                 1
             )
-            """
-        )
-    )
+            """))
 
     project_indexes = _index_names(inspector, "projects")
     if "idx_projects_tenant_created_by" not in project_indexes:

@@ -45,8 +45,7 @@ def upgrade() -> None:
     # Only update where user has a system_account (skip admin users without one)
     dialect = connection.dialect.name
     if dialect == "sqlite":
-        op.execute(
-            """
+        op.execute("""
             UPDATE autonomous_workflows
             SET system_account = (
                 SELECT u.system_account FROM users u
@@ -56,11 +55,9 @@ def upgrade() -> None:
             )
             WHERE system_account IS NULL OR system_account = ''
             AND user_id IS NOT NULL
-            """
-        )
+            """)
     else:  # PostgreSQL
-        op.execute(
-            """
+        op.execute("""
             UPDATE autonomous_workflows aw
             SET system_account = u.system_account
             FROM users u
@@ -68,8 +65,7 @@ def upgrade() -> None:
             AND aw.system_account IS NULL OR aw.system_account = ''
             AND u.system_account IS NOT NULL
             AND u.system_account != ''
-            """
-        )
+            """)
 
 
 def downgrade() -> None:

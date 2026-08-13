@@ -29,8 +29,7 @@ from app.repositories.database import Database
 def find_conflicts() -> list:
     """Find groups of rows with same (date, tool, host) but different tenant."""
     db = Database()
-    rows = db.fetch_all(
-        """
+    rows = db.fetch_all("""
         SELECT
             date,
             tool_name,
@@ -42,8 +41,7 @@ def find_conflicts() -> list:
         GROUP BY date, tool_name, host_name
         HAVING COUNT(DISTINCT COALESCE(tenant_id, 1)) > 1
         ORDER BY tenant_count DESC, date DESC
-        """
-    )
+        """)
     return rows if rows else []
 
 

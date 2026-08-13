@@ -169,11 +169,9 @@ class TestValidateCliSettingsPayload:
     def test_accepts_valid_codex_toml_string(self):
         from app.modules.workspace.api_key_proxy import validate_cli_settings_payload
 
-        error = validate_cli_settings_payload(
-            """
+        error = validate_cli_settings_payload("""
             {"codex-cli":"model_provider = \\"openace\\"\\nmodel = \\"qwen3.7-max\\""}
-            """
-        )
+            """)
         assert error is None
 
     def test_rejects_invalid_codex_toml_string(self):

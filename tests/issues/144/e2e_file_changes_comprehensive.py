@@ -160,16 +160,14 @@ def run_tests():
         chat_url = navigate_to_chat(page, webui_info)
 
         # 清除 autoSave 布局缓存，确保面板使用 defaultSize
-        page.evaluate(
-            """() => {
+        page.evaluate("""() => {
             for (let i = localStorage.length - 1; i >= 0; i--) {
                 const key = localStorage.key(i);
                 if (key && key.includes('chat-file-changes')) {
                     localStorage.removeItem(key);
                 }
             }
-        }"""
-        )
+        }""")
         # 重新导航
         page.goto(chat_url, wait_until="domcontentloaded")
         time.sleep(5)
@@ -272,8 +270,7 @@ def run_tests():
 
         # 通过页面 fetch 调用 Git API（自动带 token）
         try:
-            api_result = page.evaluate(
-                """async () => {
+            api_result = page.evaluate("""async () => {
                 try {
                     const url = new URL(window.location.href);
                     const token = url.searchParams.get('token');
@@ -283,8 +280,7 @@ def run_tests():
                 } catch (e) {
                     return { error: e.message };
                 }
-            }"""
-            )
+            }""")
             log("Git API", str(api_result)[:300])
             has_changes = api_result.get("files") and len(api_result.get("files", [])) > 0
             check("Git API 返回文件变更", has_changes)
