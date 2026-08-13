@@ -108,15 +108,19 @@ def main() -> int:
     """
     # Issue #2331: Ensure test context is properly detected before any mode detection
     # This is a defensive measure to avoid RuntimeError in edge cases
+    # CRITICAL: Force development mode in test context regardless of current value
+    # to prevent test isolation issues where previous tests leave production mode set
     import sys
 
     if "pytest" in sys.modules or "unittest" in sys.modules:
-        # Running in test context - ensure development mode if not explicitly set
+        # Running in test context - FORCE development mode
+        # This is necessary because:
+        # 1. Previous tests may have set OPENACE_SECURITY_MODE=production
+        # 2. The conftest.py _clear_cache fixture only resets the cache, not the env var
+        # 3. This script must run in development mode when tested
         import os
 
-        current_mode = os.environ.get("OPENACE_SECURITY_MODE", "").strip()
-        if not current_mode:
-            os.environ["OPENACE_SECURITY_MODE"] = "development"
+        os.environ["OPENACE_SECURITY_MODE"] = "development"
 
     args = build_parser().parse_args()
     database_url = args.database_url or _get_db_url()

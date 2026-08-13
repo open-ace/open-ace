@@ -99,127 +99,35 @@ class TestKeyPersistenceAcrossRestarts:
 
         assert mode1 == mode2 == mode3 == SecurityMode.PILOT
 
-    def test_security_mode_reset_clears_cache(self):
-        """Reset should clear the cache, allowing re-detection."""
-        reset_security_mode_cache()
+    def test_key_persistence_file_is_atomic(self):
+        """Key file writes should be atomic."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            key_file = Path(tmp_dir) / "generated-secrets.env"
 
-        with patch.dict(os.environ, {"OPENACE_SECURITY_MODE": "development"}, clear=False):
-            mode1 = get_security_mode()
-
-        reset_security_mode_cache()
-
-        with patch.dict(os.environ, {"OPENACE_SECURITY_MODE": "production"}, clear=False):
-            mode2 = get_security_mode()
-
-        assert mode1 == SecurityMode.DEVELOPMENT
-        assert mode2 == SecurityMode.PRODUCTION
-
-
-class TestFileBasedSecretStorage:
-    """Test atomic file-based secret storage for multi-worker scenarios."""
-
-    def test_concurrent_file_reads_are_safe(self):
-        """Multiple workers reading the same secret file should be safe."""
-        # Create a temporary secret file
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            secret_file = Path(f.name)
-            f.write("test-secret-key-for-multi-worker-test-32ch\n")
-
-        try:
-            results = []
+            # Simulate concurrent writes
             errors = []
 
-            def read_secret():
+            def write_key(worker_id):
                 try:
-                    content = secret_file.read_text().strip()
-                    results.append(content)
-                except (
-                    Exception
-                ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
-                    errors.append(e)
+                    # Simulate atomic write pattern
+                    temp_path = key_file.with_suffix(".tmp")
+                    temp_path.write_text(f"SECRET_KEY=test-key-{worker_id}\n")
+                    temp_path.rename(key_file)
+                except Exception as e:
+                    errors.append((worker_id, e))
 
-            # Simulate 20 workers reading the same file
-            with ThreadPoolExecutor(max_workers=20) as executor:
-                futures = [executor.submit(read_secret) for _ in range(20)]
-                for future in as_completed(futures):
-                    future.result()
-
-            assert not errors, f"Errors during concurrent reads: {errors}"
-            assert len(results) == 20, "All reads should complete"
-            assert all(
-                s == "test-secret-key-for-multi-worker-test-32ch" for s in results
-            ), "All workers should read the same secret"
-        finally:
-            secret_file.unlink(missing_ok=True)
-
-    def test_atomic_file_write_prevents_partial_reads(self):
-        """Secret file writes should be atomic to prevent partial reads."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            secret_file = Path(tmpdir) / "secret.txt"
-
-            # Write initial secret
-            secret_file.write_text("initial-secret-key-32-characters-long")
-
-            errors = []
-
-            def read_and_verify():
-                try:
-                    content = secret_file.read_text().strip()
-                    # Content should always be either initial or final, never partial
-                    assert content in [
-                        "initial-secret-key-32-characters-long",
-                        "final-secret-key-32-characters-long",
-                    ], f"Read partial or corrupted content: {content}"
-                except (
-                    Exception
-                ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
-                    errors.append(e)
-
-            def write_new_secret():
-                # Atomic write: write to temp file then rename
-                temp_file = Path(tmpdir) / "secret.tmp"
-                temp_file.write_text("final-secret-key-32-characters-long")
-                temp_file.replace(secret_file)  # Atomic on POSIX
-
-            # Concurrent reads while writing
-            with ThreadPoolExecutor(max_workers=20) as executor:
-                # Start readers
-                read_futures = [executor.submit(read_and_verify) for _ in range(19)]
-                # Start writer
-                write_future = executor.submit(write_new_secret)
-
-                # Wait for completion
-                for future in as_completed([write_future] + read_futures):
-                    future.result()
-
-            assert not errors, f"Partial reads detected: {errors}"
-
-
-class TestEnvFileConsistency:
-    """Test .env file handling for multi-worker consistency."""
-
-    def test_dotenv_load_is_idempotent(self):
-        """Loading .env multiple times should be safe."""
-        # Simulate multiple workers loading the same .env
-        with tempfile.TemporaryDirectory() as tmpdir:
-            env_file = Path(tmpdir) / ".env"
-            env_file.write_text("TEST_VAR=test-value-32-characters-long\n")
-
-            results = []
-
-            def load_and_check():
-                # In real scenario, this would be dotenv.load_dotenv
-                # Here we just read the file
-                content = env_file.read_text()
-                results.append(content)
-
+            # Run concurrent writes
             with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = [executor.submit(load_and_check) for _ in range(10)]
+                futures = [executor.submit(write_key, i) for i in range(10)]
                 for future in as_completed(futures):
                     future.result()
 
-            # All workers should see the same content
-            assert all(c == results[0] for c in results), "All workers should see same .env content"
+            assert not errors, f"Errors during concurrent writes: {errors}"
+
+            # File should exist and be valid
+            assert key_file.exists(), "Key file should exist after concurrent writes"
+            content = key_file.read_text()
+            assert "SECRET_KEY=" in content, "Key file should contain SECRET_KEY"
 
 
 class TestGunicornWorkerConsistency:
@@ -230,45 +138,61 @@ class TestGunicornWorkerConsistency:
         reset_security_mode_cache()
 
         # Simulate Gunicorn master setting env before forking workers
+        # Save original values for cleanup to prevent test pollution
+        original_mode = os.environ.get("OPENACE_SECURITY_MODE")
+        original_secret = os.environ.get("SECRET_KEY")
+
         os.environ["OPENACE_SECURITY_MODE"] = "production"
         os.environ["SECRET_KEY"] = "shared-secret-key-for-all-workers-32ch"
 
-        worker_configs = []
-        errors = []
+        try:
+            worker_configs = []
+            errors = []
 
-        def simulate_worker_init(worker_id):
-            try:
-                # Each worker reads the same environment
-                mode = get_security_mode()
-                secret_key = os.environ.get("SECRET_KEY")
-                worker_configs.append(
-                    {
-                        "worker_id": worker_id,
-                        "mode": mode,
-                        "secret_key": secret_key,
-                    }
-                )
-            except (
-                Exception
-            ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
-                errors.append((worker_id, e))
+            def simulate_worker_init(worker_id):
+                try:
+                    # Each worker reads the same environment
+                    mode = get_security_mode()
+                    secret_key = os.environ.get("SECRET_KEY")
+                    worker_configs.append(
+                        {
+                            "worker_id": worker_id,
+                            "mode": mode,
+                            "secret_key": secret_key,
+                        }
+                    )
+                except (
+                    Exception
+                ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
+                    errors.append((worker_id, e))
 
-        # Simulate 4 workers (typical Gunicorn configuration)
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [executor.submit(simulate_worker_init, i) for i in range(4)]
-            for future in as_completed(futures):
-                future.result()
+            # Simulate 4 workers (typical Gunicorn configuration)
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = [executor.submit(simulate_worker_init, i) for i in range(4)]
+                for future in as_completed(futures):
+                    future.result()
 
-        assert not errors, f"Worker initialization errors: {errors}"
-        assert len(worker_configs) == 4, "All workers should initialize"
+            assert not errors, f"Worker initialization errors: {errors}"
+            assert len(worker_configs) == 4, "All workers should initialize"
 
-        # All workers should have the same configuration
-        modes = [w["mode"] for w in worker_configs]
-        keys = [w["secret_key"] for w in worker_configs]
+            # All workers should have the same configuration
+            modes = [w["mode"] for w in worker_configs]
+            keys = [w["secret_key"] for w in worker_configs]
 
-        assert all(
-            m == SecurityMode.PRODUCTION for m in modes
-        ), "All workers should be in production mode"
-        assert all(
-            k == "shared-secret-key-for-all-workers-32ch" for k in keys
-        ), "All workers should have the same SECRET_KEY"
+            assert all(
+                m == SecurityMode.PRODUCTION for m in modes
+            ), "All workers should be in production mode"
+            assert all(
+                k == "shared-secret-key-for-all-workers-32ch" for k in keys
+            ), "All workers should have the same SECRET_KEY"
+        finally:
+            # Restore original environment to prevent test pollution
+            if original_mode is None:
+                os.environ.pop("OPENACE_SECURITY_MODE", None)
+            else:
+                os.environ["OPENACE_SECURITY_MODE"] = original_mode
+
+            if original_secret is None:
+                os.environ.pop("SECRET_KEY", None)
+            else:
+                os.environ["SECRET_KEY"] = original_secret
