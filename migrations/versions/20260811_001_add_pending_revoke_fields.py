@@ -35,12 +35,21 @@ def upgrade() -> None:
     # Add fields to agent_tokens table
     if dialect == "postgresql":
         # PostgreSQL: Use batch_alter_table for safety
+        # Check if columns exist before adding
+        inspector = sa.inspect(bind)
+        agent_tokens_columns = [col["name"] for col in inspector.get_columns("agent_tokens")]
+
         with op.batch_alter_table("agent_tokens", schema=None) as batch_op:
-            batch_op.add_column(
-                sa.Column("pending_revoke", sa.Boolean(), nullable=False, server_default="false")
-            )
-            batch_op.add_column(sa.Column("revoke_after", TIMESTAMP(), nullable=True))
-            batch_op.add_column(sa.Column("rotation_id", sa.String(36), nullable=True))
+            if "pending_revoke" not in agent_tokens_columns:
+                batch_op.add_column(
+                    sa.Column(
+                        "pending_revoke", sa.Boolean(), nullable=False, server_default="false"
+                    )
+                )
+            if "revoke_after" not in agent_tokens_columns:
+                batch_op.add_column(sa.Column("revoke_after", TIMESTAMP(), nullable=True))
+            if "rotation_id" not in agent_tokens_columns:
+                batch_op.add_column(sa.Column("rotation_id", sa.String(36), nullable=True))
 
         # Create unique index for active tokens (partial index)
         op.execute(
@@ -70,20 +79,30 @@ def upgrade() -> None:
 
     else:
         # SQLite: Add columns with default values
+        # Check if columns exist before adding (schema-sqlite.sql may already have them)
+        inspector = sa.inspect(bind)
+        agent_tokens_columns = [col["name"] for col in inspector.get_columns("agent_tokens")]
+
         with op.batch_alter_table("agent_tokens", schema=None) as batch_op:
-            batch_op.add_column(
-                sa.Column("pending_revoke", sa.Integer(), nullable=False, server_default="0")
-            )
-            batch_op.add_column(sa.Column("revoke_after", sa.Text(), nullable=True))
-            batch_op.add_column(sa.Column("rotation_id", sa.Text(), nullable=True))
+            if "pending_revoke" not in agent_tokens_columns:
+                batch_op.add_column(
+                    sa.Column("pending_revoke", sa.Integer(), nullable=False, server_default="0")
+                )
+            if "revoke_after" not in agent_tokens_columns:
+                batch_op.add_column(sa.Column("revoke_after", sa.Text(), nullable=True))
+            if "rotation_id" not in agent_tokens_columns:
+                batch_op.add_column(sa.Column("rotation_id", sa.Text(), nullable=True))
 
         # SQLite doesn't support partial indexes, create regular indexes
-        op.create_index(
-            "idx_agent_tokens_machine_pending",
-            "agent_tokens",
-            ["machine_id", "pending_revoke", "revoke_after"],
-            unique=False,
-        )
+        # Check if indexes exist before creating
+        existing_indexes = [idx["name"] for idx in inspector.get_indexes("agent_tokens")]
+        if "idx_agent_tokens_machine_pending" not in existing_indexes:
+            op.create_index(
+                "idx_agent_tokens_machine_pending",
+                "agent_tokens",
+                ["machine_id", "pending_revoke", "revoke_after"],
+                unique=False,
+            )
 
     # Add fields to remote_machines table
     # Check if columns exist before adding (agent_version may already exist from other migrations)
