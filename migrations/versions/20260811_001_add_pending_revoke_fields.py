@@ -98,6 +98,20 @@ def upgrade() -> None:
         # SQLite doesn't support partial indexes, create regular indexes
         # Check if indexes exist before creating
         existing_indexes = [idx["name"] for idx in inspector.get_indexes("agent_tokens")]
+        if "idx_agent_tokens_one_active_per_machine" not in existing_indexes:
+            op.create_index(
+                "idx_agent_tokens_one_active_per_machine",
+                "agent_tokens",
+                ["machine_id"],
+                unique=True,
+            )
+        if "idx_agent_tokens_pending_revoke_timeout" not in existing_indexes:
+            op.create_index(
+                "idx_agent_tokens_pending_revoke_timeout",
+                "agent_tokens",
+                ["revoke_after"],
+                unique=False,
+            )
         if "idx_agent_tokens_machine_pending" not in existing_indexes:
             op.create_index(
                 "idx_agent_tokens_machine_pending",
@@ -144,8 +158,12 @@ def downgrade() -> None:
     if dialect == "postgresql":
         op.execute("DROP INDEX IF EXISTS idx_agent_tokens_one_active_per_machine")
         op.execute("DROP INDEX IF EXISTS idx_agent_tokens_pending_revoke_timeout")
-
-    op.drop_index("idx_agent_tokens_machine_pending", table_name="agent_tokens")
+        op.drop_index("idx_agent_tokens_machine_pending", table_name="agent_tokens")
+    else:
+        # SQLite: drop all three indexes
+        op.drop_index("idx_agent_tokens_one_active_per_machine", table_name="agent_tokens")
+        op.drop_index("idx_agent_tokens_pending_revoke_timeout", table_name="agent_tokens")
+        op.drop_index("idx_agent_tokens_machine_pending", table_name="agent_tokens")
 
     # Drop columns from agent_tokens
     with op.batch_alter_table("agent_tokens", schema=None) as batch_op:

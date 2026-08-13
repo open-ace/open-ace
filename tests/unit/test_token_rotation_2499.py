@@ -130,8 +130,8 @@ class TestTokenRotation:
         machine_id = str(uuid.uuid4())
 
         # Mock database to return None for timeout config
-        cursor = mock_db.connection.return_value.cursor.return_value
-        cursor.fetchone.return_value = None
+        # Use _mock_cursor which is the actual cursor used by the manager
+        mock_db._mock_cursor.fetchone.return_value = None
 
         # Get timeout
         timeout = manager._get_token_revoke_timeout(machine_id)
