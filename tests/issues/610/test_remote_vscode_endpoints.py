@@ -141,6 +141,10 @@ class TestVSCodeStart(unittest.TestCase):
         """Non-admin user without machine access gets 403."""
         mgr = MagicMock()
         mgr.check_user_access.return_value = False
+        # Tenant-agnostic machine: skips the #2538 cross-tenant guard (a bare
+        # MagicMock tenant_id is non-None and would 404) so the test exercises
+        # its intended path — an unassigned user is denied with 403.
+        mgr.get_machine.return_value = {"tenant_id": None}
         app = _make_app(mgr)
         with app.test_client() as client:
             resp = _auth_post(
@@ -204,6 +208,10 @@ class TestVSCodeStart(unittest.TestCase):
         mgr = MagicMock()
         mgr.check_user_access.return_value = True
         mgr.is_agent_connected.return_value = True
+        # #2538 gates access on explicit assignment (get_user_permission), not
+        # check_user_access; model the non-admin as an assigned "user" so the
+        # start succeeds.
+        mgr.get_user_permission.return_value = "user"
         app = _make_app(mgr)
         with app.test_client() as client:
             resp = _auth_post(
@@ -282,6 +290,8 @@ class TestVSCodeStop(unittest.TestCase):
         """Non-admin without access gets 403."""
         mgr = MagicMock()
         mgr.check_user_access.return_value = False
+        # Tenant-agnostic machine (see TestVSCodeStart.test_access_denied_non_admin).
+        mgr.get_machine.return_value = {"tenant_id": None}
         app = _make_app(mgr)
         with app.test_client() as client:
             resp = _auth_post(
@@ -450,6 +460,8 @@ class TestVSCodeStatus(unittest.TestCase):
         """Non-admin without machine access gets 403."""
         mgr = MagicMock()
         mgr.check_user_access.return_value = False
+        # Tenant-agnostic machine (see TestVSCodeStart.test_access_denied_non_admin).
+        mgr.get_machine.return_value = {"tenant_id": None}
         app = _make_app(mgr)
 
         from app.modules.workspace import vscode_store as vs_mod
@@ -511,6 +523,8 @@ class TestVSCodeAttach(unittest.TestCase):
         """Non-admin without access gets 403."""
         mgr = MagicMock()
         mgr.check_user_access.return_value = False
+        # Tenant-agnostic machine (see TestVSCodeStart.test_access_denied_non_admin).
+        mgr.get_machine.return_value = {"tenant_id": None}
         app = _make_app(mgr)
         with app.test_client() as client:
             resp = _auth_post(

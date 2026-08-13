@@ -29,8 +29,8 @@ def app():
     return _app
 
 
-def _mock_user(user_id=1, role="admin"):
-    return {"id": user_id, "username": "testuser", "role": role}
+def _mock_user(user_id=1, role="admin", tenant_id=None):
+    return {"id": user_id, "username": "testuser", "role": role, "tenant_id": tenant_id}
 
 
 def _mock_proxy():
@@ -177,7 +177,10 @@ class TestSessionModelsRemoteByMachine:
         self, mock_extract, mock_auth, mock_get_aggr, mock_get_proxy, app
     ):
         mock_extract.return_value = "tok"
-        mock_auth.return_value = _mock_user(user_id=1)
+        # Machine belongs to tenant 1; the caller must be in the same tenant to
+        # pass the #2538 cross-tenant guard (get_session_models has no admin
+        # bypass), so model the admin as a tenant-1 user.
+        mock_auth.return_value = _mock_user(user_id=1, tenant_id=1)
 
         mock_agent_mgr = MagicMock()
         mock_agent_mgr.check_user_access.return_value = True

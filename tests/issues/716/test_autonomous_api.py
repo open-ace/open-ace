@@ -53,7 +53,7 @@ def auto_db(tmp_path):
                 pass
 
 
-def _mock_auth(user_id=1, role="admin"):
+def _mock_auth(user_id=1, role="admin", tenant_id=None):
     """Patch auth to bypass authentication."""
     return patch(
         "app.auth.decorators._load_user_from_token",
@@ -62,6 +62,7 @@ def _mock_auth(user_id=1, role="admin"):
             "username": "admin" if role == "admin" else "testuser",
             "email": f"{role}@test.com",
             "role": role,
+            "tenant_id": tenant_id,
         },
     )
 
@@ -915,7 +916,10 @@ class TestGetModels:
         mock_mgr = MagicMock()
         mock_mgr.check_user_access.return_value = "admin"
         mock_mgr.get_machine.return_value = {"tenant_id": 7}
-        with _mock_auth():
+        # Caller must share the machine's tenant to clear the #2538 cross-tenant
+        # guard (get_available_models has no admin bypass); tenant-7 here so the
+        # derived tenant (also 7) still comes from the machine record below.
+        with _mock_auth(tenant_id=7):
             with (
                 patch(
                     "app.modules.workspace.api_key_proxy.APIKeyProxyService",

@@ -226,5 +226,10 @@ def test_check_session_access_denies_null_tenant_machine_admin(sqlite_db, monkey
             "null-tenant machine-admin must be denied (fail closed), not admitted via the "
             "untenant-scoped machine-admin branch"
         )
+        # Issue #2538 changed the null-tenant denial from 403 to 404 ("Session
+        # not found") so a caller without a tenant cannot learn the session
+        # exists. The fail-closed property #1789 guards (a null-tenant user is
+        # never admitted) is preserved and in fact strengthened: #2538's check
+        # fires before the machine-admin branch is even reached.
         status_code = error[1]
-        assert status_code == 403, f"expected 403, got {status_code}"
+        assert status_code == 404, f"expected 404, got {status_code}"
