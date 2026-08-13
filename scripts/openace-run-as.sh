@@ -179,6 +179,31 @@ if [ "$isolated" = true ]; then
         fi
     }
 
+    # Return 0 (true) when two .git entry signatures describe the same regular
+    # file with identical content, type, owner and device, differing at most in
+    # the filesystem inode. The orchestrator's worktree self-heal can recreate a
+    # worktree (git worktree add) between two runs that share an isolation key
+    # (a resumed session, task_id == session_id), giving the .git gitfile a new
+    # inode with byte-identical content. That is NOT tampering: a
+    # push-redirect attack must change the gitdir pointer content (-> sha256
+    # changes) or swap the entry type (file -> link/dir), both of which still
+    # mismatch here. Only the inode may differ. Scope: cross-run check only;
+    # the within-run check (agent session live) stays strict.
+    signatures_differ_only_by_inode() {
+        local sig_a="$1" sig_b="$2"
+        # Both entries must be regular gitfiles; a type change (link/dir) is
+        # structural and must not be tolerated.
+        case "$sig_a" in file:*) ;; *) return 1 ;; esac
+        case "$sig_b" in file:*) ;; *) return 1 ;; esac
+        # Normalize the ACL-mask group-class digit, then blank the inode field
+        # (field 3 after 'file:') so a rebuild compares equal. After 'file:' the
+        # layout is <dev>:<inode>:<mode>:<user>:<group>:<sha256>.
+        local na nb
+        na="$(normalize_group_class_signature "$sig_a" | awk -F: -v OFS=: '{ $3=""; print }')"
+        nb="$(normalize_group_class_signature "$sig_b" | awk -F: -v OFS=: '{ $3=""; print }')"
+        [ "$na" = "$nb" ]
+    }
+
     git_entry_signature() {
         local signature_project="$1"
         if [ -L "$signature_project/.git" ]; then
@@ -729,6 +754,10 @@ if [ "$isolated" = true ]; then
                 "$previous_git_signature" \
                 "$previous_git_acl_snapshot"; then
             : # integrity verified for the same project
+        elif [ "$previous_signature_project" = "$project_dir" ] && \
+            signatures_differ_only_by_inode "$previous_git_signature" "$(git_entry_signature "$project_dir")"; then
+            : # worktree rebuilt between runs (inode-only, identical content) — NOT tamper;
+              # fall through so the registry is re-baselined below with the current signature
         elif [ "$previous_signature_project" = "$project_dir" ]; then
             echo "OPENACE_REPO_INTEGRITY_VIOLATION: .git entry changed during interrupted agent execution" >&2
             exit 68

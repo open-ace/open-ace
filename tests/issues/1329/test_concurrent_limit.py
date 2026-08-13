@@ -23,8 +23,7 @@ def auto_db(tmp_path):
             conn = db.get_connection()
             try:
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE TABLE IF NOT EXISTS users (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         username TEXT UNIQUE NOT NULL,
@@ -34,8 +33,7 @@ def auto_db(tmp_path):
                         tenant_id INTEGER,
                         is_active INTEGER DEFAULT 1
                     )
-                """
-                )
+                """)
                 cursor.execute(
                     "INSERT INTO users (username, email, password_hash, role, tenant_id) VALUES (?, ?, ?, ?, ?)",
                     ("testuser", "test@test.com", "hash123", "user", 1),
@@ -44,16 +42,14 @@ def auto_db(tmp_path):
                     "INSERT INTO users (username, email, password_hash, role, tenant_id) VALUES (?, ?, ?, ?, ?)",
                     ("otheruser", "other@test.com", "hash456", "user", 1),
                 )
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE TABLE IF NOT EXISTS tenants (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         name TEXT NOT NULL,
                         slug TEXT UNIQUE NOT NULL,
                         quota TEXT
                     )
-                """
-                )
+                """)
                 cursor.execute(
                     "INSERT INTO tenants (name, slug, quota) VALUES (?, ?, ?)",
                     ("Test Tenant", "test-tenant", '{"max_sessions_per_user": 3}'),

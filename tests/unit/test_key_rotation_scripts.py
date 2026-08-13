@@ -48,8 +48,7 @@ def _seed_sqlite_db(db_path: Path) -> None:
 
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         CREATE TABLE api_key_store (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id INTEGER,
@@ -65,10 +64,8 @@ def _seed_sqlite_db(db_path: Path) -> None:
             is_active INTEGER,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """
-    )
-    cur.execute(
-        """
+        """)
+    cur.execute("""
         CREATE TABLE smtp_settings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             smtp_host TEXT,
@@ -80,10 +77,8 @@ def _seed_sqlite_db(db_path: Path) -> None:
             is_verified INTEGER,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """
-    )
-    cur.execute(
-        """
+        """)
+    cur.execute("""
         CREATE TABLE model_gateway_config (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             mode TEXT,
@@ -93,8 +88,7 @@ def _seed_sqlite_db(db_path: Path) -> None:
             model_prefix TEXT,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """
-    )
+        """)
 
     api_service = APIKeyProxyService(db_path=str(db_path))
     # Use get_password_manager() singleton to ensure same key is used

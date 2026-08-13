@@ -40,9 +40,7 @@ class TestMigrationPreflight:
 
         # Create tables
         with engine.connect() as conn:
-            conn.execute(
-                sa.text(
-                    """
+            conn.execute(sa.text("""
                 CREATE TABLE users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL,
@@ -51,21 +49,15 @@ class TestMigrationPreflight:
                     tenant_id INTEGER,
                     is_active INTEGER DEFAULT 1
                 )
-            """
-                )
-            )
-            conn.execute(
-                sa.text(
-                    """
+            """))
+            conn.execute(sa.text("""
                 CREATE TABLE tenants (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
                     is_active INTEGER DEFAULT 1,
                     deleted_at TIMESTAMP
                 )
-            """
-                )
-            )
+            """))
             conn.commit()
 
         return engine
@@ -183,29 +175,21 @@ class TestMigrationClassification:
         engine = create_engine("sqlite:///:memory:")
 
         with engine.connect() as conn:
-            conn.execute(
-                sa.text(
-                    """
+            conn.execute(sa.text("""
                 CREATE TABLE users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL,
                     role TEXT NOT NULL,
                     tenant_id INTEGER
                 )
-            """
-                )
-            )
-            conn.execute(
-                sa.text(
-                    """
+            """))
+            conn.execute(sa.text("""
                 CREATE TABLE tenants (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
                     is_active INTEGER DEFAULT 1
                 )
-            """
-                )
-            )
+            """))
             conn.commit()
 
         return engine
@@ -329,16 +313,12 @@ class TestMigrationIdempotency:
         engine = create_engine("sqlite:///:memory:")
 
         with engine.connect() as conn:
-            conn.execute(
-                sa.text(
-                    """
+            conn.execute(sa.text("""
                 CREATE TABLE users (
                     id INTEGER PRIMARY KEY,
                     role TEXT
                 )
-            """
-                )
-            )
+            """))
             conn.execute(sa.text("INSERT INTO users (id, role) VALUES (1, 'platform_admin')"))
             conn.execute(sa.text("INSERT INTO users (id, role) VALUES (2, 'tenant_admin')"))
             conn.commit()
@@ -364,16 +344,12 @@ class TestMigrationIdempotency:
         with engine.connect() as conn:
             # Create tables
             migration_module._create_migration_metadata_table(conn)
-            conn.execute(
-                sa.text(
-                    """
+            conn.execute(sa.text("""
                 CREATE TABLE users (
                     id INTEGER PRIMARY KEY,
                     role TEXT
                 )
-            """
-                )
-            )
+            """))
             conn.execute(sa.text("INSERT INTO users (id, role) VALUES (1, 'platform_admin')"))
             conn.commit()
 
@@ -472,27 +448,19 @@ class TestSessionInvalidation:
 
         with engine.connect() as conn:
             # Create tables
-            conn.execute(
-                sa.text(
-                    """
+            conn.execute(sa.text("""
                 CREATE TABLE users (
                     id INTEGER PRIMARY KEY,
                     role TEXT
                 )
-            """
-                )
-            )
-            conn.execute(
-                sa.text(
-                    """
+            """))
+            conn.execute(sa.text("""
                 CREATE TABLE sessions (
                     id INTEGER PRIMARY KEY,
                     user_id INTEGER,
                     is_active INTEGER DEFAULT 1
                 )
-            """
-                )
-            )
+            """))
             conn.execute(sa.text("INSERT INTO users (id, role) VALUES (1, 'admin')"))
             conn.execute(sa.text("INSERT INTO sessions (id, user_id, is_active) VALUES (1, 1, 1)"))
             conn.commit()
