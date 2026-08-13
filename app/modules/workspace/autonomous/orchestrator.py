@@ -2686,11 +2686,25 @@ class AutonomousOrchestrator:
         """Re-pin the trusted Git context for repo_path to its CURRENT gitdir
         identity.
 
-        Called at worktree lifecycle points (ensure_worktree / recreate), which
-        legitimately change the gitdir after the prior _run_agent pinned it.
-        The class-level registry persists across scheduler cycles, so without
-        this refresh the next cycle's lifecycle git ops verify against a stale
-        baseline and produce false-positive "identity changed" failures (#2565).
+        Called after `worktree add` in ensure_worktree, which legitimately
+        creates a NEW worktree gitdir (new device:inode) that the prior
+        _run_agent cycle's pinned identity cannot match. The class-level
+        registry (_trusted_git_contexts) persists across scheduler cycles, so
+        without this refresh the next cycle's lifecycle git ops verify against a
+        stale baseline and produce false-positive "identity changed" failures
+        (#2565).
+
+        Scope — worktree-path entries only:
+        The refresh is intentionally scoped to the worktree-path (the gitdir
+        that `worktree add` actually recreates). The MAIN repo's ``.git``
+        identity is stable under worktree ops (``worktree add`` only adds a
+        subdir under ``<main>/.git/worktrees/``, it does not change
+        ``<main>/.git``'s own device:inode), so it is NOT refreshed here.
+        This also avoids a concurrency hazard: the registry is class-level and
+        shared; an entry-time refresh on the shared main-repo key could clear
+        it during another concurrent workflow's agent window (same
+        project_path, different worktree_path/branch are not serialized by
+        project_path).
 
         Best-effort: if the gitdir cannot be snapshotted (e.g. doesn't exist
         yet), skip silently — _verify_trusted_git_context's empty-context

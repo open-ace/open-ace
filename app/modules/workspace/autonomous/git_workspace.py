@@ -190,10 +190,14 @@ class GitWorkspaceService:
             if user:
                 system_account = user.get("system_account")
         main_gh = _GitHubOps(project_path, system_account=system_account)
-        # Refresh the trusted Git context for the main repo so lifecycle ops
-        # (fetch/show-ref/worktree-add) verify against the CURRENT gitdir, not
-        # a stale baseline pinned by a prior _run_agent cycle. (#2565)
-        self._orch._refresh_trusted_git_context(project_path, system_account)
+        # NOTE: the main-repo trusted Git context is NOT refreshed here.
+        # `worktree add` only adds a subdir under <main>/.git/worktrees/ — it
+        # does NOT change <main>/.git's own device:inode — so main_gh's pinned
+        # identity already matches current and needs no re-basing. Refreshing it
+        # here would also clear a SHARED class-level registry entry during another
+        # concurrent workflow's agent window (same project_path, different
+        # worktree/branch). Refreshes are scoped to worktree-path entries below
+        # (the gitdir that is actually recreated by `worktree add`). (#2565)
         # Valid worktree: a .git FILE inside means git set it up (a plain
         # clone has a .git directory instead). If the stored path was
         # unnormalized (legacy ".."), persist the canonical form so JSONL
