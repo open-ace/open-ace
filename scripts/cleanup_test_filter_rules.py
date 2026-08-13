@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Cleanup test filter rules from content_filter_rules table.
 
