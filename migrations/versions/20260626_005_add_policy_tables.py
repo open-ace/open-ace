@@ -36,8 +36,7 @@ def upgrade() -> None:
     conn = op.get_bind()
 
     if conn.dialect.name == "postgresql":
-        op.execute(
-            """
+        op.execute("""
             CREATE TABLE IF NOT EXISTS policy_rules (
                 id SERIAL PRIMARY KEY,
                 rule_key TEXT NOT NULL,
@@ -65,10 +64,8 @@ def upgrade() -> None:
                 superseded_at TIMESTAMP,
                 description TEXT
             )
-            """
-        )
-        op.execute(
-            """
+            """)
+        op.execute("""
             CREATE TABLE IF NOT EXISTS policy_decisions (
                 id SERIAL PRIMARY KEY,
                 decision_id TEXT NOT NULL,
@@ -99,11 +96,9 @@ def upgrade() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            """
-        )
+            """)
     else:
-        op.execute(
-            """
+        op.execute("""
             CREATE TABLE IF NOT EXISTS policy_rules (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 rule_key TEXT NOT NULL,
@@ -131,10 +126,8 @@ def upgrade() -> None:
                 superseded_at TIMESTAMP,
                 description TEXT
             )
-            """
-        )
-        op.execute(
-            """
+            """)
+        op.execute("""
             CREATE TABLE IF NOT EXISTS policy_decisions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 decision_id TEXT NOT NULL,
@@ -165,8 +158,7 @@ def upgrade() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            """
-        )
+            """)
 
     op.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS policy_rules_rule_key_version_key "

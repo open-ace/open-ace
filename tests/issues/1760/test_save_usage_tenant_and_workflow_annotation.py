@@ -143,8 +143,7 @@ def test_update_agent_sessions_stats_writes_per_session_model(tmp_path, monkeypa
     # Build a minimal schema covering the columns update_agent_sessions_stats
     # touches, so the INSERT/UPDATE paths can run end-to-end.
     conn = shared_db.get_connection()
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS agent_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT UNIQUE,
@@ -163,13 +162,11 @@ def test_update_agent_sessions_stats_writes_per_session_model(tmp_path, monkeypa
             created_at TEXT,
             updated_at TEXT
         )
-        """
-    )
+        """)
     # fetch_claude also inserts into session_messages; without this table the
     # test logs WARNING noise (the model assertion doesn't depend on it, but a
     # clean log is preferable).
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS session_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL,
@@ -186,8 +183,7 @@ def test_update_agent_sessions_stats_writes_per_session_model(tmp_path, monkeypa
             content_blocks TEXT,
             tenant_id INTEGER DEFAULT 1
         )
-        """
-    )
+        """)
     conn.commit()
     conn.close()
 

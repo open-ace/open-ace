@@ -891,15 +891,13 @@ class AlertNotifier:
             cursor = conn.cursor()
             if is_postgresql():
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                         INSERT INTO webhook_deliveries
                             (alert_id, user_id, webhook_url_hash, status, attempts,
                              max_attempts, next_retry_at, created_at, updated_at)
                         VALUES (?, ?, ?, 'in_flight', 0, ?, NULL, ?, ?)
                         RETURNING id
-                        """
-                    ),
+                        """),
                     (
                         alert.alert_id,
                         user_id,
@@ -913,14 +911,12 @@ class AlertNotifier:
                 delivery_id = cast("int | None", row["id"]) if row is not None else None
             else:
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                         INSERT INTO webhook_deliveries
                             (alert_id, user_id, webhook_url_hash, status, attempts,
                              max_attempts, next_retry_at, created_at, updated_at)
                         VALUES (?, ?, ?, 'in_flight', 0, ?, NULL, ?, ?)
-                        """
-                    ),
+                        """),
                     (
                         alert.alert_id,
                         user_id,
@@ -1055,8 +1051,7 @@ class AlertNotifier:
             cursor = conn.cursor()
             if is_postgresql():
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                         UPDATE webhook_deliveries
                         SET status = 'in_flight', next_retry_at = NULL, updated_at = ?
                         WHERE id IN (
@@ -1069,8 +1064,7 @@ class AlertNotifier:
                             FOR UPDATE SKIP LOCKED
                         )
                         RETURNING *
-                        """
-                    ),
+                        """),
                     (now, now, limit),
                 )
                 rows = cursor.fetchall()
@@ -1082,16 +1076,14 @@ class AlertNotifier:
             cursor.execute("BEGIN IMMEDIATE")
             try:
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                         SELECT id FROM webhook_deliveries
                         WHERE status = 'pending'
                           AND (next_retry_at IS NULL OR next_retry_at <= ?)
                           AND attempts < max_attempts
                         ORDER BY (next_retry_at IS NULL), next_retry_at
                         LIMIT ?
-                        """
-                    ),
+                        """),
                     (now, limit),
                 )
                 ids = [r["id"] for r in cursor.fetchall()]
@@ -1285,8 +1277,7 @@ class AlertNotifier:
         bool_false = "BOOLEAN DEFAULT FALSE" if is_postgresql() else "INTEGER DEFAULT 0"
 
         # Create alerts table
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS alerts (
                 id {id_type},
                 alert_id TEXT UNIQUE NOT NULL,
@@ -1303,12 +1294,10 @@ class AlertNotifier:
                 action_url TEXT,
                 action_text TEXT
             )
-        """
-        )
+        """)
 
         # Create notification_preferences table
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS notification_preferences (
                 user_id INTEGER PRIMARY KEY,
                 email_enabled {bool_true},
@@ -1320,8 +1309,7 @@ class AlertNotifier:
                 email_verified {bool_false},
                 dingtalk_webhook_secret TEXT
             )
-        """
-        )
+        """)
         # Issue #1829, F6: back-fill the per-user DingTalk signing-secret column
         # on databases created before this revision (CREATE TABLE IF NOT EXISTS
         # is a no-op there). The column holds the Fernet-encrypted per-user
@@ -1333,32 +1321,25 @@ class AlertNotifier:
             )
 
         # Create indexes
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_alerts_user_id
             ON alerts(user_id)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_alerts_created_at
             ON alerts(created_at)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_alerts_read
             ON alerts(read)
-        """
-        )
+        """)
 
         # Webhook delivery-state table (Issue #1831). Mirrors the Alembic
         # migration ``20260726_004_add_webhook_deliveries``: durable record of
         # outbound webhook attempts so transient receiver failures (5xx /
         # timeout / reset) are retried with backoff by the reaper instead of
         # being silently dropped. Only the URL *hash* is stored.
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS webhook_deliveries (
                 id {id_type},
                 alert_id TEXT NOT NULL,
@@ -1374,26 +1355,19 @@ class AlertNotifier:
                 updated_at TIMESTAMP NOT NULL,
                 CHECK (status IN ('pending', 'in_flight', 'delivered', 'dead'))
             )
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_status_retry
             ON webhook_deliveries(status, next_retry_at)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_user
             ON webhook_deliveries(user_id)
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_alert
             ON webhook_deliveries(alert_id)
-        """
-        )
+        """)
 
         conn.commit()
         conn.close()
@@ -1743,14 +1717,12 @@ class AlertNotifier:
         cursor = conn.cursor()
 
         cursor.execute(
-            adapt_sql(
-                """
+            adapt_sql("""
             INSERT INTO alerts
             (alert_id, alert_type, severity, title, message, user_id, username,
              tool_name, metadata, created_at, read, action_url, action_text)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-            ),
+        """),
             (
                 alert.alert_id,
                 alert.alert_type,
@@ -1856,14 +1828,12 @@ class AlertNotifier:
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
         cursor.execute(
-            adapt_sql(
-                f"""
+            adapt_sql(f"""
             SELECT * FROM alerts
             WHERE {where_clause}
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
-        """
-            ),
+        """),
             params + [limit, offset],
         )
 

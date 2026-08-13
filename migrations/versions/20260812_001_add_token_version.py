@@ -75,8 +75,7 @@ def upgrade() -> None:
     # This ensures new tokens created during migration get correct version numbers
     if dialect == "postgresql":
         # PostgreSQL: Use plpgsql trigger
-        op.execute(
-            """
+        op.execute("""
             CREATE OR REPLACE FUNCTION set_token_version_trigger()
             RETURNS TRIGGER AS $$
             BEGIN
@@ -89,17 +88,14 @@ def upgrade() -> None:
                 RETURN NEW;
             END;
             $$ LANGUAGE plpgsql;
-        """
-        )
+        """)
 
-        op.execute(
-            """
+        op.execute("""
             CREATE TRIGGER trigger_set_token_version
             BEFORE INSERT ON agent_tokens
             FOR EACH ROW
             EXECUTE FUNCTION set_token_version_trigger();
-        """
-        )
+        """)
 
 
 def downgrade() -> None:
