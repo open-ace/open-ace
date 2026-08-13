@@ -343,10 +343,10 @@ class TestEnvOverrides:
         )
 
         invalidate_config_cache()
-        monkeypatch.setenv("FILE_CHANGE_ASYNCHRONOUS_PARSING_ENABLED", "false")
+        monkeypatch.setenv("FILE_CHANGE_ASYNC_PARSING_ENABLED", "false")
 
-        # Note: The actual env var name in code is different
-        # This test documents the expected behavior
+        config = get_file_change_parser_config(use_cache=False)
+        assert config.async_parsing.enabled is False
 
     def test_thread_pool_size_override(self, monkeypatch):
         """Test FILE_CHANGE_ASYNC_PARSING_THREAD_POOL_SIZE override."""

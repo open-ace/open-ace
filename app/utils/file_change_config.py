@@ -167,8 +167,7 @@ class ConsistencyCheckConfig:
 
         if not 1 <= self.cleanup_interval_hours <= 168:
             errors.append(
-                f"cleanup_interval_hours must be in [1, 168], "
-                f"got {self.cleanup_interval_hours}"
+                f"cleanup_interval_hours must be in [1, 168], " f"got {self.cleanup_interval_hours}"
             )
 
         return errors
@@ -509,9 +508,7 @@ def get_file_change_parser_config(
     # Validate configuration
     errors = config.validate()
     if errors:
-        logger.warning(
-            f"Invalid file change parser configuration, using defaults: {errors}"
-        )
+        logger.warning(f"Invalid file change parser configuration, using defaults: {errors}")
         # Return default config with overrides only for valid values
         default_config = FileChangeParserConfig()
         _apply_env_overrides(default_config)
