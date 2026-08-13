@@ -598,10 +598,10 @@ def api_update_user_quota(user_id):
         resource_name=user.get("username") if user else None,
         details={
             "action": "quota_update",
-            "daily_token_quota": data.get("daily_token_quota"),
-            "monthly_token_quota": data.get("monthly_token_quota"),
-            "daily_request_quota": data.get("daily_request_quota"),
-            "monthly_request_quota": data.get("monthly_request_quota"),
+            "daily_token_quota": new_daily_token,
+            "monthly_token_quota": new_monthly_token,
+            "daily_request_quota": new_daily_request,
+            "monthly_request_quota": new_monthly_request,
         },
         **client_info,
     )
