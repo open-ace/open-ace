@@ -79,14 +79,12 @@ async def test_issue34():
             await asyncio.sleep(2)
 
             # 使用 JavaScript 点击 Analysis 导航链接
-            await page.evaluate(
-                """() => {
+            await page.evaluate("""() => {
                 const navAnalysis = document.getElementById('nav-analysis');
                 if (navAnalysis && navAnalysis.style.display !== 'none') {
                     navAnalysis.click();
                 }
-            }"""
-            )
+            }""")
             await asyncio.sleep(3)
 
             # 检查 Analysis 页面是否正确显示
@@ -132,25 +130,21 @@ async def test_issue34():
             # 3. 点击 Conversation History 标签
             print("3. 点击 Conversation History 标签...")
             # 使用 Bootstrap 的 Tab API 来切换标签
-            await page.evaluate(
-                """() => {
+            await page.evaluate("""() => {
                 const tab = document.getElementById('conversation-history-tab');
                 if (tab) {
                     // 使用 Bootstrap 的 Tab API
                     const bsTab = new bootstrap.Tab(tab);
                     bsTab.show();
                 }
-            }"""
-            )
+            }""")
             await asyncio.sleep(2)
 
             # 检查标签是否已激活
-            tab_active = await page.evaluate(
-                """() => {
+            tab_active = await page.evaluate("""() => {
                 const tab = document.getElementById('conversation-history-tab');
                 return tab ? tab.classList.contains('active') : false;
-            }"""
-            )
+            }""")
             print(f"   标签激活状态: {tab_active}")
 
             # 检查内容区域是否可见

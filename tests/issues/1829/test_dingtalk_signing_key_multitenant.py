@@ -241,8 +241,7 @@ class TestF6ColumnBackfill:
         db_path = tmp_path / "legacy.db"
         conn = sqlite3.connect(db_path)
         # Pre-F6 schema: no dingtalk_webhook_secret column.
-        conn.executescript(
-            """
+        conn.executescript("""
             CREATE TABLE notification_preferences (
                 user_id INTEGER PRIMARY KEY,
                 email_enabled INTEGER DEFAULT 1,
@@ -253,8 +252,7 @@ class TestF6ColumnBackfill:
                 notification_email TEXT,
                 email_verified INTEGER DEFAULT 0
             );
-            """
-        )
+            """)
         conn.commit()
         conn.close()
 

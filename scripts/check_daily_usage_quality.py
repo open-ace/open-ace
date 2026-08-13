@@ -29,8 +29,7 @@ def check_tenant_id_null() -> int:
 def check_duplicates() -> int:
     """Count (date, tool, host) tuples with multiple tenants."""
     db = Database()
-    result = db.fetch_one(
-        """
+    result = db.fetch_one("""
         SELECT COUNT(*) as count
         FROM (
             SELECT date, tool_name, host_name
@@ -38,8 +37,7 @@ def check_duplicates() -> int:
             GROUP BY date, tool_name, host_name
             HAVING COUNT(DISTINCT COALESCE(tenant_id, 1)) > 1
         )
-        """
-    )
+        """)
     return result["count"] if result else 0
 
 
@@ -53,15 +51,13 @@ def check_total_rows() -> int:
 def check_tenant_distribution() -> dict:
     """Get tenant distribution."""
     db = Database()
-    rows = db.fetch_all(
-        """
+    rows = db.fetch_all("""
         SELECT tenant_id, COUNT(*) as count
         FROM daily_usage
         GROUP BY tenant_id
         ORDER BY count DESC
         LIMIT 10
-        """
-    )
+        """)
     return {row["tenant_id"]: row["count"] for row in rows} if rows else {}
 
 

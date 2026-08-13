@@ -69,25 +69,21 @@ def main():
 
     # Get sessions without project_path
     if is_postgresql():
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT DISTINCT agent_session_id, tool_name
             FROM daily_messages
             WHERE agent_session_id IS NOT NULL
               AND (project_path IS NULL OR project_path = '')
             LIMIT 100
-        """
-        )
+        """)
     else:
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT DISTINCT agent_session_id, tool_name
             FROM daily_messages
             WHERE agent_session_id IS NOT NULL
               AND (project_path IS NULL OR project_path = '')
             LIMIT 100
-        """
-        )
+        """)
 
     rows = cursor.fetchall()
     total = len(rows)

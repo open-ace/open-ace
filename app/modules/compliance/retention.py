@@ -112,25 +112,21 @@ class DataRetentionManager:
             # Retention history table
             # Use SERIAL for PostgreSQL, AUTOINCREMENT for SQLite
             if self.db.is_postgresql:
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE TABLE IF NOT EXISTS retention_history (
                         id SERIAL PRIMARY KEY,
                         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         report_data TEXT NOT NULL
                     )
-                """
-                )
+                """)
             else:
-                cursor.execute(
-                    """
+                cursor.execute("""
                     CREATE TABLE IF NOT EXISTS retention_history (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         report_data TEXT NOT NULL
                     )
-                """
-                )
+                """)
 
             conn.commit()
 
@@ -344,14 +340,12 @@ class DataRetentionManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    adapt_sql(
-                        f"""
+                    adapt_sql(f"""
                     UPDATE daily_messages
                     SET sender_id = 'ANONYMIZED',
                         sender_name = 'ANONYMIZED'
                     WHERE {time_col} < ?
-                """
-                    ),
+                """),
                     (cutoff,),
                 )
                 conn.commit()
@@ -361,15 +355,13 @@ class DataRetentionManager:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    adapt_sql(
-                        f"""
+                    adapt_sql(f"""
                     UPDATE audit_logs
                     SET username = 'ANONYMIZED',
                         ip_address = NULL,
                         user_agent = NULL
                     WHERE {time_col} < ?
-                """
-                    ),
+                """),
                     (cutoff,),
                 )
                 conn.commit()
@@ -392,12 +384,10 @@ class DataRetentionManager:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql(
-                    """
+                adapt_sql("""
                 INSERT INTO retention_history (timestamp, report_data)
                 VALUES (?, ?)
-            """
-                ),
+            """),
                 (report.timestamp, json.dumps(report.to_dict())),
             )
             conn.commit()
@@ -516,12 +506,10 @@ class DataRetentionManager:
         self._ensure_tables()
 
         # Check if cleanup has been run recently
-        last_cleanup = self.db.fetch_one(
-            """
+        last_cleanup = self.db.fetch_one("""
             SELECT timestamp FROM retention_history
             ORDER BY timestamp DESC LIMIT 1
-        """
-        )
+        """)
 
         last_cleanup_time = None
         days_since_cleanup = None

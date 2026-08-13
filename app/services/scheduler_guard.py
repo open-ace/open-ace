@@ -270,8 +270,7 @@ class SchedulerExecutionGuard:
 
             # Try to acquire/update lease
             self.db.execute(
-                adapt_sql(
-                    """
+                adapt_sql("""
                     INSERT INTO scheduler_leaders
                         (job_name, leader_id, owner_info, acquired_at, expires_at, heartbeat_at,
                          fencing_token, lock_strategy)
@@ -288,8 +287,7 @@ class SchedulerExecutionGuard:
                         skip_count = scheduler_leaders.skip_count,
                         fail_count = scheduler_leaders.fail_count
                     WHERE scheduler_leaders.expires_at < ?
-                    """
-                ),
+                    """),
                 (
                     self.job_name,
                     self.leader_id,
@@ -366,13 +364,11 @@ class SchedulerExecutionGuard:
 
         try:
             self.db.execute(
-                adapt_sql(
-                    """
+                adapt_sql("""
                     UPDATE scheduler_leaders
                     SET heartbeat_at = ?
                     WHERE job_name = ? AND leader_id = ?
-                    """
-                ),
+                    """),
                 (now, self.job_name, self.leader_id),
             )
 
@@ -513,15 +509,13 @@ class SchedulerExecutionGuard:
 
         try:
             self.db.execute(
-                adapt_sql(
-                    """
+                adapt_sql("""
                     INSERT INTO scheduler_runs
                         (job_name, leader_id, started_at, ended_at, status, duration_ms,
                          error_message, lock_strategy, fencing_token, lock_acquired_at,
                          lock_released_at, leader_host)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """
-                ),
+                    """),
                 (
                     self.job_name,
                     self.leader_id,
@@ -541,35 +535,29 @@ class SchedulerExecutionGuard:
             # Update counters in scheduler_leaders
             if status == "completed":
                 self.db.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                         UPDATE scheduler_leaders
                         SET run_count = run_count + 1, last_run_at = ?
                         WHERE job_name = ? AND leader_id = ?
-                        """
-                    ),
+                        """),
                     (now, self.job_name, self.leader_id),
                 )
             elif status == "skipped":
                 self.db.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                         UPDATE scheduler_leaders
                         SET skip_count = skip_count + 1
                         WHERE job_name = ?
-                        """
-                    ),
+                        """),
                     (self.job_name,),
                 )
             elif status in ("failed", "lost_leadership"):
                 self.db.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                         UPDATE scheduler_leaders
                         SET fail_count = fail_count + 1
                         WHERE job_name = ? AND leader_id = ?
-                        """
-                    ),
+                        """),
                     (self.job_name, self.leader_id),
                 )
 

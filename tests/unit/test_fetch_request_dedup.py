@@ -34,8 +34,7 @@ def _load_fetch_script(module_file: str, module_name: str, db_url: str):
 
 def _init_dest_schema(db_path: Path) -> None:
     conn = sqlite3.connect(str(db_path))
-    conn.executescript(
-        """
+    conn.executescript("""
         CREATE TABLE users (
             id INTEGER PRIMARY KEY,
             username TEXT,
@@ -69,8 +68,7 @@ def _init_dest_schema(db_path: Path) -> None:
             timestamp TEXT,
             metadata TEXT
         );
-        """
-    )
+        """)
     conn.execute(
         "INSERT INTO users (id, username, system_account, email) VALUES (?, ?, ?, ?)",
         (1, "rhuang", "rhuang", "rhuang@localhost"),
