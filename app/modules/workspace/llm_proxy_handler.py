@@ -939,14 +939,15 @@ def _check_content_filter(
                     "message": result.message,
                 },
             )
-            # Warn: return warning info for caller to add response header
+            # Warn: set warning info in Flask g for response header
             # Frontend will show toast based on X-Content-Filter-Warning header
-            return {
+            g.content_filter_warning = {
                 "type": "warning",
                 "message": result.message,
                 "matched_rules": result.matched_rules,
                 "suggestion": result.suggestion,
             }
+            return None
 
         if result.action == "redact":
             # Log the redact action
@@ -1222,10 +1223,6 @@ def handle_llm_proxy_request(
         # Block: return error response
         return content_filter_result
 
-    # Handle warning case: set response header for frontend
-    if isinstance(content_filter_result, dict) and content_filter_result.get("type") == "warning":
-        # Store warning info in Flask g for later use in response
-        g.content_filter_warning = content_filter_result
     # Note: redact handling would require modifying request body, which is
     # complex for streaming. For now, we just log and continue for warn/redact.
     # ── end content filter check ─────────────────────────────────────────

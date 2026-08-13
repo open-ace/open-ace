@@ -315,8 +315,7 @@ class ContentFilter:
             enabled_rules = [
                 r
                 for r in rules
-                if r.get("is_enabled", True)
-                and r.get("status", "active") in ("active", "approved")
+                if r.get("is_enabled", True) and r.get("status", "active") in ("active", "approved")
             ]
         except Exception as e:
             logger.error(f"Failed to load filter rules from database: {e}")
@@ -330,7 +329,9 @@ class ContentFilter:
             self._rules_cache = enabled_rules
             self._cache_valid = True
 
-        logger.debug(f"Loaded {len(enabled_rules)} filter rules from database for tenant {self.tenant_id}")
+        logger.debug(
+            f"Loaded {len(enabled_rules)} filter rules from database for tenant {self.tenant_id}"
+        )
         return enabled_rules
 
     def _get_compiled_pattern(

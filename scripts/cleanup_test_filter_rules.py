@@ -28,6 +28,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.repositories.database import adapt_boolean_value
+
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
@@ -115,10 +117,11 @@ def disable_rules(conn, rule_ids: list[int], dry_run: bool = False) -> None:
     cur.execute(
         f"""
         UPDATE content_filter_rules
-        SET is_enabled = 0, updated_at = ?
+        SET is_enabled = ?, updated_at = ?
         WHERE id IN ({placeholders})
         """,
-        [datetime.now(timezone.utc).replace(tzinfo=None).isoformat()] + rule_ids,
+        [adapt_boolean_value(False), datetime.now(timezone.utc).replace(tzinfo=None).isoformat()]
+        + rule_ids,
     )
 
     conn.commit()
@@ -200,7 +203,9 @@ def rollback_rules(conn, backup_file: Path) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Cleanup test filter rules")
-    parser.add_argument("--dry-run", action="store_true", help="Show what would be cleaned without making changes")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would be cleaned without making changes"
+    )
     parser.add_argument("--rollback", action="store_true", help="Rollback from backup file")
     parser.add_argument("--backup-file", type=str, help="Backup file path for rollback")
     args = parser.parse_args()
@@ -253,7 +258,9 @@ def main():
         print("\nCleanup completed successfully")
         print(f"Backup file: {backup_file}")
         print("To rollback, run:")
-        print(f"  python scripts/cleanup_test_filter_rules.py --rollback --backup-file {backup_file}")
+        print(
+            f"  python scripts/cleanup_test_filter_rules.py --rollback --backup-file {backup_file}"
+        )
 
 
 if __name__ == "__main__":

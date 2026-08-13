@@ -12,7 +12,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any, cast
 
-from app.repositories.database import CONFIG_DIR, Database
+from app.repositories.database import CONFIG_DIR, Database, adapt_boolean_value
 
 logger = logging.getLogger(__name__)
 
@@ -284,9 +284,7 @@ class GovernanceRepository:
     # Approval Workflow Methods
     # =========================================================================
 
-    def get_filter_rules_by_source(
-        self, source: str, tenant_id: int | None = None
-    ) -> list[dict]:
+    def get_filter_rules_by_source(self, source: str, tenant_id: int | None = None) -> list[dict]:
         """
         Get filter rules by source with tenant isolation.
 
@@ -392,10 +390,12 @@ class GovernanceRepository:
                     approved_by = ?,
                     approved_at = ?,
                     updated_at = ?,
-                    is_enabled = 1
+                    is_enabled = ?
                 WHERE id = ?
             """
-            cursor = self.db.execute(query, (approver_id, now, now, rule_id))
+            cursor = self.db.execute(
+                query, (approver_id, now, now, adapt_boolean_value(True), rule_id)
+            )
 
             if cursor.rowcount == 0:
                 return False
