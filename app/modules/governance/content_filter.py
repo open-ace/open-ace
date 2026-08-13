@@ -512,7 +512,7 @@ class ContentFilter:
                             "severity": rule_severity,
                             "count": len(matches),
                             "description": rule_description,
-                            "source": "database",
+                            "source": rule.get("source", "database"),
                         }
                     )
 

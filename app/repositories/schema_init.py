@@ -323,4 +323,56 @@ def _backfill_missing_columns(conn, dialect: str) -> None:
                 cursor.execute(sql)
         conn.commit()
 
+    # content_filter_rules columns (Issue #2550: tenant isolation)
+    if _table_exists(conn, "content_filter_rules", dialect):
+        content_filter_rules_columns = [
+            ("tenant_id", "INTEGER", None),
+            ("source", "VARCHAR(20)", "'user'"),
+            ("category", "VARCHAR(50)", "'custom'"),
+            ("status", "VARCHAR(20)", "'active'"),
+            ("approved_by", "INTEGER", None),
+            ("approved_at", "TIMESTAMP" if not is_postgres else "timestamp without time zone", None),
+            ("created_by", "INTEGER", None),
+            ("metadata", "TEXT" if not is_postgres else "JSON", None),
+            ("urgency_reason", "TEXT", None),
+        ]
+        for col_name, col_type, default in content_filter_rules_columns:
+            if not _column_exists(conn, "content_filter_rules", col_name, dialect):
+                sql = f"ALTER TABLE content_filter_rules ADD COLUMN {col_name} {col_type}"
+                if default is not None:
+                    if is_postgres and col_type == "JSON":
+                        sql += f" DEFAULT {default}"
+                    else:
+                        sql += f" DEFAULT {default}"
+                cursor.execute(sql)
+        conn.commit()
+
+    # Create filter_rule_approvals table if it doesn't exist (Issue #2550)
+    if not _table_exists(conn, "filter_rule_approvals", dialect):
+        if is_postgres:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS filter_rule_approvals (
+                    id SERIAL PRIMARY KEY,
+                    rule_id INTEGER REFERENCES content_filter_rules(id) ON DELETE CASCADE,
+                    approver_id INTEGER REFERENCES users(id),
+                    action VARCHAR(20) NOT NULL,
+                    comment TEXT,
+                    tenant_id INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        else:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS filter_rule_approvals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    rule_id INTEGER,
+                    approver_id INTEGER,
+                    action VARCHAR(20) NOT NULL,
+                    comment TEXT,
+                    tenant_id INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        conn.commit()
+
     cursor.close()

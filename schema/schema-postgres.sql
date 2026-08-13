@@ -630,7 +630,16 @@ CREATE TABLE content_filter_rules (
     is_enabled boolean DEFAULT true,
     description text,
     created_at timestamp without time zone NOT NULL,
-    updated_at timestamp without time zone
+    updated_at timestamp without time zone,
+    tenant_id integer,
+    source character varying(20) DEFAULT 'user'::character varying,
+    category character varying(50) DEFAULT 'custom'::character varying,
+    status character varying(20) DEFAULT 'active'::character varying,
+    approved_by integer,
+    approved_at timestamp without time zone,
+    created_by integer,
+    metadata json,
+    urgency_reason text
 );
 
 CREATE SEQUENCE content_filter_rules_id_seq

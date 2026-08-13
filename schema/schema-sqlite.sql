@@ -425,7 +425,16 @@ CREATE TABLE content_filter_rules (
  is_enabled INTEGER DEFAULT 1,
  description text,
  created_at TIMESTAMP NOT NULL,
- updated_at TIMESTAMP
+ updated_at TIMESTAMP,
+ tenant_id integer,
+ source VARCHAR(20) DEFAULT 'user',
+ category VARCHAR(50) DEFAULT 'custom',
+ status VARCHAR(20) DEFAULT 'active',
+ approved_by INTEGER,
+ approved_at TIMESTAMP,
+ created_by INTEGER,
+ metadata TEXT,
+ urgency_reason TEXT
 );
 
 CREATE TABLE daily_messages (
