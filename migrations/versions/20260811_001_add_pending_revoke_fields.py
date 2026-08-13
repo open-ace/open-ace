@@ -51,6 +51,8 @@ def upgrade() -> None:
             if "rotation_id" not in agent_tokens_columns:
                 batch_op.add_column(sa.Column("rotation_id", sa.String(36), nullable=True))
 
+    # Create indexes - these are PostgreSQL-only (partial indexes)
+    if dialect == "postgresql":
         # Create unique index for active tokens (partial index)
         op.execute(
             """
