@@ -1,0 +1,167 @@
+# File Change Parser Configuration
+# Issue #2589: File change panel configuration for detecting file/folder operations
+
+# Asynchronous parsing configuration
+async_parsing:
+  # Enable asynchronous parsing to avoid blocking message persistence
+  enabled: true
+
+  # Thread pool size for concurrent parsing tasks
+  # Valid range: [1, 10]
+  thread_pool_size: 2
+
+  # Timeout for parsing operations (seconds)
+  # Valid range: [10, 3600]
+  timeout_seconds: 300
+
+  # Maximum retry count for failed parsing
+  # Valid range: [0, 10]
+  max_retries: 3
+
+  # Timeout for pending result queue (seconds)
+  # Should be less than timeout_seconds
+  # Valid range: [10, 60]
+  pending_result_timeout_seconds: 30
+
+  # Graceful shutdown timeout (seconds)
+  # Time to wait for running tasks on application exit
+  # Valid range: [10, 60]
+  shutdown_timeout_seconds: 30
+
+# Individual parser configuration
+parsers:
+  # mkdir command parser
+  mkdir:
+    enabled: true
+    # Parsing timeout in milliseconds
+    timeout_ms: 50
+
+  # mv command parser (rename/move)
+  mv:
+    enabled: true
+    timeout_ms: 50
+
+  # cp command parser
+  cp:
+    enabled: true
+    timeout_ms: 50
+
+  # rm command parser
+  rm:
+    enabled: true
+    timeout_ms: 50
+
+  # write_file tool parser
+  write_file:
+    enabled: true
+    timeout_ms: 50
+
+  # edit tool parser
+  edit:
+    enabled: true
+    timeout_ms: 50
+
+# Path security validation configuration
+path_validation:
+  # Allow symbolic links in file operations
+  # Setting to false will reject operations involving symlinks
+  allow_symlinks: false
+
+  # Maximum allowed path length
+  # Valid range: [256, 8192]
+  max_path_length: 4096
+
+  # Symbolic link check cache TTL (seconds)
+  # Performance optimization for symlink resolution
+  # Valid range: [10, 300]
+  symlink_cache_ttl_seconds: 60
+
+# Data consistency check configuration
+consistency_check:
+  # Enable periodic consistency check
+  enabled: true
+
+  # Check interval (minutes)
+  # Valid range: [10, 1440]
+  interval_minutes: 60
+
+  # ParseFailureRecord retention days
+  # Records older than this will be cleaned up
+  # Valid range: [7, 365]
+  parse_failure_retention_days: 30
+
+  # Cleanup task interval (hours)
+  # Valid range: [1, 168]
+  cleanup_interval_hours: 24
+
+# Cleanup configuration
+cleanup:
+  # Enable distributed lock for cleanup task (requires Redis)
+  # Useful in multi-instance deployment to prevent concurrent cleanup
+  distributed_lock_enabled: false
+
+  # Redis configuration for distributed lock (if enabled)
+  redis:
+    host: "localhost"
+    port: 6379
+    db: 0
+    password: null
+    lock_timeout_seconds: 300
+
+# Alert rules configuration
+# Alerts are triggered when metrics exceed thresholds
+alert_rules:
+  # Parse success rate below threshold
+  parse_success_rate:
+    enabled: true
+    # Threshold percentage (trigger if success_rate < threshold)
+    threshold_percent: 99
+    severity: "warning"
+    # Notification methods: log, email, sms
+    notifications:
+      - "log"
+      - "email"
+
+  # Message persistence latency increased
+  persistence_latency:
+    enabled: true
+    # P95 latency threshold in milliseconds
+    threshold_ms: 20
+    severity: "critical"
+    notifications:
+      - "log"
+      - "email"
+      - "sms"
+
+  # Thread pool blocked
+  thread_pool_blocked:
+    enabled: true
+    # Trigger when active_threads >= max_threads
+    severity: "critical"
+    notifications:
+      - "log"
+      - "email"
+      - "sms"
+
+  # Pending queue backlog
+  pending_queue_backlog:
+    enabled: true
+    # Queue size threshold
+    threshold_size: 100
+    severity: "warning"
+    notifications:
+      - "log"
+      - "email"
+
+  # ParseFailureRecord abnormal growth
+  parse_failure_growth:
+    enabled: true
+    # Growth rate threshold (records per day)
+    threshold_per_day: 5
+    severity: "warning"
+    notifications:
+      - "log"
+      - "email"
+
+# Version for data structure compatibility
+version: "1.0"
