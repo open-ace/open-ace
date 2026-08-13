@@ -16,7 +16,7 @@ from app.auth.decorators import admin_required
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.usage_repo import UsageRepository
 from app.repositories.user_repo import UserRepository
-from app.schemas.quota import validate_quota_update
+from app.schemas.quota import validate_quota_update, validate_tenant_allocation
 from app.services.auth_service import get_security_settings_cached
 from app.utils.validators import validate_email, validate_password, validate_username
 from app.utils.workspace import ensure_system_user
@@ -401,10 +401,20 @@ def api_reset_user_password(user_id):
 @admin_bp.route("/admin/users/<int:user_id>/quota", methods=["PUT"])
 @admin_required
 def api_update_user_quota(user_id):
-    """Update a user's quota."""
+    """Update a user's quota.
+
+    This endpoint validates:
+    1. Individual quota values (range, type)
+    2. Tenant allocation limit (total allocated quota must not exceed tenant limit)
+
+    For quota increases, it uses pessimistic locking to ensure concurrent safety.
+    For quota decreases, it bypasses the tenant allocation check.
+    """
+    from app.repositories.database import Database, adapt_sql
+
     data = request.get_json() or {}
 
-    # Validate quota values before updating
+    # Step 1: Validate individual quota values
     is_valid, errors = validate_quota_update(
         daily_token_quota=data.get("daily_token_quota"),
         monthly_token_quota=data.get("monthly_token_quota"),
@@ -429,38 +439,170 @@ def api_update_user_quota(user_id):
             400,
         )
 
-    # If validation passes, proceed with update
-    success = user_repo.update_user_quota(
-        user_id=user_id,
-        daily_token_quota=data.get("daily_token_quota"),
-        monthly_token_quota=data.get("monthly_token_quota"),
-        daily_request_quota=data.get("daily_request_quota"),
-        monthly_request_quota=data.get("monthly_request_quota"),
-    )
+    # Step 2: Get current user to check if we need tenant allocation validation
+    current_user = user_repo.get_user_by_id(user_id)
+    if not current_user:
+        return jsonify({"error": "User not found"}), 404
 
-    if success:
-        # Audit log for quota update
-        user = user_repo.get_user_by_id(user_id)
-        client_info = get_client_info()
-        audit_logger.log_action(
-            action=AuditAction.QUOTA_UPDATE,
-            user_id=g.user_id,
-            username=g.user.get("username"),
-            resource_type="user",
-            resource_id=str(user_id),
-            resource_name=user.get("username") if user else None,
-            details={
-                "action": "quota_update",
-                "daily_token_quota": data.get("daily_token_quota"),
-                "monthly_token_quota": data.get("monthly_token_quota"),
-                "daily_request_quota": data.get("daily_request_quota"),
-                "monthly_request_quota": data.get("monthly_request_quota"),
-            },
-            **client_info,
+    tenant_id = current_user.get("tenant_id")
+    if not tenant_id:
+        return jsonify({"error": "User has no tenant assigned"}), 400
+
+    # Step 3: Determine if this is a quota increase or decrease
+    # Decision D3: For quota decreases, skip tenant allocation check
+    new_daily_token = data.get("daily_token_quota")
+    new_monthly_token = data.get("monthly_token_quota")
+    new_daily_request = data.get("daily_request_quota")
+    new_monthly_request = data.get("monthly_request_quota")
+
+    current_daily_token = current_user.get("daily_token_quota")
+    current_monthly_token = current_user.get("monthly_token_quota")
+    current_daily_request = current_user.get("daily_request_quota")
+    current_monthly_request = current_user.get("monthly_request_quota")
+
+    # Check if all new quotas are less than or equal to current quotas (decrease or no change)
+    is_quota_decrease_or_same = True
+    if new_daily_token is not None and current_daily_token is not None:
+        if new_daily_token > current_daily_token:
+            is_quota_decrease_or_same = False
+    if new_monthly_token is not None and current_monthly_token is not None:
+        if new_monthly_token > current_monthly_token:
+            is_quota_decrease_or_same = False
+    if new_daily_request is not None and current_daily_request is not None:
+        if new_daily_request > current_daily_request:
+            is_quota_decrease_or_same = False
+    if new_monthly_request is not None and current_monthly_request is not None:
+        if new_monthly_request > current_monthly_request:
+            is_quota_decrease_or_same = False
+
+    # Step 4: If quota increase, validate tenant allocation with locking
+    if not is_quota_decrease_or_same:
+        db = Database()
+
+        try:
+            # Use pessimistic locking for concurrent safety
+            # Lock the tenant row to prevent concurrent quota updates
+            with db.connection() as conn:
+                cursor = conn.cursor()
+
+                # Try to acquire lock on tenant_quotas row (NOWAIT to avoid blocking)
+                # For PostgreSQL: SELECT FOR UPDATE NOWAIT
+                # For SQLite: No row-level locking, rely on transaction isolation
+                if db.is_postgresql:
+                    cursor.execute(
+                        """
+                        SELECT tenant_id FROM tenant_quotas
+                        WHERE tenant_id = %s
+                        FOR UPDATE NOWAIT
+                    """,
+                        (tenant_id,),
+                    )
+                else:
+                    # SQLite: Just select the row (no FOR UPDATE)
+                    cursor.execute(
+                        "SELECT tenant_id FROM tenant_quotas WHERE tenant_id = ?",
+                        (tenant_id,),
+                    )
+
+                lock_result = cursor.fetchone()
+                if not lock_result:
+                    conn.rollback()
+                    return jsonify({"error": "Tenant quota configuration not found"}), 404
+
+                # Step 5: Validate tenant allocation (within transaction)
+                validation_result = validate_tenant_allocation(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    new_daily_token_quota=new_daily_token,
+                    new_monthly_token_quota=new_monthly_token,
+                    new_daily_request_quota=new_daily_request,
+                    new_monthly_request_quota=new_monthly_request,
+                    db=db,
+                )
+
+                if not validation_result["is_valid"]:
+                    conn.rollback()
+                    logger.warning(
+                        f"Tenant quota allocation rejected for user {user_id}: "
+                        f"{validation_result['error']}"
+                    )
+                    return (
+                        jsonify(
+                            {
+                                "error": "Tenant quota exceeded",
+                                "message": validation_result.get("error", "Quota allocation exceeds tenant limit"),
+                                "details": {
+                                    "available": validation_result.get("available", {}),
+                                    "is_unlimited_tenant": validation_result.get("is_unlimited_tenant", False),
+                                },
+                            }
+                        ),
+                        400,
+                    )
+
+                # Step 6: Update user quota (within transaction)
+                success = user_repo.update_user_quota(
+                    user_id=user_id,
+                    daily_token_quota=new_daily_token,
+                    monthly_token_quota=new_monthly_token,
+                    daily_request_quota=new_daily_request,
+                    monthly_request_quota=new_monthly_request,
+                )
+
+                if not success:
+                    conn.rollback()
+                    return jsonify({"error": "Failed to update quota"}), 500
+
+                conn.commit()
+
+        except Exception as e:
+            # Handle lock acquisition failure (concurrent update in progress)
+            if "lock" in str(e).lower() or "could not obtain lock" in str(e).lower():
+                logger.warning(f"Concurrent quota update detected for tenant {tenant_id}")
+                return (
+                    jsonify(
+                        {
+                            "error": "Concurrent update",
+                            "message": "Another quota update is in progress. Please try again.",
+                        }
+                    ),
+                    409,
+                )
+            logger.exception(f"Failed to update quota for user {user_id}: {e}")
+            return jsonify({"error": "Failed to update quota"}), 500
+    else:
+        # Quota decrease or no change: update directly without tenant check
+        success = user_repo.update_user_quota(
+            user_id=user_id,
+            daily_token_quota=new_daily_token,
+            monthly_token_quota=new_monthly_token,
+            daily_request_quota=new_daily_request,
+            monthly_request_quota=new_monthly_request,
         )
-        return jsonify({"success": True})
 
-    return jsonify({"error": "Failed to update quota"}), 500
+        if not success:
+            return jsonify({"error": "Failed to update quota"}), 500
+
+    # Step 7: Audit log for quota update
+    user = user_repo.get_user_by_id(user_id)
+    client_info = get_client_info()
+    audit_logger.log_action(
+        action=AuditAction.QUOTA_UPDATE,
+        user_id=g.user_id,
+        username=g.user.get("username"),
+        resource_type="user",
+        resource_id=str(user_id),
+        resource_name=user.get("username") if user else None,
+        details={
+            "action": "quota_update",
+            "daily_token_quota": data.get("daily_token_quota"),
+            "monthly_token_quota": data.get("monthly_token_quota"),
+            "daily_request_quota": data.get("daily_request_quota"),
+            "monthly_request_quota": data.get("monthly_request_quota"),
+        },
+        **client_info,
+    )
+    return jsonify({"success": True})
 
 
 @admin_bp.route("/admin/quota/usage", methods=["GET"])
@@ -591,6 +733,196 @@ def api_quota_stats():
             },
         }
     )
+
+
+@admin_bp.route("/admin/quota/validate-allocation", methods=["POST"])
+@admin_required
+def api_validate_quota_allocation():
+    """Validate if a quota allocation would exceed tenant limits.
+
+    This endpoint is used by frontend to provide real-time feedback
+    before the user submits the quota update form.
+
+    Request body:
+        {
+            "user_id": int (optional, for update scenario),
+            "daily_token_quota": int (optional),
+            "monthly_token_quota": int (optional),
+            "daily_request_quota": int (optional),
+            "monthly_request_quota": int (optional)
+        }
+
+    Response:
+        {
+            "valid": bool,
+            "available": {
+                "daily_token": int,
+                "monthly_token": int,
+                "daily_request": int,
+                "monthly_request": int
+            },
+            "message": str (optional, if invalid)
+        }
+    """
+    from app.repositories.database import Database
+
+    data = request.get_json() or {}
+
+    # Get tenant_id from current user context
+    tenant_id = g.user.get("tenant_id")
+    if not tenant_id:
+        return jsonify({"error": "User has no tenant assigned"}), 400
+
+    user_id = data.get("user_id")
+    new_daily_token = data.get("daily_token_quota")
+    new_monthly_token = data.get("monthly_token_quota")
+    new_daily_request = data.get("daily_request_quota")
+    new_monthly_request = data.get("monthly_request_quota")
+
+    # Validate the allocation
+    db = Database()
+    result = validate_tenant_allocation(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        new_daily_token_quota=new_daily_token,
+        new_monthly_token_quota=new_monthly_token,
+        new_daily_request_quota=new_daily_request,
+        new_monthly_request_quota=new_monthly_request,
+        db=db,
+    )
+
+    response = {
+        "valid": result["is_valid"],
+        "available": result.get("available", {}),
+        "is_unlimited_tenant": result.get("is_unlimited_tenant", False),
+    }
+
+    if not result["is_valid"]:
+        response["message"] = result.get("error", "Quota allocation exceeds tenant limit")
+
+    return jsonify(response)
+
+
+@admin_bp.route("/admin/quota/health-check", methods=["POST"])
+@admin_required
+def api_quota_health_check():
+    """Check tenant quota health status.
+
+    Detects if the total allocated quota exceeds tenant limits.
+
+    Request body (optional):
+        {
+            "tenant_id": int (optional, defaults to current user's tenant)
+        }
+
+    Response:
+        {
+            "tenant_id": int,
+            "status": "ok" | "over_allocated",
+            "allocated": {
+                "daily_token": int,
+                "monthly_token": int,
+                "daily_request": int,
+                "monthly_request": int
+            },
+            "limit": {
+                "daily_token": int,
+                "monthly_token": int,
+                "daily_request": int,
+                "monthly_request": int
+            },
+            "over_by": {
+                "daily_token": int (if over-allocated),
+                "monthly_token": int (if over-allocated),
+                "daily_request": int (if over-allocated),
+                "monthly_request": int (if over-allocated)
+            } (optional)
+        }
+    """
+    from app.repositories.database import Database
+    from app.services.tenant_service import TenantService
+
+    data = request.get_json(silent=True) or {}
+
+    # Get tenant_id from request or current user
+    tenant_id = data.get("tenant_id") or g.user.get("tenant_id")
+    if not tenant_id:
+        return jsonify({"error": "Tenant ID is required"}), 400
+
+    tenant_service = TenantService()
+    tenant = tenant_service.get_tenant(tenant_id)
+
+    if not tenant:
+        return jsonify({"error": "Tenant not found"}), 404
+
+    tenant_quota = tenant.quota
+
+    # Calculate allocated quotas from all users
+    users = user_repo.get_all_users(tenant_id=tenant_id)
+
+    allocated = {
+        "daily_token": 0,
+        "monthly_token": 0,
+        "daily_request": 0,
+        "monthly_request": 0,
+    }
+
+    for user in users:
+        if user.get("is_active", True):
+            if user.get("daily_token_quota"):
+                allocated["daily_token"] += user["daily_token_quota"]
+            if user.get("monthly_token_quota"):
+                allocated["monthly_token"] += user["monthly_token_quota"]
+            if user.get("daily_request_quota"):
+                allocated["daily_request"] += user["daily_request_quota"]
+            if user.get("monthly_request_quota"):
+                allocated["monthly_request"] += user["monthly_request_quota"]
+
+    # Convert allocated tokens to actual count for comparison
+    allocated_daily_tokens_actual = allocated["daily_token"] * TOKEN_QUOTA_MULTIPLIER
+    allocated_monthly_tokens_actual = allocated["monthly_token"] * TOKEN_QUOTA_MULTIPLIER
+
+    # Check if over-allocated
+    is_over_allocated = False
+    over_by = {}
+
+    if tenant_quota.daily_token_limit and allocated_daily_tokens_actual > tenant_quota.daily_token_limit:
+        is_over_allocated = True
+        over_by["daily_token"] = allocated_daily_tokens_actual - tenant_quota.daily_token_limit
+
+    if tenant_quota.monthly_token_limit and allocated_monthly_tokens_actual > tenant_quota.monthly_token_limit:
+        is_over_allocated = True
+        over_by["monthly_token"] = allocated_monthly_tokens_actual - tenant_quota.monthly_token_limit
+
+    if tenant_quota.daily_request_limit and allocated["daily_request"] > tenant_quota.daily_request_limit:
+        is_over_allocated = True
+        over_by["daily_request"] = allocated["daily_request"] - tenant_quota.daily_request_limit
+
+    if tenant_quota.monthly_request_limit and allocated["monthly_request"] > tenant_quota.monthly_request_limit:
+        is_over_allocated = True
+        over_by["monthly_request"] = allocated["monthly_request"] - tenant_quota.monthly_request_limit
+
+    response = {
+        "tenant_id": tenant_id,
+        "status": "over_allocated" if is_over_allocated else "ok",
+        "allocated": {
+            "daily_token": allocated["daily_token"],
+            "monthly_token": allocated["monthly_token"],
+            "daily_request": allocated["daily_request"],
+            "monthly_request": allocated["monthly_request"],
+        },
+        "limit": {
+            "daily_token": tenant_quota.daily_token_limit,
+            "monthly_token": tenant_quota.monthly_token_limit,
+            "daily_request": tenant_quota.daily_request_limit,
+            "monthly_request": tenant_quota.monthly_request_limit,
+        },
+    }
+
+    if is_over_allocated:
+        response["over_by"] = over_by
+
+    return jsonify(response)
 
 
 @admin_bp.route("/admin/feishu/sync", methods=["POST"])
