@@ -103,7 +103,7 @@ class RuleVersionManager:
             版本列表
         """
         try:
-            from app.repositories.database import get_connection, adapt_sql
+            from app.repositories.database import adapt_sql, get_connection
 
             conn = get_connection()
             cursor = conn.cursor()
@@ -204,7 +204,7 @@ class RuleVersionManager:
     def _get_next_version_number(self, rule_id: int) -> int:
         """获取下一个版本号"""
         try:
-            from app.repositories.database import get_connection, adapt_sql
+            from app.repositories.database import adapt_sql, get_connection
 
             conn = get_connection()
             cursor = conn.cursor()
@@ -243,7 +243,7 @@ class RuleVersionManager:
     ) -> int | None:
         """保存版本到数据库"""
         try:
-            from app.repositories.database import get_connection, adapt_sql, is_postgresql
+            from app.repositories.database import adapt_sql, get_connection, is_postgresql
 
             conn = get_connection()
             cursor = conn.cursor()
@@ -302,7 +302,7 @@ class RuleVersionManager:
     def _get_version_snapshot(self, rule_id: int, version_number: int) -> dict[str, Any] | None:
         """获取版本快照"""
         try:
-            from app.repositories.database import get_connection, adapt_sql
+            from app.repositories.database import adapt_sql, get_connection
 
             conn = get_connection()
             cursor = conn.cursor()
@@ -374,8 +374,8 @@ class RuleVersionManager:
     ):
         """记录回滚到审批日志"""
         try:
-            from app.repositories.database import get_connection, adapt_sql
-            from sqlalchemy.dialects.postgresql import JSONB
+
+            from app.repositories.database import adapt_sql, get_connection
 
             conn = get_connection()
             cursor = conn.cursor()

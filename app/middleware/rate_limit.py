@@ -8,8 +8,8 @@ import functools
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from threading import Lock
-from typing import Callable
 
 from flask import g, request
 

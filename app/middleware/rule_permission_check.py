@@ -6,7 +6,7 @@ Open ACE - Rule Permission Check Middleware
 
 import functools
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from flask import g, request
 
@@ -128,10 +128,7 @@ def check_self_approval(rule_creator_id: int) -> bool:
         return True
 
     # 其他角色不能审批自己创建的规则
-    if user_id and rule_creator_id and int(user_id) == int(rule_creator_id):
-        return False
-
-    return True
+    return not (user_id and rule_creator_id and int(user_id) == int(rule_creator_id))
 
 
 def check_tenant_access(rule_tenant_id: int | None) -> bool:
@@ -203,8 +200,6 @@ def can_approve_rule(rule: dict) -> tuple[bool, str | None]:
     Returns:
         (是否可以审批, 错误消息)
     """
-    user_role = get_user_role()
-
     # 必须是审批者或更高角色
     if not check_permission(RULE_ROLES["approver"]):
         return False, "Requires approver role or higher"
