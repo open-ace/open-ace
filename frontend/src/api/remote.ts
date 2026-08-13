@@ -237,8 +237,14 @@ export interface RunApprovalsResponse {
 
 export const remoteApi = {
   // Machine management
-  listMachines(): Promise<{ success: boolean; machines: RemoteMachine[]; user_role?: string }> {
-    return apiClient.get('/api/remote/machines');
+  listMachines(
+    tenantId?: number
+  ): Promise<{ success: boolean; machines: RemoteMachine[]; user_role?: string }> {
+    const params: Record<string, string> = {};
+    if (tenantId !== undefined) {
+      params.tenant_id = String(tenantId);
+    }
+    return apiClient.get('/api/remote/machines', params);
   },
 
   getMachine(machineId: string): Promise<{ success: boolean; machine: RemoteMachine }> {

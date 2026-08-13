@@ -9,7 +9,7 @@
  * - Deregister machine (system admin only)
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   useMachines,
   useMachineUsers,
@@ -35,13 +35,62 @@ import {
   useToast,
 } from '@/components/common';
 import type { RemoteMachine } from '@/api';
+import { tenantApi, type Tenant } from '@/api';
 import { copyToClipboard } from '@/utils';
-import { isAdminRole } from '@/utils/permissions';
+import { isAdminRole, canManageAllTenants } from '@/utils/permissions';
+import { useAuth } from '@/hooks';
 
 export const RemoteMachineManagement: React.FC = () => {
   const language = useLanguage();
   const toast = useToast();
-  const { data: machinesData, isLoading, isError, error, refetch } = useMachines();
+
+  // Admin tenant selection
+  const { user } = useAuth();
+  const isAdmin = canManageAllTenants(user);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
+  const selectedTenantIdRef = useRef<number | null>(null);
+  const [isLoadingTenants, setIsLoadingTenants] = useState(false);
+
+  // Compute effective tenant ID
+  const effectiveTenantId = isAdmin ? selectedTenantId : user?.tenant_id;
+
+  // Fetch tenants list for admin users
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    setIsLoadingTenants(true);
+    tenantApi
+      .listTenants({ status: 'active', limit: 100 })
+      .then((result) => {
+        setTenants(result.tenants);
+        // Use ref to check, avoid triggering useEffect again
+        if (result.tenants.length > 0 && !selectedTenantIdRef.current) {
+          selectedTenantIdRef.current = result.tenants[0].id;
+          setSelectedTenantId(result.tenants[0].id);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to fetch tenants:', err);
+        toast.error(t('failedToLoadTenants', language) || 'Failed to load tenants');
+      })
+      .finally(() => {
+        setIsLoadingTenants(false);
+      });
+  }, [isAdmin, language, toast]);
+
+  // Sync ref with state
+  useEffect(() => {
+    selectedTenantIdRef.current = selectedTenantId;
+  }, [selectedTenantId]);
+
+  const {
+    data: machinesData,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useMachines(effectiveTenantId ?? undefined);
   const generateToken = useGenerateToken();
   const deregisterMachine = useDeregisterMachine();
   const rotateMachineToken = useRotateMachineToken();
@@ -87,8 +136,12 @@ export const RemoteMachineManagement: React.FC = () => {
 
   // Handlers
   const handleGenerateToken = async () => {
+    if (!effectiveTenantId) {
+      toast.error(t('noTenantSelected', language) || 'No tenant selected');
+      return;
+    }
     try {
-      const result = await generateToken.mutateAsync(undefined);
+      const result = await generateToken.mutateAsync(effectiveTenantId);
       setGeneratedToken(result.registration_token);
       setShowTokenDialog(true);
     } catch (err) {
@@ -285,6 +338,45 @@ export const RemoteMachineManagement: React.FC = () => {
   ).length;
   const offlineCount = totalMachines - onlineCount;
 
+  // Handle empty tenant list for admin
+  if (isAdmin && tenants.length === 0 && !isLoadingTenants) {
+    return (
+      <div className="remote-machine-management">
+        <EmptyState
+          icon="bi-building"
+          title={t('noTenantsAvailable', language) || 'No Tenants Available'}
+          description={
+            t('noTenantsDescription', language) ||
+            'Please contact system administrator to assign tenant permissions.'
+          }
+        />
+      </div>
+    );
+  }
+
+  // Handle no tenant for non-admin
+  if (!isAdmin && !user?.tenant_id) {
+    return (
+      <div className="remote-machine-management">
+        <EmptyState
+          icon="bi-building"
+          title={t('noTenantConfigured', language) || 'No Tenant Configured'}
+          description={
+            t('noTenantDescription', language) ||
+            'Please contact system administrator to configure your tenant.'
+          }
+        />
+      </div>
+    );
+  }
+
+  // Show loading while tenants are loading
+  if (isLoadingTenants || (isAdmin && !effectiveTenantId)) {
+    return (
+      <Loading size="lg" text={t('loadingTenants', language) || 'Loading tenant information...'} />
+    );
+  }
+
   if (isLoading) {
     return <Loading size="lg" text={t('loading', language)} />;
   }
@@ -303,6 +395,33 @@ export const RemoteMachineManagement: React.FC = () => {
 
   return (
     <div className="remote-machine-management">
+      {/* Tenant Selector - Only for admins */}
+      {isAdmin && (
+        <div className="card mb-3">
+          <div className="card-body">
+            <div className="row align-items-center">
+              <div className="col-md-4">
+                <label className="form-label mb-0">
+                  <i className="bi bi-building me-2" />
+                  {t('selectTenant', language) || 'Select Tenant'}
+                </label>
+              </div>
+              <div className="col-md-8">
+                <Select
+                  value={selectedTenantId?.toString() ?? ''}
+                  onChange={(value) => setSelectedTenantId(Number(value))}
+                  options={tenants.map((tenant) => ({
+                    value: tenant.id.toString(),
+                    label: tenant.name,
+                  }))}
+                  placeholder={t('selectTenantPlaceholder', language) || 'Choose a tenant'}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('remoteMachines', language)}</h2>
