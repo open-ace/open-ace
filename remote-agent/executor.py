@@ -109,6 +109,17 @@ class SessionProcess:
         # CLI's internal session_id (from SDK init response), used for --resume
         self._cli_session_id: str | None = None
 
+        # Issue #2547: Process tree termination support
+        # Try to import psutil for process tree traversal
+        self._psutil_available = False
+        self._child_pids: set[int] = set()
+        try:
+            import psutil  # noqa: F401
+
+            self._psutil_available = True
+        except ImportError:
+            logger.debug("psutil not available, process tree termination will be limited")
+
     @property
     def pid(self) -> int | None:
         """Process ID, or None if the process has not started or has exited."""
@@ -135,6 +146,55 @@ class SessionProcess:
         )
         self._stdout_thread.start()
         self._stderr_thread.start()
+
+        # Issue #2547: Snapshot child processes in background thread
+        # to avoid blocking startup (performance optimization)
+        if self._psutil_available and self.is_running:
+            threading.Thread(
+                target=self._snapshot_child_processes,
+                name=f"snapshot-{self.session_id[:8]}",
+                daemon=True,
+            ).start()
+
+    def _snapshot_child_processes(self) -> None:
+        """
+        Issue #2547: Snapshot child process PIDs for reliable termination.
+
+        CLI tools like qwen-code spawn internal node processes that may
+        detach from the process group (setsid/detached). By capturing
+        the process tree early, we can terminate them later even if
+        they become orphan processes (PPID=1).
+
+        This method runs in a background thread to avoid blocking startup.
+        """
+        if not self._psutil_available:
+            return
+
+        import time
+
+        import psutil
+
+        # Poll for child processes (up to 1 second total)
+        # This avoids blocking while still capturing spawned processes
+        for attempt in range(10):
+            if not self.is_running:
+                return
+            try:
+                parent = psutil.Process(self.process.pid)
+                children = parent.children(recursive=True)
+                if children:
+                    self._child_pids = {p.pid for p in children}
+                    logger.debug(
+                        "Session %s: captured %d child process(es): %s",
+                        self.session_id[:8],
+                        len(self._child_pids),
+                        sorted(self._child_pids),
+                    )
+                    return
+            except (psutil.NoSuchProcess, ProcessLookupError, PermissionError):
+                # Process may have exited or we lack permission
+                return
+            time.sleep(0.1)
 
     @staticmethod
     def _extract_stream_session_id(parsed: dict[str, Any]) -> str:
@@ -394,7 +454,11 @@ class SessionProcess:
         Gracefully stop the subprocess.
 
         Sends SIGTERM, then SIGKILL after the timeout if the process
-        does not exit.
+        does not exit. Also terminates any child processes captured in
+        the snapshot to handle CLI tools that spawn detached processes.
+
+        Issue #2547: Enhanced to terminate child processes that may
+        have detached from the process group.
         """
         if not self.is_running:
             return
@@ -449,6 +513,144 @@ class SessionProcess:
                 self.process.wait(timeout=2.0)
             except OSError:
                 pass
+
+        # Issue #2547: Terminate any processes captured in snapshot
+        # that may have detached from the process group
+        self._terminate_snapshot_processes()
+
+        # Issue #2547: Final verification - check if process truly exited
+        self._verify_process_terminated()
+
+    def _terminate_snapshot_processes(self) -> None:
+        """
+        Issue #2547: Terminate processes captured in the snapshot.
+
+        Some CLI tools (like qwen-code) spawn internal processes that
+        may detach from the process group (setsid/detached). These
+        orphan processes (PPID=1) won't be terminated by killpg.
+        We terminate them based on the snapshot captured at startup.
+        """
+        if not self._child_pids:
+            return
+
+        import time
+
+        for pid in self._child_pids:
+            try:
+                # Check if process is still alive
+                os.kill(pid, 0)
+            except (ProcessLookupError, OSError):
+                # Process already exited
+                continue
+
+            logger.info(
+                "Terminating orphan child process %d for session %s",
+                pid,
+                self.session_id[:8],
+            )
+
+            # Try graceful termination first
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                continue
+
+        # Wait for processes to exit
+        time.sleep(1.0)
+
+        # Force kill any remaining processes
+        for pid in self._child_pids:
+            try:
+                os.kill(pid, 0)
+            except (ProcessLookupError, OSError):
+                continue
+
+            try:
+                os.kill(pid, signal.SIGKILL)
+                logger.debug("Force killed orphan process %d", pid)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+
+        # Issue #2547: Also use psutil to find any remaining children
+        # that weren't captured in snapshot (belt and suspenders)
+        self._terminate_remaining_children()
+
+    def _terminate_remaining_children(self) -> None:
+        """
+        Issue #2547: Use psutil to terminate any remaining child processes.
+
+        This is a fallback in case some processes were spawned after
+        the initial snapshot or were missed by the snapshot.
+        """
+        if not self._psutil_available:
+            return
+        if not self.process.pid:
+            return
+
+        import psutil
+
+        try:
+            parent = psutil.Process(self.process.pid)
+            children = parent.children(recursive=True)
+            if not children:
+                return
+
+            logger.info(
+                "Terminating %d remaining child process(es) for session %s",
+                len(children),
+                self.session_id[:8],
+            )
+
+            # Terminate all children (SIGTERM)
+            for child in children:
+                try:
+                    child.terminate()
+                except (psutil.NoSuchProcess, PermissionError):
+                    pass
+
+            # Wait for termination
+            gone, alive = psutil.wait_procs(children, timeout=3.0)
+
+            # Force kill any remaining
+            for child in alive:
+                try:
+                    child.kill()
+                    logger.warning("Force killed remaining child process %d", child.pid)
+                except (psutil.NoSuchProcess, PermissionError):
+                    pass
+
+        except (psutil.NoSuchProcess, ProcessLookupError, PermissionError):
+            # Parent process already exited
+            pass
+
+    def _verify_process_terminated(self) -> None:
+        """
+        Issue #2547: Verify that the process has truly terminated.
+
+        Logs an error if the process is still running after stop()
+        completes. This helps identify cases where process termination
+        may not have fully succeeded.
+        """
+        if self.process.poll() is None:
+            # Process is still running - this shouldn't happen
+            logger.error(
+                "Process %d for session %s did not terminate after stop()",
+                self.process.pid,
+                self.session_id[:8],
+            )
+
+            # Try one more force kill
+            try:
+                self.process.kill()
+                logger.warning("Force killed process %d in verification", self.process.pid)
+            except (ProcessLookupError, OSError):
+                pass
+        else:
+            logger.debug(
+                "Session %s process terminated successfully (exit code: %s)",
+                self.session_id[:8],
+                self.process.returncode,
+            )
 
     def pause(self) -> bool:
         """Suspend the subprocess using SIGSTOP (Unix) or psutil (Windows)."""

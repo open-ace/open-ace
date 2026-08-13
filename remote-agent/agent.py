@@ -154,6 +154,109 @@ class RemoteAgent:
         except Exception:
             return False
 
+    def _cleanup_orphan_processes(self) -> None:
+        """
+        Issue #2547: Clean up orphan CLI processes from previous runs.
+
+        Scans for processes that may have been orphaned (PPID=1) when
+        the agent crashed or was killed. These are CLI processes that
+        match session IDs from the persisted sessions.json but whose
+        parent session no longer exists.
+        """
+        sessions_file = self._executor._META_FILE
+        if not sessions_file.exists():
+            return
+
+        try:
+            meta = json.loads(sessions_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return
+
+        if not meta:
+            return
+
+        # Try to import psutil for process scanning
+        try:
+            import psutil
+        except ImportError:
+            logger.debug("psutil not available, skipping orphan process cleanup")
+            return
+
+        # Collect all session IDs from persisted metadata
+        persisted_session_ids = set(meta.keys())
+        cleaned_pids = []
+
+        # More precise CLI process patterns to avoid false positives
+        # (e.g., avoid matching "claude" text editor)
+        import re
+
+        cli_patterns = [
+            r"/usr/bin/qwen\b",  # qwen CLI typical path
+            r"/usr/local/bin/qwen\b",
+            r"node.*qwen-code-cli",
+            r"node.*qwen\b",
+            r"claude-code\b",
+            r"codex\s+--",  # codex with CLI flags
+            r"zcode\b.*--",  # zcode with CLI flags
+        ]
+
+        # Scan all processes for CLI processes matching our sessions
+        try:
+            for proc in psutil.process_iter(["pid", "ppid", "cmdline", "name"]):
+                try:
+                    # Skip if not an orphan (PPID != 1)
+                    if proc.info.get("ppid") != 1:
+                        continue
+
+                    cmdline = proc.info.get("cmdline") or []
+                    cmdline_str = " ".join(cmdline)
+
+                    # First, check if cmdline contains any of our session IDs
+                    # This is the primary filter to avoid killing unrelated processes
+                    matched_session_id = None
+                    for session_id in persisted_session_ids:
+                        if session_id in cmdline_str:
+                            matched_session_id = session_id
+                            break
+
+                    if not matched_session_id:
+                        continue
+
+                    # Second, verify it looks like a CLI process using precise patterns
+                    is_cli_process = any(
+                        re.search(pattern, cmdline_str, re.IGNORECASE) for pattern in cli_patterns
+                    )
+
+                    if not is_cli_process:
+                        continue
+
+                    # Log and terminate the orphan process
+                    logger.info(
+                        "Terminating orphan CLI process %d (session %s): %s",
+                        proc.info["pid"],
+                        matched_session_id[:8],
+                        cmdline_str[:200],  # Log full command for debugging
+                    )
+                    try:
+                        proc.terminate()
+                        cleaned_pids.append(proc.info["pid"])
+                    except (psutil.NoSuchProcess, PermissionError):
+                        pass
+
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+
+        except Exception as e:
+            logger.warning("Failed to scan processes for orphans: %s", e)
+            return
+
+        if cleaned_pids:
+            logger.info(
+                "Cleaned up %d orphan CLI process(es): %s",
+                len(cleaned_pids),
+                cleaned_pids,
+            )
+
     def _atomic_write_json(self, filepath: str, data: dict | list) -> None:
         """Write JSON to file atomically using temp file + rename."""
         dir_path = os.path.dirname(filepath)
@@ -247,6 +350,10 @@ class RemoteAgent:
         # This may launch detached relay subprocesses, so it must happen only
         # after the parent process has accepted the TLS policy.
         self._restore_terminal_sessions()
+
+        # Issue #2547: Clean up orphan processes from previous runs
+        # before attempting to restore sessions
+        self._cleanup_orphan_processes()
 
         # Restore sessions from previous run (crash recovery)
         restored = self._executor.restore_sessions()
