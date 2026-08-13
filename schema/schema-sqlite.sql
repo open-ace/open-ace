@@ -141,6 +141,15 @@ CREATE TABLE ai_agent_settings (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE alert_creation_failures (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ alert_data text NOT NULL,
+ retry_count integer DEFAULT 0,
+ last_retry_at TIMESTAMP,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ status text DEFAULT 'pending'
+);
+
 CREATE TABLE alerts (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  alert_id text NOT NULL,
@@ -282,7 +291,6 @@ CREATE TABLE autonomous_workflows (
  dev_round integer DEFAULT 1,
  max_plan_rounds integer DEFAULT 3,
  max_pr_review_rounds integer DEFAULT 5,
- require_full_review_rounds INTEGER DEFAULT 0,
  total_tokens integer DEFAULT 0,
  total_input_tokens integer DEFAULT 0,
  total_output_tokens integer DEFAULT 0,
@@ -312,6 +320,7 @@ CREATE TABLE autonomous_workflows (
  locked_by text DEFAULT '',
  transient_retry_count integer DEFAULT 0,
  retry_count integer DEFAULT 0,
+ require_full_review_rounds INTEGER DEFAULT 0 NOT NULL,
  test_retries integer DEFAULT 0,
  skip_retries integer DEFAULT 0,
  dev_retries_on_test_fail integer DEFAULT 0,
@@ -425,17 +434,7 @@ CREATE TABLE content_filter_rules (
  is_enabled INTEGER DEFAULT 1,
  description text,
  created_at TIMESTAMP NOT NULL,
- updated_at TIMESTAMP,
- tenant_id integer,
- source TEXT DEFAULT 'user',
- category TEXT DEFAULT 'custom',
- status TEXT DEFAULT 'active',
- approved_by integer,
- approved_at TIMESTAMP,
- created_by integer,
- metadata json,
- urgency_reason text,
-    CONSTRAINT chk_status_valid CHECK ((status IN ('pending', 'approved', 'active', 'rejected', 'disabled')))
+ updated_at TIMESTAMP
 );
 
 CREATE TABLE daily_messages (
@@ -521,16 +520,6 @@ CREATE TABLE email_notification_logs (
  next_retry_at TIMESTAMP
 );
 
-CREATE TABLE filter_rule_approvals (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- rule_id integer,
- approver_id integer,
- action TEXT NOT NULL,
- comment text,
- tenant_id integer,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE TABLE hourly_stats (
  date TEXT NOT NULL,
  hour integer NOT NULL,
@@ -607,6 +596,14 @@ CREATE TABLE machine_assignments (
  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE migration_metadata (
+ migration_id TEXT PRIMARY KEY NOT NULL,
+ migration_name TEXT NOT NULL,
+ applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ checksum TEXT,
+ details TEXT
+);
+
 CREATE TABLE model_gateway_config (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  mode text DEFAULT 'direct',
@@ -630,6 +627,20 @@ CREATE TABLE notification_preferences (
  notification_email text,
  email_verified INTEGER DEFAULT 0,
  dingtalk_webhook_secret text
+);
+
+CREATE TABLE parse_failure_records (
+ id TEXT PRIMARY KEY NOT NULL,
+ session_id TEXT NOT NULL,
+ tool_use_id TEXT NOT NULL,
+ tool_name TEXT NOT NULL,
+ tool_input text NOT NULL,
+ error text NOT NULL,
+ "timestamp" TIMESTAMP NOT NULL,
+ retry_count integer DEFAULT 0 NOT NULL,
+ last_retry_at TIMESTAMP,
+ resolved INTEGER DEFAULT 0 NOT NULL,
+ created_at TIMESTAMP NOT NULL
 );
 
 CREATE TABLE policy_decisions (
@@ -968,11 +979,6 @@ CREATE TABLE scheduler_runs (
  leader_host TEXT
 );
 
-CREATE TABLE schema_metadata (
- initialized_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- schema_version TEXT
-);
-
 CREATE TABLE security_settings (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  setting_key TEXT NOT NULL,
@@ -1048,7 +1054,7 @@ CREATE TABLE sso_auth_states (
  provider_name text NOT NULL,
  nonce text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- expires_at TIMESTAMP DEFAULT (datetime('now', '+600 seconds')) NOT NULL
+ expires_at TIMESTAMP NOT NULL
 );
 
 CREATE TABLE sso_identities (
@@ -1181,9 +1187,9 @@ CREATE TABLE tenant_settings (
  custom_branding INTEGER DEFAULT 0,
  branding_name TEXT,
  branding_logo_url TEXT,
- auto_provision_users INTEGER DEFAULT 0,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ auto_provision_users INTEGER DEFAULT 0,
  block_sensitive_keyword INTEGER DEFAULT 0,
  sensitive_keyword_match_mode TEXT DEFAULT 'word_boundary'
 );
@@ -1370,6 +1376,29 @@ CREATE TABLE users (
  tenant_version integer DEFAULT 1 NOT NULL,
     CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
     CONSTRAINT chk_2332_users_role_valid CHECK ((role IN ('platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
+);
+
+CREATE TABLE users_backup_2332 (
+ id integer,
+ username TEXT,
+ password_hash TEXT,
+ email TEXT,
+ is_admin INTEGER,
+ is_active INTEGER,
+ created_at TIMESTAMP,
+ last_login TIMESTAMP,
+ role TEXT,
+ daily_token_quota integer,
+ monthly_token_quota integer,
+ daily_request_quota integer,
+ monthly_request_quota integer,
+ deleted_at TIMESTAMP,
+ system_account text,
+ tenant_id integer,
+ must_change_password INTEGER,
+ avatar_url TEXT,
+ auto_mapping_enabled INTEGER,
+ tenant_version integer
 );
 
 CREATE TABLE web_user_auth_sessions (
@@ -1630,20 +1659,6 @@ CREATE INDEX idx_audit_timestamp ON audit_logs ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs (user_id);
 
-CREATE INDEX idx_cfr_category ON content_filter_rules (category);
-
-CREATE INDEX idx_cfr_enabled ON content_filter_rules (is_enabled);
-
-CREATE INDEX idx_cfr_source ON content_filter_rules (source);
-
-CREATE INDEX idx_cfr_status ON content_filter_rules (status);
-
-CREATE UNIQUE INDEX idx_cfr_system_unique ON content_filter_rules (pattern) WHERE (((source) = 'system') AND (tenant_id IS NULL));
-
-CREATE INDEX idx_cfr_tenant_enabled_status ON content_filter_rules (tenant_id, is_enabled, status);
-
-CREATE INDEX idx_cfr_tenant_id ON content_filter_rules (tenant_id);
-
 CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence (session_id, command_id);
 
 CREATE INDEX idx_command_evidence_workflow_milestone ON command_execution_evidence (workflow_id, milestone_id);
@@ -1691,10 +1706,6 @@ CREATE INDEX idx_events_workflow_created ON workflow_events (workflow_id, create
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules (is_enabled);
 
 CREATE INDEX idx_filter_rules_type ON content_filter_rules (type);
-
-CREATE INDEX idx_fra_rule_id ON filter_rule_approvals (rule_id);
-
-CREATE INDEX idx_fra_tenant_id ON filter_rule_approvals (tenant_id);
 
 CREATE INDEX idx_hourly_stats_date ON hourly_stats (date);
 
@@ -1765,6 +1776,14 @@ CREATE INDEX idx_messages_user_date_role_covering ON daily_messages (user_id, da
 CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones (workflow_id, phase, status);
 
 CREATE INDEX idx_milestones_workflow_round ON workflow_milestones (workflow_id, dev_round);
+
+CREATE INDEX idx_parse_failure_created_at ON parse_failure_records (created_at);
+
+CREATE INDEX idx_parse_failure_session ON parse_failure_records (session_id);
+
+CREATE INDEX idx_parse_failure_timestamp ON parse_failure_records ("timestamp");
+
+CREATE INDEX idx_parse_failure_unresolved ON parse_failure_records (resolved) WHERE (resolved = false);
 
 CREATE INDEX idx_policy_decisions_fingerprint ON policy_decisions (fingerprint_hash);
 
