@@ -72,12 +72,14 @@ export function detectCategoryConflicts(
 export function calculateImpactPreview(
   category: ProjectCategory,
   newPatterns: string[],
-  stats: ProjectStats[]
+  stats: ProjectStats[],
+  allCategories: ProjectCategory[] = []
 ): {
   added: ProjectStats[];
   removed: ProjectStats[];
   currentCount: number;
   newCount: number;
+  conflicts: CategoryConflict[];
 } {
   const currentMatches = stats.filter((s) =>
     matchesPatterns(s.project_path, category.key_patterns)
@@ -90,10 +92,32 @@ export function calculateImpactPreview(
   const added = newMatches.filter((s) => !currentIds.has(s.project_id));
   const removed = currentMatches.filter((s) => !newIds.has(s.project_id));
 
+  // Calculate conflicts with other categories
+  const otherCategories = allCategories.filter((c) => c.id !== category.id && c.is_active);
+  const conflicts: CategoryConflict[] = [];
+
+  for (const stat of newMatches) {
+    const matchedOthers: string[] = [];
+    for (const other of otherCategories) {
+      if (matchesPatterns(stat.project_path, other.key_patterns)) {
+        matchedOthers.push(other.name);
+      }
+    }
+    if (matchedOthers.length > 0) {
+      conflicts.push({
+        projectId: stat.project_id,
+        projectName: stat.project_name ?? stat.project_path.split(/[/\\]/).pop() ?? 'Unknown',
+        projectPath: stat.project_path,
+        matchedCategories: [category.name, ...matchedOthers],
+      });
+    }
+  }
+
   return {
     added,
     removed,
     currentCount: currentMatches.length,
     newCount: newMatches.length,
+    conflicts,
   };
 }

@@ -29,6 +29,7 @@ import { getAllProjectStats, deleteProject, type ProjectStats } from '@/api/proj
 import { listProjectCategories, type ProjectCategory } from '@/api/projectCategories';
 import { formatDateTime, createMatcherConfig } from '@/utils';
 import { usePageRefresh } from '@/hooks';
+import { matchesPatterns } from '@/utils/categoryConflictDetection';
 
 type CategorySortKey = 'name' | 'total_workspaces' | 'total_users' | 'total_tokens' | 'last_access';
 type SortDirection = 'asc' | 'desc';
@@ -86,19 +87,6 @@ function extractProjectName(path: string): string {
   return parts[parts.length - 1] || 'unknown'; // Fallback
 }
 
-// Normalize path separators for cross-platform matching
-function normalizePath(path: string): string {
-  // Replace all backslashes with forward slashes for consistent matching
-  return path.replace(/\\/g, '/');
-}
-
-// Match project path against patterns (case-insensitive, contains match)
-function matchCategory(projectPath: string, patterns: string[]): boolean {
-  // Normalize path separators before matching
-  const normalizedPath = normalizePath(projectPath).toLowerCase();
-  return patterns.some((p) => p && normalizedPath.includes(normalizePath(p).toLowerCase()));
-}
-
 // Categorize projects into groups
 function categorizeProjects(
   stats: ProjectStats[],
@@ -117,7 +105,7 @@ function categorizeProjects(
 
     for (const stat of stats) {
       if (matchedProjectIds.has(stat.project_id)) continue;
-      if (matchCategory(stat.project_path, category.key_patterns)) {
+      if (matchesPatterns(stat.project_path, category.key_patterns)) {
         workspaces.push(stat);
         matchedProjectIds.add(stat.project_id);
       }
