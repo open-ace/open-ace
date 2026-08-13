@@ -596,12 +596,12 @@ def create_app(config=None):
     def readiness_check():
         """Readiness check endpoint for Kubernetes and load balancers.
 
-                Checks database connection, schema version compatibility, config directory,
-                workspace directory, encryption keys, initialization status, and security mode.
-                Returns HTTP 503 if any critical check fails.
+        Checks database connection, schema version compatibility, config directory,
+        workspace directory, encryption keys, initialization status, and security mode.
+        Returns HTTP 503 if any critical check fails.
 
         Issue #2330: Uses SchemaCompatibilityService with Alembic graph validation
-                Issue #2331: Also checks security mode source validation.
+        Issue #2331: Also checks security mode source validation.
         """
         from app.repositories.database import Database, is_postgresql
         from app.services.schema_compatibility_service import get_schema_compatibility_service

@@ -332,24 +332,15 @@ def get_environment_mode() -> str:
         _deprecation_warned = True
 
     # Delegate to unified security mode API
-    from app.utils.security_mode import get_security_mode, reset_security_mode_cache
+    from app.utils.security_mode import get_security_mode
 
     try:
         mode = get_security_mode()
         return mode.value  # Return string for backward compatibility
     except RuntimeError:
-        # If security mode detection fails, reset cache and try with safe defaults
-        # This can happen during test execution if environment is not fully set up
-        # Issue #2331: Defensive fallback for edge cases
-        reset_security_mode_cache()
-        # Force development mode for safety
-        import os
-
-        current_mode = os.environ.get("OPENACE_SECURITY_MODE", "").strip()
-        if not current_mode:
-            os.environ["OPENACE_SECURITY_MODE"] = "development"
-        mode = get_security_mode()
-        return mode.value
+        # Re-raise - if security mode detection fails, it's a configuration error
+        # Issue #2331: Fail-closed principle - propagate errors, don't mask them
+        raise
 
 
 def is_production_environment() -> bool:
