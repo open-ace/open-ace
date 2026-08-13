@@ -136,6 +136,7 @@ class ContentFilter:
         custom_patterns: dict[str, str] | None = None,
         custom_keywords: list[str] | None = None,
         governance_repo: GovernanceRepository | None = None,
+        tenant_id: int | None = None,
     ):
         """
         Initialize content filter.
@@ -151,6 +152,7 @@ class ContentFilter:
             custom_patterns: Additional regex patterns to match.
             custom_keywords: Additional keywords to detect.
             governance_repo: Optional GovernanceRepository for database rules.
+            tenant_id: Optional tenant ID for tenant isolation.
         """
         self.config = config or {}
         self.enabled = self.config.get("enabled", True)
@@ -161,6 +163,9 @@ class ContentFilter:
         self.sensitive_keyword_match_mode = self.config.get(
             "sensitive_keyword_match_mode", "word_boundary"
         )
+
+        # Tenant isolation
+        self.tenant_id = tenant_id
 
         # Database rules integration
         self.governance_repo = governance_repo
@@ -291,10 +296,10 @@ class ContentFilter:
 
     def _load_rules_from_db(self) -> list[dict[str, Any]]:
         """
-        Load filter rules from database.
+        Load filter rules from database with tenant isolation.
 
         Returns:
-            List of enabled filter rules.
+            List of enabled filter rules filtered by tenant.
         """
         if self.governance_repo is None:
             return []
@@ -305,8 +310,14 @@ class ContentFilter:
 
         # Load rules from database (I/O operation outside lock)
         try:
-            rules = self.governance_repo.get_filter_rules()
-            enabled_rules = [r for r in rules if r.get("is_enabled", True)]
+            rules = self.governance_repo.get_filter_rules(tenant_id=self.tenant_id)
+            # Filter to only enabled and active rules
+            enabled_rules = [
+                r
+                for r in rules
+                if r.get("is_enabled", True)
+                and r.get("status", "active") in ("active", "approved")
+            ]
         except Exception as e:
             logger.error(f"Failed to load filter rules from database: {e}")
             return []
@@ -319,7 +330,7 @@ class ContentFilter:
             self._rules_cache = enabled_rules
             self._cache_valid = True
 
-        logger.debug(f"Loaded {len(enabled_rules)} filter rules from database")
+        logger.debug(f"Loaded {len(enabled_rules)} filter rules from database for tenant {self.tenant_id}")
         return enabled_rules
 
     def _get_compiled_pattern(
@@ -596,12 +607,26 @@ class ContentFilter:
         # Determine passed based on action
         passed = overall_action != "block"
 
-        # Log if enabled
+        # Log if enabled - differentiate by rule source
         if self.log_matches and matched_rules:
-            logger.warning(
-                f"Content filter matched: {len(matched_rules)} rules, "
-                f"risk={overall_risk}, action={overall_action}, passed={passed}"
-            )
+            system_rules = [r for r in matched_rules if r.get("source") == "system"]
+            user_rules = [r for r in matched_rules if r.get("source") != "system"]
+
+            if overall_action == "block":
+                logger.error(
+                    f"Content blocked: {len(matched_rules)} rules, "
+                    f"risk={overall_risk}, tenant_id={self.tenant_id}"
+                )
+            elif system_rules and not user_rules:
+                logger.info(
+                    f"System rule matched: {len(system_rules)} rules, "
+                    f"tenant_id={self.tenant_id}"
+                )
+            elif user_rules:
+                logger.warning(
+                    f"User rule matched: {len(user_rules)} rules, "
+                    f"risk={overall_risk}, action={overall_action}, tenant_id={self.tenant_id}"
+                )
 
         # Generate message and suggestion
         message = None

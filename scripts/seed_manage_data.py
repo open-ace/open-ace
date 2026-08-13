@@ -211,7 +211,11 @@ def seed_audit_logs(conn):
 
 
 def seed_filter_rules(conn):
-    """Insert default content filter rules."""
+    """Insert default content filter rules with tenant isolation support.
+
+    System rules are marked with source='system' and tenant_id=NULL,
+    making them global rules visible to all tenants.
+    """
     cur = conn.cursor()
 
     cur.execute("SELECT COUNT(*) as cnt FROM content_filter_rules")
@@ -221,7 +225,13 @@ def seed_filter_rules(conn):
         return
 
     ph = get_param_placeholder()
+
+    # System rules with metadata for identification
+    # Each rule includes: description, type, pattern, severity, action, enabled, source, tenant_id, category, metadata
+    import json
+
     rules = [
+        # PII rules
         (
             "PII Email Detection",
             "regex",
@@ -229,6 +239,10 @@ def seed_filter_rules(conn):
             "medium",
             "mask",
             True,
+            "system",  # source
+            None,  # tenant_id (NULL for global rules)
+            "pii",  # category
+            json.dumps({"system_version": "1.0"}),  # metadata
         ),
         (
             "PII Phone Detection",
@@ -237,6 +251,10 @@ def seed_filter_rules(conn):
             "medium",
             "mask",
             True,
+            "system",
+            None,
+            "pii",
+            json.dumps({"system_version": "1.0"}),
         ),
         (
             "Credit Card Detection",
@@ -245,33 +263,114 @@ def seed_filter_rules(conn):
             "high",
             "block",
             True,
+            "system",
+            None,
+            "pii",
+            json.dumps({"system_version": "1.0"}),
         ),
-        ("Password Exposure", "keyword", r"\bpassword\b", "high", "block", True),
-        ("API Key Exposure", "keyword", r"\bapi[_-]?key\b", "high", "block", True),
-        ("Secret Exposure", "keyword", r"\bsecret\b", "medium", "mask", True),
-        ("SSN Detection", "regex", r"\b\d{3}-\d{2}-\d{4}\b", "high", "block", True),
+        # Security rules
+        (
+            "Password Exposure",
+            "keyword",
+            r"\bpassword\b",
+            "high",
+            "block",
+            True,
+            "system",
+            None,
+            "security",
+            json.dumps({"system_version": "1.0"}),
+        ),
+        (
+            "API Key Exposure",
+            "keyword",
+            r"\bapi[_-]?key\b",
+            "high",
+            "block",
+            True,
+            "system",
+            None,
+            "security",
+            json.dumps({"system_version": "1.0"}),
+        ),
+        (
+            "Secret Exposure",
+            "keyword",
+            r"\bsecret\b",
+            "medium",
+            "mask",
+            True,
+            "system",
+            None,
+            "security",
+            json.dumps({"system_version": "1.0"}),
+        ),
+        (
+            "SSN Detection",
+            "regex",
+            r"\b\d{3}-\d{2}-\d{4}\b",
+            "high",
+            "block",
+            True,
+            "system",
+            None,
+            "pii",
+            json.dumps({"system_version": "1.0"}),
+        ),
     ]
 
-    for desc, rule_type, pattern, severity, action, enabled in rules:
-        cur.execute(
-            adapt_sql(
-                f"""
-            INSERT INTO content_filter_rules
-            (pattern, type, severity, action, is_enabled, description, created_at, updated_at)
-            VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-        """
-            ),
-            (
-                pattern,
-                rule_type,
-                severity,
-                action,
-                enabled,
-                desc,
-                datetime.utcnow(),
-                datetime.utcnow(),
-            ),
-        )
+    for desc, rule_type, pattern, severity, action, enabled, source, tenant_id, category, metadata in rules:
+        # Check if new columns exist (for forward compatibility)
+        try:
+            cur.execute(
+                adapt_sql(
+                    f"""
+                INSERT INTO content_filter_rules
+                (pattern, type, severity, action, is_enabled, description,
+                 source, tenant_id, category, status, metadata,
+                 created_at, updated_at)
+                VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph},
+                        {ph}, {ph}, {ph}, {ph}, {ph},
+                        {ph}, {ph})
+            """
+                ),
+                (
+                    pattern,
+                    rule_type,
+                    severity,
+                    action,
+                    enabled,
+                    desc,
+                    source,
+                    tenant_id,
+                    category,
+                    "active",  # status
+                    metadata,
+                    datetime.utcnow(),
+                    datetime.utcnow(),
+                ),
+            )
+        except Exception:
+            # Fallback: old schema without new columns
+            cur.execute(
+                adapt_sql(
+                    f"""
+                INSERT INTO content_filter_rules
+                (pattern, type, severity, action, is_enabled, description, created_at, updated_at)
+                VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
+            """
+                ),
+                (
+                    pattern,
+                    rule_type,
+                    severity,
+                    action,
+                    enabled,
+                    desc,
+                    datetime.utcnow(),
+                    datetime.utcnow(),
+                ),
+            )
 
     conn.commit()
     print(f"  Inserted {len(rules)} filter rules")

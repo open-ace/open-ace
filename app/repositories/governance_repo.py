@@ -41,19 +41,38 @@ class GovernanceRepository:
     # Content Filter Rules
     # =========================================================================
 
-    def get_filter_rules(self) -> list[dict]:
+    def get_filter_rules(self, tenant_id: int | None = None) -> list[dict]:
         """
-        Get all content filter rules.
+        Get content filter rules with tenant isolation.
+
+        Args:
+            tenant_id: Tenant ID for filtering. If provided, returns both
+                       global rules (tenant_id IS NULL) and tenant-specific rules.
+                       If None, returns all rules (backward compatible).
 
         Returns:
             List[Dict]: List of filter rules.
         """
-        query = "SELECT * FROM content_filter_rules ORDER BY created_at DESC"
-        rules = self.db.fetch_all(query)
+        if tenant_id is not None:
+            # Tenant isolation: include global rules + tenant-specific rules
+            query = """
+                SELECT * FROM content_filter_rules
+                WHERE (tenant_id IS NULL OR tenant_id = ?)
+                ORDER BY created_at DESC
+            """
+            rules = self.db.fetch_all(query, (tenant_id,))
+        else:
+            # Backward compatible: return all rules
+            query = "SELECT * FROM content_filter_rules ORDER BY created_at DESC"
+            rules = self.db.fetch_all(query)
 
-        # Convert is_enabled to boolean
+        # Convert is_enabled to boolean and handle new fields
         for rule in rules:
             rule["is_enabled"] = bool(rule.get("is_enabled", 1))
+            # Ensure new fields have defaults for backward compatibility
+            rule.setdefault("source", "user")
+            rule.setdefault("category", "custom")
+            rule.setdefault("status", "active")
 
         return rules
 
@@ -229,6 +248,215 @@ class GovernanceRepository:
         except Exception as e:
             logger.error(f"Error deleting filter rule: {e}")
             return False
+
+    # =========================================================================
+    # Approval Workflow Methods
+    # =========================================================================
+
+    def get_filter_rules_by_source(
+        self, source: str, tenant_id: int | None = None
+    ) -> list[dict]:
+        """
+        Get filter rules by source with tenant isolation.
+
+        Args:
+            source: Rule source ('system' or 'user').
+            tenant_id: Tenant ID for filtering.
+
+        Returns:
+            List[Dict]: List of filter rules.
+        """
+        if tenant_id is not None:
+            query = """
+                SELECT * FROM content_filter_rules
+                WHERE source = ? AND (tenant_id IS NULL OR tenant_id = ?)
+                ORDER BY created_at DESC
+            """
+            rules = self.db.fetch_all(query, (source, tenant_id))
+        else:
+            query = "SELECT * FROM content_filter_rules WHERE source = ? ORDER BY created_at DESC"
+            rules = self.db.fetch_all(query, (source,))
+
+        for rule in rules:
+            rule["is_enabled"] = bool(rule.get("is_enabled", 1))
+
+        return rules
+
+    def get_filter_rules_by_category(
+        self, category: str, tenant_id: int | None = None
+    ) -> list[dict]:
+        """
+        Get filter rules by category with tenant isolation.
+
+        Args:
+            category: Rule category.
+            tenant_id: Tenant ID for filtering.
+
+        Returns:
+            List[Dict]: List of filter rules.
+        """
+        if tenant_id is not None:
+            query = """
+                SELECT * FROM content_filter_rules
+                WHERE category = ? AND (tenant_id IS NULL OR tenant_id = ?)
+                ORDER BY created_at DESC
+            """
+            rules = self.db.fetch_all(query, (category, tenant_id))
+        else:
+            query = "SELECT * FROM content_filter_rules WHERE category = ? ORDER BY created_at DESC"
+            rules = self.db.fetch_all(query, (category,))
+
+        for rule in rules:
+            rule["is_enabled"] = bool(rule.get("is_enabled", 1))
+
+        return rules
+
+    def get_pending_approval_rules(self, tenant_id: int | None = None) -> list[dict]:
+        """
+        Get filter rules pending approval.
+
+        Args:
+            tenant_id: Tenant ID for filtering.
+
+        Returns:
+            List[Dict]: List of pending filter rules.
+        """
+        if tenant_id is not None:
+            query = """
+                SELECT * FROM content_filter_rules
+                WHERE status = 'pending' AND tenant_id = ?
+                ORDER BY created_at DESC
+            """
+            rules = self.db.fetch_all(query, (tenant_id,))
+        else:
+            query = "SELECT * FROM content_filter_rules WHERE status = 'pending' ORDER BY created_at DESC"
+            rules = self.db.fetch_all(query)
+
+        for rule in rules:
+            rule["is_enabled"] = bool(rule.get("is_enabled", 1))
+
+        return rules
+
+    def approve_filter_rule(
+        self, rule_id: int, approver_id: int, comment: str | None = None
+    ) -> bool:
+        """
+        Approve a filter rule.
+
+        Args:
+            rule_id: Rule ID to approve.
+            approver_id: Approver user ID.
+            comment: Optional approval comment.
+
+        Returns:
+            bool: True if successful.
+        """
+        try:
+            from app.repositories.database import is_postgresql
+
+            now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+
+            # Update rule status
+            query = """
+                UPDATE content_filter_rules
+                SET status = 'approved',
+                    approved_by = ?,
+                    approved_at = ?,
+                    updated_at = ?,
+                    is_enabled = 1
+                WHERE id = ?
+            """
+            cursor = self.db.execute(query, (approver_id, now, now, rule_id))
+
+            if cursor.rowcount == 0:
+                return False
+
+            # Record approval history
+            self._record_approval(rule_id, approver_id, "approved", comment)
+
+            return True
+        except Exception as e:
+            logger.error(f"Error approving filter rule: {e}")
+            return False
+
+    def reject_filter_rule(
+        self, rule_id: int, approver_id: int, comment: str | None = None
+    ) -> bool:
+        """
+        Reject a filter rule.
+
+        Args:
+            rule_id: Rule ID to reject.
+            approver_id: Approver user ID.
+            comment: Optional rejection comment.
+
+        Returns:
+            bool: True if successful.
+        """
+        try:
+            now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+
+            # Update rule status
+            query = """
+                UPDATE content_filter_rules
+                SET status = 'rejected',
+                    approved_by = ?,
+                    approved_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+            """
+            cursor = self.db.execute(query, (approver_id, now, now, rule_id))
+
+            if cursor.rowcount == 0:
+                return False
+
+            # Record approval history
+            self._record_approval(rule_id, approver_id, "rejected", comment)
+
+            return True
+        except Exception as e:
+            logger.error(f"Error rejecting filter rule: {e}")
+            return False
+
+    def _record_approval(
+        self, rule_id: int, approver_id: int, action: str, comment: str | None = None
+    ) -> None:
+        """
+        Record approval history.
+
+        Args:
+            rule_id: Rule ID.
+            approver_id: Approver user ID.
+            action: Action ('approved' or 'rejected').
+            comment: Optional comment.
+        """
+        try:
+            query = """
+                INSERT INTO filter_rule_approvals
+                (rule_id, approver_id, action, comment, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """
+            now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            self.db.execute(query, (rule_id, approver_id, action, comment, now))
+        except Exception as e:
+            logger.error(f"Error recording approval history: {e}")
+
+    def get_approval_history(self, rule_id: int) -> list[dict]:
+        """
+        Get approval history for a rule.
+
+        Args:
+            rule_id: Rule ID.
+
+        Returns:
+            List[Dict]: List of approval records.
+        """
+        query = """
+            SELECT * FROM filter_rule_approvals
+            WHERE rule_id = ?
+            ORDER BY created_at DESC
+        """
+        return self.db.fetch_all(query, (rule_id,))
 
     # =========================================================================
     # Security Settings

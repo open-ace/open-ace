@@ -451,9 +451,11 @@ def api_add_keyword():
 @governance_bp.route("/filter-rules", methods=["GET"])
 @admin_required
 def api_get_filter_rules():
-    """Get all content filter rules."""
+    """Get all content filter rules with tenant isolation."""
 
-    rules = governance_repo.get_filter_rules()
+    # Apply tenant isolation
+    tenant_id = get_current_tenant_id()
+    rules = governance_repo.get_filter_rules(tenant_id=tenant_id)
 
     return jsonify(rules)
 
@@ -470,9 +472,19 @@ def api_create_filter_rule():
     action = data.get("action", "warn")
     description = data.get("description")
     is_enabled = data.get("is_enabled", True)
+    category = data.get("category", "custom")
 
     if not pattern:
         return jsonify({"error": "Pattern is required"}), 400
+
+    # Get tenant ID and created_by from current user
+    tenant_id = get_current_tenant_id()
+    created_by = g.user_id if hasattr(g, "user_id") else None
+
+    # Determine initial status based on source
+    # User-created rules start as pending unless created by platform_admin
+    source = "user"
+    status = "active"  # For backward compatibility, new rules are active by default
 
     rule_id = governance_repo.create_filter_rule(
         pattern=pattern,
@@ -496,7 +508,7 @@ def api_create_filter_rule():
             resource_type="filter_rule",
             resource_id=str(rule_id),
             resource_name=pattern,
-            details={"action": "create", "pattern": pattern, "type": rule_type},
+            details={"action": "create", "pattern": pattern, "type": rule_type, "category": category},
             **client_info,
         )
 
@@ -638,3 +650,123 @@ def api_get_password_policy():
     """
     policy = governance_repo.get_password_policy()
     return jsonify(policy)
+
+
+# ============================================================================
+# Filter Rule Approval Endpoints (Issue #2550)
+# ============================================================================
+
+
+@governance_bp.route("/filter-rules/<int:rule_id>/approve", methods=["POST"])
+@admin_required
+def api_approve_filter_rule(rule_id):
+    """Approve a content filter rule.
+
+    Requires platform_admin or tenant_admin permission.
+    """
+    data = request.get_json() or {}
+    comment = data.get("comment")
+
+    # Get approver ID from current user
+    approver_id = g.user_id if hasattr(g, "user_id") else None
+    if not approver_id:
+        return jsonify({"error": "User ID not found"}), 401
+
+    # Check if user has permission (platform_admin or tenant_admin)
+    user_role = g.user.get("role") if hasattr(g, "user") else None
+    if user_role not in ("platform_admin", "admin"):
+        # Check if user is tenant_admin for the rule's tenant
+        rule = governance_repo.get_filter_rule(rule_id)
+        if not rule:
+            return jsonify({"error": "Rule not found"}), 404
+
+        # For now, only platform_admin and admin can approve
+        return jsonify({"error": "Permission denied"}), 403
+
+    success = governance_repo.approve_filter_rule(rule_id, approver_id, comment)
+
+    if success:
+        # Invalidate content filter cache
+        content_filter.invalidate_cache()
+
+        # Log the action
+        client_info = get_client_info()
+        audit_logger.log_action(
+            action=AuditAction.SYSTEM_CONFIG_CHANGE,
+            user_id=g.user_id,
+            username=g.user.get("username"),
+            resource_type="filter_rule",
+            resource_id=str(rule_id),
+            details={"action": "approve", "comment": comment},
+            **client_info,
+        )
+
+        return jsonify({"success": True})
+
+    return jsonify({"error": "Failed to approve filter rule"}), 500
+
+
+@governance_bp.route("/filter-rules/<int:rule_id>/reject", methods=["POST"])
+@admin_required
+def api_reject_filter_rule(rule_id):
+    """Reject a content filter rule.
+
+    Requires platform_admin or tenant_admin permission.
+    """
+    data = request.get_json() or {}
+    comment = data.get("comment")
+
+    # Get approver ID from current user
+    approver_id = g.user_id if hasattr(g, "user_id") else None
+    if not approver_id:
+        return jsonify({"error": "User ID not found"}), 401
+
+    # Check if user has permission
+    user_role = g.user.get("role") if hasattr(g, "user") else None
+    if user_role not in ("platform_admin", "admin"):
+        return jsonify({"error": "Permission denied"}), 403
+
+    success = governance_repo.reject_filter_rule(rule_id, approver_id, comment)
+
+    if success:
+        # Invalidate content filter cache
+        content_filter.invalidate_cache()
+
+        # Log the action
+        client_info = get_client_info()
+        audit_logger.log_action(
+            action=AuditAction.SYSTEM_CONFIG_CHANGE,
+            user_id=g.user_id,
+            username=g.user.get("username"),
+            resource_type="filter_rule",
+            resource_id=str(rule_id),
+            details={"action": "reject", "comment": comment},
+            **client_info,
+        )
+
+        return jsonify({"success": True})
+
+    return jsonify({"error": "Failed to reject filter rule"}), 500
+
+
+@governance_bp.route("/filter-rules/pending", methods=["GET"])
+@admin_required
+def api_get_pending_filter_rules():
+    """Get filter rules pending approval."""
+    tenant_id = get_current_tenant_id()
+    rules = governance_repo.get_pending_approval_rules(tenant_id=tenant_id)
+    return jsonify(rules)
+
+
+@governance_bp.route("/filter-rules/sources", methods=["GET"])
+@admin_required
+def api_get_filter_rule_sources():
+    """Get available filter rule sources."""
+    return jsonify(["system", "user"])
+
+
+@governance_bp.route("/filter-rules/categories", methods=["GET"])
+@admin_required
+def api_get_filter_rule_categories():
+    """Get available filter rule categories."""
+    return jsonify(["pii", "security", "business", "test", "custom"])

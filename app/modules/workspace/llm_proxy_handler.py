@@ -736,6 +736,10 @@ def _finalize_upstream_response(
         if key.lower() in ("content-type", "x-request-id", "openai-organization"):
             response_headers[key] = value
 
+    # Add content filter warning header if set (Issue #2550)
+    if hasattr(g, "content_filter_warning"):
+        response_headers["X-Content-Filter-Warning"] = "true"
+
     if "text/event-stream" in content_type:
         return Response(
             stream_with_context(generate()),
@@ -913,9 +917,14 @@ def _check_content_filter(
                     "message": result.message,
                 },
             )
-            # Warn: continue normally, the warning is logged but not returned to user
-            # (Frontend will show toast based on response headers or separate API)
-            return None
+            # Warn: return warning info for caller to add response header
+            # Frontend will show toast based on X-Content-Filter-Warning header
+            return {
+                "type": "warning",
+                "message": result.message,
+                "matched_rules": result.matched_rules,
+                "suggestion": result.suggestion,
+            }
 
         if result.action == "redact":
             # Log the redact action
@@ -1190,6 +1199,11 @@ def handle_llm_proxy_request(
     if isinstance(content_filter_result, tuple):
         # Block: return error response
         return content_filter_result
+
+    # Handle warning case: set response header for frontend
+    if isinstance(content_filter_result, dict) and content_filter_result.get("type") == "warning":
+        # Store warning info in Flask g for later use in response
+        g.content_filter_warning = content_filter_result
     # Note: redact handling would require modifying request body, which is
     # complex for streaming. For now, we just log and continue for warn/redact.
     # ── end content filter check ─────────────────────────────────────────
