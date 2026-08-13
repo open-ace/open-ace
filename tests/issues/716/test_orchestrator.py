@@ -19,6 +19,7 @@ def _trusted_repo_boundary_for_state_machine_tests(monkeypatch):
     """
     from app.modules.workspace.autonomous.github_ops import GitHubOps
     from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+    from app.repositories.user_repo import UserRepository
 
     def snapshot(orchestrator, wf, workspace_type, system_account):
         if workspace_type != "local":
@@ -50,6 +51,23 @@ def _trusted_repo_boundary_for_state_machine_tests(monkeypatch):
         classmethod(lambda cls, *args, **kwargs: None),
     )
     monkeypatch.setattr(GitHubOps, "bind_trusted_git_context", lambda self, *args, **kwargs: None)
+    # The orchestrator's development/planning/preparation paths resolve the
+    # workflow owner via UserRepository().get_user_by_id(), which resolves
+    # Database() in user_repo's own namespace (the tests' orchestrator.Database
+    # patch does not cover it). Under the SQLite CI lane the query hits a
+    # schema-less DB -> "no such table: users". These state-machine tests don't
+    # assert on the user record, so stub get_user_by_id with a valid dict.
+    monkeypatch.setattr(
+        UserRepository,
+        "get_user_by_id",
+        lambda self, user_id: {
+            "id": user_id,
+            "username": "owner",
+            "system_account": None,
+            "role": "platform_admin",
+            "tenant_id": None,
+        },
+    )
 
 
 def _make_workflow(**overrides):

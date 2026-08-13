@@ -44,6 +44,132 @@ logger = logging.getLogger(__name__)
 MAX_RAW_CONTENT_LENGTH = 100000
 MAX_MESSAGE_LENGTH = 50000
 
+# ════════════════════════════════════════════
+# Issue #2532: Sensitive response field constants
+# ════════════════════════════════════════════
+
+# Fields that indicate sensitive token data in JSON responses.
+# When these fields are present, security headers are added to prevent
+# caching and referrer leakage.
+SENSITIVE_RESPONSE_FIELDS: frozenset[str] = frozenset(
+    {
+        "agent_token",
+        "registration_token",
+    }
+)
+
+# Maximum response body size to check for sensitive fields (10KB).
+# Larger responses are skipped to avoid performance impact.
+_SENSITIVE_FIELD_CHECK_MAX_SIZE = 10240
+
+# ════════════════════════════════════════════
+# Issue #2531: Session state check constants
+# ════════════════════════════════════════════
+
+# Feature flag for rollback: set to "false" to disable state checks
+ENABLE_SESSION_STATE_CHECK = os.environ.get("ENABLE_SESSION_STATE_CHECK", "true").lower() == "true"
+
+# Session states
+_ALLOWED_STATES = {"active"}
+_PAUSED_STATES = {"paused"}
+_ENDED_STATES = frozenset({"completed", "stopped", "error"})
+_KNOWN_STATES = _ALLOWED_STATES | _PAUSED_STATES | _ENDED_STATES
+
+# Error messages for each state
+_STATE_MESSAGES = {
+    "paused": "Session is paused, please resume first",
+    "completed": "Remote session has ended",
+    "stopped": "Remote session has been stopped",
+    "error": "Remote session encountered an error",
+}
+
+
+def _check_session_state(session_info: dict, operation: str) -> tuple | None:
+    """Check if session state allows the operation.
+
+    Issue #2531: Returns error response if session is paused, ended, or has unknown status.
+
+    Args:
+        session_info: Dict with session status and metadata.
+        operation: Operation name for audit logging.
+
+    Returns:
+        None: Session is active, operation allowed.
+        (jsonify, 409): Session is paused or ended, operation rejected.
+        (jsonify, 500): Session status is unknown or missing, system error.
+    """
+    status = session_info.get("status")
+
+    # Status missing: system error
+    if status is None:
+        logger.error(
+            "Session %s status is None for operation %s - possible data corruption",
+            session_info.get("session_id", "unknown")[:8],
+            operation,
+        )
+        return (
+            jsonify({"success": False, "error": "Session status unavailable"}),
+            500,
+        )
+
+    # Unknown status: system error
+    if status not in _KNOWN_STATES:
+        logger.warning(
+            "Unknown session status '%s' for session %s operation %s",
+            status,
+            session_info.get("session_id", "unknown")[:8],
+            operation,
+        )
+        return (
+            jsonify({"success": False, "error": f"Unknown session status: {status}"}),
+            500,
+        )
+
+    # Paused state: business rejection
+    if status in _PAUSED_STATES:
+        logger.warning(
+            "Attempted %s on paused session %s by user %s from %s",
+            operation,
+            session_info.get("session_id", "unknown")[:8],
+            g.user.get("id") if g.get("user") else "unknown",
+            request.remote_addr or "unknown",
+        )
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": _STATE_MESSAGES.get(status, "Session is paused"),
+                    "session_status": status,
+                }
+            ),
+            409,
+        )
+
+    # Ended state: business rejection
+    if status in _ENDED_STATES:
+        logger.warning(
+            "Attempted %s on %s session %s by user %s from %s",
+            operation,
+            status,
+            session_info.get("session_id", "unknown")[:8],
+            g.user.get("id") if g.get("user") else "unknown",
+            request.remote_addr or "unknown",
+        )
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": _STATE_MESSAGES.get(status, "Remote session has ended"),
+                    "session_status": status,
+                }
+            ),
+            409,
+        )
+
+    # Active state: allowed
+    return None
+
+
 # Module-level audit logger instance
 audit_logger = AuditLogger()
 
@@ -151,16 +277,42 @@ def load_user():
 
 @remote_bp.after_request
 def add_security_headers(response: Response) -> Response:
-    """Add security headers for responses with token in query parameters.
+    """Add security headers for responses with token in query parameters or body.
 
     Issue #1896: Set Referrer-Policy and Cache-Control headers to prevent
     token leakage through browser history, referer headers, and caches.
+
+    Issue #2532: Also detect sensitive fields in JSON response body
+    (agent_token, registration_token) and add security headers accordingly.
     """
     # Check if request has token in query parameters
     if request.args.get("token"):
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         response.headers.setdefault("Cache-Control", "no-store, no-cache, must-revalidate")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
+
+    # Issue #2532: Check JSON response body for sensitive fields
+    # Only check JSON responses, skip SSE streams and file downloads
+    content_type = response.content_type or ""
+    if content_type.startswith("application/json"):
+        # Skip large responses to avoid performance impact
+        if response.content_length and response.content_length > _SENSITIVE_FIELD_CHECK_MAX_SIZE:
+            return response
+
+        try:
+            data = response.get_json(silent=True)
+            if data and isinstance(data, dict):
+                # Check if response contains sensitive fields
+                if any(key in SENSITIVE_RESPONSE_FIELDS for key in data):
+                    response.headers.setdefault("Referrer-Policy", "no-referrer")
+                    response.headers.setdefault(
+                        "Cache-Control", "no-store, no-cache, must-revalidate"
+                    )
+                    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        except Exception:
+            # Silently skip on JSON parse errors - don't affect normal responses
+            pass
+
     return response
 
 
@@ -193,6 +345,9 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple[Any, Any] | Non
     can still authenticate without a Bearer token, but with an expiry
     deadline and a clear_legacy_mode transition on first Bearer use.
 
+    Note: Callers should validate machine_id format before calling this function.
+    The callers (agent_message, usage_report) already perform UUID validation.
+
     Returns:
         (is_legacy, None) if legacy mode applies.
         (False, error_response) if not legacy and no Bearer provided.
@@ -206,7 +361,10 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple[Any, Any] | Non
         # If this was a legacy machine, clear the flag
         if agent_mgr.is_legacy_machine(machine_id):
             agent_mgr.clear_legacy_mode(machine_id)
-            logger.info("Legacy mode cleared for machine %s after Bearer auth", machine_id[:8])
+            logger.info(
+                "Legacy mode cleared for machine %s after Bearer auth",
+                safe_machine_id_prefix(machine_id),
+            )
         return False, None
 
     # No Bearer header — check if legacy mode is allowed
@@ -237,7 +395,7 @@ def _check_legacy_fallback(machine_id: str) -> tuple[bool, tuple[Any, Any] | Non
 
     logger.warning(
         "Legacy auth (no Bearer) accepted for machine %s — deadline approaching",
-        machine_id[:8],
+        safe_machine_id_prefix(machine_id),
     )
     return True, None
 
@@ -468,16 +626,133 @@ def _extract_machine_id():
     return machine_id
 
 
+# Issue #2540: UUID pattern for machine_id validation
+_UUID_PATTERN = re.compile(
+    r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", re.IGNORECASE
+)
+
+
+def _validate_machine_id_format(machine_id: Any) -> tuple[bool, tuple | None]:
+    """Validate machine_id is a valid UUID string.
+
+    Issue #2540: Prevents int/float/invalid-string inputs that would cause
+    TypeError in slice operations (machine_id[:8]).
+
+    Args:
+        machine_id: The machine_id value to validate.
+
+    Returns:
+        (True, None) if valid UUID string.
+        (False, error_response) if invalid format.
+    """
+    if machine_id is None:
+        return False, (
+            jsonify(
+                {
+                    "error": "machine_id must be a valid UUID string",
+                    "hint": "use 'machine_id' field (UUID) from GET /api/remote/machines, not 'id' (integer)",
+                }
+            ),
+            400,
+        )
+
+    # Must be a string
+    if not isinstance(machine_id, str):
+        return False, (
+            jsonify(
+                {
+                    "error": "machine_id must be a valid UUID string",
+                    "hint": "use 'machine_id' field (UUID) from GET /api/remote/machines, not 'id' (integer)",
+                }
+            ),
+            400,
+        )
+
+    # Must match UUID format
+    if not _UUID_PATTERN.match(machine_id):
+        return False, (
+            jsonify(
+                {
+                    "error": "machine_id must be a valid UUID string",
+                    "hint": "use 'machine_id' field (UUID) from GET /api/remote/machines, not 'id' (integer)",
+                }
+            ),
+            400,
+        )
+
+    return True, None
+
+
+def safe_machine_id_prefix(machine_id: Any) -> str:
+    """Safely extract first 8 chars of machine_id for logging/display.
+
+    Issue #2540: Type-safe slice to prevent TypeError when machine_id
+    is not a string (e.g., int passed instead of UUID string).
+
+    Args:
+        machine_id: Any value (expected to be UUID string, but may be int/None).
+
+    Returns:
+        First 8 characters of string representation, or "unknown" if None/empty.
+    """
+    if not machine_id:
+        return "unknown"
+    return str(machine_id)[:8]
+
+
 def _check_machine_access(machine_id):
-    """Check if user has access to machine. Returns error or None."""
+    """Check if user has access to machine. Returns error or None.
+
+    Issue #2538: Added tenant isolation check for unassigned users.
+    Issue #2540: Added UUID format validation to prevent TypeError.
+    """
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
+
+    # Issue #2540: Validate machine_id is a valid UUID string
+    is_valid, format_error = _validate_machine_id_format(machine_id)
+    if not is_valid:
+        return format_error
+
     if User.is_admin_role(g.user.get("role")):
         return None
+
     mgr = get_remote_agent_manager()
-    if not mgr.check_user_access(machine_id, g.user["id"]):
-        return jsonify({"error": "Permission denied"}), 403
-    return None
+
+    # Get machine data first for tenant isolation check
+    machine = mgr.get_machine(machine_id)
+    if not machine:
+        return jsonify({"error": "Machine not found"}), 404
+
+    # Check if user is assigned to this machine
+    # Assigned users have explicit permission and should not be blocked by tenant isolation
+    # Issue #2538: Machine admins are granted access through explicit assignment,
+    # which is a legitimate cross-tenant access mechanism.
+    user_permission = mgr.get_user_permission(machine_id, g.user["id"])
+    if user_permission and user_permission in ("admin", "user"):
+        # User is explicitly assigned - allow access regardless of tenant
+        return None
+
+    # User is not assigned - check tenant isolation before denying access
+    # Issue #2538: Cross-tenant access by unassigned users should return 404
+    machine_tenant_id = machine.get("tenant_id")
+    user_tenant_id = g.user.get("tenant_id")
+
+    if machine_tenant_id is not None:
+        if user_tenant_id is None or machine_tenant_id != user_tenant_id:
+            logger.warning(
+                "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
+                "machine_id=%s, machine_tenant=%s, endpoint=%s",
+                g.user.get("id"),
+                user_tenant_id,
+                machine_id,
+                machine_tenant_id,
+                request.endpoint,
+            )
+            return jsonify({"error": "Machine not found"}), 404
+
+    # User is not assigned and tenant isolation passed - permission denied
+    return jsonify({"error": "Permission denied"}), 403
 
 
 def _check_machine_tenant_access(machine_id: str) -> tuple[dict | None, tuple | None]:
@@ -525,7 +800,29 @@ def _check_machine_tenant_access(machine_id: str) -> tuple[dict | None, tuple | 
             return None, (jsonify({"error": "Machine not found"}), 404)
         return machine, None
 
-    # Non-admin: check user access
+    # Machine admin: check if user has admin permission on this machine
+    # Machine admins are granted access through explicit assignment,
+    # which is a legitimate cross-tenant access mechanism.
+    user_perm = agent_mgr.get_user_permission(machine_id, g.user["id"])
+    if user_perm == "admin":
+        return machine, None
+
+    # Non-admin: check tenant isolation first (Issue #2538)
+    # Ensure cross-tenant access returns 404, not 403
+    if machine_tenant_id is not None:
+        if user_tenant_id is None or machine_tenant_id != user_tenant_id:
+            logger.warning(
+                "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
+                "machine_id=%s, machine_tenant=%s, endpoint=%s",
+                g.user.get("id"),
+                user_tenant_id,
+                machine_id,
+                machine_tenant_id,
+                request.endpoint,
+            )
+            return None, (jsonify({"error": "Machine not found"}), 404)
+
+    # Then check user assignment
     if not agent_mgr.check_user_access(machine_id, g.user["id"]):
         return None, (jsonify({"error": "Permission denied"}), 403)
 
@@ -1132,20 +1429,19 @@ def get_remote_session(session_id):
                 if not (_msg_role(m) == "user" and is_qwen_system_context(_msg_content(m)))
             ]
 
-        # Return explicit error for ended sessions so frontend can handle properly
+        # Issue #2531: Return explicit error for ended/paused sessions with 409 status
         status = result.get("status")
-        if status in ("completed", "stopped", "error"):
-            status_messages = {
-                "completed": "Remote session has ended",
-                "stopped": "Remote session has been stopped",
-                "error": "Remote session encountered an error",
-            }
-            return jsonify(
-                {
-                    "success": False,
-                    "session": result,
-                    "error": status_messages.get(status, "Remote session has ended"),
-                }
+        if status in _ENDED_STATES or status in _PAUSED_STATES:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "session": result,
+                        "error": _STATE_MESSAGES.get(status, "Remote session has ended"),
+                        "session_status": status,
+                    }
+                ),
+                409,
             )
         return jsonify({"success": True, "session": result})
     return jsonify({"error": "Session not found"}), 404
@@ -1155,9 +1451,15 @@ def get_remote_session(session_id):
 def send_remote_message(session_id):
     """Send a message to a remote session."""
 
-    _, access_error = _check_session_access(session_id)
+    session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Check session state before sending message
+    if ENABLE_SESSION_STATE_CHECK:
+        state_error = _check_session_state(session_info, "send_message")
+        if state_error:
+            return state_error
 
     data = request.get_json() or {}
     content = data.get("content", "")
@@ -1190,9 +1492,15 @@ def send_remote_message(session_id):
 def update_remote_session_model(session_id):
     """Switch the model of an active remote session."""
 
-    _, access_error = _check_session_access(session_id)
+    session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Check session state before updating model
+    if ENABLE_SESSION_STATE_CHECK:
+        state_error = _check_session_state(session_info, "update_model")
+        if state_error:
+            return state_error
 
     data = request.get_json() or {}
     model = data.get("model")
@@ -1211,9 +1519,22 @@ def update_remote_session_model(session_id):
 def abort_remote_request(session_id):
     """Abort the current in-progress request without stopping the session."""
 
-    _, access_error = _check_session_access(session_id)
+    session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Idempotent handling for ended sessions
+    if ENABLE_SESSION_STATE_CHECK:
+        status = session_info.get("status")
+        # Only ended sessions return success immediately (idempotent)
+        if status in _ENDED_STATES:
+            return jsonify({"success": True})
+        # Log unknown status but continue with underlying method
+        if status is None or status not in _KNOWN_STATES:
+            logger.error(
+                "Attempted abort on unknown status session %s",
+                session_id[:8],
+            )
 
     payload = request.get_json(silent=True) or {}
     reason = payload.get("reason", "user")
@@ -1230,9 +1551,23 @@ def abort_remote_request(session_id):
 def stop_remote_session(session_id):
     """Stop a remote session."""
 
-    _, access_error = _check_session_access(session_id)
+    session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Idempotent handling for ended/paused sessions
+    if ENABLE_SESSION_STATE_CHECK:
+        status = session_info.get("status")
+        # Ended sessions: already stopped, return success (idempotent)
+        if status in _ENDED_STATES:
+            return jsonify({"success": True})
+        # Paused sessions: can be stopped (will unbind machine_id)
+        # Unknown status: log and continue with underlying method
+        if status is None or status not in _KNOWN_STATES:
+            logger.error(
+                "Attempted stop on unknown status session %s",
+                session_id[:8],
+            )
 
     session_mgr = get_remote_session_manager()
     success = session_mgr.stop_session(session_id)
@@ -1246,9 +1581,15 @@ def stop_remote_session(session_id):
 def pause_remote_session(session_id):
     """Pause a remote session."""
 
-    _, access_error = _check_session_access(session_id)
+    session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Check session state before pausing
+    if ENABLE_SESSION_STATE_CHECK:
+        state_error = _check_session_state(session_info, "pause_session")
+        if state_error:
+            return state_error
 
     session_mgr = get_remote_session_manager()
     success = session_mgr.pause_session(session_id)
@@ -1262,9 +1603,15 @@ def pause_remote_session(session_id):
 def resume_remote_session(session_id):
     """Resume a paused remote session."""
 
-    _, access_error = _check_session_access(session_id)
+    session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Check session state before resuming
+    if ENABLE_SESSION_STATE_CHECK:
+        state_error = _check_session_state(session_info, "resume_session")
+        if state_error:
+            return state_error
 
     session_mgr = get_remote_session_manager()
     success = session_mgr.resume_session(session_id)
@@ -1292,6 +1639,12 @@ def send_permission_response(session_id):
     session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Check session state before sending permission response
+    if ENABLE_SESSION_STATE_CHECK:
+        state_error = _check_session_state(session_info, "send_permission_response")
+        if state_error:
+            return state_error
 
     data = request.get_json() or {}
     request_id = data.get("request_id")
@@ -1342,6 +1695,12 @@ def send_interaction_response(session_id):
     session_info, access_error = _check_session_access(session_id)
     if access_error:
         return access_error
+
+    # Issue #2531: Check session state before sending interaction response
+    if ENABLE_SESSION_STATE_CHECK:
+        state_error = _check_session_state(session_info, "send_interaction_response")
+        if state_error:
+            return state_error
 
     data = request.get_json() or {}
     msg_id = data.get("msg_id")
@@ -1745,6 +2104,11 @@ def agent_message():
 
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
+
+    # Issue #2540: Validate machine_id is a valid UUID string
+    is_valid, format_error = _validate_machine_id_format(machine_id)
+    if not is_valid:
+        return format_error
 
     # ===== Bearer token authentication =====
     # All message types except "register" require a valid Bearer token
@@ -2219,7 +2583,7 @@ def agent_message():
             if not agent_mgr.is_connected(machine_id):
                 logger.warning(
                     "session_sync: machine %s is not connected, skipping user_id resolution",
-                    machine_id[:8],
+                    safe_machine_id_prefix(machine_id),
                 )
             else:
                 try:
@@ -2241,7 +2605,7 @@ def agent_message():
                 except Exception as e:
                     logger.warning(
                         "Failed to resolve user_id from machine_assignments for machine=%s: %s",
-                        machine_id[:8],
+                        safe_machine_id_prefix(machine_id),
                         e,
                     )
 
@@ -2254,7 +2618,7 @@ def agent_message():
                     tool_name=tool_name,
                     project_path=project_path or "",
                     model=model,
-                    host_name=machine_id[:8],
+                    host_name=safe_machine_id_prefix(machine_id),
                     user_id=sync_user_id,
                     context={
                         "workspace_type": "terminal",
@@ -2417,7 +2781,7 @@ def agent_message():
                                     (
                                         date_str,
                                         tool_name,
-                                        machine_id[:8],
+                                        safe_machine_id_prefix(machine_id),
                                         message_id,
                                         role,
                                         content[:MAX_MESSAGE_LENGTH],
@@ -2446,7 +2810,7 @@ def agent_message():
                                     (
                                         date_str,
                                         tool_name,
-                                        machine_id[:8],
+                                        safe_machine_id_prefix(machine_id),
                                         message_id,
                                         role,
                                         content[:MAX_MESSAGE_LENGTH],
@@ -2539,8 +2903,16 @@ def start_terminal():
     # Get machine info for title/hostname
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
-    machine_name = machine.get("machine_name", machine_id[:8]) if machine else machine_id[:8]
-    hostname = machine.get("hostname", machine_id[:8]) if machine else machine_id[:8]
+    machine_name = (
+        machine.get("machine_name", safe_machine_id_prefix(machine_id))
+        if machine
+        else safe_machine_id_prefix(machine_id)
+    )
+    hostname = (
+        machine.get("hostname", safe_machine_id_prefix(machine_id))
+        if machine
+        else safe_machine_id_prefix(machine_id)
+    )
     tenant_id = machine.get("tenant_id", 1) if machine else 1
 
     # Generate terminal ID and proxy tokens for multiple providers
@@ -2713,8 +3085,16 @@ def start_cli_terminal():
 
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
-    machine_name = machine.get("machine_name", machine_id[:8]) if machine else machine_id[:8]
-    hostname = machine.get("hostname", machine_id[:8]) if machine else machine_id[:8]
+    machine_name = (
+        machine.get("machine_name", safe_machine_id_prefix(machine_id))
+        if machine
+        else safe_machine_id_prefix(machine_id)
+    )
+    hostname = (
+        machine.get("hostname", safe_machine_id_prefix(machine_id))
+        if machine
+        else safe_machine_id_prefix(machine_id)
+    )
     tenant_id = machine.get("tenant_id", 1) if machine else 1
     terminal_id = str(uuid.uuid4())
 
@@ -2848,6 +3228,27 @@ def attach_terminal(terminal_id):
     # Check access
     agent_mgr = get_remote_agent_manager()
     if not User.is_admin_role(g.user.get("role")):
+        # Issue #2538: Tenant isolation check before permission check
+        machine = agent_mgr.get_machine(machine_id)
+        if not machine:
+            return jsonify({"error": "Machine not found"}), 404
+
+        machine_tenant_id = machine.get("tenant_id")
+        user_tenant_id = g.user.get("tenant_id")
+
+        if machine_tenant_id is not None:
+            if user_tenant_id is None or machine_tenant_id != user_tenant_id:
+                logger.warning(
+                    "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
+                    "machine_id=%s, machine_tenant=%s, endpoint=%s",
+                    g.user.get("id"),
+                    user_tenant_id,
+                    machine_id,
+                    machine_tenant_id,
+                    request.endpoint,
+                )
+                return jsonify({"error": "Machine not found"}), 404
+
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -2977,7 +3378,7 @@ def get_terminal_status(terminal_id):
     logger.info(
         "get_terminal_status: terminal=%s, machine=%s, has_proxy_token=%s",
         terminal_id[:8],
-        machine_id[:8],
+        safe_machine_id_prefix(machine_id),
         bool(proxy_token),
     )
 
@@ -2994,6 +3395,27 @@ def get_terminal_status(terminal_id):
 
     # Standard user authentication
     if not User.is_admin_role(g.user.get("role")):
+        # Issue #2538: Tenant isolation check before permission check
+        machine = agent_mgr.get_machine(machine_id)
+        if not machine:
+            return jsonify({"error": "Machine not found"}), 404
+
+        machine_tenant_id = machine.get("tenant_id")
+        user_tenant_id = g.user.get("tenant_id")
+
+        if machine_tenant_id is not None:
+            if user_tenant_id is None or machine_tenant_id != user_tenant_id:
+                logger.warning(
+                    "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
+                    "machine_id=%s, machine_tenant=%s, endpoint=%s",
+                    g.user.get("id"),
+                    user_tenant_id,
+                    machine_id,
+                    machine_tenant_id,
+                    request.endpoint,
+                )
+                return jsonify({"error": "Machine not found"}), 404
+
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -3405,6 +3827,12 @@ def usage_report():
     machine_id = data.get("machine_id")
     if not machine_id:
         return jsonify({"error": "machine_id is required"}), 400
+
+    # Issue #2540: Validate machine_id is a valid UUID string
+    is_valid, format_error = _validate_machine_id_format(machine_id)
+    if not is_valid:
+        return format_error
+
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
     if not machine:
@@ -3438,7 +3866,10 @@ def usage_report():
             return bearer_error
         if agent_mgr.is_legacy_machine(machine_id):
             agent_mgr.clear_legacy_mode(machine_id)
-            logger.info("Legacy mode cleared for machine %s after Bearer auth", machine_id[:8])
+            logger.info(
+                "Legacy mode cleared for machine %s after Bearer auth",
+                safe_machine_id_prefix(machine_id),
+            )
     else:
         _, legacy_error = _check_legacy_fallback(machine_id)
         if legacy_error:
@@ -3456,7 +3887,7 @@ def usage_report():
             return legacy_error
         logger.warning(
             "Usage report accepted for legacy machine %s (no Bearer token)",
-            machine_id[:8],
+            safe_machine_id_prefix(machine_id),
         )
     return _process_authenticated_usage_report(data, machine_id, client_ip)
 
@@ -3568,6 +3999,27 @@ def create_remote_directory(machine_id):
     agent_mgr = get_remote_agent_manager()
 
     if not User.is_admin_role(g.user.get("role")):
+        # Issue #2538: Tenant isolation check before permission check
+        machine = agent_mgr.get_machine(machine_id)
+        if not machine:
+            return jsonify({"error": "Machine not found"}), 404
+
+        machine_tenant_id = machine.get("tenant_id")
+        user_tenant_id = g.user.get("tenant_id")
+
+        if machine_tenant_id is not None:
+            if user_tenant_id is None or machine_tenant_id != user_tenant_id:
+                logger.warning(
+                    "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
+                    "machine_id=%s, machine_tenant=%s, endpoint=%s",
+                    g.user.get("id"),
+                    user_tenant_id,
+                    machine_id,
+                    machine_tenant_id,
+                    request.endpoint,
+                )
+                return jsonify({"error": "Machine not found"}), 404
+
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -3660,6 +4112,27 @@ def _dispatch_remote_git_command(machine_id, command, required_params):
     agent_mgr = get_remote_agent_manager()
 
     if not User.is_admin_role(g.user.get("role")):
+        # Issue #2538: Tenant isolation check before permission check
+        machine = agent_mgr.get_machine(machine_id)
+        if not machine:
+            return jsonify({"error": "Machine not found"}), 404
+
+        machine_tenant_id = machine.get("tenant_id")
+        user_tenant_id = g.user.get("tenant_id")
+
+        if machine_tenant_id is not None:
+            if user_tenant_id is None or machine_tenant_id != user_tenant_id:
+                logger.warning(
+                    "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
+                    "machine_id=%s, machine_tenant=%s, endpoint=%s",
+                    g.user.get("id"),
+                    user_tenant_id,
+                    machine_id,
+                    machine_tenant_id,
+                    request.endpoint,
+                )
+                return jsonify({"error": "Machine not found"}), 404
+
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -3828,6 +4301,27 @@ def remote_vscode_status(vscode_id):
     machine_id, info = found
 
     if not User.is_admin_role(g.user.get("role")):
+        # Issue #2538: Tenant isolation check before permission check
+        machine = agent_mgr.get_machine(machine_id)
+        if not machine:
+            return jsonify({"error": "Machine not found"}), 404
+
+        machine_tenant_id = machine.get("tenant_id")
+        user_tenant_id = g.user.get("tenant_id")
+
+        if machine_tenant_id is not None:
+            if user_tenant_id is None or machine_tenant_id != user_tenant_id:
+                logger.warning(
+                    "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
+                    "machine_id=%s, machine_tenant=%s, endpoint=%s",
+                    g.user.get("id"),
+                    user_tenant_id,
+                    machine_id,
+                    machine_tenant_id,
+                    request.endpoint,
+                )
+                return jsonify({"error": "Machine not found"}), 404
+
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 
@@ -3863,6 +4357,27 @@ def remote_vscode_attach(vscode_id):
         return jsonify({"success": False, "error": "machine_id is required"}), 400
 
     if not User.is_admin_role(g.user.get("role")):
+        # Issue #2538: Tenant isolation check before permission check
+        machine = agent_mgr.get_machine(machine_id)
+        if not machine:
+            return jsonify({"error": "Machine not found"}), 404
+
+        machine_tenant_id = machine.get("tenant_id")
+        user_tenant_id = g.user.get("tenant_id")
+
+        if machine_tenant_id is not None:
+            if user_tenant_id is None or machine_tenant_id != user_tenant_id:
+                logger.warning(
+                    "Cross-tenant access denied: user_id=%s, user_tenant=%s, "
+                    "machine_id=%s, machine_tenant=%s, endpoint=%s",
+                    g.user.get("id"),
+                    user_tenant_id,
+                    machine_id,
+                    machine_tenant_id,
+                    request.endpoint,
+                )
+                return jsonify({"error": "Machine not found"}), 404
+
         if not agent_mgr.check_user_access(machine_id, g.user["id"]):
             return jsonify({"error": "Access denied"}), 403
 

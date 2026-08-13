@@ -75,11 +75,12 @@ def check_session_access(
     # Fail closed: a non-admin with no tenant cannot be tenant-scoped. Previously
     # a null tenant_id silently skipped the cross-tenant check and fell through to
     # the (untenant-scoped) machine-admin branch, leaking cross-tenant sessions.
+    # Issue #2538: Return 404 instead of 403 to avoid leaking session existence.
     if current_tenant_id in (None, ""):
-        return None, (jsonify({"error": "Access denied"}), 403)
+        return None, (jsonify({"error": "Session not found"}), 404)
     session = session_mgr._session_manager.get_session(session_id, tenant_id=current_tenant_id)
     if session and current_tenant_id != session.tenant_id:
-        return None, (jsonify({"error": "Access denied"}), 403)
+        return None, (jsonify({"error": "Session not found"}), 404)
     if session and session.user_id == g.user["id"]:
         return status, None
     # Machine admin
@@ -89,7 +90,7 @@ def check_session_access(
         perm = mgr.get_user_permission(mid, g.user["id"])
         if perm == "admin":
             return status, None
-    return None, (jsonify({"error": "Access denied"}), 403)
+    return None, (jsonify({"error": "Session not found"}), 404)
 
 
 # ── shared remote-user loading ────────────────────────────────────────────

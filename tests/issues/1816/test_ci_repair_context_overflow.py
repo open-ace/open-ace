@@ -541,8 +541,14 @@ def test_cap_round_commit_failure_does_not_create_summary_or_enter_report():
     orch._get_gh = MagicMock(return_value=orch._gh)
     orch._gh.get_current_branch.return_value = wf["branch_name"]
     orch._gh.get_diff_stats.return_value = {"commits": 1}
-    orch._gh.has_uncommitted_changes.side_effect = [False, True]
-    orch._gh.get_current_commit.side_effect = ["sha-before", "sha-before"]
+    # Three has_uncommitted_changes() probes fire before the salvage commit:
+    # (1) phases/pr_review.py clean-tree precheck, (2) the dirty-tree staging
+    # precheck in _apply_pr_review_fix, (3) the post-agent salvage check. Only
+    # (3)=True drives the salvage git_commit that this test wants to fail, so
+    # (1) and (2) must be False — otherwise the staging git_commit raises first
+    # and hits pause_fix (status=paused) instead of fail_fix (status=failed).
+    orch._gh.has_uncommitted_changes.side_effect = [False, False, True]
+    orch._gh.get_current_commit.return_value = "sha-before"
     orch._gh.git_commit.side_effect = RuntimeError("commit denied")
 
     def run_git(args, check=True):

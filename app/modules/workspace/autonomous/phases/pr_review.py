@@ -712,6 +712,34 @@ def handle(ctx, deps) -> PhaseResult:
             )
         summary_text = host.artifact_text(summary_result)
         if not summary_text.strip():
+            # A --resumed session whose last turn already ended can synthesize
+            # an empty "No response requested" terminal result (0 tokens) — a
+            # transient resume no-op, not a genuine failure (the run itself
+            # succeeded). Retry ONCE with a brand-new session (session_line=
+            # "fresh"), which cannot no-op because it isn't resuming. The
+            # summary prompt embeds the last review inline, so a fresh session
+            # still has what it needs. Genuine failures / overflows / integrity
+            # violations are handled above and never reach here.
+            retry_result = host.run_agent_with_context_recovery(
+                wf=wf,
+                workflow_id=host.workflow_id,
+                cli_tool=wf.get("cli_tool", "claude-code"),
+                model=wf.get("model", ""),
+                project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+                prompt=summary_prompt,
+                workspace_type=wf.get("workspace_type", "local"),
+                remote_machine_id=wf.get("remote_machine_id"),
+                permission_mode=wf.get("permission_mode", "auto-edit"),
+                allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
+                    wf.get("cli_tool", "claude-code"), []
+                ),
+                session_line="fresh",
+                milestone_id=summary_ms.get("milestone_id", ""),
+            )
+            host.accumulate_tokens(retry_result)
+            summary_result = retry_result
+            summary_text = host.artifact_text(summary_result)
+        if not summary_text.strip():
             message = "PR review summary agent returned no result"
             repo.update_milestone(
                 summary_ms.get("milestone_id", ""),
