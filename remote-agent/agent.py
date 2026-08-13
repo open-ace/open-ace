@@ -38,7 +38,11 @@ logger = logging.getLogger("openace-agent")
 
 # Issue #2588: Configurable timeout for VS Code port reading
 # Allows adjustment for different network environments and startup speeds
-VSCODE_PORT_READ_TIMEOUT = float(os.environ.get("OPENACE_VSCODE_PORT_TIMEOUT", "30.0"))
+# Minimum 1 second to prevent invalid values
+VSCODE_PORT_READ_TIMEOUT = max(
+    1.0,
+    float(os.environ.get("OPENACE_VSCODE_PORT_TIMEOUT", "30.0"))
+)
 
 
 def get_local_ip() -> str:
@@ -2219,9 +2223,7 @@ class RemoteAgent:
                 # Try to read stderr for error message
                 stderr_output = ""
                 try:
-                    # Read with a small timeout to avoid blocking forever
-                    import select as _select
-                    # Try to read available data from stderr
+                    # Use a thread to avoid blocking when reading stderr
                     if proc.stderr:
                         # Use a thread to avoid blocking
                         stderr_reader_result = []
@@ -2281,7 +2283,8 @@ class RemoteAgent:
             self._vscode_passwords.pop(vscode_id, None)
             self._send_vscode_status(vscode_id, "error", error=str(e))
 
-    def _read_vscode_port(self, proc: subprocess.Popen, vscode_id: str) -> int | None:
+    @staticmethod
+    def _read_vscode_port(proc: subprocess.Popen, vscode_id: str) -> int | None:
         """Read stdout/stderr from code-server process until a URL with port is found.
 
         Issue #2588: Uses concurrent threads to read both stdout and stderr,
@@ -2289,6 +2292,9 @@ class RemoteAgent:
 
         Uses a continuous consumption strategy to prevent pipe buffer from filling up
         and blocking the code-server process.
+
+        Note: This is a static method to allow easier testing without requiring
+        a full RemoteAgent instance.
         """
         import re
 

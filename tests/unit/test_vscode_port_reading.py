@@ -122,8 +122,8 @@ class TestReadVSCodePort(unittest.TestCase):
         ]
         mock_proc = self._create_mock_proc(stdout_lines=stdout_lines)
 
-        # Access the method via class
-        port = RemoteAgent._read_vscode_port(None, mock_proc, "test-vscode")
+        # Call static method directly
+        port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
         self.assertEqual(port, 12345)
 
@@ -138,7 +138,7 @@ class TestReadVSCodePort(unittest.TestCase):
         ]
         mock_proc = self._create_mock_proc(stderr_lines=stderr_lines)
 
-        port = RemoteAgent._read_vscode_port(None, mock_proc, "test-vscode")
+        port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
         self.assertEqual(port, 54321)
 
