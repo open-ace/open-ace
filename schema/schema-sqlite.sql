@@ -810,7 +810,8 @@ CREATE TABLE remote_machines (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  last_heartbeat TIMESTAMP,
- legacy_mode INTEGER DEFAULT 0
+ legacy_mode INTEGER DEFAULT 0,
+ token_revoke_timeout integer DEFAULT 300
 );
 
 CREATE TABLE remote_runtime_commands (

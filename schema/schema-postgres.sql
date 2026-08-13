@@ -157,7 +157,10 @@ CREATE TABLE agent_tokens (
     revoked_at timestamp without time zone,
     revoked_by integer,
     rotated_at timestamp without time zone,
-    token_version bigint DEFAULT '0'::bigint NOT NULL
+    token_version bigint DEFAULT '0'::bigint NOT NULL,
+    pending_revoke boolean DEFAULT false NOT NULL,
+    revoke_after timestamp without time zone,
+    rotation_id character varying(36)
 );
 
 CREATE SEQUENCE agent_tokens_id_seq
