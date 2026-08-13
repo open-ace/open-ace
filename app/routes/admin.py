@@ -410,7 +410,7 @@ def api_update_user_quota(user_id):
     For quota increases, it uses pessimistic locking to ensure concurrent safety.
     For quota decreases, it bypasses the tenant allocation check.
     """
-    from app.repositories.database import Database, adapt_sql
+    from app.repositories.database import Database
 
     data = request.get_json() or {}
 
@@ -842,7 +842,6 @@ def api_quota_health_check():
             } (optional)
         }
     """
-    from app.repositories.database import Database
     from app.services.tenant_service import TenantService
 
     data = request.get_json(silent=True) or {}
