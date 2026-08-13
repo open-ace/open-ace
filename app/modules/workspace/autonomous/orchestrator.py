@@ -11007,7 +11007,39 @@ class AutonomousOrchestrator:
             return fail_fix(message, fix_result)
 
         if not self._artifact_text(fix_result).strip():
-            return fail_fix("PR review fix agent returned no result", fix_result)
+            # A --resumed session whose last turn already ended can synthesize
+            # an empty "No response requested" terminal result (0 tokens) — a
+            # transient resume no-op, not a genuine failure (the run itself
+            # succeeded). Retry ONCE with a brand-new session (session_line=
+            # "fresh"), which cannot no-op because it isn't resuming. The fix
+            # prompt embeds the review feedback inline, so a fresh session
+            # still has what it needs. Mirrors the pr_review summary-agent
+            # backstop (#2570, commit fb680a17). Genuine failures / overflows /
+            # integrity violations are handled above and never reach here.
+            logger.warning(
+                "Workflow %s: PR review fix agent returned no result on main "
+                "session; retrying once on a fresh session",
+                self._workflow_id[:8],
+            )
+            fix_result = self._run_agent_with_context_recovery(
+                wf=wf,
+                workflow_id=self._workflow_id,
+                cli_tool=wf.get("cli_tool", "claude-code"),
+                model=wf.get("model", ""),
+                project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+                prompt=fix_prompt,
+                workspace_type=wf.get("workspace_type", "local"),
+                remote_machine_id=wf.get("remote_machine_id"),
+                permission_mode=wf.get("permission_mode", "auto-edit"),
+                allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
+                    wf.get("cli_tool", "claude-code"), []
+                ),
+                session_line="fresh",
+                milestone_id=fix_ms.get("milestone_id", ""),
+            )
+            self._accumulate_tokens(fix_result)
+            if not self._artifact_text(fix_result).strip():
+                return fail_fix("PR review fix agent returned no result", fix_result)
 
         # Clear user feedback after it has been injected into the prompt
         if wf.get("user_feedback", "").strip():
