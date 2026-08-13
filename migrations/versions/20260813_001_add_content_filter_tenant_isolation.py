@@ -146,7 +146,7 @@ def upgrade() -> None:
                         tenant_id = NULL,
                         category = :category,
                         status = 'active',
-                        metadata = :metadata::json
+                        metadata = CAST(:metadata AS json)
                     WHERE pattern = :pattern
                       AND (source IS NULL OR source = 'user')
                     """
@@ -245,7 +245,11 @@ def upgrade() -> None:
             op.create_table(
                 "filter_rule_approvals",
                 sa.Column("id", sa.Integer(), primary_key=True),
-                sa.Column("rule_id", sa.Integer(), sa.ForeignKey("content_filter_rules.id", ondelete="CASCADE")),
+                sa.Column(
+                    "rule_id",
+                    sa.Integer(),
+                    sa.ForeignKey("content_filter_rules.id", ondelete="CASCADE"),
+                ),
                 sa.Column("approver_id", sa.Integer(), sa.ForeignKey("users.id")),
                 sa.Column("action", sa.String(20), nullable=False),
                 sa.Column("comment", sa.Text()),
