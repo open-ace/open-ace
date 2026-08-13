@@ -114,10 +114,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Remove parse_failure_records table."""
-    # Get database type
-    bind = op.get_bind()
-    dialect = bind.dialect.name
-
     # Drop indexes
     op.drop_index("idx_parse_failure_created_at", table_name="parse_failure_records")
     op.drop_index("idx_parse_failure_unresolved", table_name="parse_failure_records")

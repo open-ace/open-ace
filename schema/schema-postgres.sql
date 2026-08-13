@@ -229,6 +229,24 @@ CREATE SEQUENCE ai_agent_settings_id_seq
     CACHE 1;
 
 ALTER SEQUENCE ai_agent_settings_id_seq OWNED BY ai_agent_settings.id;
+CREATE TABLE alert_creation_failures (
+    id integer NOT NULL,
+    alert_data text NOT NULL,
+    retry_count integer DEFAULT 0,
+    last_retry_at timestamp without time zone,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    status text DEFAULT 'pending'::text
+);
+
+CREATE SEQUENCE alert_creation_failures_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE alert_creation_failures_id_seq OWNED BY alert_creation_failures.id;
 CREATE TABLE alerts (
     id integer NOT NULL,
     alert_id text NOT NULL,
@@ -442,7 +460,6 @@ CREATE TABLE autonomous_workflows (
     dev_round integer DEFAULT 1,
     max_plan_rounds integer DEFAULT 3,
     max_pr_review_rounds integer DEFAULT 5,
-    require_full_review_rounds boolean DEFAULT false,
     total_tokens integer DEFAULT 0,
     total_input_tokens integer DEFAULT 0,
     total_output_tokens integer DEFAULT 0,
@@ -472,6 +489,7 @@ CREATE TABLE autonomous_workflows (
     locked_by text DEFAULT ''::text,
     transient_retry_count integer DEFAULT 0,
     retry_count integer DEFAULT 0,
+    require_full_review_rounds boolean DEFAULT false NOT NULL,
     test_retries integer DEFAULT 0,
     skip_retries integer DEFAULT 0,
     dev_retries_on_test_fail integer DEFAULT 0,
@@ -581,7 +599,6 @@ CREATE TABLE compliance_reports (
 );
 
 CREATE SEQUENCE compliance_reports_id_seq
-    AS integer
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -871,6 +888,14 @@ CREATE SEQUENCE machine_assignments_id_seq
     CACHE 1;
 
 ALTER SEQUENCE machine_assignments_id_seq OWNED BY machine_assignments.id;
+CREATE TABLE migration_metadata (
+    migration_id character varying(100) NOT NULL,
+    migration_name character varying(200) NOT NULL,
+    applied_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    checksum character varying(64),
+    details jsonb
+);
+
 CREATE TABLE model_gateway_config (
     id integer NOT NULL,
     mode text DEFAULT 'direct'::text,
@@ -903,6 +928,20 @@ CREATE TABLE notification_preferences (
     notification_email text,
     email_verified boolean DEFAULT false,
     dingtalk_webhook_secret text
+);
+
+CREATE TABLE parse_failure_records (
+    id character varying(64) NOT NULL,
+    session_id character varying(64) NOT NULL,
+    tool_use_id character varying(128) NOT NULL,
+    tool_name character varying(64) NOT NULL,
+    tool_input text NOT NULL,
+    error text NOT NULL,
+    "timestamp" timestamp with time zone NOT NULL,
+    retry_count integer DEFAULT 0 NOT NULL,
+    last_retry_at timestamp with time zone,
+    resolved boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone NOT NULL
 );
 
 CREATE TABLE policy_decisions (
@@ -1412,11 +1451,6 @@ CREATE SEQUENCE scheduler_runs_id_seq
     CACHE 1;
 
 ALTER SEQUENCE scheduler_runs_id_seq OWNED BY scheduler_runs.id;
-CREATE TABLE schema_metadata (
-    initialized_at timestamp without time zone DEFAULT now() NOT NULL,
-    schema_version character varying(64)
-);
-
 CREATE TABLE security_settings (
     id integer NOT NULL,
     setting_key character varying(100) NOT NULL,
@@ -1462,22 +1496,22 @@ CREATE SEQUENCE session_messages_id_seq
 
 ALTER SEQUENCE session_messages_id_seq OWNED BY session_messages.id;
 CREATE MATERIALIZED VIEW session_stats AS
- SELECT agent_session_id AS session_id,
-    tool_name,
-    host_name,
-    sender_name,
-    max((sender_id)::text) AS sender_id,
-    max((date)::text) AS date,
+ SELECT daily_messages.agent_session_id AS session_id,
+    daily_messages.tool_name,
+    daily_messages.host_name,
+    daily_messages.sender_name,
+    max((daily_messages.sender_id)::text) AS sender_id,
+    max((daily_messages.date)::text) AS date,
     count(*) AS message_count,
-    sum(tokens_used) AS total_tokens,
-    sum(input_tokens) AS total_input_tokens,
-    sum(output_tokens) AS total_output_tokens,
-    min("timestamp") AS created_at,
-    max("timestamp") AS updated_at,
-    max(project_path) AS project_path
+    sum(daily_messages.tokens_used) AS total_tokens,
+    sum(daily_messages.input_tokens) AS total_input_tokens,
+    sum(daily_messages.output_tokens) AS total_output_tokens,
+    min(daily_messages."timestamp") AS created_at,
+    max(daily_messages."timestamp") AS updated_at,
+    max(daily_messages.project_path) AS project_path
    FROM daily_messages
-  WHERE (agent_session_id IS NOT NULL)
-  GROUP BY agent_session_id, tool_name, host_name, sender_name
+  WHERE (daily_messages.agent_session_id IS NOT NULL)
+  GROUP BY daily_messages.agent_session_id, daily_messages.tool_name, daily_messages.host_name, daily_messages.sender_name
   WITH NO DATA;
 
 CREATE TABLE sessions (
@@ -1556,7 +1590,7 @@ CREATE TABLE sso_auth_states (
     provider_name text NOT NULL,
     nonce text,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    expires_at timestamp without time zone DEFAULT (CURRENT_TIMESTAMP + '00:10:00'::interval) NOT NULL
+    expires_at timestamp without time zone NOT NULL
 );
 
 CREATE TABLE sso_identities (
@@ -1793,9 +1827,9 @@ CREATE TABLE tenant_settings (
     custom_branding boolean DEFAULT false,
     branding_name character varying(100),
     branding_logo_url character varying(500),
-    auto_provision_users boolean DEFAULT false,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    auto_provision_users boolean DEFAULT false,
     block_sensitive_keyword boolean DEFAULT false,
     sensitive_keyword_match_mode character varying(50) DEFAULT 'word_boundary'::character varying
 );
@@ -2075,6 +2109,29 @@ CREATE TABLE users (
     CONSTRAINT chk_2332_users_role_valid CHECK (((role)::text = ANY ((ARRAY['platform_admin'::character varying, 'tenant_admin'::character varying, 'manager'::character varying, 'user'::character varying, 'readonly'::character varying])::text[])))
 );
 
+CREATE TABLE users_backup_2332 (
+    id integer,
+    username character varying,
+    password_hash character varying,
+    email character varying,
+    is_admin boolean,
+    is_active boolean,
+    created_at timestamp without time zone,
+    last_login timestamp without time zone,
+    role character varying,
+    daily_token_quota integer,
+    monthly_token_quota integer,
+    daily_request_quota integer,
+    monthly_request_quota integer,
+    deleted_at timestamp without time zone,
+    system_account text,
+    tenant_id integer,
+    must_change_password boolean,
+    avatar_url character varying(500),
+    auto_mapping_enabled boolean,
+    tenant_version integer
+);
+
 CREATE SEQUENCE users_id_seq
     AS integer
     START WITH 1
@@ -2203,6 +2260,8 @@ ALTER TABLE ONLY agent_tokens ALTER COLUMN id SET DEFAULT nextval('agent_tokens_
 ALTER TABLE ONLY aggregation_history ALTER COLUMN id SET DEFAULT nextval('aggregation_history_id_seq'::regclass);
 
 ALTER TABLE ONLY ai_agent_settings ALTER COLUMN id SET DEFAULT nextval('ai_agent_settings_id_seq'::regclass);
+
+ALTER TABLE ONLY alert_creation_failures ALTER COLUMN id SET DEFAULT nextval('alert_creation_failures_id_seq'::regclass);
 
 ALTER TABLE ONLY alerts ALTER COLUMN id SET DEFAULT nextval('alerts_id_seq'::regclass);
 
@@ -2379,6 +2438,9 @@ ALTER TABLE ONLY ai_agent_settings
 ALTER TABLE ONLY ai_agent_settings
     ADD CONSTRAINT ai_agent_settings_setting_key_key UNIQUE (setting_key);
 
+ALTER TABLE ONLY alert_creation_failures
+    ADD CONSTRAINT alert_creation_failures_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY alerts
     ADD CONSTRAINT alerts_alert_id_key UNIQUE (alert_id);
 
@@ -2460,11 +2522,17 @@ ALTER TABLE ONLY machine_assignments
 ALTER TABLE ONLY machine_assignments
     ADD CONSTRAINT machine_assignments_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY migration_metadata
+    ADD CONSTRAINT migration_metadata_pkey PRIMARY KEY (migration_id);
+
 ALTER TABLE ONLY model_gateway_config
     ADD CONSTRAINT model_gateway_config_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY notification_preferences
     ADD CONSTRAINT notification_preferences_pkey PRIMARY KEY (user_id);
+
+ALTER TABLE ONLY parse_failure_records
+    ADD CONSTRAINT parse_failure_records_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY policy_decisions
     ADD CONSTRAINT policy_decisions_pkey PRIMARY KEY (id);
@@ -3146,6 +3214,22 @@ CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones USING btree (w
 --
 
 CREATE INDEX idx_milestones_workflow_round ON workflow_milestones USING btree (workflow_id, dev_round);
+
+CREATE INDEX idx_parse_failure_created_at ON parse_failure_records USING btree (created_at);
+
+
+--
+--
+
+CREATE INDEX idx_parse_failure_session ON parse_failure_records USING btree (session_id);
+
+CREATE INDEX idx_parse_failure_timestamp ON parse_failure_records USING btree ("timestamp");
+
+
+--
+--
+
+CREATE INDEX idx_parse_failure_unresolved ON parse_failure_records USING btree (resolved) WHERE (resolved = false);
 
 CREATE INDEX idx_policy_decisions_fingerprint ON policy_decisions USING btree (fingerprint_hash);
 

@@ -141,6 +141,15 @@ CREATE TABLE ai_agent_settings (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE alert_creation_failures (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ alert_data text NOT NULL,
+ retry_count integer DEFAULT 0,
+ last_retry_at TIMESTAMP,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ status text DEFAULT 'pending'
+);
+
 CREATE TABLE alerts (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  alert_id text NOT NULL,
@@ -282,7 +291,6 @@ CREATE TABLE autonomous_workflows (
  dev_round integer DEFAULT 1,
  max_plan_rounds integer DEFAULT 3,
  max_pr_review_rounds integer DEFAULT 5,
- require_full_review_rounds INTEGER DEFAULT 0,
  total_tokens integer DEFAULT 0,
  total_input_tokens integer DEFAULT 0,
  total_output_tokens integer DEFAULT 0,
@@ -312,6 +320,7 @@ CREATE TABLE autonomous_workflows (
  locked_by text DEFAULT '',
  transient_retry_count integer DEFAULT 0,
  retry_count integer DEFAULT 0,
+ require_full_review_rounds INTEGER DEFAULT 0 NOT NULL,
  test_retries integer DEFAULT 0,
  skip_retries integer DEFAULT 0,
  dev_retries_on_test_fail integer DEFAULT 0,
@@ -587,6 +596,14 @@ CREATE TABLE machine_assignments (
  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE migration_metadata (
+ migration_id TEXT PRIMARY KEY NOT NULL,
+ migration_name TEXT NOT NULL,
+ applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ checksum TEXT,
+ details TEXT
+);
+
 CREATE TABLE model_gateway_config (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  mode text DEFAULT 'direct',
@@ -610,6 +627,20 @@ CREATE TABLE notification_preferences (
  notification_email text,
  email_verified INTEGER DEFAULT 0,
  dingtalk_webhook_secret text
+);
+
+CREATE TABLE parse_failure_records (
+ id TEXT PRIMARY KEY NOT NULL,
+ session_id TEXT NOT NULL,
+ tool_use_id TEXT NOT NULL,
+ tool_name TEXT NOT NULL,
+ tool_input text NOT NULL,
+ error text NOT NULL,
+ "timestamp" TIMESTAMP NOT NULL,
+ retry_count integer DEFAULT 0 NOT NULL,
+ last_retry_at TIMESTAMP,
+ resolved INTEGER DEFAULT 0 NOT NULL,
+ created_at TIMESTAMP NOT NULL
 );
 
 CREATE TABLE policy_decisions (
@@ -948,11 +979,6 @@ CREATE TABLE scheduler_runs (
  leader_host TEXT
 );
 
-CREATE TABLE schema_metadata (
- initialized_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- schema_version TEXT
-);
-
 CREATE TABLE security_settings (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  setting_key TEXT NOT NULL,
@@ -1028,7 +1054,7 @@ CREATE TABLE sso_auth_states (
  provider_name text NOT NULL,
  nonce text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- expires_at TIMESTAMP DEFAULT (datetime('now', '+600 seconds')) NOT NULL
+ expires_at TIMESTAMP NOT NULL
 );
 
 CREATE TABLE sso_identities (
@@ -1161,9 +1187,9 @@ CREATE TABLE tenant_settings (
  custom_branding INTEGER DEFAULT 0,
  branding_name TEXT,
  branding_logo_url TEXT,
- auto_provision_users INTEGER DEFAULT 0,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ auto_provision_users INTEGER DEFAULT 0,
  block_sensitive_keyword INTEGER DEFAULT 0,
  sensitive_keyword_match_mode TEXT DEFAULT 'word_boundary'
 );
@@ -1350,6 +1376,29 @@ CREATE TABLE users (
  tenant_version integer DEFAULT 1 NOT NULL,
     CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
     CONSTRAINT chk_2332_users_role_valid CHECK ((role IN ('platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
+);
+
+CREATE TABLE users_backup_2332 (
+ id integer,
+ username TEXT,
+ password_hash TEXT,
+ email TEXT,
+ is_admin INTEGER,
+ is_active INTEGER,
+ created_at TIMESTAMP,
+ last_login TIMESTAMP,
+ role TEXT,
+ daily_token_quota integer,
+ monthly_token_quota integer,
+ daily_request_quota integer,
+ monthly_request_quota integer,
+ deleted_at TIMESTAMP,
+ system_account text,
+ tenant_id integer,
+ must_change_password INTEGER,
+ avatar_url TEXT,
+ auto_mapping_enabled INTEGER,
+ tenant_version integer
 );
 
 CREATE TABLE web_user_auth_sessions (
@@ -1728,6 +1777,14 @@ CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones (workflow_id, 
 
 CREATE INDEX idx_milestones_workflow_round ON workflow_milestones (workflow_id, dev_round);
 
+CREATE INDEX idx_parse_failure_created_at ON parse_failure_records (created_at);
+
+CREATE INDEX idx_parse_failure_session ON parse_failure_records (session_id);
+
+CREATE INDEX idx_parse_failure_timestamp ON parse_failure_records ("timestamp");
+
+CREATE INDEX idx_parse_failure_unresolved ON parse_failure_records (resolved) WHERE (resolved = false);
+
 CREATE INDEX idx_policy_decisions_fingerprint ON policy_decisions (fingerprint_hash);
 
 CREATE INDEX idx_policy_decisions_request_id ON policy_decisions (request_id);
@@ -1981,3 +2038,4 @@ CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules (rule_key,
 CREATE UNIQUE INDEX uq_projects_path ON projects (tenant_id, path) WHERE (is_active IS TRUE);
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects (user_id, project_id);
+
