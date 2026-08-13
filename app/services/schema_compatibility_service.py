@@ -291,31 +291,15 @@ class SchemaCompatibilityService:
         Returns:
             List of revision IDs, or None if table doesn't exist
         """
+        from app.repositories.schema_guard import _execute_all, _table_exists
+
         # Check if alembic_version table exists
         try:
-            # Use information_schema for PostgreSQL, sqlite_master for SQLite
-            if hasattr(connection, "dialect") and connection.dialect.name == "postgresql":
-                table_exists_query = (
-                    "SELECT EXISTS ("
-                    "SELECT 1 FROM information_schema.tables "
-                    "WHERE table_schema = 'public' AND table_name = 'alembic_version'"
-                    ")"
-                )
-            else:
-                table_exists_query = (
-                    "SELECT EXISTS ("
-                    "SELECT 1 FROM sqlite_master "
-                    "WHERE type='table' AND name='alembic_version'"
-                    ")"
-                )
-
-            result = connection.execute(sa.text(table_exists_query))
-            if not result.scalar():
+            if not _table_exists(connection, "alembic_version"):
                 return None
 
-            # Get all revisions (not just first row)
-            result = connection.execute(sa.text("SELECT version_num FROM alembic_version"))
-            rows = result.fetchall()
+            # Get all revisions (not just first row) — supports multiple heads
+            rows = _execute_all(connection, "SELECT version_num FROM alembic_version")
             return [str(row[0]) for row in rows] if rows else []
 
         except Exception as e:
@@ -608,24 +592,10 @@ class SchemaCompatibilityService:
 
     def _check_schema_metadata_exists(self, connection: Connection) -> bool:
         """Check if schema_metadata table exists (database-level guard)."""
-        try:
-            if hasattr(connection, "dialect") and connection.dialect.name == "postgresql":
-                query = (
-                    "SELECT EXISTS ("
-                    "SELECT 1 FROM information_schema.tables "
-                    "WHERE table_schema = 'public' AND table_name = 'schema_metadata'"
-                    ")"
-                )
-            else:
-                query = (
-                    "SELECT EXISTS ("
-                    "SELECT 1 FROM sqlite_master "
-                    "WHERE type='table' AND name='schema_metadata'"
-                    ")"
-                )
+        from app.repositories.schema_guard import _table_exists
 
-            result = connection.execute(sa.text(query))
-            return bool(result.scalar())
+        try:
+            return _table_exists(connection, "schema_metadata")
         except Exception as e:
             logger.debug(f"Error checking schema_metadata: {e}")
             return False
