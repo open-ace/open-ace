@@ -39,38 +39,30 @@ def upgrade() -> None:
     # Step 1: Migrate any existing 'viewer' users to 'readonly'
     # This handles compatibility for any users that might have been created with 'viewer'
     if is_postgresql:
-        op.execute(
-            """
+        op.execute("""
             UPDATE users
             SET role = 'readonly'
             WHERE role = 'viewer'
-            """
-        )
+            """)
     else:  # SQLite
-        op.execute(
-            """
+        op.execute("""
             UPDATE users
             SET role = 'readonly'
             WHERE role = 'viewer'
-            """
-        )
+            """)
 
     # Step 2: Update CHECK constraint to include 'readonly'
     if is_postgresql:
         # PostgreSQL: Drop old constraint and add new one
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE users
             DROP CONSTRAINT IF EXISTS chk_users_role
-            """
-        )
-        op.execute(
-            """
+            """)
+        op.execute("""
             ALTER TABLE users
             ADD CONSTRAINT chk_users_role
             CHECK (role IN ('admin', 'manager', 'user', 'readonly'))
-            """
-        )
+            """)
     else:
         # SQLite: Need to recreate the table to update CHECK constraint
         # Drop indexes first to avoid name conflicts (SQLite indexes are globally unique)
@@ -127,12 +119,10 @@ def upgrade() -> None:
 
         # Copy data from old table to new table using matching columns
         columns_str = ", ".join(all_columns)
-        op.execute(
-            f"""
+        op.execute(f"""
             INSERT INTO users_new ({columns_str})
             SELECT {columns_str} FROM users
-            """
-        )
+            """)
 
         # Recreate indexes
         op.execute("CREATE INDEX idx_users_role ON users_new(role)")
@@ -153,27 +143,21 @@ def downgrade() -> None:
 
     # Step 1: Migrate 'readonly' back to 'viewer' for downgrade consistency
     if is_postgresql:
-        op.execute(
-            """
+        op.execute("""
             UPDATE users
             SET role = 'viewer'
             WHERE role = 'readonly'
-            """
-        )
+            """)
         # Drop new constraint and restore old one
-        op.execute(
-            """
+        op.execute("""
             ALTER TABLE users
             DROP CONSTRAINT IF EXISTS chk_users_role
-            """
-        )
-        op.execute(
-            """
+            """)
+        op.execute("""
             ALTER TABLE users
             ADD CONSTRAINT chk_users_role
             CHECK (role IN ('admin', 'manager', 'user'))
-            """
-        )
+            """)
     else:
         # SQLite: Recreate table with old CHECK constraint
         op.execute("DROP INDEX IF EXISTS idx_users_role")
@@ -187,13 +171,11 @@ def downgrade() -> None:
         column_names = {col["name"] for col in columns_info}
 
         # Migrate 'readonly' to 'viewer' first (before table recreation)
-        op.execute(
-            """
+        op.execute("""
             UPDATE users
             SET role = 'viewer'
             WHERE role = 'readonly'
-            """
-        )
+            """)
 
         # Build column list dynamically based on current schema
         # Use all columns from the actual table to ensure consistency
@@ -236,12 +218,10 @@ def downgrade() -> None:
         op.execute(create_sql)
 
         columns_str = ", ".join(all_columns)
-        op.execute(
-            f"""
+        op.execute(f"""
             INSERT INTO users_new ({columns_str})
             SELECT {columns_str} FROM users
-            """
-        )
+            """)
 
         op.execute("CREATE INDEX idx_users_role ON users_new(role)")
         op.execute("CREATE INDEX idx_users_email ON users_new(email)")

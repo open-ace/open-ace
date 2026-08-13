@@ -8,13 +8,14 @@
  * - Delete API key confirmation
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useApiKeys,
   useStoreApiKey,
   useUpdateApiKey,
   useDeleteApiKey,
   usePageRefresh,
+  useAuth,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -29,9 +30,12 @@ import {
   EmptyState,
   Badge,
   PageRefreshControl,
+  useToast,
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 import { createMatcherConfig } from '@/utils';
+import { canManageAllTenants } from '@/utils/permissions';
+import { tenantApi, type Tenant } from '@/api';
 import type { ApiKey } from '@/api';
 
 /**
@@ -144,7 +148,55 @@ const defaultZcodeSettings = `{
 
 export const APIKeyManagement: React.FC = () => {
   const language = useLanguage();
-  const { data: keysData, isLoading, isError, error, refetch } = useApiKeys();
+  const toast = useToast();
+
+  // Admin tenant selection (Issue #2579) - mirrors RemoteMachineManagement (#2535)
+  const { user } = useAuth();
+  const isAdmin = canManageAllTenants(user);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
+  const selectedTenantIdRef = useRef<number | null>(null);
+  const [isLoadingTenants, setIsLoadingTenants] = useState(false);
+
+  // Compute effective tenant ID
+  const effectiveTenantId = isAdmin ? selectedTenantId : user?.tenant_id;
+
+  // Fetch tenants list for admin users
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    setIsLoadingTenants(true);
+    tenantApi
+      .listTenants({ status: 'active', limit: 100 })
+      .then((result) => {
+        setTenants(result.tenants);
+        // Use ref to check, avoid triggering useEffect again
+        if (result.tenants.length > 0 && !selectedTenantIdRef.current) {
+          selectedTenantIdRef.current = result.tenants[0].id;
+          setSelectedTenantId(result.tenants[0].id);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to fetch tenants:', err);
+        toast.error(t('failedToLoadTenants', language) || 'Failed to load tenants');
+      })
+      .finally(() => {
+        setIsLoadingTenants(false);
+      });
+  }, [isAdmin, language, toast]);
+
+  // Sync ref with state
+  useEffect(() => {
+    selectedTenantIdRef.current = selectedTenantId;
+  }, [selectedTenantId]);
+
+  const {
+    data: keysData,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useApiKeys(effectiveTenantId ?? undefined);
   const storeApiKey = useStoreApiKey();
   const updateApiKey = useUpdateApiKey();
   const deleteApiKey = useDeleteApiKey();
@@ -528,6 +580,7 @@ export const APIKeyManagement: React.FC = () => {
         scope: formData.scope,
         priority: formData.priority,
         weight: formData.weight,
+        tenant_id: effectiveTenantId ?? undefined,
       });
       setShowAddDialog(false);
       refetch();
@@ -573,6 +626,7 @@ export const APIKeyManagement: React.FC = () => {
         scope: formData.scope,
         priority: formData.priority,
         weight: formData.weight,
+        tenant_id: effectiveTenantId ?? undefined,
       });
       setShowEditDialog(false);
       setEditTarget(null);
@@ -591,7 +645,10 @@ export const APIKeyManagement: React.FC = () => {
   const handleDelete = async () => {
     if (!deleteTarget) return;
     try {
-      await deleteApiKey.mutateAsync({ keyId: deleteTarget.id });
+      await deleteApiKey.mutateAsync({
+        keyId: deleteTarget.id,
+        tenantId: effectiveTenantId ?? undefined,
+      });
       setShowDeleteDialog(false);
       setDeleteTarget(null);
       refetch();
@@ -599,6 +656,42 @@ export const APIKeyManagement: React.FC = () => {
       console.error('Failed to delete API key:', err);
     }
   };
+
+  // Tenant guards (Issue #2579): never fire a tenant-less list request for
+  // platform admins - wait for the tenant list to resolve first.
+  if (isAdmin && tenants.length === 0 && !isLoadingTenants) {
+    return (
+      <div className="api-key-management">
+        <EmptyState
+          icon="bi-building"
+          title={t('noTenantsAvailable', language) || 'No Tenants Available'}
+          description={
+            t('noTenantsDescription', language) ||
+            'Please contact system administrator to assign tenant permissions.'
+          }
+        />
+      </div>
+    );
+  }
+  if (isLoadingTenants || (isAdmin && !effectiveTenantId)) {
+    return (
+      <Loading size="lg" text={t('loadingTenants', language) || 'Loading tenant information...'} />
+    );
+  }
+  if (!isAdmin && !effectiveTenantId) {
+    return (
+      <div className="api-key-management">
+        <EmptyState
+          icon="bi-building"
+          title={t('noTenantConfigured', language) || 'No Tenant Configured'}
+          description={
+            t('noTenantDescription', language) ||
+            'Please contact system administrator to configure your tenant.'
+          }
+        />
+      </div>
+    );
+  }
 
   if (isLoading) {
     return <Loading size="lg" text={t('loading', language)} />;
@@ -610,6 +703,33 @@ export const APIKeyManagement: React.FC = () => {
 
   return (
     <div className="api-key-management">
+      {/* Tenant Selector - Only for admins */}
+      {isAdmin && (
+        <div className="card mb-3">
+          <div className="card-body">
+            <div className="row align-items-center">
+              <div className="col-md-4">
+                <label className="form-label mb-0">
+                  <i className="bi bi-building me-2" />
+                  {t('selectTenant', language) || 'Select Tenant'}
+                </label>
+              </div>
+              <div className="col-md-8">
+                <Select
+                  value={selectedTenantId?.toString() ?? ''}
+                  onChange={(value) => setSelectedTenantId(Number(value))}
+                  options={tenants.map((tenant) => ({
+                    value: tenant.id.toString(),
+                    label: tenant.name,
+                  }))}
+                  placeholder={t('selectTenantPlaceholder', language) || 'Choose a tenant'}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h2>{t('apiKeys', language)}</h2>
@@ -699,6 +819,7 @@ export const APIKeyManagement: React.FC = () => {
                               updateApiKey.mutate({
                                 keyId: key.id,
                                 is_active: !key.is_active,
+                                tenant_id: effectiveTenantId ?? undefined,
                               });
                             }}
                             disabled={updateApiKey.isPending}

@@ -76,14 +76,12 @@ def scan_base_urls(tenant_filter: int | None = None) -> dict[str, Any]:
                 (tenant_filter,),
             )
         else:
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT id, tenant_id, provider, key_name, base_url, scope
                 FROM api_key_store
                 WHERE base_url IS NOT NULL AND base_url != ''
                 ORDER BY tenant_id, provider, key_name
-                """
-            )
+                """)
 
         rows = cursor.fetchall()
     finally:

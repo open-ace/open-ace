@@ -118,14 +118,12 @@ class TenantRepository:
                 # Insert tenant_quotas
                 quota_dict = tenant.quota.to_dict()
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                     INSERT INTO tenant_quotas
                     (tenant_id, daily_token_limit, monthly_token_limit,
                      daily_request_limit, monthly_request_limit, max_users, max_sessions_per_user)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """
-                    ),
+                """),
                     (
                         tenant_id,
                         quota_dict.get("daily_token_limit", 1000000),
@@ -150,14 +148,12 @@ class TenantRepository:
                 )
 
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                     INSERT INTO tenant_settings
                     (tenant_id, content_filter_enabled, audit_log_enabled,
                      audit_log_retention_days, data_retention_days, sso_enabled, sso_provider, auto_provision_users)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """
-                    ),
+                """),
                     (
                         tenant_id,
                         content_filter_val,
@@ -475,15 +471,13 @@ class TenantRepository:
 
                 # Update tenant totals
                 cursor.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                     UPDATE tenants SET
                         total_tokens_used = total_tokens_used + ?,
                         total_requests_made = total_requests_made + ?,
                         updated_at = ?
                     WHERE id = ?
-                """
-                    ),
+                """),
                     (tokens, requests, datetime.now(timezone.utc).replace(tzinfo=None), tenant_id),
                 )
 

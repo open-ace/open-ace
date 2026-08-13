@@ -166,7 +166,7 @@ class TestAuthentication:
 
     def test_no_bearer_token_non_legacy(self, manager):
         """Non-legacy machine without Bearer should fail validation."""
-        machine_id = "machine-auth-001"
+        machine_id = "e421d788-6cb4-501f-80f3-b3517d5d26f3"
 
         # Register machine (non-legacy by default)
         reg_token = manager.create_registration_token(tenant_id=1, created_by=1)
@@ -182,7 +182,7 @@ class TestAuthentication:
 
     def test_invalid_bearer_token(self, manager):
         """Invalid Bearer token should fail validation."""
-        machine_id = "machine-auth-002"
+        machine_id = "2485f7ed-f6fe-5818-9195-56323e8c00d5"
 
         reg_token = manager.create_registration_token(tenant_id=1, created_by=1)
         result = manager.register_machine(
@@ -201,7 +201,7 @@ class TestAuthentication:
         reg_a = manager.create_registration_token(tenant_id=1, created_by=1)
         result_a = manager.register_machine(
             registration_token=reg_a,
-            machine_id="machine-a",
+            machine_id="37d94b90-228a-5358-84e8-bdd5fade8412",
             machine_name="Machine A",
         )
         token_a = result_a["agent_token"]
@@ -210,19 +210,21 @@ class TestAuthentication:
         reg_b = manager.create_registration_token(tenant_id=1, created_by=1)
         manager.register_machine(
             registration_token=reg_b,
-            machine_id="machine-b",
+            machine_id="4709fca1-753e-5786-a6fc-692812e1f4a2",
             machine_name="Machine B",
         )
 
         # A's token should NOT validate against B's machine_id
-        assert manager.validate_agent_token(token_a, "machine-b") is False
+        assert (
+            manager.validate_agent_token(token_a, "4709fca1-753e-5786-a6fc-692812e1f4a2") is False
+        )
 
         # A's token should validate against A's machine_id
-        assert manager.validate_agent_token(token_a, "machine-a") is True
+        assert manager.validate_agent_token(token_a, "37d94b90-228a-5358-84e8-bdd5fade8412") is True
 
     def test_valid_token_success(self, manager):
         """Valid Bearer token should pass validation."""
-        machine_id = "machine-auth-003"
+        machine_id = "1b717d0f-2cf4-50a8-9de9-d590292e4e51"
 
         reg_token = manager.create_registration_token(tenant_id=1, created_by=1)
         result = manager.register_machine(
@@ -238,7 +240,7 @@ class TestAuthentication:
 
     def test_revoked_token_fails(self, manager):
         """Revoked token should fail validation."""
-        machine_id = "machine-auth-004"
+        machine_id = "542ed065-8734-54c3-9ef6-3fd761a2a92c"
 
         reg_token = manager.create_registration_token(tenant_id=1, created_by=1)
         result = manager.register_machine(
@@ -267,7 +269,7 @@ class TestBindingValidation:
 
     def test_session_machine_binding_correct(self, manager, tmp_path):
         """Session should belong to correct machine."""
-        machine_id = "machine-bind-001"
+        machine_id = "0a9d854c-b7f9-552d-99b4-038819ca3c5e"
         session_id = "session-bind-001"
 
         reg_token = manager.create_registration_token(tenant_id=1, created_by=1)
@@ -288,8 +290,8 @@ class TestBindingValidation:
 
     def test_cross_machine_session_rejected(self, manager, tmp_path):
         """Session belonging to different machine should be rejected."""
-        machine_a = "machine-bind-a"
-        machine_b = "machine-bind-b"
+        machine_a = "7d6d5473-c046-5e3a-b293-0a4eb73b2761"
+        machine_b = "6c4cc7f6-b9bd-5904-b588-8e7937eacbcc"
         session_a = "session-bind-a"
 
         # Register both machines
@@ -327,7 +329,7 @@ class TestLegacyCompatibility:
 
     def test_legacy_machine_accepted(self, manager):
         """Legacy machine should be allowed without Bearer."""
-        machine_id = "machine-legacy-001"
+        machine_id = "947da314-615b-5a32-99e6-1890746a401d"
 
         reg_token = manager.create_registration_token(tenant_id=1, created_by=1)
         result = manager.register_machine(
@@ -351,7 +353,7 @@ class TestLegacyCompatibility:
 
     def test_non_legacy_requires_bearer(self, manager):
         """Non-legacy machine without Bearer should fail."""
-        machine_id = "machine-legacy-002"
+        machine_id = "5a8a0d74-d849-55f0-9746-2d1117ef426d"
 
         reg_token = manager.create_registration_token(tenant_id=1, created_by=1)
         result = manager.register_machine(
@@ -369,7 +371,7 @@ class TestLegacyCompatibility:
 
     def test_legacy_mode_can_be_cleared(self, manager):
         """Legacy mode should be clearable after Bearer auth."""
-        machine_id = "machine-legacy-003"
+        machine_id = "be1c1a7b-9bb7-5a3d-a60b-0b3e27861ea2"
 
         reg_token = manager.create_registration_token(tenant_id=1, created_by=1)
         manager.register_machine(
@@ -457,7 +459,7 @@ class TestValidRequests:
 
     def test_process_usage_report_basic(self, manager, tmp_path):
         """Basic usage report processing should work."""
-        machine_id = "machine-valid-001"
+        machine_id = "9c8bca3a-2469-524f-9851-edb786719e5c"
         session_id = "session-valid-001"
 
         # Setup
@@ -488,7 +490,7 @@ class TestValidRequests:
 
     def test_token_rotation_preserves_usage(self, manager):
         """Token rotation should not affect usage data."""
-        machine_id = "machine-valid-002"
+        machine_id = "501210ac-0d0f-547b-968c-f0fe5d0ff9b8"
 
         reg_token = manager.create_registration_token(tenant_id=1, created_by=1)
         result = manager.register_machine(
@@ -589,7 +591,7 @@ class TestUsageReportHttpIntegration:
         self, usage_http, path
     ):
         client, manager = usage_http
-        machine_id = "machine-http-noauth"
+        machine_id = "b92ad08a-40a6-5ea9-8217-3e4053576380"
         session_id = "session-http-noauth"
         _register_http_machine(manager, machine_id)
         _create_session_in_db(manager.db_path, session_id, machine_id)
@@ -610,7 +612,11 @@ class TestUsageReportHttpIntegration:
     def test_valid_bearer_updates_usage_and_audits_both_paths(self, usage_http, path):
         client, manager = usage_http
         suffix = "direct" if path.endswith("usage-report") else "message"
-        machine_id = f"machine-http-{suffix}"
+        machine_id = (
+            "baed6dc3-f0e6-5bae-a674-2a02c259d55b"
+            if suffix == "direct"
+            else "2495881c-0d5b-535d-9061-9f8858637284"
+        )
         session_id = f"session-http-{suffix}"
         token = _register_http_machine(manager, machine_id)
         _create_session_in_db(manager.db_path, session_id, machine_id)
@@ -642,13 +648,15 @@ class TestUsageReportHttpIntegration:
 
     def test_cross_machine_is_rejected_on_actual_agent_path(self, usage_http):
         client, manager = usage_http
-        token_a = _register_http_machine(manager, "machine-http-a")
-        _register_http_machine(manager, "machine-http-b")
-        _create_session_in_db(manager.db_path, "session-http-b", "machine-http-b")
+        token_a = _register_http_machine(manager, "60977ea0-4355-535d-9de6-123954ed95d5")
+        _register_http_machine(manager, "338433f6-52d3-5e96-a620-8edd26c7374f")
+        _create_session_in_db(
+            manager.db_path, "session-http-b", "338433f6-52d3-5e96-a620-8edd26c7374f"
+        )
 
         response = client.post(
             "/api/remote/agent/message",
-            json=_usage_payload("machine-http-a", "session-http-b"),
+            json=_usage_payload("60977ea0-4355-535d-9de6-123954ed95d5", "session-http-b"),
             headers={"Authorization": f"Bearer {token_a}"},
         )
 
@@ -666,7 +674,11 @@ class TestUsageReportHttpIntegration:
         session_user,
     ):
         client, manager = usage_http
-        machine_id = f"machine-http-bind-{session_tenant}-{session_user}"
+        machine_id = (
+            "c1a120cd-60c8-52bc-adb1-a90bafda2861"
+            if session_tenant == 2
+            else "533dac89-ce1d-5b14-88cb-cb434e95efee"
+        )
         session_id = f"session-http-bind-{session_tenant}-{session_user}"
         token = _register_http_machine(manager, machine_id)
         _create_session_in_db(
@@ -689,7 +701,7 @@ class TestUsageReportHttpIntegration:
 
     def test_duplicate_report_is_idempotent_and_conflicting_replay_is_rejected(self, usage_http):
         client, manager = usage_http
-        machine_id = "machine-http-replay"
+        machine_id = "4ba66546-7ee3-577e-aeb6-fefcb27fa8e3"
         session_id = "session-http-replay"
         token = _register_http_machine(manager, machine_id)
         _create_session_in_db(manager.db_path, session_id, machine_id)
@@ -721,8 +733,8 @@ class TestUsageReportHttpIntegration:
 
     def test_binding_failures_are_uniform_rate_limited_and_do_not_leak_victim_ids(self, usage_http):
         client, manager = usage_http
-        attacker_machine = "machine-http-attacker"
-        victim_machine = "machine-http-victim"
+        attacker_machine = "1c28d9ba-e22a-5d29-b513-d1c0dfbd6b00"
+        victim_machine = "fc2f9738-55a4-5d82-8fdb-c8f03d058cc1"
         victim_session = "session-http-victim-secret"
         token = _register_http_machine(manager, attacker_machine, tenant_id=1)
         _register_http_machine(manager, victim_machine, tenant_id=2, user_id=2)
@@ -776,7 +788,7 @@ class TestUsageReportHttpIntegration:
 
     def test_invalid_binding_hits_machine_limit_before_more_db_or_audit_work(self, usage_http):
         client, manager = usage_http
-        machine_id = "machine-http-binding-limit"
+        machine_id = "54e186d2-2497-5588-87ff-674cd51b4e3a"
         token = _register_http_machine(manager, machine_id)
         headers = {"Authorization": f"Bearer {token}"}
 
@@ -803,7 +815,7 @@ class TestUsageReportHttpIntegration:
 
     def test_invalid_token_audit_is_shared_and_bounded(self, usage_http):
         client, manager = usage_http
-        machine_id = "machine-http-auth-audit-limit"
+        machine_id = "0bbf4e0a-9391-5c3b-b436-771f6f213e56"
         _register_http_machine(manager, machine_id)
         payload = _usage_payload(machine_id, "session-auth-audit-limit")
 
@@ -834,7 +846,11 @@ class TestUsageReportHttpIntegration:
     def test_report_id_less_agent_has_explicit_short_migration_window(self, usage_http, path):
         client, manager = usage_http
         suffix = "legacy-direct" if path.endswith("usage-report") else "legacy-message"
-        machine_id = f"machine-http-{suffix}"
+        machine_id = (
+            "566db1eb-3777-5483-9b6a-173c08356adf"
+            if suffix == "legacy-direct"
+            else "e9ccc48e-2094-544e-b057-2bb964752f36"
+        )
         session_id = f"session-http-{suffix}"
         token = _register_http_machine(manager, machine_id)
         _create_session_in_db(manager.db_path, session_id, machine_id)
@@ -858,7 +874,7 @@ class TestUsageReportHttpIntegration:
 
     def test_report_id_less_agent_is_rejected_after_migration_deadline(self, usage_http):
         client, manager = usage_http
-        machine_id = "machine-http-legacy-expired"
+        machine_id = "c8d3136c-8df6-5466-b3e9-6c0fbfa2ecb3"
         session_id = "session-http-legacy-expired"
         token = _register_http_machine(manager, machine_id)
         _create_session_in_db(manager.db_path, session_id, machine_id)

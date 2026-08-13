@@ -2410,6 +2410,11 @@ ${webui_local_rule}"
     current_user_rules="${current_user_rules}
 ${utility_rule}"
 
+    # 【Issue #2334】添加 GIT_SAFE 和 GH_SAFE 规则（(ALL) runas）
+    current_user_rules="${current_user_rules}
+$run_user ALL=(ALL) NOPASSWD: GIT_SAFE
+$run_user ALL=(ALL) NOPASSWD: GH_SAFE"
+
     # Add security wrapper rules if any
     if [ -n "$security_wrapper_rules" ]; then
         current_user_rules="${current_user_rules}
@@ -2459,15 +2464,101 @@ Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
     # 【修复 Issue #1395】添加 autonomous 开发所需的 CLI 工具和 git/gh 命令
     # CLI 工具路径可能是 /usr/bin/qwen-code 或 /usr/local/bin/qwen-code（取决于 npm 安装方式）
     # 使用通配符覆盖所有可能的 CLI 工具路径
-    local cmnd_alias_section="# 【安全加固 Issue #1855 + #2181】安全命令别名定义
-# Utility commands for multi-user workspace operations
-# Commands must have '*' suffix to allow arguments (Issue #1262)
-# useradd/id: for creating system users in Package multi-user mode (uid >= 1000 validated in code)
-# git/gh: for autonomous development workflows (Issue #1395)
-# 【Issue #2181】移除高风险通配命令 cat/chown/useradd/rm，改用安全 wrapper
-# 保留：test, ls, stat, mkdir, id, find（低风险或只读）
+    # 【Issue #2334】使用统一的 generate-sudoers.sh 生成 sudoers
+    # 此处定义与 Docker 保持一致的别名
+
+    # Resolve git and gh paths
+    local GIT_PATH=$(which git 2>/dev/null || echo "/usr/bin/git")
+    local GH_PATH=$(which gh 2>/dev/null || echo "/usr/bin/gh")
+
+    local cmnd_alias_section="# 【安全加固 Issue #2334】安全命令别名定义
+# git精确参数白名单（覆盖100%autonomous工作流）
+# 【Issue #2334】使用 (ALL) runas 以允许 github_ops 跨用户 git 操作
+Cmnd_Alias GIT_SAFE = \\
+    ${GIT_PATH} config --global --add safe.directory *, \\
+    ${GIT_PATH} remote get-url origin, \\
+    ${GIT_PATH} remote add *, \\
+    ${GIT_PATH} checkout *, \\
+    ${GIT_PATH} checkout -b *, \\
+    ${GIT_PATH} checkout -b * *, \\
+    ${GIT_PATH} push *, \\
+    ${GIT_PATH} push -u *, \\
+    ${GIT_PATH} push origin *, \\
+    ${GIT_PATH} push origin --delete *, \\
+    ${GIT_PATH} push origin * --force-with-lease, \\
+    ${GIT_PATH} fetch *, \\
+    ${GIT_PATH} pull *, \\
+    ${GIT_PATH} merge *, \\
+    ${GIT_PATH} rebase *, \\
+    ${GIT_PATH} reset --hard HEAD, \\
+    ${GIT_PATH} branch *, \\
+    ${GIT_PATH} branch --show-current, \\
+    ${GIT_PATH} branch -D *, \\
+    ${GIT_PATH} rev-parse *, \\
+    ${GIT_PATH} rev-list --count *, \\
+    ${GIT_PATH} worktree add *, \\
+    ${GIT_PATH} worktree add -b *, \\
+    ${GIT_PATH} worktree remove *, \\
+    ${GIT_PATH} worktree remove * --force, \\
+    ${GIT_PATH} worktree list --porcelain, \\
+    ${GIT_PATH} diff *, \\
+    ${GIT_PATH} diff --numstat *, \\
+    ${GIT_PATH} show *, \\
+    ${GIT_PATH} show --format= *, \\
+    ${GIT_PATH} show --numstat --format= *, \\
+    ${GIT_PATH} status --porcelain, \\
+    ${GIT_PATH} status *, \\
+    ${GIT_PATH} log *, \\
+    ${GIT_PATH} add *, \\
+    ${GIT_PATH} add -A, \\
+    ${GIT_PATH} commit *, \\
+    ${GIT_PATH} commit -m *, \\
+    ${GIT_PATH} commit -m * --no-verify, \\
+    ${GIT_PATH} init
+
+# gh精确参数白名单（覆盖100%autonomous工作流）
+# Issue #1855: --admin 仅在 OPENACE_ALLOW_ADMIN_MERGE=1 时启用
+# 【Issue #2334】使用 (ALL) runas 以允许 github_ops 跨用户 gh 操作
+Cmnd_Alias GH_SAFE = \\
+    ${GH_PATH} repo create *, \\
+    ${GH_PATH} repo create * --private, \\
+    ${GH_PATH} repo create * --public, \\
+    ${GH_PATH} repo create * --description *, \\
+    ${GH_PATH} repo view --json *, \\
+    ${GH_PATH} issue create --title * --body *, \\
+    ${GH_PATH} issue create --title * --body * --label *, \\
+    ${GH_PATH} issue view * --json *, \\
+    ${GH_PATH} issue comment * --body *, \\
+    ${GH_PATH} issue view * --comments --json *, \\
+    ${GH_PATH} issue edit * --title *, \\
+    ${GH_PATH} issue edit * --body *, \\
+    ${GH_PATH} issue close *, \\
+    ${GH_PATH} issue reopen *, \\
+    ${GH_PATH} pr create --title * --body * --base *, \\
+    ${GH_PATH} pr create --title * --body * --base * --head *, \\
+    ${GH_PATH} pr create --title * --body * --base * --head * --draft, \\
+    ${GH_PATH} pr view * --json *, \\
+    ${GH_PATH} pr comment * --body *, \\
+    ${GH_PATH} pr merge *, \\
+    ${GH_PATH} pr merge * --merge, \\
+    ${GH_PATH} pr merge * --squash, \\
+    ${GH_PATH} pr merge * --rebase, \\
+    ${GH_PATH} pr merge * --auto, \\
+    ${GH_PATH} pr view * --json commits, \\
+    ${GH_PATH} pr checks * --json *, \\
+    ${GH_PATH} pr diff *, \\
+    ${GH_PATH} pr list *, \\
+    ${GH_PATH} api user, \\
+    ${GH_PATH} api repos/*/pulls/*/comments --jq *, \\
+    ${GH_PATH} api repos/*/issues/*/comments --jq *
+
+# 【安全加固 Issue #2334】OPENACE_UTILS 收紧
+# 移除 git/gh 通配（改用 GIT_SAFE/GH_SAFE），消除 runas 漂移
+# 移除 mkdir（改用 openace-mkdir wrapper）
+# 保留低风险只读命令：test, ls, stat, id, find
 # find 是只读操作，DAC 已保护敏感目录
-Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/find *, /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
+# 【Issue #2334】runas 使用 (ALL) 以支持 github_ops 跨用户工具调用
+Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/id *, /usr/bin/find *
 
 # 【安全加固 Issue #2181】安全 wrapper 规则
 # 以下 wrapper 替代原通配命令，内部验证参数安全性
@@ -4109,7 +4200,7 @@ install_local() {
 
         # Use nohup to run in background and save PID
         print_info "Starting web server on $host:$port as user '$DEPLOY_USER'..."
-        if ! su - "$DEPLOY_USER" -c "cd '$target_path' && AI_TOKEN_WEB_PORT=$port AI_TOKEN_WEB_HOST=$host nohup python3 server.py > logs/server.log 2>&1 & echo \$! > logs/server.pid"; then
+        if ! su - "$DEPLOY_USER" -c "cd '$target_path' && { AI_TOKEN_WEB_PORT=$port AI_TOKEN_WEB_HOST=$host nohup python3 server.py > '$target_path/logs/server.log' 2>&1 & echo \$! > '$pid_file'; }"; then
             print_error "Failed to start server as user '$DEPLOY_USER'"
             print_info "Check if user exists: id $DEPLOY_USER"
             echo ""
@@ -4252,7 +4343,7 @@ install_deploy() {
             # Start the server in background as the correct user
             print_info "Starting web server on $host:$port as user '$DEPLOY_USER' on remote..."
             local pid_file="$target_path/logs/server.pid"
-            if ! ssh "$remote" "su - '$DEPLOY_USER' -c \"cd '$target_path' && AI_TOKEN_WEB_PORT=$port AI_TOKEN_WEB_HOST=$host nohup python3 server.py > logs/server.log 2>&1 & echo \\\$! > logs/server.pid\""; then
+            if ! ssh "$remote" "su - '$DEPLOY_USER' -c \"cd '$target_path' && { AI_TOKEN_WEB_PORT=$port AI_TOKEN_WEB_HOST=$host nohup python3 server.py > '$target_path/logs/server.log' 2>&1 & echo \\\$! > '$pid_file'; }\""; then
                 print_error "Failed to start server on remote as user '$DEPLOY_USER'"
                 print_info "Check if user exists on remote: ssh $remote 'id $DEPLOY_USER'"
                 echo ""

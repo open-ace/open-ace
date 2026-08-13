@@ -284,8 +284,11 @@ class TestRegression:
         assert result.passed is False
         assert result.action == "block"
 
-        # Test credit card (should block)
-        result = content_filter.check_content("Credit card: 1234-5678-9012-3456")
+        # Test credit card (should block). Use a Luhn-valid test PAN: #2554
+        # narrowed pii_credit_card to Luhn-valid matches, so the old synthetic
+        # placeholder (1234-...-3456, which fails Luhn) no longer blocks; a real
+        # card still does.
+        result = content_filter.check_content("Credit card: 4111-1111-1111-1111")
         assert result.passed is False
         assert result.action == "block"
 

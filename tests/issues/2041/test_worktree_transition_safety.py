@@ -418,9 +418,11 @@ def test_resolve_worktree_branch_returns_short_name():
     fake_result.returncode = 0
     fake_result.stdout = "auto-dev/wf2041\n"
     fake_result.stderr = ""
-    # Patch GitHubOps.__new__ to return our mock for the temp instance.
-    with patch.object(GitHubOps, "__new__", return_value=gh):
-        gh._run_git.return_value = fake_result
+    # Patch _run_git on the class so the internally-created GitHubOps (wt_gh)
+    # returns the fake. Do NOT patch GitHubOps.__new__: mock leaves a poisoned
+    # explicit object.__new__ on restore, breaking every later GitHubOps(...)
+    # construction across the shard (the #2457 object.__new__ cluster).
+    with patch.object(GitHubOps, "_run_git", return_value=fake_result):
         result = GitHubOps.resolve_worktree_branch(gh, WT_PATH)
     assert result == "auto-dev/wf2041"
 
@@ -434,8 +436,7 @@ def test_resolve_worktree_branch_returns_none_for_detached_head():
     fake_result.returncode = 1
     fake_result.stdout = ""
     fake_result.stderr = "fatal: ref HEAD is not a symbolic ref"
-    with patch.object(GitHubOps, "__new__", return_value=gh):
-        gh._run_git.return_value = fake_result
+    with patch.object(GitHubOps, "_run_git", return_value=fake_result):
         result = GitHubOps.resolve_worktree_branch(gh, WT_PATH)
     assert result is None
 
@@ -445,8 +446,7 @@ def test_resolve_worktree_branch_returns_none_on_git_error():
     gh = MagicMock(spec=GitHubOps)
     gh._assert_worktree_contained = MagicMock()
     gh.system_account = None
-    with patch.object(GitHubOps, "__new__", return_value=gh):
-        gh._run_git.side_effect = GitHubOpsError("git not found")
+    with patch.object(GitHubOps, "_run_git", side_effect=GitHubOpsError("git not found")):
         result = GitHubOps.resolve_worktree_branch(gh, WT_PATH)
     assert result is None
 

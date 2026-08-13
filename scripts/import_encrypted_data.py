@@ -71,14 +71,12 @@ def import_api_keys(conn, api_keys: list[dict[str, Any]]) -> int:
 
             # Update existing record (adapt_sql converts ? -> %s on PostgreSQL)
             cursor.execute(
-                adapt_sql(
-                    """
+                adapt_sql("""
                     UPDATE api_key_store
                     SET encrypted_key = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ? AND tenant_id = ?
-                    """
-                ),
+                    """),
                 (encrypted_key, key_data["id"], key_data["tenant_id"]),
             )
             imported += 1
@@ -106,14 +104,12 @@ def import_smtp_settings(conn, smtp_data: dict[str, Any] | None) -> bool:
         encrypted_password = password_manager.encrypt(smtp_data["plaintext_password"])
 
         cursor.execute(
-            adapt_sql(
-                """
+            adapt_sql("""
                 UPDATE smtp_settings
                 SET encrypted_password = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-                """
-            ),
+                """),
             (encrypted_password, smtp_data["id"]),
         )
         conn.commit()
@@ -140,14 +136,12 @@ def import_gateway_config(conn, gateway_data: dict[str, Any] | None) -> bool:
         encrypted_key = password_manager.encrypt(gateway_data["plaintext_api_key"])
 
         cursor.execute(
-            adapt_sql(
-                """
+            adapt_sql("""
                 UPDATE model_gateway_config
                 SET encrypted_api_key = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-                """
-            ),
+                """),
             (encrypted_key, gateway_data["id"]),
         )
         conn.commit()

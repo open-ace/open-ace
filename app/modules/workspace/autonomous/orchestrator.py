@@ -2682,6 +2682,65 @@ class AutonomousOrchestrator:
             "common_identity": common_identity,
         }
 
+    def _refresh_trusted_git_context(self, repo_path: str, system_account: str | None) -> None:
+        """Re-pin the trusted Git context for repo_path to its CURRENT gitdir
+        identity.
+
+        Called after `worktree add` in ensure_worktree, which legitimately
+        creates a NEW worktree gitdir (new device:inode) that the prior
+        _run_agent cycle's pinned identity cannot match. The class-level
+        registry (_trusted_git_contexts) persists across scheduler cycles, so
+        without this refresh the next cycle's lifecycle git ops verify against a
+        stale baseline and produce false-positive "identity changed" failures
+        (#2565).
+
+        Scope — worktree-path entries only:
+        The refresh is intentionally scoped to the worktree-path (the gitdir
+        that `worktree add` actually recreates). The MAIN repo's ``.git``
+        identity is stable under worktree ops (``worktree add`` only adds a
+        subdir under ``<main>/.git/worktrees/``, it does not change
+        ``<main>/.git``'s own device:inode), so it is NOT refreshed here.
+        This also avoids a concurrency hazard: the registry is class-level and
+        shared; an entry-time refresh on the shared main-repo key could clear
+        it during another concurrent workflow's agent window (same
+        project_path, different worktree_path/branch are not serialized by
+        project_path).
+
+        Best-effort: if the gitdir cannot be snapshotted (e.g. doesn't exist
+        yet), skip silently — _verify_trusted_git_context's empty-context
+        early-return handles the unset case.
+
+        The stale context must be cleared first so that the GitHubOps instance
+        created inside _capture_repo_state can run its own git probes without
+        tripping the very identity check we are trying to refresh.
+        """
+        GitHubOps.clear_trusted_git_context(repo_path)
+        try:
+            state = self._capture_repo_state(repo_path, system_account)
+        except Exception:
+            logger.debug(
+                "Skipping trusted Git context refresh for %s (capture failed)",
+                repo_path,
+            )
+            return
+        git_dir = state.get("git_dir", "")
+        git_identity = state.get("git_identity", "")
+        common_dir = state.get("common_dir", "")
+        common_identity = state.get("common_identity", "")
+        if not git_dir or not git_identity or not common_dir or not common_identity:
+            logger.debug(
+                "Skipping trusted Git context refresh for %s (incomplete state)",
+                repo_path,
+            )
+            return
+        GitHubOps.register_trusted_git_context(
+            repo_path,
+            git_dir,
+            git_identity,
+            common_dir,
+            common_identity,
+        )
+
     def recover_worktree_branch(
         self,
         gh: GitHubOps,
@@ -3458,6 +3517,16 @@ class AutonomousOrchestrator:
                     # Use merge-base as the effective round base for scope validation.
                     # This only counts changes in the PR branch, not merge-introduced changes.
                     commit_before = effective_base
+                    # The merge's upstream files must also be excluded from the
+                    # CUMULATIVE range. Without this, a workflow that is many
+                    # commits behind main and syncs via a merge commit would
+                    # have its stale ``base_commit_sha`` (the branch-creation
+                    # point) produce a cumulative diff counting the merge's
+                    # hundreds of upstream files -> a false "scope exceeded".
+                    # We read cumulative_base from the workflow below; override
+                    # the in-memory view so it uses the merge-base too.
+                    wf = dict(wf)
+                    wf["base_commit_sha"] = effective_base
                     logger.info(
                         "Merge commit detected: using merge-base %s as effective round base",
                         effective_base[:12],
@@ -3470,6 +3539,38 @@ class AutonomousOrchestrator:
 
         ranges = [("current round", commit_before)]
         cumulative_base = (wf.get("base_commit_sha") or "").strip()
+        # Bug B: When the cumulative range spans a prior merge of upstream
+        # main (even if ``commit_after`` itself is not the merge commit), the
+        # persisted ``base_commit_sha`` is the stale branch-creation point.
+        # The CI-repair push path calls this validator with the stale ``wf``
+        # after a prior round merged main, so the cumulative diff would count
+        # every merged upstream file -> a false "scope exceeded". Re-derive via
+        # merge-base so the cumulative range excludes upstream merge files,
+        # mirroring the merge-commit reduction above and the pre-merge logic.
+        if cumulative_base:
+            try:
+                mb_result = gh._run_git(["merge-base", commit_after, "origin/main"], check=False)
+                effective_cumulative_base = (
+                    mb_result.stdout.strip() if mb_result.returncode == 0 else ""
+                )
+            except Exception as exc:
+                logger.warning("Failed to re-derive cumulative merge-base: %s", exc)
+                effective_cumulative_base = ""
+            if effective_cumulative_base and effective_cumulative_base != cumulative_base:
+                # The merge-base is a closer (more recent) ancestor than the
+                # stale persisted base. Use it so upstream files merged into
+                # the branch are excluded from the cumulative count. The
+                # merge-base can only be equal to or a descendant of the true
+                # branch point, so this only NARROWS the base — it never
+                # widens it past the original branch-creation point.
+                logger.info(
+                    "Cumulative base re-derived via merge-base %s (was stale %s)",
+                    effective_cumulative_base[:12],
+                    cumulative_base[:12],
+                )
+                cumulative_base = effective_cumulative_base
+                wf = dict(wf)
+                wf["base_commit_sha"] = effective_cumulative_base
         if not cumulative_base:
             # Legacy workflows (or a batch whose initial rev-parse failed) can
             # have no persisted base. Never compare them with the *moving*
@@ -10906,7 +11007,39 @@ class AutonomousOrchestrator:
             return fail_fix(message, fix_result)
 
         if not self._artifact_text(fix_result).strip():
-            return fail_fix("PR review fix agent returned no result", fix_result)
+            # A --resumed session whose last turn already ended can synthesize
+            # an empty "No response requested" terminal result (0 tokens) — a
+            # transient resume no-op, not a genuine failure (the run itself
+            # succeeded). Retry ONCE with a brand-new session (session_line=
+            # "fresh"), which cannot no-op because it isn't resuming. The fix
+            # prompt embeds the review feedback inline, so a fresh session
+            # still has what it needs. Mirrors the pr_review summary-agent
+            # backstop (#2570, commit fb680a17). Genuine failures / overflows /
+            # integrity violations are handled above and never reach here.
+            logger.warning(
+                "Workflow %s: PR review fix agent returned no result on main "
+                "session; retrying once on a fresh session",
+                self._workflow_id[:8],
+            )
+            fix_result = self._run_agent_with_context_recovery(
+                wf=wf,
+                workflow_id=self._workflow_id,
+                cli_tool=wf.get("cli_tool", "claude-code"),
+                model=wf.get("model", ""),
+                project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+                prompt=fix_prompt,
+                workspace_type=wf.get("workspace_type", "local"),
+                remote_machine_id=wf.get("remote_machine_id"),
+                permission_mode=wf.get("permission_mode", "auto-edit"),
+                allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
+                    wf.get("cli_tool", "claude-code"), []
+                ),
+                session_line="fresh",
+                milestone_id=fix_ms.get("milestone_id", ""),
+            )
+            self._accumulate_tokens(fix_result)
+            if not self._artifact_text(fix_result).strip():
+                return fail_fix("PR review fix agent returned no result", fix_result)
 
         # Clear user feedback after it has been injected into the prompt
         if wf.get("user_feedback", "").strip():

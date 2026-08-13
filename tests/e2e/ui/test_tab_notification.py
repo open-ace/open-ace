@@ -116,8 +116,7 @@ def test_tab_notification_colors(
 
                 # Inject JavaScript to simulate postMessage from iframe
                 # This simulates qwen-code-webui sending a notification
-                page.evaluate(
-                    """
+                page.evaluate("""
                     () => {
                         // Simulate notification message from iframe
                         const message = {
@@ -127,8 +126,7 @@ def test_tab_notification_colors(
                         };
                         window.postMessage(message, '*');
                     }
-                """
-                )
+                """)
                 time.sleep(1)
                 screenshots.append(take_screenshot(page, "04_notification_input.png"))
 
@@ -159,8 +157,7 @@ def test_tab_notification_colors(
 
             # Step 5: Test permission type notification
             print("\nStep 5: Simulate notification (permission type)")
-            page.evaluate(
-                """
+            page.evaluate("""
                 () => {
                     const message = {
                         type: 'qwen-code-tab-notification',
@@ -169,8 +166,7 @@ def test_tab_notification_colors(
                     };
                     window.postMessage(message, '*');
                 }
-            """
-            )
+            """)
             time.sleep(1)
             screenshots.append(take_screenshot(page, "05_notification_permission.png"))
 
@@ -188,8 +184,7 @@ def test_tab_notification_colors(
 
             # Step 6: Test plan type notification
             print("\nStep 6: Simulate notification (plan type)")
-            page.evaluate(
-                """
+            page.evaluate("""
                 () => {
                     const message = {
                         type: 'qwen-code-tab-notification',
@@ -198,8 +193,7 @@ def test_tab_notification_colors(
                     };
                     window.postMessage(message, '*');
                 }
-            """
-            )
+            """)
             time.sleep(1)
             screenshots.append(take_screenshot(page, "06_notification_plan.png"))
 
@@ -229,8 +223,7 @@ def test_tab_notification_colors(
 
             # Step 8: Simulate clearing notification (isWaiting: false)
             print("\nStep 8: Clear notification")
-            page.evaluate(
-                """
+            page.evaluate("""
                 () => {
                     const message = {
                         type: 'qwen-code-tab-notification',
@@ -239,8 +232,7 @@ def test_tab_notification_colors(
                     };
                     window.postMessage(message, '*');
                 }
-            """
-            )
+            """)
             time.sleep(1)
             screenshots.append(take_screenshot(page, "07_notification_cleared.png"))
 

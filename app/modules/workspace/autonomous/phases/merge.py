@@ -215,6 +215,7 @@ def handle(ctx, deps) -> PhaseResult:
                 phase="merge",
                 milestone_type="pr_head_unverified",
                 status="in_progress",
+                dev_round=int(wf.get("dev_round", 1) or 1),
                 title=f"PR #{pr_number} head not verifiable; deferring merge",
                 error_message=head_ev.reason,
                 metadata=json.dumps({"evidence": head_ev.to_dict()}, ensure_ascii=False),
@@ -297,6 +298,7 @@ def handle(ctx, deps) -> PhaseResult:
                 phase="merge",
                 milestone_type="merged",
                 status="completed",
+                dev_round=int(wf.get("dev_round", 1) or 1),
                 title=f"PR #{pr_number} merged",
             )
         except GitHubOpsError as e:
@@ -430,6 +432,7 @@ def handle(ctx, deps) -> PhaseResult:
                         phase="merge",
                         milestone_type="merged",
                         status="failed",
+                        dev_round=int(wf.get("dev_round", 1) or 1),
                         title="PR merge failed",
                         error_message=f"Merge conflict resolution failed: {resolve_err}",
                     )

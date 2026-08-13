@@ -296,6 +296,105 @@ def test_review_agent_no_result_returns_failed():
     assert "no result" in result.structured_error.get("message", "")
 
 
+# ── summary agent empty-result retry ─────────────────────────────────────
+
+
+def _summary_workflow():
+    """A workflow at the round cap (round 1 of max 1) with an approved review,
+    so the summary branch fires after exactly one review agent run. The summary
+    agent is the SECOND run_agent_with_context_recovery call."""
+    return _workflow(current_round=0, max_pr_review_rounds=1)
+
+
+def test_summary_empty_first_call_retries_fresh_and_succeeds():
+    """When the summary agent (session_line='main') returns success but EMPTY
+    artifact text — a transient resume no-op — handle() retries ONCE with a
+    fresh session (session_line='fresh'). If the retry returns non-empty text,
+    the phase does NOT fail: the milestone is recorded with the fresh summary
+    and the phase advances to report."""
+    gh = _gh()
+    # First call = review agent (non-empty). Second call = summary 'main'
+    # (empty, the resume no-op). Third call = summary 'fresh' (non-empty).
+    review_result = _agent(text="approved")
+    empty_summary = _agent(text="   \n")
+    fresh_summary = _agent(text="Summary: all review comments addressed.")
+    host = _host(
+        review_is_approved=True,
+        run_agent_with_context_recovery=MagicMock(
+            side_effect=[review_result, empty_summary, fresh_summary]
+        ),
+    )
+    # artifact_text maps each result to its response_text.
+    host.artifact_text.side_effect = lambda r: getattr(r, "response_text", "") or ""
+    deps = _deps(host, gh)
+
+    result = pr_review_phase.handle(_ctx(_summary_workflow()), deps)
+
+    assert result.outcome == "completed", result
+    assert result.next_phase == "report"
+    # The summary agent ran twice (main + fresh) plus the one review run.
+    assert host.run_agent_with_context_recovery.call_count == 3
+    # The retry (3rd call) must use a fresh session line.
+    third_kwargs = host.run_agent_with_context_recovery.call_args_list[2].kwargs
+    assert third_kwargs.get("session_line") == "fresh"
+    # The milestone is recorded with the fresh (non-empty) summary text — it
+    # must NOT carry the empty main-run text. The summary milestone update is
+    # the last update_milestone call in this path.
+    update_calls = deps.repo.update_milestone.call_args_list
+    summary_update = update_calls[-1]
+    assert summary_update.args[1]["review_content"] == ("Summary: all review comments addressed.")
+    assert summary_update.args[1]["status"] == "completed"
+
+
+def test_summary_empty_after_fresh_retry_still_fails():
+    """If BOTH the main summary run and the fresh retry return empty text, the
+    existing fail-closed behaviour is preserved: PhaseResult.failed with the
+    'returned no result' message."""
+    gh = _gh()
+    review_result = _agent(text="approved")
+    empty_main = _agent(text="")
+    empty_fresh = _agent(text="")
+    host = _host(
+        review_is_approved=True,
+        run_agent_with_context_recovery=MagicMock(
+            side_effect=[review_result, empty_main, empty_fresh]
+        ),
+    )
+    host.artifact_text.side_effect = lambda r: getattr(r, "response_text", "") or ""
+    deps = _deps(host, gh)
+
+    result = pr_review_phase.handle(_ctx(_summary_workflow()), deps)
+
+    assert result.outcome == "failed"
+    assert result.next_status == "failed"
+    assert "no result" in result.structured_error.get("message", "")
+    # Summary ran twice (main + fresh) plus the review run.
+    assert host.run_agent_with_context_recovery.call_count == 3
+
+
+def test_summary_genuine_failure_does_not_trigger_fresh_retry():
+    """A genuine summary-agent failure (success=False) or context overflow takes
+    the existing failure path — it must NOT trigger the fresh-retry backstop,
+    which is reserved for a SUCCEEDED-but-empty run. run_agent is called once
+    for review and once for summary (no third call)."""
+    gh = _gh()
+    review_result = _agent(text="approved")
+    failed_summary = _agent(text="", success=False)
+    failed_summary.error = "agent crashed"
+    host = _host(
+        review_is_approved=True,
+        run_agent_with_context_recovery=MagicMock(side_effect=[review_result, failed_summary]),
+    )
+    host.artifact_text.side_effect = lambda r: getattr(r, "response_text", "") or ""
+    deps = _deps(host, gh)
+
+    result = pr_review_phase.handle(_ctx(_summary_workflow()), deps)
+
+    assert result.outcome == "failed"
+    # No fresh retry: only review + the failed summary run.
+    assert host.run_agent_with_context_recovery.call_count == 2
+
+
 def test_read_only_tool_unsupported_returns_failed():
     """A CLI tool without an enforceable read-only review sandbox (e.g. openclaw)
     fails closed before running any review agent."""
