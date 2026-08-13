@@ -86,10 +86,17 @@ function extractProjectName(path: string): string {
   return parts[parts.length - 1] || 'unknown'; // Fallback
 }
 
+// Normalize path separators for cross-platform matching
+function normalizePath(path: string): string {
+  // Replace all backslashes with forward slashes for consistent matching
+  return path.replace(/\\/g, '/');
+}
+
 // Match project path against patterns (case-insensitive, contains match)
 function matchCategory(projectPath: string, patterns: string[]): boolean {
-  const lowerPath = projectPath.toLowerCase();
-  return patterns.some((p) => p && lowerPath.includes(p.toLowerCase()));
+  // Normalize path separators before matching
+  const normalizedPath = normalizePath(projectPath).toLowerCase();
+  return patterns.some((p) => p && normalizedPath.includes(normalizePath(p).toLowerCase()));
 }
 
 // Categorize projects into groups
