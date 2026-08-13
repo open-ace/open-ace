@@ -109,7 +109,10 @@ CREATE TABLE agent_tokens (
  revoked_at TIMESTAMP,
  revoked_by integer,
  rotated_at TIMESTAMP,
- token_version INTEGER DEFAULT '0' NOT NULL
+ token_version INTEGER DEFAULT '0' NOT NULL,
+ pending_revoke INTEGER DEFAULT 0 NOT NULL,
+ revoke_after TEXT,
+ rotation_id TEXT
 );
 
 CREATE TABLE aggregation_history (
@@ -1563,9 +1566,9 @@ CREATE INDEX idx_agent_tokens_machine ON agent_tokens (machine_id);
 
 CREATE INDEX idx_agent_tokens_machine_version ON agent_tokens (machine_id, token_version);
 
-CREATE UNIQUE INDEX idx_agent_tokens_one_active_per_machine ON agent_tokens (machine_id);
+CREATE UNIQUE INDEX idx_agent_tokens_one_active_per_machine ON agent_tokens (machine_id) WHERE ((is_revoked = 0) AND (pending_revoke = 0));
 
-CREATE INDEX idx_agent_tokens_pending_revoke_timeout ON agent_tokens (revoke_after);
+CREATE INDEX idx_agent_tokens_pending_revoke_timeout ON agent_tokens (revoke_after) WHERE ((pending_revoke = 1) AND (is_revoked = 0));
 
 CREATE INDEX idx_aggregation_history_status ON aggregation_history (status);
 
