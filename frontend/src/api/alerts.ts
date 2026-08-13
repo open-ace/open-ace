@@ -6,16 +6,19 @@ import { apiClient } from './client';
 
 // Types
 export interface Alert {
-  id: string;
+  alert_id: string;
   type: 'quota' | 'system' | 'security';
   severity: 'info' | 'warning' | 'critical';
   title: string;
   message: string;
   user_id?: number;
   username?: string;
-  is_read: boolean;
+  read: boolean;
   created_at: string;
   metadata?: Record<string, unknown>;
+  tool_name?: string;
+  action_url?: string;
+  action_text?: string;
 }
 
 export interface AlertListResponse {

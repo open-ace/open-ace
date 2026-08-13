@@ -259,29 +259,17 @@ def auto_db(tmp_path):
         db = Database(db_url=f"sqlite:///{db_path}")
         conn = db.get_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    email TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    role TEXT DEFAULT 'user',
-                    is_active INTEGER DEFAULT 1,
-                    created_at TEXT,
-                    updated_at TEXT
-                )
-                """
-            )
-            cursor.execute(
-                "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
-                ("admin", "admin@test.com", "hash", "admin"),
-            )
-            conn.commit()
             from app.repositories.schema_init import load_schema_from_file
 
+            # Load the FULL authoritative schema (incl. users.deleted_at) on the empty
+            # DB FIRST, then seed — never hand-CREATE an old users table (the column
+            # would never be backfilled; legacy tests/issues escape hatch).
             load_schema_from_file(db_url=db.db_url, dialect="sqlite")
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
+                ("admin", "admin@test.com", "hash", "platform_admin"),
+            )
             conn.commit()
         finally:
             conn.close()
@@ -315,9 +303,13 @@ def _make_repo():
 
 
 @pytest.fixture
-def client(auto_db):
+def client(auto_db, monkeypatch):
     from app import create_app
 
+    # Point create_app()'s ensure_all_tables() at auto_db's seeded SQLite DB
+    # (get_database_url() defaults to dev Postgres locally). The quota gate
+    # short-circuits (429) before user_repo, so no user_repo rebind needed here.
+    monkeypatch.setenv("DATABASE_URL", auto_db.db_url)
     app = create_app({"TESTING": True})
     with app.app_context():
         c = app.test_client()

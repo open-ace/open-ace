@@ -929,24 +929,6 @@ export const ComplianceMgmt: React.FC = () => {
             </div>
           )}
         </Modal>
-
-        {/* Report Preview Modal */}
-        <ReportPreviewModal
-          isOpen={showReportPreviewModal}
-          onClose={() => setShowReportPreviewModal(false)}
-          htmlContent={previewHtmlContent}
-          reportType={previewReportType}
-          reportId={previewReportId}
-          onDownload={(fmt) => {
-            if (previewReportId) {
-              handleDownloadSavedReport(previewReportId, previewReportType, fmt);
-            } else {
-              // For newly generated report without saved ID, generate and download
-              handleGenerate();
-            }
-          }}
-          isDownloading={isGenerating}
-        />
       </>
     );
   };
@@ -1009,6 +991,24 @@ export const ComplianceMgmt: React.FC = () => {
 
       {/* Tab Content */}
       {activeTab === 'reports' ? renderReportsTab() : renderRetentionTab()}
+
+      {/* Report Preview Modal - Rendered at top level to work across all tabs */}
+      <ReportPreviewModal
+        isOpen={showReportPreviewModal}
+        onClose={() => setShowReportPreviewModal(false)}
+        htmlContent={previewHtmlContent}
+        reportType={previewReportType}
+        reportId={previewReportId}
+        onDownload={(fmt) => {
+          if (previewReportId) {
+            handleDownloadSavedReport(previewReportId, previewReportType, fmt);
+          } else {
+            // For newly generated report without saved ID, generate and download
+            handleGenerate();
+          }
+        }}
+        isDownloading={isGenerating}
+      />
     </div>
   );
 };

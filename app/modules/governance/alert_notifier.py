@@ -398,10 +398,22 @@ class Alert:
     action_text: str | None = None
 
     def to_dict(self) -> dict:
-        """Convert to dictionary for JSON serialization."""
+        """Convert to dictionary for JSON serialization.
+
+        Issue #2477: Frontend expects 'id', 'type', 'is_read' fields.
+        Keep 'alert_id', 'alert_type', 'read' for backward compatibility.
+        Deprecation planned: v2.0 will mark as deprecated, v3.0 will remove.
+        """
         return {
+            # Frontend-expected fields (Issue #2477)
+            "id": self.alert_id,
+            "type": self.alert_type,
+            "is_read": self.read,
+            # Original fields for backward compatibility
             "alert_id": self.alert_id,
             "alert_type": self.alert_type,
+            "read": self.read,
+            # Other fields
             "severity": self.severity,
             "title": self.title,
             "message": self.message,
@@ -410,7 +422,6 @@ class Alert:
             "tool_name": self.tool_name,
             "metadata": self.metadata,
             "created_at": self.created_at.isoformat(),
-            "read": self.read,
             "action_url": self.action_url,
             "action_text": self.action_text,
         }

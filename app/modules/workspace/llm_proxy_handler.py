@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from typing import Any
 
 from flask import Response, g, jsonify, request, stream_with_context
@@ -21,6 +23,55 @@ logger = logging.getLogger(__name__)
 
 # Shared ContentFilter instance for performance (uses cached rules)
 _content_filter_instance = None
+
+# Issue #2547: Stopped sessions cache for request circuit breaking
+# When a session is stopped, we add its ID here to reject subsequent
+# LLM requests from orphan processes (PPID=1) that may still be retrying.
+_stopped_sessions_cache: dict[str, float] = {}  # session_id -> timestamp
+_stopped_sessions_cache_lock = threading.Lock()
+_STOPPED_SESSION_TTL_SECONDS = 60  # How long to reject requests after stop
+
+
+def mark_session_stopped(session_id: str) -> None:
+    """Mark a session as stopped to trigger request circuit breaking."""
+    global _stopped_sessions_cache
+    with _stopped_sessions_cache_lock:
+        _stopped_sessions_cache[session_id] = time.time()
+        logger.info("Session %s marked as stopped for request circuit breaking", session_id[:8])
+        # Clean up expired entries
+        _cleanup_stopped_sessions_cache_locked()
+
+
+def is_session_stopped(session_id: str) -> bool:
+    """Check if a session is in the stopped sessions cache."""
+    global _stopped_sessions_cache
+    with _stopped_sessions_cache_lock:
+        timestamp = _stopped_sessions_cache.get(session_id)
+        if timestamp is None:
+            return False
+        # Check if entry has expired
+        if time.time() - timestamp > _STOPPED_SESSION_TTL_SECONDS:
+            del _stopped_sessions_cache[session_id]
+            return False
+        return True
+
+
+def _cleanup_stopped_sessions_cache_locked() -> None:
+    """Remove expired entries from the stopped sessions cache.
+
+    Must be called while holding _stopped_sessions_cache_lock.
+    """
+    global _stopped_sessions_cache
+    now = time.time()
+    expired = [
+        sid
+        for sid, ts in _stopped_sessions_cache.items()
+        if now - ts > _STOPPED_SESSION_TTL_SECONDS
+    ]
+    for sid in expired:
+        del _stopped_sessions_cache[sid]
+    if expired:
+        logger.debug("Cleaned up %d expired stopped session entries", len(expired))
 
 
 def _get_content_filter():
@@ -742,6 +793,23 @@ def _gateway_error_response(resp: Any, gateway_key: str) -> tuple[Response, int]
         )
 
 
+def _is_autonomous_request(token_payload: dict | None) -> bool:
+    """Whether a proxy request originates from the autonomous agent runner.
+
+    The autonomous proxy token is minted with ``session_type="agent"``
+    (agent_runner.py); that claim rides in the validated token payload
+    (api_key_proxy.generate_proxy_token). Autonomous prompts are
+    system-generated/trusted and inherently carry commit SHAs, dates, and code
+    that the user-content filter's PII detectors false-positive on (15-digit
+    SHAs → credit cards → 403 block, #2499). Such requests skip the governance
+    content filter, which exists for user-submitted chat — not the system's own
+    prompts to its model.
+    """
+    if token_payload is None:
+        return False
+    return token_payload.get("session_type") == "agent"
+
+
 def _check_content_filter(
     user_id: int,
     username: str | None,
@@ -1023,6 +1091,49 @@ def handle_llm_proxy_request(
     else:
         session_id = str(token_payload["session_id"])
 
+        # Issue #2464: If using webui aggregate session, check for user's active session
+        # When user creates a session via /work, route WebUI messages to that session
+        if session_id.startswith("webui:"):
+            try:
+                from app.modules.workspace.session_manager import get_session_manager
+
+                sm = get_session_manager()
+                active_sessions = sm.get_active_sessions(user_id=user_id, tenant_id=tenant_id)
+                # Filter out webui aggregate sessions, get the most recent non-webui session
+                # get_active_sessions already returns sessions sorted by updated_at DESC
+                non_webui_sessions = [
+                    s for s in active_sessions if not s.session_id.startswith("webui:")
+                ]
+                if non_webui_sessions:
+                    # First result is the most recently updated (SQL ORDER BY updated_at DESC)
+                    session_id = non_webui_sessions[0].session_id
+                    logger.debug(
+                        "Using user's active session %s instead of webui aggregate",
+                        session_id[:8],
+                    )
+            except Exception as e:
+                # On any error, fall back to webui aggregate session
+                logger.warning("Failed to get active sessions, using webui aggregate: %s", e)
+
+    # Issue #2547: Circuit breaking for stopped sessions
+    # Reject requests from orphan processes that may still be retrying
+    if is_session_stopped(session_id):
+        logger.warning(
+            "Rejecting request for stopped session %s (circuit breaker)",
+            session_id[:8],
+        )
+        return (
+            jsonify(
+                {
+                    "error": {
+                        "message": "Session has been stopped",
+                        "type": "session_stopped",
+                    }
+                }
+            ),
+            410,  # Gone - indicates resource no longer available
+        )
+
     try:
         from app.modules.governance.quota_manager import QuotaManager
 
@@ -1057,13 +1168,25 @@ def handle_llm_proxy_request(
     # ── Content filter check for user input ──────────────────────────────
     # Check user messages for sensitive content before forwarding to LLM.
     # Block: return 403, Warn: log and continue, Redact: modify content.
-    username = g.user.get("username") if hasattr(g, "user") else None
-    content_filter_result = _check_content_filter(
-        user_id=user_id,
-        username=username,
-        request_body=request.get_data(),
-        tenant_id=tenant_id,
-    )
+    # Autonomous agent requests (session_type="agent") are exempt: their
+    # prompts are system-generated and inherently carry SHAs/dates/code that
+    # the PII detectors false-positive on — filtering them 403-blocked glm-5
+    # autonomous workflows (#2499). The filter governs user-submitted chat.
+    if _is_autonomous_request(token_payload):
+        logger.debug(
+            "Skipping content filter for autonomous agent request " "(user_id=%s, tenant_id=%s)",
+            user_id,
+            tenant_id,
+        )
+        content_filter_result = None
+    else:
+        username = g.user.get("username") if hasattr(g, "user") else None
+        content_filter_result = _check_content_filter(
+            user_id=user_id,
+            username=username,
+            request_body=request.get_data(),
+            tenant_id=tenant_id,
+        )
     if isinstance(content_filter_result, tuple):
         # Block: return error response
         return content_filter_result

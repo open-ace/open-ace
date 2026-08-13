@@ -116,10 +116,13 @@ class ApiClient {
 
     const url = `${this.baseUrl}${endpoint}`;
 
+    // Issue #2511: Only set Content-Type when there's a body to avoid HTTP semantic violation
     const requestHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
       ...headers,
     };
+    if (body) {
+      requestHeaders['Content-Type'] = 'application/json';
+    }
 
     // Create abort controller for timeout
     const controller = new AbortController();

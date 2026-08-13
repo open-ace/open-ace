@@ -254,7 +254,10 @@ def test_missing_checklist_verdict_forces_indeterminate_and_never_closes_issue()
             ),
         }
     ]
-    deps.gh.add_issue_comment.assert_not_called()
+    # Indeterminate now surfaces to humans as an issue comment (what's missing).
+    deps.gh.add_issue_comment.assert_called_once()
+    _, comment = deps.gh.add_issue_comment.call_args.args
+    assert "rejects expired tokens" in comment
     deps.gh.close_issue.assert_not_called()
 
 

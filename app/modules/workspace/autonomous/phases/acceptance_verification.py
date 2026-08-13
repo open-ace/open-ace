@@ -26,6 +26,7 @@ from __future__ import annotations
 import dataclasses
 import fnmatch
 import json
+import logging
 import time
 from typing import cast
 
@@ -42,6 +43,8 @@ from app.utils.config import is_acceptance_verification_enabled
 
 VERIFIED_BY = "acceptance-verifier-v1"
 MAX_VERIFIER_INFRA_RETRIES = 3
+
+logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -171,21 +174,96 @@ def _parse_issue_body(gh, issue_number) -> str:
     return body if isinstance(body, str) else ""
 
 
+def _failed_items(report: dict) -> list[tuple[str, dict]]:
+    """Actionable items: scope/gates/verifier entries not confirmed."""
+    out: list[tuple[str, dict]] = []
+    for kind in ("scope", "gates", "verifier"):
+        for entry in report.get(kind, []):
+            if entry.get("verdict") != "confirmed":
+                out.append((kind, entry))
+    return out
+
+
+def _acceptance_summary(status: str, report: dict) -> str:
+    """Human-readable one-line summary for the milestone card.
+
+    On confirmed, counts suffice. On rejected/indeterminate, name the items
+    that failed so a human reading the card knows what to fix — not just
+    ``scope=1 gates=0``. Capped to stay a single readable line.
+    """
+    failed_names: list[str] = []
+    for _, entry in _failed_items(report):
+        name = entry.get("item")
+        if isinstance(name, str) and name.strip():
+            failed_names.append(name.strip())
+    if failed_names:
+        listed = ", ".join(failed_names[:6])
+        extra = f" (+{len(failed_names) - 6} more)" if len(failed_names) > 6 else ""
+        return f"status={status}; not-verified: {listed}{extra}"
+    return (
+        f"status={status}; "
+        f"scope={len(report.get('scope', []))} "
+        f"gates={len(report.get('gates', []))} "
+        f"verifier={len(report.get('verifier', []))}"
+    )
+
+
 def _format_report_comment(report: dict) -> str:
+    status = (report.get("status") or "").lower()
+    icon = {"confirmed": "✅", "rejected": "❌"}.get(status, "⚠️")
+    title = {
+        "confirmed": "Acceptance verified",
+        "rejected": "Acceptance not verified",
+    }.get(status, "Acceptance inconclusive")
     lines = [
-        "## ✅ Acceptance verified",
+        f"## {icon} {title}",
         f"**Merge SHA:** `{report.get('merge_sha')}`",
         f"**Verifier:** `{report.get('verified_by')}`",
-        "",
-        "**Scope gate:**",
     ]
-    for s in report.get("scope", []):
-        lines.append(f"- `{s['item']}` — {s['verdict']}")
-    if report.get("verifier"):
-        lines += ["", "**Verifier findings:**"]
-        for v in report["verifier"]:
-            lines.append(f"- {v['verdict']} — {v['item']}")
+    if status == "confirmed":
+        lines += ["", "**Scope gate:**"]
+        for s in report.get("scope", []):
+            lines.append(f"- `{s['item']}` — {s['verdict']}")
+        if report.get("verifier"):
+            lines += ["", "**Verifier findings:**"]
+            for v in report["verifier"]:
+                lines.append(f"- {v['verdict']} — {v['item']}")
+        return "\n".join(lines)
+    # rejected / indeterminate: surface WHAT failed so a human knows the next step.
+    failed = _failed_items(report)
+    if failed:
+        label = "Rejected / missing" if status == "rejected" else "Could not verify"
+        lines += ["", f"**{label}:**"]
+        for kind, entry in failed:
+            detail = entry.get("rationale") or ""
+            if not detail:
+                ev = entry.get("evidence") or []
+                if ev and isinstance(ev[0], dict):
+                    detail = ev[0].get("note", "")
+            tail = f" — {detail}" if detail else ""
+            lines.append(f"- [{kind}] `{entry.get('item')}` ({entry.get('verdict')}){tail}")
+    lines += [
+        "",
+        "**Next step:** address the items above, then resume the workflow to re-verify.",
+    ]
     return "\n".join(lines)
+
+
+def _post_verdict_comment(deps, issue_number, report) -> None:
+    """Best-effort: post the human-readable verdict as an issue comment so the
+    author sees WHAT failed + what to do. A comment failure must not block the
+    pause — the verdict is also persisted in the workflow/milestone.
+    """
+    if not issue_number:
+        return
+    try:
+        deps.gh.add_issue_comment(issue_number, _format_report_comment(report))
+    except Exception:
+        logger.warning(
+            "acceptance verifier: failed to post verdict comment for issue %s",
+            issue_number,
+            exc_info=True,
+        )
 
 
 _TERMINAL_VERIFICATION_STATUSES = frozenset({"confirmed", "rejected", "indeterminate"})
@@ -255,12 +333,7 @@ def _acceptance_milestone(*, workflow_id, attempt, status, report) -> dict:
     the moment a verdict was committed (#2394). ``metadata`` keeps the full
     structured report as JSON; ``result_summary`` is a short readable line.
     """
-    summary = (
-        f"status={status}; "
-        f"scope={len(report.get('scope', []))} "
-        f"gates={len(report.get('gates', []))} "
-        f"verifier={len(report.get('verifier', []))}"
-    )
+    summary = _acceptance_summary(status, report)
     return {
         "workflow_id": workflow_id,
         "phase": "acceptance_verification",
@@ -412,7 +485,7 @@ def handle(ctx, deps) -> PhaseResult:
                 f"verification agent verdict fields were malformed at index {index}"
             )
             continue
-        evidence_items = cast(list[dict], evidence)
+        evidence_items = cast("list[dict]", evidence)
         verdict = _verdict_from_str(raw_status)
         if verdict in {Verdict.CONFIRMED, Verdict.REJECTED} and not evidence_items:
             verdict = Verdict.INDETERMINATE
@@ -616,6 +689,7 @@ def handle(ctx, deps) -> PhaseResult:
             milestone_events=[milestone],
         )
     if status == "rejected":
+        _post_verdict_comment(deps, issue_number, report)
         return PhaseResult.pause(
             structured_error={
                 "message": "Acceptance verification rejected",
@@ -628,6 +702,7 @@ def handle(ctx, deps) -> PhaseResult:
             milestone_events=[milestone],
         )
     # indeterminate
+    _post_verdict_comment(deps, issue_number, report)
     return PhaseResult.pause(
         workflow_patch={
             **common_patch,

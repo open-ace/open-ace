@@ -86,10 +86,11 @@ def _build_deps(
     return deps, host
 
 
-def _workflow(pr_number: int | None = 123) -> dict:
+def _workflow(pr_number: int | None = 123, dev_round: int = 1) -> dict:
     return {
         "github_pr_number": pr_number,
         "branch_name": "feature-x",
+        "dev_round": dev_round,
     }
 
 
@@ -123,6 +124,28 @@ def test_merge_handle_success_returns_completed_phase_result():
     ), result.milestone_events
     # Terminal phase_change emitted through the host.
     host.emit_phase_change.assert_called_with({"phase": "completed"})
+
+
+def test_merged_milestone_records_workflow_dev_round():
+    """The merged milestone carries the workflow's current dev_round, not the
+    DB default 1.
+
+    Reproducer #2538: a workflow that merged in round 3 recorded its merged
+    milestone with dev_round=1 (the column default) while the round-3 dev /
+    CI-repair milestones correctly showed dev_round=3. The timeline UI groups
+    by dev_round, so the merged card (the latest by timestamp) was mis-placed
+    into the round-1 group, appearing out of order before the round-3 cards.
+    """
+    deps, host = _build_deps()
+    merge_phase.handle(_ctx(_workflow(dev_round=3)), deps)
+
+    merged_calls = [
+        c
+        for c in host.create_milestone_idempotent.call_args_list
+        if c.kwargs.get("milestone_type") == "merged"
+    ]
+    assert merged_calls, "merged milestone was not recorded on a clean merge"
+    assert merged_calls[-1].kwargs.get("dev_round") == 3
 
 
 def test_merge_handle_no_pr_number_skips_to_cleanup():

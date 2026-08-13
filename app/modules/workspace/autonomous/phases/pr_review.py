@@ -132,6 +132,18 @@ def _ensure_branch_and_push(gh, host, branch_name, entry_feature_head, entry_mai
             raise RuntimeError(
                 f"Branch mismatch before push: expected {branch_name}, actual {current_branch}"
             )
+    # Safety net: commit any uncommitted changes before push so the branch HEAD
+    # carries them. The dev phase auto-commits agent work, but changes made
+    # after that commit (a review-fix retry, a merge-main sync on a prior
+    # round) can stay uncommitted — create_pr then 422s with "No commits
+    # between main and branch" (#2468 fa40beec, #2477 b6348aac).
+    if gh.has_uncommitted_changes():
+        gh.git_add_all()
+        gh.git_commit("auto: stage pending changes before push", no_verify=True)
+        logger.info(
+            "Workflow %s pr_review: staged uncommitted changes before push",
+            host.workflow_id[:8],
+        )
     gh.git_push(branch=branch_name, force_with_lease=True)
 
 
@@ -699,6 +711,34 @@ def handle(ctx, deps) -> PhaseResult:
                 structured_error={"message": message}, workflow_patch=workflow_patch
             )
         summary_text = host.artifact_text(summary_result)
+        if not summary_text.strip():
+            # A --resumed session whose last turn already ended can synthesize
+            # an empty "No response requested" terminal result (0 tokens) — a
+            # transient resume no-op, not a genuine failure (the run itself
+            # succeeded). Retry ONCE with a brand-new session (session_line=
+            # "fresh"), which cannot no-op because it isn't resuming. The
+            # summary prompt embeds the last review inline, so a fresh session
+            # still has what it needs. Genuine failures / overflows / integrity
+            # violations are handled above and never reach here.
+            retry_result = host.run_agent_with_context_recovery(
+                wf=wf,
+                workflow_id=host.workflow_id,
+                cli_tool=wf.get("cli_tool", "claude-code"),
+                model=wf.get("model", ""),
+                project_path=wf.get("worktree_path") or wf.get("project_path", ""),
+                prompt=summary_prompt,
+                workspace_type=wf.get("workspace_type", "local"),
+                remote_machine_id=wf.get("remote_machine_id"),
+                permission_mode=wf.get("permission_mode", "auto-edit"),
+                allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(
+                    wf.get("cli_tool", "claude-code"), []
+                ),
+                session_line="fresh",
+                milestone_id=summary_ms.get("milestone_id", ""),
+            )
+            host.accumulate_tokens(retry_result)
+            summary_result = retry_result
+            summary_text = host.artifact_text(summary_result)
         if not summary_text.strip():
             message = "PR review summary agent returned no result"
             repo.update_milestone(

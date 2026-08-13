@@ -1174,6 +1174,12 @@ class RemoteSessionManager:
 
         self._agent_manager.send_command(machine_id, command)
 
+        # Issue #2547: Mark session as stopped for request circuit breaking
+        # This prevents orphan processes from continuing to send requests
+        from app.modules.workspace.llm_proxy_handler import mark_session_stopped
+
+        mark_session_stopped(session_id)
+
         # Complete session
         self._session_manager.complete_session(session_id)
         self._agent_manager.unbind_session(session_id)
@@ -1724,7 +1730,11 @@ class RemoteSessionManager:
         )
 
     def process_session_status_update(
-        self, session_id: str, status: str, pid: int | None = None
+        self,
+        session_id: str,
+        status: str,
+        pid: int | None = None,
+        cli_session_id: str | None = None,
     ) -> None:
         """Process a session status update from a remote agent."""
         session = self._session_manager.get_session(session_id)
@@ -1756,6 +1766,15 @@ class RemoteSessionManager:
             self._agent_manager.mark_session_ended(session_id)
             # Clean up permission mode cache
             self._session_permission_modes.pop(session_id, None)
+
+        # Backfill cli_session_id if provided and not already set
+        if cli_session_id and not session.cli_session_id:
+            session.cli_session_id = cli_session_id
+            logger.info(
+                "Backfilled cli_session_id=%s for session %s",
+                cli_session_id[:8],
+                session_id[:8],
+            )
 
         self._session_manager.update_session(session)
 

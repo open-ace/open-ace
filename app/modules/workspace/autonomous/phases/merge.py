@@ -215,6 +215,7 @@ def handle(ctx, deps) -> PhaseResult:
                 phase="merge",
                 milestone_type="pr_head_unverified",
                 status="in_progress",
+                dev_round=int(wf.get("dev_round", 1) or 1),
                 title=f"PR #{pr_number} head not verifiable; deferring merge",
                 error_message=head_ev.reason,
                 metadata=json.dumps({"evidence": head_ev.to_dict()}, ensure_ascii=False),
@@ -297,6 +298,7 @@ def handle(ctx, deps) -> PhaseResult:
                 phase="merge",
                 milestone_type="merged",
                 status="completed",
+                dev_round=int(wf.get("dev_round", 1) or 1),
                 title=f"PR #{pr_number} merged",
             )
         except GitHubOpsError as e:
@@ -372,27 +374,42 @@ def handle(ctx, deps) -> PhaseResult:
                 or is_conflict_rejection
                 or (mergeable is False and not mergeable_state)
             )
-            # GitHub's mergeability cache can report a stale "dirty"
-            # immediately after a synchronization push, before the
-            # synthetic merge commit is recomputed. The PR branch already
-            # contains main in that case, so verifying ancestry avoids a
-            # no-op merge that fails with "made no commit". Only the
-            # cache-derived "dirty" path needs the probe; text evidence
-            # and a definitive non-mergeable branch are authoritative.
+            # Any mergeability signal — cache-derived "dirty", conflict-
+            # rejection text, or a definitive non-mergeable state — can be
+            # stale after a prior merge cycle already synced the branch with
+            # main (e.g. a conflicts-resolved push). When the branch already
+            # contains main there is no real git conflict, so probing ancestry
+            # avoids a no-op resolve that merges "Already up to date" and
+            # terminally fails with "made no commit" (workflow e274ec0e/#2467:
+            # a later cycle re-entered resolve on a branch a prior cycle had
+            # already pushed, failing on a PR that was genuinely mergeable).
+            # ``branch_contains_main`` is a ground-truth git check — main as
+            # an ancestor means no conflict is possible — so it overrules even
+            # authoritative-looking text. When the rejection is a stale
+            # *conflict* signal, defer so GitHub recomputes mergeability; when
+            # it is a *policy* block, fall through to the policy handler below
+            # (the block is independent of any git conflict).
             if (
                 is_real_conflict
-                and mergeable_state == "dirty"
-                and not is_conflict_rejection
-                and mergeable is not False
                 and pr_head_sha
                 and deps.host.branch_contains_main(gh, pr_head_sha, branch_name) is True
             ):
-                logger.info(
-                    "PR #%s mergeable_state=dirty is stale (branch has main); "
-                    "deferring to policy/check path",
-                    pr_number,
-                )
-                is_real_conflict = False
+                if is_policy_rejection:
+                    logger.info(
+                        "PR #%s: branch has main (no git conflict possible); "
+                        "the merge rejection is policy (state=%s), deferring "
+                        "to policy handling",
+                        pr_number,
+                        mergeable_state or "unknown",
+                    )
+                    is_real_conflict = False
+                else:
+                    logger.info(
+                        "PR #%s: conflict signal is stale (branch already has "
+                        "main); deferring for GitHub to recompute mergeability",
+                        pr_number,
+                    )
+                    return PhaseResult.retry()
             if is_real_conflict:
                 try:
                     # Authoritative conflict evidence wins over generic
@@ -415,6 +432,7 @@ def handle(ctx, deps) -> PhaseResult:
                         phase="merge",
                         milestone_type="merged",
                         status="failed",
+                        dev_round=int(wf.get("dev_round", 1) or 1),
                         title="PR merge failed",
                         error_message=f"Merge conflict resolution failed: {resolve_err}",
                     )

@@ -134,7 +134,7 @@
       "issue_number": "1140",
       "nodeid": "tests/issues/1140/test_zcode_dev_mode_and_session.py::test_session_line_updates_even_on_resume",
       "outcome": "failure",
-      "summary": "AssertionError: _run_agent must not skip session line update on resume \u2014 see #525 where dev resumed a dead planning session forever"
+      "summary": "AssertionError: _run_agent must not skip session line update on resume — see #525 where dev resumed a dead planning session forever"
     },
     {
       "category": "assertion_failure",
@@ -262,7 +262,7 @@
       "issue_number": "1395",
       "nodeid": "tests/issues/1395/test_cross_user_permissions.py::test_isolated_wrapper_can_handle_signals_while_waiting_for_agent",
       "outcome": "failure",
-      "summary": "assert 'trap cleanup_isolated EXIT' in '#!/bin/bash\\n# openace-run-as \u2014 cross-user agent launcher for AI autonomous development.\\n#\\n# Problem (Issue #1395): the open-ace service runs as the `openace\u2026"
+      "summary": "assert 'trap cleanup_isolated EXIT' in '#!/bin/bash\\n# openace-run-as — cross-user agent launcher for AI autonomous development.\\n#\\n# Problem (Issue #1395): the open-ace service runs as the `openace…"
     },
     {
       "category": "assertion_failure",
@@ -270,7 +270,7 @@
       "issue_number": "1395",
       "nodeid": "tests/issues/1395/test_cross_user_permissions.py::test_isolated_wrapper_normalizes_recovered_acls_before_git_baseline",
       "outcome": "failure",
-      "summary": "assert 'signature_registry=\"/run/openace-agent-git-signature-${target_uid}\"' in '#!/bin/bash\\n# openace-run-as \u2014 cross-user agent launcher for AI autonomous development.\\n#\\n# Problem (Issue #1395): \u2026"
+      "summary": "assert 'signature_registry=\"/run/openace-agent-git-signature-${target_uid}\"' in '#!/bin/bash\\n# openace-run-as — cross-user agent launcher for AI autonomous development.\\n#\\n# Problem (Issue #1395): …"
     },
     {
       "category": "test_body_exception",
@@ -585,46 +585,6 @@
       "summary": "AssertionError: non-'already exists' error should propagate, not be masked"
     },
     {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1891",
-      "nodeid": "tests/issues/1891/test_usage_report_auth.py::TestUsageReportHttpIntegration::test_duplicate_report_is_idempotent_and_conflicting_replay_is_rejected",
-      "outcome": "failure",
-      "summary": "assert 0 == 2"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1891",
-      "nodeid": "tests/issues/1891/test_usage_report_auth.py::TestUsageReportHttpIntegration::test_report_id_less_agent_has_explicit_short_migration_window[/api/remote/agent/message]",
-      "outcome": "failure",
-      "summary": "assert 0 == 150"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1891",
-      "nodeid": "tests/issues/1891/test_usage_report_auth.py::TestUsageReportHttpIntegration::test_report_id_less_agent_has_explicit_short_migration_window[/api/remote/usage-report]",
-      "outcome": "failure",
-      "summary": "assert 0 == 150"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1891",
-      "nodeid": "tests/issues/1891/test_usage_report_auth.py::TestUsageReportHttpIntegration::test_valid_bearer_updates_usage_and_audits_both_paths[/api/remote/agent/message]",
-      "outcome": "failure",
-      "summary": "assert 0 == 2"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1891",
-      "nodeid": "tests/issues/1891/test_usage_report_auth.py::TestUsageReportHttpIntegration::test_valid_bearer_updates_usage_and_audits_both_paths[/api/remote/usage-report]",
-      "outcome": "failure",
-      "summary": "assert 0 == 2"
-    },
-    {
       "category": "test_body_exception",
       "exception_type": "RuntimeError",
       "issue_number": "1895",
@@ -815,62 +775,6 @@
       "nodeid": "tests/issues/221/test_tenant_form_validation.py::test_tenant_form_validation",
       "outcome": "failure",
       "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "2335",
-      "nodeid": "tests/issues/2335/test_close_issue.py::test_close_issue_runs_as_service_user_with_bot_token",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "2335",
-      "nodeid": "tests/issues/2335/test_close_issue.py::test_get_merge_commit_sha_none_when_empty",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "2335",
-      "nodeid": "tests/issues/2335/test_close_issue.py::test_get_merge_commit_sha_returns_oid",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "2335",
-      "nodeid": "tests/issues/2335/test_close_issue.py::test_reopen_issue_runs_as_service_user_with_bot_token",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "2335",
-      "nodeid": "tests/issues/2335/test_verifier_checkout.py::test_cross_user_verifier_cleanup_uses_owner_safe_wrapper",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "2335",
-      "nodeid": "tests/issues/2335/test_verifier_checkout.py::test_cross_user_verifier_directory_is_created_by_repository_owner",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "2335",
-      "nodeid": "tests/issues/2335/test_verifier_checkout.py::test_same_user_verifier_directory_is_private_and_owner_writable",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
     },
     {
       "category": "assertion_failure",
@@ -1087,62 +991,6 @@
       "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestSameTimestampTiebreak::test_identical_timestamps_ordered_by_id",
       "outcome": "failure",
       "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "2431",
-      "nodeid": "tests/issues/2431/test_acceptance_verifier_hardening.py::test_issue_closure_combines_closed_at_with_latest_timeline_actor",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "2431",
-      "nodeid": "tests/issues/2431/test_acceptance_verifier_hardening.py::test_issue_closure_rejects_timeline_actor_from_a_different_close_event",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "2431",
-      "nodeid": "tests/issues/2431/test_acceptance_verifier_hardening.py::test_issue_comment_exact_body_from_same_bot_is_idempotent",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "2431",
-      "nodeid": "tests/issues/2431/test_acceptance_verifier_hardening.py::test_issue_comment_listing_uses_paginated_rest_and_normalizes_pages",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "2431",
-      "nodeid": "tests/issues/2431/test_acceptance_verifier_hardening.py::test_issue_comment_same_body_from_human_does_not_deduplicate",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "2431",
-      "nodeid": "tests/issues/2431/test_acceptance_verifier_hardening.py::test_issue_comment_unknown_bot_identity_does_not_trust_existing_author",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "2431",
-      "nodeid": "tests/issues/2431/test_acceptance_verifier_hardening.py::test_merge_sha_is_fetched_and_verified_when_missing",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
     },
     {
       "category": "test_body_exception",
@@ -1601,20 +1449,20 @@
       "summary": "AssertionError: Create failed: 401 {\"error\":\"Authentication required\"}"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "517",
       "nodeid": "tests/issues/517/e2e_codex_real_session.py::test_session_restore",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: agent_sessions"
+      "summary": "AssertionError: No codex sessions to test restore"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "517",
       "nodeid": "tests/issues/517/e2e_codex_real_session.py::test_session_sync_verification",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: agent_sessions"
+      "summary": "AssertionError: No codex sessions in agent_sessions"
     },
     {
       "category": "assertion_failure",
@@ -1630,7 +1478,7 @@
       "issue_number": "52",
       "nodeid": "tests/issues/52/test_issue52.py::test_database_migration",
       "outcome": "failure",
-      "summary": "AssertionError: linux_account \u5b57\u6bb5\u672a\u6dfb\u52a0\u5230 users \u8868"
+      "summary": "AssertionError: linux_account 字段未添加到 users 表"
     },
     {
       "category": "assertion_failure",
@@ -1646,7 +1494,7 @@
       "issue_number": "52",
       "nodeid": "tests/issues/52/test_issue52.py::test_update_user_with_linux_account",
       "outcome": "failure",
-      "summary": "AssertionError: \u521b\u5efa\u7528\u6237\u5931\u8d25"
+      "summary": "AssertionError: 创建用户失败"
     },
     {
       "category": "test_body_exception",
@@ -1838,7 +1686,7 @@
       "issue_number": "673",
       "nodeid": "tests/issues/673/test_session_filter_params.py::test_api_endpoint_integration",
       "outcome": "failure",
-      "summary": "AssertionError: API \u8fd4\u56de 401"
+      "summary": "AssertionError: API 返回 401"
     },
     {
       "category": "setup_error",
@@ -1889,1116 +1737,20 @@
       "summary": "assert False"
     },
     {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestAuthRequired::test_create_requires_auth",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestAuthRequired::test_delete_requires_auth",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestAuthRequired::test_get_requires_auth",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestAuthRequired::test_list_requires_auth",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestAuthRequired::test_tools_requires_auth",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCancelMilestone::test_cancel_milestone",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_can_require_full_review_rounds",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_missing_cli_tool",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_missing_project_path",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_missing_requirements",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_new_project_no_path_needed",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_success",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_with_issue_url",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_with_multiple_issue_selectors",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestCreateWorkflow::test_create_with_only_invalid_issue_selectors",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestDeleteBatch::test_delete_batch_forbidden_for_other_users",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestDeleteBatch::test_delete_batch_not_found",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestDeleteBatch::test_delete_batch_success",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestDeleteWorkflow::test_delete_not_found",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestDeleteWorkflow::test_delete_success",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestForkMilestone::test_fork_milestone",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetMilestoneSession::test_get_session_milestone_not_found",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetMilestoneSession::test_get_session_no_session_id",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetMilestoneSession::test_get_session_prefers_actual_cli_session_when_mapped",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetMilestoneSession::test_get_session_success",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetMilestoneSession::test_get_session_workflow_not_found",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetMilestoneSession::test_get_session_wrong_workflow",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetModels::test_get_models_exception_returns_empty",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetModels::test_get_models_no_keys_returns_empty",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetModels::test_get_models_remote_denies_without_access",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetModels::test_get_models_remote_derives_tenant_from_machine",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetModels::test_get_models_remote_lookup_failure_not_masked_as_success",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetModels::test_get_models_returns_normalized_models",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetTimeline::test_get_timeline",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetTimeline::test_get_timeline_backfills_diff_stats_per_milestone",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetTimeline::test_get_timeline_exposes_actual_llm_session_id",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetTools::test_get_tools",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetWorkflow::test_get_not_found",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetWorkflow::test_get_other_users_workflow_forbidden",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetWorkflow::test_get_parses_definition_snapshot",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestGetWorkflow::test_get_success",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestListWorkflows::test_list_admin_sees_all",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestListWorkflows::test_list_passes_search_limit_offset_and_status",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestListWorkflows::test_list_regular_user_filters_own",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestListWorkflows::test_list_success",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestMarkDone::test_mark_done",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestPauseWorkflow::test_pause_already_paused",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestPauseWorkflow::test_pause_success",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestResumeWorkflow::test_resume_not_paused",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestResumeWorkflow::test_resume_success",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestStopWorkflow::test_stop_cancels_queued_batch_siblings",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestStopWorkflow::test_stop_success",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestStreamWorkflowEvents::test_stream_requires_ownership",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestStreamWorkflowEvents::test_stream_returns_event_stream",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_api.py::TestStreamWorkflowEvents::test_stream_workflow_not_found",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_quota_gate.py::TestCreateWorkflowQuotaGate::test_over_quota_rejected",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_quota_gate.py::TestCreateWorkflowQuotaGate::test_quota_check_error_fail_closed_rejected",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestAllowedFieldsFiltering::test_update_allows_only_whitelisted_fields",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestAllowedFieldsFiltering::test_update_filters_out_empty_update_set",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestAllowedFieldsFiltering::test_update_milestone_allowed_fields_filter",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestAllowedFieldsFiltering::test_update_persists_transient_retry_count",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestAllowedFieldsFiltering::test_update_workflow_coerces_booleans",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestCIRoundTripPersistence::test_ci_repair_fields_round_trip",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestCIRoundTripPersistence::test_worktree_and_preferred_paths_round_trip_together",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestContentLanguagePersistence::test_defaults_to_en_when_omitted",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestContentLanguagePersistence::test_explicit_content_language_round_trips",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestContentLanguagePersistence::test_invalid_content_language_normalized_to_en",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestContentLanguagePersistence::test_none_content_language_normalized_to_en",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestEventCRUD::test_create_event",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestEventCRUD::test_events_ordered_by_created_at",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestEventCRUD::test_list_events",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestEventCRUD::test_list_events_with_limit",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestMilestoneCRUD::test_cancel_milestones_after",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestMilestoneCRUD::test_create_milestone",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestMilestoneCRUD::test_get_milestone",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestMilestoneCRUD::test_list_milestones",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestMilestoneCRUD::test_list_milestones_filter_dev_round",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestMilestoneCRUD::test_list_milestones_filter_phase",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestMilestoneCRUD::test_update_milestone",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_create_workflow",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_create_workflow_persists_require_full_review_rounds",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_delete_batch_cascades",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_delete_workflow",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_delete_workflow_cascades",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_get_active_workflows",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_get_milestone_usage_summary",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_get_workflow",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_get_workflow_not_found",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_list_workflows",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_list_workflows_comma_separated_status",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_list_workflows_filter_status",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_list_workflows_filter_user",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_list_workflows_search_and_pagination",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_update_workflow",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_update_workflow_empty",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_autonomous_repo.py::TestWorkflowCRUD::test_update_workflow_tokens",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsBranch::test_create_branch_from_base",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsBranch::test_create_branch_from_head",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "716",
       "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsBranch::test_delete_branch",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+      "outcome": "failure",
+      "summary": "AssertionError: assert 4 == 2"
     },
     {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsBranch::test_get_current_branch",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsBranch::test_get_current_commit",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsDiff::test_get_commit_diff",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsDiff::test_get_commit_diff_stats",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsDiff::test_get_diff",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsDiff::test_get_diff_stats",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsError::test_check_false_no_exception",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsError::test_gh_command_failure",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsError::test_gh_not_found",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsError::test_gh_timeout",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "716",
       "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_add_all",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_commit",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_commit_default_no_verify_flag",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_commit_no_verify",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_init",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_push",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsInit::test_init",
       "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsIssue::test_add_issue_comment",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsIssue::test_create_issue",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsIssue::test_create_issue_no_labels",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsIssue::test_get_issue",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsIssue::test_list_issue_comments",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsIssue::test_list_issue_comments_with_since",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsIssue::test_update_issue",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsPR::test_create_pr",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsPR::test_create_pr_draft",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsPR::test_get_pr",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsPR::test_get_pr_merge_state",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsPR::test_list_pr_comments",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsPR::test_list_pr_comments_empty",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsPR::test_merge_pr",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsRepo::test_create_repo",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsRepo::test_create_repo_public",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsRepo::test_get_repo_name",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsRepo::test_get_repo_name_fallback_no_remote",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsRepo::test_get_repo_url",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsWorktree::test_create_worktree",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsWorktree::test_create_worktree_with_base",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsWorktree::test_list_worktrees",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "TypeError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsWorktree::test_remove_worktree",
-      "outcome": "error",
-      "summary": "failed on setup with \"TypeError: object.__new__() takes exactly one argument (the type to instantiate)\""
+      "summary": "AssertionError: assert 'add' in ['git', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', ...]"
     },
     {
       "category": "assertion_failure",
@@ -3217,68 +1969,68 @@
       "summary": "AssertionError: dev milestone should be completed when salvaged"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_allows_different_commits",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: assert 2 == 0"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_auto_commit_failure_falls_back_to_fail",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: Expected 'git_commit' to have been called once. Called 0 times."
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_auto_commits_uncommitted_changes",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: Expected 'git_add_all' to have been called once. Called 0 times."
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_detects_no_code_changes",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: assert 'no code changes' in 'cannot establish a trusted git context before agent execution'"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_skip_check_when_agent_fails",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: assert 'timeout' in 'cannot establish a trusted git context before agent execution'"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_skip_check_when_commit_unavailable",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: assert 2 == 0"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestFinalPlanAnnotation::test_final_plan_includes_last_review",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: assert False"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestFinalPlanAnnotation::test_final_plan_without_review",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "AssertionError: assert False"
     },
     {
       "category": "test_body_exception",
@@ -3297,20 +2049,12 @@
       "summary": "sqlite3.OperationalError: no such table: users"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
-      "issue_number": "733",
-      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestPermissionModePassthrough::test_planning_passes_permission_mode",
-      "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "733",
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestPlanningPromptConstraints::test_initial_plan_prompt_forbids_full_code",
       "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
+      "summary": "assert 0 >= 1"
     },
     {
       "category": "test_body_exception",
@@ -3553,60 +2297,12 @@
       "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "786",
-      "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_build_subprocess_kwargs_no_env",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "786",
-      "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_build_subprocess_kwargs_with_env",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "786",
-      "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_get_env_returns_dict_when_configured",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "786",
-      "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_get_env_returns_none_when_no_config",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "786",
-      "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_run_gh_injects_env",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
+      "category": "assertion_failure",
+      "exception_type": "AssertionError",
       "issue_number": "786",
       "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_run_gh_no_env_when_not_configured",
       "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "786",
-      "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_run_git_injects_env",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
+      "summary": "AssertionError: assert 'env' not in {'cwd': '/tmp', 'capture_output': True, 'text': True, 'timeout': 120, ...}"
     },
     {
       "category": "test_body_exception",
@@ -3710,7 +2406,7 @@
       "issue_number": "814",
       "nodeid": "tests/issues/814/test_worktree_path_selfheal.py::TestEnsureWorktreeSelfHeal::test_no_update_when_path_already_canonical",
       "outcome": "failure",
-      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='140600398512272'> != auto-dev/1390d553) with uncommitted changes.\u2026"
+      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='140600398512272'> != auto-dev/1390d553) with uncommitted changes.…"
     },
     {
       "category": "test_body_exception",
@@ -3718,7 +2414,7 @@
       "issue_number": "814",
       "nodeid": "tests/issues/814/test_worktree_path_selfheal.py::TestEnsureWorktreeSelfHeal::test_normalizes_stale_dotdot_path_when_valid",
       "outcome": "failure",
-      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='140600663599696'> != auto-dev/1390d553) with uncommitted changes.\u2026"
+      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='140600663599696'> != auto-dev/1390d553) with uncommitted changes.…"
     },
     {
       "category": "test_body_exception",
@@ -3759,134 +2455,6 @@
       "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestDoMergeDeferredRetry::test_uses_graph_merge_base_and_backfills_stale_scope_base",
       "outcome": "failure",
       "summary": "AssertionError: assert [call(['fetch... check=False)] == [call(['fetch... check=False)]"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetConflictMarkerPaths::test_deleted_conflict_path_is_a_valid_marker_free_resolution",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetConflictMarkerPaths::test_detects_custom_marker_size_larger_than_seven",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetConflictMarkerPaths::test_no_matches_returns_empty_list",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetConflictMarkerPaths::test_probe_failure_raises",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetConflictMarkerPaths::test_returns_only_matching_conflict_files",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetUnmergedPaths::test_query_failure_raises",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetUnmergedPaths::test_returns_authoritative_u_stage_paths",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetWorktreeChangedPaths::test_combines_tracked_unmerged_and_untracked_paths",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetWorktreeChangedPaths::test_probe_failure_raises[0]",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestGetWorktreeChangedPaths::test_probe_failure_raises[1]",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestIndexSnapshot::test_parses_stage_zero_and_unmerged_entries",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestIndexSnapshot::test_snapshot_probe_and_parse_fail_closed",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestMergePrAutoFlag::test_auto_flag_adds_auto_arg",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestMergePrAutoFlag::test_no_auto_by_default",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestResolveCommit::test_empty_resolution_raises",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestResolveCommit::test_resolves_ref_to_immutable_commit",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
     },
     {
       "category": "assertion_failure",
@@ -3969,142 +2537,6 @@
       "summary": "failed on setup with \"AssertionError\""
     },
     {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestCancelMilestoneWithFeedback::test_cancel_creates_requirement_received_milestone",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestCancelMilestoneWithFeedback::test_cancel_empty_feedback_succeeds",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestCancelMilestoneWithFeedback::test_cancel_stores_feedback_on_workflow",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestCancelMilestoneWithFeedback::test_cancel_without_feedback_succeeds",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkListing::test_get_forks_empty",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkListing::test_get_forks_returns_children",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkMilestone::test_fork_copies_milestones",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkMilestone::test_fork_creates_forked_milestone_on_parent",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkMilestone::test_fork_creates_new_workflow",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkMilestone::test_fork_forces_worktree_strategy",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkMilestone::test_fork_pause_original",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkRepoIntegration::test_copy_milestones_strips_inherited_fork_workflow_id",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkRepoIntegration::test_copy_milestones_to_workflow",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkRepoIntegration::test_create_and_list_forks",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkRepoIntegration::test_create_milestone_persists_fork_workflow_id",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestForkRepoIntegration::test_list_forks_empty",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "886",
-      "nodeid": "tests/issues/886/test_cancel_fork_redesign.py::TestResumeWithFeedback::test_resume_with_feedback",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: no such column: deleted_at\""
-    },
-    {
       "category": "test_body_exception",
       "exception_type": "",
       "issue_number": "91",
@@ -4126,7 +2558,7 @@
       "issue_number": "913",
       "nodeid": "tests/issues/913/test_pr909_review_feedback.py::TestGetCheckFailureExcerpt::test_ci_repair_context_skips_excerpt_failure",
       "outcome": "failure",
-      "summary": "assert '\u5931\u8d25\u6458\u5f55' not in \"PR #42 \u5728\u5408\u5e76\u524d...9180888144'>\""
+      "summary": "assert '失败摘录' not in \"PR #42 在合并前...9180888144'>\""
     },
     {
       "category": "test_body_exception",
@@ -4182,7 +2614,7 @@
       "issue_number": "987",
       "nodeid": "tests/issues/987/test_prompt_truncation.py::TestPostGithubComment::test_long_body_capped_with_notice",
       "outcome": "failure",
-      "summary": "AssertionError: assert '\u622a\u65ad' in 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\u2026"
+      "summary": "AssertionError: assert '截断' in 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB…"
     },
     {
       "category": "test_body_exception",
@@ -4235,6 +2667,10 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
+    "prune_note": "Targeted prune of 83 comparator-resolved nodeids (#2457 re-sync: object.__new__/723/#2332/ensure_cs_cookie/716-no-such-table) from run 31596249646; shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
+    "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
+    "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
     "run_contract": "extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure",
     "source_run": "31382049159",
