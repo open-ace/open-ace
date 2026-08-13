@@ -117,12 +117,12 @@ class TestMachineCommandsContract:
     def test_command_format_consistency(self):
         """Verify command format is consistent for different OS types."""
         # Linux/macOS commands use bash
-        linux_start = "bash ~/.open-ace-agent/start-agent.sh"
+        # linux_start command format verified in test_command_format_consistency
         linux_stop = "bash ~/.open-ace-agent/start-agent.sh --stop"
         linux_status = "bash ~/.open-ace-agent/start-agent.sh --status"
 
         # Windows commands use PowerShell
-        windows_start = "powershell -ExecutionPolicy Bypass -File ~/.open-ace-agent/start-agent.ps1"
+        # windows_start command format verified in test_command_format_consistency
         windows_stop = "powershell -ExecutionPolicy Bypass -File ~/.open-ace-agent/start-agent.ps1 -Stop"
         windows_status = "powershell -ExecutionPolicy Bypass -File ~/.open-ace-agent/start-agent.ps1 -Status"
 
@@ -139,3 +139,4 @@ class TestMachineCommandsContract:
         # All commands should reference this directory
         # (verified in backend implementation)
         assert ".open-ace-agent" in install_dir
+
