@@ -384,7 +384,7 @@ def create_app(config=None):
     # Register blueprints
     register_blueprints(app)
 
-# Schema initialization: distinguish production vs development paths (Issue #2190, #2330, #2331)
+    # Schema initialization: distinguish production vs development paths (Issue #2190, #2330, #2331)
     from app.repositories.database import is_postgresql
     from app.repositories.schema_guard import SchemaCompatibilityError
     from app.services.schema_compatibility_service import get_schema_compatibility_service
@@ -591,20 +591,19 @@ def create_app(config=None):
 
         return jsonify(results), status_code
 
-# Readiness check endpoint (Issue #2186, #2190, #2330, #2331)
+    # Readiness check endpoint (Issue #2186, #2190, #2330, #2331)
     @app.route("/readyz")
     def readiness_check():
         """Readiness check endpoint for Kubernetes and load balancers.
 
-        Checks database connection, schema version compatibility, config directory,
-        workspace directory, encryption keys, initialization status, and security mode.
-        Returns HTTP 503 if any critical check fails.
+                Checks database connection, schema version compatibility, config directory,
+                workspace directory, encryption keys, initialization status, and security mode.
+                Returns HTTP 503 if any critical check fails.
 
-Issue #2330: Uses SchemaCompatibilityService with Alembic graph validation
-        Issue #2331: Also checks security mode source validation.
+        Issue #2330: Uses SchemaCompatibilityService with Alembic graph validation
+                Issue #2331: Also checks security mode source validation.
         """
         from app.repositories.database import Database, is_postgresql
-        from app.repositories.schema_guard import SchemaCompatibilityError
         from app.services.schema_compatibility_service import get_schema_compatibility_service
         from app.services.schema_compatibility_types import CompatibilityPolicy
         from app.utils.health_checks import (
@@ -689,7 +688,7 @@ Issue #2330: Uses SchemaCompatibilityService with Alembic graph validation
         if db_result.get("status") != "ok":
             status_code = 503
 
-# Check schema version using SchemaCompatibilityService (Issue #2330)
+        # Check schema version using SchemaCompatibilityService (Issue #2330)
         # Issue #2331: Use unified security mode
         from app.utils.security_mode import get_security_mode
 
