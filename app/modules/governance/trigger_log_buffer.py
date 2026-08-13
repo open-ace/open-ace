@@ -144,7 +144,7 @@ class TriggerLogBuffer:
 
     def _write_to_database(self, batch: list[dict[str, Any]]):
         """写入数据库"""
-        from app.repositories.database import get_connection, adapt_sql
+        from app.repositories.database import adapt_sql, get_connection
 
         conn = get_connection()
         cursor = conn.cursor()

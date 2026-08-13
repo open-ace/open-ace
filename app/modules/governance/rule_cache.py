@@ -149,7 +149,7 @@ class RuleCache:
         # 这里需要直接操作数据库写入 rule_cache_sync 表
         # 由于 GovernanceRepository 可能没有这个方法，我们需要直接使用 db
         try:
-            from app.repositories.database import get_connection, adapt_sql, is_postgresql
+            from app.repositories.database import adapt_sql, get_connection
 
             conn = get_connection()
             cursor = conn.cursor()
@@ -210,7 +210,7 @@ class RuleCache:
             return
 
         try:
-            from app.repositories.database import get_connection, adapt_sql
+            from app.repositories.database import adapt_sql, get_connection
 
             conn = get_connection()
             cursor = conn.cursor()
@@ -231,8 +231,8 @@ class RuleCache:
                 # 处理事件
                 for event in events:
                     event_id = event[0]
-                    rule_id = event[1]
-                    action = event[2]
+                    _rule_id = event[1]  # noqa: F841 - extracted for clarity but not used
+                    _action = event[2]  # noqa: F841 - extracted for clarity but not used
                     tenant_id = event[3]
 
                     # 失效缓存
