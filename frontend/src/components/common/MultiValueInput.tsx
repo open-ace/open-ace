@@ -104,7 +104,7 @@ export const MultiValueInput: React.FC<MultiValueInputProps> = ({
   );
 
   const canAdd = value.length < maxItems && !disabled;
-  const hasError = error || (!allowEmpty && value.some((v) => v.trim() === ''));
+  const hasError = error ?? (!allowEmpty && value.some((v) => v.trim() === ''));
 
   return (
     <div className={cn('form-group', className)}>

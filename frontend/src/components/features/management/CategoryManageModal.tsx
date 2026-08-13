@@ -237,7 +237,7 @@ export const CategoryManageModal: React.FC<CategoryManageModalProps> = ({
         title={t('deactivateCategory', language)}
         message={t('deactivateCategoryConfirm', language).replace(
           '{name}',
-          deactivateTarget?.name || ''
+          deactivateTarget?.name ?? ''
         )}
         confirmText={t('deactivate', language)}
         cancelText={t('cancel', language)}
@@ -253,7 +253,7 @@ export const CategoryManageModal: React.FC<CategoryManageModalProps> = ({
         title={t('activateCategory', language)}
         message={t('activateCategoryConfirm', language).replace(
           '{name}',
-          activateTarget?.name || ''
+          activateTarget?.name ?? ''
         )}
         confirmText={t('activate', language)}
         cancelText={t('cancel', language)}
