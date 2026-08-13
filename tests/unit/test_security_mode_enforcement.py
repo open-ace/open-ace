@@ -258,7 +258,11 @@ class TestRequireExplicitMode:
         reset_security_mode_cache()
 
         # Should not raise in test context
-        require_explicit_mode()
+        try:
+            require_explicit_mode()
+            # Success - no exception raised
+        except RuntimeError as e:
+            pytest.fail(f"require_explicit_mode() should not raise in test context: {e}")
 
     def test_test_context_sets_development(self):
         """Test context sets development mode."""
