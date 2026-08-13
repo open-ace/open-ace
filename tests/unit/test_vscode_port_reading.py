@@ -161,7 +161,7 @@ class TestReadVSCodePort(unittest.TestCase):
             stderr_delay=0.1  # stderr slightly delayed
         )
 
-        port = RemoteAgent._read_vscode_port(None, mock_proc, "test-vscode")
+        port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
         # Should return the first match (stdout)
         self.assertEqual(port, 11111)
@@ -183,7 +183,7 @@ class TestReadVSCodePort(unittest.TestCase):
             stderr_delay=0.0   # stderr immediate
         )
 
-        port = RemoteAgent._read_vscode_port(None, mock_proc, "test-vscode")
+        port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
         # Should return stderr port (first match)
         self.assertEqual(port, 44444)
@@ -197,7 +197,7 @@ class TestReadVSCodePort(unittest.TestCase):
             poll_result=1  # Non-zero exit code
         )
 
-        port = RemoteAgent._read_vscode_port(None, mock_proc, "test-vscode")
+        port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
         # Should return None (no port found)
         self.assertIsNone(port)
@@ -221,7 +221,7 @@ class TestReadVSCodePort(unittest.TestCase):
                 stderr_delay=10.0
             )
 
-            port = RemoteAgent._read_vscode_port(None, mock_proc, "test-vscode")
+            port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
             # Should timeout and return None
             self.assertIsNone(port)
@@ -239,7 +239,7 @@ class TestReadVSCodePort(unittest.TestCase):
         ]
         mock_proc = self._create_mock_proc(stderr_lines=stderr_lines)
 
-        port = RemoteAgent._read_vscode_port(None, mock_proc, "test-vscode")
+        port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
         # Should return None (no valid port found)
         self.assertIsNone(port)
@@ -254,7 +254,7 @@ class TestReadVSCodePort(unittest.TestCase):
         ]
         mock_proc = self._create_mock_proc(stderr_lines=stderr_lines)
 
-        port = RemoteAgent._read_vscode_port(None, mock_proc, "test-vscode")
+        port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
         # Should return first port
         self.assertEqual(port, 10000)
@@ -276,7 +276,7 @@ class TestReadVSCodePort(unittest.TestCase):
             stderr_lines=stderr_lines
         )
 
-        port = RemoteAgent._read_vscode_port(None, mock_proc, "test-vscode")
+        port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
         self.assertEqual(port, 12345)
 
@@ -296,7 +296,7 @@ class TestReadVSCodePort(unittest.TestCase):
             stderr_lines=stderr_lines
         )
 
-        port = RemoteAgent._read_vscode_port(None, mock_proc, "test-vscode")
+        port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
         self.assertEqual(port, 54321)
 
@@ -310,7 +310,7 @@ class TestReadVSCodePort(unittest.TestCase):
         mock_proc.stderr = MockPipe([])
         mock_proc.poll = Mock(return_value=None)
 
-        port = RemoteAgent._read_vscode_port(None, mock_proc, "test-vscode")
+        port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
         # Should handle exception gracefully and return None
         self.assertIsNone(port)
@@ -324,7 +324,7 @@ class TestReadVSCodePort(unittest.TestCase):
         ]
         mock_proc = self._create_mock_proc(stderr_lines=stderr_lines)
 
-        port = RemoteAgent._read_vscode_port(None, mock_proc, "test-vscode")
+        port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
         self.assertEqual(port, 8080)
 
@@ -337,7 +337,7 @@ class TestReadVSCodePort(unittest.TestCase):
         ]
         mock_proc = self._create_mock_proc(stderr_lines=stderr_lines)
 
-        port = RemoteAgent._read_vscode_port(None, mock_proc, "test-vscode")
+        port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
         self.assertEqual(port, 8443)
 
@@ -370,7 +370,7 @@ class TestVSCodePortReadingIntegration(unittest.TestCase):
             mock_proc.poll = Mock(return_value=None)
 
             start = time.time()
-            port = RemoteAgent._read_vscode_port(None, mock_proc, "test-vscode")
+            port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
             elapsed = time.time() - start
 
             # Should return quickly (not wait for stderr delay)

@@ -67,7 +67,7 @@ tail -f /dev/null 2>/dev/null || sleep 10
 
         try:
             # Read the port
-            port = RemoteAgent._read_vscode_port(None, proc, "test-vscode-int")
+            port = RemoteAgent._read_vscode_port(proc, "test-vscode-int")
 
             # Verify port was detected
             self.assertEqual(port, 12345, "Should detect port from stderr output")
@@ -109,7 +109,7 @@ tail -f /dev/null 2>/dev/null || sleep 10
         )
 
         try:
-            port = RemoteAgent._read_vscode_port(None, proc, "test-vscode-int")
+            port = RemoteAgent._read_vscode_port(proc, "test-vscode-int")
 
             self.assertEqual(port, 54321, "Should detect port from stdout output")
 
@@ -155,7 +155,7 @@ exit 1
             )
 
             try:
-                port = RemoteAgent._read_vscode_port(None, proc, "test-vscode-int")
+                port = RemoteAgent._read_vscode_port(proc, "test-vscode-int")
 
                 # Should return None (no port found)
                 self.assertIsNone(port, "Should return None when no port is output")
@@ -198,7 +198,7 @@ tail -f /dev/null 2>/dev/null || sleep 10
         )
 
         try:
-            port = RemoteAgent._read_vscode_port(None, proc, "test-vscode-int")
+            port = RemoteAgent._read_vscode_port(proc, "test-vscode-int")
 
             self.assertEqual(port, 9999, "Should detect port from immediate stderr output")
 
@@ -237,7 +237,7 @@ tail -f /dev/null 2>/dev/null || sleep 10
         )
 
         try:
-            port = RemoteAgent._read_vscode_port(None, proc, "test-vscode-int")
+            port = RemoteAgent._read_vscode_port(proc, "test-vscode-int")
 
             self.assertEqual(port, 7777, "Should detect port after delay")
 
