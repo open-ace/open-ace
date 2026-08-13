@@ -27,46 +27,69 @@ depends_on = None
 
 
 def upgrade():
-    """添加测试规则相关字段"""
+    """添加测试规则相关字段
+
+    The schema.sql snapshots also define these columns (so freshly-bootstrapped
+    databases already have them). Guard each add_column against the existing
+    schema, the same way 20260718_001 does, so this migration no-ops cleanly
+    on databases that already have the columns.
+    """
     # 检查是否为 PostgreSQL
     bind = op.get_bind()
     is_postgres = bind.dialect.name == "postgresql"
 
+    # Use inspector to check existing columns
+    inspector = sa.inspect(bind)
+    existing_columns = {col["name"] for col in inspector.get_columns("content_filter_rules")}
+
     # 1. 添加 is_test 字段
-    op.add_column(
-        "content_filter_rules",
-        sa.Column("is_test", sa.Boolean(), nullable=True, server_default="0"),
-    )
+    if "is_test" not in existing_columns:
+        op.add_column(
+            "content_filter_rules",
+            sa.Column("is_test", sa.Boolean(), nullable=True, server_default="0"),
+        )
 
     # 2. 添加 approval_status 字段
-    op.add_column(
-        "content_filter_rules",
-        sa.Column("approval_status", sa.String(20), nullable=True, server_default="approved"),
-    )
+    if "approval_status" not in existing_columns:
+        op.add_column(
+            "content_filter_rules",
+            sa.Column("approval_status", sa.String(20), nullable=True, server_default="approved"),
+        )
 
     # 3. 添加 approved_by 字段
-    op.add_column("content_filter_rules", sa.Column("approved_by", sa.Integer(), nullable=True))
+    if "approved_by" not in existing_columns:
+        op.add_column("content_filter_rules", sa.Column("approved_by", sa.Integer(), nullable=True))
 
     # 4. 添加 approved_at 字段
-    op.add_column("content_filter_rules", sa.Column("approved_at", sa.DateTime(), nullable=True))
+    if "approved_at" not in existing_columns:
+        op.add_column(
+            "content_filter_rules", sa.Column("approved_at", sa.DateTime(), nullable=True)
+        )
 
     # 5. 添加 created_by 字段
-    op.add_column("content_filter_rules", sa.Column("created_by", sa.Integer(), nullable=True))
+    if "created_by" not in existing_columns:
+        op.add_column("content_filter_rules", sa.Column("created_by", sa.Integer(), nullable=True))
 
     # 6. 添加 priority 字段
-    op.add_column(
-        "content_filter_rules",
-        sa.Column("priority", sa.Integer(), nullable=True, server_default="100"),
-    )
+    if "priority" not in existing_columns:
+        op.add_column(
+            "content_filter_rules",
+            sa.Column("priority", sa.Integer(), nullable=True, server_default="100"),
+        )
 
     # 7. 添加 tenant_id 字段
-    op.add_column("content_filter_rules", sa.Column("tenant_id", sa.Integer(), nullable=True))
+    if "tenant_id" not in existing_columns:
+        op.add_column("content_filter_rules", sa.Column("tenant_id", sa.Integer(), nullable=True))
 
     # 8. 添加 valid_from 字段（可选）
-    op.add_column("content_filter_rules", sa.Column("valid_from", sa.DateTime(), nullable=True))
+    if "valid_from" not in existing_columns:
+        op.add_column("content_filter_rules", sa.Column("valid_from", sa.DateTime(), nullable=True))
 
     # 9. 添加 valid_until 字段（可选）
-    op.add_column("content_filter_rules", sa.Column("valid_until", sa.DateTime(), nullable=True))
+    if "valid_until" not in existing_columns:
+        op.add_column(
+            "content_filter_rules", sa.Column("valid_until", sa.DateTime(), nullable=True)
+        )
 
     # 10. 标记现有测试规则（ID 2-5）
     # 根据 Issue #2550，这些是测试规则
@@ -95,7 +118,7 @@ def upgrade():
           AND approval_status IS NULL
     """)
 
-    # 12. 添加索引以优化查询
+    # 12. 添加索引以优化查询（幂等：使用 IF NOT EXISTS）
     if is_postgres:
         op.execute("""
             CREATE INDEX IF NOT EXISTS idx_filter_rules_is_test
