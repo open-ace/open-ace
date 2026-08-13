@@ -56,13 +56,13 @@ class TestGetMachineCommandsAuthentication:
             # Setup mock machine
             mock_mgr = MagicMock()
             mock_mgr.get_machine.return_value = {
-                "machine_id": "test-machine-001",
+                "machine_id": "00000000-0000-0000-0000-000000000001",
                 "os_type": "Linux",
             }
             mock_remote_agent_manager.return_value = mock_mgr
 
             # Request without authentication
-            resp = client.get("/api/remote/machines/test-machine-001/commands")
+            resp = client.get("/api/remote/machines/00000000-0000-0000-0000-000000000001/commands")
             assert resp.status_code == 401
 
 
@@ -90,7 +90,7 @@ class TestGetMachineCommandsFunctionality:
         """Test that the endpoint exists and responds."""
         with app.app_context():
             # Even without authentication, should get a proper HTTP response
-            resp = client.get("/api/remote/machines/test-machine-001/commands")
+            resp = client.get("/api/remote/machines/00000000-0000-0000-0000-000000000001/commands")
             # Should not return 404 (endpoint not found) or 500 (server error)
             assert resp.status_code in [401, 403, 404, 200]
 
@@ -100,7 +100,7 @@ class TestGetMachineCommandsFunctionality:
             # Setup mock machine
             mock_mgr = MagicMock()
             mock_mgr.get_machine.return_value = {
-                "machine_id": "test-machine-001",
+                "machine_id": "00000000-0000-0000-0000-000000000001",
                 "os_type": "Linux",
             }
             mock_mgr.get_user_permission.return_value = "admin"
@@ -111,7 +111,7 @@ class TestGetMachineCommandsFunctionality:
                 mock_g.user = {"id": "user-001", "role": "system_admin"}
 
                 with patch("app.routes.remote.User.is_admin_role", return_value=True):
-                    resp = client.get("/api/remote/machines/test-machine-001/commands")
+                    resp = client.get("/api/remote/machines/00000000-0000-0000-0000-000000000001/commands")
 
                     if resp.status_code == 200:
                         data = json.loads(resp.data)
@@ -158,7 +158,7 @@ class TestGetMachineCommandsPermissions:
             # Setup mock machine
             mock_mgr = MagicMock()
             mock_mgr.get_machine.return_value = {
-                "machine_id": "test-machine-001",
+                "machine_id": "00000000-0000-0000-0000-000000000001",
                 "os_type": "Linux",
             }
             mock_mgr.get_user_permission.return_value = "admin"
@@ -169,7 +169,7 @@ class TestGetMachineCommandsPermissions:
                 mock_g.user = {"id": "user-001", "role": "system_admin"}
 
                 with patch("app.routes.remote.User.is_admin_role", return_value=True):
-                    resp = client.get("/api/remote/machines/test-machine-001/commands")
+                    resp = client.get("/api/remote/machines/00000000-0000-0000-0000-000000000001/commands")
 
                     if resp.status_code == 200:
                         data = json.loads(resp.data)
@@ -182,7 +182,7 @@ class TestGetMachineCommandsPermissions:
             # Setup mock machine
             mock_mgr = MagicMock()
             mock_mgr.get_machine.return_value = {
-                "machine_id": "test-machine-001",
+                "machine_id": "00000000-0000-0000-0000-000000000001",
                 "os_type": "Linux",
             }
             mock_mgr.get_user_permission.return_value = "user"
@@ -193,7 +193,7 @@ class TestGetMachineCommandsPermissions:
                 mock_g.user = {"id": "user-001", "role": "user"}
 
                 with patch("app.routes.remote.User.is_admin_role", return_value=False):
-                    resp = client.get("/api/remote/machines/test-machine-001/commands")
+                    resp = client.get("/api/remote/machines/00000000-0000-0000-0000-000000000001/commands")
 
                     if resp.status_code == 200:
                         data = json.loads(resp.data)
@@ -219,7 +219,7 @@ class TestGetMachineCommandsIntegration:
             try:
                 # We can't use url_for without request context
                 # So we just test the endpoint directly
-                resp = client.get("/api/remote/machines/test-machine-001/commands")
+                resp = client.get("/api/remote/machines/00000000-0000-0000-0000-000000000001/commands")
                 # Should not return 404 (not found)
                 assert resp.status_code != 404
             except Exception as e:
@@ -232,7 +232,7 @@ class TestGetMachineCommandsIntegration:
             # Setup mock machine with Linux
             mock_mgr = MagicMock()
             mock_mgr.get_machine.return_value = {
-                "machine_id": "test-machine-001",
+                "machine_id": "00000000-0000-0000-0000-000000000001",
                 "os_type": "Linux",
             }
             mock_mgr.get_user_permission.return_value = "admin"
@@ -242,7 +242,7 @@ class TestGetMachineCommandsIntegration:
                 mock_g.user = {"id": "user-001", "role": "system_admin"}
 
                 with patch("app.routes.remote.User.is_admin_role", return_value=True):
-                    resp = client.get("/api/remote/machines/test-machine-001/commands")
+                    resp = client.get("/api/remote/machines/00000000-0000-0000-0000-000000000001/commands")
 
                     if resp.status_code == 200:
                         data = json.loads(resp.data)
