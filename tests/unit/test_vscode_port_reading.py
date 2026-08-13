@@ -5,18 +5,18 @@ Issue #2588: Tests for concurrent stdout/stderr reading to support
 code-server 4.132.0+ which outputs port information to stderr.
 """
 
+import os
 import subprocess
+
+# Import the module under test
+import sys
 import threading
 import time
 import unittest
 from unittest.mock import MagicMock, Mock, patch
 
-# Import the module under test
-import sys
-import os
-
 # Add remote-agent to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'remote-agent'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "remote-agent"))
 
 
 class MockPipe:
@@ -53,7 +53,7 @@ class MockPipe:
             self.index += 1
             # Ensure bytes output
             if isinstance(line, str):
-                return line.encode('utf-8')
+                return line.encode("utf-8")
             return line
 
     def read(self):
@@ -67,7 +67,7 @@ class MockPipe:
                 line = self.lines[self.index]
                 self.index += 1
                 if isinstance(line, str):
-                    result += line.encode('utf-8')
+                    result += line.encode("utf-8")
                 else:
                     result += line
         return result
@@ -79,7 +79,7 @@ class TestReadVSCodePort(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         # Import after setting up path
-        from agent import RemoteAgent, AgentConfig
+        from agent import AgentConfig, RemoteAgent
 
         # Create a minimal mock agent for testing
         self.config = Mock(spec=AgentConfig)
@@ -92,9 +92,14 @@ class TestReadVSCodePort(unittest.TestCase):
         # We'll test the method directly without full agent initialization
         # to avoid dependency issues
 
-    def _create_mock_proc(self, stdout_lines=None, stderr_lines=None,
-                          stdout_delay=0.0, stderr_delay=0.0,
-                          poll_result=None):
+    def _create_mock_proc(
+        self,
+        stdout_lines=None,
+        stderr_lines=None,
+        stdout_delay=0.0,
+        stderr_delay=0.0,
+        poll_result=None,
+    ):
         """
         Create a mock subprocess.Popen object.
 
@@ -158,7 +163,7 @@ class TestReadVSCodePort(unittest.TestCase):
             stdout_lines=stdout_lines,
             stderr_lines=stderr_lines,
             stdout_delay=0.0,
-            stderr_delay=0.1  # stderr slightly delayed
+            stderr_delay=0.1,  # stderr slightly delayed
         )
 
         port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
@@ -180,7 +185,7 @@ class TestReadVSCodePort(unittest.TestCase):
             stdout_lines=stdout_lines,
             stderr_lines=stderr_lines,
             stdout_delay=0.1,  # stdout delayed
-            stderr_delay=0.0   # stderr immediate
+            stderr_delay=0.0,  # stderr immediate
         )
 
         port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
@@ -193,9 +198,7 @@ class TestReadVSCodePort(unittest.TestCase):
         from agent import RemoteAgent
 
         # Process exits without output
-        mock_proc = self._create_mock_proc(
-            poll_result=1  # Non-zero exit code
-        )
+        mock_proc = self._create_mock_proc(poll_result=1)  # Non-zero exit code
 
         port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
@@ -204,8 +207,8 @@ class TestReadVSCodePort(unittest.TestCase):
 
     def test_timeout_no_output(self):
         """Test timeout handling when no output is produced."""
-        from agent import RemoteAgent
         import agent
+        from agent import RemoteAgent
 
         # Save original timeout
         original_timeout = agent.VSCODE_PORT_READ_TIMEOUT
@@ -215,10 +218,7 @@ class TestReadVSCodePort(unittest.TestCase):
 
             # Create process that never outputs
             mock_proc = self._create_mock_proc(
-                stdout_lines=[],
-                stderr_lines=[],
-                stdout_delay=10.0,  # Long delay
-                stderr_delay=10.0
+                stdout_lines=[], stderr_lines=[], stdout_delay=10.0, stderr_delay=10.0  # Long delay
             )
 
             port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
@@ -271,10 +271,7 @@ class TestReadVSCodePort(unittest.TestCase):
             b"[INFO] code-server 4.132.0\n",
             b"HTTP server listening on http://0.0.0.0:12345/\n",
         ]
-        mock_proc = self._create_mock_proc(
-            stdout_lines=stdout_lines,
-            stderr_lines=stderr_lines
-        )
+        mock_proc = self._create_mock_proc(stdout_lines=stdout_lines, stderr_lines=stderr_lines)
 
         port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
@@ -291,10 +288,7 @@ class TestReadVSCodePort(unittest.TestCase):
             b"[INFO] Initializing...\n",
             b"[INFO] Ready\n",
         ]
-        mock_proc = self._create_mock_proc(
-            stdout_lines=stdout_lines,
-            stderr_lines=stderr_lines
-        )
+        mock_proc = self._create_mock_proc(stdout_lines=stdout_lines, stderr_lines=stderr_lines)
 
         port = RemoteAgent._read_vscode_port(mock_proc, "test-vscode")
 
@@ -306,7 +300,7 @@ class TestReadVSCodePort(unittest.TestCase):
 
         # Create pipe that raises exception
         mock_proc = Mock(spec=subprocess.Popen)
-        mock_proc.stdout = MockPipe([], raise_error=IOError("Pipe closed"))
+        mock_proc.stdout = MockPipe([], raise_error=OSError("Pipe closed"))
         mock_proc.stderr = MockPipe([])
         mock_proc.poll = Mock(return_value=None)
 
@@ -347,8 +341,8 @@ class TestVSCodePortReadingIntegration(unittest.TestCase):
 
     def test_concurrent_stream_reading(self):
         """Test that both streams are read concurrently without blocking."""
-        from agent import RemoteAgent
         import agent
+        from agent import RemoteAgent
 
         # This test verifies that reading doesn't block when one stream
         # has no output
@@ -380,5 +374,5 @@ class TestVSCodePortReadingIntegration(unittest.TestCase):
             agent.VSCODE_PORT_READ_TIMEOUT = original_timeout
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
