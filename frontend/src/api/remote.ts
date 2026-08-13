@@ -251,6 +251,25 @@ export const remoteApi = {
     return apiClient.get(`/api/remote/machines/${machineId}`);
   },
 
+  /**
+   * Get operational commands for a machine.
+   * Issue #2565: Returns start/stop/status commands for the remote agent.
+   */
+  getMachineCommands(
+    machineId: string
+  ): Promise<{
+    success: boolean;
+    os_type: string;
+    server_url: string;
+    start_command: string;
+    stop_command: string;
+    status_command: string;
+    install_command?: string;
+    uninstall_command?: string;
+  }> {
+    return apiClient.get(`/api/remote/machines/${machineId}/commands`);
+  },
+
   generateRegistrationToken(
     tenantId?: number
   ): Promise<{ success: boolean; registration_token: string; message: string }> {
