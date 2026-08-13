@@ -123,6 +123,10 @@ class TestProductionCapablePathDetection:
         # is_production_capable_path() to return True early, before checking
         # the emergency rollback flag. We must unset it to reach that code path.
         monkeypatch.delenv("OPENACE_SECURITY_MODE", raising=False)
+        # Issue #2331: CI environment variable causes is_production_capable_path()
+        # to return False early, preventing the emergency rollback check from running.
+        # We must unset it to reach that code path.
+        monkeypatch.delenv("CI", raising=False)
 
         # Mock is_test_context to return False AFTER setting up environment
         monkeypatch.setattr(security_mode, "is_test_context", lambda: False)
