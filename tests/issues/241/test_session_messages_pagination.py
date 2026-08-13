@@ -66,11 +66,16 @@ def manager(monkeypatch):
         pass
 
 
-def _create_session(mgr, session_id="sess-pagination", user_id=1):
-    """Create a session and return its session_id string."""
+def _create_session(mgr, session_id="sess-pagination", user_id=1, tenant_id=1):
+    """Create a session and return its session_id string.
+
+    Session writes resolve tenant fail-closed (#1789 lineage): an explicit
+    tenant_id is required because the fixture DB seeds no users row to look up.
+    """
     session = mgr.create_session(
         tool_name="qwen",
         user_id=user_id,
+        tenant_id=tenant_id,
         session_type="chat",
         title="pagination test",
         session_id=session_id,

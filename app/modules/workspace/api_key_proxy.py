@@ -232,8 +232,7 @@ class APIKeyProxyService:
         # api_key_store table is created by migration, but ensure it exists for
         # environments that don't run migrations
         # Issue #1894: Added resolved_ips and resolved_at for SSRF protection
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS api_key_store (
                 id {id_type},
                 tenant_id INTEGER,
@@ -255,11 +254,9 @@ class APIKeyProxyService:
                 resolved_at TIMESTAMP,
                 UNIQUE(tenant_id, provider, key_name)
             )
-        """
-        )
+        """)
 
-        cursor.execute(
-            f"""
+        cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS proxy_token_jtis (
                 id {id_type},
                 jti TEXT NOT NULL UNIQUE,
@@ -285,8 +282,7 @@ class APIKeyProxyService:
                 terminated_at TIMESTAMP,
                 termination_reason TEXT
             )
-        """
-        )
+        """)
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_proxy_token_jtis_session ON proxy_token_jtis(session_id)"
         )

@@ -123,26 +123,22 @@ def test_sync_creates_users_teams_and_memberships(sync_env):
     assert [team["name"] for team in teams] == ["Engineering", "QA"]
     assert all(FEISHU_PROVIDER_NAME in team["settings"] for team in teams)
 
-    identities = db.fetch_all(
-        """
+    identities = db.fetch_all("""
         SELECT provider_name, provider_user_id
         FROM sso_identities
         ORDER BY provider_user_id ASC
-        """
-    )
+        """)
     assert identities == [
         {"provider_name": FEISHU_PROVIDER_NAME, "provider_user_id": "ou_alice"},
         {"provider_name": FEISHU_PROVIDER_NAME, "provider_user_id": "ou_bob"},
     ]
 
-    memberships = db.fetch_all(
-        """
+    memberships = db.fetch_all("""
         SELECT tm.user_id, t.name AS team_name
         FROM team_members tm
         JOIN teams t ON t.team_id = tm.team_id
         ORDER BY team_name ASC
-        """
-    )
+        """)
     assert [row["team_name"] for row in memberships] == ["Engineering", "QA"]
 
 

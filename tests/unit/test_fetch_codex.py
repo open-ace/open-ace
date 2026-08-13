@@ -268,8 +268,7 @@ def test_reimport_replaces_stale_codex_session_rows(monkeypatch, tmp_path):
     importlib.reload(shared_db)
 
     conn = sqlite3.connect(str(db_path))
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE daily_messages (
             date TEXT,
             tool_name TEXT,
@@ -295,8 +294,7 @@ def test_reimport_replaces_stale_codex_session_rows(monkeypatch, tmp_path):
             user_id integer,
             PRIMARY KEY (date, tool_name, host_name, message_id)
         )
-        """
-    )
+        """)
     conn.execute(
         """
         INSERT INTO daily_messages (
@@ -362,14 +360,12 @@ def test_reimport_replaces_stale_codex_session_rows(monkeypatch, tmp_path):
     assert saved == 2
 
     conn = sqlite3.connect(str(db_path))
-    rows = conn.execute(
-        """
+    rows = conn.execute("""
         SELECT message_id, role, tokens_used
         FROM daily_messages
         WHERE tool_name = 'codex'
         ORDER BY message_id
-        """
-    ).fetchall()
+        """).fetchall()
     conn.close()
 
     assert rows == [("assistant-1", "assistant", 0), ("user-1", "user", 1050)]

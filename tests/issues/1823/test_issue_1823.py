@@ -39,8 +39,7 @@ def temp_db():
     with db.connection() as conn:
         cursor = conn.cursor()
         # remote_runtime_outputs table
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS remote_runtime_outputs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
@@ -50,11 +49,9 @@ def temp_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP
             )
-        """
-        )
+        """)
         # remote_runtime_commands table
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS remote_runtime_commands (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 command_id TEXT NOT NULL,
@@ -69,27 +66,22 @@ def temp_db():
                 responded_at TIMESTAMP,
                 expires_at TIMESTAMP
             )
-        """
-        )
+        """)
         # retention_history table
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS retention_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 report_data TEXT NOT NULL
             )
-        """
-        )
+        """)
         # agent_sessions table
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS agent_sessions (
                 session_id TEXT PRIMARY KEY,
                 status TEXT NOT NULL
             )
-        """
-        )
+        """)
         conn.commit()
 
     yield db_path
