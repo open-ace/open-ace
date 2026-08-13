@@ -332,10 +332,12 @@ class TestGitHubOpsGit:
     def test_git_add_all(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="")
         self.gh.git_add_all()
-        cmd = mock_run.call_args[0][0]
-        assert "git" in cmd
-        assert "add" in cmd
-        assert "-A" in cmd
+        # git_add_all issues multiple commands (add -A, rm .worktrees, diff
+        # --cached, reset artifacts). Find the ``add -A`` call among them.
+        all_cmds = [call.args[0] for call in mock_run.call_args_list]
+        add_cmd = next((c for c in all_cmds if "add" in c), None)
+        assert add_cmd is not None, f"git add not found in calls: {all_cmds}"
+        assert "-A" in add_cmd
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_git_commit(self, mock_run):
