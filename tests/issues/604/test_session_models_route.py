@@ -197,7 +197,7 @@ class TestSessionModelsRemoteByMachine:
 
         client = app.test_client()
         resp = client.get(
-            "/api/workspace/session-models?workspace_type=remote&machine_id=mac-1",
+            "/api/workspace/session-models?workspace_type=remote&machine_id=b2b10214-1b8c-550f-8983-3fb0d3b2e480",
             headers={"Authorization": "Bearer tok"},
         )
 
@@ -227,7 +227,7 @@ class TestSessionModelsRemoteByMachine:
 
         client = app.test_client()
         resp = client.get(
-            "/api/workspace/session-models?workspace_type=remote&machine_id=mac-1",
+            "/api/workspace/session-models?workspace_type=remote&machine_id=b2b10214-1b8c-550f-8983-3fb0d3b2e480",
             headers={"Authorization": "Bearer tok"},
         )
 

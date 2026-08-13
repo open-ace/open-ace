@@ -928,11 +928,11 @@ class TestGetModels:
             ):
                 resp = client.get(
                     "/api/autonomous/models?tool=claude-code"
-                    "&workspace_type=remote&machine_id=m-42"
+                    "&workspace_type=remote&machine_id=eca8ab1a-ca78-50d6-80d0-849dbde5c3c9"
                 )
         assert resp.status_code == 200
         mock_mgr.check_user_access.assert_called_once()
-        mock_mgr.get_machine.assert_called_once_with("m-42")
+        mock_mgr.get_machine.assert_called_once_with("eca8ab1a-ca78-50d6-80d0-849dbde5c3c9")
         mock_proxy.get_tool_models.assert_called_once_with(
             tenant_id=7, tool_name="claude-code", scope="remote"
         )
@@ -955,7 +955,7 @@ class TestGetModels:
             ):
                 resp = client.get(
                     "/api/autonomous/models?tool=claude-code"
-                    "&workspace_type=remote&machine_id=m-42"
+                    "&workspace_type=remote&machine_id=eca8ab1a-ca78-50d6-80d0-849dbde5c3c9"
                 )
         assert resp.status_code == 404
         mock_proxy.get_tool_models.assert_not_called()
@@ -1004,7 +1004,7 @@ class TestGetModels:
             ):
                 resp = client.get(
                     "/api/autonomous/models?tool=claude-code"
-                    "&workspace_type=remote&machine_id=m-42"
+                    "&workspace_type=remote&machine_id=eca8ab1a-ca78-50d6-80d0-849dbde5c3c9"
                 )
         # Must not be a misleading "success, no models" — surface the failure.
         assert resp.status_code != 200

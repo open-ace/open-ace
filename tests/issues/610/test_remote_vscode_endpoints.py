@@ -89,7 +89,7 @@ class TestVSCodeStart(unittest.TestCase):
         with app.test_client() as client:
             resp = client.post(
                 "/api/remote/vscode/start",
-                json={"machine_id": "m1", "project_path": "/tmp"},
+                json={"machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9", "project_path": "/tmp"},
             )
             self.assertEqual(resp.status_code, 401)
 
@@ -117,7 +117,7 @@ class TestVSCodeStart(unittest.TestCase):
                 client,
                 "/api/remote/vscode/start",
                 "test-token-1-admin",
-                json={"machine_id": "m1"},
+                json={"machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9"},
             )
             self.assertEqual(resp.status_code, 400)
             data = resp.get_json()
@@ -147,7 +147,7 @@ class TestVSCodeStart(unittest.TestCase):
                 client,
                 "/api/remote/vscode/start",
                 "test-token-2-user",
-                json={"machine_id": "m1", "project_path": "/tmp"},
+                json={"machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9", "project_path": "/tmp"},
             )
             self.assertEqual(resp.status_code, 403)
 
@@ -162,7 +162,7 @@ class TestVSCodeStart(unittest.TestCase):
                 client,
                 "/api/remote/vscode/start",
                 "test-token-1-admin",
-                json={"machine_id": "m1", "project_path": "/tmp"},
+                json={"machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9", "project_path": "/tmp"},
             )
             self.assertEqual(resp.status_code, 503)
             data = resp.get_json()
@@ -180,7 +180,10 @@ class TestVSCodeStart(unittest.TestCase):
                 client,
                 "/api/remote/vscode/start",
                 "test-token-1-admin",
-                json={"machine_id": "m1", "project_path": "/home/user/project"},
+                json={
+                    "machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
+                    "project_path": "/home/user/project",
+                },
             )
             self.assertEqual(resp.status_code, 200)
             data = resp.get_json()
@@ -207,7 +210,7 @@ class TestVSCodeStart(unittest.TestCase):
                 client,
                 "/api/remote/vscode/start",
                 "test-token-5-user",
-                json={"machine_id": "m1", "project_path": "/tmp"},
+                json={"machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9", "project_path": "/tmp"},
             )
             self.assertEqual(resp.status_code, 200)
             data = resp.get_json()
@@ -230,7 +233,7 @@ class TestVSCodeStop(unittest.TestCase):
         with app.test_client() as client:
             resp = client.post(
                 "/api/remote/vscode/stop",
-                json={"vscode_id": "v1", "machine_id": "m1"},
+                json={"vscode_id": "v1", "machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9"},
             )
             self.assertEqual(resp.status_code, 401)
 
@@ -243,7 +246,7 @@ class TestVSCodeStop(unittest.TestCase):
                 client,
                 "/api/remote/vscode/stop",
                 "test-token-1-admin",
-                json={"machine_id": "m1"},
+                json={"machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9"},
             )
             self.assertEqual(resp.status_code, 400)
             data = resp.get_json()
@@ -285,7 +288,7 @@ class TestVSCodeStop(unittest.TestCase):
                 client,
                 "/api/remote/vscode/stop",
                 "test-token-2-user",
-                json={"vscode_id": "v1", "machine_id": "m1"},
+                json={"vscode_id": "v1", "machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9"},
             )
             self.assertEqual(resp.status_code, 403)
 
@@ -307,7 +310,10 @@ class TestVSCodeStop(unittest.TestCase):
                     client,
                     "/api/remote/vscode/stop",
                     "test-token-1-admin",
-                    json={"vscode_id": "vscode-123", "machine_id": "m1"},
+                    json={
+                        "vscode_id": "vscode-123",
+                        "machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
+                    },
                 )
         finally:
             vs_mod.vscode_info_store = original_store
@@ -324,7 +330,9 @@ class TestVSCodeStop(unittest.TestCase):
         self.assertEqual(cmd["vscode_id"], "vscode-123")
 
         # Verify mark_stopped was called to invalidate token (Issue #2183)
-        mock_store.mark_stopped.assert_called_once_with("m1", "vscode-123")
+        mock_store.mark_stopped.assert_called_once_with(
+            "810ceed8-fd1b-50f3-8bc1-609601d23ae9", "vscode-123"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -377,7 +385,7 @@ class TestVSCodeStatus(unittest.TestCase):
         original_store = vs_mod.vscode_info_store
         mock_store = MagicMock()
         mock_store.find_by_vscode_id.return_value = (
-            "m1",
+            "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
             {
                 "status": "running",
                 "token": "browser-secret-token",
@@ -414,7 +422,7 @@ class TestVSCodeStatus(unittest.TestCase):
         original_store = vs_mod.vscode_info_store
         mock_store = MagicMock()
         mock_store.find_by_vscode_id.return_value = (
-            "m1",
+            "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
             {
                 "status": "error",
                 "error": "code-server crashed",
@@ -449,7 +457,7 @@ class TestVSCodeStatus(unittest.TestCase):
         original_store = vs_mod.vscode_info_store
         mock_store = MagicMock()
         mock_store.find_by_vscode_id.return_value = (
-            "m1",
+            "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
             {"status": "running", "token": "tok"},
         )
         vs_mod.vscode_info_store = mock_store
@@ -482,7 +490,7 @@ class TestVSCodeAttach(unittest.TestCase):
         with app.test_client() as client:
             resp = client.post(
                 "/api/remote/vscode/vs1/attach",
-                json={"machine_id": "m1"},
+                json={"machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9"},
             )
             self.assertEqual(resp.status_code, 401)
 
@@ -509,7 +517,7 @@ class TestVSCodeAttach(unittest.TestCase):
                 client,
                 "/api/remote/vscode/vs1/attach",
                 "test-token-5-user",
-                json={"machine_id": "m1"},
+                json={"machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9"},
             )
             self.assertEqual(resp.status_code, 403)
 
@@ -523,7 +531,7 @@ class TestVSCodeAttach(unittest.TestCase):
                 client,
                 "/api/remote/vscode/vs-123/attach",
                 "test-token-1-admin",
-                json={"machine_id": "m1"},
+                json={"machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9"},
             )
             self.assertEqual(resp.status_code, 200)
             data = resp.get_json()
@@ -592,7 +600,7 @@ class TestVSCodeProxy(unittest.TestCase):
         app, vs_mod, orig, mock_store = self._make_app_with_store(
             mgr,
             (
-                "m1",
+                "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
                 {
                     "status": "running",
                     "token": "valid-token",
@@ -624,7 +632,7 @@ class TestVSCodeProxy(unittest.TestCase):
         app, vs_mod, orig, mock_store = self._make_app_with_store(
             mgr,
             (
-                "m1",
+                "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
                 {
                     "status": "running",
                     "token": "correct-token",
@@ -652,7 +660,7 @@ class TestVSCodeProxy(unittest.TestCase):
         app, vs_mod, orig, mock_store = self._make_app_with_store(
             mgr,
             (
-                "m1",
+                "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
                 {
                     "status": "pending",
                     "token": "valid-token",
@@ -679,7 +687,7 @@ class TestVSCodeProxy(unittest.TestCase):
         app, vs_mod, orig, mock_store = self._make_app_with_store(
             mgr,
             (
-                "m1",
+                "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
                 {
                     "status": "running",
                     "token": "",  # empty stored token
@@ -704,7 +712,7 @@ class TestVSCodeProxy(unittest.TestCase):
         app, vs_mod, orig, mock_store = self._make_app_with_store(
             mgr,
             (
-                "m1",
+                "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
                 {
                     "status": "running",
                     "token": "valid-token",
@@ -746,7 +754,7 @@ class TestVSCodeProxy(unittest.TestCase):
         app, vs_mod, orig, mock_store = self._make_app_with_store(
             mgr,
             (
-                "m1",
+                "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
                 {
                     "status": "running",
                     "token": "valid-token",
@@ -838,7 +846,7 @@ class TestVSCodeStatusMessageHandler(unittest.TestCase):
 
         payload = {
             "type": "vscode_status",
-            "machine_id": "m1",
+            "machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
             "vscode_id": "vs-123",
             "status": "running",
             "http_url": "http://remote:8080",
@@ -884,13 +892,13 @@ class TestVSCodeStatusMessageHandler(unittest.TestCase):
         # Verify store.put was called with correct args
         mock_store.put.assert_called_once()
         call_args = mock_store.put.call_args
-        self.assertEqual(call_args[0][0], "m1")  # machine_id
+        self.assertEqual(call_args[0][0], "810ceed8-fd1b-50f3-8bc1-609601d23ae9")  # machine_id
         self.assertEqual(call_args[0][1], "vs-123")  # vscode_id
         stored_info = call_args[0][2]
         self.assertEqual(stored_info["status"], "running")
         self.assertEqual(stored_info["original_http_url"], "http://remote:8080")
         self.assertEqual(stored_info["original_token"], "original-vscode-token")
-        self.assertEqual(stored_info["machine_id"], "m1")
+        self.assertEqual(stored_info["machine_id"], "810ceed8-fd1b-50f3-8bc1-609601d23ae9")
         self.assertEqual(stored_info["project_path"], "/home/user/project")
         # A browser token should be generated (64 hex chars from secrets.token_hex(32))
         self.assertEqual(len(stored_info["token"]), 64)
@@ -901,7 +909,7 @@ class TestVSCodeStatusMessageHandler(unittest.TestCase):
 
         payload = {
             "type": "vscode_status",
-            "machine_id": "m1",
+            "machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
             "vscode_id": "vs-123",
             "status": "stopped",
         }
@@ -942,7 +950,9 @@ class TestVSCodeStatusMessageHandler(unittest.TestCase):
         self.assertTrue(data["success"])
 
         # Issue #2183: Should call mark_stopped instead of pop
-        mock_store.mark_stopped.assert_called_once_with("m1", "vs-123")
+        mock_store.mark_stopped.assert_called_once_with(
+            "810ceed8-fd1b-50f3-8bc1-609601d23ae9", "vs-123"
+        )
 
     def test_error_status_stores_error(self):
         """Error status stores the error message."""
@@ -950,7 +960,7 @@ class TestVSCodeStatusMessageHandler(unittest.TestCase):
 
         payload = {
             "type": "vscode_status",
-            "machine_id": "m1",
+            "machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
             "vscode_id": "vs-123",
             "status": "error",
             "error": "port already in use",
@@ -993,12 +1003,12 @@ class TestVSCodeStatusMessageHandler(unittest.TestCase):
 
         mock_store.put.assert_called_once()
         call_args = mock_store.put.call_args
-        self.assertEqual(call_args[0][0], "m1")
+        self.assertEqual(call_args[0][0], "810ceed8-fd1b-50f3-8bc1-609601d23ae9")
         self.assertEqual(call_args[0][1], "vs-123")
         stored_info = call_args[0][2]
         self.assertEqual(stored_info["status"], "error")
         self.assertEqual(stored_info["error"], "port already in use")
-        self.assertEqual(stored_info["machine_id"], "m1")
+        self.assertEqual(stored_info["machine_id"], "810ceed8-fd1b-50f3-8bc1-609601d23ae9")
 
     def test_not_found_status_cleans_up(self):
         """not_found status removes the store entry."""
@@ -1006,7 +1016,7 @@ class TestVSCodeStatusMessageHandler(unittest.TestCase):
 
         payload = {
             "type": "vscode_status",
-            "machine_id": "m1",
+            "machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
             "vscode_id": "vs-123",
             "status": "not_found",
         }
@@ -1046,7 +1056,7 @@ class TestVSCodeStatusMessageHandler(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(data["success"])
 
-        mock_store.pop.assert_called_once_with("m1", "vs-123")
+        mock_store.pop.assert_called_once_with("810ceed8-fd1b-50f3-8bc1-609601d23ae9", "vs-123")
 
     def test_missing_vscode_id_returns_success(self):
         """Missing vscode_id returns success without storing anything."""
@@ -1054,7 +1064,7 @@ class TestVSCodeStatusMessageHandler(unittest.TestCase):
 
         payload = {
             "type": "vscode_status",
-            "machine_id": "m1",
+            "machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
             # No vscode_id
             "status": "running",
             "http_url": "http://remote:8080",
@@ -1104,7 +1114,7 @@ class TestVSCodeStatusMessageHandler(unittest.TestCase):
 
         payload = {
             "type": "vscode_status",
-            "machine_id": "m1",
+            "machine_id": "810ceed8-fd1b-50f3-8bc1-609601d23ae9",
             "vscode_id": "vs-123",
             "status": "running",
             # No http_url

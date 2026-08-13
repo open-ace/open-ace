@@ -204,14 +204,17 @@ def test_check_session_access_denies_null_tenant_machine_admin(sqlite_db, monkey
         class _StubRemoteMgr:
             def __init__(self):
                 self._session_manager = manager
-                self._data = {"session_id": "tenant-two-session", "machine_id": "M1"}
+                self._data = {
+                    "session_id": "tenant-two-session",
+                    "machine_id": "90849a28-ea5d-503e-afe1-f2cea0832770",
+                }
 
             def get_session_status(self, session_id):
                 return self._data if session_id == "tenant-two-session" else None
 
         class _StubAgentMgr:
             def get_user_permission(self, machine_id, user_id):
-                # Null-tenant user 99 is an "admin" of machine M1 — the unguarded
+                # Null-tenant user 99 is an "admin" of machine 90849a28 — the unguarded
                 # machine-admin branch would let them in before the fix.
                 return "admin"
 
