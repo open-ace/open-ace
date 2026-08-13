@@ -18,7 +18,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "20260814_001"
-down_revision = "20260812_001_add_token_version"
+down_revision = "20260812_001"
 branch_labels = None
 depends_on = None
 
