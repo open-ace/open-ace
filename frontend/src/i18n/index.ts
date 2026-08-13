@@ -3115,7 +3115,7 @@ export const translations: Record<Language, Translations> = {
     failedToUpdateTenantQuota: '更新租户配额失败',
     requestBodyRequired: '请求体必填',
     noValidFieldsToUpdate: '没有有效的更新字段',
-    // Note: 'activate' is also defined in Category Management section above
+    activate: '激活',
     suspend: '暂停',
     monthlyTokens: '每月 Token',
     monthlyTokenLimit: '每月 Token 限额',
