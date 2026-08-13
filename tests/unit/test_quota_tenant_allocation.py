@@ -8,8 +8,9 @@ Tests validation of tenant allocation limits including:
 - Quota decrease scenarios
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestValidateTenantAllocation:

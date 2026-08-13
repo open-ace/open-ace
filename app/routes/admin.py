@@ -533,10 +533,14 @@ def api_update_user_quota(user_id):
                         jsonify(
                             {
                                 "error": "Tenant quota exceeded",
-                                "message": validation_result.get("error", "Quota allocation exceeds tenant limit"),
+                                "message": validation_result.get(
+                                    "error", "Quota allocation exceeds tenant limit"
+                                ),
                                 "details": {
                                     "available": validation_result.get("available", {}),
-                                    "is_unlimited_tenant": validation_result.get("is_unlimited_tenant", False),
+                                    "is_unlimited_tenant": validation_result.get(
+                                        "is_unlimited_tenant", False
+                                    ),
                                 },
                             }
                         ),
@@ -888,21 +892,37 @@ def api_quota_health_check():
     is_over_allocated = False
     over_by = {}
 
-    if tenant_quota.daily_token_limit and allocated_daily_tokens_actual > tenant_quota.daily_token_limit:
+    if (
+        tenant_quota.daily_token_limit
+        and allocated_daily_tokens_actual > tenant_quota.daily_token_limit
+    ):
         is_over_allocated = True
         over_by["daily_token"] = allocated_daily_tokens_actual - tenant_quota.daily_token_limit
 
-    if tenant_quota.monthly_token_limit and allocated_monthly_tokens_actual > tenant_quota.monthly_token_limit:
+    if (
+        tenant_quota.monthly_token_limit
+        and allocated_monthly_tokens_actual > tenant_quota.monthly_token_limit
+    ):
         is_over_allocated = True
-        over_by["monthly_token"] = allocated_monthly_tokens_actual - tenant_quota.monthly_token_limit
+        over_by["monthly_token"] = (
+            allocated_monthly_tokens_actual - tenant_quota.monthly_token_limit
+        )
 
-    if tenant_quota.daily_request_limit and allocated["daily_request"] > tenant_quota.daily_request_limit:
+    if (
+        tenant_quota.daily_request_limit
+        and allocated["daily_request"] > tenant_quota.daily_request_limit
+    ):
         is_over_allocated = True
         over_by["daily_request"] = allocated["daily_request"] - tenant_quota.daily_request_limit
 
-    if tenant_quota.monthly_request_limit and allocated["monthly_request"] > tenant_quota.monthly_request_limit:
+    if (
+        tenant_quota.monthly_request_limit
+        and allocated["monthly_request"] > tenant_quota.monthly_request_limit
+    ):
         is_over_allocated = True
-        over_by["monthly_request"] = allocated["monthly_request"] - tenant_quota.monthly_request_limit
+        over_by["monthly_request"] = (
+            allocated["monthly_request"] - tenant_quota.monthly_request_limit
+        )
 
     response = {
         "tenant_id": tenant_id,

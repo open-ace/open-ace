@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
     from app.repositories.database import Database
+else:
+    from app.repositories.database import adapt_boolean_condition
 
 logger = logging.getLogger(__name__)
 
@@ -286,7 +288,7 @@ def validate_tenant_allocation(
     # Each quota field handles NULL values independently using conditional aggregation
     # Token quotas are stored in M units
     allocated_row = db.fetch_one(
-        """
+        f"""
         SELECT
             COALESCE(SUM(CASE WHEN daily_token_quota IS NOT NULL THEN daily_token_quota ELSE 0 END), 0) as daily_token,
             COALESCE(SUM(CASE WHEN monthly_token_quota IS NOT NULL THEN monthly_token_quota ELSE 0 END), 0) as monthly_token,
@@ -294,7 +296,7 @@ def validate_tenant_allocation(
             COALESCE(SUM(CASE WHEN monthly_request_quota IS NOT NULL THEN monthly_request_quota ELSE 0 END), 0) as monthly_request
         FROM users
         WHERE tenant_id = ?
-          AND is_active = 1
+          AND {adapt_boolean_condition('is_active', True)}
           AND (id IS NULL OR id != ?)
     """,
         (tenant_id, user_id or 0),
