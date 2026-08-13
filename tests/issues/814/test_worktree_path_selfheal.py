@@ -125,10 +125,22 @@ class TestEnsureWorktreeSelfHeal:
         # _ensure_worktree now checks validity via main_gh.path_exists_as_user
         # (cross-user safe; replaced the old os.path.isfile probe, Issue #1395).
         fake_gh = MagicMock()
-        fake_gh.path_exists_as_user.return_value = True
+        # Only the worktree's .git marker "exists": the #23 node_modules shim
+        # (later in ensure_worktree) probes the main clone's frontend and must
+        # find no install, else it runs _run_as_account on the mock and records
+        # a fail-soft milestone this test asserts never happens.
+        fake_gh.path_exists_as_user.side_effect = lambda p, **_kw: str(p).endswith("/.git")
+        # #1573 branch consistency: the worktree's actual branch must match
+        # branch_name, else the fake's MagicMock branch trips the mismatch
+        # guard (with a truthy has_uncommitted_changes → GitHubOpsError).
+        fake_gh.get_current_branch.return_value = wf["branch_name"]
+        # A class-like fake: constructing it yields fake_gh, and classmethod
+        # access (GitHubOps.clear_trusted_git_context, added by #2565's
+        # _refresh_trusted_git_context) works — a bare lambda has no attributes.
+        fake_gh_cls = MagicMock(return_value=fake_gh)
         monkeypatch.setattr(
             "app.modules.workspace.autonomous.orchestrator.GitHubOps",
-            lambda _path, **_kw: fake_gh,
+            fake_gh_cls,
         )
         o = _make_orchestrator(wf)
 
@@ -145,10 +157,22 @@ class TestEnsureWorktreeSelfHeal:
         canonical = wf["worktree_path"]
 
         fake_gh = MagicMock()
-        fake_gh.path_exists_as_user.return_value = True
+        # Only the worktree's .git marker "exists": the #23 node_modules shim
+        # (later in ensure_worktree) probes the main clone's frontend and must
+        # find no install, else it runs _run_as_account on the mock and records
+        # a fail-soft milestone this test asserts never happens.
+        fake_gh.path_exists_as_user.side_effect = lambda p, **_kw: str(p).endswith("/.git")
+        # #1573 branch consistency: the worktree's actual branch must match
+        # branch_name, else the fake's MagicMock branch trips the mismatch
+        # guard (with a truthy has_uncommitted_changes → GitHubOpsError).
+        fake_gh.get_current_branch.return_value = wf["branch_name"]
+        # A class-like fake: constructing it yields fake_gh, and classmethod
+        # access (GitHubOps.clear_trusted_git_context, added by #2565's
+        # _refresh_trusted_git_context) works — a bare lambda has no attributes.
+        fake_gh_cls = MagicMock(return_value=fake_gh)
         monkeypatch.setattr(
             "app.modules.workspace.autonomous.orchestrator.GitHubOps",
-            lambda _path, **_kw: fake_gh,
+            fake_gh_cls,
         )
         o = _make_orchestrator(wf)
 
@@ -176,17 +200,27 @@ class TestEnsureWorktreeSelfHeal:
             # worktree add <path> <existing-branch>  (NO -b)
             MagicMock(),
         ]
+        # A class-like fake: constructing it yields fake_gh, and classmethod
+        # access (GitHubOps.clear_trusted_git_context, added by #2565's
+        # _refresh_trusted_git_context) works — a bare lambda has no attributes.
+        fake_gh_cls = MagicMock(return_value=fake_gh)
         monkeypatch.setattr(
             "app.modules.workspace.autonomous.orchestrator.GitHubOps",
-            lambda _path, **_kw: fake_gh,
+            fake_gh_cls,
         )
 
         result = o._ensure_worktree(wf)
 
         assert result == canonical
-        # Last git call reattaches the existing branch (no -b flag).
-        last_call = fake_gh._run_git.call_args_list[-1].args[0]
-        assert last_call == ["worktree", "add", canonical, wf["branch_name"]]
+        # The reattach call (no -b flag). Selected by command prefix rather
+        # than position: #2565's post-add trusted-context refresh appends a
+        # rev-parse probe after it (absorbed by the refresh's error path).
+        add_calls = [
+            c.args[0]
+            for c in fake_gh._run_git.call_args_list
+            if c.args[0][:2] == ["worktree", "add"]
+        ]
+        assert add_calls == [["worktree", "add", canonical, wf["branch_name"]]]
         o._create_milestone.assert_called_once()
 
     def test_recreates_missing_worktree_and_branch_from_origin(self, monkeypatch):
@@ -224,22 +258,32 @@ class TestEnsureWorktreeSelfHeal:
             # worktree add -b <branch> <path> <base-sha-verified>
             MagicMock(),
         ]
+        # A class-like fake: constructing it yields fake_gh, and classmethod
+        # access (GitHubOps.clear_trusted_git_context, added by #2565's
+        # _refresh_trusted_git_context) works — a bare lambda has no attributes.
+        fake_gh_cls = MagicMock(return_value=fake_gh)
         monkeypatch.setattr(
             "app.modules.workspace.autonomous.orchestrator.GitHubOps",
-            lambda _path, **_kw: fake_gh,
+            fake_gh_cls,
         )
 
         result = o._ensure_worktree(wf)
 
         assert result == canonical
-        last_call = fake_gh._run_git.call_args_list[-1].args[0]
-        assert last_call == [
-            "worktree",
-            "add",
-            "-b",
-            wf["branch_name"],
-            canonical,
-            "base-sha-verified",
+        add_calls = [
+            c.args[0]
+            for c in fake_gh._run_git.call_args_list
+            if c.args[0][:2] == ["worktree", "add"]
+        ]
+        assert add_calls == [
+            [
+                "worktree",
+                "add",
+                "-b",
+                wf["branch_name"],
+                canonical,
+                "base-sha-verified",
+            ]
         ]
 
     def test_noop_for_new_branch_strategy(self, monkeypatch):

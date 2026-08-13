@@ -70,13 +70,11 @@ class PolicyRepository:
             cursor = conn.cursor()
             # Supersede existing current rows for this logical rule.
             cursor.execute(
-                adapt_sql(
-                    """
+                adapt_sql("""
                     UPDATE policy_rules
                        SET is_current = ?, superseded_at = ?
                      WHERE rule_key = ? AND is_current = ?
-                    """
-                ),
+                    """),
                 (_bool(False), now, rule_key, _bool(True)),
             )
             conn.commit()
@@ -169,12 +167,10 @@ class PolicyRepository:
     def set_rule_enabled(self, rule_id: int, enabled: bool) -> int:
         """Toggle enabled on the current version only. Returns rows updated."""
         cursor = self.db.execute(
-            adapt_sql(
-                """
+            adapt_sql("""
                 UPDATE policy_rules SET enabled = ?, updated_at = ?
                  WHERE id = ? AND is_current = ?
-                """
-            ),
+                """),
             (_bool(enabled), _utcnow_naive(), rule_id, _bool(True)),
         )
         return getattr(cursor, "rowcount", 0) or 0
@@ -301,14 +297,12 @@ class PolicyRepository:
             cond += " AND fingerprint_hash = ?"
             where_params.append(fingerprint_hash)
         cursor = self.db.execute(
-            adapt_sql(
-                f"""
+            adapt_sql(f"""
                 UPDATE policy_decisions
                    SET decision = ?, reviewer_identity = ?, consumed_at = ?,
                        remote_response_id = ?, updated_at = ?
                  WHERE {cond}
-                """
-            ),
+                """),
             tuple(params + where_params),
         )
         return getattr(cursor, "rowcount", 0) or 0

@@ -29,7 +29,9 @@ def sqlite_sm(tmp_path, monkeypatch):
 
 
 def _create_session(sm: SessionManager, session_id: str = "sess-1128") -> AgentSession:
-    return sm.create_session(tool_name="claude", session_id=session_id, user_id=1)
+    # Session writes resolve tenant fail-closed (#1789 lineage); the fixture DB
+    # seeds no users row to look up, so pass the tenant explicitly.
+    return sm.create_session(tool_name="claude", session_id=session_id, user_id=1, tenant_id=1)
 
 
 def test_add_message_merges_duplicate_message_id_without_double_count(sqlite_sm):
@@ -126,8 +128,7 @@ def test_ensure_tables_migrates_legacy_session_messages_schema(tmp_path, monkeyp
     monkeypatch.setattr(sm_mod, "is_postgresql", lambda: False)
     db_path = tmp_path / "legacy_session_messages.db"
     conn = sqlite3.connect(str(db_path))
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE agent_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL UNIQUE,
@@ -150,10 +151,8 @@ def test_ensure_tables_migrates_legacy_session_messages_schema(tmp_path, monkeyp
             completed_at TIMESTAMP,
             expires_at TIMESTAMP
         )
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE TABLE session_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL,
@@ -164,8 +163,7 @@ def test_ensure_tables_migrates_legacy_session_messages_schema(tmp_path, monkeyp
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             metadata TEXT
         )
-        """
-    )
+        """)
     conn.commit()
     conn.close()
 
@@ -198,8 +196,11 @@ def test_llm_proxy_records_transcript_without_double_count(monkeypatch):
         def get_session(self, session_id, include_messages=False):
             return self.session
 
-        def update_session(self, updated_session):
-            self.session = updated_session
+        def update_session_fields(self, session_id, fields, tenant_id=None, require_tenant=False):
+            # Mirror the real SessionManager interface (llm_proxy writes the
+            # session model via update_session_fields with a tenant kwarg).
+            for key, value in fields.items():
+                setattr(self.session, key, value)
             return True
 
         def increment_session_usage(
@@ -210,7 +211,16 @@ def test_llm_proxy_records_transcript_without_double_count(monkeypatch):
             total_tokens_delta=0,
             total_input_delta=0,
             total_output_delta=0,
+            total_cache_read_delta=0,
+            total_cache_write_delta=0,
+            tenant_id=None,
+            require_tenant=True,
         ):
+            # tenant_id/require_tenant/cache deltas mirror the real
+            # SessionManager signature (usage_sink passes tenant_id=... and the
+            # cache kwargs); without them the call raises TypeError and the
+            # sink's except swallows it, silently zeroing the counters this
+            # test asserts on.
             self.session.message_count = (self.session.message_count or 0) + message_delta
             self.session.request_count = (self.session.request_count or 0) + request_delta
             self.session.total_tokens = (self.session.total_tokens or 0) + total_tokens_delta

@@ -63,12 +63,10 @@ class AlertStateSynchronizer:
                     )
                 else:
                     cursor.execute(
-                        adapt_sql(
-                            """
+                        adapt_sql("""
                             SELECT user_id, metadata, created_at FROM alerts
                             WHERE alert_id = ?
-                        """
-                        ),
+                        """),
                         (alert_id,),
                     )
 
@@ -103,12 +101,10 @@ class AlertStateSynchronizer:
                     )
                 else:
                     cursor.execute(
-                        adapt_sql(
-                            """
+                        adapt_sql("""
                             UPDATE alerts SET read = ?
                             WHERE alert_id = ?
-                        """
-                        ),
+                        """),
                         (adapt_boolean_value(True), alert_id),
                     )
 
@@ -138,8 +134,7 @@ class AlertStateSynchronizer:
                         )
                     else:
                         cursor.execute(
-                            adapt_sql(
-                                """
+                            adapt_sql("""
                                 UPDATE quota_alerts
                                 SET acknowledged = ?,
                                     acknowledged_at = ?
@@ -147,8 +142,7 @@ class AlertStateSynchronizer:
                                 AND quota_type = ?
                                 AND acknowledged = ?
                                 AND DATE(created_at) = ?
-                            """
-                            ),
+                            """),
                             (
                                 adapt_boolean_value(True),
                                 now,
@@ -200,12 +194,10 @@ class AlertStateSynchronizer:
                     )
                 else:
                     cursor.execute(
-                        adapt_sql(
-                            """
+                        adapt_sql("""
                             SELECT user_id, metadata, created_at FROM alerts
                             WHERE alert_id = ?
-                        """
-                        ),
+                        """),
                         (alert_id,),
                     )
 
@@ -237,11 +229,9 @@ class AlertStateSynchronizer:
                     )
                 else:
                     cursor.execute(
-                        adapt_sql(
-                            """
+                        adapt_sql("""
                             DELETE FROM alerts WHERE alert_id = ?
-                        """
-                        ),
+                        """),
                         (alert_id,),
                     )
 
@@ -266,14 +256,12 @@ class AlertStateSynchronizer:
                         )
                     else:
                         cursor.execute(
-                            adapt_sql(
-                                """
+                            adapt_sql("""
                                 DELETE FROM quota_alerts
                                 WHERE user_id = ?
                                 AND quota_type = ?
                                 AND DATE(created_at) = ?
-                            """
-                            ),
+                            """),
                             (alert_user_id, quota_type, created_date),
                         )
 
@@ -330,14 +318,12 @@ class AlertStateSynchronizer:
                         )
                     else:
                         cursor.execute(
-                            adapt_sql(
-                                """
+                            adapt_sql("""
                                 DELETE FROM alerts
                                 WHERE user_id = ?
                                 AND read = ?
                                 AND created_at < ?
-                            """
-                            ),
+                            """),
                             (user_id, adapt_boolean_value(True), cutoff_str),
                         )
                 else:
@@ -352,13 +338,11 @@ class AlertStateSynchronizer:
                         )
                     else:
                         cursor.execute(
-                            adapt_sql(
-                                """
+                            adapt_sql("""
                                 DELETE FROM alerts
                                 WHERE read = ?
                                 AND created_at < ?
-                            """
-                            ),
+                            """),
                             (adapt_boolean_value(True), cutoff_str),
                         )
 
@@ -378,14 +362,12 @@ class AlertStateSynchronizer:
                         )
                     else:
                         cursor.execute(
-                            adapt_sql(
-                                """
+                            adapt_sql("""
                                 DELETE FROM quota_alerts
                                 WHERE user_id = ?
                                 AND acknowledged = ?
                                 AND created_at < ?
-                            """
-                            ),
+                            """),
                             (user_id, adapt_boolean_value(True), cutoff_str),
                         )
                 else:
@@ -400,13 +382,11 @@ class AlertStateSynchronizer:
                         )
                     else:
                         cursor.execute(
-                            adapt_sql(
-                                """
+                            adapt_sql("""
                                 DELETE FROM quota_alerts
                                 WHERE acknowledged = ?
                                 AND created_at < ?
-                            """
-                            ),
+                            """),
                             (adapt_boolean_value(True), cutoff_str),
                         )
 
@@ -445,12 +425,10 @@ class AlertStateSynchronizer:
 
             # Count quota-type alerts
             alerts_count = self.db.fetch_one(
-                adapt_sql(
-                    """
+                adapt_sql("""
                     SELECT COUNT(*) as count FROM alerts
                     WHERE alert_type = ?
-                """
-                ),
+                """),
                 ("quota",),
             )
             result["alerts_quota_count"] = alerts_count.get("count", 0) if alerts_count else 0
@@ -460,8 +438,7 @@ class AlertStateSynchronizer:
 
             # Find quota_alerts that might not have corresponding alerts
             if is_postgresql():
-                orphan_quota_alerts = self.db.fetch_all(
-                    """
+                orphan_quota_alerts = self.db.fetch_all("""
                     SELECT qa.id, qa.user_id, qa.quota_type, qa.created_at
                     FROM quota_alerts qa
                     WHERE NOT EXISTS (
@@ -471,12 +448,9 @@ class AlertStateSynchronizer:
                         AND (a.metadata::jsonb)->>'quota_type' = qa.quota_type
                         AND DATE(a.created_at) = DATE(qa.created_at)
                     )
-                """
-                )
+                """)
             else:
-                orphan_quota_alerts = self.db.fetch_all(
-                    adapt_sql(
-                        """
+                orphan_quota_alerts = self.db.fetch_all(adapt_sql("""
                     SELECT qa.id, qa.user_id, qa.quota_type, qa.created_at
                     FROM quota_alerts qa
                     WHERE NOT EXISTS (
@@ -486,9 +460,7 @@ class AlertStateSynchronizer:
                         AND json_extract(a.metadata, '$.quota_type') = qa.quota_type
                         AND DATE(a.created_at) = DATE(qa.created_at)
                     )
-                """
-                    )
-                )
+                """))
 
             if orphan_quota_alerts:
                 result["mismatches"].extend(
@@ -505,8 +477,7 @@ class AlertStateSynchronizer:
 
             # Check for alerts without corresponding quota_alerts (less critical)
             if is_postgresql():
-                orphan_alerts = self.db.fetch_all(
-                    """
+                orphan_alerts = self.db.fetch_all("""
                     SELECT a.alert_id, a.user_id,
                            (a.metadata::jsonb)->>'quota_type' as quota_type,
                            a.created_at
@@ -518,12 +489,9 @@ class AlertStateSynchronizer:
                         AND qa.quota_type = (a.metadata::jsonb)->>'quota_type'
                         AND DATE(qa.created_at) = DATE(a.created_at)
                     )
-                """
-                )
+                """)
             else:
-                orphan_alerts = self.db.fetch_all(
-                    adapt_sql(
-                        """
+                orphan_alerts = self.db.fetch_all(adapt_sql("""
                     SELECT a.alert_id, a.user_id, json_extract(a.metadata, '$.quota_type') as quota_type, a.created_at
                     FROM alerts a
                     WHERE a.alert_type = 'quota'
@@ -533,9 +501,7 @@ class AlertStateSynchronizer:
                         AND qa.quota_type = json_extract(a.metadata, '$.quota_type')
                         AND DATE(qa.created_at) = DATE(a.created_at)
                     )
-                """
-                    )
-                )
+                """))
 
             if orphan_alerts:
                 result["mismatches"].extend(

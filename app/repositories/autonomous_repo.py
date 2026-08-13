@@ -193,15 +193,13 @@ class AutonomousWorkflowRepository:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql(
-                    f"""
+                adapt_sql(f"""
                     SELECT workflow_id, agent_pid, status
                     FROM autonomous_workflows
                     WHERE agent_pid IS NOT NULL
                       AND agent_pid > 0
                       AND status IN ({placeholders})
-                    """
-                ),
+                    """),
                 list(active_statuses),
             )
             # RealDictRow (PG) and sqlite3.Row both convert via dict(row).
@@ -223,14 +221,10 @@ class AutonomousWorkflowRepository:
         conn = self.db.get_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute(
-                adapt_sql(
-                    """
+            cursor.execute(adapt_sql("""
                     SELECT * FROM autonomous_workflows
                     WHERE worktree_transition_state IS NOT NULL
-                    """
-                )
-            )
+                    """))
             # RealDictRow (PG) and sqlite3.Row both convert via dict(row).
             # Do NOT use dict(zip(cols, row)): a RealDictRow iterates as its
             # KEYS (column names), so zip yields {column_name: column_name}
@@ -252,15 +246,11 @@ class AutonomousWorkflowRepository:
         conn = self.db.get_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute(
-                adapt_sql(
-                    """
+            cursor.execute(adapt_sql("""
                     SELECT * FROM autonomous_workflows
                     WHERE sandbox_state IS NOT NULL
                       AND sandbox_state IN ('created', 'running', 'paused')
-                    """
-                )
-            )
+                    """))
             # RealDictRow (PG) and sqlite3.Row both convert via dict(row).
             # Do NOT use dict(zip(cols, row)): a RealDictRow iterates as its
             # KEYS (column names), so zip yields {column_name: column_name}
@@ -562,15 +552,13 @@ class AutonomousWorkflowRepository:
         ``acceptance_verification`` phase/status mapping so delivered rows can
         run the default-off drain path instead of becoming dead ends.
         """
-        return self.db.fetch_all(
-            """
+        return self.db.fetch_all("""
             SELECT * FROM autonomous_workflows
             WHERE status IN ('pending', 'preparing', 'planning', 'developing',
                              'pr_review', 'reporting', 'waiting', 'merging',
                              'verification_pending')
             ORDER BY created_at ASC
-            """
-        )
+            """)
 
     def get_workflows_pending_cleanup(self) -> list:
         """Get delivered workflows whose Git cleanup is still pending (#2043).
@@ -586,14 +574,12 @@ class AutonomousWorkflowRepository:
         blind for the entire parked window. The caller skips workflows the
         scheduler is currently advancing — see ``_is_in_flight``.
         """
-        return self.db.fetch_all(
-            """
+        return self.db.fetch_all("""
             SELECT * FROM autonomous_workflows
             WHERE status IN ('completed', 'verification_pending')
               AND cleanup_status = 'pending'
             ORDER BY cleanup_updated_at ASC NULLS LAST, created_at ASC
-            """
-        )
+            """)
 
     def count_active_workflows_by_user(self, user_id: int) -> int:
         """Count active workflows for a specific user.
@@ -629,23 +615,19 @@ class AutonomousWorkflowRepository:
                 """,
                 (f"{escape_like(quota_prefix)}%",),
             )
-        return self.db.fetch_all(
-            """
+        return self.db.fetch_all("""
             SELECT * FROM autonomous_workflows
             WHERE status = 'paused'
             ORDER BY created_at ASC
-            """
-        )
+            """)
 
     def get_queued_workflows(self) -> list:
         """Get workflows that are queued behind another workflow in the same batch."""
-        return self.db.fetch_all(
-            """
+        return self.db.fetch_all("""
             SELECT * FROM autonomous_workflows
             WHERE status = 'queued' AND batch_id IS NOT NULL AND batch_id != ''
             ORDER BY created_at ASC, batch_order ASC
-            """
-        )
+            """)
 
     def list_batch_workflows(self, batch_id: str) -> list:
         """List all workflows in a batch ordered by configured sequence."""
@@ -665,15 +647,13 @@ class AutonomousWorkflowRepository:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql(
-                    """
+                adapt_sql("""
                     UPDATE autonomous_workflows
                     SET status = 'cancelled', completed_at = ?, updated_at = ?
                     WHERE batch_id = ?
                       AND workflow_id != ?
                       AND status = 'queued'
-                    """
-                ),
+                    """),
                 (now, now, batch_id, exclude_workflow_id),
             )
             rowcount = cursor.rowcount
@@ -795,8 +775,7 @@ class AutonomousWorkflowRepository:
         milestones, matching the request count shown in the session list sidebar.
         """
         self.db.execute(
-            adapt_sql(
-                """
+            adapt_sql("""
                 UPDATE autonomous_workflows SET
                     total_requests = (
                         SELECT COALESCE(SUM(cnt), 0) FROM (
@@ -810,8 +789,7 @@ class AutonomousWorkflowRepository:
                     ),
                     updated_at = ?
                 WHERE workflow_id = ?
-                """
-            ),
+                """),
             (
                 workflow_id,
                 datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
@@ -828,8 +806,7 @@ class AutonomousWorkflowRepository:
         """
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         self.db.execute(
-            adapt_sql(
-                """
+            adapt_sql("""
                 UPDATE autonomous_workflows SET
                     total_tokens = COALESCE((
                         SELECT SUM(COALESCE(phase_total_tokens, 0))
@@ -849,8 +826,7 @@ class AutonomousWorkflowRepository:
                     ), 0),
                     updated_at = ?
                 WHERE workflow_id = ?
-                """
-            ),
+                """),
             (workflow_id, workflow_id, workflow_id, workflow_id, now, workflow_id),
         )
 
@@ -1309,14 +1285,12 @@ class AutonomousWorkflowRepository:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                _db_mod.adapt_sql(
-                    """
+                _db_mod.adapt_sql("""
                     UPDATE autonomous_workflows
                     SET locked_at = ?, locked_by = ?
                     WHERE workflow_id = ?
                       AND (locked_at IS NULL OR locked_at < ?)
-                    """
-                ),
+                    """),
                 (now, owner, workflow_id, cutoff),
             )
             rowcount = cursor.rowcount
@@ -1340,13 +1314,11 @@ class AutonomousWorkflowRepository:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                _db_mod.adapt_sql(
-                    """
+                _db_mod.adapt_sql("""
                     UPDATE autonomous_workflows
                     SET locked_at = ?
                     WHERE workflow_id = ? AND locked_by = ?
-                    """
-                ),
+                    """),
                 (now, workflow_id, owner),
             )
             refreshed = cursor.rowcount > 0
@@ -1368,13 +1340,11 @@ class AutonomousWorkflowRepository:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                _db_mod.adapt_sql(
-                    """
+                _db_mod.adapt_sql("""
                     UPDATE autonomous_workflows
                     SET agent_pid = NULL, agent_session_id = '', updated_at = ?
                     WHERE workflow_id = ? AND locked_by = ? AND agent_pid IS NOT NULL
-                    """
-                ),
+                    """),
                 (now, workflow_id, owner),
             )
             cleared = cursor.rowcount > 0
@@ -1407,8 +1377,7 @@ class AutonomousWorkflowRepository:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                _db_mod.adapt_sql(
-                    """
+                _db_mod.adapt_sql("""
                     UPDATE autonomous_workflows
                     SET locked_at = ?, locked_by = ?
                     WHERE workflow_id = ?
@@ -1420,8 +1389,7 @@ class AutonomousWorkflowRepository:
                           AND (agent_pid IS NULL OR agent_pid <= 0)
                         )
                       )
-                    """
-                ),
+                    """),
                 (now, owner, workflow_id, cutoff),
             )
             rowcount = cursor.rowcount
@@ -1438,13 +1406,11 @@ class AutonomousWorkflowRepository:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                _db_mod.adapt_sql(
-                    """
+                _db_mod.adapt_sql("""
                     UPDATE autonomous_workflows
                     SET locked_at = NULL, locked_by = NULL
                     WHERE workflow_id = ? AND locked_by = ?
-                    """
-                ),
+                    """),
                 (workflow_id, owner),
             )
             conn.commit()
