@@ -2682,6 +2682,51 @@ class AutonomousOrchestrator:
             "common_identity": common_identity,
         }
 
+    def _refresh_trusted_git_context(self, repo_path: str, system_account: str | None) -> None:
+        """Re-pin the trusted Git context for repo_path to its CURRENT gitdir
+        identity.
+
+        Called at worktree lifecycle points (ensure_worktree / recreate), which
+        legitimately change the gitdir after the prior _run_agent pinned it.
+        The class-level registry persists across scheduler cycles, so without
+        this refresh the next cycle's lifecycle git ops verify against a stale
+        baseline and produce false-positive "identity changed" failures (#2565).
+
+        Best-effort: if the gitdir cannot be snapshotted (e.g. doesn't exist
+        yet), skip silently — _verify_trusted_git_context's empty-context
+        early-return handles the unset case.
+
+        The stale context must be cleared first so that the GitHubOps instance
+        created inside _capture_repo_state can run its own git probes without
+        tripping the very identity check we are trying to refresh.
+        """
+        GitHubOps.clear_trusted_git_context(repo_path)
+        try:
+            state = self._capture_repo_state(repo_path, system_account)
+        except Exception:
+            logger.debug(
+                "Skipping trusted Git context refresh for %s (capture failed)",
+                repo_path,
+            )
+            return
+        git_dir = state.get("git_dir", "")
+        git_identity = state.get("git_identity", "")
+        common_dir = state.get("common_dir", "")
+        common_identity = state.get("common_identity", "")
+        if not git_dir or not git_identity or not common_dir or not common_identity:
+            logger.debug(
+                "Skipping trusted Git context refresh for %s (incomplete state)",
+                repo_path,
+            )
+            return
+        GitHubOps.register_trusted_git_context(
+            repo_path,
+            git_dir,
+            git_identity,
+            common_dir,
+            common_identity,
+        )
+
     def recover_worktree_branch(
         self,
         gh: GitHubOps,
