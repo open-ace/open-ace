@@ -434,7 +434,26 @@ CREATE TABLE content_filter_rules (
  is_enabled INTEGER DEFAULT 1,
  description text,
  created_at TIMESTAMP NOT NULL,
- updated_at TIMESTAMP
+ updated_at TIMESTAMP,
+ tenant_id integer,
+ source text DEFAULT 'user',
+ category text DEFAULT 'custom',
+ status text DEFAULT 'active',
+ approved_by integer,
+ approved_at TIMESTAMP,
+ created_by integer,
+ metadata text,
+ urgency_reason text
+);
+
+CREATE TABLE filter_rule_approvals (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ rule_id integer,
+ approver_id integer,
+ action text NOT NULL,
+ comment text,
+ tenant_id integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE daily_messages (
@@ -1706,6 +1725,20 @@ CREATE INDEX idx_events_workflow_created ON workflow_events (workflow_id, create
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules (is_enabled);
 
 CREATE INDEX idx_filter_rules_type ON content_filter_rules (type);
+
+CREATE INDEX idx_cfr_tenant_id ON content_filter_rules (tenant_id);
+
+CREATE INDEX idx_cfr_source ON content_filter_rules (source);
+
+CREATE INDEX idx_cfr_category ON content_filter_rules (category);
+
+CREATE INDEX idx_cfr_status ON content_filter_rules (status);
+
+CREATE INDEX idx_cfr_tenant_enabled_status ON content_filter_rules (tenant_id, is_enabled, status);
+
+CREATE INDEX idx_fra_rule_id ON filter_rule_approvals (rule_id);
+
+CREATE INDEX idx_fra_tenant_id ON filter_rule_approvals (tenant_id);
 
 CREATE INDEX idx_hourly_stats_date ON hourly_stats (date);
 

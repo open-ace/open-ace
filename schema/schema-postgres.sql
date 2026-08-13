@@ -647,7 +647,16 @@ CREATE TABLE content_filter_rules (
     is_enabled boolean DEFAULT true,
     description text,
     created_at timestamp without time zone NOT NULL,
-    updated_at timestamp without time zone
+    updated_at timestamp without time zone,
+    tenant_id integer,
+    source character varying(20) DEFAULT 'user'::character varying,
+    category character varying(50) DEFAULT 'custom'::character varying,
+    status character varying(20) DEFAULT 'active'::character varying,
+    approved_by integer,
+    approved_at timestamp without time zone,
+    created_by integer,
+    metadata json,
+    urgency_reason text
 );
 
 CREATE SEQUENCE content_filter_rules_id_seq
@@ -659,6 +668,25 @@ CREATE SEQUENCE content_filter_rules_id_seq
     CACHE 1;
 
 ALTER SEQUENCE content_filter_rules_id_seq OWNED BY content_filter_rules.id;
+CREATE TABLE filter_rule_approvals (
+    id integer NOT NULL,
+    rule_id integer,
+    approver_id integer,
+    action character varying(20) NOT NULL,
+    comment text,
+    tenant_id integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE filter_rule_approvals_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE filter_rule_approvals_id_seq OWNED BY filter_rule_approvals.id;
 CREATE TABLE daily_messages (
     id integer NOT NULL,
     date character varying NOT NULL,
@@ -3072,6 +3100,24 @@ CREATE INDEX idx_events_workflow_created ON workflow_events USING btree (workflo
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules USING btree (is_enabled);
 
 CREATE INDEX idx_filter_rules_type ON content_filter_rules USING btree (type);
+
+CREATE INDEX idx_cfr_tenant_id ON content_filter_rules USING btree (tenant_id);
+
+CREATE INDEX idx_cfr_source ON content_filter_rules USING btree (source);
+
+CREATE INDEX idx_cfr_category ON content_filter_rules USING btree (category);
+
+CREATE INDEX idx_cfr_status ON content_filter_rules USING btree (status);
+
+CREATE INDEX idx_cfr_tenant_enabled_status ON content_filter_rules USING btree (tenant_id, is_enabled, status);
+
+CREATE UNIQUE INDEX idx_cfr_system_unique ON content_filter_rules USING btree (pattern) WHERE (source = 'system'::text) AND (tenant_id IS NULL);
+
+ALTER TABLE ONLY content_filter_rules ADD CONSTRAINT chk_status_valid CHECK ((status)::text IN ('pending'::text, 'approved'::text, 'active'::text, 'rejected'::text, 'disabled'::text));
+
+CREATE INDEX idx_fra_rule_id ON filter_rule_approvals USING btree (rule_id);
+
+CREATE INDEX idx_fra_tenant_id ON filter_rule_approvals USING btree (tenant_id);
 
 
 --
