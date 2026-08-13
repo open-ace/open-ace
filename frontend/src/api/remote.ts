@@ -304,7 +304,10 @@ export const remoteApi = {
   },
 
   deleteApiKey(keyId: number, tenantId?: number): Promise<{ success: boolean; message: string }> {
-    return apiClient.delete(`/api/api-keys/${keyId}`, { tenant_id: tenantId ?? 1 });
+    // Backend resolves tenant_id from the query string for DELETE (Issue #2511);
+    // apiClient.delete has no query param, so append it to the endpoint manually.
+    const query = tenantId !== undefined ? `?tenant_id=${encodeURIComponent(String(tenantId))}` : '';
+    return apiClient.delete(`/api/api-keys/${keyId}${query}`);
   },
 
   updateApiKey(data: UpdateApiKeyRequest): Promise<{ success: boolean; message: string }> {
