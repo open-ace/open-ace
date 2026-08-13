@@ -190,9 +190,13 @@ export const APIKeyManagement: React.FC = () => {
     selectedTenantIdRef.current = selectedTenantId;
   }, [selectedTenantId]);
 
-  const { data: keysData, isLoading, isError, error, refetch } = useApiKeys(
-    effectiveTenantId ?? undefined
-  );
+  const {
+    data: keysData,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useApiKeys(effectiveTenantId ?? undefined);
   const storeApiKey = useStoreApiKey();
   const updateApiKey = useUpdateApiKey();
   const deleteApiKey = useDeleteApiKey();

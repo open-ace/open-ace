@@ -306,7 +306,8 @@ export const remoteApi = {
   deleteApiKey(keyId: number, tenantId?: number): Promise<{ success: boolean; message: string }> {
     // Backend resolves tenant_id from the query string for DELETE (Issue #2511);
     // apiClient.delete has no query param, so append it to the endpoint manually.
-    const query = tenantId !== undefined ? `?tenant_id=${encodeURIComponent(String(tenantId))}` : '';
+    const query =
+      tenantId !== undefined ? `?tenant_id=${encodeURIComponent(String(tenantId))}` : '';
     return apiClient.delete(`/api/api-keys/${keyId}${query}`);
   },
 
