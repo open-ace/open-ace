@@ -177,7 +177,7 @@ class TestRuleCacheSynchronization:
         cache = RuleCache(rule_loader=mock_loader, governance_repo=mock_repo)
 
         # Mock database connection
-        with patch('app.modules.governance.rule_cache.get_connection') as mock_conn:
+        with patch('app.repositories.database.get_connection') as mock_conn:
             mock_cursor = Mock()
             mock_conn.return_value.cursor.return_value = mock_cursor
 

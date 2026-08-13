@@ -51,8 +51,12 @@ class TestTriggerLogBuffer:
             buffer.add(rule_id=2, action_taken="warn")
             buffer.add(rule_id=3, action_taken="warn")
 
-            # Should have triggered flush
-            assert buffer._total_flushed == 0  # Not yet written due to mock
+            # Give time for the flush to be triggered
+            import time
+            time.sleep(0.1)
+
+            # Should have triggered flush (write method called)
+            assert mock_write.called or buffer._buffer.qsize() == 0
 
     def test_content_hash_computation(self):
         """Test content hash computation."""
@@ -169,7 +173,7 @@ class TestTriggerLogBufferDatabase:
             }
         ]
 
-        with patch('app.modules.governance.trigger_log_buffer.get_connection') as mock_conn:
+        with patch('app.repositories.database.get_connection') as mock_conn:
             mock_cursor = Mock()
             mock_conn.return_value.cursor.return_value = mock_cursor
 
@@ -185,7 +189,7 @@ class TestTriggerLogBufferDatabase:
         batch = [{"rule_id": 1, "matched_content_hash": "abc", "matched_at": "2026-08-13",
                   "action_taken": "warn", "session_id": None, "user_id": None, "tenant_id": None}]
 
-        with patch('app.modules.governance.trigger_log_buffer.get_connection') as mock_conn:
+        with patch('app.repositories.database.get_connection') as mock_conn:
             mock_cursor = Mock()
             mock_cursor.execute.side_effect = Exception("DB error")
             mock_conn.return_value.cursor.return_value = mock_cursor

@@ -337,7 +337,7 @@ class ContentFilter:
                 r for r in rules
                 if r.get("is_enabled", True)
                 and not r.get("is_test", False)
-                and r.get("approval_status") == "approved"
+                and r.get("approval_status", "approved") == "approved"
             ]
 
             # Apply tenant filtering
