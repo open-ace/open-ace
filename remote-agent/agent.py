@@ -39,10 +39,7 @@ logger = logging.getLogger("openace-agent")
 # Issue #2588: Configurable timeout for VS Code port reading
 # Allows adjustment for different network environments and startup speeds
 # Minimum 1 second to prevent invalid values
-VSCODE_PORT_READ_TIMEOUT = max(
-    1.0,
-    float(os.environ.get("OPENACE_VSCODE_PORT_TIMEOUT", "30.0"))
-)
+VSCODE_PORT_READ_TIMEOUT = max(1.0, float(os.environ.get("OPENACE_VSCODE_PORT_TIMEOUT", "30.0")))
 
 
 def get_local_ip() -> str:
@@ -2227,12 +2224,14 @@ class RemoteAgent:
                     if proc.stderr:
                         # Use a thread to avoid blocking
                         stderr_reader_result = []
+
                         def _read_stderr():
                             try:
                                 data = proc.stderr.read()
                                 stderr_reader_result.append(data)
                             except Exception:
                                 pass
+
                         stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
                         stderr_thread.start()
                         stderr_thread.join(timeout=1.0)  # Wait up to 1 second

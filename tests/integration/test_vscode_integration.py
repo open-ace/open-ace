@@ -7,15 +7,14 @@ with mock code-server processes.
 
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import Mock, patch, MagicMock
-
-import sys
+from unittest.mock import MagicMock, Mock, patch
 
 # Add remote-agent to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'remote-agent'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "remote-agent"))
 
 
 class TestVSCodeIntegration(unittest.TestCase):
@@ -29,6 +28,7 @@ class TestVSCodeIntegration(unittest.TestCase):
     def tearDown(self):
         """Clean up test fixtures."""
         import shutil
+
         try:
             shutil.rmtree(self.test_dir, ignore_errors=True)
         except Exception:
@@ -43,7 +43,7 @@ class TestVSCodeIntegration(unittest.TestCase):
         """
         # Create a mock code-server script that outputs to stderr
         mock_script = os.path.join(self.test_dir, "mock-code-server-stderr.sh")
-        with open(mock_script, 'w') as f:
+        with open(mock_script, "w") as f:
             f.write("""#!/bin/bash
 # Mock code-server that outputs port to stderr (Issue #2588)
 sleep 0.1
@@ -89,7 +89,7 @@ tail -f /dev/null 2>/dev/null || sleep 10
         """
         # Create a mock code-server script that outputs to stdout
         mock_script = os.path.join(self.test_dir, "mock-code-server-stdout.sh")
-        with open(mock_script, 'w') as f:
+        with open(mock_script, "w") as f:
             f.write("""#!/bin/bash
 # Mock code-server that outputs port to stdout (old behavior)
 sleep 0.1
@@ -129,7 +129,7 @@ tail -f /dev/null 2>/dev/null || sleep 10
         """
         # Create a mock code-server that doesn't output a port
         mock_script = os.path.join(self.test_dir, "mock-code-server-no-port.sh")
-        with open(mock_script, 'w') as f:
+        with open(mock_script, "w") as f:
             f.write("""#!/bin/bash
 # Mock code-server that doesn't output a port
 sleep 0.1
@@ -139,8 +139,8 @@ exit 1
 """)
         os.chmod(mock_script, 0o755)
 
-        from agent import RemoteAgent
         import agent
+        from agent import RemoteAgent
 
         # Set a short timeout for this test
         original_timeout = agent.VSCODE_PORT_READ_TIMEOUT
@@ -179,7 +179,7 @@ exit 1
         is output immediately after process start.
         """
         mock_script = os.path.join(self.test_dir, "mock-code-server-fast.sh")
-        with open(mock_script, 'w') as f:
+        with open(mock_script, "w") as f:
             f.write("""#!/bin/bash
 # Fast startup - output port immediately to stderr
 echo "HTTP server listening on http://127.0.0.1:9999/" >&2
@@ -217,7 +217,7 @@ tail -f /dev/null 2>/dev/null || sleep 10
         This verifies timeout handling when port output is delayed.
         """
         mock_script = os.path.join(self.test_dir, "mock-code-server-delayed.sh")
-        with open(mock_script, 'w') as f:
+        with open(mock_script, "w") as f:
             f.write("""#!/bin/bash
 # Delayed startup - wait before outputting port
 sleep 0.5
@@ -257,13 +257,14 @@ class TestVSCodeProcessCleanup(unittest.TestCase):
         """
         Test that code-server process is properly terminated when port reading fails.
         """
+        # Verify that _cmd_start_vscode has proper error handling
+        import inspect
+
         from agent import RemoteAgent
 
         # Create a simple test that verifies the cleanup logic exists
         # (Full integration test would require mocking more components)
 
-        # Verify that _cmd_start_vscode has proper error handling
-        import inspect
         source = inspect.getsource(RemoteAgent._cmd_start_vscode)
 
         # Check for termination logic
@@ -274,9 +275,10 @@ class TestVSCodeProcessCleanup(unittest.TestCase):
         """
         Test that process cleanup happens on exceptions.
         """
+        import inspect
+
         from agent import RemoteAgent
 
-        import inspect
         source = inspect.getsource(RemoteAgent._cmd_start_vscode)
 
         # Check for exception handling with cleanup
@@ -284,5 +286,5 @@ class TestVSCodeProcessCleanup(unittest.TestCase):
         self.assertIn("_vscode_processes.pop", source, "Should clean up process reference")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
