@@ -799,7 +799,7 @@ export const translations: Record<Language, Translations> = {
     deactivateCategoryConfirm: 'Deactivate category "{name}"?',
     activateCategoryConfirm: 'Activate category "{name}"?',
     deactivate: 'Deactivate',
-    activate: 'Activate',
+    // Note: 'activate' is also defined in Tenant Management section below
     categoryCreated: 'Category created successfully',
     categoryUpdated: 'Category updated successfully',
     categoryDeactivated: 'Category deactivated successfully',
@@ -2670,7 +2670,7 @@ export const translations: Record<Language, Translations> = {
     categoryDeactivated: '分类已停用',
     categoryActivated: '分类已启用',
     filterByCategory: '按分类筛选',
-    allCategories: '全部分类',
+    // Note: 'allCategories' is also defined in Prompt Management section above
     noCategories: '暂无分类',
     noCategoriesDescription: '创建分类以按匹配规则组织项目。',
     manageCategoriesDescription: '管理项目分类以组织项目。',
@@ -3135,7 +3135,7 @@ export const translations: Record<Language, Translations> = {
     failedToUpdateTenantQuota: '更新租户配额失败',
     requestBodyRequired: '请求体必填',
     noValidFieldsToUpdate: '没有有效的更新字段',
-    activate: '激活',
+    // Note: 'activate' is also defined in Category Management section above
     suspend: '暂停',
     monthlyTokens: '每月 Token',
     monthlyTokenLimit: '每月 Token 限额',
@@ -3893,8 +3893,7 @@ export const translations: Record<Language, Translations> = {
     noCategories: 'カテゴリなし',
     noCategoriesDescription: 'マッチパターンでプロジェクトを整理するカテゴリを作成してください。',
     manageCategoriesDescription: 'プロジェクトを整理するためのカテゴリを管理します。',
-    never: 'なし',
-    viewDetails: '詳細表示',
+    // Note: 'never' and 'viewDetails' are also defined in previous sections above
     auditAnalysis: '監査分析',
     ssoSettings: 'SSO設定',
     ssoConfiguration: 'SSO構成',
@@ -4622,7 +4621,7 @@ export const translations: Record<Language, Translations> = {
     promptContent: '内容',
     promptContentHelp: 'プロンプト内容を入力。変数には {変数名} を使用してください。',
     category: 'カテゴリ',
-    allCategories: 'すべてのカテゴリ',
+    // Note: 'allCategories' is also defined in Category Management section above
     tags: 'タグ',
     tagsHelp: 'カンマ区切りでタグを入力',
     variables: '変数',
@@ -4876,7 +4875,7 @@ export const translations: Record<Language, Translations> = {
     failedToUpdateTenantQuota: 'テナントクォータ更新に失敗しました',
     requestBodyRequired: 'リクエストボディが必要です',
     noValidFieldsToUpdate: '更新する有効なフィールドがありません',
-    activate: '有効化',
+    // Note: 'activate' is also defined in Category Management section above
     suspend: '停止',
     monthlyTokens: '月間トークン',
     monthlyTokenLimit: '月間トークン制限',
@@ -6331,7 +6330,7 @@ export const translations: Record<Language, Translations> = {
     promptContent: '내용',
     promptContentHelp: '프롬프트 내용을 입력하세요. 변수는 {변수명}을 사용하세요.',
     category: '카테고리',
-    allCategories: '모든 카테고리',
+    // Note: 'allCategories' is also defined in Category Management section above
     tags: '태그',
     tagsHelp: '쉼표로 구분하여 태그 입력',
     variables: '변수',
@@ -6586,7 +6585,7 @@ export const translations: Record<Language, Translations> = {
     failedToUpdateTenantQuota: '테넌트 할당량 업데이트 실패',
     requestBodyRequired: '요청 본문 필요',
     noValidFieldsToUpdate: '업데이트할 유효한 필드 없음',
-    activate: '활성화',
+    // Note: 'activate' is also defined in Category Management section above
     suspend: '정지',
     monthlyTokens: '월간 토큰',
     monthlyTokenLimit: '월간 토큰 제한',

@@ -103,12 +103,7 @@ export const CategoryManageModal: React.FC<CategoryManageModalProps> = ({
 
   return (
     <>
-      <Modal
-        isOpen={isOpen}
-        onClose={onClose}
-        title={t('manageCategories', language)}
-        size="lg"
-      >
+      <Modal isOpen={isOpen} onClose={onClose} title={t('manageCategories', language)} size="lg">
         {/* Header with create button */}
         <div className="d-flex justify-content-between align-items-center mb-3">
           <p className="text-muted mb-0">{t('manageCategoriesDescription', language)}</p>

@@ -147,13 +147,16 @@ export const CategoryEditModal: React.FC<CategoryEditModalProps> = ({
   };
 
   // Handle key patterns change
-  const handleKeyPatternsChange = useCallback((value: string[]) => {
-    setFormData((prev) => ({ ...prev, key_patterns: value }));
-    // Clear error when user starts typing
-    if (errors.key_patterns) {
-      setErrors((prev) => ({ ...prev, key_patterns: undefined }));
-    }
-  }, [errors.key_patterns]);
+  const handleKeyPatternsChange = useCallback(
+    (value: string[]) => {
+      setFormData((prev) => ({ ...prev, key_patterns: value }));
+      // Clear error when user starts typing
+      if (errors.key_patterns) {
+        setErrors((prev) => ({ ...prev, key_patterns: undefined }));
+      }
+    },
+    [errors.key_patterns]
+  );
 
   return (
     <Modal
