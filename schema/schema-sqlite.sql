@@ -427,14 +427,15 @@ CREATE TABLE content_filter_rules (
  created_at TIMESTAMP NOT NULL,
  updated_at TIMESTAMP,
  tenant_id integer,
- source VARCHAR(20) DEFAULT 'user',
- category VARCHAR(50) DEFAULT 'custom',
- status VARCHAR(20) DEFAULT 'active',
- approved_by INTEGER,
+ source TEXT DEFAULT 'user',
+ category TEXT DEFAULT 'custom',
+ status TEXT DEFAULT 'active',
+ approved_by integer,
  approved_at TIMESTAMP,
- created_by INTEGER,
- metadata TEXT,
- urgency_reason TEXT
+ created_by integer,
+ metadata json,
+ urgency_reason text,
+    CONSTRAINT chk_status_valid CHECK ((status IN ('pending', 'approved', 'active', 'rejected', 'disabled')))
 );
 
 CREATE TABLE daily_messages (
@@ -518,6 +519,16 @@ CREATE TABLE email_notification_logs (
  error_message text,
  retry_count integer DEFAULT 0,
  next_retry_at TIMESTAMP
+);
+
+CREATE TABLE filter_rule_approvals (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ rule_id integer,
+ approver_id integer,
+ action TEXT NOT NULL,
+ comment text,
+ tenant_id integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE hourly_stats (
@@ -1619,6 +1630,20 @@ CREATE INDEX idx_audit_timestamp ON audit_logs ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs (user_id);
 
+CREATE INDEX idx_cfr_category ON content_filter_rules (category);
+
+CREATE INDEX idx_cfr_enabled ON content_filter_rules (is_enabled);
+
+CREATE INDEX idx_cfr_source ON content_filter_rules (source);
+
+CREATE INDEX idx_cfr_status ON content_filter_rules (status);
+
+CREATE UNIQUE INDEX idx_cfr_system_unique ON content_filter_rules (pattern) WHERE (((source) = 'system') AND (tenant_id IS NULL));
+
+CREATE INDEX idx_cfr_tenant_enabled_status ON content_filter_rules (tenant_id, is_enabled, status);
+
+CREATE INDEX idx_cfr_tenant_id ON content_filter_rules (tenant_id);
+
 CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence (session_id, command_id);
 
 CREATE INDEX idx_command_evidence_workflow_milestone ON command_execution_evidence (workflow_id, milestone_id);
@@ -1666,6 +1691,10 @@ CREATE INDEX idx_events_workflow_created ON workflow_events (workflow_id, create
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules (is_enabled);
 
 CREATE INDEX idx_filter_rules_type ON content_filter_rules (type);
+
+CREATE INDEX idx_fra_rule_id ON filter_rule_approvals (rule_id);
+
+CREATE INDEX idx_fra_tenant_id ON filter_rule_approvals (tenant_id);
 
 CREATE INDEX idx_hourly_stats_date ON hourly_stats (date);
 
