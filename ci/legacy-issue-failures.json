@@ -2,46 +2,6 @@
   "entries": [
     {
       "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1003",
-      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestAddMessageCountUsageGate::test_autonomous_count_usage_false_leaves_counters",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1003",
-      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestAddMessageCountUsageGate::test_legacy_count_usage_true_still_accumulates",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1003",
-      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestIncrementSessionUsage::test_accumulates_across_calls",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1003",
-      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestIncrementSessionUsage::test_starts_from_existing_value",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1003",
-      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestMilestoneSessionInvariant::test_session_equals_sum_of_per_call_deltas",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
       "exception_type": "TimeoutError",
       "issue_number": "1006",
       "nodeid": "tests/issues/1006/e2e_conversation_history_default_dates.py::test_default_dates",
@@ -95,38 +55,6 @@
       "nodeid": "tests/issues/1125/test_workspace_session_summary_contract.py::test_list_sessions_hides_autonomous_tracking_wrappers",
       "outcome": "failure",
       "summary": "AssertionError: assert ['track-123',...l-claude-123'] == ['actual-claude-123']"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1128",
-      "nodeid": "tests/issues/1128/test_session_message_transcript_contract.py::test_add_message_merges_duplicate_message_id_without_double_count",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1128",
-      "nodeid": "tests/issues/1128/test_session_message_transcript_contract.py::test_add_message_persists_structured_session_message_columns",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1128",
-      "nodeid": "tests/issues/1128/test_session_message_transcript_contract.py::test_append_transcript_message_is_summary_side_effect_free",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1128",
-      "nodeid": "tests/issues/1128/test_session_message_transcript_contract.py::test_llm_proxy_records_transcript_without_double_count",
-      "outcome": "failure",
-      "summary": "AssertionError: assert 0 == 1"
     },
     {
       "category": "assertion_failure",
@@ -711,214 +639,6 @@
       "nodeid": "tests/issues/241/test_pagination_migration_head.py::test_single_migration_head",
       "outcome": "failure",
       "summary": "AssertionError: assert '20260809_001...il_dev_rounds' == '20260715_001...lure_head_sha'"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestGetSessionEnvelope::test_include_messages_returns_recent_page_and_metadata",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestGetSessionEnvelope::test_milestone_total_uses_conditional_count",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestGetSessionEnvelope::test_without_include_messages_has_no_pagination_envelope",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestMessagesEndpointWalk::test_cursor_walk_through_endpoint",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestMessagesEndpointWalk::test_limit_clamped_to_max_via_endpoint",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestMessagesEndpointWalk::test_lone_before_timestamp_is_ignored",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_admin_bypasses_owner_check",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_messages_endpoint_404_for_unknown_session",
-      "outcome": "failure",
-      "summary": "assert 500 == 404"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_messages_endpoint_enforces_ownership_before_load",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_non_owner_gets_403",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_same_owner_wrong_tenant_gets_403",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_unknown_session_returns_404",
-      "outcome": "failure",
-      "summary": "assert 500 == 404"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestCrossPageContinuity::test_full_walk_no_overlap_no_gap",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestCrossPageContinuity::test_has_more_flag_and_cursor_only_when_older_page_exists",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestDescReverseAdjacency::test_second_page_is_adjacent_not_oldest",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestEmptyAndDefaults::test_default_limit_used_when_none",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestEmptyAndDefaults::test_empty_session_returns_empty_page",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestInternalCallersUnaffected::test_get_session_full_history_when_requested",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestInternalCallersUnaffected::test_get_session_no_messages_by_default",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestLimitClamping::test_max_boundary_returns_exactly_max",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestLimitClamping::test_over_max_clamped_to_max",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestLimitClamping::test_zero_or_negative_falls_back_to_default",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestMilestoneCount::test_count_messages_total_and_milestone_scoped",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestMilestoneCount::test_get_messages_page_respects_milestone_filter",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestNullTimestampSafetyNet::test_schema_rejects_null_timestamp",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestSameTimestampTiebreak::test_identical_timestamps_ordered_by_id",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
     },
     {
       "category": "test_body_exception",
@@ -1628,14 +1348,6 @@
       "category": "assertion_failure",
       "exception_type": "AssertionError",
       "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_add_all",
-      "outcome": "failure",
-      "summary": "AssertionError: assert 'add' in ['git', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', ...]"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "716",
       "nodeid": "tests/issues/716/test_orchestrator.py::TestOrchestratorMerge::test_merge_blocked_state_triggers_ci_repair",
       "outcome": "failure",
       "summary": "AssertionError: Expected 'mock' to have been called once. Called 0 times."
@@ -1823,14 +1535,6 @@
       "nodeid": "tests/issues/720/test_model_gateway_handler.py::TestGatewaySuccess::test_gateway_forward_success",
       "outcome": "failure",
       "summary": "assert 502 == 200"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "723",
-      "nodeid": "tests/issues/723/test_mtime_fallback.py::TestListCliSessionIdsForProject::test_returns_distinct_nonempty_ids",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
     },
     {
       "category": "assertion_failure",
@@ -2143,38 +1847,6 @@
       "nodeid": "tests/issues/761/test_planning_restriction.py::TestPlanningTimeout::test_planning_timeout_constant",
       "outcome": "failure",
       "summary": "assert 1800 == 600"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "764",
-      "nodeid": "tests/issues/764/test_session_create_params.py::TestCreateSessionAcceptsWorkspaceParams::test_create_session_defaults_to_local",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "764",
-      "nodeid": "tests/issues/764/test_session_create_params.py::TestCreateSessionAcceptsWorkspaceParams::test_create_session_includes_workspace_in_insert",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "764",
-      "nodeid": "tests/issues/764/test_session_create_params.py::TestCreateSessionAcceptsWorkspaceParams::test_create_session_type_error_fixed",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "764",
-      "nodeid": "tests/issues/764/test_session_create_params.py::TestCreateSessionAcceptsWorkspaceParams::test_create_session_with_workspace_type",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
     },
     {
       "category": "assertion_failure",
@@ -2531,8 +2203,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-13 prune 2 resolved: tests/issues/814 worktree-selfheal tests, stale vs #1573 branch-consistency + #23 node_modules-shim + #2565 trusted-context-refresh additions to ensure_worktree; fixed by tenant-correcting the GitHubOps fake. Shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31704317996",
+    "prune_note": "2026-08-13 prune 37+3+1 resolved: TenantResolutionError session-write cluster plus 3 same-file baseline entries resolved by the tenant-context test fixes, plus 716 test_git_add_all resolved on main by #2601 (fb9c5128, observed passing in run 31709302597). Shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31709302597",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
