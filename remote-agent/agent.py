@@ -36,6 +36,10 @@ from config import AgentConfig
 
 logger = logging.getLogger("openace-agent")
 
+# Issue #2588: Configurable timeout for VS Code port reading
+# Allows adjustment for different network environments and startup speeds
+VSCODE_PORT_READ_TIMEOUT = float(os.environ.get("OPENACE_VSCODE_PORT_TIMEOUT", "30.0"))
+
 
 def get_local_ip() -> str:
     """获取本机 IP 地址（从 hostname 解析）。"""
@@ -2169,6 +2173,7 @@ class RemoteAgent:
             env = os.environ.copy()
             env["PASSWORD"] = code_server_password
 
+            start_time = time.time()
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -2180,12 +2185,12 @@ class RemoteAgent:
 
             # Wait for code-server to print its URL (with timeout)
             port = self._read_vscode_port(proc, vscode_id)
+            elapsed = time.time() - start_time
 
             if port:
                 # code-server started successfully - keep pipes open.
-                # The process will continue writing minimal logs; the pipe
-                # buffer won't fill up since code-server output is minimal
-                # after startup.
+                # The daemon threads will continue consuming output to prevent
+                # pipe buffer from filling up (Issue #2588).
                 self._vscode_ports[vscode_id] = port
                 hostname = self._get_reachable_hostname()
                 http_url = f"http://{hostname}:{port}"
@@ -2197,48 +2202,172 @@ class RemoteAgent:
                     token=vscode_token,
                     cs_password=code_server_password,
                 )
-                logger.info("VSCode %s running on %s", vscode_id[:8], http_url)
+                logger.info(
+                    "VSCode %s running on %s (started in %.2fs)",
+                    vscode_id[:8],
+                    http_url,
+                    elapsed,
+                )
             else:
-                # Process likely exited — read stderr for error message.
+                # Port reading failed - clean up the process (Issue #2588)
+                logger.error(
+                    "VSCode %s port reading failed after %.2fs, cleaning up process",
+                    vscode_id[:8],
+                    elapsed,
+                )
+
+                # Try to read stderr for error message
                 stderr_output = ""
                 try:
-                    stderr_output = proc.stderr.read().decode(errors="replace")[:500]
+                    # Read with a small timeout to avoid blocking forever
+                    import select as _select
+                    # Try to read available data from stderr
+                    if proc.stderr:
+                        # Use a thread to avoid blocking
+                        stderr_reader_result = []
+                        def _read_stderr():
+                            try:
+                                data = proc.stderr.read()
+                                stderr_reader_result.append(data)
+                            except Exception:
+                                pass
+                        stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+                        stderr_thread.start()
+                        stderr_thread.join(timeout=1.0)  # Wait up to 1 second
+                        if stderr_reader_result:
+                            stderr_output = stderr_reader_result[0].decode(errors="replace")[:1000]
+                except Exception:
+                    # If we can't read stderr, continue with cleanup
+                    pass
+
+                # Terminate the process
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    try:
+                        proc.kill()
+                        proc.wait(timeout=2)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
-                logger.error("code-server failed to start for %s: %s", vscode_id[:8], stderr_output)
+
+                # Clean up references
+                self._vscode_processes.pop(vscode_id, None)
+                self._vscode_tokens.pop(vscode_id, None)
+                self._vscode_passwords.pop(vscode_id, None)
+
+                error_msg = f"code-server failed to start: port reading failed after {elapsed:.1f}s"
+                if stderr_output:
+                    error_msg += f": {stderr_output[:200]}"
+
+                logger.error(
+                    "VSCode %s failed to start: %s",
+                    vscode_id[:8],
+                    error_msg,
+                )
                 self._send_vscode_status(
                     vscode_id,
                     "error",
-                    error=f"code-server failed to start: {stderr_output[:200]}",
+                    error=error_msg,
                 )
 
         except Exception as e:
             logger.error("Failed to start code-server: %s", e)
+            # Clean up any partially initialized state
+            self._vscode_processes.pop(vscode_id, None)
+            self._vscode_tokens.pop(vscode_id, None)
+            self._vscode_passwords.pop(vscode_id, None)
             self._send_vscode_status(vscode_id, "error", error=str(e))
 
     def _read_vscode_port(self, proc: subprocess.Popen, vscode_id: str) -> int | None:
-        """Read stdout/stderr from code-server process until a URL with port is found."""
+        """Read stdout/stderr from code-server process until a URL with port is found.
+
+        Issue #2588: Uses concurrent threads to read both stdout and stderr,
+        supporting code-server 4.132.0+ which outputs to stderr.
+
+        Uses a continuous consumption strategy to prevent pipe buffer from filling up
+        and blocking the code-server process.
+        """
         import re
 
         port_pattern = re.compile(r"https?://[\d.]+:(\d+)")
-        deadline = time.time() + 30  # 30s timeout
-        try:
-            while time.time() < deadline:
-                line = proc.stdout.readline()
-                if not line:
-                    # Check stderr too
-                    line = proc.stderr.readline()
-                if not line:
-                    if proc.poll() is not None:
-                        return None
-                    time.sleep(0.5)
-                    continue
-                text = line.decode(errors="replace").strip()
-                match = port_pattern.search(text)
-                if match:
-                    return int(match.group(1))
-        except Exception as e:
-            logger.warning("Error reading code-server port: %s", e)
+        result: dict[str, Any] = {}
+        ready = threading.Event()
+        timeout = VSCODE_PORT_READ_TIMEOUT
+
+        def _reader(stream, stream_name: str) -> None:
+            """Thread function to read from a stream and detect port."""
+            try:
+                while True:
+                    raw = stream.readline()
+                    if not raw:  # EOF
+                        break
+                    if isinstance(raw, bytes):
+                        line = raw.decode(errors="replace").strip()
+                    else:
+                        line = raw.strip()
+                    # Log for debugging (but limit output)
+                    if line and logger.isEnabledFor(logging.DEBUG):
+                        logger.debug("VSCode %s %s: %s", vscode_id[:8], stream_name, line[:100])
+                    # Check for port pattern
+                    match = port_pattern.search(line)
+                    if match and "port" not in result:
+                        result["port"] = match.group(1)
+                        ready.set()
+                        # Continue reading to prevent pipe buffer from filling
+                # Stream closed, signal ready if this was the first close
+                if "port" not in result and "stream_closed" not in result:
+                    result["stream_closed"] = stream_name
+                    ready.set()
+            except Exception as e:
+                logger.warning(
+                    "VSCode %s %s reader error: %s",
+                    vscode_id[:8],
+                    stream_name,
+                    e,
+                )
+                if "error" not in result:
+                    result["error"] = e
+                ready.set()
+
+        # Start daemon threads to read both streams concurrently
+        stdout_thread = threading.Thread(
+            target=lambda: _reader(proc.stdout, "stdout"),
+            daemon=True,
+        )
+        stderr_thread = threading.Thread(
+            target=lambda: _reader(proc.stderr, "stderr"),
+            daemon=True,
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+
+        # Wait for port detection or timeout
+        if ready.wait(timeout):
+            # Event was set - check if we found a port
+            port_str = result.get("port")
+            if port_str:
+                try:
+                    return int(port_str)
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        "VSCode %s invalid port '%s': %s",
+                        vscode_id[:8],
+                        port_str,
+                        e,
+                    )
+                    return None
+            # No port found, but event was set (stream closed or error)
+            return None
+
+        # Timeout
+        logger.warning(
+            "VSCode %s port reading timeout after %.1fs",
+            vscode_id[:8],
+            timeout,
+        )
         return None
 
     def _cmd_stop_vscode(self, data: dict[str, Any]) -> None:
