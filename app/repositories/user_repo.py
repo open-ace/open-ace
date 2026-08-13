@@ -74,13 +74,11 @@ class UserRepository:
             if self.db.is_postgresql:
                 # PostgreSQL uses TRUE/FALSE for boolean columns
                 result = self.db.fetch_one(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                     INSERT INTO users (username, email, password_hash, role, is_active, created_at, system_account, tenant_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     RETURNING id
-                """
-                    ),
+                """),
                     (
                         username,
                         email,
@@ -98,12 +96,10 @@ class UserRepository:
                 # SQLite uses 1/0 for boolean columns
                 is_active_int = adapt_boolean_value(is_active)
                 cursor = self.db.execute(
-                    adapt_sql(
-                        """
+                    adapt_sql("""
                     INSERT INTO users (username, email, password_hash, role, is_active, created_at, system_account, tenant_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """
-                    ),
+                """),
                     (
                         username,
                         email,
@@ -492,12 +488,10 @@ class UserRepository:
         Returns:
             bool: True if successful.
         """
-        query = adapt_sql(
-            """
+        query = adapt_sql("""
             INSERT INTO sessions (user_id, token, created_at, expires_at)
             VALUES (?, ?, ?, ?)
-        """
-        )
+        """)
 
         try:
             # Use UTC to match auth_service._utcnow() which stores expires_at in UTC
@@ -518,14 +512,12 @@ class UserRepository:
         Returns:
             Optional[Dict]: Session data with user info or None.
         """
-        query = adapt_sql(
-            """
+        query = adapt_sql("""
             SELECT s.*, u.username, u.email, u.role, u.tenant_id, u.must_change_password
             FROM sessions s
             JOIN users u ON s.user_id = u.id
             WHERE s.token = ? AND s.expires_at > ?
-        """
-        )
+        """)
 
         # Use UTC to match auth_service._utcnow() which stores expires_at in UTC
         utcnow = datetime.now(timezone.utc).replace(tzinfo=None)

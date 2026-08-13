@@ -190,6 +190,14 @@ class GitWorkspaceService:
             if user:
                 system_account = user.get("system_account")
         main_gh = _GitHubOps(project_path, system_account=system_account)
+        # NOTE: the main-repo trusted Git context is NOT refreshed here.
+        # `worktree add` only adds a subdir under <main>/.git/worktrees/ — it
+        # does NOT change <main>/.git's own device:inode — so main_gh's pinned
+        # identity already matches current and needs no re-basing. Refreshing it
+        # here would also clear a SHARED class-level registry entry during another
+        # concurrent workflow's agent window (same project_path, different
+        # worktree/branch). Refreshes are scoped to worktree-path entries below
+        # (the gitdir that is actually recreated by `worktree add`). (#2565)
         # Valid worktree: a .git FILE inside means git set it up (a plain
         # clone has a .git directory instead). If the stored path was
         # unnormalized (legacy ".."), persist the canonical form so JSONL
@@ -257,6 +265,7 @@ class GitWorkspaceService:
                         )
                         if branch_check.returncode == 0 or remote_check.returncode == 0:
                             main_gh._run_git(["worktree", "add", canonical, expected_branch])
+                            self._orch._refresh_trusted_git_context(canonical, system_account)
                         else:
                             # Branch gone — fail closed without a verified head
                             # instead of silently rebuilding from origin/main.
@@ -275,6 +284,7 @@ class GitWorkspaceService:
                             main_gh._run_git(
                                 ["worktree", "add", "-b", expected_branch, canonical, head_sha]
                             )
+                            self._orch._refresh_trusted_git_context(canonical, system_account)
                         self._orch._create_milestone(
                             phase=wf.get("current_phase", "preparation"),
                             milestone_type="worktree_restored",
@@ -322,6 +332,7 @@ class GitWorkspaceService:
                 # without recreating the branch. For a remote-only branch, git
                 # auto-creates a local tracking branch in this step.
                 main_gh._run_git(["worktree", "add", canonical, branch_name])
+                self._orch._refresh_trusted_git_context(canonical, system_account)
                 # Issue #1999 guard: a surviving local branch may have drifted
                 # ahead of the verified head (unpushed commits). If we have a
                 # confirmed expected_head_sha and the attached HEAD does not
@@ -347,6 +358,7 @@ class GitWorkspaceService:
                     self._orch._fail_recovery_closed(wf, canonical, decision, head_meta, "", "")
                     raise RuntimeError(f"Worktree recovery fail-closed: {decision}")
                 main_gh._run_git(["worktree", "add", "-b", branch_name, canonical, head_sha])
+                self._orch._refresh_trusted_git_context(canonical, system_account)
         except GitHubOpsError as e:
             logger.error("Failed to recreate worktree at %s: %s", canonical, e)
             raise

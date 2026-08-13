@@ -27,6 +27,7 @@ class TestCreateSessionAcceptsWorkspaceParams:
         sm = self._make_session_manager()
         session = sm.create_session(
             tool_name="claude-code",
+            tenant_id=1,
             title="Autonomous: test",
             project_path="/tmp/test",
             workspace_type="remote",
@@ -38,7 +39,7 @@ class TestCreateSessionAcceptsWorkspaceParams:
 
     def test_create_session_defaults_to_local(self):
         sm = self._make_session_manager()
-        session = sm.create_session(tool_name="claude-code", title="Test session")
+        session = sm.create_session(tool_name="claude-code", tenant_id=1, title="Test session")
         assert session.workspace_type == "local"
         assert session.remote_machine_id is None
 
@@ -46,12 +47,19 @@ class TestCreateSessionAcceptsWorkspaceParams:
         sm = self._make_session_manager()
         sm.create_session(
             tool_name="qwen-code-cli",
+            tenant_id=1,
             workspace_type="remote",
             remote_machine_id="abc-def",
         )
         mock_cursor = sm._get_connection.return_value.cursor.return_value
-        mock_cursor.execute.assert_called_once()
-        call_args = mock_cursor.execute.call_args
+        # create_session also probes the schema (tenant column introspection)
+        # via cursor.execute before the INSERT, so select the INSERT call
+        # instead of asserting exactly one execute.
+        insert_calls = [
+            c for c in mock_cursor.execute.call_args_list if "INSERT INTO agent_sessions" in c[0][0]
+        ]
+        assert len(insert_calls) == 1
+        call_args = insert_calls[0]
         sql = call_args[0][0]
         params = list(call_args[0][1])
         assert "workspace_type" in sql
@@ -64,6 +72,7 @@ class TestCreateSessionAcceptsWorkspaceParams:
         try:
             sm.create_session(
                 session_id="test-session-id",
+                tenant_id=1,
                 session_type="chat",
                 title="Autonomous: abc12345",
                 tool_name="claude-code",

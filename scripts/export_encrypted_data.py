@@ -68,14 +68,12 @@ def export_api_keys(conn) -> list[dict[str, Any]]:
 
     # adapt_boolean_condition emits "(is_active)::int != 0" on PostgreSQL and
     # "is_active = 1" on SQLite, covering both boolean and INTEGER columns.
-    cursor.execute(
-        f"""
+    cursor.execute(f"""
         SELECT id, tenant_id, provider, key_name, encrypted_key, base_url,
                cli_tools, cli_settings, scope, priority, weight
         FROM api_key_store
         WHERE {adapt_boolean_condition("is_active", True)}
-        """
-    )
+        """)
 
     rows = cursor.fetchall()
     exported = []
@@ -114,14 +112,12 @@ def export_smtp_settings(conn) -> dict[str, Any] | None:
     password_manager = get_password_manager()
     cursor = conn.cursor()
 
-    cursor.execute(
-        """
+    cursor.execute("""
         SELECT id, smtp_host, smtp_port, smtp_user, encrypted_password,
                from_address, use_tls, is_verified
         FROM smtp_settings
         ORDER BY id DESC LIMIT 1
-        """
-    )
+        """)
 
     row = cursor.fetchone()
     if not row:
@@ -153,13 +149,11 @@ def export_gateway_config(conn) -> dict[str, Any] | None:
     password_manager = get_password_manager()
     cursor = conn.cursor()
 
-    cursor.execute(
-        """
+    cursor.execute("""
         SELECT id, mode, base_url, encrypted_api_key, model_prefix_mode, model_prefix
         FROM model_gateway_config
         ORDER BY id DESC LIMIT 1
-        """
-    )
+        """)
 
     row = cursor.fetchone()
     if not row:
