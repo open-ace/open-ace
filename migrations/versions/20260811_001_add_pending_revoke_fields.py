@@ -86,18 +86,30 @@ def upgrade() -> None:
         )
 
     # Add fields to remote_machines table
+    # Check if columns exist before adding (agent_version may already exist from other migrations)
+    inspector = sa.inspect(bind)
+    remote_machines_columns = [col["name"] for col in inspector.get_columns("remote_machines")]
+
     if dialect == "postgresql":
         with op.batch_alter_table("remote_machines", schema=None) as batch_op:
-            batch_op.add_column(sa.Column("agent_version", sa.String(32), nullable=True))
-            batch_op.add_column(
-                sa.Column("token_revoke_timeout", sa.Integer(), nullable=True, server_default="300")
-            )
+            if "agent_version" not in remote_machines_columns:
+                batch_op.add_column(sa.Column("agent_version", sa.String(32), nullable=True))
+            if "token_revoke_timeout" not in remote_machines_columns:
+                batch_op.add_column(
+                    sa.Column(
+                        "token_revoke_timeout", sa.Integer(), nullable=True, server_default="300"
+                    )
+                )
     else:
         with op.batch_alter_table("remote_machines", schema=None) as batch_op:
-            batch_op.add_column(sa.Column("agent_version", sa.Text(), nullable=True))
-            batch_op.add_column(
-                sa.Column("token_revoke_timeout", sa.Integer(), nullable=True, server_default="300")
-            )
+            if "agent_version" not in remote_machines_columns:
+                batch_op.add_column(sa.Column("agent_version", sa.Text(), nullable=True))
+            if "token_revoke_timeout" not in remote_machines_columns:
+                batch_op.add_column(
+                    sa.Column(
+                        "token_revoke_timeout", sa.Integer(), nullable=True, server_default="300"
+                    )
+                )
 
 
 def downgrade() -> None:

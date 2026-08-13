@@ -368,7 +368,6 @@ class AgentConfig:
             OSError: If save operation fails.
         """
         import sys
-        import tempfile
 
         if os.environ.get("OPENACE_AGENT_TOKEN"):
             logger.warning(
@@ -444,8 +443,7 @@ class AgentConfig:
 
         # Find existing backups
         backups = sorted(
-            [f for f in backup_dir.iterdir() if f.name.startswith(backup_name)],
-            reverse=True
+            [f for f in backup_dir.iterdir() if f.name.startswith(backup_name)], reverse=True
         )
 
         # Remove old backups beyond keep limit

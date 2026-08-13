@@ -1175,7 +1175,7 @@ def rotate_machine_token(machine_id):
         details=details,
     )
 
-# Issue #2499: Only push command for delayed mode
+    # Issue #2499: Only push command for delayed mode
     if not immediate:
         # Push rotate_token command to agent so it updates its local config.
         # Issue #2530: Include token_version for version-based filtering.
