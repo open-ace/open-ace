@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from typing import Any
 
 from flask import Response, g, jsonify, request, stream_with_context
@@ -25,9 +27,6 @@ _content_filter_instance = None
 # Issue #2547: Stopped sessions cache for request circuit breaking
 # When a session is stopped, we add its ID here to reject subsequent
 # LLM requests from orphan processes (PPID=1) that may still be retrying.
-import threading
-import time
-
 _stopped_sessions_cache: dict[str, float] = {}  # session_id -> timestamp
 _stopped_sessions_cache_lock = threading.Lock()
 _STOPPED_SESSION_TTL_SECONDS = 60  # How long to reject requests after stop
