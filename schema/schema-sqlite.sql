@@ -109,7 +109,10 @@ CREATE TABLE agent_tokens (
  revoked_at TIMESTAMP,
  revoked_by integer,
  rotated_at TIMESTAMP,
- token_version INTEGER DEFAULT '0' NOT NULL
+ token_version INTEGER DEFAULT '0' NOT NULL,
+ pending_revoke INTEGER DEFAULT 0 NOT NULL,
+ revoke_after TEXT,
+ rotation_id TEXT
 );
 
 CREATE TABLE aggregation_history (
