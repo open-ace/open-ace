@@ -43,8 +43,7 @@ class TestDistributedLock(unittest.TestCase):
             "INSERT OR IGNORE INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
             ("admin", "admin@test.com", "hash123", "admin"),
         )
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS autonomous_workflows (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 workflow_id TEXT NOT NULL UNIQUE,
@@ -54,8 +53,7 @@ class TestDistributedLock(unittest.TestCase):
                 locked_at TEXT,
                 locked_by TEXT DEFAULT ''
             )
-            """
-        )
+            """)
         cursor.execute(
             "INSERT INTO autonomous_workflows (workflow_id, user_id, status, cli_tool) VALUES (?, ?, ?, ?)",
             (wf_id, 1, "pending", "claude-code"),

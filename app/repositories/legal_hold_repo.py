@@ -65,14 +65,12 @@ class LegalHoldRepository:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql(
-                    """
+                adapt_sql("""
                     INSERT INTO legal_holds (
                         tenant_id, hold_type, data_type, record_id,
                         reason, case_reference, created_by, created_at, expires_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """
-                ),
+                """),
                 (
                     tenant_id,
                     hold_type,
@@ -116,15 +114,13 @@ class LegalHoldRepository:
         """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         return self.db.fetch_all(
-            adapt_sql(
-                """
+            adapt_sql("""
                 SELECT * FROM legal_holds
                 WHERE tenant_id = ?
                 AND lifted_at IS NULL
                 AND (expires_at IS NULL OR expires_at > ?)
                 ORDER BY created_at DESC
-            """
-            ),
+            """),
             (tenant_id, now),
         )
 
@@ -186,13 +182,11 @@ class LegalHoldRepository:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql(
-                    """
+                adapt_sql("""
                     UPDATE legal_holds
                     SET lifted_at = ?, lifted_by = ?, lift_reason = ?
                     WHERE id = ?
-                """
-                ),
+                """),
                 (now, lifted_by, lift_reason, hold_id),
             )
             conn.commit()
@@ -211,15 +205,13 @@ class LegalHoldRepository:
         """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         return self.db.fetch_all(
-            adapt_sql(
-                """
+            adapt_sql("""
                 SELECT * FROM legal_holds
                 WHERE tenant_id = ?
                 AND lifted_at IS NULL
                 AND (expires_at IS NULL OR expires_at > ?)
                 AND (hold_type = 'global' OR data_type = ?)
                 ORDER BY created_at DESC
-            """
-            ),
+            """),
             (tenant_id, now, data_type),
         )

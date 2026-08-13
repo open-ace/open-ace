@@ -635,14 +635,12 @@ def test_heartbeat_prevents_takeover_after_a_31_minute_agent_run(tmp_path):
     db_path = str(tmp_path / "workflow-lock.db")
     stale = (datetime.now(timezone.utc) - timedelta(minutes=31)).strftime("%Y-%m-%d %H:%M:%S")
     conn = sqlite3.connect(db_path)
-    conn.execute(
-        """CREATE TABLE autonomous_workflows (
+    conn.execute("""CREATE TABLE autonomous_workflows (
             workflow_id TEXT PRIMARY KEY,
             locked_at TEXT,
             locked_by TEXT,
             agent_pid INTEGER
-        )"""
-    )
+        )""")
     conn.execute(
         "INSERT INTO autonomous_workflows VALUES (?, ?, ?, ?)",
         ("wf-live", stale, "host/100/worker", 4242),
@@ -793,15 +791,13 @@ def test_phase_commit_is_fenced_after_scheduler_lock_loss():
 def test_old_owner_cannot_clear_replacement_agent_pid(tmp_path):
     db_path = str(tmp_path / "agent-pid-fence.db")
     conn = sqlite3.connect(db_path)
-    conn.execute(
-        """CREATE TABLE autonomous_workflows (
+    conn.execute("""CREATE TABLE autonomous_workflows (
             workflow_id TEXT PRIMARY KEY,
             locked_by TEXT,
             agent_pid INTEGER,
             agent_session_id TEXT,
             updated_at TEXT
-        )"""
-    )
+        )""")
     conn.execute(
         "INSERT INTO autonomous_workflows VALUES (?, ?, ?, ?, ?)",
         ("wf-new", "new-owner", 999, "new-session", ""),
@@ -824,14 +820,12 @@ def test_old_owner_cannot_clear_replacement_agent_pid(tmp_path):
 def test_workflow_update_requires_current_lock_owner(tmp_path):
     db_path = str(tmp_path / "workflow-update-fence.db")
     conn = sqlite3.connect(db_path)
-    conn.execute(
-        """CREATE TABLE autonomous_workflows (
+    conn.execute("""CREATE TABLE autonomous_workflows (
             workflow_id TEXT PRIMARY KEY,
             status TEXT,
             locked_by TEXT,
             updated_at TEXT
-        )"""
-    )
+        )""")
     conn.execute(
         "INSERT INTO autonomous_workflows VALUES (?, ?, ?, ?)",
         ("wf-fenced", "verification_pending", "new-owner", ""),

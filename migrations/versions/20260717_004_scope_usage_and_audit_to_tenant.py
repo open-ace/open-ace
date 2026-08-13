@@ -49,9 +49,7 @@ def upgrade() -> None:
     if "tenant_id" not in audit_log_columns:
         op.add_column("audit_logs", sa.Column("tenant_id", sa.Integer(), nullable=True))
 
-    conn.execute(
-        sa.text(
-            """
+    conn.execute(sa.text("""
             UPDATE audit_logs
             SET tenant_id = (
                 SELECT users.tenant_id
@@ -59,9 +57,7 @@ def upgrade() -> None:
                 WHERE users.id = audit_logs.user_id
             )
             WHERE tenant_id IS NULL AND user_id IS NOT NULL
-            """
-        )
-    )
+            """))
 
     usage_indexes = _index_names(sa.inspect(conn), "daily_usage")
     usage_uniques = _unique_names(sa.inspect(conn), "daily_usage")

@@ -20,8 +20,7 @@ class TestRetentionPolicyRepository:
         # Create retention_policies table directly for testing
         with db.connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                """
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS retention_policies (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     tenant_id INTEGER,
@@ -40,8 +39,7 @@ class TestRetentionPolicyRepository:
                     updated_by INTEGER,
                     UNIQUE(tenant_id, data_type, version)
                 )
-            """
-            )
+            """)
             # Clean table before test
             cursor.execute("DELETE FROM retention_policies")
             conn.commit()
