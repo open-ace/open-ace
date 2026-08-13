@@ -31,7 +31,7 @@ class TestVSCodeIntegration(unittest.TestCase):
 
         try:
             shutil.rmtree(self.test_dir, ignore_errors=True)
-        except Exception:
+        except Exception:  # allow-swallow: cleanup
             pass
 
     def test_mock_code_server_stderr_output(self):
