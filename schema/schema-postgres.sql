@@ -2814,6 +2814,12 @@ CREATE INDEX idx_agent_tokens_machine ON agent_tokens USING btree (machine_id);
 CREATE INDEX idx_agent_tokens_machine_version ON agent_tokens USING btree (machine_id, token_version);
 
 
+CREATE UNIQUE INDEX idx_agent_tokens_one_active_per_machine ON agent_tokens USING btree (machine_id) WHERE ((is_revoked = false) AND (pending_revoke = false));
+
+
+CREATE INDEX idx_agent_tokens_pending_revoke_timeout ON agent_tokens USING btree (revoke_after) WHERE ((pending_revoke = true) AND (is_revoked = false));
+
+
 --
 --
 

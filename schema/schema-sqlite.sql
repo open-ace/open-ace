@@ -1562,6 +1562,8 @@ CREATE INDEX idx_agent_tokens_machine ON agent_tokens (machine_id);
 
 CREATE INDEX idx_agent_tokens_machine_version ON agent_tokens (machine_id, token_version);
 
+CREATE INDEX idx_agent_tokens_machine_pending ON agent_tokens (machine_id, pending_revoke, revoke_after);
+
 CREATE INDEX idx_aggregation_history_status ON aggregation_history (status);
 
 CREATE INDEX idx_aggregation_history_type_date ON aggregation_history (type, start_date, end_date);
