@@ -141,7 +141,7 @@ export const MultiValueInput: React.FC<MultiValueInputProps> = ({
         {canAdd && (
           <Button variant="outline-primary" size="sm" onClick={handleAdd} disabled={disabled}>
             <i className="bi bi-plus-lg me-1" />
-            Add
+            {t('add', language)}
           </Button>
         )}
       </div>

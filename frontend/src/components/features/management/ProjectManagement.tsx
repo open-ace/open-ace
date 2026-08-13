@@ -35,7 +35,6 @@ import { usePageRefresh, useAuth } from '@/hooks';
 import { isAdmin } from '@/utils/permissions';
 import { CategoryManageModal } from './CategoryManageModal';
 import { CategoryFilter } from './CategoryFilter';
-import { CategoryEditModal } from './CategoryEditModal';
 
 type CategorySortKey = 'name' | 'total_workspaces' | 'total_users' | 'total_tokens' | 'last_access';
 type SortDirection = 'asc' | 'desc';
@@ -212,10 +211,6 @@ export const ProjectManagement: React.FC = () => {
 
   // Category filter state
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | 'all'>('all');
-
-  // Quick edit category state
-  const [quickEditCategory, setQuickEditCategory] = useState<ProjectCategory | null>(null);
-  const [showQuickEditModal, setShowQuickEditModal] = useState(false);
 
   // Page refresh control
   const pageRefresh = usePageRefresh({
@@ -685,21 +680,6 @@ export const ProjectManagement: React.FC = () => {
         isOpen={showCategoryManageModal}
         onClose={() => setShowCategoryManageModal(false)}
         onChange={handleCategoryChange}
-      />
-
-      {/* Quick Edit Category Modal */}
-      <CategoryEditModal
-        isOpen={showQuickEditModal}
-        onClose={() => {
-          setShowQuickEditModal(false);
-          setQuickEditCategory(null);
-        }}
-        onSuccess={() => {
-          handleCategoryChange();
-          setShowQuickEditModal(false);
-          setQuickEditCategory(null);
-        }}
-        category={quickEditCategory}
       />
     </div>
   );
