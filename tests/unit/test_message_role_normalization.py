@@ -157,8 +157,7 @@ class TestSharedDbWriteBoundary:
 
         # Create the daily_messages table on the file-backed DB.
         init_conn = _connect()
-        init_conn.execute(
-            """
+        init_conn.execute("""
             CREATE TABLE daily_messages (
                 date TEXT,
                 tool_name TEXT,
@@ -184,8 +183,7 @@ class TestSharedDbWriteBoundary:
                 user_id integer,
                 PRIMARY KEY (date, tool_name, host_name, message_id)
             )
-            """
-        )
+            """)
         init_conn.commit()
         init_conn.close()
 

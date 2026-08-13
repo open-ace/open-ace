@@ -143,13 +143,11 @@ class EmailNotificationLogRepository:
             next_retry_update = f", next_retry_at = {adapt_sql('?')}"
 
         cursor.execute(
-            adapt_sql(
-                f"""
+            adapt_sql(f"""
                 UPDATE email_notification_logs
                 SET status = ?, error_message = ? {retry_count_update} {next_retry_update}
                 WHERE id = ?
-            """
-            ),
+            """),
             [status, error_message] + ([next_retry_at] if next_retry_at else []) + [log_id],
         )
 
@@ -173,16 +171,14 @@ class EmailNotificationLogRepository:
         cursor = conn.cursor()
 
         cursor.execute(
-            adapt_sql(
-                """
+            adapt_sql("""
                 SELECT * FROM email_notification_logs
                 WHERE status = 'failed'
                   AND retry_count < ?
                   AND (next_retry_at IS NULL OR next_retry_at <= ?)
                 ORDER BY sent_at ASC
                 LIMIT 50
-            """
-            ),
+            """),
             (max_retry_count, datetime.now(timezone.utc).replace(tzinfo=None)),
         )
 
@@ -212,14 +208,12 @@ class EmailNotificationLogRepository:
         cursor = conn.cursor()
 
         cursor.execute(
-            adapt_sql(
-                """
+            adapt_sql("""
                 SELECT * FROM email_notification_logs
                 WHERE user_id = ?
                 ORDER BY sent_at DESC
                 LIMIT ? OFFSET ?
-            """
-            ),
+            """),
             (user_id, limit, offset),
         )
 
@@ -248,14 +242,12 @@ class EmailNotificationLogRepository:
 
         # Total counts by status
         cursor.execute(
-            adapt_sql(
-                """
+            adapt_sql("""
                 SELECT status, COUNT(*) as count
                 FROM email_notification_logs
                 WHERE sent_at >= ?
                 GROUP BY status
-            """
-            ),
+            """),
             (cutoff,),
         )
 
@@ -268,13 +260,11 @@ class EmailNotificationLogRepository:
 
         # Average retry count for failed emails
         cursor.execute(
-            adapt_sql(
-                """
+            adapt_sql("""
                 SELECT AVG(retry_count) as avg_retry
                 FROM email_notification_logs
                 WHERE status = 'failed' AND sent_at >= ?
-            """
-            ),
+            """),
             (cutoff,),
         )
 

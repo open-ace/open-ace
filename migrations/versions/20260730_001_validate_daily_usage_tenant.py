@@ -40,9 +40,7 @@ def upgrade() -> None:
         print(f"Updated {result[0]} rows with NULL tenant_id to tenant_id=1")
 
     # Check for potential conflicts (same date/tool/host with multiple tenants)
-    conflicts = conn.execute(
-        sa.text(
-            """
+    conflicts = conn.execute(sa.text("""
             SELECT COUNT(*) as count
             FROM (
                 SELECT date, tool_name, host_name
@@ -50,9 +48,7 @@ def upgrade() -> None:
                 GROUP BY date, tool_name, host_name
                 HAVING COUNT(DISTINCT COALESCE(tenant_id, 1)) > 1
             ) AS conflict_groups
-            """
-        )
-    ).fetchone()
+            """)).fetchone()
 
     if conflicts and conflicts[0] > 0:
         print(

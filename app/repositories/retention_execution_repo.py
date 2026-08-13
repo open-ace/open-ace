@@ -54,14 +54,12 @@ class RetentionExecutionRepository:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql(
-                    """
+                adapt_sql("""
                     INSERT INTO retention_executions (
                         execution_id, tenant_id, policy_id, status, dry_run,
                         batch_size, max_records_override, started_at, created_at
                     ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)
-                """
-                ),
+                """),
                 (
                     execution_id,
                     tenant_id,
@@ -204,13 +202,11 @@ class RetentionExecutionRepository:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql(
-                    f"""
+                adapt_sql(f"""
                     UPDATE retention_executions
                     SET {', '.join(updates)}
                     WHERE execution_id = ?
-                """
-                ),
+                """),
                 params,
             )
             conn.commit()
@@ -235,26 +231,22 @@ class RetentionExecutionRepository:
         """
         if status:
             return self.db.fetch_all(
-                adapt_sql(
-                    """
+                adapt_sql("""
                     SELECT * FROM retention_executions
                     WHERE tenant_id = ? AND status = ?
                     ORDER BY created_at DESC
                     LIMIT ?
-                """
-                ),
+                """),
                 (tenant_id, status, limit),
             )
         else:
             return self.db.fetch_all(
-                adapt_sql(
-                    """
+                adapt_sql("""
                     SELECT * FROM retention_executions
                     WHERE tenant_id = ?
                     ORDER BY created_at DESC
                     LIMIT ?
-                """
-                ),
+                """),
                 (tenant_id, limit),
             )
 
@@ -279,14 +271,12 @@ class RetentionExecutionRepository:
             cursor = conn.cursor()
             # Try to acquire lock
             cursor.execute(
-                adapt_sql(
-                    """
+                adapt_sql("""
                     UPDATE retention_executions
                     SET lock_acquired_at = ?, lock_expires_at = ?
                     WHERE execution_id = ?
                     AND (lock_acquired_at IS NULL OR lock_expires_at < ?)
-                """
-                ),
+                """),
                 (now, expires_at, execution_id, now),
             )
             conn.commit()
@@ -304,13 +294,11 @@ class RetentionExecutionRepository:
         with self.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                adapt_sql(
-                    """
+                adapt_sql("""
                     UPDATE retention_executions
                     SET lock_acquired_at = NULL, lock_expires_at = NULL
                     WHERE execution_id = ?
-                """
-                ),
+                """),
                 (execution_id,),
             )
             conn.commit()

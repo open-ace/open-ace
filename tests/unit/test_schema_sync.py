@@ -27,17 +27,14 @@ def test_compare_sqlite_snapshots_matches_identical_schema():
 
 def test_compare_sqlite_snapshots_detects_table_column_and_index_drift():
     """Different schemas should report structural drift."""
-    actual = schema_sync.sqlite_snapshot_from_sql(
-        """
+    actual = schema_sync.sqlite_snapshot_from_sql("""
         CREATE TABLE users (
             id INTEGER PRIMARY KEY,
             username TEXT NOT NULL
         );
         CREATE INDEX idx_users_username ON users (username);
-        """
-    )
-    expected = schema_sync.sqlite_snapshot_from_sql(
-        """
+        """)
+    expected = schema_sync.sqlite_snapshot_from_sql("""
         CREATE TABLE users (
             id INTEGER PRIMARY KEY,
             username TEXT NOT NULL,
@@ -48,8 +45,7 @@ def test_compare_sqlite_snapshots_detects_table_column_and_index_drift():
             name TEXT NOT NULL
         );
         CREATE INDEX idx_users_email ON users (email);
-        """
-    )
+        """)
 
     diff = schema_sync.compare_sqlite_snapshots(actual, expected)
 
@@ -100,22 +96,18 @@ def test_compare_postgres_schema_text_ignores_session_stats_qualification_noise(
 
 def test_compare_sqlite_snapshots_ignores_pk_notnull_and_boolean_default_noise():
     """SQLite PK/nullability quirks and boolean literals should not cause drift."""
-    actual = schema_sync.sqlite_snapshot_from_sql(
-        """
+    actual = schema_sync.sqlite_snapshot_from_sql("""
         CREATE TABLE users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             is_active INTEGER DEFAULT 0
         );
-        """
-    )
-    expected = schema_sync.sqlite_snapshot_from_sql(
-        """
+        """)
+    expected = schema_sync.sqlite_snapshot_from_sql("""
         CREATE TABLE users (
             id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             is_active BOOLEAN DEFAULT false
         );
-        """
-    )
+        """)
 
     diff = schema_sync.compare_sqlite_snapshots(actual, expected)
 
@@ -124,8 +116,7 @@ def test_compare_sqlite_snapshots_ignores_pk_notnull_and_boolean_default_noise()
 
 def test_compare_sqlite_snapshots_matches_equivalent_indexes_with_different_names():
     """Equivalent index semantics should match even when names differ."""
-    actual = schema_sync.sqlite_snapshot_from_sql(
-        """
+    actual = schema_sync.sqlite_snapshot_from_sql("""
         CREATE TABLE daily_usage (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL,
@@ -134,10 +125,8 @@ def test_compare_sqlite_snapshots_matches_equivalent_indexes_with_different_name
             UNIQUE (date, tool_name, host_name)
         );
         CREATE INDEX idx_usage_date ON daily_usage (date);
-        """
-    )
-    expected = schema_sync.sqlite_snapshot_from_sql(
-        """
+        """)
+    expected = schema_sync.sqlite_snapshot_from_sql("""
         CREATE TABLE daily_usage (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL,
@@ -147,8 +136,7 @@ def test_compare_sqlite_snapshots_matches_equivalent_indexes_with_different_name
         CREATE UNIQUE INDEX uq_daily_usage_date_tool_host
         ON daily_usage (date, tool_name, host_name);
         CREATE INDEX idx_daily_usage_date ON daily_usage (date);
-        """
-    )
+        """)
 
     diff = schema_sync.compare_sqlite_snapshots(actual, expected)
 
@@ -157,8 +145,7 @@ def test_compare_sqlite_snapshots_matches_equivalent_indexes_with_different_name
 
 def test_compare_sqlite_snapshots_ignores_column_order_and_where_formatting_noise():
     """Column order and equivalent partial-index predicates should not drift."""
-    actual = schema_sync.sqlite_snapshot_from_sql(
-        """
+    actual = schema_sync.sqlite_snapshot_from_sql("""
         CREATE TABLE daily_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             conversation_id TEXT,
@@ -167,10 +154,8 @@ def test_compare_sqlite_snapshots_ignores_column_order_and_where_formatting_nois
         CREATE INDEX idx_messages_session
         ON daily_messages (agent_session_id)
         WHERE ((agent_session_id IS NOT NULL));
-        """
-    )
-    expected = schema_sync.sqlite_snapshot_from_sql(
-        """
+        """)
+    expected = schema_sync.sqlite_snapshot_from_sql("""
         CREATE TABLE daily_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             agent_session_id TEXT,
@@ -179,8 +164,7 @@ def test_compare_sqlite_snapshots_ignores_column_order_and_where_formatting_nois
         CREATE INDEX idx_messages_session
         ON daily_messages (agent_session_id)
         WHERE agent_session_id IS NOT NULL;
-        """
-    )
+        """)
 
     diff = schema_sync.compare_sqlite_snapshots(actual, expected)
 

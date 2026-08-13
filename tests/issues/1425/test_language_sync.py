@@ -142,8 +142,7 @@ async def test_language_postmessage_sent():
         await page.wait_for_timeout(2000)
 
         # Inject script to capture postMessage calls from parent to iframe
-        await page.evaluate(
-            """
+        await page.evaluate("""
             () => {
                 // Store original postMessage
                 const originalPostMessage = window.postMessage.bind(window);
@@ -167,8 +166,7 @@ async def test_language_postmessage_sent():
                 // Also track messages sent to iframes
                 const originalIframePostMessage = HTMLIFrameElement.prototype.contentWindow;
             }
-        """
-        )
+        """)
 
         # Get iframe element
         iframe_element = await page.query_selector("iframe")
@@ -255,8 +253,7 @@ async def test_language_realtime_sync():
 
         # Change language in Open ACE (without reload)
         print("\n3. Changing language to 'zh' without reload...")
-        await page.evaluate(
-            """
+        await page.evaluate("""
             () => {
                 // Trigger language change via store
                 localStorage.setItem('language', 'zh');
@@ -268,8 +265,7 @@ async def test_language_realtime_sync():
                     url: window.location.href
                 }));
             }
-        """
-        )
+        """)
 
         # Wait for postMessage to be sent
         await page.wait_for_timeout(1000)

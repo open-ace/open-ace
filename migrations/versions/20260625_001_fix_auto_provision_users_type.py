@@ -27,13 +27,11 @@ depends_on: str | Sequence[str] | None = None
 def get_column_type(conn, table_name: str, column_name: str) -> str:
     """Get the current data type of a column in PostgreSQL."""
     result = conn.execute(
-        sa.text(
-            """
+        sa.text("""
             SELECT data_type
             FROM information_schema.columns
             WHERE table_name = :table_name AND column_name = :column_name
-            """
-        ),
+            """),
         {"table_name": table_name, "column_name": column_name},
     )
     row = result.fetchone()
@@ -55,13 +53,11 @@ def upgrade() -> None:
 
     # PostgreSQL: convert integer to boolean (existing databases)
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN auto_provision_users DROP DEFAULT")
-    op.execute(
-        """
+    op.execute("""
         ALTER TABLE tenant_settings
         ALTER COLUMN auto_provision_users TYPE BOOLEAN
         USING CASE WHEN auto_provision_users = 1 THEN TRUE ELSE FALSE END
-        """
-    )
+        """)
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN auto_provision_users SET DEFAULT FALSE")
 
 
@@ -79,11 +75,9 @@ def downgrade() -> None:
         return
 
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN auto_provision_users DROP DEFAULT")
-    op.execute(
-        """
+    op.execute("""
         ALTER TABLE tenant_settings
         ALTER COLUMN auto_provision_users TYPE INTEGER
         USING CASE WHEN auto_provision_users THEN 1 ELSE 0 END
-        """
-    )
+        """)
     op.execute("ALTER TABLE tenant_settings ALTER COLUMN auto_provision_users SET DEFAULT 0")

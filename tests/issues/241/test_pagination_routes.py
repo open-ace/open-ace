@@ -59,9 +59,12 @@ def app_and_manager(monkeypatch):
 
 
 def _make_session(mgr, user_id=1, session_id="sess-route"):
+    # Session writes resolve tenant fail-closed (#1789 lineage); the fixture DB
+    # seeds no users row to look up, so pass the tenant explicitly.
     s = mgr.create_session(
         tool_name="qwen",
         user_id=user_id,
+        tenant_id=1,
         session_type="chat",
         title="route test",
         session_id=session_id,
@@ -103,7 +106,7 @@ class TestOwnershipAnd404:
     def test_unknown_session_returns_404(self, app_and_manager):
         app, _ = app_and_manager
         with app.test_request_context("/api/workspace/sessions/does-not-exist"):
-            g.user = {"id": 1, "role": "user"}
+            g.user = {"id": 1, "role": "user", "tenant_id": 1}
             resp = workspace_route.get_session("does-not-exist")
         assert _status(resp) == 404
 
@@ -111,7 +114,11 @@ class TestOwnershipAnd404:
         app, mgr = app_and_manager
         sid = _make_session(mgr, user_id=1)
         with app.test_request_context(f"/api/workspace/sessions/{sid}"):
-            g.user = {"id": 999, "role": "user"}  # different user
+            # Same-tenant non-owner (a null-tenant user is denied earlier by
+            # _session_lookup_tenant_id's fail-closed abort, which the view's
+            # error handler surfaces as 500; tenant-correct the caller so this
+            # test exercises the ownership check it is named for).
+            g.user = {"id": 999, "role": "user", "tenant_id": 1}
             resp = workspace_route.get_session(sid)
         assert _status(resp) == 403
 
@@ -121,14 +128,15 @@ class TestOwnershipAnd404:
         sid = _make_session(mgr, user_id=1)
         _add(mgr, sid, 0)
         with app.test_request_context(f"/api/workspace/sessions/{sid}/messages"):
-            g.user = {"id": 999, "role": "user"}
+            # Same-tenant non-owner (see test_non_owner_gets_403 note).
+            g.user = {"id": 999, "role": "user", "tenant_id": 1}
             resp = workspace_route.get_session_messages(sid)
         assert _status(resp) == 403
 
     def test_messages_endpoint_404_for_unknown_session(self, app_and_manager):
         app, _ = app_and_manager
         with app.test_request_context("/api/workspace/sessions/ghost/messages"):
-            g.user = {"id": 1, "role": "user"}
+            g.user = {"id": 1, "role": "user", "tenant_id": 1}
             resp = workspace_route.get_session_messages("ghost")
         assert _status(resp) == 404
 
@@ -152,7 +160,10 @@ class TestOwnershipAnd404:
         with app.test_request_context(f"/api/workspace/sessions/{sid}"):
             g.user = {"id": 1, "role": "user", "tenant_id": 3}
             resp = workspace_route.get_session(sid)
-        assert _status(resp) == 403
+        # Issue #2538: cross-tenant access returns 404 (not 403) so the caller
+        # cannot learn the session exists. The property under test — a
+        # tenant-mismatched owner is denied — is preserved.
+        assert _status(resp) == 404
 
 
 # =================== get_session pagination envelope ========================
@@ -168,7 +179,7 @@ class TestGetSessionEnvelope:
         with app.test_request_context(
             f"/api/workspace/sessions/{sid}?include_messages=true&message_limit=2"
         ):
-            g.user = {"id": 1, "role": "user"}
+            g.user = {"id": 1, "role": "user", "tenant_id": 1}
             resp = workspace_route.get_session(sid)
 
         assert _status(resp) == 200
@@ -185,7 +196,7 @@ class TestGetSessionEnvelope:
         sid = _make_session(mgr, user_id=1)
         _add(mgr, sid, 0)
         with app.test_request_context(f"/api/workspace/sessions/{sid}"):
-            g.user = {"id": 1, "role": "user"}
+            g.user = {"id": 1, "role": "user", "tenant_id": 1}
             resp = workspace_route.get_session(sid)
         data = _json(resp)["data"]
         assert "messages_total" not in data
@@ -204,7 +215,7 @@ class TestGetSessionEnvelope:
         with app.test_request_context(
             f"/api/workspace/sessions/{sid}?include_messages=true&milestone_id=M1"
         ):
-            g.user = {"id": 1, "role": "user"}
+            g.user = {"id": 1, "role": "user", "tenant_id": 1}
             resp = workspace_route.get_session(sid)
         data = _json(resp)["data"]
         # session.message_count == 5, but milestone M1 has only 3.
@@ -229,7 +240,7 @@ class TestMessagesEndpointWalk:
             if before_ts is not None:
                 qs += f"&before_timestamp={before_ts}&before_id={before_id}"
             with app.test_request_context(qs):
-                g.user = {"id": 1, "role": "user"}
+                g.user = {"id": 1, "role": "user", "tenant_id": 1}
                 resp = workspace_route.get_session_messages(sid)
             assert _status(resp) == 200
             payload = _json(resp)["data"]
@@ -255,7 +266,7 @@ class TestMessagesEndpointWalk:
         with app.test_request_context(
             f"/api/workspace/sessions/{sid}/messages?before_timestamp=2026-07-04T12:00:03"
         ):
-            g.user = {"id": 1, "role": "user"}
+            g.user = {"id": 1, "role": "user", "tenant_id": 1}
             resp = workspace_route.get_session_messages(sid)
         data = _json(resp)["data"]
         # No before_id => cursor dropped => most-recent page (5 rows, has_more False).
@@ -269,7 +280,7 @@ class TestMessagesEndpointWalk:
             _add(mgr, sid, n, count_usage=False)
 
         with app.test_request_context(f"/api/workspace/sessions/{sid}/messages?limit=99999"):
-            g.user = {"id": 1, "role": "user"}
+            g.user = {"id": 1, "role": "user", "tenant_id": 1}
             resp = workspace_route.get_session_messages(sid)
         assert _status(resp) == 200
         # Clamped to MAX (500) but only 3 rows exist.

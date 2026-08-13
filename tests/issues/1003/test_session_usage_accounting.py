@@ -44,7 +44,11 @@ def sqlite_sm(tmp_path, monkeypatch):
 
 
 def _create(sm, sid="sess-1"):
-    return sm.create_session(tool_name="test", session_id=sid, user_id=1)
+    # Session writes resolve tenant fail-closed (#1789 lineage); the fixture DB
+    # seeds no users row to look up, so pass the tenant explicitly. Counter
+    # updates below must pass the same tenant (require_tenant=True matches
+    # nothing when tenant_id is unresolved).
+    return sm.create_session(tool_name="test", session_id=sid, user_id=1, tenant_id=1)
 
 
 # ── increment_session_usage ──────────────────────────────────────────────
@@ -56,6 +60,7 @@ class TestIncrementSessionUsage:
         _create(sm)
         sm.increment_session_usage(
             "sess-1",
+            tenant_id=1,
             message_delta=2,
             request_delta=3,
             total_tokens_delta=100,
@@ -64,6 +69,7 @@ class TestIncrementSessionUsage:
         )
         sm.increment_session_usage(
             "sess-1",
+            tenant_id=1,
             message_delta=1,
             request_delta=2,
             total_tokens_delta=50,
@@ -81,8 +87,8 @@ class TestIncrementSessionUsage:
         # simulate a session that already has counts (e.g. resumed)
         sm = sqlite_sm
         _create(sm)
-        sm.increment_session_usage("sess-1", request_delta=10, total_tokens_delta=1000)
-        sm.increment_session_usage("sess-1", request_delta=3, total_tokens_delta=150)
+        sm.increment_session_usage("sess-1", tenant_id=1, request_delta=10, total_tokens_delta=1000)
+        sm.increment_session_usage("sess-1", tenant_id=1, request_delta=3, total_tokens_delta=150)
         s = sm.get_session("sess-1")
         assert s.request_count == 13
         assert s.total_tokens == 1150
@@ -104,7 +110,7 @@ class TestAddMessageCountUsageGate:
         session summary."""
         sm = sqlite_sm
         _create(sm)
-        sm.increment_session_usage("sess-1", request_delta=5, total_tokens_delta=500)
+        sm.increment_session_usage("sess-1", tenant_id=1, request_delta=5, total_tokens_delta=500)
         sm.add_message(session_id="sess-1", role="assistant", content="hi", count_usage=False)
         sm.add_message(session_id="sess-1", role="tool", content="result", count_usage=False)
         s = sm.get_session("sess-1")
@@ -186,6 +192,7 @@ class TestMilestoneSessionInvariant:
             # agent_runner finish path: increment session by this call's counts
             sm.increment_session_usage(
                 "sess-1",
+                tenant_id=1,
                 message_delta=1,
                 request_delta=rc,
                 total_tokens_delta=tk,

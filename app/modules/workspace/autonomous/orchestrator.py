@@ -3539,6 +3539,38 @@ class AutonomousOrchestrator:
 
         ranges = [("current round", commit_before)]
         cumulative_base = (wf.get("base_commit_sha") or "").strip()
+        # Bug B: When the cumulative range spans a prior merge of upstream
+        # main (even if ``commit_after`` itself is not the merge commit), the
+        # persisted ``base_commit_sha`` is the stale branch-creation point.
+        # The CI-repair push path calls this validator with the stale ``wf``
+        # after a prior round merged main, so the cumulative diff would count
+        # every merged upstream file -> a false "scope exceeded". Re-derive via
+        # merge-base so the cumulative range excludes upstream merge files,
+        # mirroring the merge-commit reduction above and the pre-merge logic.
+        if cumulative_base:
+            try:
+                mb_result = gh._run_git(["merge-base", commit_after, "origin/main"], check=False)
+                effective_cumulative_base = (
+                    mb_result.stdout.strip() if mb_result.returncode == 0 else ""
+                )
+            except Exception as exc:
+                logger.warning("Failed to re-derive cumulative merge-base: %s", exc)
+                effective_cumulative_base = ""
+            if effective_cumulative_base and effective_cumulative_base != cumulative_base:
+                # The merge-base is a closer (more recent) ancestor than the
+                # stale persisted base. Use it so upstream files merged into
+                # the branch are excluded from the cumulative count. The
+                # merge-base can only be equal to or a descendant of the true
+                # branch point, so this only NARROWS the base — it never
+                # widens it past the original branch-creation point.
+                logger.info(
+                    "Cumulative base re-derived via merge-base %s (was stale %s)",
+                    effective_cumulative_base[:12],
+                    cumulative_base[:12],
+                )
+                cumulative_base = effective_cumulative_base
+                wf = dict(wf)
+                wf["base_commit_sha"] = effective_cumulative_base
         if not cumulative_base:
             # Legacy workflows (or a batch whose initial rev-parse failed) can
             # have no persisted base. Never compare them with the *moving*
