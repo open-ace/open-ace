@@ -130,8 +130,9 @@ class GovernanceRepository:
             Optional[int]: Rule ID if successful.
         """
         try:
-            from app.repositories.database import is_postgresql
             import json
+
+            from app.repositories.database import is_postgresql
 
             # Prepare metadata
             metadata_json = json.dumps(metadata) if metadata else None
@@ -382,8 +383,6 @@ class GovernanceRepository:
             bool: True if successful.
         """
         try:
-            from app.repositories.database import is_postgresql
-
             now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
             # Update rule status

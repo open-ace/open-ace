@@ -13,11 +13,12 @@ This prevents cross-tenant rule pollution and establishes governance controls.
 from __future__ import annotations
 
 import json
+
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "20260813_001_add_content_filter_tenant_isolation"
-down_revision: str | None = "20260812_001_add_token_version"
+down_revision: str | None = "20260812_001"
 branch_labels: str | None = None
 depends_on: str | None = None
 

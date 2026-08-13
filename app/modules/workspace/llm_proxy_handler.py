@@ -6,7 +6,7 @@ import json
 import logging
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from flask import Response, g, jsonify, request, stream_with_context
 
@@ -18,6 +18,9 @@ from app.modules.workspace.model_gateway import get_gateway_planner
 
 # Issue #1894: SSRF protection
 from app.utils.outbound_url_guard import safe_request
+
+if TYPE_CHECKING:
+    from app.modules.governance.content_filter import ContentFilter
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +77,7 @@ def _cleanup_stopped_sessions_cache_locked() -> None:
         logger.debug("Cleaned up %d expired stopped session entries", len(expired))
 
 
-def _get_content_filter(tenant_id: int | None = None) -> "ContentFilter":
+def _get_content_filter(tenant_id: int | None = None) -> ContentFilter:
     """
     Get ContentFilter instance with tenant isolation.
 
