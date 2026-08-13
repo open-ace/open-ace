@@ -31,15 +31,34 @@ GLOBAL_TENANT_SENTINEL = "GLOBAL_TENANT"
 _content_filter_instance = None
 
 
-def _get_content_filter():
-    """Get or create shared ContentFilter instance."""
-    global _content_filter_instance
-    if _content_filter_instance is None:
-        from app.modules.governance.content_filter import ContentFilter
-        from app.repositories.governance_repo import GovernanceRepository
+def _get_content_filter(tenant_id: int | None = None):
+    """
+    Get ContentFilter instance with tenant isolation.
 
+    If tenant_id is provided, creates a new instance for that tenant.
+    Otherwise, returns a global instance for backward compatibility.
+
+    Args:
+        tenant_id: Optional tenant ID for tenant isolation.
+
+    Returns:
+        ContentFilter instance.
+    """
+    from app.modules.governance.content_filter import ContentFilter
+    from app.repositories.governance_repo import GovernanceRepository
+
+    global _content_filter_instance
+
+    if tenant_id is not None:
+        # Create a new instance with tenant isolation
+        governance_repo = GovernanceRepository()
+        return ContentFilter(governance_repo=governance_repo, tenant_id=tenant_id)
+
+    # Backward compatible: return global instance without tenant_id
+    if _content_filter_instance is None:
         governance_repo = GovernanceRepository()
         _content_filter_instance = ContentFilter(governance_repo=governance_repo)
+
     return _content_filter_instance
 
 
@@ -1624,7 +1643,7 @@ class SessionManager:
             try:
                 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 
-                content_filter = _get_content_filter()
+                content_filter = _get_content_filter(tenant_id=effective_tenant_id)
 
                 # Get user_id and username from session for audit logging
                 cursor.execute(

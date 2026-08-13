@@ -102,6 +102,12 @@ class GovernanceRepository:
         action: str = "warn",
         description: str | None = None,
         is_enabled: bool = True,
+        tenant_id: int | None = None,
+        source: str = "user",
+        category: str = "custom",
+        status: str = "active",
+        created_by: int | None = None,
+        metadata: dict | None = None,
     ) -> int | None:
         """
         Create a new filter rule.
@@ -113,20 +119,31 @@ class GovernanceRepository:
             action: Action to take (warn, block, redact).
             description: Optional description.
             is_enabled: Whether rule is enabled.
+            tenant_id: Optional tenant ID for tenant isolation.
+            source: Rule source ('system' or 'user').
+            category: Rule category (pii, security, business, test, custom).
+            status: Rule status (pending, approved, active, rejected, disabled).
+            created_by: Optional user ID of the creator.
+            metadata: Optional JSON metadata.
 
         Returns:
             Optional[int]: Rule ID if successful.
         """
         try:
             from app.repositories.database import is_postgresql
+            import json
+
+            # Prepare metadata
+            metadata_json = json.dumps(metadata) if metadata else None
 
             # Use RETURNING for PostgreSQL
             if is_postgresql():
                 result = self.db.fetch_one(
                     """
                     INSERT INTO content_filter_rules
-                    (pattern, type, severity, action, is_enabled, description, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (pattern, type, severity, action, is_enabled, description,
+                     tenant_id, source, category, status, created_by, metadata, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 """,
                     (
@@ -136,6 +153,12 @@ class GovernanceRepository:
                         action,
                         is_enabled,
                         description,
+                        tenant_id,
+                        source,
+                        category,
+                        status,
+                        created_by,
+                        metadata_json,
                         datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                     ),
                     commit=True,
@@ -147,8 +170,9 @@ class GovernanceRepository:
                 cursor = self.db.execute(
                     """
                     INSERT INTO content_filter_rules
-                    (pattern, type, severity, action, is_enabled, description, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (pattern, type, severity, action, is_enabled, description,
+                     tenant_id, source, category, status, created_by, metadata, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         pattern,
@@ -157,6 +181,12 @@ class GovernanceRepository:
                         action,
                         is_enabled_val,
                         description,
+                        tenant_id,
+                        source,
+                        category,
+                        status,
+                        created_by,
+                        metadata_json,
                         datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                     ),
                 )

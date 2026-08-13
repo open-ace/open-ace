@@ -23,8 +23,28 @@ governance_bp = Blueprint("governance", __name__)
 audit_logger = AuditLogger()
 quota_manager = QuotaManager()
 governance_repo = GovernanceRepository()
-content_filter = ContentFilter(governance_repo=governance_repo)
 logger = logging.getLogger(__name__)
+
+# Global content filter instance for operations that don't need tenant_id
+_content_filter_global = ContentFilter(governance_repo=governance_repo)
+
+
+def _get_content_filter(tenant_id: int | None = None) -> ContentFilter:
+    """
+    Get ContentFilter instance with tenant isolation.
+
+    Creates a new instance per request with the current tenant_id.
+    This ensures tenant isolation is enforced on every request.
+
+    Args:
+        tenant_id: Optional tenant ID. If None, gets from current request context.
+
+    Returns:
+        ContentFilter instance configured for the tenant.
+    """
+    if tenant_id is None:
+        tenant_id = get_current_tenant_id()
+    return ContentFilter(governance_repo=governance_repo, tenant_id=tenant_id)
 
 
 def get_client_info():
@@ -352,7 +372,7 @@ def api_check_content():
         except Exception as e:
             logger.warning(f"Failed to fetch tenant config for tenant {tenant_id}: {e}")
 
-    result = content_filter.check_content(content, tenant_config=tenant_config)
+    result = _get_content_filter(tenant_id=tenant_id).check_content(content, tenant_config=tenant_config)
 
     # Log if blocked
     if not result.passed:
@@ -377,7 +397,7 @@ def api_check_content():
 def api_filter_stats():
     """Get content filter statistics."""
 
-    stats = content_filter.get_stats()
+    stats = _content_filter_global.get_stats()
 
     return jsonify(stats)
 
@@ -396,7 +416,7 @@ def api_add_pattern():
         return jsonify({"error": "Name and pattern are required"}), 400
 
     try:
-        content_filter.add_custom_pattern(name, pattern, risk)
+        _content_filter_global.add_custom_pattern(name, pattern, risk)
 
         # Log the action
         client_info = get_client_info()
@@ -427,7 +447,7 @@ def api_add_keyword():
     if not keyword:
         return jsonify({"error": "Keyword is required"}), 400
 
-    content_filter.add_custom_keyword(keyword)
+    _content_filter_global.add_custom_keyword(keyword)
 
     # Log the action
     client_info = get_client_info()
@@ -463,7 +483,7 @@ def api_get_filter_rules():
 @governance_bp.route("/filter-rules", methods=["POST"])
 @admin_required
 def api_create_filter_rule():
-    """Create a new content filter rule."""
+    """Create a new content filter rule with tenant isolation."""
 
     data = request.get_json() or {}
     pattern = data.get("pattern")
@@ -493,11 +513,16 @@ def api_create_filter_rule():
         action=action,
         description=description,
         is_enabled=is_enabled,
+        tenant_id=tenant_id,
+        source=source,
+        category=category,
+        status=status,
+        created_by=created_by,
     )
 
     if rule_id:
         # Invalidate content filter cache
-        content_filter.invalidate_cache()
+        _content_filter_global.invalidate_cache()
 
         # Log the action
         client_info = get_client_info()
@@ -536,7 +561,7 @@ def api_update_filter_rule(rule_id):
 
     if success:
         # Invalidate content filter cache
-        content_filter.invalidate_cache()
+        _content_filter_global.invalidate_cache()
 
         # Log the action
         client_info = get_client_info()
@@ -565,7 +590,7 @@ def api_delete_filter_rule(rule_id):
 
     if success:
         # Invalidate content filter cache
-        content_filter.invalidate_cache()
+        _content_filter_global.invalidate_cache()
 
         # Log the action
         client_info = get_client_info()
@@ -663,6 +688,7 @@ def api_approve_filter_rule(rule_id):
     """Approve a content filter rule.
 
     Requires platform_admin or tenant_admin permission.
+    Tenant isolation: only allows approval of rules within the same tenant.
     """
     data = request.get_json() or {}
     comment = data.get("comment")
@@ -672,22 +698,29 @@ def api_approve_filter_rule(rule_id):
     if not approver_id:
         return jsonify({"error": "User ID not found"}), 401
 
+    # Get the rule and verify it exists
+    rule = governance_repo.get_filter_rule(rule_id)
+    if not rule:
+        return jsonify({"error": "Rule not found"}), 404
+
+    # Get current tenant ID
+    current_tenant_id = get_current_tenant_id()
+
+    # Tenant isolation check: can only approve rules for the same tenant or global rules
+    rule_tenant_id = rule.get("tenant_id")
+    if rule_tenant_id is not None and rule_tenant_id != current_tenant_id:
+        return jsonify({"error": "Permission denied: cross-tenant approval not allowed"}), 403
+
     # Check if user has permission (platform_admin or tenant_admin)
     user_role = g.user.get("role") if hasattr(g, "user") else None
     if user_role not in ("platform_admin", "admin"):
-        # Check if user is tenant_admin for the rule's tenant
-        rule = governance_repo.get_filter_rule(rule_id)
-        if not rule:
-            return jsonify({"error": "Rule not found"}), 404
-
-        # For now, only platform_admin and admin can approve
         return jsonify({"error": "Permission denied"}), 403
 
     success = governance_repo.approve_filter_rule(rule_id, approver_id, comment)
 
     if success:
         # Invalidate content filter cache
-        content_filter.invalidate_cache()
+        _content_filter_global.invalidate_cache()
 
         # Log the action
         client_info = get_client_info()
@@ -712,6 +745,7 @@ def api_reject_filter_rule(rule_id):
     """Reject a content filter rule.
 
     Requires platform_admin or tenant_admin permission.
+    Tenant isolation: only allows rejection of rules within the same tenant.
     """
     data = request.get_json() or {}
     comment = data.get("comment")
@@ -720,6 +754,19 @@ def api_reject_filter_rule(rule_id):
     approver_id = g.user_id if hasattr(g, "user_id") else None
     if not approver_id:
         return jsonify({"error": "User ID not found"}), 401
+
+    # Get the rule and verify it exists
+    rule = governance_repo.get_filter_rule(rule_id)
+    if not rule:
+        return jsonify({"error": "Rule not found"}), 404
+
+    # Get current tenant ID
+    current_tenant_id = get_current_tenant_id()
+
+    # Tenant isolation check: can only reject rules for the same tenant or global rules
+    rule_tenant_id = rule.get("tenant_id")
+    if rule_tenant_id is not None and rule_tenant_id != current_tenant_id:
+        return jsonify({"error": "Permission denied: cross-tenant rejection not allowed"}), 403
 
     # Check if user has permission
     user_role = g.user.get("role") if hasattr(g, "user") else None
@@ -730,7 +777,7 @@ def api_reject_filter_rule(rule_id):
 
     if success:
         # Invalidate content filter cache
-        content_filter.invalidate_cache()
+        _content_filter_global.invalidate_cache()
 
         # Log the action
         client_info = get_client_info()
