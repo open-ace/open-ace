@@ -772,7 +772,8 @@ export const translations: Record<Language, Translations> = {
     categoryEmptyHint: 'No categories yet. Create categories to organize projects.',
     calculating: 'Calculating...',
     keywordSearchPlaceholder: 'Search categories...',
-    categoryModifiedConflict: 'Category has been modified by another user. Please refresh and try again.',
+    categoryModifiedConflict:
+      'Category has been modified by another user. Please refresh and try again.',
     manageCategories: 'Manage Categories',
     categoryNamePlaceholder: 'Enter category name',
     categoryPatternsPlaceholder: 'Enter pattern and press Enter',
@@ -3830,10 +3831,12 @@ export const translations: Record<Language, Translations> = {
     categoryDisabled: '無効',
     enableCategory: 'カテゴリ有効',
     disableCategory: 'カテゴリ無効',
-    categoryEmptyHint: 'カテゴリがありません。プロジェクトを整理するためにカテゴリを作成してください。',
+    categoryEmptyHint:
+      'カテゴリがありません。プロジェクトを整理するためにカテゴリを作成してください。',
     calculating: '計算中...',
     keywordSearchPlaceholder: 'カテゴリを検索...',
-    categoryModifiedConflict: 'カテゴリは他のユーザーによって変更されました。更新して再試行してください。',
+    categoryModifiedConflict:
+      'カテゴリは他のユーザーによって変更されました。更新して再試行してください。',
     manageCategories: 'カテゴリ管理',
     categoryNamePlaceholder: 'カテゴリ名を入力',
     categoryPatternsPlaceholder: 'キーワードを入力してEnter',
@@ -5530,7 +5533,8 @@ export const translations: Record<Language, Translations> = {
     categoryEmptyHint: '카테고리가 없습니다. 프로젝트를 정리하기 위해 카테고리를 생성하세요.',
     calculating: '계산 중...',
     keywordSearchPlaceholder: '카테고리 검색...',
-    categoryModifiedConflict: '카테고리가 다른 사용자에 의해 수정되었습니다. 새로고침 후 다시 시도하세요.',
+    categoryModifiedConflict:
+      '카테고리가 다른 사용자에 의해 수정되었습니다. 새로고침 후 다시 시도하세요.',
     manageCategories: '카테고리 관리',
     categoryNamePlaceholder: '카테고리 이름 입력',
     categoryPatternsPlaceholder: '키워드 입력 후 Enter',
