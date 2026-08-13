@@ -1,7 +1,7 @@
 """Add tenant isolation to content filter rules
 
 Revision ID: 20260813_001_add_content_filter_tenant_isolation
-Revises: 20260812_001_add_token_version
+Revises: 20260814_001
 Create Date: 2026-08-13
 
 Issue: #2550
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "20260813_001_add_content_filter_tenant_isolation"
-down_revision: str | None = "20260812_001"
+down_revision: str | None = "20260814_001"
 branch_labels: str | None = None
 depends_on: str | None = None
 
