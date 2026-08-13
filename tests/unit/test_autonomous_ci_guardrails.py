@@ -2479,3 +2479,147 @@ def test_review_fix_stage_failure_marks_paused_not_failed():
     assert "failed" not in statuses, "stage failure must NOT hard-fail (#2441)"
     # Tree reset to the pre-staging commit (no half-staged state left behind).
     gh.reset_hard_to.assert_called_once_with("commit-pre-staging")
+
+
+# ── #2550: pr_review fix-agent empty-result fresh retry ───────────────────
+#
+# Mirror of the pr_review summary-agent backstop (#2570, commit fb680a17):
+# the fix agent also runs session_line="main" to preserve dev context, so a
+# --resumed session whose last turn already ended can synthesize an empty
+# "No response requested" terminal result (0 tokens, success=True). That
+# transient resume no-op terminally failed the workflow (#2550 workflow
+# 02dae370). The fix: when the main fix run SUCCEEDS but yields empty
+# artifact text, retry ONCE with session_line="fresh". If the retry is still
+# empty, the existing fail-closed path applies.
+
+
+def _make_fix_orchestrator():
+    """Minimal AutonomousOrchestrator for _apply_pr_review_fix empty-retry
+    tests: clean worktree (no pre-staging), no integrity/overflow, scope OK,
+    and an agent runner whose behaviour is set per-test via side_effect."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-2550"
+    orch.repo = MagicMock()
+    orch.emitter = MagicMock()
+    orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-fix"})
+    orch._update_workflow = MagicMock()
+    orch._accumulate_tokens = MagicMock()
+    orch._abort_on_repo_integrity_violation = MagicMock(return_value=False)
+    orch._is_context_overflow = MagicMock(return_value=False)
+    orch._validate_autonomous_change_scope = MagicMock(return_value="")
+    orch._clean_agent_text = MagicMock(return_value="review feedback")
+    orch._record_trusted_head = MagicMock()
+    # _artifact_text reads result.response_text by default (per-test overrides
+    # rebind it when a side_effect is needed).
+    orch._artifact_text = MagicMock(side_effect=lambda r: getattr(r, "response_text", "") or "")
+    return orch
+
+
+def _make_fix_gh(*, commits_advance=True):
+    """A clean-worktree gh. After the agent runs, the branch HEAD must advance
+    for the success path to reach push; otherwise the salvage branch fires."""
+    gh = MagicMock()
+    gh.has_uncommitted_changes.return_value = False
+    if commits_advance:
+        gh.get_current_commit.side_effect = ["sha-before", "sha-after"]
+    else:
+        gh.get_current_commit.return_value = "sha-before"
+    gh.get_current_branch.return_value = "auto-dev/wf-2550"
+    gh.get_commit_diff_stats.return_value = {"files": 1, "additions": 3, "deletions": 1}
+    gh.git_push = MagicMock()
+    return gh
+
+
+def _fix_wf():
+    return {
+        "workflow_id": "wf-2550",
+        "worktree_path": "/tmp/repo",
+        "project_path": "/tmp/repo",
+        "cli_tool": "claude-code",
+        "dev_round": 1,
+        "branch_name": "auto-dev/wf-2550",
+    }
+
+
+@pytest.mark.regression
+@pytest.mark.issue(2550)
+def test_review_fix_empty_main_retries_fresh_and_succeeds():
+    """#2550: when the fix agent (session_line='main') returns success but EMPTY
+    artifact text — a transient resume no-op — _apply_pr_review_fix retries ONCE
+    with a fresh session (session_line='fresh'). If the retry returns non-empty
+    text, the fix does NOT fail: it proceeds to commit/push (here HEAD advanced,
+    so the success path runs). Mirrors the #2570 summary-agent backstop."""
+    orch = _make_fix_orchestrator()
+    empty_main = AgentTaskResult(success=True, response_text="")
+    fresh_ok = AgentTaskResult(success=True, response_text="B1 fixed: added validation.")
+    orch._run_agent_with_context_recovery = MagicMock(side_effect=[empty_main, fresh_ok])
+    gh = _make_fix_gh(commits_advance=True)
+
+    succeeded = orch._apply_pr_review_fix(_fix_wf(), gh, "B1 must be fixed", 1, 1, [], 2578)
+
+    # The fix did NOT fail — the fresh retry's non-empty result carried through.
+    assert succeeded is not False, "fresh retry should recover the empty main run"
+    # The agent ran twice: main (empty) + fresh (non-empty).
+    assert orch._run_agent_with_context_recovery.call_count == 2
+    # The retry (2nd call) must use a fresh session line.
+    second_kwargs = orch._run_agent_with_context_recovery.call_args_list[1].kwargs
+    assert second_kwargs.get("session_line") == "fresh"
+    # The retry must reuse the SAME fix_prompt (not a different/blank prompt).
+    first_kwargs = orch._run_agent_with_context_recovery.call_args_list[0].kwargs
+    assert second_kwargs.get("prompt") == first_kwargs.get("prompt")
+    # Workflow was NOT terminal-failed by the no-result path.
+    failed = [
+        call.args[0].get("status")
+        for call in orch._update_workflow.call_args_list
+        if call.args and isinstance(call.args[0], dict)
+    ]
+    assert "failed" not in failed, "fresh retry must not terminal-fail the workflow"
+
+
+@pytest.mark.regression
+@pytest.mark.issue(2550)
+def test_review_fix_empty_after_fresh_retry_still_fails_closed():
+    """#2550 fail-closed: if BOTH the main fix run and the fresh retry return
+    empty text, the existing 'PR review fix agent returned no result' failure
+    is preserved (fail-closed unchanged). Mirrors the #2570 summary backstop."""
+    orch = _make_fix_orchestrator()
+    empty_main = AgentTaskResult(success=True, response_text="")
+    empty_fresh = AgentTaskResult(success=True, response_text="   ")
+    orch._run_agent_with_context_recovery = MagicMock(side_effect=[empty_main, empty_fresh])
+    gh = _make_fix_gh()
+
+    succeeded = orch._apply_pr_review_fix(_fix_wf(), gh, "B1 must be fixed", 1, 1, [], 2578)
+
+    # fail-closed: returned False and workflow marked failed with no-result msg.
+    assert succeeded is False
+    assert orch._run_agent_with_context_recovery.call_count == 2
+    milestone_update = orch.repo.update_milestone.call_args.args[1]
+    assert milestone_update["status"] == "failed"
+    assert "returned no result" in milestone_update["error_message"]
+    workflow_update = orch._update_workflow.call_args.args[0]
+    assert workflow_update["status"] == "failed"
+    # Nothing staged/pushed.
+    gh.git_add_all.assert_not_called()
+    gh.git_push.assert_not_called()
+
+
+@pytest.mark.regression
+@pytest.mark.issue(2550)
+def test_review_fix_genuine_failure_does_not_trigger_fresh_retry():
+    """#2550 scope guard: the fresh-retry backstop is reserved for a
+    SUCCEEDED-but-empty run. A genuine failure (success=False) takes the
+    existing failure path — the agent runs exactly ONCE (no fresh retry)."""
+    orch = _make_fix_orchestrator()
+    failed = AgentTaskResult(success=False, error="agent process exited 1")
+    orch._run_agent_with_context_recovery = MagicMock(return_value=failed)
+    gh = _make_fix_gh()
+
+    succeeded = orch._apply_pr_review_fix(_fix_wf(), gh, "B1 must be fixed", 1, 1, [], 2578)
+
+    assert succeeded is False
+    # No fresh retry: only the one failed run.
+    assert orch._run_agent_with_context_recovery.call_count == 1
+    milestone_update = orch.repo.update_milestone.call_args.args[1]
+    assert "agent failed" in milestone_update["error_message"]
