@@ -1091,7 +1091,9 @@ class RemoteAgentManager:
             # Check if temporarily valid (within timeout window)
             is_temporarily_valid = row.get("is_temporarily_valid")
             if is_postgresql():
-                is_temporarily_valid = bool(is_temporarily_valid) if is_temporarily_valid is not None else False
+                is_temporarily_valid = (
+                    bool(is_temporarily_valid) if is_temporarily_valid is not None else False
+                )
             else:
                 is_temporarily_valid = bool(is_temporarily_valid)
 
@@ -1104,7 +1106,7 @@ class RemoteAgentManager:
 
     def rotate_agent_token(
         self, machine_id: str, rotated_by: int | None = None, immediate: bool = False
-    ) -> dict[str, str | bool | int] | None:
+    ) -> dict[str, str | bool | int | None] | None:
         """Rotate the agent token for a machine.
 
         Issue #2499: Supports two modes:
@@ -1286,16 +1288,20 @@ class RemoteAgentManager:
                 )
                 row = cursor.fetchone()
                 if row and row.get("token_revoke_timeout"):
-                    timeout = row["token_revoke_timeout"]
+                    timeout = int(row["token_revoke_timeout"])
                     # Clamp to valid range
                     return max(MIN_TOKEN_REVOKE_TIMEOUT, min(timeout, MAX_TOKEN_REVOKE_TIMEOUT))
         except Exception as e:
             logger.warning("Failed to get token_revoke_timeout for %s: %s", machine_id[:8], e)
 
         # Fall back to environment variable or default
-        return max(MIN_TOKEN_REVOKE_TIMEOUT, min(DEFAULT_TOKEN_REVOKE_TIMEOUT, MAX_TOKEN_REVOKE_TIMEOUT))
+        return max(
+            MIN_TOKEN_REVOKE_TIMEOUT, min(DEFAULT_TOKEN_REVOKE_TIMEOUT, MAX_TOKEN_REVOKE_TIMEOUT)
+        )
 
-    def _create_agent_token_with_rotation(self, machine_id: str, rotation_id: str, token_version: int) -> str:
+    def _create_agent_token_with_rotation(
+        self, machine_id: str, rotation_id: str, token_version: int
+    ) -> str:
         """Generate and store a new agent token with rotation_id and version.
 
         Issue #2499: Associates token with rotation operation.
@@ -1359,9 +1365,7 @@ class RemoteAgentManager:
         # Verify HMAC signature
         message = f"{rotation_id}:{timestamp}"
         expected_signature = hmac.new(
-            new_token.encode(),
-            message.encode(),
-            hashlib.sha256
+            new_token.encode(), message.encode(), hashlib.sha256
         ).hexdigest()
 
         if not hmac.compare_digest(signature, expected_signature):

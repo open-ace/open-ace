@@ -811,7 +811,6 @@ class RemoteAgent:
         """
         new_token = data.get("new_token")
         rotation_id = data.get("rotation_id")
-        timeout = data.get("timeout", 300)
         token_version = data.get("token_version")
 
         if not new_token or len(new_token) < 16:
@@ -882,11 +881,7 @@ class RemoteAgent:
         """
         timestamp = int(time.time())
         message = f"{rotation_id}:{timestamp}"
-        signature = hmac.new(
-            new_token.encode(),
-            message.encode(),
-            hashlib.sha256
-        ).hexdigest()
+        signature = hmac.new(new_token.encode(), message.encode(), hashlib.sha256).hexdigest()
 
         # Retry logic: 1s, 2s, 4s (exponential backoff)
         max_retries = 3
@@ -927,7 +922,7 @@ class RemoteAgent:
                 )
 
             if attempt < max_retries - 1:
-                sleep_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                sleep_time = 2**attempt  # Exponential backoff: 1s, 2s, 4s
                 logger.info("Retrying confirmation in %d seconds...", sleep_time)
                 time.sleep(sleep_time)
 
@@ -1131,7 +1126,9 @@ class RemoteAgent:
         except Exception as e:
             logger.warning("Failed to sync token version from server: %s", e)
 
-    def _http_send(self, data: dict[str, Any], headers: dict[str, str] | None = None) -> dict | None:
+    def _http_send(
+        self, data: dict[str, Any], headers: dict[str, str] | None = None
+    ) -> dict | None:
         """Send HTTP message to server with optional custom headers.
 
         Issue #2499: Extracted for reuse by confirmation mechanism.
@@ -1161,7 +1158,9 @@ class RemoteAgent:
             if response.status_code == 200:
                 return response.json()
             else:
-                logger.warning("HTTP send failed with status %d: %s", response.status_code, response.text[:200])
+                logger.warning(
+                    "HTTP send failed with status %d: %s", response.status_code, response.text[:200]
+                )
                 return None
         except Exception as e:
             logger.warning("HTTP send error: %s", e)

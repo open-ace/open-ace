@@ -13,14 +13,14 @@ This migration adds support for delayed token revocation:
 
 Also adds agent version tracking and configurable timeout.
 """
-from alembic import op
+
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects.postgresql import TIMESTAMP
-from datetime import datetime, timezone
 
 # revision identifiers, used by Alembic.
 revision = "20260811_001"
-down_revision = "20260810_001_enforce_admin_role_migration"
+down_revision = "20260812_001"
 branch_labels = None
 depends_on = None
 
@@ -39,33 +39,33 @@ def upgrade() -> None:
             batch_op.add_column(
                 sa.Column("pending_revoke", sa.Boolean(), nullable=False, server_default="false")
             )
-            batch_op.add_column(
-                sa.Column("revoke_after", TIMESTAMP(), nullable=True)
-            )
-            batch_op.add_column(
-                sa.Column("rotation_id", sa.String(36), nullable=True)
-            )
+            batch_op.add_column(sa.Column("revoke_after", TIMESTAMP(), nullable=True))
+            batch_op.add_column(sa.Column("rotation_id", sa.String(36), nullable=True))
 
         # Create unique index for active tokens (partial index)
-        op.execute("""
+        op.execute(
+            """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_tokens_one_active_per_machine
             ON agent_tokens (machine_id)
             WHERE is_revoked = False AND pending_revoke = False
-        """)
+        """
+        )
 
         # Create index for timeout cleanup (partial index)
-        op.execute("""
+        op.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_agent_tokens_pending_revoke_timeout
             ON agent_tokens (revoke_after)
             WHERE pending_revoke = True AND is_revoked = False
-        """)
+        """
+        )
 
         # Create index for authentication queries
         op.create_index(
             "idx_agent_tokens_machine_pending",
             "agent_tokens",
             ["machine_id", "pending_revoke", "revoke_after"],
-            unique=False
+            unique=False,
         )
 
     else:
@@ -74,35 +74,27 @@ def upgrade() -> None:
             batch_op.add_column(
                 sa.Column("pending_revoke", sa.Integer(), nullable=False, server_default="0")
             )
-            batch_op.add_column(
-                sa.Column("revoke_after", sa.Text(), nullable=True)
-            )
-            batch_op.add_column(
-                sa.Column("rotation_id", sa.Text(), nullable=True)
-            )
+            batch_op.add_column(sa.Column("revoke_after", sa.Text(), nullable=True))
+            batch_op.add_column(sa.Column("rotation_id", sa.Text(), nullable=True))
 
         # SQLite doesn't support partial indexes, create regular indexes
         op.create_index(
             "idx_agent_tokens_machine_pending",
             "agent_tokens",
             ["machine_id", "pending_revoke", "revoke_after"],
-            unique=False
+            unique=False,
         )
 
     # Add fields to remote_machines table
     if dialect == "postgresql":
         with op.batch_alter_table("remote_machines", schema=None) as batch_op:
-            batch_op.add_column(
-                sa.Column("agent_version", sa.String(32), nullable=True)
-            )
+            batch_op.add_column(sa.Column("agent_version", sa.String(32), nullable=True))
             batch_op.add_column(
                 sa.Column("token_revoke_timeout", sa.Integer(), nullable=True, server_default="300")
             )
     else:
         with op.batch_alter_table("remote_machines", schema=None) as batch_op:
-            batch_op.add_column(
-                sa.Column("agent_version", sa.Text(), nullable=True)
-            )
+            batch_op.add_column(sa.Column("agent_version", sa.Text(), nullable=True))
             batch_op.add_column(
                 sa.Column("token_revoke_timeout", sa.Integer(), nullable=True, server_default="300")
             )

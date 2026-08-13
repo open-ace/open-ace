@@ -6,13 +6,14 @@ This scheduler runs every 60 seconds and force-revokes tokens that have
 exceeded their revoke_after timeout, ensuring old tokens don't remain
 valid indefinitely.
 """
+
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
 
-from app.services.distributed_scheduler import DistributedScheduler
 from app.repositories.database import adapt_boolean_value, is_postgresql
+from app.services.distributed_scheduler import DistributedScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,8 @@ class PendingRevokeCleanupScheduler(DistributedScheduler):
                     adapt_boolean_value(True),
                     now.isoformat(),
                     adapt_boolean_value(False),
-                ] + token_ids,
+                ]
+                + token_ids,
             )
 
             affected = cursor.rowcount
@@ -116,9 +118,9 @@ class PendingRevokeCleanupScheduler(DistributedScheduler):
             token_row: Database row containing token info.
         """
         try:
-            from app.modules.governance.audit_logger import AuditAction, audit_logger
+            from app.modules.governance.audit_logger import AuditAction, AuditLogger
 
-            audit_logger.log_action(
+            AuditLogger().log_action(
                 AuditAction.AGENT_TOKEN_FORCE_REVOKED,
                 severity="warning",
                 resource_type="agent_token",
@@ -152,6 +154,7 @@ def start_pending_revoke_cleanup(db):
 
     def run_loop():
         import time
+
         while True:
             try:
                 scheduler.run_with_lock(scheduler._run_job)
@@ -160,6 +163,7 @@ def start_pending_revoke_cleanup(db):
             time.sleep(60)  # Run every 60 seconds
 
     import threading
+
     thread = threading.Thread(target=run_loop, daemon=True)
     thread.start()
     logger.info("Pending revoke cleanup scheduler started")

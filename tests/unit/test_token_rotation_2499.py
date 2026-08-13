@@ -7,6 +7,7 @@ Tests for:
 - confirm_token_rotation with signature verification
 - Atomic config writes in agent
 """
+
 import hashlib
 import hmac
 import json
@@ -24,6 +25,8 @@ import pytest
 # Add remote-agent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "remote-agent"))
 
+from app.modules.workspace.agent_token import generate_agent_token, hash_token
+
 # Test fixtures
 from app.modules.workspace.remote_agent_manager import (
     DEFAULT_TOKEN_REVOKE_TIMEOUT,
@@ -31,7 +34,6 @@ from app.modules.workspace.remote_agent_manager import (
     MIN_TOKEN_REVOKE_TIMEOUT,
     RemoteAgentManager,
 )
-from app.modules.workspace.agent_token import generate_agent_token, hash_token
 
 
 class TestTokenRotation:
@@ -59,10 +61,12 @@ class TestTokenRotation:
     def manager(self, mock_db):
         """Create RemoteAgentManager instance for testing."""
         # Skip initialization that requires database
-        with patch.object(RemoteAgentManager, '_restore_in_memory_state'):
-            with patch.object(RemoteAgentManager, '_start_heartbeat_monitor'):
-                with patch.object(RemoteAgentManager, '_start_retention_cleanup'):
-                    with patch('app.modules.workspace.remote_agent_manager.Database', return_value=mock_db):
+        with patch.object(RemoteAgentManager, "_restore_in_memory_state"):
+            with patch.object(RemoteAgentManager, "_start_heartbeat_monitor"):
+                with patch.object(RemoteAgentManager, "_start_retention_cleanup"):
+                    with patch(
+                        "app.modules.workspace.remote_agent_manager.Database", return_value=mock_db
+                    ):
                         manager = RemoteAgentManager()
         return manager
 
@@ -77,9 +81,7 @@ class TestTokenRotation:
 
         # Execute immediate rotation
         result = manager.rotate_agent_token(
-            machine_id=machine_id,
-            rotated_by=rotated_by,
-            immediate=True
+            machine_id=machine_id, rotated_by=rotated_by, immediate=True
         )
 
         # Verify result
@@ -100,9 +102,7 @@ class TestTokenRotation:
 
         # Execute delayed rotation
         result = manager.rotate_agent_token(
-            machine_id=machine_id,
-            rotated_by=rotated_by,
-            immediate=False
+            machine_id=machine_id, rotated_by=rotated_by, immediate=False
         )
 
         # Verify result
@@ -192,10 +192,12 @@ class TestConfirmTokenRotation:
     @pytest.fixture
     def manager(self, mock_db):
         """Create RemoteAgentManager instance for testing."""
-        with patch.object(RemoteAgentManager, '_restore_in_memory_state'):
-            with patch.object(RemoteAgentManager, '_start_heartbeat_monitor'):
-                with patch.object(RemoteAgentManager, '_start_retention_cleanup'):
-                    with patch('app.modules.workspace.remote_agent_manager.Database', return_value=mock_db):
+        with patch.object(RemoteAgentManager, "_restore_in_memory_state"):
+            with patch.object(RemoteAgentManager, "_start_heartbeat_monitor"):
+                with patch.object(RemoteAgentManager, "_start_retention_cleanup"):
+                    with patch(
+                        "app.modules.workspace.remote_agent_manager.Database", return_value=mock_db
+                    ):
                         manager = RemoteAgentManager()
         return manager
 
@@ -208,11 +210,7 @@ class TestConfirmTokenRotation:
 
         # Generate valid signature
         message = f"{rotation_id}:{timestamp}"
-        signature = hmac.new(
-            new_token.encode(),
-            message.encode(),
-            hashlib.sha256
-        ).hexdigest()
+        signature = hmac.new(new_token.encode(), message.encode(), hashlib.sha256).hexdigest()
 
         # Mock database
         mock_db._mock_cursor.fetchone.return_value = {"id": 1, "machine_id": machine_id}
@@ -223,7 +221,7 @@ class TestConfirmTokenRotation:
             rotation_id=rotation_id,
             signature=signature,
             timestamp=timestamp,
-            new_token=new_token
+            new_token=new_token,
         )
 
         # Verify success
@@ -245,7 +243,7 @@ class TestConfirmTokenRotation:
             rotation_id=rotation_id,
             signature=signature,
             timestamp=timestamp,
-            new_token=new_token
+            new_token=new_token,
         )
 
         # Verify failure
@@ -261,11 +259,7 @@ class TestConfirmTokenRotation:
 
         # Generate signature
         message = f"{rotation_id}:{timestamp}"
-        signature = hmac.new(
-            new_token.encode(),
-            message.encode(),
-            hashlib.sha256
-        ).hexdigest()
+        signature = hmac.new(new_token.encode(), message.encode(), hashlib.sha256).hexdigest()
 
         # Confirm rotation
         result = manager.confirm_token_rotation(
@@ -273,7 +267,7 @@ class TestConfirmTokenRotation:
             rotation_id=rotation_id,
             signature=signature,
             timestamp=timestamp,
-            new_token=new_token
+            new_token=new_token,
         )
 
         # Verify failure
@@ -288,11 +282,7 @@ class TestConfirmTokenRotation:
 
         # Generate signature
         message = f"{rotation_id}:{timestamp}"
-        signature = hmac.new(
-            new_token.encode(),
-            message.encode(),
-            hashlib.sha256
-        ).hexdigest()
+        signature = hmac.new(new_token.encode(), message.encode(), hashlib.sha256).hexdigest()
 
         # Mock database to return None (already processed)
         mock_db._mock_cursor.fetchone.return_value = None
@@ -303,7 +293,7 @@ class TestConfirmTokenRotation:
             rotation_id=rotation_id,
             signature=signature,
             timestamp=timestamp,
-            new_token=new_token
+            new_token=new_token,
         )
 
         # Verify success (idempotent)
@@ -334,17 +324,18 @@ class TestValidateAgentToken:
     @pytest.fixture
     def manager(self, mock_db):
         """Create RemoteAgentManager instance for testing."""
-        with patch.object(RemoteAgentManager, '_restore_in_memory_state'):
-            with patch.object(RemoteAgentManager, '_start_heartbeat_monitor'):
-                with patch.object(RemoteAgentManager, '_start_retention_cleanup'):
-                    with patch('app.modules.workspace.remote_agent_manager.Database', return_value=mock_db):
+        with patch.object(RemoteAgentManager, "_restore_in_memory_state"):
+            with patch.object(RemoteAgentManager, "_start_heartbeat_monitor"):
+                with patch.object(RemoteAgentManager, "_start_retention_cleanup"):
+                    with patch(
+                        "app.modules.workspace.remote_agent_manager.Database", return_value=mock_db
+                    ):
                         manager = RemoteAgentManager()
         return manager
 
     def test_validate_normal_token(self, manager, mock_db):
         """Test validation of normal (non-pending) token."""
         token = generate_agent_token()
-        token_hash = hash_token(token)
         machine_id = str(uuid.uuid4())
 
         # Mock database
@@ -354,7 +345,7 @@ class TestValidateAgentToken:
             "is_revoked": False,
             "pending_revoke": False,
             "revoke_after": None,
-            "is_temporarily_valid": False
+            "is_temporarily_valid": False,
         }
 
         # Validate token
@@ -375,7 +366,7 @@ class TestValidateAgentToken:
             "is_revoked": False,
             "pending_revoke": True,
             "revoke_after": datetime.now(timezone.utc) + timedelta(minutes=5),
-            "is_temporarily_valid": True
+            "is_temporarily_valid": True,
         }
 
         # Validate token
@@ -396,7 +387,7 @@ class TestValidateAgentToken:
             "is_revoked": False,
             "pending_revoke": True,
             "revoke_after": datetime.now(timezone.utc) - timedelta(minutes=1),
-            "is_temporarily_valid": False
+            "is_temporarily_valid": False,
         }
 
         # Validate token
@@ -417,7 +408,7 @@ class TestValidateAgentToken:
             "is_revoked": True,
             "pending_revoke": False,
             "revoke_after": None,
-            "is_temporarily_valid": False
+            "is_temporarily_valid": False,
         }
 
         # Validate token
