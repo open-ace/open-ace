@@ -201,7 +201,11 @@ class TestLoggingLevels:
             cf.check_content("This contains system_test")
 
         # Should have INFO log, not WARNING
-        assert any("System rule matched" in record.message for record in caplog.records if record.levelno == logging.INFO)
+        assert any(
+            "System rule matched" in record.message
+            for record in caplog.records
+            if record.levelno == logging.INFO
+        )
 
     def test_user_rule_logged_at_warning(self, governance_repo_sqlite, caplog):
         """User rule matches should be logged at WARNING level."""
@@ -222,7 +226,11 @@ class TestLoggingLevels:
             cf.check_content("This contains user_test")
 
         # Should have WARNING log
-        assert any("User rule matched" in record.message for record in caplog.records if record.levelno == logging.WARNING)
+        assert any(
+            "User rule matched" in record.message
+            for record in caplog.records
+            if record.levelno == logging.WARNING
+        )
 
     def test_blocked_content_logged_at_error(self, governance_repo_sqlite, caplog):
         """Blocked content should be logged at ERROR level."""
@@ -244,7 +252,11 @@ class TestLoggingLevels:
 
         # Should be blocked and logged at ERROR
         assert result.passed is False
-        assert any("Content blocked" in record.message for record in caplog.records if record.levelno == logging.ERROR)
+        assert any(
+            "Content blocked" in record.message
+            for record in caplog.records
+            if record.levelno == logging.ERROR
+        )
 
 
 class TestBackwardCompatibility:

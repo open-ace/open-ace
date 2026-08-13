@@ -56,21 +56,17 @@ def identify_test_rules(conn) -> list[dict]:
     cur = conn.cursor()
 
     # Rules with category='test'
-    cur.execute(
-        """
+    cur.execute("""
         SELECT * FROM content_filter_rules
         WHERE category = 'test' OR description LIKE '%test%' OR description LIKE '%测试%'
-        """
-    )
+        """)
     test_rules = cur.fetchall()
 
     # Also find rules with empty descriptions or patterns that look like test data
-    cur.execute(
-        """
+    cur.execute("""
         SELECT * FROM content_filter_rules
         WHERE description IS NULL OR description = '' OR pattern LIKE '%test_keyword%'
-        """
-    )
+        """)
     additional_rules = cur.fetchall()
 
     # Combine and dedupe by id

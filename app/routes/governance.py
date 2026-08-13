@@ -372,7 +372,9 @@ def api_check_content():
         except Exception as e:
             logger.warning(f"Failed to fetch tenant config for tenant {tenant_id}: {e}")
 
-    result = _get_content_filter(tenant_id=tenant_id).check_content(content, tenant_config=tenant_config)
+    result = _get_content_filter(tenant_id=tenant_id).check_content(
+        content, tenant_config=tenant_config
+    )
 
     # Log if blocked
     if not result.passed:
@@ -533,7 +535,12 @@ def api_create_filter_rule():
             resource_type="filter_rule",
             resource_id=str(rule_id),
             resource_name=pattern,
-            details={"action": "create", "pattern": pattern, "type": rule_type, "category": category},
+            details={
+                "action": "create",
+                "pattern": pattern,
+                "type": rule_type,
+                "category": category,
+            },
             **client_info,
         )
 

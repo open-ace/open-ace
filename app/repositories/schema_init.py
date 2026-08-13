@@ -331,7 +331,11 @@ def _backfill_missing_columns(conn, dialect: str) -> None:
             ("category", "VARCHAR(50)", "'custom'"),
             ("status", "VARCHAR(20)", "'active'"),
             ("approved_by", "INTEGER", None),
-            ("approved_at", "TIMESTAMP" if not is_postgres else "timestamp without time zone", None),
+            (
+                "approved_at",
+                "TIMESTAMP" if not is_postgres else "timestamp without time zone",
+                None,
+            ),
             ("created_by", "INTEGER", None),
             ("metadata", "TEXT" if not is_postgres else "JSON", None),
             ("urgency_reason", "TEXT", None),

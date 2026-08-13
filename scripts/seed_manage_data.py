@@ -315,12 +315,22 @@ def seed_filter_rules(conn):
         ),
     ]
 
-    for desc, rule_type, pattern, severity, action, enabled, source, tenant_id, category, metadata in rules:
-            # Check if new columns exist (for forward compatibility)
-            try:
-                cur.execute(
-                    adapt_sql(
-                        f"""
+    for (
+        desc,
+        rule_type,
+        pattern,
+        severity,
+        action,
+        enabled,
+        source,
+        tenant_id,
+        category,
+        metadata,
+    ) in rules:
+        # Check if new columns exist (for forward compatibility)
+        try:
+            cur.execute(
+                adapt_sql(f"""
                     INSERT INTO content_filter_rules
                     (pattern, type, severity, action, is_enabled, description,
                      source, tenant_id, category, status, metadata,
@@ -328,45 +338,42 @@ def seed_filter_rules(conn):
                     VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph},
                             {ph}, {ph}, {ph}, {ph}, {ph},
                             {ph}, {ph})
-                """
-                    ),
-                    (
-                        pattern,
-                        rule_type,
-                        severity,
-                        action,
-                        enabled,
-                        desc,
-                        source,
-                        tenant_id,
-                        category,
-                        "active",  # status
-                        metadata,
-                        datetime.utcnow(),
-                        datetime.utcnow(),
-                    ),
-                )
-            except Exception:
-                # Fallback: old schema without new columns
-                cur.execute(
-                    adapt_sql(
-                        f"""
+                """),
+                (
+                    pattern,
+                    rule_type,
+                    severity,
+                    action,
+                    enabled,
+                    desc,
+                    source,
+                    tenant_id,
+                    category,
+                    "active",  # status
+                    metadata,
+                    datetime.utcnow(),
+                    datetime.utcnow(),
+                ),
+            )
+        except Exception:
+            # Fallback: old schema without new columns
+            cur.execute(
+                adapt_sql(f"""
                     INSERT INTO content_filter_rules
                     (pattern, type, severity, action, is_enabled, description, created_at, updated_at)
                     VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})
-                """
-                    ),
-                    (
-                        pattern,
-                        rule_type,
-                        severity,
-                        action,
-                        enabled,
-                        desc,
-                        datetime.utcnow(),
-                        datetime.utcnow(),
-                    ),
-                )
+                """),
+                (
+                    pattern,
+                    rule_type,
+                    severity,
+                    action,
+                    enabled,
+                    desc,
+                    datetime.utcnow(),
+                    datetime.utcnow(),
+                ),
+            )
 
     conn.commit()
     print(f"  Inserted {len(rules)} filter rules")

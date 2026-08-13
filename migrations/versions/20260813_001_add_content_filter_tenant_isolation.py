@@ -139,8 +139,7 @@ def upgrade() -> None:
 
         if is_postgresql:
             conn.execute(
-                sa.text(
-                    """
+                sa.text("""
                     UPDATE content_filter_rules
                     SET source = 'system',
                         tenant_id = NULL,
@@ -149,14 +148,12 @@ def upgrade() -> None:
                         metadata = CAST(:metadata AS json)
                     WHERE pattern = :pattern
                       AND (source IS NULL OR source = 'user')
-                    """
-                ),
+                    """),
                 {"category": category, "metadata": metadata_json, "pattern": pattern},
             )
         else:
             conn.execute(
-                sa.text(
-                    """
+                sa.text("""
                     UPDATE content_filter_rules
                     SET source = 'system',
                         tenant_id = NULL,
@@ -165,8 +162,7 @@ def upgrade() -> None:
                         metadata = :metadata
                     WHERE pattern = :pattern
                       AND (source IS NULL OR source = 'user')
-                    """
-                ),
+                    """),
                 {"category": category, "metadata": metadata_json, "pattern": pattern},
             )
 
@@ -220,9 +216,7 @@ def upgrade() -> None:
     # Step 5: Add check constraint for status
     # ========================================================================
     if is_postgresql:
-        conn.execute(
-            sa.text(
-                """
+        conn.execute(sa.text("""
                 DO $$
                 BEGIN
                     IF NOT EXISTS (
@@ -233,9 +227,7 @@ def upgrade() -> None:
                         CHECK (status IN ('pending', 'approved', 'active', 'rejected', 'disabled'));
                     END IF;
                 END $$;
-                """
-            )
-        )
+                """))
 
     # ========================================================================
     # Step 6: Create filter_rule_approvals table
@@ -287,9 +279,7 @@ def downgrade() -> None:
 
     # Drop check constraint for PostgreSQL
     if is_postgresql:
-        conn.execute(
-            sa.text(
-                """
+        conn.execute(sa.text("""
                 DO $$
                 BEGIN
                     IF EXISTS (
@@ -298,9 +288,7 @@ def downgrade() -> None:
                         ALTER TABLE content_filter_rules DROP CONSTRAINT chk_status_valid;
                     END IF;
                 END $$;
-                """
-            )
-        )
+                """))
 
     # Drop indexes
     indexes = _index_names(inspector, "content_filter_rules")
