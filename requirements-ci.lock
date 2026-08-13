@@ -20,7 +20,7 @@ bandit==1.9.4
     # via -r requirements-ci.in
 bcrypt==5.0.0
     # via -r requirements.txt
-black==26.5.1
+black==25.1.0
     # via -r requirements-ci.in
 blinker==1.9.0
     # via flask
@@ -237,8 +237,6 @@ pytest-xdist==3.8.0
     # via -r requirements-ci.in
 python-discovery==1.5.1
     # via virtualenv
-pytokens==0.4.1
-    # via black
 pyyaml==6.0.3
     # via
     #   -r requirements.txt
