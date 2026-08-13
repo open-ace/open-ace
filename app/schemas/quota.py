@@ -10,6 +10,10 @@ Provides validation and limits for quota values to ensure:
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING:
+    from app.repositories.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +27,15 @@ MAX_REQUEST_QUOTA = 2147483647
 
 # Minimum quota value
 MIN_QUOTA = 0
+
+
+class QuotaAllocationResult(TypedDict):
+    """Type definition for tenant allocation validation result."""
+
+    is_valid: bool
+    error: str
+    available: dict[str, int]
+    is_unlimited_tenant: bool
 
 
 def validate_token_quota(value: int | None, quota_name: str = "token_quota") -> tuple[bool, str]:
@@ -172,8 +185,8 @@ def validate_tenant_allocation(
     new_monthly_token_quota: int | None = None,
     new_daily_request_quota: int | None = None,
     new_monthly_request_quota: int | None = None,
-    db: "Database | None" = None,
-) -> dict:
+    db: Database | None = None,
+) -> QuotaAllocationResult:
     """
     Validate tenant quota allocation to ensure user quotas don't exceed tenant limits.
 
@@ -196,19 +209,15 @@ def validate_tenant_allocation(
             - available: Dict with remaining available quota values
             - is_unlimited_tenant: bool - Whether tenant has unlimited quota
     """
-    from typing import TYPE_CHECKING
-
-    if TYPE_CHECKING:
-        from app.repositories.database import Database
-
+    # Import Database at runtime to avoid circular imports
     if db is None:
-        from app.repositories.database import Database
+        from app.repositories.database import Database as DatabaseClass
 
-        db = Database()
+        db = DatabaseClass()
 
-    result = {
+    result: QuotaAllocationResult = {
         "is_valid": True,
-        "error": None,
+        "error": "",
         "available": {
             "daily_token": 0,
             "monthly_token": 0,

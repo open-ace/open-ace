@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Quota Health Check Script
 
@@ -23,7 +22,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.repositories.database import Database
 from app.repositories.tenant_repo import TenantRepository
 from app.repositories.user_repo import UserRepository
-
 
 TOKEN_QUOTA_MULTIPLIER = 1_000_000
 
@@ -79,21 +77,37 @@ def check_tenant_quota_health(tenant_id: int, db: Database) -> dict:
     is_over_allocated = False
     over_by = {}
 
-    if tenant_quota.daily_token_limit and allocated_daily_tokens_actual > tenant_quota.daily_token_limit:
+    if (
+        tenant_quota.daily_token_limit
+        and allocated_daily_tokens_actual > tenant_quota.daily_token_limit
+    ):
         is_over_allocated = True
         over_by["daily_token"] = allocated_daily_tokens_actual - tenant_quota.daily_token_limit
 
-    if tenant_quota.monthly_token_limit and allocated_monthly_tokens_actual > tenant_quota.monthly_token_limit:
+    if (
+        tenant_quota.monthly_token_limit
+        and allocated_monthly_tokens_actual > tenant_quota.monthly_token_limit
+    ):
         is_over_allocated = True
-        over_by["monthly_token"] = allocated_monthly_tokens_actual - tenant_quota.monthly_token_limit
+        over_by["monthly_token"] = (
+            allocated_monthly_tokens_actual - tenant_quota.monthly_token_limit
+        )
 
-    if tenant_quota.daily_request_limit and allocated["daily_request"] > tenant_quota.daily_request_limit:
+    if (
+        tenant_quota.daily_request_limit
+        and allocated["daily_request"] > tenant_quota.daily_request_limit
+    ):
         is_over_allocated = True
         over_by["daily_request"] = allocated["daily_request"] - tenant_quota.daily_request_limit
 
-    if tenant_quota.monthly_request_limit and allocated["monthly_request"] > tenant_quota.monthly_request_limit:
+    if (
+        tenant_quota.monthly_request_limit
+        and allocated["monthly_request"] > tenant_quota.monthly_request_limit
+    ):
         is_over_allocated = True
-        over_by["monthly_request"] = allocated["monthly_request"] - tenant_quota.monthly_request_limit
+        over_by["monthly_request"] = (
+            allocated["monthly_request"] - tenant_quota.monthly_request_limit
+        )
 
     result = {
         "tenant_id": tenant_id,
@@ -176,7 +190,9 @@ def print_health_report(result: dict, json_output: bool = False) -> None:
     print(f"  Daily Request:  {format_quota_value(result['limit']['daily_request'])}")
     print(f"  Monthly Request: {format_quota_value(result['limit']['monthly_request'])}")
 
-    print(f"\nUsers: {result['user_count']['active']} active / {result['user_count']['total']} total (max: {result['user_count']['max']})")
+    print(
+        f"\nUsers: {result['user_count']['active']} active / {result['user_count']['total']} total (max: {result['user_count']['max']})"
+    )
 
     if result["status"] == "over_allocated" and result.get("over_by"):
         print("\n⚠️  OVER-ALLOCATED:")

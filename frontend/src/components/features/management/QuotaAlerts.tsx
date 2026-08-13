@@ -556,9 +556,7 @@ export const QuotaAlerts: React.FC = () => {
                             {language === 'zh' ? '接近上限' : 'Near Limit'}
                           </Badge>
                         ) : (
-                          <Badge variant="success">
-                            {language === 'zh' ? '正常' : 'OK'}
-                          </Badge>
+                          <Badge variant="success">{language === 'zh' ? '正常' : 'OK'}</Badge>
                         )}
                       </div>
                       <div className="row g-2 small">
@@ -589,7 +587,9 @@ export const QuotaAlerts: React.FC = () => {
                           <span
                             className={cn(
                               'ms-2',
-                              quotaStats.remaining.daily_token < 0 ? 'text-danger fw-bold' : 'text-success'
+                              quotaStats.remaining.daily_token < 0
+                                ? 'text-danger fw-bold'
+                                : 'text-success'
                             )}
                           >
                             {quotaStats.remaining.daily_token < 0
