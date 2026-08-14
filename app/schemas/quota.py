@@ -13,7 +13,7 @@ import logging
 from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
-    from app.repositories.database import Database
+    from app.repositories.database import Database, adapt_boolean_condition
 else:
     from app.repositories.database import adapt_boolean_condition
 
