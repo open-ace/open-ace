@@ -122,15 +122,17 @@ class TestMachineCommandsContract:
         linux_status = "bash ~/.open-ace-agent/start-agent.sh --status"
 
         # Windows commands use PowerShell
-        # windows_start command format verified in test_command_format_consistency
-        windows_stop = "powershell -ExecutionPolicy Bypass -File ~/.open-ace-agent/start-agent.ps1 -Stop"
-        windows_status = "powershell -ExecutionPolicy Bypass -File ~/.open-ace-agent/start-agent.ps1 -Status"
+        # Issue #2565: Windows path uses $env:USERPROFILE instead of ~
+        windows_stop = "powershell -ExecutionPolicy Bypass -File $env:USERPROFILE\\.open-ace-agent\\start-agent.ps1 -Stop"
+        windows_status = "powershell -ExecutionPolicy Bypass -File $env:USERPROFILE\\.open-ace-agent\\start-agent.ps1 -Status"
 
         # Verify command structure
         assert "--stop" in linux_stop, "Linux stop command should have --stop flag"
         assert "--status" in linux_status, "Linux status command should have --status flag"
         assert "-Stop" in windows_stop, "Windows stop command should have -Stop flag"
         assert "-Status" in windows_status, "Windows status command should have -Status flag"
+        # Verify Windows path format
+        assert "$env:USERPROFILE" in windows_stop, "Windows command should use $env:USERPROFILE"
 
     def test_install_directory_consistency(self):
         """Verify install directory path is consistent."""
