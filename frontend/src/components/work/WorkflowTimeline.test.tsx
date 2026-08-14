@@ -7,7 +7,7 @@
 
 import { fireEvent, render, screen, within } from '@/test/utils';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { WorkflowTimeline } from './WorkflowTimeline';
+import { WorkflowTimeline, formatAcceptanceReport } from './WorkflowTimeline';
 import type { AutonomousWorkflow } from '@/api/autonomous';
 
 const { mockResumeWithFeedbackMutate, mockAcceptanceOverrideMutate, pendingMutation } = vi.hoisted(
@@ -144,22 +144,18 @@ describe('WorkflowTimeline paused-state banner (#2634)', () => {
     expect(screen.queryByRole('button', { name: /resume with feedback/i })).not.toBeInTheDocument();
   });
 
-  it('shows resume-with-feedback only for rejected acceptance, not indeterminate', () => {
-    const rejected = renderTimeline(pausedWorkflow({ verification_status: 'rejected' }));
-    // The banner button's accessible name is the help text (title -> aria-label).
-    expect(screen.getByRole('button', { name: /new development round/i })).toBeInTheDocument();
-    rejected.unmount();
-
-    // indeterminate keeps the acceptance-override button instead (#2335 S6)
-    renderTimeline(pausedWorkflow({ verification_status: 'indeterminate' }));
-    expect(
-      screen.queryByRole('button', { name: /new development round/i })
-    ).not.toBeInTheDocument();
-    // Override button: accessible name is its descriptive title (verifier could
-    // not reach a verdict → confirm acceptance and close the issue).
-    expect(
-      screen.getByRole('button', { name: /confirm acceptance and close the issue/i })
-    ).toBeInTheDocument();
+  it('#2658 shows BOTH exits (override + resume-with-feedback) for rejected AND indeterminate acceptance pauses', () => {
+    for (const status of ['rejected', 'indeterminate'] as const) {
+      const view = renderTimeline(pausedWorkflow({ verification_status: status }));
+      // The banner button's accessible name is the help text (title -> aria-label).
+      expect(screen.getByRole('button', { name: /new development round/i })).toBeInTheDocument();
+      // Override button: accessible name is its descriptive title (reworded for
+      // #2658 — covers rejected-overturn and indeterminate alike).
+      expect(
+        screen.getByRole('button', { name: /accept the delivered result/i })
+      ).toBeInTheDocument();
+      view.unmount();
+    }
   });
 
   it('opens the feedback modal, blocks empty submit, and submits valid feedback', () => {
@@ -205,5 +201,45 @@ describe('WorkflowTimeline paused-state banner (#2634)', () => {
 
     expect(mockResumeWithFeedbackMutate).toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('formatAcceptanceReport (#2658)', () => {
+  it('renders per-item verdicts, rationale and evidence refs from metadata JSON', () => {
+    const report = {
+      merge_sha: 'abc123',
+      status: 'rejected',
+      verified_by: 'glm-5',
+      scope: [{ item: 'src/app.py', verdict: 'confirmed', evidence: [] }],
+      gates: [],
+      verifier: [
+        {
+          item: '修复登录失败',
+          verdict: 'rejected',
+          evidence: [{ ref: 'tests/test_login.py:12', note: '用例仍然失败' }],
+          rationale: '合并后用例依旧失败',
+        },
+      ],
+    };
+    const out = formatAcceptanceReport(JSON.stringify(report));
+    expect(out).toContain('❌ rejected');
+    expect(out).toContain('Merge SHA: abc123');
+    expect(out).toContain('── Scope ──');
+    expect(out).toContain('✅ src/app.py');
+    expect(out).toContain('❌ 修复登录失败 — 合并后用例依旧失败');
+    expect(out).toContain('↳ tests/test_login.py:12 (用例仍然失败)');
+    // Empty sections are skipped (gates omitted above).
+    expect(out).not.toContain('── Gates ──');
+  });
+
+  it('falls back to raw metadata when the JSON is malformed', () => {
+    expect(formatAcceptanceReport('not-json{')).toBe('not-json{');
+  });
+
+  it('omits optional fields gracefully', () => {
+    const out = formatAcceptanceReport(JSON.stringify({ status: 'indeterminate' }));
+    expect(out).toContain('⚠️ indeterminate');
+    expect(out).not.toContain('Merge SHA');
+    expect(out).not.toContain('Infra error');
   });
 });

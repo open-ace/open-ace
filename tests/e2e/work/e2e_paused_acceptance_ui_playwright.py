@@ -16,9 +16,13 @@ repository, mirroring tests/e2e/e2e_acceptance_override_playwright.py):
      submitting feedback calls POST /resume-with-feedback (payload asserted)
      and the workflow leaves "paused" (status becomes "waiting" — real
      backend transition, no route mocking).
-  3. Indeterminate workflow (verification_status=indeterminate): the
-     "Accept (override)" button is present and the resume-with-feedback
-     button is absent.
+  3. Indeterminate workflow (verification_status=indeterminate): BOTH exits
+     render — the "Accept (override)" button and the "Resume with Feedback"
+     button (#2658 unified gating; previously indeterminate had no resume
+     entry).
+  4. Rejected workflow timeline (#2658): the "View acceptance report" button
+     opens the generic content viewer with the per-item verdicts and evidence
+     refs parsed from the acceptance milestone's metadata JSON.
 
 Seeding: five workflow rows are inserted via AutonomousWorkflowRepository —
 an acceptance-paused (rejected) workflow paused >3 days ago, a quota-paused
@@ -149,6 +153,47 @@ def seed_workflow(
     return workflow_id
 
 
+def seed_acceptance_milestone(workflow_id: str, status: str) -> None:
+    """#2658: attach an acceptance milestone whose metadata carries the full
+    verification report JSON — the report viewer renders from this column."""
+    import json as _json
+
+    os.environ.setdefault("SCHEDULER_MODE", "web")
+    from app import create_app
+    from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+    report = {
+        "merge_sha": "abc123def456",
+        "status": status,
+        "verified_by": "glm-5/e2e",
+        "scope": [{"item": "src/app.py", "verdict": "confirmed", "evidence": []}],
+        "gates": [],
+        "verifier": [
+            {
+                "item": "修复登录失败",
+                "verdict": "rejected",
+                "evidence": [{"ref": "tests/test_login.py:12", "note": "用例仍然失败"}],
+                "rationale": "合并后用例依旧失败",
+            }
+        ],
+    }
+    app = create_app()
+    repo = AutonomousWorkflowRepository()
+    with app.app_context():
+        repo.create_milestone(
+            {
+                "workflow_id": workflow_id,
+                "phase": "acceptance_verification",
+                "round_number": 1,
+                "milestone_type": "acceptance_verification",
+                "status": status,
+                "title": f"Acceptance verification: {status}",
+                "result_summary": f"status={status}; not-verified: 修复登录失败",
+                "metadata": _json.dumps(report, ensure_ascii=False),
+            }
+        )
+
+
 def cleanup_previous_runs() -> None:
     """Delete workflows left by previous runs of this test (idempotent re-runs)."""
     from app import create_app
@@ -181,6 +226,7 @@ def main() -> None:
         title="E2E paused-acceptance UI #2634",
         paused_days_ago=4,
     )
+    seed_acceptance_milestone(accepted_id, "rejected")
     quota_id = seed_workflow(
         title="E2E quota-paused UI #2634",
         current_phase="developing",
@@ -317,7 +363,7 @@ def main() -> None:
             ), f"feedback not persisted: {row.get('user_feedback')!r}"
             print("[PASS] workflow left paused (status=waiting, feedback persisted)")
 
-            # ── 3. Indeterminate workflow: override present, resume absent ──
+            # ── 3. Indeterminate workflow: BOTH exits (#2658) ────────────
             page.goto(
                 f"{BASE_URL}/work/autonomous?workflow={indeterminate_id}",
                 wait_until="domcontentloaded",
@@ -327,11 +373,35 @@ def main() -> None:
             expect(
                 page.locator(".timeline-state-banner").get_by_text("Accept (override)")
             ).to_be_visible()
-            expect(page.locator(".timeline-state-banner")).not_to_contain_text(
-                "Resume with Feedback"
-            )
+            # #2658: indeterminate now also offers resume-with-feedback (was
+            # override-only before the unified gating).
+            expect(
+                page.locator(".timeline-state-banner").get_by_text(
+                    "Resume with Feedback", exact=True
+                )
+            ).to_be_visible()
             shot(page, "05-indeterminate")
-            print("[PASS] indeterminate workflow keeps override button, no resume-with-feedback")
+            print("[PASS] indeterminate workflow shows override + resume-with-feedback")
+
+            # ── 4. Rejected workflow: full report viewer (#2658) ──────────
+            page.goto(
+                f"{BASE_URL}/work/autonomous?workflow={accepted_id}",
+                wait_until="domcontentloaded",
+            )
+            pause(2)
+            report_btn = page.get_by_role("button", name="View acceptance report")
+            expect(report_btn).to_be_visible(timeout=30000)
+            report_btn.click()
+            pause(0.5)
+            # The generic content viewer shows the per-item verdicts and
+            # evidence refs parsed from the milestone's metadata JSON. Scope
+            # to the dialog — the milestone card's summary line repeats the
+            # item name outside the modal (strict-mode collision).
+            viewer = page.get_by_role("dialog")
+            expect(viewer.get_by_text("修复登录失败")).to_be_visible()
+            expect(viewer.get_by_text("tests/test_login.py:12")).to_be_visible()
+            shot(page, "06-report-viewer")
+            print("[PASS] acceptance report viewer renders per-item verdicts + evidence")
         finally:
             browser.close()
 

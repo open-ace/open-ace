@@ -1909,8 +1909,10 @@ export const translations: Record<Language, Translations> = {
       'This starts a NEW development round driven by your feedback. The workflow will merge again and re-run acceptance verification after the new merge.',
     autoAcceptanceOverrideTitle: 'Acceptance pending human review',
     autoAcceptanceOverrideDesc:
-      'The verifier could not reach a confident verdict. If you have reviewed the merged code, you can confirm acceptance and close the issue.',
+      'Accept the delivered result (confirmed by human review), close the issue and complete the workflow. Available to the workflow owner or an admin.',
     autoAcceptanceOverrideButton: 'Accept (override)',
+    autoViewAcceptanceReport: 'View acceptance report',
+    autoViewAcceptanceReportTitle: 'Acceptance verification report',
     autoAcceptanceOverrideConfirm:
       'Confirm acceptance on the merged code and close the issue? This action is recorded with your username.',
     autoAcceptanceOverrideReason: 'Reason (optional)',
@@ -3838,8 +3840,10 @@ export const translations: Record<Language, Translations> = {
       '这将根据你的反馈开启新一轮开发；工作流会重新合并代码并再次执行验收验证。',
     autoAcceptanceOverrideTitle: '验收待人工复核',
     autoAcceptanceOverrideDesc:
-      '验证器无法给出确定性结论。如果你已审查合并后的代码，可以确认验收并关闭 Issue。',
+      '人工确认验收通过并关闭 Issue、完成工作流。工作流所有者或管理员可操作；若验收器已拒绝，此操作将推翻该拒绝。',
     autoAcceptanceOverrideButton: '确认验收（覆盖）',
+    autoViewAcceptanceReport: '查看验收报告',
+    autoViewAcceptanceReportTitle: '验收报告',
     autoAcceptanceOverrideConfirm: '确认合并代码的验收并关闭 Issue？此操作会记录你的用户名。',
     autoAcceptanceOverrideReason: '原因（可选）',
     autoAcceptanceOverrideSuccess: '验收已确认，Issue 将被关闭。',
@@ -5539,8 +5543,10 @@ export const translations: Record<Language, Translations> = {
       'フィードバックに基づいて新しい開発ラウンドを開始します。ワークフローは再度マージし、その後承認確認を再実行します。',
     autoAcceptanceOverrideTitle: '承認確認が人間のレビューを待っています',
     autoAcceptanceOverrideDesc:
-      '検証エージェントが確定的な結論に達しませんでした。マージ済みコードを確認した場合、承認を確定して Issue をクローズできます。',
+      '人間の確認により受理し、Issue をクローズしてワークフローを完了します。ワークフロー所有者または管理者が操作できます。検証者が拒否した場合はその判定を覆します。',
     autoAcceptanceOverrideButton: '承認（オーバーライド）',
+    autoViewAcceptanceReport: '受け入れレポートを表示',
+    autoViewAcceptanceReportTitle: '受け入れ検証レポート',
     autoAcceptanceOverrideConfirm:
       'マージ済みコードの承認を確定し Issue をクローズしますか？この操作はユーザー名と共に記録されます。',
     autoAcceptanceOverrideReason: '理由（任意）',
@@ -7362,8 +7368,10 @@ export const translations: Record<Language, Translations> = {
       '피드백을 반영해 새로운 개발 라운드를 시작합니다. 워크플로는 다시 병합한 후 수락 확인을 재실행합니다.',
     autoAcceptanceOverrideTitle: '수락 확인이 사람 검토를 기다리는 중',
     autoAcceptanceOverrideDesc:
-      '검증 에이전트가 확정적인 결론에 도달하지 못했습니다. 병합된 코드를 검토했다면 수락을 확정하고 Issue를 닫을 수 있습니다.',
+      '사람의 확인으로 승인하고 Issue를 닫아 워크플로를 완료합니다. 워크플로 소유자 또는 관리자가 실행할 수 있습니다. 검증자가 거부한 경우 해당 판정을 뒤집습니다.',
     autoAcceptanceOverrideButton: '수락 (재정의)',
+    autoViewAcceptanceReport: '승인 리포트 보기',
+    autoViewAcceptanceReportTitle: '승인 검증 리포트',
     autoAcceptanceOverrideConfirm:
       '병합된 코드의 수락을 확정하고 Issue를 닫으시겠습니까? 이 작업은 사용자 이름과 함께 기록됩니다.',
     autoAcceptanceOverrideReason: '사유 (선택)',
