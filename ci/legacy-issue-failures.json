@@ -641,14 +641,6 @@
       "summary": "AssertionError: Login failed: {\"error\":\"Invalid username or password\"}"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "4",
-      "nodeid": "tests/issues/4/test_conversation_history_icon.py::test_conversation_history_icon",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
       "issue_number": "42",
@@ -1794,14 +1786,6 @@
     },
     {
       "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "79",
-      "nodeid": "tests/issues/79/test_role_filter.py::test_role_filter",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
       "exception_type": "Error",
       "issue_number": "80",
       "nodeid": "tests/issues/80/test_manage_language_dropdown.py::test_manage_language_dropdown",
@@ -1969,22 +1953,6 @@
       "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/login"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "98",
-      "nodeid": "tests/issues/98/test_data_update.py::test_data_update",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "98",
-      "nodeid": "tests/issues/98/test_refresh_detailed.py::test_messages_refresh_detailed",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
       "issue_number": "987",
@@ -2043,8 +2011,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-14 prune 15+5 resolved: async-def cluster — 15 revived with the pytest-asyncio marker alone (spike run 31700276891) plus 5 revived by port/env/fixture/dead-JS fixes (run 31764889447). Remaining 3 unmarked/known: 98/refresh_detailed + 79/role_filter + 4/conversation_history_icon have real UI-selector drift; 98/data_update requires PostgreSQL (issues lane is SQLite-only). Shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31764889447",
+    "prune_note": "2026-08-14 prune 4 residual async entries (#2631 follow-up): the last 4 'async def not natively supported' entries were real UI/lane drift, not missing markers. Fixed per 2457-residual-plan.md (independently reviewed CLEAN): 4/history-icon login used dead input[name=] selectors + wrong seeded password; 79/role_filter checkbox ids were removed and default selection became all-3-roles (rewrote as seeded regression via upload API); 98/refresh_detailed refresh button is now icon-only data-testid=manual-refresh-button and auto-refresh moved into a dropdown; 98/data_update dropped psycopg2/host-PG setup for the lane upload API + shared must_change_password pre-clear. Seeded admin must_change_password=1 was the common blocker (modal blocks clicks; /api/messages 403). Shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31780251110",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",

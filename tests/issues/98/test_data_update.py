@@ -2,213 +2,175 @@
 """
 Test for Issue #98: 刷新后数据没有变化
 
-测试内容：
-1. 获取当前消息列表
-2. 添加新消息到数据库
-3. 点击刷新按钮
-4. 检查新消息是否显示
+测试内容（对齐当前 issues lane：upload API seed + 临时端口 BASE_URL）：
+1. 登录并打开 /manage/messages
+2. 通过 /api/upload/messages（X-Upload-Auth）插入一条带唯一 marker 的今日消息
+3. 点击手动刷新按钮（React-Query invalidateQueries，无整页 reload）
+4. 断言新消息出现在列表里
 """
 
 import asyncio
-import json
 import os
+import sqlite3
+import uuid
 from datetime import datetime
 
-import psycopg2
-from playwright.async_api import async_playwright
+import pytest
+import requests
+from playwright.async_api import async_playwright, expect
 
-BASE_URL = "http://localhost:19888"
-
-
-def get_db_connection():
-    """Get database connection."""
-    config_path = os.path.expanduser("~/.open-ace/config.json")
-    with open(config_path) as f:
-        config = json.load(f)
-
-    db_config = config.get("database", {})
-    db_url = db_config.get("url")
-
-    if db_url and db_url.startswith("postgresql"):
-        conn = psycopg2.connect(db_url)
-        return conn
-    else:
-        raise ValueError("PostgreSQL database not configured")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
+SEED_TOOL_NAME = "issue98_data_update_test"
 
 
-def add_test_message():
-    """Add a test message to the database."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
+def _lane_db_path():
+    return os.path.expanduser("~/.open-ace/ace.db")
 
-    # Generate unique test message
-    timestamp = datetime.now().isoformat()
-    test_content = f"TEST MESSAGE - {timestamp}"
-    import uuid
 
-    message_id = str(uuid.uuid4())
+def _clear_admin_password_flag():
+    """Clear must_change_password on the seeded admin (issues-lane SQLite DB).
 
-    cursor.execute(
-        """
-        INSERT INTO daily_messages (
-            date, tool_name, host_name, sender_name, sender_id,
-            role, content, tokens_used, input_tokens, output_tokens,
-            timestamp, model, message_id
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        RETURNING id
-    """,
-        (
-            datetime.now().strftime("%Y-%m-%d"),
-            "test_tool",
-            "test_host",
-            "test_sender",
-            "test_sender_id",
-            "user",
-            test_content,
-            100,
-            50,
-            50,
-            timestamp,
-            "test-model",
-            message_id,
-        ),
+    Otherwise the forced password-change modal blocks every Playwright click
+    and /api/messages returns 403 password_change_required. Never complete the
+    modal — that would break sibling tests' admin/admin123 logins.
+    """
+    db_path = _lane_db_path()
+    if not os.path.exists(db_path):
+        return
+    conn = sqlite3.connect(db_path)
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+        if "must_change_password" not in cols:
+            return
+        conn.execute("UPDATE users SET must_change_password=0 WHERE username='admin'")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _cleanup_seeded_messages():
+    db_path = _lane_db_path()
+    if not os.path.exists(db_path):
+        return
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("DELETE FROM daily_messages WHERE tool_name = ?", (SEED_TOOL_NAME,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def upload_test_message():
+    """Insert one user-role message for today via the lane upload API.
+
+    Returns the unique content marker (also the visible message text).
+    """
+    upload_key = os.environ.get("UPLOAD_AUTH_KEY")
+    if not upload_key:
+        pytest.skip("UPLOAD_AUTH_KEY not set (no issues-lane server spawned)")
+
+    now = datetime.now()
+    marker = f"ISSUE98-TEST-MESSAGE-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "date": now.strftime("%Y-%m-%d"),
+        "tool_name": SEED_TOOL_NAME,
+        "messages": [
+            {
+                "message_id": str(uuid.uuid4()),
+                "role": "user",
+                "content": marker,
+                "tokens_used": 100,
+                "input_tokens": 50,
+                "output_tokens": 50,
+                "timestamp": now.isoformat(),
+                "sender_name": "issue98-seeder",
+            }
+        ],
+    }
+    resp = requests.post(
+        f"{BASE_URL}/api/upload/messages",
+        json=payload,
+        headers={"X-Upload-Auth": upload_key},
+        timeout=15,
     )
-
-    msg_id = cursor.fetchone()[0]
-    conn.commit()
-    conn.close()
-
-    print(f"  Added test message with ID: {msg_id}, content: {test_content[:50]}...")
-    return test_content
+    assert resp.status_code == 200, f"seed upload failed: {resp.status_code} {resp.text[:200]}"
+    assert resp.json().get("saved_count") == 1, f"unexpected seed result: {resp.text[:200]}"
+    return marker
 
 
-def delete_test_messages():
-    """Delete test messages from the database."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("DELETE FROM daily_messages WHERE tool_name = 'test_tool'")
-    deleted = cursor.rowcount
-
-    conn.commit()
-    conn.close()
-
-    print(f"  Deleted {deleted} test messages")
-    return deleted
-
-
+@pytest.mark.asyncio
 async def test_data_update():
-    """Test that refresh updates the data."""
+    """Test that refresh picks up newly inserted data."""
+    _clear_admin_password_flag()
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(viewport={"width": 1400, "height": 900}, locale="zh-CN")
         page = await context.new_page()
 
         try:
-            # Clean up any existing test messages
-            print("\n[Setup] Cleaning up test messages...")
-            delete_test_messages()
-
-            # Step 1: Navigate to login page
-            print("\n[Step 1] Navigating to login page...")
+            # Login and open the messages page.
+            print("[Step 1] Login and navigate to Messages page...")
             await page.goto(f"{BASE_URL}/login", wait_until="networkidle", timeout=30000)
-            await page.wait_for_timeout(1000)
-
-            # Step 2: Login
-            print("[Step 2] Logging in...")
             await page.fill("#username", "admin")
             await page.fill("#password", "admin123")
             await page.click('button[type="submit"]')
             await page.wait_for_url(lambda url: "/login" not in url, timeout=10000)
-            print("✓ Login successful")
 
-            # Step 3: Navigate to Messages page
-            print("\n[Step 3] Navigating to Messages page...")
             await page.goto(f"{BASE_URL}/manage/messages", wait_until="networkidle", timeout=30000)
-            await page.wait_for_timeout(2000)
-            print("✓ Messages page loaded")
-
-            # Step 4: Get current message count
-            print("\n[Step 4] Getting current message count...")
+            await page.wait_for_selector(".messages", timeout=15000)
 
             messages_before = await page.locator(".message-item").count()
-            print(f"  Messages visible before: {messages_before}")
+            print(f"[Step 2] Messages visible before: {messages_before}")
 
-            # Step 5: Add a test message
-            print("\n[Step 5] Adding test message to database...")
-            test_content = add_test_message()
+            # Insert the test message via the lane-compatible upload API.
+            print("[Step 3] Uploading test message via /api/upload/messages...")
+            marker = upload_test_message()
 
-            # Step 6: Click refresh button
-            print("\n[Step 6] Clicking refresh button...")
-            refresh_btn = page.locator('button:has-text("刷新"), button:has-text("Refresh")')
-            await refresh_btn.first.click()
-            await page.wait_for_timeout(3000)
-            print("✓ Refresh button clicked")
+            # Manual refresh (icon button; invalidates the React Query cache).
+            print("[Step 4] Clicking manual refresh button...")
+            refresh_btn = page.locator('[data-testid="manual-refresh-button"]')
+            await expect(refresh_btn).to_be_enabled(timeout=5000)
+            await refresh_btn.click()
 
-            # Step 7: Check if new message appears
-            print("\n[Step 7] Checking for new message...")
+            # The new message must appear without a page reload.
+            print("[Step 5] Verifying the new message appears...")
+            test_msg = page.locator(f'.message-item:has-text("{marker}")')
+            await expect(test_msg).to_have_count(1, timeout=15000)
+            print(f"  Test message visible: {marker}")
 
-            # Check if test message appears (search for partial content)
-            test_msg_locator = page.locator('.message-item:has-text("TEST MESSAGE")')
-            test_msg_count = await test_msg_locator.count()
-
-            if test_msg_count > 0:
-                print("  ✓ Test message found in UI!")
-            else:
-                print("  ✗ Test message NOT found in UI")
-
-                # Check current messages
-                messages_after = await page.locator(".message-item").count()
-                print(f"  Messages visible after: {messages_after}")
-
-                # Check API directly
-                print("\n  Checking API directly...")
-                api_response = await page.evaluate("""async () => {
-                    const response = await fetch('/api/messages?limit=100&role=user,assistant,system');
-                    const data = await response.json();
-                    return data;
-                }""")
-
-                if api_response and "messages" in api_response:
-                    print(f"  API returned {len(api_response['messages'])} messages")
-
-                    # Check if test message is in API response
-                    test_msg_in_api = any(
-                        msg.get("content", "").startswith("TEST MESSAGE")
-                        for msg in api_response["messages"]
-                    )
-                    print(f"  Test message in API response: {test_msg_in_api}")
-
-            # Take screenshot
-            await page.screenshot(
-                path="screenshots/issues/98/05_data_update_test.png", full_page=True
+            screenshot_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "screenshots",
+                "issues",
+                "98",
             )
-            print("  Screenshot saved: screenshots/issues/98/05_data_update_test.png")
+            os.makedirs(screenshot_dir, exist_ok=True)
+            await page.screenshot(
+                path=os.path.join(screenshot_dir, "05_data_update_test.png"), full_page=True
+            )
 
-            # Summary
-            print("\n" + "=" * 50)
-            print("Test Summary:")
-            print(f"  - Test message added: {test_content[:50]}...")
-            print(f"  - Test message found in UI: {test_msg_count > 0}")
-            print("=" * 50)
-
-        except Exception as e:
-            print(f"\n✗ Error: {e}")
+            print("\n✅ Data-update regression passed.")
+        except Exception:
             import traceback
 
             traceback.print_exc()
-            await page.screenshot(path="screenshots/issues/98/error_data_update.png")
-            print("  Error screenshot saved: screenshots/issues/98/error_data_update.png")
+            screenshot_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "screenshots",
+                "issues",
+                "98",
+                "error_data_update.png",
+            )
+            os.makedirs(os.path.dirname(screenshot_dir), exist_ok=True)
+            await page.screenshot(path=screenshot_dir)
+            raise
         finally:
-            # Clean up test messages
-            print("\n[Cleanup] Removing test messages...")
-            delete_test_messages()
-
+            # Cleanup must run even on failure: residual rows would perturb
+            # sibling tests in the same shard.
+            _cleanup_seeded_messages()
             await browser.close()
 
 
 if __name__ == "__main__":
-    import os
-
-    os.makedirs("screenshots/issues/98", exist_ok=True)
     asyncio.run(test_data_update())
