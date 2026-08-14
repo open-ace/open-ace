@@ -407,10 +407,32 @@ def _classify_admin_accounts(
 
     Returns:
         Dict with classification results.
+
+    Issue #2633: Added Step 0 to protect initial platform admins BEFORE Step 1,
+    ensuring that admins with id=1 or in whitelist are protected regardless of tenant_id.
     """
     results = {"tenant_admin_count": 0, "platform_admin_count": 0, "remaining_admin_count": 0}
 
-    # Step 1: Classify admin + tenant_id NOT NULL → tenant_admin
+    # Step 0 (Issue #2633): Protect initial platform admins FIRST
+    # This must execute BEFORE Step 1 to prevent misclassification when admin has tenant_id.
+    # The protection is based on id=1 or whitelist, NOT on tenant_id.
+    whitelist_condition, whitelist_params = _build_whitelist_condition(whitelist)
+    proven_condition = f"({whitelist_condition} OR id = 1)"
+
+    result = conn.execute(
+        sa.text(f"""
+            UPDATE users
+            SET role = 'platform_admin'
+            WHERE role = 'admin'
+              AND {proven_condition}
+        """),
+        whitelist_params,
+    )
+    results["platform_admin_count"] = result.rowcount
+    log.info(f"Protected {results['platform_admin_count']} initial platform admins")
+
+    # Step 1: Classify remaining admin + tenant_id NOT NULL → tenant_admin
+    # Note: Accounts with id=1 or in whitelist are already classified, so excluded.
     result = conn.execute(sa.text("""
             UPDATE users
             SET role = 'tenant_admin'
@@ -420,15 +442,11 @@ def _classify_admin_accounts(
     results["tenant_admin_count"] = result.rowcount
     log.info(f"Classified {results['tenant_admin_count']} accounts as tenant_admin")
 
-    # Step 2: Classify admin + tenant_id NULL + proven → platform_admin
-    # Build whitelist condition with parameterized query
+    # Step 2: Classify remaining admin + tenant_id NULL + proven → platform_admin (fallback)
+    # This handles edge cases where initial admin has no tenant_id but wasn't in whitelist.
+    # Accounts with id=1 are already handled by Step 0, so this is a no-op in most cases.
     whitelist_condition, whitelist_params = _build_whitelist_condition(whitelist)
-
-    # Heuristic: user.id = 1
-    heuristic_condition = "id = 1"
-
-    # Combine conditions
-    proven_condition = f"({whitelist_condition} OR {heuristic_condition})"
+    proven_condition = f"({whitelist_condition} OR id = 1)"
 
     result = conn.execute(
         sa.text(f"""
@@ -440,8 +458,9 @@ def _classify_admin_accounts(
         """),
         whitelist_params,
     )
-    results["platform_admin_count"] = result.rowcount
-    log.info(f"Classified {results['platform_admin_count']} accounts as platform_admin")
+    # Add to platform_admin_count (these are additional platform admins)
+    results["platform_admin_count"] += result.rowcount
+    log.info(f"Classified {result.rowcount} additional accounts as platform_admin")
 
     # Step 3: Check for remaining admin accounts (should be 0)
     result = conn.execute(sa.text("SELECT COUNT(*) FROM users WHERE role = 'admin'"))
