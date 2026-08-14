@@ -11,16 +11,17 @@ allowed_paths:
   # User endpoints
   - "user"
 
-  # Pull request comments
-  - "repos/*"
+  # Repository endpoints (owner/repo format)
   - "repos/*/*"
-  - "repos/*/pulls/*"
-  - "repos/*/pulls/*/comments"
-  - "repos/*/issues/*/comments"
+
+  # Pull request endpoints
+  - "repos/*/*/pulls/*"
+  - "repos/*/*/pulls/*/comments"
+  - "repos/*/*/pulls/*/reviews"
 
   # Issue endpoints
-  - "repos/*/issues/*"
-  - "repos/*/issues/*/comments"
+  - "repos/*/*/issues/*"
+  - "repos/*/*/issues/*/comments"
 
 forbidden_methods:
   - "DELETE"
