@@ -195,7 +195,12 @@ class TestMigrationClassification:
         return engine
 
     def test_classifies_tenant_admin(self, db_connection):
-        """Test classification of admin with tenant_id."""
+        """Test classification of admin with tenant_id.
+
+        Note: This test has a user with id=1 and tenant_id=1.
+        Due to Issue #2633 fix, id=1 is protected as platform_admin.
+        The test now verifies that a tenant admin (not id=1) is correctly classified.
+        """
         import importlib
 
         migration_module = importlib.import_module(
@@ -203,11 +208,11 @@ class TestMigrationClassification:
         )
 
         with db_connection.connect() as conn:
-            # Create tenant and admin
+            # Create tenant and admin (using id != 1 to test tenant_admin classification)
             conn.execute(sa.text("INSERT INTO tenants (id, name) VALUES (1, 'tenant1')"))
             conn.execute(
                 sa.text(
-                    "INSERT INTO users (id, username, role, tenant_id) VALUES (1, 'user1', 'admin', 1)"
+                    "INSERT INTO users (id, username, role, tenant_id) VALUES (2, 'user1', 'admin', 1)"
                 )
             )
             conn.commit()
@@ -220,7 +225,7 @@ class TestMigrationClassification:
             assert results["remaining_admin_count"] == 0
 
             # Verify role updated
-            result = conn.execute(sa.text("SELECT role FROM users WHERE id = 1"))
+            result = conn.execute(sa.text("SELECT role FROM users WHERE id = 2"))
             assert result.scalar() == "tenant_admin"
 
     def test_classifies_platform_admin_with_whitelist(self, db_connection):
@@ -295,6 +300,124 @@ class TestMigrationClassification:
             # Should raise RuntimeError
             with pytest.raises(RuntimeError, match="could not be classified"):
                 migration_module._classify_admin_accounts(conn, [])
+
+    def test_initial_admin_with_tenant_id_becomes_platform_admin(self, db_connection):
+        """Issue #2633: Initial admin (id=1) with tenant_id should become platform_admin.
+
+        This tests the fix for the bug where initial admin with tenant_id
+        was incorrectly classified as tenant_admin.
+        """
+        import importlib
+
+        migration_module = importlib.import_module(
+            "migrations.versions.20260810_001_enforce_admin_role_migration"
+        )
+
+        with db_connection.connect() as conn:
+            # Create tenant
+            conn.execute(sa.text("INSERT INTO tenants (id, name) VALUES (1, 'default')"))
+
+            # Create initial admin with tenant_id (the bug scenario)
+            conn.execute(
+                sa.text(
+                    "INSERT INTO users (id, username, role, tenant_id) VALUES (1, 'initial_admin', 'admin', 1)"
+                )
+            )
+            conn.commit()
+
+            # Classify without whitelist (using heuristic id=1)
+            results = migration_module._classify_admin_accounts(conn, [])
+
+            # Should be classified as platform_admin, NOT tenant_admin
+            assert results["platform_admin_count"] == 1
+            assert results["tenant_admin_count"] == 0
+            assert results["remaining_admin_count"] == 0
+
+            # Verify role is platform_admin
+            result = conn.execute(sa.text("SELECT role FROM users WHERE id = 1"))
+            assert result.scalar() == "platform_admin"
+
+    def test_initial_admin_with_tenant_id_and_whitelist(self, db_connection):
+        """Issue #2633: Whitelisted admin with tenant_id should become platform_admin."""
+        import importlib
+
+        migration_module = importlib.import_module(
+            "migrations.versions.20260810_001_enforce_admin_role_migration"
+        )
+
+        with db_connection.connect() as conn:
+            # Create tenant
+            conn.execute(sa.text("INSERT INTO tenants (id, name) VALUES (1, 'default')"))
+
+            # Create whitelisted admin with tenant_id
+            conn.execute(
+                sa.text(
+                    "INSERT INTO users (id, username, role, tenant_id) VALUES (2, 'whitelisted', 'admin', 1)"
+                )
+            )
+            conn.commit()
+
+            # Classify with whitelist
+            results = migration_module._classify_admin_accounts(conn, ["whitelisted"])
+
+            # Should be classified as platform_admin
+            assert results["platform_admin_count"] == 1
+            assert results["tenant_admin_count"] == 0
+
+            # Verify role
+            result = conn.execute(sa.text("SELECT role FROM users WHERE id = 2"))
+            assert result.scalar() == "platform_admin"
+
+    def test_multiple_admins_with_mixed_tenant_ids(self, db_connection):
+        """Issue #2633: Test multiple admins with mixed tenant_id scenarios."""
+        import importlib
+
+        migration_module = importlib.import_module(
+            "migrations.versions.20260810_001_enforce_admin_role_migration"
+        )
+
+        with db_connection.connect() as conn:
+            # Create tenant
+            conn.execute(sa.text("INSERT INTO tenants (id, name) VALUES (1, 'default')"))
+
+            # Initial admin with tenant_id (should be platform_admin via id=1 heuristic)
+            conn.execute(
+                sa.text(
+                    "INSERT INTO users (id, username, role, tenant_id) VALUES (1, 'initial', 'admin', 1)"
+                )
+            )
+            # Regular tenant admin with tenant_id
+            conn.execute(
+                sa.text(
+                    "INSERT INTO users (id, username, role, tenant_id) VALUES (2, 'tenant_admin', 'admin', 1)"
+                )
+            )
+            # Platform admin without tenant_id (needs whitelist)
+            conn.execute(
+                sa.text(
+                    "INSERT INTO users (id, username, role, tenant_id) VALUES (3, 'platform_only', 'admin', NULL)"
+                )
+            )
+            conn.commit()
+
+            # Classify with whitelist for platform_only
+            results = migration_module._classify_admin_accounts(conn, ["platform_only"])
+
+            # Initial admin (id=1) and platform_only (id=3) should be platform_admin
+            # tenant_admin (id=2) should be tenant_admin
+            assert results["platform_admin_count"] == 2
+            assert results["tenant_admin_count"] == 1
+            assert results["remaining_admin_count"] == 0
+
+            # Verify roles
+            result = conn.execute(sa.text("SELECT role FROM users WHERE id = 1"))
+            assert result.scalar() == "platform_admin"
+
+            result = conn.execute(sa.text("SELECT role FROM users WHERE id = 2"))
+            assert result.scalar() == "tenant_admin"
+
+            result = conn.execute(sa.text("SELECT role FROM users WHERE id = 3"))
+            assert result.scalar() == "platform_admin"
 
 
 class TestMigrationIdempotency:
