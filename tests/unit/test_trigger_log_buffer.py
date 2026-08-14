@@ -4,6 +4,7 @@ Unit tests for Trigger Log Buffer module.
 Tests for log buffering, batch writing, and reliability.
 """
 
+import atexit
 import threading
 from unittest.mock import MagicMock, Mock, patch
 
@@ -23,6 +24,12 @@ class TestTriggerLogBuffer:
         assert buffer.flush_interval == 1.0
         assert buffer._buffer.qsize() == 0
 
+        # Clean up atexit registration to avoid errors when test ends
+        try:
+            atexit.unregister(buffer.force_flush)
+        except (ValueError, KeyError):
+            pass
+
     def test_add_log_entry(self):
         """Test adding log entry to buffer."""
         buffer = TriggerLogBuffer()
@@ -38,6 +45,12 @@ class TestTriggerLogBuffer:
 
         assert buffer._buffer.qsize() == 1
         assert buffer._total_added == 1
+
+        # Clean up atexit registration to avoid errors when test ends
+        try:
+            atexit.unregister(buffer.force_flush)
+        except (ValueError, KeyError):
+            pass
 
     def test_trigger_flush_on_batch_size(self):
         """Test that flush is triggered when batch size is reached."""
@@ -59,6 +72,12 @@ class TestTriggerLogBuffer:
 
             # Should have triggered flush (write method called)
             assert mock_write.called or buffer._buffer.qsize() == 0
+
+        # Clean up atexit registration to avoid errors when test ends
+        try:
+            atexit.unregister(buffer.force_flush)
+        except (ValueError, KeyError):
+            pass
 
     def test_content_hash_computation(self):
         """Test content hash computation."""
@@ -92,6 +111,12 @@ class TestTriggerLogBuffer:
             # Should have attempted to write
             assert mock_write.called
 
+        # Clean up atexit registration to avoid errors when test ends
+        try:
+            atexit.unregister(buffer.force_flush)
+        except (ValueError, KeyError):
+            pass
+
     def test_flush_error_handling(self):
         """Test error handling during flush."""
         buffer = TriggerLogBuffer(batch_size=100)
@@ -106,6 +131,12 @@ class TestTriggerLogBuffer:
 
             # Should have recorded error
             assert buffer._flush_errors == 1
+
+        # Clean up atexit registration to avoid errors when test ends
+        try:
+            atexit.unregister(buffer.force_flush)
+        except (ValueError, KeyError):
+            pass
 
     def test_buffer_stats(self):
         """Test buffer statistics."""
