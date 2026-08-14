@@ -196,6 +196,11 @@ class PromptLibrary:
             CREATE INDEX IF NOT EXISTS idx_prompt_templates_public
             ON prompt_templates(is_public)
         """)
+        # Unique index on name makes seeding idempotent at the DB layer (#2577).
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_templates_name
+            ON prompt_templates(name)
+        """)
 
         conn.commit()
         conn.close()
@@ -554,13 +559,15 @@ class PromptLibrary:
             )
         else:
             # Only count public templates
-            cursor.execute(adapt_sql(f"""
+            cursor.execute(
+                adapt_sql(f"""
                     SELECT category, COUNT(*) as count
                     FROM prompt_templates
                     WHERE {adapt_boolean_condition("is_public", True)}
                     GROUP BY category
                     ORDER BY count DESC
-                """))
+                """)
+            )
 
         rows = cursor.fetchall()
         conn.close()
@@ -647,6 +654,24 @@ class PromptLibrary:
 
     def seed_default_templates(self) -> None:
         """Seed the library with default prompt templates."""
+        # Self-heal: de-duplicate by name and ensure the unique index exists so
+        # concurrent seeders cannot create duplicate rows (Issue #2577). Covers
+        # existing dev databases created before this index existed.
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            DELETE FROM prompt_templates
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM prompt_templates GROUP BY name
+            )
+            """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_templates_name
+            ON prompt_templates(name)
+            """)
+        conn.commit()
+        conn.close()
+
         default_templates = [
             PromptTemplate(
                 name="Code Review",
@@ -759,19 +784,69 @@ class PromptLibrary:
             ),
         ]
 
-        for template in default_templates:
-            # Check if template already exists
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                adapt_sql("SELECT id FROM prompt_templates WHERE name = ?"), (template.name,)
-            )
-            exists = cursor.fetchone()
-            conn.close()
+        # Atomic insert per dialect: ON CONFLICT (name) DO NOTHING (Postgres)
+        # or INSERT OR IGNORE (SQLite). Relies on idx_prompt_templates_name
+        # provided by migration 20260814_004 / schema.sql / _ensure_tables().
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
-            if not exists:
-                self.create_template(template)
-                logger.info(f"Seeded default template: {template.name}")
+        for template in default_templates:
+            variables_json = json.dumps(template.variables)
+            tags_json = json.dumps(template.tags)
+            if is_postgresql():
+                cursor.execute(
+                    """
+                    INSERT INTO prompt_templates
+                    (name, description, category, content, variables, tags, author_id,
+                     author_name, is_public, is_featured, use_count, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (name) DO NOTHING
+                    """,
+                    (
+                        template.name,
+                        template.description,
+                        template.category,
+                        template.content,
+                        variables_json,
+                        tags_json,
+                        template.author_id,
+                        template.author_name,
+                        template.is_public,
+                        template.is_featured,
+                        template.use_count,
+                        now,
+                        now,
+                    ),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT OR IGNORE INTO prompt_templates
+                    (name, description, category, content, variables, tags, author_id,
+                     author_name, is_public, is_featured, use_count, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        template.name,
+                        template.description,
+                        template.category,
+                        template.content,
+                        variables_json,
+                        tags_json,
+                        template.author_id,
+                        template.author_name,
+                        template.is_public,
+                        template.is_featured,
+                        template.use_count,
+                        now,
+                        now,
+                    ),
+                )
+            logger.info(f"Seeded default template: {template.name}")
+
+        conn.commit()
+        conn.close()
 
 
 # Module-level singleton

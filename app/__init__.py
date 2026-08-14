@@ -423,6 +423,17 @@ def create_app(config=None):
                         f"Schema compatibility BYPASSED for emergency: {result.bypass_reason}. "
                         f"Database may be incompatible."
                     )
+                    # Best-effort seed of default prompt templates. ON CONFLICT
+                    # (name) relies on migration 20260814_004's unique index; if
+                    # the DB is too far behind (index missing) this raises and is
+                    # swallowed, matching the degraded-but-allowed semantics of
+                    # the bypass branch.
+                    try:
+                        from app.modules.workspace.prompt_library import get_prompt_library
+
+                        get_prompt_library().seed_default_templates()
+                    except Exception as e:
+                        logger.warning("Failed to seed default prompt templates: %s", e)
                     # Return early - don't log "passed" message after bypass
                     return
                 else:
@@ -460,7 +471,7 @@ def create_app(config=None):
         ensure_all_tables()
         logger.info(f"Development schema bootstrap completed (mode={env_mode})")
 
-    # Deliberately AFTER the schema check above, which is the first thing that
+# Deliberately AFTER the schema check above, which is the first thing that
     # talks to the database. This query is only a diagnostic, and placing it
     # earlier would make a startup diagnostic the first blocking call -- on an
     # unreachable host (firewall DROP, no connect_timeout configured) it would
@@ -472,6 +483,17 @@ def create_app(config=None):
     from app.auth.permissions import warn_if_strict_mode_locks_out_legacy_admins
 
     warn_if_strict_mode_locks_out_legacy_admins()
+
+    # Seed default prompt templates (best-effort). The unique index on
+    # prompt_templates(name) is created by ensure_all_tables() / schema.sql /
+    # migration 20260814_004, so the ON CONFLICT / INSERT OR IGNORE seeding is
+    # idempotent and safe under concurrent workers (Issue #2577).
+    try:
+        from app.modules.workspace.prompt_library import get_prompt_library
+
+        get_prompt_library().seed_default_templates()
+    except Exception as e:
+        logger.warning("Failed to seed default prompt templates: %s", e) (fix: rebase onto latest main, rename migration to 20260814_004 (#2577))
 
     # Pre-check encryption key registry (Issue #1820, #2186)
     try:
@@ -675,9 +697,9 @@ def create_app(config=None):
 
                 if not is_test_context():
                     checks["security_mode"]["status"] = "not_explicit"
-                    checks["security_mode"][
-                        "reason"
-                    ] = f"Security mode must be explicitly set (current source: {source.value})"
+                    checks["security_mode"]["reason"] = (
+                        f"Security mode must be explicitly set (current source: {source.value})"
+                    )
                     status_code = 503
 
             # Check for pilot metadata in production mode

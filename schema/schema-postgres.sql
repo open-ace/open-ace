@@ -3337,6 +3337,8 @@ CREATE INDEX idx_prompt_templates_author ON prompt_templates USING btree (author
 
 CREATE INDEX idx_prompt_templates_category ON prompt_templates USING btree (category);
 
+CREATE UNIQUE INDEX idx_prompt_templates_name ON prompt_templates USING btree (name);
+
 
 --
 --
