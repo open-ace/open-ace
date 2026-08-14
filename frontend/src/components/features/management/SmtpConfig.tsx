@@ -23,7 +23,7 @@ import {
 } from '@/components/common';
 import { smtpConfigApi, type SMTPConfig, type EmailStatistics } from '@/api/smtpConfig';
 
-export const SmtpConfig: React.FC = () => {
+export const SmtpConfig: React.FC<{ compact?: boolean }> = ({ compact = false }) => {
   const language = useLanguage();
   const toast = useToast();
 
@@ -282,19 +282,21 @@ export const SmtpConfig: React.FC = () => {
 
   return (
     <div className="smtp-config">
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h2>{t('smtpConfiguration', language)}</h2>
-        {config && (
-          <Badge variant={config.is_verified ? 'success' : 'warning'}>
-            {config.is_verified ? t('verified', language) : t('notVerified', language)}
-          </Badge>
-        )}
-      </div>
+      {!compact && (
+        <div className="d-flex justify-content-between align-items-center mb-3">
+          <h2>{t('smtpConfiguration', language)}</h2>
+          {config && (
+            <Badge variant={config.is_verified ? 'success' : 'warning'}>
+              {config.is_verified ? t('verified', language) : t('notVerified', language)}
+            </Badge>
+          )}
+        </div>
+      )}
 
       {error && <Error message={error} onRetry={fetchConfig} />}
 
       {/* Existing config info */}
-      {config && (
+      {!compact && config && (
         <Card className="mb-3">
           <div className="d-flex align-items-center">
             <i className="bi bi-info-circle text-info me-2" />
@@ -483,30 +485,32 @@ export const SmtpConfig: React.FC = () => {
       )}
 
       {/* Help */}
-      <Card title={t('help', language)} className="mt-4">
-        <div className="alert alert-info">
-          <h6 className="alert-heading">{t('smtpSetupGuide', language)}</h6>
-          <ul className="mb-0">
-            <li>{t('smtpSetupGuide1', language)}</li>
-            <li>{t('smtpSetupGuide2', language)}</li>
-            <li>{t('smtpSetupGuide3', language)}</li>
-            <li>{t('smtpSetupGuide4', language)}</li>
-          </ul>
-          <hr className="my-2" />
-          <h6 className="alert-heading mb-2">{t('smtpPortGuide', language) || 'Port Guide'}</h6>
-          <ul className="mb-0">
-            <li>
-              <strong>25</strong>: {t('smtpHelpPort25', language)}
-            </li>
-            <li>
-              <strong>587</strong>: {t('smtpHelpPort587', language)}
-            </li>
-            <li>
-              <strong>465</strong>: {t('smtpHelpPort465', language)}
-            </li>
-          </ul>
-        </div>
-      </Card>
+      {!compact && (
+        <Card title={t('help', language)} className="mt-4">
+          <div className="alert alert-info">
+            <h6 className="alert-heading">{t('smtpSetupGuide', language)}</h6>
+            <ul className="mb-0">
+              <li>{t('smtpSetupGuide1', language)}</li>
+              <li>{t('smtpSetupGuide2', language)}</li>
+              <li>{t('smtpSetupGuide3', language)}</li>
+              <li>{t('smtpSetupGuide4', language)}</li>
+            </ul>
+            <hr className="my-2" />
+            <h6 className="alert-heading mb-2">{t('smtpPortGuide', language) || 'Port Guide'}</h6>
+            <ul className="mb-0">
+              <li>
+                <strong>25</strong>: {t('smtpHelpPort25', language)}
+              </li>
+              <li>
+                <strong>587</strong>: {t('smtpHelpPort587', language)}
+              </li>
+              <li>
+                <strong>465</strong>: {t('smtpHelpPort465', language)}
+              </li>
+            </ul>
+          </div>
+        </Card>
+      )}
     </div>
   );
 };
