@@ -10,6 +10,7 @@ Tests cover:
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -22,6 +23,19 @@ from unittest import mock
 
 import pytest
 
+# Import from implementation module to avoid code duplication
+scripts_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'scripts')
+git_wrapper_path = os.path.join(scripts_dir, 'openace-git.py')
+
+spec = importlib.util.spec_from_file_location("openace_git", git_wrapper_path)
+openace_git = importlib.util.module_from_spec(spec)
+sys.modules["openace_git"] = openace_git
+spec.loader.exec_module(openace_git)
+
+parse_git_arguments = openace_git.parse_git_arguments
+validate_c_arguments = openace_git.validate_c_arguments
+validate_path = openace_git.validate_path
+parse_version = openace_git.parse_version
 
 # ============================================================================
 # Exit Codes (must match openace-git.py)
@@ -36,145 +50,6 @@ EXIT_AUDIT_ERROR = 68
 EXIT_COMMAND_FAILED = 69
 EXIT_TIMEOUT = 70
 EXIT_VERSION_INCOMPATIBLE = 71
-
-
-# ============================================================================
-# Helper functions (copied from wrapper for testing)
-# These are direct copies to avoid module import issues in CI
-# ============================================================================
-
-# Known git global options and their argument counts
-KNOWN_GLOBAL_OPTS = {
-    "-c": 1,
-    "-C": 1,
-    "--git-dir": 1,
-    "--work-tree": 1,
-    "--bare": 0,
-    "--version": 0,
-    "--help": 0,
-}
-
-# Forbidden -c config prefixes (RCE vectors)
-FORBIDDEN_C_PREFIXES = ["alias.", "core.hooksPath"]
-ALLOWED_HOOKS_VALUES = ["", "/dev/null"]
-
-
-def parse_git_arguments(args: list[str]):
-    """Parse git arguments."""
-    global_opts = []
-    subcommand = ""
-    subcommand_args = []
-    c_args = []
-    i = 0
-
-    while i < len(args):
-        arg = args[i]
-
-        # Handle --name=value format
-        if "=" in arg:
-            name = arg.split("=", 1)[0]
-            if name in KNOWN_GLOBAL_OPTS or name.startswith("--"):
-                global_opts.append(arg)
-                if name == "-c" or name.startswith("-c"):
-                    if "=" in arg:
-                        c_args.append(arg.split("=", 1)[1])
-                i += 1
-                continue
-
-        # Handle known global options
-        if arg in KNOWN_GLOBAL_OPTS:
-            global_opts.append(arg)
-            num_args = KNOWN_GLOBAL_OPTS[arg]
-            for _ in range(num_args):
-                i += 1
-                if i < len(args):
-                    global_opts.append(args[i])
-                    if arg == "-c":
-                        c_args.append(args[i])
-            i += 1
-            continue
-
-        # Handle -c<key>=<value> format (no space)
-        if arg.startswith("-c") and len(arg) > 2:
-            global_opts.append(arg)
-            if "=" in arg:
-                c_args.append(arg[2:])
-            i += 1
-            continue
-
-        # First non-global option is the subcommand
-        if not subcommand:
-            subcommand = arg
-        else:
-            subcommand_args.append(arg)
-
-        i += 1
-
-    class Result:
-        pass
-
-    result = Result()
-    result.global_opts = global_opts
-    result.subcommand = subcommand
-    result.subcommand_args = subcommand_args
-    result.c_args = c_args
-    return result
-
-
-def validate_c_arguments(c_args: list[str]):
-    """Validate -c arguments for safety."""
-    for c_arg in c_args:
-        # Extract key and value
-        if "=" in c_arg:
-            key, value = c_arg.split("=", 1)
-        else:
-            continue
-
-        # Check for forbidden prefixes
-        for forbidden in FORBIDDEN_C_PREFIXES:
-            if key.startswith(forbidden):
-                # Special case: allow core.hooksPath=/dev/null
-                if key == "core.hooksPath" and value in ALLOWED_HOOKS_VALUES:
-                    continue
-                return False, f"Forbidden config key: {key}"
-
-    return True, ""
-
-
-def validate_path(path: str, allowed_prefixes: list[str]):
-    """Validate that path is under allowed prefixes."""
-    if not path:
-        return True, ""
-
-    # Resolve path
-    try:
-        import os
-        resolved = os.path.realpath(path)
-    except OSError:
-        return False, f"Cannot resolve path: {path}"
-
-    # Check against allowed prefixes
-    for prefix in allowed_prefixes:
-        if not prefix:
-            continue
-        import os
-        prefix_resolved = os.path.realpath(prefix)
-        if resolved.startswith(prefix_resolved + os.sep) or resolved == prefix_resolved:
-            return True, ""
-
-    return False, f"Path '{path}' is outside allowed directories"
-
-
-def parse_version(version_str: str):
-    """Parse version string into tuple of integers."""
-    import re
-    match = re.search(r"(\d+\.\d+\.\d+)", version_str)
-    if match:
-        version = match.group(1)
-        return tuple(int(x) for x in version.split("."))
-
-    parts = re.findall(r"\d+", version_str)
-    return tuple(int(x) for x in parts) if parts else (0, 0, 0)
 
 
 # ============================================================================
