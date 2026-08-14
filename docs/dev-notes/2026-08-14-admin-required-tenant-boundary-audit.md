@@ -30,6 +30,23 @@
 外加 `app/routes/admin.py` 里的 `reject_privilege_escalation()`，挡住租户管理员发放
 `platform_admin` / `admin` 角色。
 
+### 只查租户是不够的：还要查角色
+
+第一版只做了**横向**比对（租户 == 租户），独立评审把它打穿了：
+
+1. `api_create_user` 强制要求 `tenant_id`（缺了直接 400），所以**凡是从 admin API
+   建出来的 platform_admin 都必然挂在某个租户下**；
+2. schema 只约束 `tenant_admin` 必须有租户
+   （`chk_2332_tenant_admin_requires_tenant`），没有任何约束禁止 platform_admin
+   带租户；
+3. 于是把一个 platform_admin 归到租户 A，租户 A 的管理员就能重置它的密码并从响应里
+   读出来——**没有发放任何角色，所以 `reject_privilege_escalation` 完全不触发**。
+
+修法是补一条**纵向**判断：租户级管理员不得操作平台级账号，无论租户是否相同。
+判断走 `app/auth/permissions.py::is_platform_level_role`，它**刻意不受 strict mode
+影响**——如果用受 flag 影响的 `is_platform_admin_role`，一旦打开 strict mode，
+legacy `admin` 行就会突然失去保护，等于「开了更严的开关反而更不安全」。
+
 选装饰器叠加而不是逐个端点手写 if，是因为后者「忘记调用」就是静默失效——
 `mapping_rules.py` 那两个端点手写了同样的逻辑（#2180），能用但没有复用。
 
@@ -38,9 +55,13 @@
 
 ## 全量审计结果
 
-`app/routes/` 下共 **92** 个 `@admin_required` 端点：
+用 AST 枚举（不是正则，正则会漏），`app/routes/` 下共 **95** 个函数挂了
+`@admin_required`：其中 **92** 个是路由处理函数，另外 **3** 个是蓝图级
+`before_request` 守卫（`feishu_config.py:27`、`model_gateway.py:27`、
+`smtp_config.py:29` 的 `check_admin`）——对这三个，「按函数数」低估了覆盖面，
+一个钩子守的是整个蓝图的所有路由。
 
-| 文件 | 端点数 |
+| 文件 | 挂 `@admin_required` 的函数 |
 |---|---|
 | governance.py | 18 |
 | admin.py | 17 |
@@ -52,13 +73,21 @@
 | analytics.py | 4 |
 | ai_agent_settings.py | 3 |
 | fetch.py | 2 |
+| feishu_config.py | 1（before_request） |
+| model_gateway.py | 1（before_request） |
+| smtp_config.py | 1（before_request） |
 
 路径里带资源 id 的共 24 个，其中 19 个现在是租户感知的：
 
-- **本次修掉的 9 个用户端点**：admin.py 的 5 个（改/删/改密/重置密码/改配额）、
+- **本次加装饰器的 7 个**：admin.py 的 5 个（改/删/改密/重置密码/改配额）、
   compliance.py:452 用户行为画像、governance.py:240 用户活动
-- 已有自建校验的：mapping_rules.py 的 2 个（#2180 手写）、remote.py 的 3 个
-  （`_check_machine_tenant_access`）、sso.py 的 7 个（provider 按租户取）
+- **本次没动、原本就有自建校验的 2 个用户端点**：mapping_rules.py:84 与 :237
+  （#2180 手写的 `_validate_user_in_tenant`，读过，是有效的）
+- 其余非用户资源已有校验的：remote.py 的 3 个（`_check_machine_tenant_access`）、
+  sso.py 的 7 个（provider 按租户取）
+
+也就是说「9 个用户端点现在都受控」是对的，但其中只有 **7 个**是本次加的装饰器，
+另外 2 个是沿用既有的手写校验（重复实现，将来值得合并到同一个装饰器）。
 
 ### 剩余 5 个：有资源 id 且完全没有租户处理
 
@@ -76,6 +105,22 @@
 不是读数据。修法和本次一样：加一个按资源 id 查出 owner tenant 再比对的守卫；
 这几个资源不是 user，所以需要各自的 repo 查询，不能直接复用
 `same_tenant_user_required`。
+
+### 潜伏陷阱：`require_tenant_scope()` 把 tenant_admin 当全局管理员
+
+`app/models/user.py:24` 的 `ADMIN_ROLES` 里**包含 `tenant_admin`**，所以
+`resolve_tenant_scope()`（decorators.py:851）对租户管理员返回 `is_admin=True`，
+`require_tenant_scope()` 随之返回 `tenant_id=None`（全局作用域）。
+
+**目前不构成泄露**：三个调用点（`roi.py:129`、`usage.py:35`、`projects.py:98`）
+全都写成 `_, error = require_tenant_scope()`，**丢掉了返回的 tenant_id**，只把它当
+「无租户的普通用户一律拒」的闸门用；真正的查询作用域另外从 `g.user.tenant_id` /
+`get_current_tenant_id()` 取，那里租户管理员拿到的是自己的租户。
+
+但这是个上了膛的枪：三处的 docstring 都写着「Admins keep global scope」，作者指的是
+平台管理员，而 `is_admin_role` 把租户管理员也算了进去。**下一个照着签名用返回值的调用者
+就会给租户管理员全局作用域。** 要么收窄 `resolve_tenant_scope` 的 admin 判断，要么把
+返回值改成不可忽略的形状。
 
 ### 剩余 68 个不带资源 id 的端点
 

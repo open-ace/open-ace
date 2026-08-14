@@ -18,6 +18,7 @@ from app.auth.decorators import (
     resolve_admin_tenant_scope,
     same_tenant_user_required,
 )
+from app.auth.permissions import is_platform_level_role
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.usage_repo import UsageRepository
 from app.repositories.user_repo import UserRepository
@@ -47,20 +48,18 @@ def get_client_info():
     }
 
 
-# Roles a tenant-scoped admin must not be able to hand out. Granting these is
-# equivalent to escaping the tenant: the grantee (possibly the grantor's own
-# account) becomes a platform admin and can then reach every other tenant.
-PLATFORM_LEVEL_ROLES = ("platform_admin", "admin")
-
-
 def reject_privilege_escalation(role: object) -> tuple[Any, int] | None:
     """Deny a tenant-scoped admin assigning a platform-level role.
+
+    Granting one is equivalent to escaping the tenant: the grantee (possibly
+    the grantor's own account) becomes a platform admin and can then reach
+    every other tenant.
 
     Returns ``None`` when the assignment is allowed (no role given, an
     ordinary role, or the actor is a platform admin), otherwise the 403 the
     caller must return.
     """
-    if role is None or role not in PLATFORM_LEVEL_ROLES:
+    if role is None or not is_platform_level_role(cast("str | None", role)):
         return None
 
     actor_tenant_id, denial = resolve_admin_tenant_scope()
@@ -129,14 +128,11 @@ def api_create_user():
 
     # A tenant-scoped admin may only populate their own tenant, and may not
     # mint a platform-level account there.
+    # Also 400s an unusable tenant_id, so nothing unvalidated reaches the
+    # quota check or the INSERT.
     tenant_id, denial = enforce_requested_tenant_scope(tenant_id)
     if denial is not None:
         return denial
-    if tenant_id is None:
-        # The raw value was present but not a usable tenant id (non-numeric,
-        # zero, negative). Reject rather than fall through to an unscoped
-        # create.
-        return jsonify({"error": "Invalid tenant_id"}), 400
     escalation = reject_privilege_escalation(role)
     if escalation is not None:
         return escalation
@@ -233,8 +229,15 @@ def api_update_user(user_id):
     escalation = reject_privilege_escalation(data.get("role"))
     if escalation is not None:
         return escalation
+
+    # Use the value the scope guard returns, never the raw body value. A value
+    # the guard cannot normalize (0, -1, "", "abc") comes back as None, which
+    # enforce_requested_tenant_scope treats as "no tenant requested" and lets
+    # through -- so re-reading data["tenant_id"] afterwards would hand that
+    # unvalidated value to the quota check and the UPDATE.
+    new_tenant_id = None
     if data.get("tenant_id") is not None:
-        _, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+        new_tenant_id, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
         if denial is not None:
             return denial
 
@@ -247,7 +250,6 @@ def api_update_user(user_id):
         ensure_system_user(system_account, uid=uid)
 
     # Handle tenant_id change
-    new_tenant_id = data.get("tenant_id")
     if new_tenant_id is not None:
         from app.services.tenant_service import TenantService
 

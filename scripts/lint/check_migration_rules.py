@@ -375,6 +375,30 @@ def _git(args: list[str]) -> str | None:
     return result.stdout
 
 
+def _baseline_commit(ref: str) -> str | None:
+    """Resolve the commit whose revision ids this tree must still contain.
+
+    That is ``merge-base(ref, HEAD)`` -- the point this branch forked from --
+    NOT the tip of ``ref``. Using the tip makes every branch that simply lags
+    behind main fail: a migration merged to main after the fork is "missing"
+    from the branch, and the obvious way to silence that is to add its id to
+    RETIRED_REVISION_IDS, which is precisely the mistake this rule exists to
+    prevent.
+
+    The merge-base is still complete, not a weakening. A branch's diff is
+    computed from its fork point, so it cannot express the deletion of a file
+    that did not exist there; every id a branch is capable of removing is an
+    id present at the merge-base.
+
+    Falls back to ``ref`` when there is no common ancestor (unrelated
+    histories, or a synthetic tree with no HEAD).
+    """
+    merge_base = _git(["merge-base", ref, "HEAD"])
+    if merge_base and merge_base.strip():
+        return merge_base.strip()
+    return ref if _git(["rev-parse", "--verify", f"{ref}^{{commit}}"]) else None
+
+
 def _revision_ids_at_ref(ref: str) -> dict[str, str] | None:
     """Map revision id -> path for every migration on ``ref``.
 
@@ -401,8 +425,21 @@ def _revision_ids_at_ref(ref: str) -> dict[str, str] | None:
 def check_released_revision_ids(
     versions_dir: Path, baseline_ref: str = DEFAULT_BASELINE_REF
 ) -> list[Violation]:
-    """MIG003: every revision id on ``baseline_ref`` must still exist locally."""
-    baseline = _revision_ids_at_ref(baseline_ref)
+    """MIG003: every revision id this branch forked from must still exist.
+
+    The comparison point is ``merge-base(baseline_ref, HEAD)`` rather than the
+    tip of ``baseline_ref`` -- see :func:`_baseline_commit` for why the tip
+    produces false positives on any branch that lags behind.
+    """
+    commit = _baseline_commit(baseline_ref)
+    if commit is None:
+        print(
+            f"MIG003: skipped (cannot resolve a baseline commit for '{baseline_ref}').",
+            file=sys.stderr,
+        )
+        return []
+
+    baseline = _revision_ids_at_ref(commit)
     if baseline is None:
         print(
             f"MIG003: skipped (cannot read migrations from '{baseline_ref}').",

@@ -330,9 +330,16 @@ def create_app(config=None):
     # (Issue #2332). Resolving it lazily on the first role check would work too,
     # but doing it here is what makes the documented "cached at application
     # startup" contract true and puts the ENABLED/DISABLED line in the boot log.
-    from app.auth.permissions import init_platform_admin_strict_mode
+    from app.auth.permissions import (
+        init_platform_admin_strict_mode,
+        warn_if_strict_mode_locks_out_legacy_admins,
+    )
 
     init_platform_admin_strict_mode()
+    # The flag used to be inert, so operators may have set it long ago and seen
+    # nothing happen. Now that it works, say so loudly if turning it on is about
+    # to strip platform access from accounts that still use the legacy role.
+    warn_if_strict_mode_locks_out_legacy_admins()
 
     # Initialize Prometheus metrics (Issue #2186)
     # Only for web workers - scheduler has its own metrics server

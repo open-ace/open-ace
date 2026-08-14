@@ -1396,12 +1396,22 @@ def enforce_target_user_tenant(target_user: dict | None) -> tuple[Response, int]
 
     * Platform admin: always allowed; a cross-tenant target is audit-logged.
     * Tenant-scoped admin: allowed only when the target user carries the same
-      ``tenant_id``. A target with no tenant (platform-level accounts) is
-      denied -- fail closed rather than treating NULL as a wildcard.
+      ``tenant_id`` AND is not itself a platform-level account.
+
+      A target with ``tenant_id IS NULL`` is denied. NULL here does not mean
+      "platform-level" -- ``users.tenant_id`` is simply nullable and rows
+      predating the tenant model still have it unset (``api_update_user``
+      expects such rows to exist). Denying is a deliberate behavior change:
+      those users become unmanageable by tenant admins until someone assigns
+      them a tenant. The alternative -- treating NULL as "matches anything" --
+      is the wildcard bug this whole guard exists to prevent.
     * ``target_user is None``: allowed through, so the endpoint keeps emitting
-      its own 404/500 for a missing user. A tenant admin cannot learn anything
-      from this that a plain 404 would not already tell them.
+      its own 404/500 for a missing user. Callers that act on the raw id
+      without a not-found branch must deny instead -- see
+      :func:`same_tenant_user_required`, which does.
     """
+    from app.auth.permissions import is_platform_level_role
+
     actor_tenant_id, denial = resolve_admin_tenant_scope()
     if denial is not None:
         return denial
@@ -1415,6 +1425,28 @@ def enforce_target_user_tenant(target_user: dict | None) -> tuple[Response, int]
         # Platform admin: permitted, but record the boundary crossing.
         _audit_cross_tenant_user_access(target_user)
         return None
+
+    # Vertical check, not just horizontal. Sharing a tenant does NOT make a
+    # platform admin a legitimate target for a tenant admin: platform accounts
+    # reach every tenant, so taking one over escapes the boundary entirely.
+    #
+    # This is reachable by design rather than by accident -- api_create_user
+    # rejects a missing tenant_id (400), so every platform admin minted through
+    # the admin API necessarily carries some tenant, and the schema only
+    # constrains tenant_admin to have one (chk_2332_tenant_admin_requires_tenant).
+    # Without this branch a tenant admin could reset the password of a
+    # platform_admin filed under its own tenant and read it from the response.
+    if is_platform_level_role(target_user.get("role")):
+        logger.warning(
+            "Tenant admin denied operation on platform-level account: "
+            "actor=%s actor_tenant=%s target=%s target_role=%s path=%s",
+            getattr(g, "user_id", None),
+            actor_tenant_id,
+            target_user.get("id"),
+            target_user.get("role"),
+            request.path,
+        )
+        return jsonify({"error": "Cross-tenant access denied"}), 403
 
     if target_tenant_id is None or target_tenant_id != actor_tenant_id:
         logger.warning(
@@ -1542,12 +1574,27 @@ def enforce_requested_tenant_scope(
     * Tenant-scoped admin -> their own tenant. Asking for a different tenant
       is denied instead of silently rewritten, so a caller never believes it
       read another tenant's data.
+
+    A value that was supplied but cannot be read as a tenant id (``0``, ``-1``,
+    ``""``, ``"abc"``) is rejected with 400 rather than normalized to ``None``.
+    Collapsing it to ``None`` would make it indistinguishable from "no tenant
+    requested", which for a tenant-scoped admin silently rewrites the request
+    to their own tenant and for a platform admin silently widens it to all
+    tenants -- in both cases acting on something the caller did not ask for.
     """
     actor_tenant_id, denial = resolve_admin_tenant_scope()
     if denial is not None:
         return None, denial
 
     requested = _normalize_user_tenant_id(requested_tenant_id)
+    if requested_tenant_id is not None and requested is None:
+        logger.warning(
+            "Unusable tenant_id %r from actor=%s at %s",
+            requested_tenant_id,
+            getattr(g, "user_id", None),
+            request.path,
+        )
+        return None, (jsonify({"error": "Invalid tenant_id"}), 400)
 
     if actor_tenant_id is None:
         return requested, None

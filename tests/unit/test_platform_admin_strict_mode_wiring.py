@@ -158,3 +158,66 @@ class TestStartupInitialization:
             "create_app must call init_platform_admin_strict_mode() so the flag "
             "is frozen and logged before the first request"
         )
+        assert (
+            "warn_if_strict_mode_locks_out_legacy_admins" in called
+        ), "create_app must run the legacy-admin lockout check at startup"
+
+
+class TestLegacyAdminLockoutWarning:
+    """The flag was inert while the runbook told operators to set it.
+
+    So the deploy that finally wires it up is the deploy where every remaining
+    role='admin' account silently loses platform access. Startup must say so.
+    """
+
+    def test_no_check_when_strict_mode_is_off(self, monkeypatch):
+        from app.auth.permissions import warn_if_strict_mode_locks_out_legacy_admins
+
+        monkeypatch.setenv("OPENACE_PLATFORM_ADMIN_STRICT_MODE", "false")
+
+        assert warn_if_strict_mode_locks_out_legacy_admins() is None
+
+    def test_counts_and_logs_legacy_admins_when_on(self, monkeypatch, caplog):
+        import logging
+        from unittest.mock import MagicMock
+
+        from app.auth.permissions import warn_if_strict_mode_locks_out_legacy_admins
+
+        monkeypatch.setenv("OPENACE_PLATFORM_ADMIN_STRICT_MODE", "true")
+        db = MagicMock()
+        db.fetch_one.return_value = {"n": 3}
+        monkeypatch.setattr("app.repositories.database.Database", lambda *a, **k: db)
+
+        with caplog.at_level(logging.ERROR):
+            assert warn_if_strict_mode_locks_out_legacy_admins() == 3
+
+        assert "3 account(s) still have" in caplog.text
+
+    def test_silent_when_no_legacy_admins_remain(self, monkeypatch, caplog):
+        import logging
+        from unittest.mock import MagicMock
+
+        from app.auth.permissions import warn_if_strict_mode_locks_out_legacy_admins
+
+        monkeypatch.setenv("OPENACE_PLATFORM_ADMIN_STRICT_MODE", "true")
+        db = MagicMock()
+        db.fetch_one.return_value = {"n": 0}
+        monkeypatch.setattr("app.repositories.database.Database", lambda *a, **k: db)
+
+        with caplog.at_level(logging.ERROR):
+            assert warn_if_strict_mode_locks_out_legacy_admins() == 0
+
+        assert "still have" not in caplog.text
+
+    def test_unreachable_database_is_not_fatal(self, monkeypatch):
+        """Startup diagnostics must never be the thing that breaks startup."""
+        from app.auth.permissions import warn_if_strict_mode_locks_out_legacy_admins
+
+        monkeypatch.setenv("OPENACE_PLATFORM_ADMIN_STRICT_MODE", "true")
+
+        def boom(*a, **k):
+            raise RuntimeError("no database")
+
+        monkeypatch.setattr("app.repositories.database.Database", boom)
+
+        assert warn_if_strict_mode_locks_out_legacy_admins() is None

@@ -68,6 +68,26 @@ USERS: dict[int, dict] = {
         "tenant_id": None,
         "must_change_password": False,
     },
+    # A platform admin FILED UNDER tenant A. This is not an exotic row:
+    # api_create_user rejects a missing tenant_id (400), so every platform
+    # admin minted through the admin API carries some tenant, and the schema
+    # only requires a tenant for tenant_admin.
+    98: {
+        "id": 98,
+        "username": "root-in-tenant-a",
+        "email": "root-a@a.example",
+        "role": "platform_admin",
+        "tenant_id": TENANT_A,
+        "must_change_password": False,
+    },
+    97: {
+        "id": 97,
+        "username": "legacy-admin-in-tenant-a",
+        "email": "legacy-a@a.example",
+        "role": "admin",
+        "tenant_id": TENANT_A,
+        "must_change_password": False,
+    },
 }
 
 TENANT_A_ADMIN = {
@@ -236,6 +256,69 @@ class TestPasswordResetTakeover:
         assert repo.password_updates == [20]
 
 
+class TestVerticalEscalationViaSameTenantPlatformAdmin:
+    """Sharing a tenant must not make a platform admin a valid target.
+
+    A tenant-only check is purely horizontal and misses this: file a
+    platform_admin under tenant A, and tenant A's admin can reset its password
+    and read the result -- full escape, without ever granting itself a role.
+    ``reject_privilege_escalation`` does not help, because nothing is granted.
+    """
+
+    @pytest.mark.parametrize("target_id", [98, 97])
+    def test_tenant_admin_cannot_reset_a_platform_account_in_its_own_tenant(self, target_id):
+        response, repo = _request(
+            TENANT_A_ADMIN, "POST", f"/api/admin/users/{target_id}/reset-password"
+        )
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+        assert "temporary_password" not in response.get_json()
+        assert repo.password_updates == []
+
+    @pytest.mark.parametrize(
+        ("method", "path", "body"),
+        [
+            ("PUT", "/api/admin/users/98", {"username": "pwned"}),
+            ("DELETE", "/api/admin/users/98", None),
+            ("PUT", "/api/admin/users/98/password", {"password": "NewP@ssw0rd123"}),
+            ("PUT", "/api/admin/users/98/quota", {"daily_token_quota": 999999}),
+        ],
+    )
+    def test_every_sibling_endpoint_denies_it_too(self, method, path, body):
+        response, repo = _request(TENANT_A_ADMIN, method, path, json_body=body)
+
+        assert (
+            response.status_code == 403
+        ), f"{method} {path} returned {response.status_code}: {response.get_data(as_text=True)}"
+        assert repo.updated == []
+        assert repo.deleted == []
+        assert repo.password_updates == []
+
+    def test_protection_does_not_depend_on_strict_mode(self, monkeypatch):
+        """is_platform_level_role is flag-independent on purpose.
+
+        Routing this through the strict-mode-sensitive is_platform_admin_role
+        would stop protecting legacy 'admin' rows the moment strict mode is
+        switched on -- protection must not narrow as a side effect.
+        """
+        from app.auth.permissions import reset_strict_mode_cache
+
+        reset_strict_mode_cache()
+        monkeypatch.setenv("OPENACE_PLATFORM_ADMIN_STRICT_MODE", "true")
+        try:
+            response, repo = _request(TENANT_A_ADMIN, "POST", "/api/admin/users/97/reset-password")
+            assert response.status_code == 403
+            assert repo.password_updates == []
+        finally:
+            reset_strict_mode_cache()
+
+    def test_platform_admin_may_still_manage_its_peers(self):
+        response, repo = _request(PLATFORM_ADMIN, "POST", "/api/admin/users/98/reset-password")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert repo.password_updates == [98]
+
+
 class TestOtherUserTargetedEndpoints:
     """The same gap existed on every sibling endpoint keyed by a user id."""
 
@@ -336,6 +419,58 @@ class TestPrivilegeEscalation:
 
         assert response.status_code == 403
         assert repo.updated == []
+
+    @pytest.mark.parametrize("bogus", [0, -1, "", "abc", "0"])
+    def test_unusable_tenant_id_is_rejected_not_silently_ignored(self, bogus):
+        """A value the scope guard cannot normalize returns None, which reads as
+        'no tenant requested' -- so re-reading the raw body value afterwards
+        would hand it straight to the quota check and the UPDATE.
+        """
+        response, repo = _request(
+            TENANT_A_ADMIN, "PUT", "/api/admin/users/10", json_body={"tenant_id": bogus}
+        )
+
+        assert response.status_code == 400, response.get_data(as_text=True)
+        assert repo.updated == []
+
+    def test_a_float_tenant_id_truncates_but_is_still_boundary_checked(self):
+        """1.9 is not 'unusable' -- _normalize_user_tenant_id truncates it to 1.
+
+        Documented rather than rejected: the truncated value goes through the
+        same comparison as any other, so it cannot cross a boundary. Here it
+        lands on the actor's own tenant and is allowed; the next case shows the
+        foreign-tenant float being denied.
+        """
+        response, repo = _request(
+            TENANT_A_ADMIN, "PUT", "/api/admin/users/10", json_body={"tenant_id": 1.9}
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert repo.updated == [10]
+
+    def test_a_float_tenant_id_pointing_at_another_tenant_is_denied(self):
+        response, repo = _request(
+            TENANT_A_ADMIN, "PUT", "/api/admin/users/10", json_body={"tenant_id": 2.5}
+        )
+
+        assert response.status_code == 403
+        assert repo.updated == []
+
+    def test_platform_admin_also_gets_400_for_an_unusable_tenant_id(self):
+        response, repo = _request(
+            PLATFORM_ADMIN, "PUT", "/api/admin/users/10", json_body={"tenant_id": "abc"}
+        )
+
+        assert response.status_code == 400
+        assert repo.updated == []
+
+    def test_platform_admin_can_still_move_a_user_between_tenants(self):
+        response, repo = _request(
+            PLATFORM_ADMIN, "PUT", "/api/admin/users/10", json_body={"tenant_id": TENANT_B}
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert repo.updated == [10]
 
     def test_platform_admin_may_still_create_platform_admins(self):
         response, repo = _request(

@@ -394,7 +394,7 @@ class TestMainAndDiscovery:
         err = capsys.readouterr().err
         assert "pass MIG001/MIG002" in err
 
-    def test_main_runs_mig003_by_default(self, tmp_path: Path, capsys):
+    def test_main_runs_mig003_by_default(self, tmp_path: Path, capsys, monkeypatch):
         """The released-id check is on unless explicitly skipped."""
         _write_migration(
             tmp_path,
@@ -407,13 +407,43 @@ class TestMainAndDiscovery:
             """,
             name="0001_clean.py",
         )
+        # Pin the baseline so the assertion does not depend on the checkout's
+        # git state -- an earlier version of this test accepted rc in (0, 1)
+        # and "MIG003 or MIG003: skipped", which no implementation could fail.
+        monkeypatch.setattr(rules, "_baseline_commit", lambda ref: "deadbeef")
+        monkeypatch.setattr(
+            rules, "_revision_ids_at_ref", lambda ref: {"only_on_main": "migrations/versions/m.py"}
+        )
+
         rc = rules.main([str(tmp_path)])
 
         err = capsys.readouterr().err
-        # Either the baseline was readable and every real id is reported
-        # missing from this one-file tree, or it was unreadable and skipped.
-        assert ("MIG003" in err) or ("MIG003: skipped" in err)
-        assert rc in (0, 1)
+        assert rc == 1
+        assert "MIG003" in err
+        assert "only_on_main" in err
+
+    def test_skip_flag_turns_mig003_off(self, tmp_path: Path, capsys, monkeypatch):
+        _write_migration(
+            tmp_path,
+            """
+            revision = "rev_test"
+            down_revision = None
+
+            def upgrade():
+                pass
+            """,
+            name="0001_clean.py",
+        )
+        monkeypatch.setattr(rules, "_baseline_commit", lambda ref: "deadbeef")
+        monkeypatch.setattr(
+            rules, "_revision_ids_at_ref", lambda ref: {"only_on_main": "migrations/versions/m.py"}
+        )
+
+        rc = rules.main([str(tmp_path), "--skip-released-check"])
+
+        err = capsys.readouterr().err
+        assert rc == 0
+        assert "MIG003" not in err
 
     def test_main_fails_on_violation(self, tmp_path: Path, capsys):
         _write_migration(
@@ -571,3 +601,84 @@ class TestMig003ReleasedRevisionIds:
         monkeypatch.setattr(rules, "_revision_ids_at_ref", lambda ref: {})
 
         assert rules.check_released_revision_ids(tree, "origin/main") == []
+
+    def test_unresolvable_baseline_commit_skips(self, tmp_path: Path, monkeypatch):
+        tree = self._tree(tmp_path, {"new.py": "rev_b"})
+        monkeypatch.setattr(rules, "_baseline_commit", lambda ref: None)
+
+        assert rules.check_released_revision_ids(tree, "origin/main") == []
+
+    def test_baseline_is_the_merge_base_not_the_branch_tip(self, tmp_path: Path, monkeypatch):
+        """A branch that merely lags behind main must not be failed.
+
+        Comparing against the tip of origin/main flags every migration merged
+        after the fork point as "missing", and the obvious way to silence that
+        is to add the id to RETIRED_REVISION_IDS -- exactly the mistake MIG003
+        exists to prevent. Verified by asserting the ids come from the
+        merge-base commit, not the ref.
+        """
+        tree = self._tree(tmp_path, {"forked.py": "rev_at_fork"})
+        asked_for: list[str] = []
+
+        def fake_ids(ref):
+            asked_for.append(ref)
+            # merge-base has only the forked id; the tip also has a later one.
+            return (
+                {"rev_at_fork": "m1.py"}
+                if ref == "fork_sha"
+                else {"rev_at_fork": "m1.py", "rev_merged_after_fork": "m2.py"}
+            )
+
+        monkeypatch.setattr(rules, "_baseline_commit", lambda ref: "fork_sha")
+        monkeypatch.setattr(rules, "_revision_ids_at_ref", fake_ids)
+
+        assert rules.check_released_revision_ids(tree, "origin/main") == []
+        assert asked_for == ["fork_sha"]
+
+
+class TestMig003AgainstRealMigrations:
+    """MIG003 on the committed tree, using git for real rather than stubs."""
+
+    def test_committed_tree_is_clean(self):
+        violations = rules.check_released_revision_ids(rules.DEFAULT_VERSIONS_DIR)
+        assert (
+            violations == []
+        ), "Committed migrations dropped a released revision id:\n  " + "\n  ".join(
+            v.format() for v in violations
+        )
+
+    def test_removing_a_released_migration_is_caught(self, tmp_path: Path):
+        """Copy the real tree, delete a migration that predates this branch."""
+        import shutil
+
+        victim = "20260731_004_add_proxy_token_terminated_fields.py"
+        source = rules.DEFAULT_VERSIONS_DIR / victim
+        if not source.exists():
+            pytest.skip(f"{victim} not present")
+
+        tree = tmp_path / "versions"
+        shutil.copytree(rules.DEFAULT_VERSIONS_DIR, tree)
+        (tree / victim).unlink()
+
+        violations = rules.check_released_revision_ids(tree)
+
+        if not violations:
+            pytest.skip("no git baseline available in this checkout")
+        assert any(
+            "20260731_004_add_proxy_token_terminated_fields" in v.message for v in violations
+        )
+
+    def test_renaming_only_the_file_is_allowed(self, tmp_path: Path):
+        """Alembic keys off the id; the filename is cosmetic."""
+        import shutil
+
+        victim = "20260731_004_add_proxy_token_terminated_fields.py"
+        source = rules.DEFAULT_VERSIONS_DIR / victim
+        if not source.exists():
+            pytest.skip(f"{victim} not present")
+
+        tree = tmp_path / "versions"
+        shutil.copytree(rules.DEFAULT_VERSIONS_DIR, tree)
+        (tree / victim).rename(tree / "zzz_renamed_file.py")
+
+        assert rules.check_released_revision_ids(tree) == []
