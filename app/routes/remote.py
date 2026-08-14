@@ -1070,16 +1070,20 @@ def get_machine_commands(machine_id):
     if os_type_normalized == "Windows":
         install_dir = "$env:USERPROFILE\\.open-ace-agent"
         install_command = (
-            f'powershell -Command "Invoke-WebRequest -Uri \'{server_url}/api/remote/agent/install.ps1\''
+            f"powershell -Command \"Invoke-WebRequest -Uri '{server_url}/api/remote/agent/install.ps1'"
             f" -OutFile 'install.ps1'; powershell -ExecutionPolicy Bypass -File install.ps1"
-            f' -ServerUrl \'{server_url}\' -RegistrationToken <TOKEN>"'
+            f" -ServerUrl '{server_url}' -RegistrationToken <TOKEN>\""
         )
         start_command = f"powershell -ExecutionPolicy Bypass -File {install_dir}\\start-agent.ps1"
-        stop_command = f"powershell -ExecutionPolicy Bypass -File {install_dir}\\start-agent.ps1 -Stop"
-        status_command = f"powershell -ExecutionPolicy Bypass -File {install_dir}\\start-agent.ps1 -Status"
+        stop_command = (
+            f"powershell -ExecutionPolicy Bypass -File {install_dir}\\start-agent.ps1 -Stop"
+        )
+        status_command = (
+            f"powershell -ExecutionPolicy Bypass -File {install_dir}\\start-agent.ps1 -Status"
+        )
         uninstall_command = (
-            f'powershell -Command "Invoke-WebRequest -Uri \'{server_url}/api/remote/agent/uninstall.ps1\''
-            f' -OutFile \'uninstall.ps1\'; powershell -ExecutionPolicy Bypass -File uninstall.ps1"'
+            f"powershell -Command \"Invoke-WebRequest -Uri '{server_url}/api/remote/agent/uninstall.ps1'"
+            f" -OutFile 'uninstall.ps1'; powershell -ExecutionPolicy Bypass -File uninstall.ps1\""
         )
     else:
         # Linux/macOS

@@ -49,14 +49,18 @@ class TestMachineCommandsContract:
 
         # Verify all backend fields are defined in frontend
         for field, field_type in backend_fields.items():
-            assert field in frontend_fields, f"Field '{field}' missing from frontend TypeScript interface"
-            assert frontend_fields[field] == field_type, (
-                f"Field '{field}' type mismatch: backend={field_type}, frontend={frontend_fields[field]}"
-            )
+            assert (
+                field in frontend_fields
+            ), f"Field '{field}' missing from frontend TypeScript interface"
+            assert (
+                frontend_fields[field] == field_type
+            ), f"Field '{field}' type mismatch: backend={field_type}, frontend={frontend_fields[field]}"
 
         # Verify all frontend fields exist in backend
         for field, field_type in frontend_fields.items():
-            assert field in backend_fields, f"Field '{field}' defined in frontend but not in backend"
+            assert (
+                field in backend_fields
+            ), f"Field '{field}' defined in frontend but not in backend"
 
     def test_os_type_values_match(self):
         """Verify OS type values match between frontend and backend."""
@@ -68,9 +72,9 @@ class TestMachineCommandsContract:
         frontend_supported_os_types = ["Linux", "Windows", "Darwin"]
 
         for os_type in backend_os_types:
-            assert os_type in frontend_supported_os_types, (
-                f"OS type '{os_type}' not supported by frontend"
-            )
+            assert (
+                os_type in frontend_supported_os_types
+            ), f"OS type '{os_type}' not supported by frontend"
 
     def test_optional_fields_marked_correctly(self):
         """Verify optional fields are correctly marked in TypeScript."""
@@ -98,9 +102,9 @@ class TestMachineCommandsContract:
         backend_normalized = backend_path.replace("<machine_id>", "{machineId}")
         frontend_normalized = frontend_path
 
-        assert backend_normalized == frontend_normalized, (
-            f"Path mismatch: backend={backend_path}, frontend={frontend_path}"
-        )
+        assert (
+            backend_normalized == frontend_normalized
+        ), f"Path mismatch: backend={backend_path}, frontend={frontend_path}"
 
     def test_http_method_matches(self):
         """Verify HTTP method matches between frontend and backend."""
@@ -110,9 +114,9 @@ class TestMachineCommandsContract:
         # Frontend uses apiClient.get (remote.ts)
         frontend_method = "GET"
 
-        assert backend_method == frontend_method, (
-            f"Method mismatch: backend={backend_method}, frontend={frontend_method}"
-        )
+        assert (
+            backend_method == frontend_method
+        ), f"Method mismatch: backend={backend_method}, frontend={frontend_method}"
 
     def test_command_format_consistency(self):
         """Verify command format is consistent for different OS types."""
@@ -141,4 +145,3 @@ class TestMachineCommandsContract:
         # All commands should reference this directory
         # (verified in backend implementation)
         assert ".open-ace-agent" in install_dir
-
