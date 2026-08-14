@@ -402,6 +402,13 @@ CREATE TABLE compliance_reports (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE config_import_state (
+ config_key TEXT PRIMARY KEY NOT NULL,
+ state TEXT NOT NULL,
+ source TEXT,
+ imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
 CREATE TABLE consistency_violations (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer,
@@ -497,6 +504,23 @@ CREATE TABLE daily_usage (
     CONSTRAINT chk_daily_usage_tokens_positive CHECK ((tokens_used >= 0))
 );
 
+CREATE TABLE dingtalk_settings (
+ app_key TEXT,
+ app_secret_enc text,
+ fallback_webhook_secret_enc text,
+ sync_enabled INTEGER DEFAULT 0 NOT NULL,
+ target_tenant_id integer,
+ interval_minutes integer DEFAULT 60 NOT NULL,
+ root_dept_id TEXT DEFAULT '1' NOT NULL,
+ max_runtime_seconds integer DEFAULT 1800 NOT NULL,
+ auto_recovery INTEGER DEFAULT 0 NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ created_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT ck_dingtalk_settings_singleton CHECK ((id = 1))
+);
+
 CREATE TABLE email_notification_logs (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
@@ -509,6 +533,21 @@ CREATE TABLE email_notification_logs (
  error_message text,
  retry_count integer DEFAULT 0,
  next_retry_at TIMESTAMP
+);
+
+CREATE TABLE feishu_settings (
+ app_id TEXT NOT NULL,
+ app_secret_enc text NOT NULL,
+ sync_enabled INTEGER DEFAULT 0 NOT NULL,
+ target_tenant_id integer,
+ interval_minutes integer DEFAULT 60 NOT NULL,
+ max_runtime_seconds integer DEFAULT 1800 NOT NULL,
+ auto_recovery INTEGER DEFAULT 0 NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ created_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT ck_feishu_settings_singleton CHECK ((id = 1))
 );
 
 CREATE TABLE hourly_stats (
@@ -1388,6 +1427,17 @@ CREATE TABLE webhook_deliveries (
  created_at TIMESTAMP NOT NULL,
  updated_at TIMESTAMP NOT NULL,
     CONSTRAINT ck_webhook_deliveries_status CHECK ((status IN ('pending', 'in_flight', 'delivered', 'dead')))
+);
+
+CREATE TABLE webhook_settings (
+ webhook_secret_enc text,
+ allow_private_webhook_urls INTEGER DEFAULT 0 NOT NULL,
+ enabled INTEGER DEFAULT 1 NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ created_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT ck_webhook_settings_singleton CHECK ((id = 1))
 );
 
 CREATE TABLE workflow_events (
