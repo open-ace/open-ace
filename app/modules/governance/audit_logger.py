@@ -1107,4 +1107,31 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                 },
             ],
         },
+        "notification_integration": {
+            "label": "Notification Integration",
+            "i18n_key": "categoryNotificationIntegration",
+            "resource_types": ["webhook_config", "dingtalk_config"],
+            "actions": [
+                {
+                    "value": "webhook_config_save",
+                    "label": "Webhook Config Save",
+                    "i18n_key": "actionWebhookConfigSave",
+                },
+                {
+                    "value": "webhook_config_delete",
+                    "label": "Webhook Config Delete",
+                    "i18n_key": "actionWebhookConfigDelete",
+                },
+                {
+                    "value": "dingtalk_config_save",
+                    "label": "DingTalk Config Save",
+                    "i18n_key": "actionDingtalkConfigSave",
+                },
+                {
+                    "value": "dingtalk_config_delete",
+                    "label": "DingTalk Config Delete",
+                    "i18n_key": "actionDingtalkConfigDelete",
+                },
+            ],
+        },
     }
