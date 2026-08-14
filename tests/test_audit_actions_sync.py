@@ -43,6 +43,7 @@ class TestAuditActionsSynchronization:
             "Admin Access": 2,  # ADMIN_CROSS_TENANT_ACCESS, ADMIN_GLOBAL_SESSION_LIST
             "SMTP Configuration": 2,  # SMTP_CONFIG_SAVE, SMTP_CONFIG_DELETE
             "Feishu Configuration": 2,  # FEISHU_CONFIG_SAVE, FEISHU_CONFIG_DELETE
+            "Notification Integration": 4,  # WEBHOOK/DINGTALK save and delete
         }
 
         total_expected = sum(expected_categories.values())

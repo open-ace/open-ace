@@ -199,9 +199,7 @@ class DingTalkOrgSyncService:
         # Issue #2179: Fail-Closed - 必须显式配置同步目标租户
         effective_tenant_id = tenant_id or config.get("org_sync_tenant_id")
         if effective_tenant_id is None:
-            raise ValueError(
-                "钉钉同步未配置 org_sync_tenant_id。" "请在租户设置中配置同步目标租户。"
-            )
+            raise ValueError("钉钉同步未配置 org_sync_tenant_id。请在租户设置中配置同步目标租户。")
         effective_tenant_id = int(effective_tenant_id)
         root_department_id = str(config.get("org_sync_root_dept_id") or DINGTALK_ROOT_DEPARTMENT_ID)
         result = DingTalkOrgSyncResult(
@@ -459,6 +457,20 @@ class DingTalkOrgSyncService:
             else:
                 config = dict(self.config_override)
         else:
+            try:
+                from app.repositories.notification_settings_repository import (
+                    get_notification_settings_repository,
+                )
+
+                stored = get_notification_settings_repository().get(
+                    "dingtalk", include_secrets=True
+                )
+            except Exception:
+                logger.warning(
+                    "Unable to load centralized DingTalk settings; using legacy config",
+                    exc_info=True,
+                )
+                stored = None
             config = {
                 "app_key": get_config_value("dingtalk", "app_key", ""),
                 "app_secret": get_config_value("dingtalk", "app_secret", ""),
@@ -472,6 +484,21 @@ class DingTalkOrgSyncService:
                     get_config_value("dingtalk", "org_sync_root_dept_id", "1") or "1"
                 ),
             }
+            if stored:
+                config.update(
+                    {
+                        "app_key": stored.get("app_key", ""),
+                        "app_secret": stored.get("app_secret", ""),
+                        "org_sync_enabled": bool(stored.get("sync_enabled", False)),
+                        "org_sync_tenant_id": stored.get("target_tenant_id"),
+                        "org_sync_interval_minutes": int(stored.get("interval_minutes", 60)),
+                        "org_sync_root_dept_id": str(stored.get("root_dept_id", "1")),
+                        "org_sync_max_runtime_seconds": int(
+                            stored.get("max_runtime_seconds", 1800)
+                        ),
+                        "org_sync_auto_recover": bool(stored.get("auto_recovery", False)),
+                    }
+                )
 
         config.setdefault("org_sync_enabled", False)
         # Issue #2179: Fail-Closed - 不再设置默认值

@@ -534,12 +534,12 @@ class TestGetActionCategories:
                 assert "i18n_key" in action
 
     def test_get_action_categories_total_actions_is_45(self):
-        """Test that total number of actions is 53 (including SSRF, usage report, URL token security, Feishu config, and token rotation actions)."""
+        """Test the total action count, including notification integration actions."""
         from app.modules.governance.audit_logger import get_action_categories
 
         categories = get_action_categories()
         total_actions = sum(len(cat["actions"]) for cat in categories.values())
-        assert total_actions == 53, f"Expected 53 actions, got {total_actions}"
+        assert total_actions == 57, f"Expected 57 actions, got {total_actions}"
 
     def test_get_action_categories_matches_enum_values(self):
         """Test that all action values match AuditAction enum values."""
