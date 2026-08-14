@@ -33,9 +33,7 @@ def test_upgrade_does_not_generate_an_unrelated_encryption_key() -> None:
 
 def test_upgrade_reads_the_complete_secret_value() -> None:
     block = _upgrade_key_migration_block()
-    secret_assignment = next(
-        line for line in block.splitlines() if "local current_secret=" in line
-    )
+    secret_assignment = next(line for line in block.splitlines() if "local current_secret=" in line)
 
     assert "sed -n 's/^Environment=SECRET_KEY=//p'" in secret_assignment
     assert "cut -d'=' -f3" not in secret_assignment
