@@ -1335,10 +1335,25 @@ def acceptance_verification_override(workflow_id):
 
     if workflow.get("current_phase") != "acceptance_verification":
         return jsonify({"error": "Workflow is not in the acceptance_verification phase"}), 400
+    # Paused-only (#2658 review): resume-with-feedback clears the cached
+    # verification_merge_sha but keeps the prior verification_status until a
+    # new verdict lands, so a mid-verification run (status e.g. "running")
+    # still carries a stale "rejected". Overriding there would race the
+    # verifier's own writes and stamp an unknown merge SHA — require the
+    # paused state the UI already gates on.
+    if workflow.get("status") != "paused":
+        return jsonify({"error": "Workflow is not paused for human review"}), 400
     prior_status = (workflow.get("verification_status") or "").strip()
     if prior_status not in ("indeterminate", "rejected"):
         return (
-            jsonify({"error": "Override is only available for indeterminate verification status"}),
+            jsonify(
+                {
+                    "error": (
+                        "Override is only available for indeterminate or rejected "
+                        "verification status"
+                    )
+                }
+            ),
             400,
         )
 

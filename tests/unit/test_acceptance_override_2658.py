@@ -136,12 +136,26 @@ class TestOverridePermission:
             resp = _post_override(client)
         assert resp.status_code == 200
 
-    def test_unrelated_user_gets_403(self, app_client):
-        client, _repo, _ = app_client
-        with ExitStack() as stack:
+    def test_unrelated_user_gets_403_without_side_effects(self, app_client):
+        client, repo, _ = app_client
+        gh = MagicMock()
+        with (
+            ExitStack() as stack,
+            patch(
+                "app.modules.workspace.autonomous.github_ops.GitHubOps",
+                return_value=gh,
+            ) as gh_cls,
+        ):
             stack.enter_context(_mock_auth(user_id=99, role="user", username="stranger"))
             resp = _post_override(client)
         assert resp.status_code == 403
+        # The 403 must land BEFORE any side effect: no workflow mutation, no
+        # issue comment/close, no audit event (review #2659 Minor 3).
+        repo.update_workflow.assert_not_called()
+        repo.create_event.assert_not_called()
+        gh.add_issue_comment.assert_not_called()
+        gh.close_issue.assert_not_called()
+        assert gh_cls.call_count == 0  # never constructed: 403 precedes all guards
 
 
 class TestOverrideStatusGuard:
@@ -159,6 +173,32 @@ class TestOverrideStatusGuard:
         with ExitStack() as stack:
             stack.enter_context(_mock_auth(user_id=1, role="admin"))
             resp = _post_override(client)
+        assert resp.status_code == 400
+
+    def test_not_paused_400(self, app_client):
+        """#2659 review: mid-verification runs carry a stale prior verdict
+        (resume-with-feedback clears the merge SHA but not verification_status)
+        — overriding there would race the verifier on an unknown merge."""
+        client, repo, _ = app_client
+        repo.get_workflow.return_value = _workflow_row(status="running", verification_merge_sha="")
+        with ExitStack() as stack:
+            stack.enter_context(_mock_auth(user_id=1, role="admin"))
+            resp = _post_override(client)
+        assert resp.status_code == 400
+
+    def test_empty_verification_status_400(self, app_client):
+        client, repo, _ = app_client
+        repo.get_workflow.return_value = _workflow_row(verification_status=None)
+        with ExitStack() as stack:
+            stack.enter_context(_mock_auth(user_id=1, role="admin"))
+            resp = _post_override(client)
+        assert resp.status_code == 400
+
+    def test_reason_over_2000_chars_400(self, app_client):
+        client, _repo, _ = app_client
+        with ExitStack() as stack:
+            stack.enter_context(_mock_auth(user_id=1, role="admin"))
+            resp = _post_override(client, {"reason": "x" * 2001})
         assert resp.status_code == 400
 
 

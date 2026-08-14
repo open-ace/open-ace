@@ -7,7 +7,7 @@
 
 import { fireEvent, render, screen, within } from '@/test/utils';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { WorkflowTimeline } from './WorkflowTimeline';
+import { WorkflowTimeline, formatAcceptanceReport } from './WorkflowTimeline';
 import type { AutonomousWorkflow } from '@/api/autonomous';
 
 const { mockResumeWithFeedbackMutate, mockAcceptanceOverrideMutate, pendingMutation } = vi.hoisted(
@@ -201,5 +201,45 @@ describe('WorkflowTimeline paused-state banner (#2634)', () => {
 
     expect(mockResumeWithFeedbackMutate).toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('formatAcceptanceReport (#2658)', () => {
+  it('renders per-item verdicts, rationale and evidence refs from metadata JSON', () => {
+    const report = {
+      merge_sha: 'abc123',
+      status: 'rejected',
+      verified_by: 'glm-5',
+      scope: [{ item: 'src/app.py', verdict: 'confirmed', evidence: [] }],
+      gates: [],
+      verifier: [
+        {
+          item: '修复登录失败',
+          verdict: 'rejected',
+          evidence: [{ ref: 'tests/test_login.py:12', note: '用例仍然失败' }],
+          rationale: '合并后用例依旧失败',
+        },
+      ],
+    };
+    const out = formatAcceptanceReport(JSON.stringify(report));
+    expect(out).toContain('❌ rejected');
+    expect(out).toContain('Merge SHA: abc123');
+    expect(out).toContain('── Scope ──');
+    expect(out).toContain('✅ src/app.py');
+    expect(out).toContain('❌ 修复登录失败 — 合并后用例依旧失败');
+    expect(out).toContain('↳ tests/test_login.py:12 (用例仍然失败)');
+    // Empty sections are skipped (gates omitted above).
+    expect(out).not.toContain('── Gates ──');
+  });
+
+  it('falls back to raw metadata when the JSON is malformed', () => {
+    expect(formatAcceptanceReport('not-json{')).toBe('not-json{');
+  });
+
+  it('omits optional fields gracefully', () => {
+    const out = formatAcceptanceReport(JSON.stringify({ status: 'indeterminate' }));
+    expect(out).toContain('⚠️ indeterminate');
+    expect(out).not.toContain('Merge SHA');
+    expect(out).not.toContain('Infra error');
   });
 });

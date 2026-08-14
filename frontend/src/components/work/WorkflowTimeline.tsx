@@ -122,7 +122,7 @@ const VERDICT_TONE: Record<string, string> = {
   indeterminate: '⚠️',
 };
 
-const formatAcceptanceReport = (metadata: string): string => {
+export const formatAcceptanceReport = (metadata: string): string => {
   let report: Record<string, unknown>;
   try {
     report = JSON.parse(metadata) as Record<string, unknown>;
