@@ -15,12 +15,9 @@ from app.auth.decorators import auth_required, public_endpoint
 from app.modules.governance.quota_manager import QuotaManager
 from app.repositories.usage_repo import UsageRepository
 from app.repositories.user_repo import UserRepository
+from app.schemas.quota import TOKEN_QUOTA_MULTIPLIER
 
 logger = logging.getLogger(__name__)
-
-# Token quotas are stored in M (millions) units
-# Convert to actual tokens when comparing with usage
-TOKEN_QUOTA_MULTIPLIER = 1_000_000
 
 quota_bp = Blueprint("quota", __name__)
 user_repo = UserRepository()

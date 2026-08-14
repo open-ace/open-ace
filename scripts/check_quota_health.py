@@ -22,8 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.repositories.database import Database
 from app.repositories.tenant_repo import TenantRepository
 from app.repositories.user_repo import UserRepository
-
-TOKEN_QUOTA_MULTIPLIER = 1_000_000
+from app.schemas.quota import TOKEN_QUOTA_MULTIPLIER
 
 
 def check_tenant_quota_health(tenant_id: int, db: Database) -> dict:

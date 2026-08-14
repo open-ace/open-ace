@@ -19,13 +19,10 @@ from app.repositories.database import (
     escape_like,
 )
 from app.repositories.user_repo import UserRepository
+from app.schemas.quota import TOKEN_QUOTA_MULTIPLIER
 from app.utils.helpers import parse_db_datetime
 
 logger = logging.getLogger(__name__)
-
-# Token quotas are stored in M (millions) units
-# Convert to actual tokens when comparing with usage
-TOKEN_QUOTA_MULTIPLIER = 1_000_000
 
 
 class AlertType(Enum):

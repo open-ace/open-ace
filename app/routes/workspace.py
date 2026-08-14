@@ -37,15 +37,12 @@ from app.modules.workspace.session_manager import (
 from app.modules.workspace.state_sync import get_state_sync_manager
 from app.modules.workspace.tool_connector import get_tool_connector
 from app.routes.fs import is_valid_path
+from app.schemas.quota import TOKEN_QUOTA_MULTIPLIER
 from app.utils.request_context import get_current_tenant_id
 from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
 from app.utils.workspace import get_workspace_base_dir, get_workspace_base_dirs
 
 logger = logging.getLogger(__name__)
-
-# Token quotas are stored in M (millions) units
-# Convert to actual tokens when comparing with usage
-TOKEN_QUOTA_MULTIPLIER = 1_000_000
 
 # Only refresh session when it has less than this many minutes remaining
 _SESSION_REFRESH_THRESHOLD_MINUTES = 10

@@ -16,7 +16,11 @@ from app.auth.decorators import admin_required
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.usage_repo import UsageRepository
 from app.repositories.user_repo import UserRepository
-from app.schemas.quota import validate_quota_update, validate_tenant_allocation
+from app.schemas.quota import (
+    TOKEN_QUOTA_MULTIPLIER,
+    validate_quota_update,
+    validate_tenant_allocation,
+)
 from app.services.auth_service import get_security_settings_cached
 from app.utils.validators import validate_email, validate_password, validate_username
 from app.utils.workspace import ensure_system_user
@@ -648,10 +652,6 @@ def api_quota_usage():
         user["requests_month"] = monthly_combined["requests"]
 
     return jsonify(users)
-
-
-# Token quotas are stored in M (millions) units
-TOKEN_QUOTA_MULTIPLIER = 1_000_000
 
 
 @admin_bp.route("/admin/quota/stats", methods=["GET"])

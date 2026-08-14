@@ -30,6 +30,10 @@ MAX_REQUEST_QUOTA = 2147483647
 # Minimum quota value
 MIN_QUOTA = 0
 
+# Token quota multiplier (1M = 1,000,000 actual tokens)
+# Token quotas are stored in M units in the database
+TOKEN_QUOTA_MULTIPLIER = 1_000_000
+
 
 class QuotaAllocationResult(TypedDict):
     """Type definition for tenant allocation validation result."""
@@ -315,7 +319,6 @@ def validate_tenant_allocation(
 
     # Token quotas are stored in M units, need to convert for comparison
     # Tenant limits are in actual token counts
-    TOKEN_QUOTA_MULTIPLIER = 1_000_000
 
     # Check daily token quota
     if daily_token_limit and daily_token_limit > 0:
