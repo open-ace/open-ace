@@ -9,6 +9,7 @@ list correctly displays the conversation details.
 import asyncio
 import os
 
+import pytest
 from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
@@ -16,6 +17,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "98")
 
 
+@pytest.mark.asyncio
 async def test_conversation_detail():
     """Test that conversation detail is displayed correctly."""
     async with async_playwright() as p:

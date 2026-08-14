@@ -9,11 +9,13 @@ This test verifies that:
 import asyncio
 import os
 
+import pytest
 from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 
 
+@pytest.mark.asyncio
 async def test_language_sync():
     """Test language sync functionality"""
     async with async_playwright() as p:

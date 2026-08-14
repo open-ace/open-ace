@@ -14,9 +14,12 @@ Test scenarios:
 import asyncio
 import os
 
+import pytest
 from playwright.async_api import async_playwright
 
-OPENACE_URL = os.environ.get("OPENACE_URL", "http://localhost:19888")
+# The issues lane runs the server on an ephemeral port and exports it as
+# BASE_URL (this previously read OPENACE_URL, which the runner never sets).
+OPENACE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "65")
 
@@ -37,6 +40,7 @@ async def login(page):
     await page.wait_for_url(lambda url: "/login" not in url, timeout=15000)
 
 
+@pytest.mark.asyncio
 async def test_workspace_state_restore():
     """Test that workspace state is preserved when navigating away."""
     async with async_playwright() as p:
