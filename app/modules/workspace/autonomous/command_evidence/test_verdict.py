@@ -20,6 +20,9 @@ evidence instead of the raw ``event_log``:
   *undecidable*, not a failure: with no scope to compare, a later pass yields
   INCONCLUSIVE so the heuristic decides. Decided non-coverage (both pytest
   scopes known, the later pass narrower) still yields FAILED (#2376 PR-2).
+  #2665 carve-out: a later pass carrying no test semantics at all (count-less
+  scope-less exit-0 — lint/format) cannot make a structurally-parsed test
+  failure undecidable; see ``_has_test_semantics``.
 
 Input source of truth: ``TestExecutionEvidence`` rows, never agent prose.
 """
@@ -93,15 +96,19 @@ def _latest_state(
 def _has_test_semantics(evidence: TestExecutionEvidence) -> bool:
     """Whether the evidence structurally proves a TEST command ran.
 
-    True when the parse produced pytest scope/counts/selectors, or came from
-    a framework parser that only fires on framework-specific output
-    (jest/go_test/cargo). False for the exit-0 fallbacks — ``_parse_generic``
-    on any clean command and ``_parse_pytest``'s exit-0-unparseable-output
-    arm — which yield a count-less, scope-less MEDIUM pass indistinguishable
-    from lint/format commands (pre-commit/black/ruff).
+    True only when the parse produced pytest scope/counts/selectors or parsed
+    framework counts (jest/cargo set ``passed``; go never records counts).
+    False for the exit-0 fallback arms — ``_parse_generic`` on any clean
+    command, ``_parse_pytest``'s exit-0-unparseable-output arm (which claims
+    ``parser="pytest"``!), and the framework parsers' own exit-0 arms on
+    non-test invocations of the same tool family (``go vet``/``go build``,
+    ``cargo clippy``/``cargo fmt``) — all of which yield a count-less,
+    scope-less MEDIUM pass indistinguishable from lint/format commands
+    (#2665). The paired guard in ``_classify_failures`` still preserves the
+    #2376 deferral when the failing side is equally unstructured (a pure
+    ``go test`` fail + ``go test`` pass pair carries no counts on either
+    side, so neither has test semantics and the defer stands).
     """
-    if evidence.parser in ("jest", "go_test", "cargo"):
-        return True
     return (
         evidence.coverage_scope is not None
         or evidence.collected is not None
