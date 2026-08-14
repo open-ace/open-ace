@@ -2474,7 +2474,13 @@ Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
     local cmnd_alias_section="# 【安全加固 Issue #2334】安全命令别名定义
 # git精确参数白名单（覆盖100%autonomous工作流）
 # 【Issue #2334】使用 (ALL) runas 以允许 github_ops 跨用户 git 操作
+# 【Issue #2635】前缀锚定条目：github_ops._run_git 的 sudo 路径在子命令前携带
+# git 全局选项（-c core.hooksPath=/dev/null ... 或 --git-dir=... --work-tree=...），
+# git 语法要求全局选项必须位于子命令之前，因此命令永不以 \`git <subcommand>\` 开头，
+# 动词优先白名单一条都匹配不上。此两条比旧版 \`git *\` 通配窄（必须带固定前缀）。
 Cmnd_Alias GIT_SAFE = \\
+    ${GIT_PATH} -c core.hooksPath=/dev/null *, \\
+    ${GIT_PATH} --git-dir=*, \\
     ${GIT_PATH} config --global --add safe.directory *, \\
     ${GIT_PATH} remote get-url origin, \\
     ${GIT_PATH} remote add *, \\
@@ -2519,7 +2525,12 @@ Cmnd_Alias GIT_SAFE = \\
 # gh精确参数白名单（覆盖100%autonomous工作流）
 # Issue #1855: --admin 仅在 OPENACE_ALLOW_ADMIN_MERGE=1 时启用
 # 【Issue #2334】使用 (ALL) runas 以允许 github_ops 跨用户 gh 操作
+# 【Issue #2635】前缀锚定条目：github_ops._run_gh 的 sudo 路径总是在子命令前插入
+# \`-R owner/repo\`（gh 无 -C，sudo 下靠 -R 定位仓库）；且 \`gh api\` 拒绝 -R、以
+# \`gh api repos/...\` 裸形态运行。此两条覆盖上述形态，且不弱于旧版 \`gh *\` 通配。
 Cmnd_Alias GH_SAFE = \\
+    ${GH_PATH} -R *, \\
+    ${GH_PATH} api *, \\
     ${GH_PATH} repo create *, \\
     ${GH_PATH} repo create * --private, \\
     ${GH_PATH} repo create * --public, \\
