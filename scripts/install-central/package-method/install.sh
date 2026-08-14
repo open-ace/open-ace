@@ -2935,7 +2935,7 @@ configure_scheduler_service() {
         print_info "Starting openace-scheduler service..."
         systemctl start openace-scheduler.service
     fi
-    sleep 2
+    sleep 3
     if systemctl is-active --quiet openace-scheduler.service; then
         print_success "Scheduler service active (background autonomous schedulers)"
     else
@@ -3051,7 +3051,7 @@ install_systemd_service() {
     fi
 
     # Check service status
-    sleep 2
+    sleep 3
     if systemctl is-active --quiet open-ace.service; then
         print_success "Systemd service installed and started successfully"
         print_info "Service name: open-ace"
@@ -4014,11 +4014,11 @@ install_local() {
             print_info "Restarting open-ace service..."
             systemctl daemon-reload
             systemctl restart open-ace.service
-            sleep 2
+            sleep 3
             if systemctl is-active --quiet open-ace.service; then
                 print_success "Service restarted successfully"
             else
-                print_warning "Service restart failed, check with: systemctl status open-ace"
+                print_warning "Service not yet active, check with: systemctl status open-ace"
             fi
             INSTALL_SERVICE="yes"
         fi
