@@ -6708,7 +6708,7 @@ class AutonomousOrchestrator:
             **kwargs,
         )
         if not self._is_context_overflow(result):
-            # Resume-noop backstop (#2529, system layer). A --resumed stream-json
+            # Resume-noop backstop (#2618, system layer). A --resumed stream-json
             # agent whose stale background shell re-injects a <status>stopped</status>
             # notification can terminally report success with 0 tokens and empty
             # artifact text (the provider emits a result event with no assistant
