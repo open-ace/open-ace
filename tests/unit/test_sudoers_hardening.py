@@ -11,6 +11,7 @@ Tests verify:
 
 from __future__ import annotations
 
+import fnmatch
 import re
 import subprocess
 from pathlib import Path
@@ -511,6 +512,240 @@ class TestGeneratorSyntax:
         assert (
             validate_result.returncode == 0
         ), f"Generated sudoers invalid: {validate_result.stderr}"
+
+
+class TestGithubOpsCommandShapeCoverage:
+    """Issue #2635: GIT_SAFE/GH_SAFE must match github_ops command shapes.
+
+    github_ops._run_git's sudo path builds commands where git GLOBAL OPTIONS
+    precede the subcommand (mandatory git syntax):
+
+        git -c core.hooksPath=/dev/null -c core.fsmonitor=false
+            -c safe.directory=<p> [-C <repo>] <subcommand> ...
+        git --git-dir=<...> --work-tree=<...> -c core.hooksPath=/dev/null
+            -c core.fsmonitor=false -c safe.directory=<p> <subcommand> ...
+
+    and _run_gh's sudo path always inserts ``-R owner/repo`` before the
+    subcommand, plus bare ``gh api repos/...`` forms. The #2334 verb-first
+    whitelist (``/usr/bin/git fetch *`` etc.) never matched these, so every
+    cross-user orchestrator git/gh call was rejected after the narrowed
+    whitelist was deployed. These tests lock the prefix-anchored entries that
+    cover those shapes and fail loudly if github_ops changes its prefix
+    construction without updating the sudoers generators.
+    """
+
+    # The four prefix-anchored entries (as they appear in the generator
+    # sources, pre-expansion). All three generators must carry them.
+    GIT_PREFIX_ENTRIES = [
+        "${GIT_PATH} -c core.hooksPath=/dev/null *",
+        "${GIT_PATH} --git-dir=*",
+    ]
+    GH_PREFIX_ENTRIES = [
+        "${GH_PATH} -R *",
+        "${GH_PATH} api *",
+    ]
+
+    GENERATOR_FILES = [
+        ("scripts/generate-sudoers.sh", GENERATE_SUDOERS_SH),
+        ("scripts/install-central/package-method/install.sh", INSTALL_SH),
+        ("docker-entrypoint.sh", DOCKER_ENTRYPOINT),
+    ]
+
+    @pytest.mark.parametrize("entry", GIT_PREFIX_ENTRIES + GH_PREFIX_ENTRIES)
+    @pytest.mark.parametrize(
+        "label,path",
+        GENERATOR_FILES,
+        ids=[label for label, _ in GENERATOR_FILES],
+    )
+    def test_prefix_entries_present_in_all_generators(self, entry, label, path):
+        """All three generators must carry the four prefix-anchored entries."""
+        assert entry in path.read_text(), (
+            f"{label} is missing prefix-anchored entry {entry!r}; "
+            f"github_ops._run_git/_run_gh sudo-path commands start with "
+            f"global options / -R and cannot match the verb-first whitelist "
+            f"(Issue #2635). Keep the three generators consistent."
+        )
+
+    # Bare-wildcard shapes the #2635 acceptance criterion forbids: an entry
+    # that is just the binary plus ``*`` — whether written with a resolved
+    # path, the unexpanded ${GIT_PATH}/${GH_PATH} variable, or a bare
+    # ``git``/``gh`` name — after stripping line-continuation backslashes.
+    BARE_WILDCARD_RE = re.compile(
+        r"^(?:\\\s*)?"
+        r"(\$\{GIT_PATH\}|\$\{GH_PATH\}|/usr/bin/git|/usr/local/bin/gh|git|gh)"
+        r"\s+\*\s*$"
+    )
+
+    def test_no_bare_git_or_gh_wildcard_reintroduced(self):
+        """The prefix entries must not degenerate into bare `git *`/`gh *`.
+
+        Acceptance criterion of #2635: no re-introduction of the pre-#2334
+        unprefixed wildcards. The guard runs against BOTH the generator's
+        expanded dry-run output (where ${GIT_PATH}/${GH_PATH} resolve to the
+        host's binary path — a reintroduction appears as ``<bin> *``) and the
+        raw Cmnd_Alias entries of all three generator files (covering the
+        natural unexpanded ``${GIT_PATH} *`` source form, which the previous
+        text-only check silently let through), with leading line-continuation
+        ``\\`` prefixes stripped.
+        """
+        # 1. Expanded generator output: a bare wildcard shows up as
+        #    ``<absolute-binary-path> *``.
+        try:
+            content = self._generate_sudoers()
+        except (FileNotFoundError, OSError):
+            pytest.skip("bash unavailable; cannot run generate-sudoers.sh --dry-run")
+        for alias_name in ("GIT_SAFE", "GH_SAFE"):
+            for cmd in _extract_cmnd_alias(content, alias_name):
+                stripped = cmd.strip()
+                rest = re.sub(r"^\S*/(?:git|gh)\s+", "", stripped)
+                assert rest != "*", (
+                    f"generate-sudoers.sh dry-run output: bare wildcard "
+                    f"{stripped!r} in {alias_name} re-introduces the "
+                    f"pre-#2334 `git *`/`gh *` wildcard "
+                    f"(Issue #2635 forbids this)"
+                )
+
+        # 2. Raw generator sources (docker-entrypoint.sh and install.sh are
+        #    not exercised by the dry-run): catch the unexpanded
+        #    ``${GIT_PATH} *``/``${GH_PATH} *`` and bare ``git *``/``gh *``
+        #    forms in the extracted alias entries.
+        for label, path in self.GENERATOR_FILES:
+            for alias_name in ("GIT_SAFE", "GH_SAFE"):
+                for cmd in _extract_cmnd_alias(path.read_text(), alias_name):
+                    stripped = cmd.strip()
+                    assert not self.BARE_WILDCARD_RE.match(stripped), (
+                        f"{label}: bare wildcard {stripped!r} in {alias_name} "
+                        f"re-introduces the pre-#2334 `git *`/`gh *` wildcard "
+                        f"(Issue #2635 forbids this)"
+                    )
+
+    @staticmethod
+    def _generate_sudoers() -> str:
+        """Run the unified generator in dry-run mode and return its stdout."""
+        result = subprocess.run(
+            ["bash", str(GENERATE_SUDOERS_SH), "--dry-run", "--output", "/dev/null"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"Generator failed: {result.stderr}"
+        return result.stdout
+
+    @staticmethod
+    def _strip_binary(entries: list[str], binary: str) -> list[str]:
+        """Strip the leading absolute binary path from whitelist entries.
+
+        Entries embed the host-resolved path (${GIT_PATH}/${GH_PATH}, e.g.
+        /usr/bin/git or /usr/local/bin/gh); stripping it lets us fnmatch the
+        command shapes github_ops builds (which start after the binary).
+        """
+        stripped = []
+        pattern = re.compile(rf"^\S*/{binary}\s+")
+        for entry in entries:
+            stripped.append(pattern.sub("", entry))
+        return stripped
+
+    def test_real_git_commands_match_generated_whitelist(self):
+        """Representative _run_git sudo-path shapes must match GIT_SAFE.
+
+        Uses fnmatch, which (like sudoers wildcard matching) lets ``*``
+        span spaces — mirroring how sudo matches the full argv string.
+        """
+        content = self._generate_sudoers()
+        entries = self._strip_binary(_extract_cmnd_alias(content, "GIT_SAFE"), "git")
+
+        real_shapes = [
+            # No trusted-git-dir: -c hooksPath/fsmonitor/safe.directory, then -C
+            "-c core.hooksPath=/dev/null -c core.fsmonitor=false "
+            "-c safe.directory=/x -C /x fetch origin main",
+            # Trusted-git-dir: --git-dir/--work-tree precede the -c options
+            "--git-dir=/x/.git/worktrees/w --work-tree=/x/.worktrees/w "
+            "-c core.hooksPath=/dev/null -c core.fsmonitor=false "
+            "-c safe.directory=/a -c safe.directory=/b status --porcelain",
+        ]
+        for shape in real_shapes:
+            matching = [e for e in entries if fnmatch.fnmatch(shape, e)]
+            assert matching, (
+                f"_run_git sudo-path command {shape!r} matches no GIT_SAFE "
+                f"entry; cross-user orchestrator git calls would be rejected "
+                f"by sudoers (Issue #2635). GIT_SAFE entries: {entries!r}"
+            )
+
+    def test_real_gh_commands_match_generated_whitelist(self):
+        """Representative _run_gh sudo-path shapes must match GH_SAFE."""
+        content = self._generate_sudoers()
+        entries = self._strip_binary(_extract_cmnd_alias(content, "GH_SAFE"), "gh")
+
+        real_shapes = [
+            # sudo path always inserts -R owner/repo before the subcommand
+            "-R owner/repo pr checks 123 --json name,state",
+            # gh api rejects -R (repo_scoped=False) -> plain `gh api repos/...`
+            "api repos/owner/repo/pulls/123",
+        ]
+        for shape in real_shapes:
+            matching = [e for e in entries if fnmatch.fnmatch(shape, e)]
+            assert matching, (
+                f"_run_gh sudo-path command {shape!r} matches no GH_SAFE "
+                f"entry; cross-user orchestrator gh calls would be rejected "
+                f"by sudoers (Issue #2635). GH_SAFE entries: {entries!r}"
+            )
+
+    def test_github_ops_prefix_construction_locked(self):
+        """Drift lock: github_ops must keep the exact prefix construction.
+
+        Deliberately brittle source-grep. If github_ops.py changes how it
+        builds the sudo-path prefixes (the ``-c core.hooksPath=/dev/null``
+        lead-in, the ``--git-dir=`` trusted-context build, or the ``-R``
+        insertion), the prefix-anchored sudoers entries added for #2635
+        silently stop matching and every cross-user orchestrator git/gh call
+        is rejected again. Fail here with a pointer to the entries.
+        """
+        text = GITHUB_OPS_PY.read_text()
+
+        # 1. git prefixes (both sudo and non-sudo paths) lead with
+        #    core.hooksPath=/dev/null before any subcommand.
+        assert '"core.hooksPath=/dev/null"' in text, (
+            "github_ops._run_git no longer builds the "
+            "'-c core.hooksPath=/dev/null' prefix; the sudoers entry "
+            "'${GIT_PATH} -c core.hooksPath=/dev/null *' (scripts/"
+            "generate-sudoers.sh, scripts/install-central/package-method/"
+            "install.sh, docker-entrypoint.sh) must be updated in lockstep "
+            "(Issue #2635)"
+        )
+
+        # 2. trusted-git-dir path builds --git-dir=/--work-tree= first.
+        assert 'f"--git-dir={self._trusted_git_dir}"' in text, (
+            "github_ops._run_git no longer builds the '--git-dir=' trusted "
+            "prefix; the sudoers entry '${GIT_PATH} --git-dir=*' (scripts/"
+            "generate-sudoers.sh, scripts/install-central/package-method/"
+            "install.sh, docker-entrypoint.sh) must be updated in lockstep "
+            "(Issue #2635)"
+        )
+
+        # 3. gh sudo path inserts -R owner/repo before the subcommand.
+        assert 'cmd += ["gh", "-R", owner_repo] + args' in text, (
+            "github_ops._run_gh no longer inserts '-R owner/repo' on the "
+            "sudo path; the sudoers entry '${GH_PATH} -R *' (scripts/"
+            "generate-sudoers.sh, scripts/install-central/package-method/"
+            "install.sh, docker-entrypoint.sh) must be updated in lockstep "
+            "(Issue #2635)"
+        )
+
+        # 4. Ordering (M1): within _run_git's sudo branch, the
+        #    '-c core.hooksPath=/dev/null' lead-in must be built BEFORE the
+        #    '-C'/positional part of the command. The sudoers prefix entry
+        #    '${GIT_PATH} -c core.hooksPath=/dev/null *' only matches because
+        #    the sudo-path command starts with those -c options; if '-C' (or
+        #    anything else) ever moves ahead of them, sudo silently stops
+        #    matching the prefix entry.
+        assert text.index('"core.hooksPath=/dev/null"') < text.index('["-C", self.repo_path]'), (
+            "github_ops._run_git builds '-C <repo>' (or positional args) "
+            "before the '-c core.hooksPath=/dev/null' options; the command "
+            "no longer starts with the prefix the sudoers entry "
+            "'${GIT_PATH} -c core.hooksPath=/dev/null *' anchors on "
+            "(scripts/generate-sudoers.sh, scripts/install-central/"
+            "package-method/install.sh, docker-entrypoint.sh) — update the "
+            "sudoers entries in lockstep (Issue #2635)"
+        )
 
 
 class TestSudoersDrift:
