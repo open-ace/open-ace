@@ -53,7 +53,7 @@ _security_mode = os.environ.get("OPENACE_SECURITY_MODE", "").strip()
 if not _security_mode:
     _is_prod_capable = (
         os.path.isdir("/run/systemd/system")  # systemd
-        or os.environ.get("KUBERNETES_SERVICE_HOST") is not None  # K8s
+        or bool(os.environ.get("KUBERNETES_SERVICE_HOST"))  # K8s
         or os.environ.get("FLASK_ENV") == "production"
     )
     if not _is_prod_capable:
