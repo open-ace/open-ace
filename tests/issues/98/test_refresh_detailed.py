@@ -9,13 +9,16 @@ Detailed test for Issue #98: Messages 页面的 refresh 和 auto refresh 都不�
 """
 
 import asyncio
+import os
 import time
 
+import pytest
 from playwright.async_api import async_playwright
 
-BASE_URL = "http://localhost:19888"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 
 
+@pytest.mark.asyncio
 async def test_messages_refresh_detailed():
     """Test Messages page refresh functionality in detail."""
     async with async_playwright() as p:

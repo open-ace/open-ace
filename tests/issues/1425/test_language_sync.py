@@ -124,6 +124,7 @@ async def test_language_url_parameter_update():
         print("\nTest 2 completed!")
 
 
+@pytest.mark.asyncio
 async def test_language_postmessage_sent():
     """
     Test that openace-language-change postMessage is sent when language changes.
@@ -166,8 +167,6 @@ async def test_language_postmessage_sent():
                     return originalPostMessage(message, targetOrigin, transfer);
                 };
 
-                // Also track messages sent to iframes
-                const originalIframePostMessage = HTMLIFrameElement.prototype.contentWindow;
             }
         """)
 

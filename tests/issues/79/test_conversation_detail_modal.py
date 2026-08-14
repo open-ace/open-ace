@@ -10,44 +10,49 @@ This script tests the enhanced conversation detail modal which includes:
 """
 
 import asyncio
+import os
 from datetime import datetime
 
 import aiohttp
 import pytest
 
-BASE_URL = "http://localhost:19888"
+# The issues lane runs the server on an ephemeral port exported as BASE_URL.
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 
 
+async def _fetch_first_session_id() -> str | None:
+    """Fetch a session_id from the conversation-history API (or None)."""
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"{BASE_URL}/api/conversation-history?limit=5") as resp:
+            if resp.status != 200:
+                print(f"✗ Failed to get conversation history: {resp.status}")
+                return None
+            data = await resp.json()
+            print(f"✓ Got {len(data)} conversations")
+            if not data:
+                return None
+            print(f"  Session ID: {data[0].get('session_id')}")
+            print(f"  Tool: {data[0].get('tool_name')}")
+            print(f"  Messages: {data[0].get('message_count')}")
+            print(f"  Tokens: {data[0].get('total_tokens')}")
+            return data[0].get("session_id")
+
+
+@pytest.mark.asyncio
 async def test_conversation_history_api():
     """Test the conversation history API."""
     print("\n=== Testing Conversation History API ===")
-
-    async with aiohttp.ClientSession() as session:
-        # Get conversation history
-        async with session.get(f"{BASE_URL}/api/conversation-history?limit=5") as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                print(f"✓ Got {len(data)} conversations")
-
-                if data:
-                    # Get the first conversation's session_id
-                    session_id = data[0].get("session_id")
-                    print(f"  Session ID: {session_id}")
-                    print(f"  Tool: {data[0].get('tool_name')}")
-                    print(f"  Messages: {data[0].get('message_count')}")
-                    print(f"  Tokens: {data[0].get('total_tokens')}")
-                    return session_id
-            else:
-                print(f"✗ Failed to get conversation history: {resp.status}")
-                return None
+    await _fetch_first_session_id()
 
 
-async def test_conversation_timeline_api(session_id):
+@pytest.mark.asyncio
+async def test_conversation_timeline_api():
     """Test the conversation timeline API."""
+    session_id = await _fetch_first_session_id()
     print(f"\n=== Testing Conversation Timeline API (Session: {session_id}) ===")
 
     if not session_id:
-        print("✗ No session ID provided")
+        print("✗ No session ID available (history empty or auth-denied)")
         return
 
     async with aiohttp.ClientSession() as session:
