@@ -1033,6 +1033,11 @@ def get_machine_commands(machine_id):
         - system_admin: Can view all commands
         - machine_admin: Can view commands (without registration token)
         - machine_user: Cannot view sensitive commands
+
+    Note: machine_access_required already verified:
+        - Machine exists (called agent_mgr.get_machine)
+        - User has access (called agent_mgr.get_user_permission)
+    We query again here to ensure we have the latest data for command generation.
     """
     agent_mgr = get_remote_agent_manager()
     machine = agent_mgr.get_machine(machine_id)
@@ -1043,34 +1048,42 @@ def get_machine_commands(machine_id):
     # Get server URL from request or config
     server_url = request.host_url.rstrip("/")
 
-    # Get OS type from machine record
-    os_type = (machine.get("os_type") or "").lower()
-    if os_type.startswith("win") or "windows" in os_type:
+    # Get OS type from machine record and normalize
+    # Issue #2565: Use explicit matching to avoid false positives
+    os_type = (machine.get("os_type") or "").lower().strip()
+
+    if not os_type:
+        # Default to Linux for empty os_type
+        os_type_normalized = "Linux"
+    elif os_type in ("windows", "win", "win10", "win11", "microsoft windows"):
         os_type_normalized = "Windows"
-    elif os_type.startswith("darwin") or "mac" in os_type or "macos" in os_type:
+    elif os_type in ("darwin", "macos", "mac os x", "mac os"):
         os_type_normalized = "Darwin"
+    elif os_type in ("linux", "ubuntu", "centos", "debian", "redhat", "fedora"):
+        os_type_normalized = "Linux"
     else:
-        # Default to Linux for unknown or Linux
+        # Default to Linux for unknown OS types
         os_type_normalized = "Linux"
 
     # Generate commands based on OS type
-    install_dir = "~/.open-ace-agent"
-
+    # Issue #2565: Use proper Windows path expansion
     if os_type_normalized == "Windows":
+        install_dir = "$env:USERPROFILE\\.open-ace-agent"
         install_command = (
             f'powershell -Command "Invoke-WebRequest -Uri \'{server_url}/api/remote/agent/install.ps1\''
             f" -OutFile 'install.ps1'; powershell -ExecutionPolicy Bypass -File install.ps1"
             f' -ServerUrl \'{server_url}\' -RegistrationToken <TOKEN>"'
         )
-        start_command = f"powershell -ExecutionPolicy Bypass -File {install_dir}/start-agent.ps1"
-        stop_command = f"powershell -ExecutionPolicy Bypass -File {install_dir}/start-agent.ps1 -Stop"
-        status_command = f"powershell -ExecutionPolicy Bypass -File {install_dir}/start-agent.ps1 -Status"
+        start_command = f"powershell -ExecutionPolicy Bypass -File {install_dir}\\start-agent.ps1"
+        stop_command = f"powershell -ExecutionPolicy Bypass -File {install_dir}\\start-agent.ps1 -Stop"
+        status_command = f"powershell -ExecutionPolicy Bypass -File {install_dir}\\start-agent.ps1 -Status"
         uninstall_command = (
             f'powershell -Command "Invoke-WebRequest -Uri \'{server_url}/api/remote/agent/uninstall.ps1\''
             f' -OutFile \'uninstall.ps1\'; powershell -ExecutionPolicy Bypass -File uninstall.ps1"'
         )
     else:
         # Linux/macOS
+        install_dir = "~/.open-ace-agent"
         install_command = (
             f"curl -fsSL {server_url}/api/remote/agent/install.sh | "
             f"bash -s -- --server {server_url} --token <TOKEN>"
