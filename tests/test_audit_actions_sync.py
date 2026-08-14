@@ -37,7 +37,7 @@ class TestAuditActionsSynchronization:
             "Data Access": 4,  # DATA_VIEW, EXPORT, IMPORT, DELETE
             "System": 3,  # SYSTEM_CONFIG_CHANGE, START, STOP
             "Content Filter": 4,  # CONTENT_BLOCKED, FLAGGED, WARNED, REDACTED
-            "Remote Agent": 8,  # Agent lifecycle plus usage-report security actions
+            "Remote Agent": 10,  # Agent lifecycle plus usage-report security actions, plus token rotation actions
             "SSRF Protection": 3,  # LLM_PROXY_URL_BLOCKED, ALLOWLIST_ENTRY_INVALID, IP_RESOLVED_MISMATCH
             "URL Token Security": 7,  # QUERY_SESSION_TOKEN_REJECTED, WEBUI_TOKEN_IN_QUERY_USED, PROXY_TOKEN_IN_QUERY_USED, BROWSER_TOKEN_IN_QUERY_USED, URL_TOKEN_PATH_VIOLATION, LEGACY_WEBUI_TOKEN_USED, TOKEN_LEAK_SUSPECTED
             "Admin Access": 2,  # ADMIN_CROSS_TENANT_ACCESS, ADMIN_GLOBAL_SESSION_LIST
