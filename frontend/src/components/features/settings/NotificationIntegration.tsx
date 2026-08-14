@@ -10,6 +10,43 @@ import { FeishuConfig } from './FeishuConfig';
 
 type Section = 'channels' | 'collaboration';
 
+const statusColor = (status?: string) => {
+  switch (status) {
+    case 'configured':
+    case 'enabled':
+    case 'available':
+      return '#639922';
+    case 'no_configuration_required':
+      return '#378ADD';
+    case 'needs_configuration':
+      return '#EF9F27';
+    case 'disabled':
+      return '#888780';
+    case 'error':
+      return '#A32D2D';
+    default:
+      return '#888780';
+  }
+};
+
+const statusBadgeVariant = (status?: string) => {
+  switch (status) {
+    case 'configured':
+    case 'enabled':
+    case 'available':
+    case 'no_configuration_required':
+      return 'success';
+    case 'needs_configuration':
+      return 'warning';
+    case 'disabled':
+      return 'secondary';
+    case 'error':
+      return 'danger';
+    default:
+      return 'warning';
+  }
+};
+
 export const NotificationIntegration: React.FC = () => {
   const language = useLanguage();
   const toast = useToast();
@@ -21,6 +58,8 @@ export const NotificationIntegration: React.FC = () => {
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [webhookTestUrl, setWebhookTestUrl] = useState('');
+  const [dingtalkTestUrl, setDingtalkTestUrl] = useState('');
   const [webhook, setWebhook] = useState({
     webhook_secret: '',
     allow_private_webhook_urls: false,
@@ -80,19 +119,6 @@ export const NotificationIntegration: React.FC = () => {
     };
     return keys[value ?? ''] ?? 'loading';
   };
-  const badge = (key: string) => (
-    <Badge
-      variant={
-        ['configured', 'enabled', 'available', 'no_configuration_required'].includes(
-          status[key]?.status
-        )
-          ? 'success'
-          : 'warning'
-      }
-    >
-      {t(statusKey(status[key]?.status), language)}
-    </Badge>
-  );
 
   const saveWebhook = async () => {
     const { webhook_secret, ...rest } = webhook;
@@ -153,18 +179,154 @@ export const NotificationIntegration: React.FC = () => {
     }
   };
 
-  const cards = [
+  const channelCards = [
     ['email', 'integrationEmail', 'integrationEmailDesc'],
     ['webhook', 'integrationWebhook', 'integrationWebhookDesc'],
     ['dingtalk_bot', 'integrationDingTalkBot', 'integrationDingTalkBotDesc'],
     ['feishu_bot', 'integrationFeishuBot', 'integrationFeishuBotDesc'],
-  ];
+  ] as const;
+
+  const platformCards = [
+    ['feishu', 'integrationFeishuApp', 'feishu_app'],
+    ['dingtalk', 'integrationDingTalkApp', 'dingtalk_app'],
+  ] as const;
+
+  const statusPill = (key: string, titleKey: string) => {
+    const st = status[key]?.status || 'needs_configuration';
+    return (
+      <span
+        key={key}
+        className="ni-status-pill"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          fontSize: 12.5,
+          color: 'var(--color-text-secondary, #444441)',
+        }}
+      >
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor(st) }} />
+        {t(titleKey, language)} · {t(statusKey(st), language)}
+      </span>
+    );
+  };
 
   return (
-    <div>
+    <div className="notification-integration">
+      <style>{`
+        .notification-integration .ni-status-bar {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 14px;
+          padding: 10px 0;
+        }
+        .notification-integration .ni-tabs {
+          display: flex;
+          gap: 8px;
+        }
+        .notification-integration .ni-tabs .btn {
+          border-radius: 6px;
+        }
+        .notification-integration .ni-channel-card {
+          background: var(--color-background-primary, #fff);
+          border: 0.5px solid var(--color-border-tertiary, #d3d1c7);
+          border-left-width: 3px;
+          border-radius: 12px;
+          padding: 16px 18px;
+          cursor: pointer;
+          transition: background 0.15s ease;
+          height: 100%;
+        }
+        .notification-integration .ni-channel-card:hover,
+        .notification-integration .ni-channel-card.ni-active {
+          background: var(--color-background-secondary, #f1efe8);
+        }
+        .notification-integration .ni-channel-card .ni-dot {
+          display: inline-block;
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          margin-right: 6px;
+          vertical-align: middle;
+        }
+        .notification-integration .ni-channel-card .ni-title {
+          display: flex;
+          align-items: center;
+          font-size: 14px;
+        }
+        .notification-integration .ni-detail {
+          border: 0.5px solid var(--color-border-tertiary, #d3d1c7);
+          border-left-width: 3px;
+          border-radius: 12px;
+          padding: 20px 22px;
+          background: var(--color-background-primary, #fff);
+        }
+        .notification-integration .ni-detail-header {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding-bottom: 14px;
+          border-bottom: 0.5px solid var(--color-border-tertiary, #d3d1c7);
+          margin-bottom: 16px;
+        }
+        .notification-integration .ni-detail-header .ni-icon {
+          width: 40px;
+          height: 40px;
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 18px;
+          flex-shrink: 0;
+          font-weight: 500;
+        }
+        .notification-integration .ni-detail-title {
+          font-weight: 500;
+          font-size: 14px;
+          line-height: 1.4;
+        }
+        .notification-integration .ni-detail-subtitle {
+          font-size: 12.5px;
+          color: var(--color-text-secondary, #5f5e5a);
+        }
+        .notification-integration .ni-section {
+          font-weight: 500;
+          font-size: 13px;
+          margin: 20px 0 10px;
+          padding-left: 10px;
+          border-left: 3px solid #378ADD;
+        }
+        .notification-integration .ni-metric {
+          background: var(--color-background-secondary, #f1efe8);
+          border-radius: 8px;
+          padding: 12px 16px;
+        }
+        .notification-integration .ni-metric .ni-metric-value {
+          font-size: 22px;
+          font-weight: 500;
+          margin-top: 4px;
+        }
+        .notification-integration .ni-boundary {
+          font-size: 12.5px;
+          color: var(--color-text-secondary, #5f5e5a);
+          line-height: 1.7;
+        }
+        .notification-integration .ni-hint {
+          font-size: 12px;
+          color: var(--color-text-tertiary, #888780);
+        }
+      `}</style>
+
       <h2>{t('notificationIntegration', language)}</h2>
       <p className="text-muted">{t('notificationIntegrationDesc', language)}</p>
-      <div className="btn-group mb-4" role="tablist">
+
+      <div className="ni-status-bar mb-4">
+        {channelCards.map(([key, titleKey]) => statusPill(key, titleKey))}
+        <span className="ni-hint">{t('integrationStatusBarSource', language)}</span>
+      </div>
+
+      <div className="ni-tabs mb-4" role="tablist">
         <Button
           variant={section === 'channels' ? 'primary' : 'outline-secondary'}
           onClick={() => open('channels', 'email')}
@@ -182,28 +344,68 @@ export const NotificationIntegration: React.FC = () => {
       {section === 'channels' ? (
         <>
           <div className="row g-3 mb-4">
-            {cards.map(([key, title, description]) => (
-              <div className="col-md-3" key={key}>
-                <Card className="h-100">
-                  <button
-                    className="btn text-start w-100"
-                    onClick={() => open('channels', key.replace('_bot', ''))}
+            {channelCards.map(([key, titleKey, descriptionKey]) => {
+              const channelKey = key.replace('_bot', '');
+              const active = selected === channelKey;
+              const st = status[key]?.status;
+              return (
+                <div className="col-md-3" key={key}>
+                  <div
+                    className={`ni-channel-card ${active ? 'ni-active' : ''}`}
+                    style={{ borderLeftColor: statusColor(st) }}
+                    onClick={() => open('channels', channelKey)}
                   >
-                    <div className="d-flex justify-content-between">
-                      <strong>{t(title, language)}</strong>
-                      {badge(key)}
+                    <div className="d-flex justify-content-between align-items-start">
+                      <div className="ni-title">
+                        <span className="ni-dot" style={{ background: statusColor(st) }} />
+                        <strong>{t(titleKey, language)}</strong>
+                      </div>
+                      <Badge variant={statusBadgeVariant(st)}>{t(statusKey(st), language)}</Badge>
                     </div>
-                    <small className="text-muted">{t(description, language)}</small>
-                  </button>
-                </Card>
-              </div>
-            ))}
+                    <small className="text-muted d-block mt-2">{t(descriptionKey, language)}</small>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          {selected === 'email' && <SmtpConfig />}
+
+          {selected === 'email' && (
+            <div
+              className="ni-detail"
+              style={{ borderLeftColor: statusColor(status.email?.status) }}
+            >
+              <div className="ni-detail-header">
+                <div className="ni-icon" style={{ background: '#E6F4EA', color: '#1E6F28' }}>
+                  ✉
+                </div>
+                <div>
+                  <div className="ni-detail-title">{t('smtpConfiguration', language)}</div>
+                  <div className="ni-detail-subtitle">{t('integrationSmtpSubtitle', language)}</div>
+                </div>
+              </div>
+              <SmtpConfig compact />
+            </div>
+          )}
+
           {selected === 'webhook' && (
-            <Card title={t('integrationWebhookTitle', language)}>
+            <Card
+              className="ni-detail"
+              style={{ borderLeftColor: statusColor(status.webhook?.status) }}
+            >
+              <div className="ni-detail-header">
+                <div className="ni-icon" style={{ background: '#FAEEDA', color: '#854F0B' }}>
+                  ↗
+                </div>
+                <div>
+                  <div className="ni-detail-title">{t('integrationWebhookTitle', language)}</div>
+                  <div className="ni-detail-subtitle">
+                    {t('integrationWebhookSubtitle', language)}
+                  </div>
+                </div>
+              </div>
+
               <div className="row g-3">
-                <div className="col-md-8">
+                <div className="col-md-4">
                   <label className="form-label">{t('integrationSigningSecret', language)}</label>
                   <TextInput
                     type="password"
@@ -212,82 +414,265 @@ export const NotificationIntegration: React.FC = () => {
                     placeholder={t('integrationSecretKeepHint', language)}
                   />
                 </div>
-                <Switch
-                  id="webhook-enabled"
-                  label={t('integrationDeliveryEnabled', language)}
-                  checked={webhook.enabled}
-                  onChange={(checked) => setWebhook({ ...webhook, enabled: checked })}
-                />
-                <Switch
-                  id="webhook-private"
-                  label={t('integrationAllowPrivate', language)}
-                  checked={webhook.allow_private_webhook_urls}
-                  onChange={(checked) =>
-                    setWebhook({ ...webhook, allow_private_webhook_urls: checked })
-                  }
-                />
-                <div>
-                  <Button variant="primary" onClick={saveWebhook}>
-                    {t('save', language)}
-                  </Button>
+                <div className="col-md-4">
+                  <label className="form-label">{t('integrationAllowPrivate', language)}</label>
+                  <select
+                    className="form-select"
+                    value={webhook.allow_private_webhook_urls ? '1' : '0'}
+                    onChange={(event) =>
+                      setWebhook({
+                        ...webhook,
+                        allow_private_webhook_urls: event.target.value === '1',
+                      })
+                    }
+                  >
+                    <option value="0">{t('integrationWebhookPrivateOff', language)}</option>
+                    <option value="1">{t('integrationWebhookPrivateOn', language)}</option>
+                  </select>
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">{t('integrationDeliveryEnabled', language)}</label>
+                  <select
+                    className="form-select"
+                    value={webhook.enabled ? '1' : '0'}
+                    onChange={(event) =>
+                      setWebhook({ ...webhook, enabled: event.target.value === '1' })
+                    }
+                  >
+                    <option value="1">{t('integrationWebhookStateEnabled', language)}</option>
+                    <option value="0">{t('integrationWebhookStateDisabled', language)}</option>
+                  </select>
                 </div>
               </div>
+
+              <div className="alert alert-warning mt-3 mb-0">
+                {t('integrationWebhookSsrfWarning', language)}
+              </div>
+
+              <div className="d-flex gap-2 align-items-center mt-3 flex-wrap">
+                <Button variant="primary" onClick={saveWebhook}>
+                  {t('save', language)}
+                </Button>
+                <Button
+                  variant="outline-secondary"
+                  onClick={() => {
+                    if (!webhookTestUrl.trim()) {
+                      toast.error(
+                        t('validationError', language),
+                        t('integrationTestEnterUrl', language)
+                      );
+                      return;
+                    }
+                    toast.info(
+                      t('integrationTestSend', language),
+                      `→ ${webhookTestUrl} (${t('integrationComingSoon', language)})`
+                    );
+                  }}
+                  title={t('integrationComingSoon', language)}
+                >
+                  {t('integrationTestSend', language)} ({t('integrationComingSoon', language)})
+                </Button>
+                <div className="flex-grow-1" style={{ maxWidth: 360 }}>
+                  <TextInput
+                    value={webhookTestUrl}
+                    onChange={setWebhookTestUrl}
+                    placeholder={t('integrationTestUrlPlaceholder', language)}
+                  />
+                </div>
+              </div>
+              <div className="ni-hint mt-2">{t('integrationWebhookSecretHint', language)}</div>
+
+              {/* TODO: 对接后端投递日志 API，当前为占位空状态 */}
+              <div className="ni-section">{t('integrationDeliveryLog', language)}</div>
+              <table className="table table-sm" style={{ fontSize: 12.5 }}>
+                <thead>
+                  <tr>
+                    <th>{t('integrationDeliveryLogTime', language)}</th>
+                    <th>{t('integrationDeliveryLogType', language)}</th>
+                    <th>{t('integrationDeliveryLogTarget', language)}</th>
+                    <th>{t('integrationDeliveryLogStatus', language)}</th>
+                    <th>{t('integrationDeliveryLogRetry', language)}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td colSpan={5} className="text-center text-muted py-3">
+                      {t('integrationComingSoon', language)} — API pending
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <div className="ni-hint">{t('integrationDeliveryLogHashHint', language)}</div>
             </Card>
           )}
+
           {selected === 'dingtalk' && (
-            <Card title={t('integrationDingTalkBotTitle', language)}>
-              <p>{t('integrationBotBoundary', language)}</p>
+            <Card
+              className="ni-detail"
+              style={{ borderLeftColor: statusColor(status.dingtalk_bot?.status) }}
+            >
+              <div className="ni-detail-header">
+                <div className="ni-icon" style={{ background: '#E1F5EE', color: '#0F6E56' }}>
+                  钉
+                </div>
+                <div>
+                  <div className="ni-detail-title">
+                    {t('integrationDingTalkBotTitle', language)}
+                  </div>
+                  <div className="ni-detail-subtitle">
+                    {t('integrationDingTalkBotSubtitle', language)}
+                  </div>
+                </div>
+              </div>
+
               <label className="form-label">{t('integrationFallbackSecret', language)}</label>
-              <TextInput
-                type="password"
-                value={dingtalk.fallback_webhook_secret}
-                onChange={(value) => setDingtalk({ ...dingtalk, fallback_webhook_secret: value })}
-                placeholder={t('integrationSecretKeepHint', language)}
-              />
-              <div className="mt-3">
+              <div style={{ maxWidth: 340 }}>
+                <TextInput
+                  type="password"
+                  value={dingtalk.fallback_webhook_secret}
+                  onChange={(value) => setDingtalk({ ...dingtalk, fallback_webhook_secret: value })}
+                  placeholder={t('integrationSecretKeepHint', language)}
+                />
+              </div>
+              <div className="alert alert-info mt-3 mb-0">
+                {t('integrationDingTalkBotFallbackHint', language)}
+              </div>
+
+              <div className="d-flex gap-2 align-items-center mt-3 flex-wrap">
                 <Button variant="primary" onClick={saveDingTalk}>
                   {t('save', language)}
-                </Button>{' '}
+                </Button>
+                <Button
+                  variant="outline-secondary"
+                  onClick={() => {
+                    if (!dingtalkTestUrl.trim()) {
+                      toast.error(
+                        t('validationError', language),
+                        t('integrationTestEnterUrl', language)
+                      );
+                      return;
+                    }
+                    toast.info(
+                      t('integrationTestSend', language),
+                      `→ ${dingtalkTestUrl} (${t('integrationComingSoon', language)})`
+                    );
+                  }}
+                  title={t('integrationComingSoon', language)}
+                >
+                  {t('integrationTestSend', language)} ({t('integrationComingSoon', language)})
+                </Button>
+                <div className="flex-grow-1" style={{ maxWidth: 360 }}>
+                  <TextInput
+                    value={dingtalkTestUrl}
+                    onChange={setDingtalkTestUrl}
+                    placeholder={t('integrationTestUrlPlaceholder', language)}
+                  />
+                </div>
+              </div>
+              <div className="ni-hint mt-2">{t('integrationTestSendHint', language)}</div>
+
+              <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-4 p-3 rounded-2 ni-metric">
+                <span>{t('integrationConfigureAlertTarget', language)}</span>
                 <Link className="btn btn-outline-secondary" to="/manage/quota">
                   {t('integrationGoToNotifications', language)}
                 </Link>
               </div>
             </Card>
           )}
+
           {selected === 'feishu' && (
-            <Card title={t('integrationFeishuBotTitle', language)}>
-              <p>{t('integrationFeishuNoConfig', language)}</p>
-              <Link className="btn btn-primary" to="/manage/quota">
-                {t('integrationGoToNotifications', language)}
-              </Link>
+            <Card
+              className="ni-detail"
+              style={{ borderLeftColor: statusColor(status.feishu_bot?.status) }}
+            >
+              <div className="ni-detail-header">
+                <div className="ni-icon" style={{ background: '#E6F1FB', color: '#185FA5' }}>
+                  飞
+                </div>
+                <div>
+                  <div className="ni-detail-title">{t('integrationFeishuBotTitle', language)}</div>
+                  <div className="ni-detail-subtitle">
+                    {t('integrationFeishuBotSubtitle', language)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="alert alert-info mb-0">
+                {t('integrationFeishuBotNoConfigDetail', language)}
+              </div>
+
+              <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-4 p-3 rounded-2 ni-metric">
+                <span>{t('integrationConfigureAlertTarget', language)}</span>
+                <Link className="btn btn-primary" to="/manage/quota">
+                  {t('integrationGoToNotifications', language)}
+                </Link>
+              </div>
             </Card>
           )}
         </>
       ) : (
         <>
           <div className="row g-3 mb-4">
-            {[
-              ['feishu', 'integrationFeishuApp', 'feishu_app'],
-              ['dingtalk', 'integrationDingTalkApp', 'dingtalk_app'],
-            ].map(([key, title, statusName]) => (
-              <div className="col-md-6" key={key}>
-                <Card>
-                  <button
-                    className="btn text-start w-100"
+            {platformCards.map(([key, titleKey, statusName]) => {
+              const active = selected === key;
+              const st = status[statusName]?.status;
+              return (
+                <div className="col-md-6" key={key}>
+                  <div
+                    className={`ni-channel-card ${active ? 'ni-active' : ''}`}
+                    style={{ borderLeftColor: statusColor(st) }}
                     onClick={() => open('collaboration', key)}
                   >
-                    <div className="d-flex justify-content-between">
-                      <strong>{t(title, language)}</strong>
-                      {badge(statusName)}
+                    <div className="d-flex justify-content-between align-items-start">
+                      <div className="ni-title">
+                        <span className="ni-dot" style={{ background: statusColor(st) }} />
+                        <strong>{t(titleKey, language)}</strong>
+                      </div>
+                      <Badge variant={statusBadgeVariant(st)}>{t(statusKey(st), language)}</Badge>
                     </div>
-                  </button>
-                </Card>
-              </div>
-            ))}
+                    <small className="text-muted d-block mt-2">
+                      {key === 'feishu'
+                        ? t('integrationFeishuAppDesc', language)
+                        : t('integrationDingTalkAppDesc', language)}
+                    </small>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          {selected === 'feishu' && <FeishuConfig />}
+
+          {selected === 'feishu' && (
+            <Card className="ni-detail" style={{ borderLeftColor: '#378ADD' }}>
+              <div className="ni-detail-header">
+                <div className="ni-icon" style={{ background: '#E6F1FB', color: '#185FA5' }}>
+                  飞
+                </div>
+                <div>
+                  <div className="ni-detail-title">{t('integrationFeishuApp', language)}</div>
+                  <div className="ni-detail-subtitle">
+                    {t('integrationFeishuAppSubtitle', language)}
+                  </div>
+                </div>
+              </div>
+              <FeishuConfig compact />
+            </Card>
+          )}
+
           {selected === 'dingtalk' && (
-            <Card title={t('integrationDingTalkApp', language)}>
+            <Card className="ni-detail" style={{ borderLeftColor: '#0F6E56' }}>
+              <div className="ni-detail-header">
+                <div className="ni-icon" style={{ background: '#E1F5EE', color: '#0F6E56' }}>
+                  钉
+                </div>
+                <div>
+                  <div className="ni-detail-title">{t('integrationDingTalkApp', language)}</div>
+                  <div className="ni-detail-subtitle">
+                    {t('integrationDingTalkAppSubtitle', language)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="ni-section">{t('integrationConnectionConfig', language)}</div>
               <div className="row g-3">
                 <Field label="AppKey">
                   <TextInput
@@ -303,12 +688,30 @@ export const NotificationIntegration: React.FC = () => {
                     placeholder={t('integrationSecretKeepHint', language)}
                   />
                 </Field>
-                <Switch
-                  id="dingtalk-sync"
-                  label={t('integrationAutoSync', language)}
-                  checked={dingtalk.sync_enabled}
-                  onChange={(checked) => setDingtalk({ ...dingtalk, sync_enabled: checked })}
-                />
+              </div>
+              <div className="mt-3">
+                <Button variant="primary" onClick={saveDingTalk}>
+                  {t('save', language)}
+                </Button>{' '}
+                <Button
+                  variant="outline-secondary"
+                  onClick={testDingTalk}
+                  loading={busy === 'test'}
+                >
+                  {t('testConnection', language)}
+                </Button>
+              </div>
+
+              <div className="ni-section">{t('integrationSyncSettings', language)}</div>
+              <div className="row g-3">
+                <div className="col-md-6">
+                  <Switch
+                    id="dingtalk-sync"
+                    label={t('integrationAutoSync', language)}
+                    checked={dingtalk.sync_enabled}
+                    onChange={(checked) => setDingtalk({ ...dingtalk, sync_enabled: checked })}
+                  />
+                </div>
                 <Field label={t('integrationTargetTenant', language)}>
                   <select
                     className="form-select"
@@ -325,6 +728,12 @@ export const NotificationIntegration: React.FC = () => {
                     ))}
                   </select>
                 </Field>
+                <Field label={t('integrationRootDepartment', language)}>
+                  <TextInput
+                    value={dingtalk.root_dept_id}
+                    onChange={(value) => setDingtalk({ ...dingtalk, root_dept_id: value })}
+                  />
+                </Field>
                 <Field label={t('integrationInterval', language)}>
                   <TextInput
                     type="number"
@@ -332,12 +741,6 @@ export const NotificationIntegration: React.FC = () => {
                     onChange={(value) =>
                       setDingtalk({ ...dingtalk, interval_minutes: Number(value) })
                     }
-                  />
-                </Field>
-                <Field label={t('integrationRootDepartment', language)}>
-                  <TextInput
-                    value={dingtalk.root_dept_id}
-                    onChange={(value) => setDingtalk({ ...dingtalk, root_dept_id: value })}
                   />
                 </Field>
                 <Field label={t('integrationMaxRuntime', language)}>
@@ -349,43 +752,77 @@ export const NotificationIntegration: React.FC = () => {
                     }
                   />
                 </Field>
-                <Switch
-                  id="dingtalk-recovery"
-                  label={t('integrationAutoRecovery', language)}
-                  checked={dingtalk.auto_recovery}
-                  onChange={(checked) => setDingtalk({ ...dingtalk, auto_recovery: checked })}
-                />
-                <div className="col-12 d-flex gap-2">
-                  <Button variant="primary" onClick={saveDingTalk}>
-                    {t('save', language)}
-                  </Button>
-                  <Button
-                    variant="outline-secondary"
-                    onClick={testDingTalk}
-                    loading={busy === 'test'}
-                  >
-                    {t('testConnection', language)}
-                  </Button>
-                  <Button
-                    variant="outline-warning"
-                    onClick={syncDingTalk}
-                    loading={busy === 'sync'}
-                  >
-                    {t('integrationSyncNow', language)}
-                  </Button>
+                <div className="col-md-6">
+                  <Switch
+                    id="dingtalk-recovery"
+                    label={t('integrationAutoRecovery', language)}
+                    checked={dingtalk.auto_recovery}
+                    onChange={(checked) => setDingtalk({ ...dingtalk, auto_recovery: checked })}
+                  />
                 </div>
-                {syncResult && (
-                  <div className="col-12">
-                    <div className="alert alert-success">
-                      <strong>{t('integrationSyncResult', language)}:</strong> {syncResult}
+              </div>
+
+              {/* TODO: 对接后端同步状态 API，当前为占位空状态 */}
+              <div className="ni-section">{t('integrationSyncStatusSection', language)}</div>
+              <div className="row g-3">
+                <div className="col-md-4">
+                  <div className="ni-metric">
+                    <div className="text-muted" style={{ fontSize: 12 }}>
+                      {t('integrationLastSync', language)}
+                    </div>
+                    <div className="ni-metric-value" style={{ fontSize: 16 }}>
+                      —
                     </div>
                   </div>
-                )}
+                </div>
+                <div className="col-md-4">
+                  <div className="ni-metric">
+                    <div className="text-muted" style={{ fontSize: 12 }}>
+                      {t('integrationSyncResultLabel', language)}
+                    </div>
+                    <div className="ni-metric-value" style={{ fontSize: 16 }}>
+                      —
+                    </div>
+                  </div>
+                </div>
+                <div className="col-md-4">
+                  <div className="ni-metric">
+                    <div className="text-muted" style={{ fontSize: 12 }}>
+                      {t('integrationSyncLock', language)}
+                    </div>
+                    <div className="ni-metric-value" style={{ fontSize: 16 }}>
+                      {t('integrationSyncIdle', language)}
+                    </div>
+                  </div>
+                </div>
               </div>
+
+              <div className="d-flex gap-2 align-items-center mt-3 flex-wrap">
+                <Button variant="outline-warning" onClick={syncDingTalk} loading={busy === 'sync'}>
+                  {t('integrationSyncNow', language)}
+                </Button>
+                <span className="ni-hint">{t('integrationSyncMainEntry', language)}</span>
+              </div>
+              {syncResult && (
+                <div className="alert alert-success mt-3 mb-0">
+                  <strong>{t('integrationSyncResult', language)}:</strong> {syncResult}
+                </div>
+              )}
             </Card>
           )}
         </>
       )}
+
+      <div className="ni-boundary alert alert-light border mt-4">
+        <div style={{ fontWeight: 500, color: 'var(--color-text-primary)', marginBottom: 6 }}>
+          {t('integrationBoundaryTitle', language)}
+        </div>
+        {t('integrationBoundaryBody', language)}
+        <br />
+        {t('integrationBoundaryRecipients', language)}
+        <br />
+        {t('integrationBoundarySync', language)}
+      </div>
     </div>
   );
 };
@@ -403,7 +840,7 @@ const Switch: React.FC<{
   checked: boolean;
   onChange: (checked: boolean) => void;
 }> = ({ id, label, checked, onChange }) => (
-  <div className="col-md-6 form-check form-switch ps-5 pt-4">
+  <div className="form-check form-switch">
     <input
       id={id}
       className="form-check-input"

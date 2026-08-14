@@ -22,7 +22,7 @@ import {
 } from '@/components/common';
 import { feishuConfigApi, type FeishuConfigResponse } from '@/api/feishuConfig';
 
-export const FeishuConfig: React.FC = () => {
+export const FeishuConfig: React.FC<{ compact?: boolean }> = ({ compact = false }) => {
   const language = useLanguage();
   const toast = useToast();
   const confirm = useConfirm();
@@ -233,23 +233,28 @@ export const FeishuConfig: React.FC = () => {
 
   return (
     <div className="feishu-config">
-      {/* Header */}
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h2>{t('feishuIntegration', language)}</h2>
-        {getStatusBadge()}
-      </div>
-
-      {error && <Error message={error} onRetry={fetchConfig} />}
-
-      {/* Existing config info */}
-      {config && (
-        <Card className="mb-3">
-          <div className="d-flex align-items-center">
-            <i className="bi bi-info-circle text-info me-2" />
-            <span className="text-muted">{t('feishuConfigExists', language)}</span>
+      {!compact && (
+        <>
+          {/* Header */}
+          <div className="d-flex justify-content-between align-items-center mb-3">
+            <h2>{t('feishuIntegration', language)}</h2>
+            {getStatusBadge()}
           </div>
-        </Card>
+
+          {error && <Error message={error} onRetry={fetchConfig} />}
+
+          {/* Existing config info */}
+          {config && (
+            <Card className="mb-3">
+              <div className="d-flex align-items-center">
+                <i className="bi bi-info-circle text-info me-2" />
+                <span className="text-muted">{t('feishuConfigExists', language)}</span>
+              </div>
+            </Card>
+          )}
+        </>
       )}
+      {compact && error && <Error message={error} onRetry={fetchConfig} />}
 
       {/* Configuration Form */}
       <Card className="mb-4">
@@ -384,18 +389,20 @@ export const FeishuConfig: React.FC = () => {
         </form>
       </Card>
 
-      {/* Help */}
-      <Card title={t('help', language)} className="mt-4">
-        <div className="alert alert-info">
-          <h6 className="alert-heading">{t('feishuSetupGuide', language)}</h6>
-          <ol className="mb-0">
-            <li>{t('feishuSetupGuide1', language)}</li>
-            <li>{t('feishuSetupGuide2', language)}</li>
-            <li>{t('feishuSetupGuide3', language)}</li>
-            <li>{t('feishuSetupGuide4', language)}</li>
-          </ol>
-        </div>
-      </Card>
+      {!compact && (
+        /* Help */
+        <Card title={t('help', language)} className="mt-4">
+          <div className="alert alert-info">
+            <h6 className="alert-heading">{t('feishuSetupGuide', language)}</h6>
+            <ol className="mb-0">
+              <li>{t('feishuSetupGuide1', language)}</li>
+              <li>{t('feishuSetupGuide2', language)}</li>
+              <li>{t('feishuSetupGuide3', language)}</li>
+              <li>{t('feishuSetupGuide4', language)}</li>
+            </ol>
+          </div>
+        </Card>
+      )}
     </div>
   );
 };
