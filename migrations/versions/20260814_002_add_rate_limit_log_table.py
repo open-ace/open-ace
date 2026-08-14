@@ -5,6 +5,11 @@ Revises: 20260814_001
 Create Date: 2026-08-14
 
 创建速率限制日志表，用于多进程环境下的速率限制。
+
+注意：此表会随请求增长，建议：
+1. 在生产环境配置 Redis 时优先使用 Redis 后端
+2. 定期运行清理任务：DELETE FROM rate_limit_log WHERE timestamp < <now-window>
+3. 或添加数据库级 TTL 机制（PostgreSQL: pg_cron, SQLite: 外部脚本）
 """
 
 import sqlalchemy as sa

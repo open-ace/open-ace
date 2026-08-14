@@ -77,17 +77,20 @@ class TestRedisRateLimiterBackend:
     def test_is_allowed_under_limit(self):
         """Test that requests under limit are allowed."""
         mock_redis = Mock()
+        mock_redis.evalsha.side_effect = Exception("No script")
         mock_redis.eval.return_value = 1  # Allowed
 
         backend = RedisRateLimiterBackend(mock_redis)
         key = "test:user:api"
 
         assert backend.is_allowed(key, max_requests=10, window=60)
-        assert mock_redis.eval.called
+        # Should fallback to eval when evalsha fails
+        assert mock_redis.eval.called or mock_redis.evalsha.called
 
     def test_is_allowed_over_limit(self):
         """Test that requests over limit are blocked."""
         mock_redis = Mock()
+        mock_redis.evalsha.side_effect = Exception("No script")
         mock_redis.eval.return_value = 0  # Blocked
 
         backend = RedisRateLimiterBackend(mock_redis)

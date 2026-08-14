@@ -124,12 +124,19 @@ class RedisRateLimiterBackend(RateLimiterBackend):
             sha = self._get_script_sha()
             result = self._redis.evalsha(sha, 1, key, max_requests, window, now)
             return result == 1
-        except Exception:
-            # 脚本缓存失败时回退到 EVAL
-            result = self._redis.eval(
-                _RATE_LIMIT_LUA_SCRIPT, 1, key, max_requests, window, now
-            )
-            return result == 1
+        except Exception as e:
+            # 只对 NoScriptError 回退到 EVAL，其他错误记录并允许请求
+            error_name = type(e).__name__
+            if "noscript" in error_name.lower() or "script" in str(e).lower():
+                # 脚本缓存失败时回退到 EVAL
+                result = self._redis.eval(
+                    _RATE_LIMIT_LUA_SCRIPT, 1, key, max_requests, window, now
+                )
+                return result == 1
+            else:
+                # 其他错误（连接问题等）记录并允许请求通过
+                logger.warning(f"Redis rate limit error: {e}, allowing request")
+                return True
 
     def get_remaining(self, key: str, max_requests: int, window: int) -> int:
         now = time.time()
@@ -152,6 +159,8 @@ class DatabaseRateLimiterBackend(RateLimiterBackend):
             get_connection_func: 获取数据库连接的函数
         """
         self._get_connection = get_connection_func
+        self._last_cleanup = time.time()
+        self._cleanup_interval = 60  # 每60秒清理一次
 
     def is_allowed(self, key: str, max_requests: int, window: int) -> bool:
         """
@@ -178,11 +187,13 @@ class DatabaseRateLimiterBackend(RateLimiterBackend):
                 if hasattr(conn, "execute"):
                     conn.execute("BEGIN IMMEDIATE")
 
-                # 1. 清理过期记录
-                delete_sql = adapt_sql("DELETE FROM rate_limit_log WHERE timestamp < ?")
-                cursor.execute(delete_sql, (cutoff,))
+                # 1. 定期清理过期记录（减少高频 DELETE）
+                if now - self._last_cleanup > self._cleanup_interval:
+                    delete_all_sql = adapt_sql("DELETE FROM rate_limit_log WHERE timestamp < ?")
+                    cursor.execute(delete_all_sql, (cutoff,))
+                    self._last_cleanup = now
 
-                # 2. 统计当前窗口内的请求数（使用 SELECT FOR UPDATE 或等效操作）
+                # 2. 统计当前窗口内的请求数
                 count_sql = adapt_sql(
                     "SELECT COUNT(*) FROM rate_limit_log WHERE key = ? AND timestamp > ?"
                 )
