@@ -612,6 +612,20 @@ CREATE TABLE notification_preferences (
  dingtalk_webhook_secret text
 );
 
+CREATE TABLE parse_failure_records (
+ id TEXT PRIMARY KEY NOT NULL,
+ session_id TEXT NOT NULL,
+ tool_use_id TEXT NOT NULL,
+ tool_name TEXT NOT NULL,
+ tool_input text NOT NULL,
+ error text NOT NULL,
+ "timestamp" TIMESTAMP NOT NULL,
+ retry_count integer DEFAULT 0 NOT NULL,
+ last_retry_at TIMESTAMP,
+ resolved INTEGER DEFAULT 0 NOT NULL,
+ created_at TIMESTAMP NOT NULL
+);
+
 CREATE TABLE policy_decisions (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  decision_id text NOT NULL,
@@ -1727,6 +1741,14 @@ CREATE INDEX idx_messages_user_date_role_covering ON daily_messages (user_id, da
 CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones (workflow_id, phase, status);
 
 CREATE INDEX idx_milestones_workflow_round ON workflow_milestones (workflow_id, dev_round);
+
+CREATE INDEX idx_parse_failure_created_at ON parse_failure_records (created_at);
+
+CREATE INDEX idx_parse_failure_session ON parse_failure_records (session_id);
+
+CREATE INDEX idx_parse_failure_timestamp ON parse_failure_records ("timestamp");
+
+CREATE INDEX idx_parse_failure_unresolved ON parse_failure_records (resolved) WHERE (resolved = false);
 
 CREATE INDEX idx_policy_decisions_fingerprint ON policy_decisions (fingerprint_hash);
 

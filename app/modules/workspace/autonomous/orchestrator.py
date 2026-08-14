@@ -6215,6 +6215,81 @@ class AutonomousOrchestrator:
             logger.debug("structured test verdict computation failed: %s", e)
             return ExecutionVerdict.NOT_RUN, [], f"compute failed: {e}"
 
+    def _carry_forward_prior_test_verdict(
+        self,
+        workflow_id: str,
+        current_milestone_id: str,
+        test_retries: int,
+    ) -> tuple[ExecutionVerdict, str]:
+        """Recompute the prior test milestone's structured verdict (#2590).
+
+        On a test-phase retry the agent session is reused (#2390), so the
+        current milestone has no stamped evidence — the agent saw the full
+        prior context and summarized the old results instead of re-running.
+        The #2390 milestone-scoped filter correctly yields NOT_RUN for the
+        current milestone, but the gate's heuristic fallback then reads the
+        *entire* session text (including the prior round's stale output) and
+        misclassifies the run — promoting a FAILED retry to inconclusive or
+        even pr_review.
+
+        This helper re-reads the prior test milestone's persisted
+        ``test_execution_evidence`` rows and recomputes its run verdict, so the
+        gate can carry that *real* verdict forward instead of trusting stale
+        prose. Only fires on an actual retry (``test_retries > 0``) and only
+        when a prior ``tests_run`` milestone with a decisive verdict exists.
+
+        Returns ``(verdict, reason)``. NOT_RUN means no usable prior verdict;
+        the caller falls through to the unchanged heuristic.
+        """
+        if test_retries <= 0 or not workflow_id or not current_milestone_id:
+            return ExecutionVerdict.NOT_RUN, "carry-forward skipped (no retry / no ids)"
+
+        try:
+            milestones = self.repo.list_milestones(workflow_id, phase="development")
+        except Exception:
+            milestones = []
+
+        # Only ``tests_run`` milestones, excluding the current one, newest-first.
+        test_milestones = [
+            ms
+            for ms in milestones
+            if ms.get("milestone_type") == "tests_run"
+            and (ms.get("milestone_id") or "") != current_milestone_id
+        ]
+        if not test_milestones:
+            return ExecutionVerdict.NOT_RUN, "no prior tests_run milestone"
+
+        # list_milestones returns ``created_at ASC, id ASC``; the prior milestone
+        # for THIS dev round is the one immediately before the current one. Take
+        # the latest prior test milestone (highest id) — a retry within the same
+        # dev round creates a chain of test milestones and the last one holds
+        # the real verdict the agent saw before this retry.
+        try:
+            prior_ms = max(test_milestones, key=lambda m: int(m.get("id") or 0))
+        except (ValueError, TypeError):
+            prior_ms = test_milestones[-1]
+        prior_milestone_id = prior_ms.get("milestone_id") or ""
+        if not prior_milestone_id:
+            return ExecutionVerdict.NOT_RUN, "prior milestone has no id"
+
+        try:
+            from app.modules.workspace.autonomous.command_evidence.test_verdict import (
+                compute_run_verdict,
+            )
+            from app.repositories.test_evidence_repo import TestExecutionEvidenceRepository
+
+            prior_evidences = TestExecutionEvidenceRepository().query_by_milestone(
+                workflow_id, prior_milestone_id
+            )
+            if not prior_evidences:
+                return ExecutionVerdict.NOT_RUN, "prior milestone has no test evidence"
+
+            verdict = compute_run_verdict(prior_evidences)
+            return verdict, f"carried forward from milestone {prior_milestone_id}"
+        except Exception as e:
+            logger.debug("prior verdict carry-forward failed: %s", e)
+            return ExecutionVerdict.NOT_RUN, f"carry-forward failed: {e}"
+
     def _emit_structured_test_fallback(
         self,
         verdict: ExecutionVerdict,
@@ -6684,6 +6759,22 @@ class AutonomousOrchestrator:
         visible = (result.response_text or "").strip()
         return bool(re.match(r"^API Error:\s*400\b", visible, re.IGNORECASE))
 
+    @classmethod
+    def _is_resume_noop_result(cls, result: AgentTaskResult | None) -> bool:
+        """Detect the structural resume-no-op signature (Refs #2570).
+
+        A ``--resume``'d session line whose last turn already ended can
+        synthesize a result-without-turn: the run reports success but
+        produced no measurable output — zero tokens AND empty artifact
+        text. Genuine work always moves at least one of those, so requiring
+        both keeps the retry backstop narrowly scoped.
+        """
+        if not result or not getattr(result, "success", False):
+            return False
+        if int(getattr(result, "total_tokens", 0) or 0) > 0:
+            return False
+        return not cls._artifact_text(result).strip()
+
     def _run_agent_with_context_recovery(
         self,
         wf: dict,
@@ -6700,14 +6791,58 @@ class AutonomousOrchestrator:
         The runner then rebinds the new provider transcript to the SAME tracking
         row. Usage from the rejected attempt is carried into the retry's final
         milestone write; the caller accounts the returned result as usual.
+
+        Resume no-op backstop (Refs #2570): when a NAMED line that actually
+        resumed an existing session returns success-but-empty (see
+        ``_is_resume_noop_result``), retry once with ``force_fresh=True`` on
+        the same tracking line. A fresh run cannot no-op this way and is
+        never retried; genuine failures and overflow/integrity results keep
+        their existing paths. If the retry is also empty, its result is
+        returned as-is so callers still see emptiness and fail closed.
         """
+        # Only a run that actually resumed an established session line can
+        # hit the resume no-op. Resolve that BEFORE the run: afterwards the
+        # line's mapping may have been (re)written by the run itself. Pop the
+        # (rarely passed) force_fresh kwarg so the retry calls below can pass
+        # their own without a duplicate-keyword collision.
+        force_fresh = bool(kwargs.pop("force_fresh", False))
+        resumed = False
+        if not force_fresh and SESSION_LINE_FIELDS.get(session_line):
+            try:
+                _, _, resumed = self._resolve_session_line(wf or self.workflow, session_line)
+            except Exception:
+                # Resolution is read-only; an outage must not block the run.
+                logger.warning(
+                    "Failed to pre-check resume state for session line %s",
+                    session_line,
+                    exc_info=True,
+                )
+                resumed = False
+
         result = self._run_agent(
             wf=wf,
             session_line=session_line,
             milestone_id=milestone_id,
+            force_fresh=force_fresh,
             **kwargs,
         )
         if not self._is_context_overflow(result):
+            if resumed and self._is_resume_noop_result(result):
+                logger.warning(
+                    "Workflow %s: session line %s resumed but returned an empty "
+                    "successful result (resume no-op); retrying once with a "
+                    "fresh provider transcript",
+                    self._workflow_id[:8],
+                    session_line,
+                )
+                self._accumulate_tokens(result)
+                return self._run_agent(
+                    wf=wf,
+                    session_line=session_line,
+                    milestone_id=milestone_id,
+                    force_fresh=True,
+                    **kwargs,
+                )
             return result
 
         field = SESSION_LINE_FIELDS.get(session_line)
@@ -10401,6 +10536,29 @@ class AutonomousOrchestrator:
         structured_verdict, _structured_evidences, structured_reason = (
             self._compute_structured_test_verdict(test_result, framework_type, test_ms)
         )
+        # #2590 Option A: carry forward the prior test milestone's verdict on a
+        # retry. On a test retry the agent session is reused (#2390), so the
+        # current milestone has no stamped evidence and the structured layer
+        # correctly defers NOT_RUN. But the heuristic fallback then reads the
+        # *entire* session text (the prior round's stale output) and
+        # misclassifies the run — promoting a real FAILED to inconclusive or
+        # even pr_review. When this is a retry (test_retries > 0) and the prior
+        # test milestone had a decisive verdict, carry it forward instead of
+        # trusting stale prose. No prior milestone / prior NOT_RUN / not a
+        # retry falls through unchanged.
+        if structured_verdict == ExecutionVerdict.NOT_RUN:
+            _retry_count = int(wf.get("test_retries", 0) or 0)
+            if _retry_count > 0:
+                _prior_verdict, _prior_reason = self._carry_forward_prior_test_verdict(
+                    self._workflow_id,
+                    test_ms.get("milestone_id", ""),
+                    _retry_count,
+                )
+                if _prior_verdict in (ExecutionVerdict.FAILED, ExecutionVerdict.PASSED):
+                    structured_verdict = _prior_verdict
+                    structured_reason = (
+                        f"carried forward from prior test milestone: {_prior_reason}"
+                    )
         # Only PASSED is authoritative (#2376 D2). A structured FAILED used to
         # set this too, which zeroed BOTH test_result_inconclusive and
         # tests_actually_skipped — and since nothing downstream reads

@@ -19,6 +19,7 @@ Usage:
 import asyncio
 import time
 
+import pytest
 from playwright.async_api import async_playwright
 
 # Test configuration
@@ -28,6 +29,7 @@ PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 
+@pytest.mark.asyncio
 async def test_conversation_detail_modal():
     """Test the enhanced Conversation Detail Modal."""
     async with async_playwright() as p:
