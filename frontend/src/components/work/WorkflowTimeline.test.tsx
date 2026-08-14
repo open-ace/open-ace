@@ -144,22 +144,18 @@ describe('WorkflowTimeline paused-state banner (#2634)', () => {
     expect(screen.queryByRole('button', { name: /resume with feedback/i })).not.toBeInTheDocument();
   });
 
-  it('shows resume-with-feedback only for rejected acceptance, not indeterminate', () => {
-    const rejected = renderTimeline(pausedWorkflow({ verification_status: 'rejected' }));
-    // The banner button's accessible name is the help text (title -> aria-label).
-    expect(screen.getByRole('button', { name: /new development round/i })).toBeInTheDocument();
-    rejected.unmount();
-
-    // indeterminate keeps the acceptance-override button instead (#2335 S6)
-    renderTimeline(pausedWorkflow({ verification_status: 'indeterminate' }));
-    expect(
-      screen.queryByRole('button', { name: /new development round/i })
-    ).not.toBeInTheDocument();
-    // Override button: accessible name is its descriptive title (verifier could
-    // not reach a verdict → confirm acceptance and close the issue).
-    expect(
-      screen.getByRole('button', { name: /confirm acceptance and close the issue/i })
-    ).toBeInTheDocument();
+  it('#2658 shows BOTH exits (override + resume-with-feedback) for rejected AND indeterminate acceptance pauses', () => {
+    for (const status of ['rejected', 'indeterminate'] as const) {
+      const view = renderTimeline(pausedWorkflow({ verification_status: status }));
+      // The banner button's accessible name is the help text (title -> aria-label).
+      expect(screen.getByRole('button', { name: /new development round/i })).toBeInTheDocument();
+      // Override button: accessible name is its descriptive title (reworded for
+      // #2658 — covers rejected-overturn and indeterminate alike).
+      expect(
+        screen.getByRole('button', { name: /accept the delivered result/i })
+      ).toBeInTheDocument();
+      view.unmount();
+    }
   });
 
   it('opens the feedback modal, blocks empty submit, and submits valid feedback', () => {
