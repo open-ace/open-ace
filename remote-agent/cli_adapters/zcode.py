@@ -189,6 +189,9 @@ class ZCodeAdapter(BaseCLIAdapter):
 
         ZCode modes: ``build`` (ask before edits), ``edit`` (auto-edit),
         ``plan`` (read-only planning), ``yolo`` (fully autonomous).
+
+        Issue #2591: Default to "build" (requires permission) instead of "yolo"
+        to ensure tool call permission prompts are shown to users.
         """
         mode_map = {
             "bypass": "yolo",
@@ -197,7 +200,7 @@ class ZCodeAdapter(BaseCLIAdapter):
             "auto-edit": "edit",
             "plan": "plan",
         }
-        return mode_map.get(permission_mode or "", "build")  # Issue #2591: Default to build for permission prompts
+        return mode_map.get(permission_mode or "", "build")
 
     def provides_full_command(self) -> bool:
         """Return True; build_start_args returns a self-contained command.
