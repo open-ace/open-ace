@@ -6,10 +6,12 @@ import requests
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required
+from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.notification_settings_repository import get_notification_settings_repository
 
 logger = logging.getLogger(__name__)
 notification_integrations_bp = Blueprint("notification_integrations", __name__)
+audit_logger = AuditLogger()
 
 
 @notification_integrations_bp.before_request
@@ -40,9 +42,11 @@ def channel_status():
                     "verified": bool(smtp and smtp.get("is_verified")),
                 },
                 "webhook": {
-                    "status": "disabled"
-                    if webhook and not webhook.get("enabled")
-                    else ("enabled" if webhook else "needs_configuration")
+                    "status": (
+                        "disabled"
+                        if webhook and not webhook.get("enabled")
+                        else ("enabled" if webhook else "needs_configuration")
+                    )
                 },
                 "dingtalk_bot": {
                     "status": "available",
@@ -53,11 +57,13 @@ def channel_status():
                 "feishu_bot": {"status": "no_configuration_required"},
                 "feishu_app": {"status": "configured" if feishu else "needs_configuration"},
                 "dingtalk_app": {
-                    "status": "configured"
-                    if dingtalk
-                    and dingtalk.get("app_key")
-                    and dingtalk.get("app_secret_configured")
-                    else "needs_configuration"
+                    "status": (
+                        "configured"
+                        if dingtalk
+                        and dingtalk.get("app_key")
+                        and dingtalk.get("app_secret_configured")
+                        else "needs_configuration"
+                    )
                 },
             },
         }
@@ -70,11 +76,29 @@ def webhook_config():
     if request.method == "GET":
         return jsonify({"success": True, "data": repo.get("webhook")})
     if request.method == "DELETE":
-        return jsonify({"success": repo.delete("webhook")})
+        deleted = repo.delete("webhook")
+        audit_logger.log_action(
+            action=AuditAction.WEBHOOK_CONFIG_DELETE,
+            user_id=_user_id(),
+            resource_type="webhook_config",
+            details={"deleted": deleted},
+        )
+        return jsonify({"success": deleted})
     data = request.get_json(silent=True) or {}
     allowed = {"webhook_secret", "allow_private_webhook_urls", "enabled"}
     values = {k: data[k] for k in allowed if k in data}
-    return jsonify({"success": True, "data": repo.save("webhook", values, _user_id())})
+    saved = repo.save("webhook", values, _user_id())
+    audit_logger.log_action(
+        action=AuditAction.WEBHOOK_CONFIG_SAVE,
+        user_id=_user_id(),
+        resource_type="webhook_config",
+        details={
+            "secret_updated": "webhook_secret" in values,
+            "enabled": values.get("enabled"),
+            "allow_private_webhook_urls": values.get("allow_private_webhook_urls"),
+        },
+    )
+    return jsonify({"success": True, "data": saved})
 
 
 @notification_integrations_bp.route("/management/dingtalk-config", methods=["GET", "PUT", "DELETE"])
@@ -83,7 +107,14 @@ def dingtalk_config():
     if request.method == "GET":
         return jsonify({"success": True, "data": repo.get("dingtalk")})
     if request.method == "DELETE":
-        return jsonify({"success": repo.delete("dingtalk")})
+        deleted = repo.delete("dingtalk")
+        audit_logger.log_action(
+            action=AuditAction.DINGTALK_CONFIG_DELETE,
+            user_id=_user_id(),
+            resource_type="dingtalk_config",
+            details={"deleted": deleted},
+        )
+        return jsonify({"success": deleted})
     data = request.get_json(silent=True) or {}
     allowed = {
         "app_key",
@@ -97,7 +128,20 @@ def dingtalk_config():
         "auto_recovery",
     }
     values = {k: data[k] for k in allowed if k in data}
-    return jsonify({"success": True, "data": repo.save("dingtalk", values, _user_id())})
+    saved = repo.save("dingtalk", values, _user_id())
+    audit_logger.log_action(
+        action=AuditAction.DINGTALK_CONFIG_SAVE,
+        user_id=_user_id(),
+        resource_type="dingtalk_config",
+        details={
+            "app_key_updated": "app_key" in values,
+            "app_secret_updated": "app_secret" in values,
+            "fallback_secret_updated": "fallback_webhook_secret" in values,
+            "sync_enabled": values.get("sync_enabled"),
+            "target_tenant_id": values.get("target_tenant_id"),
+        },
+    )
+    return jsonify({"success": True, "data": saved})
 
 
 @notification_integrations_bp.post("/management/dingtalk-config/test")
@@ -119,9 +163,11 @@ def test_dingtalk_config():
         return jsonify(
             {
                 "success": bool(payload.get("accessToken")),
-                "message": "DingTalk connection test successful"
-                if payload.get("accessToken")
-                else "DingTalk did not return an access token",
+                "message": (
+                    "DingTalk connection test successful"
+                    if payload.get("accessToken")
+                    else "DingTalk did not return an access token"
+                ),
             }
         )
     except requests.RequestException:

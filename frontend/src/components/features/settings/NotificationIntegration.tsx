@@ -1,19 +1,26 @@
 import React, { useEffect, useState } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
-import { Card, Badge, Button, TextInput, useToast } from '@/components/common';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Badge, Button, Card, TextInput, useConfirm, useToast } from '@/components/common';
 import { SmtpConfig } from '@/components/features/management/SmtpConfig';
-import { FeishuConfig } from './FeishuConfig';
 import { notificationChannelsApi, type ChannelStatus } from '@/api/notificationChannels';
+import { tenantApi, type Tenant } from '@/api/tenant';
+import { useLanguage } from '@/store';
+import { t } from '@/i18n';
+import { FeishuConfig } from './FeishuConfig';
 
 type Section = 'channels' | 'collaboration';
 
 export const NotificationIntegration: React.FC = () => {
+  const language = useLanguage();
+  const toast = useToast();
+  const confirm = useConfirm();
   const [params, setParams] = useSearchParams();
-  const section = (
-    params.get('section') === 'collaboration' ? 'collaboration' : 'channels'
-  ) as Section;
+  const section: Section = params.get('section') === 'collaboration' ? 'collaboration' : 'channels';
   const selected = params.get('channel') ?? params.get('platform') ?? 'email';
   const [status, setStatus] = useState<ChannelStatus>({});
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
   const [webhook, setWebhook] = useState({
     webhook_secret: '',
     allow_private_webhook_urls: false,
@@ -24,23 +31,35 @@ export const NotificationIntegration: React.FC = () => {
     app_secret: '',
     fallback_webhook_secret: '',
     sync_enabled: false,
+    target_tenant_id: '',
     interval_minutes: 60,
     root_dept_id: '1',
+    max_runtime_seconds: 1800,
+    auto_recovery: false,
   });
-  const toast = useToast();
 
   const refresh = () => notificationChannelsApi.status().then(setStatus);
   useEffect(() => {
-    refresh();
-    notificationChannelsApi
+    void refresh();
+    void notificationChannelsApi
       .getWebhook()
-      .then((v) => v && setWebhook((x) => ({ ...x, ...v, webhook_secret: '' })));
-    notificationChannelsApi
-      .getDingTalk()
       .then(
-        (v) =>
-          v && setDingtalk((x) => ({ ...x, ...v, app_secret: '', fallback_webhook_secret: '' }))
+        (value) => value && setWebhook((current) => ({ ...current, ...value, webhook_secret: '' }))
       );
+    void notificationChannelsApi.getDingTalk().then((value) => {
+      if (!value) return;
+      setDingtalk((current) => ({
+        ...current,
+        ...value,
+        target_tenant_id: value.target_tenant_id ? String(value.target_tenant_id) : '',
+        app_secret: '',
+        fallback_webhook_secret: '',
+      }));
+    });
+    void tenantApi
+      .listTenants({ status: 'active', limit: 1000 })
+      .then(({ tenants: values }) => setTenants(values))
+      .catch(() => setTenants([]));
   }, []);
 
   const open = (nextSection: Section, value: string) =>
@@ -49,6 +68,18 @@ export const NotificationIntegration: React.FC = () => {
         ? { section: nextSection, channel: value }
         : { section: nextSection, platform: value }
     );
+
+  const statusKey = (value?: string) => {
+    const keys: Record<string, string> = {
+      configured: 'integrationStatusConfigured',
+      enabled: 'integrationStatusEnabled',
+      available: 'integrationStatusAvailable',
+      no_configuration_required: 'integrationStatusNoConfig',
+      disabled: 'integrationStatusDisabled',
+      needs_configuration: 'integrationStatusNeedsConfig',
+    };
+    return keys[value ?? ''] ?? 'loading';
+  };
   const badge = (key: string) => (
     <Badge
       variant={
@@ -59,40 +90,99 @@ export const NotificationIntegration: React.FC = () => {
           : 'warning'
       }
     >
-      {status[key]?.status?.replace(/_/g, ' ') || 'loading'}
+      {t(statusKey(status[key]?.status), language)}
     </Badge>
   );
 
+  const saveWebhook = async () => {
+    const { webhook_secret, ...rest } = webhook;
+    await notificationChannelsApi.saveWebhook(webhook_secret ? { ...rest, webhook_secret } : rest);
+    toast.success(t('integrationSaved', language));
+    await refresh();
+  };
+
+  const dingtalkPayload = () => {
+    const { app_secret, fallback_webhook_secret, target_tenant_id, ...rest } = dingtalk;
+    return {
+      ...rest,
+      target_tenant_id: target_tenant_id ? Number(target_tenant_id) : null,
+      ...(app_secret ? { app_secret } : {}),
+      ...(fallback_webhook_secret ? { fallback_webhook_secret } : {}),
+    };
+  };
+
+  const saveDingTalk = async () => {
+    await notificationChannelsApi.saveDingTalk(dingtalkPayload());
+    toast.success(t('integrationSaved', language));
+    await refresh();
+  };
+
+  const testDingTalk = async () => {
+    setBusy('test');
+    try {
+      const result = await notificationChannelsApi.testDingTalk({
+        app_key: dingtalk.app_key || undefined,
+        app_secret: dingtalk.app_secret || undefined,
+      });
+      if (result.success) {
+        toast.success(t('integrationTestSuccess', language), result.message);
+      } else {
+        toast.error(t('integrationTestFailed', language), result.message);
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const syncDingTalk = async () => {
+    const tenantId = Number(dingtalk.target_tenant_id);
+    if (!Number.isInteger(tenantId) || tenantId <= 0) {
+      toast.error(t('validationError', language), t('integrationTenantRequired', language));
+      return;
+    }
+    if (!(await confirm({ message: t('integrationSyncConfirm', language), variant: 'danger' }))) {
+      return;
+    }
+    setBusy('sync');
+    try {
+      const response = await notificationChannelsApi.syncDingTalk(tenantId);
+      setSyncResult(JSON.stringify(response.result));
+      toast.success(t('integrationSyncSuccess', language));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const cards = [
+    ['email', 'integrationEmail', 'integrationEmailDesc'],
+    ['webhook', 'integrationWebhook', 'integrationWebhookDesc'],
+    ['dingtalk_bot', 'integrationDingTalkBot', 'integrationDingTalkBotDesc'],
+    ['feishu_bot', 'integrationFeishuBot', 'integrationFeishuBotDesc'],
+  ];
+
   return (
     <div>
-      <h2>通知与集成</h2>
-      <p className="text-muted">
-        管理系统通知渠道和企业协作平台连接。告警接收对象、通知目标及告警等级仍在“配额与告警 →
-        通知设置”中配置。
-      </p>
+      <h2>{t('notificationIntegration', language)}</h2>
+      <p className="text-muted">{t('notificationIntegrationDesc', language)}</p>
       <div className="btn-group mb-4" role="tablist">
         <Button
           variant={section === 'channels' ? 'primary' : 'outline-secondary'}
           onClick={() => open('channels', 'email')}
         >
-          通知渠道
+          {t('integrationChannels', language)}
         </Button>
         <Button
           variant={section === 'collaboration' ? 'primary' : 'outline-secondary'}
           onClick={() => open('collaboration', 'feishu')}
         >
-          协作平台
+          {t('integrationCollaboration', language)}
         </Button>
       </div>
+
       {section === 'channels' ? (
         <>
           <div className="row g-3 mb-4">
-            {[
-              ['email', '邮件', 'SMTP 服务器连接'],
-              ['webhook', '通用 Webhook', '全局签名与安全策略'],
-              ['dingtalk_bot', '钉钉机器人', '平台投递能力'],
-              ['feishu_bot', '飞书机器人', '目标地址按用户/租户设置'],
-            ].map(([key, title, desc]) => (
+            {cards.map(([key, title, description]) => (
               <div className="col-md-3" key={key}>
                 <Card className="h-100">
                   <button
@@ -100,10 +190,10 @@ export const NotificationIntegration: React.FC = () => {
                     onClick={() => open('channels', key.replace('_bot', ''))}
                   >
                     <div className="d-flex justify-content-between">
-                      <strong>{title}</strong>
+                      <strong>{t(title, language)}</strong>
                       {badge(key)}
                     </div>
-                    <small className="text-muted">{desc}</small>
+                    <small className="text-muted">{t(description, language)}</small>
                   </button>
                 </Card>
               </div>
@@ -111,95 +201,64 @@ export const NotificationIntegration: React.FC = () => {
           </div>
           {selected === 'email' && <SmtpConfig />}
           {selected === 'webhook' && (
-            <Card title="通用 Webhook · 全局安全配置">
+            <Card title={t('integrationWebhookTitle', language)}>
               <div className="row g-3">
                 <div className="col-md-8">
-                  <label className="form-label">签名密钥</label>
+                  <label className="form-label">{t('integrationSigningSecret', language)}</label>
                   <TextInput
                     type="password"
                     value={webhook.webhook_secret}
-                    onChange={(v) => setWebhook({ ...webhook, webhook_secret: v })}
-                    placeholder="留空表示保持不变"
+                    onChange={(value) => setWebhook({ ...webhook, webhook_secret: value })}
+                    placeholder={t('integrationSecretKeepHint', language)}
                   />
                 </div>
-                <div className="col-12 form-check form-switch ms-2">
-                  <input
-                    className="form-check-input"
-                    type="checkbox"
-                    checked={webhook.enabled}
-                    onChange={(e) => setWebhook({ ...webhook, enabled: e.target.checked })}
-                  />
-                  <label className="form-check-label">启用投递能力</label>
-                </div>
-                <div className="col-12 form-check form-switch ms-2">
-                  <input
-                    className="form-check-input"
-                    type="checkbox"
-                    checked={webhook.allow_private_webhook_urls}
-                    onChange={(e) =>
-                      setWebhook({ ...webhook, allow_private_webhook_urls: e.target.checked })
-                    }
-                  />
-                  <label className="form-check-label">允许私网地址（存在 SSRF 风险）</label>
-                </div>
+                <Switch
+                  id="webhook-enabled"
+                  label={t('integrationDeliveryEnabled', language)}
+                  checked={webhook.enabled}
+                  onChange={(checked) => setWebhook({ ...webhook, enabled: checked })}
+                />
+                <Switch
+                  id="webhook-private"
+                  label={t('integrationAllowPrivate', language)}
+                  checked={webhook.allow_private_webhook_urls}
+                  onChange={(checked) =>
+                    setWebhook({ ...webhook, allow_private_webhook_urls: checked })
+                  }
+                />
                 <div>
-                  <Button
-                    variant="primary"
-                    onClick={async () => {
-                      await notificationChannelsApi.saveWebhook({
-                        ...webhook,
-                        ...(webhook.webhook_secret ? {} : { webhook_secret: undefined }),
-                      });
-                      toast.success('保存成功');
-                      refresh();
-                    }}
-                  >
-                    保存
+                  <Button variant="primary" onClick={saveWebhook}>
+                    {t('save', language)}
                   </Button>
                 </div>
               </div>
             </Card>
           )}
           {selected === 'dingtalk' && (
-            <Card title="钉钉机器人 · 平台投递能力">
-              <p>
-                系统设置页不保存目标 URL。推荐按用户/租户配置密钥；系统级密钥仅作为旧配置兼容回退。
-              </p>
-              <label className="form-label">兼容回退签名密钥</label>
+            <Card title={t('integrationDingTalkBotTitle', language)}>
+              <p>{t('integrationBotBoundary', language)}</p>
+              <label className="form-label">{t('integrationFallbackSecret', language)}</label>
               <TextInput
                 type="password"
                 value={dingtalk.fallback_webhook_secret}
-                onChange={(v) => setDingtalk({ ...dingtalk, fallback_webhook_secret: v })}
-                placeholder="留空表示保持不变"
+                onChange={(value) => setDingtalk({ ...dingtalk, fallback_webhook_secret: value })}
+                placeholder={t('integrationSecretKeepHint', language)}
               />
               <div className="mt-3">
-                <Button
-                  variant="primary"
-                  onClick={async () => {
-                    await notificationChannelsApi.saveDingTalk({
-                      ...dingtalk,
-                      ...(dingtalk.fallback_webhook_secret
-                        ? {}
-                        : { fallback_webhook_secret: undefined }),
-                      ...(dingtalk.app_secret ? {} : { app_secret: undefined }),
-                    });
-                    toast.success('保存成功');
-                    refresh();
-                  }}
-                >
-                  保存
+                <Button variant="primary" onClick={saveDingTalk}>
+                  {t('save', language)}
                 </Button>{' '}
                 <Link className="btn btn-outline-secondary" to="/manage/quota">
-                  前往通知设置
+                  {t('integrationGoToNotifications', language)}
                 </Link>
               </div>
             </Card>
           )}
           {selected === 'feishu' && (
-            <Card title="飞书机器人 · 平台投递能力">
-              <p>无需系统配置。每个用户或租户在通知设置中配置自己的机器人 Webhook 地址与密钥。</p>
+            <Card title={t('integrationFeishuBotTitle', language)}>
+              <p>{t('integrationFeishuNoConfig', language)}</p>
               <Link className="btn btn-primary" to="/manage/quota">
-                前往通知设置
+                {t('integrationGoToNotifications', language)}
               </Link>
             </Card>
           )}
@@ -208,9 +267,9 @@ export const NotificationIntegration: React.FC = () => {
         <>
           <div className="row g-3 mb-4">
             {[
-              ['feishu', '飞书应用', 'feishu_app'],
-              ['dingtalk', '钉钉应用', 'dingtalk_app'],
-            ].map(([key, title, statusKey]) => (
+              ['feishu', 'integrationFeishuApp', 'feishu_app'],
+              ['dingtalk', 'integrationDingTalkApp', 'dingtalk_app'],
+            ].map(([key, title, statusName]) => (
               <div className="col-md-6" key={key}>
                 <Card>
                   <button
@@ -218,8 +277,8 @@ export const NotificationIntegration: React.FC = () => {
                     onClick={() => open('collaboration', key)}
                   >
                     <div className="d-flex justify-content-between">
-                      <strong>{title} · 组织同步</strong>
-                      {badge(statusKey)}
+                      <strong>{t(title, language)}</strong>
+                      {badge(statusName)}
                     </div>
                   </button>
                 </Card>
@@ -228,57 +287,100 @@ export const NotificationIntegration: React.FC = () => {
           </div>
           {selected === 'feishu' && <FeishuConfig />}
           {selected === 'dingtalk' && (
-            <Card title="钉钉应用 · 组织同步">
+            <Card title={t('integrationDingTalkApp', language)}>
               <div className="row g-3">
-                <div className="col-md-6">
-                  <label className="form-label">AppKey</label>
+                <Field label="AppKey">
                   <TextInput
                     value={dingtalk.app_key}
-                    onChange={(v) => setDingtalk({ ...dingtalk, app_key: v })}
+                    onChange={(value) => setDingtalk({ ...dingtalk, app_key: value })}
                   />
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">AppSecret</label>
+                </Field>
+                <Field label="AppSecret">
                   <TextInput
                     type="password"
                     value={dingtalk.app_secret}
-                    onChange={(v) => setDingtalk({ ...dingtalk, app_secret: v })}
-                    placeholder="留空表示保持不变"
+                    onChange={(value) => setDingtalk({ ...dingtalk, app_secret: value })}
+                    placeholder={t('integrationSecretKeepHint', language)}
                   />
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">同步间隔（分钟）</label>
+                </Field>
+                <Switch
+                  id="dingtalk-sync"
+                  label={t('integrationAutoSync', language)}
+                  checked={dingtalk.sync_enabled}
+                  onChange={(checked) => setDingtalk({ ...dingtalk, sync_enabled: checked })}
+                />
+                <Field label={t('integrationTargetTenant', language)}>
+                  <select
+                    className="form-select"
+                    value={dingtalk.target_tenant_id}
+                    onChange={(event) =>
+                      setDingtalk({ ...dingtalk, target_tenant_id: event.target.value })
+                    }
+                  >
+                    <option value="">{t('integrationSelectTenant', language)}</option>
+                    {tenants.map((tenant) => (
+                      <option key={tenant.id} value={tenant.id}>
+                        {tenant.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label={t('integrationInterval', language)}>
                   <TextInput
                     type="number"
                     value={String(dingtalk.interval_minutes)}
-                    onChange={(v) => setDingtalk({ ...dingtalk, interval_minutes: Number(v) })}
+                    onChange={(value) =>
+                      setDingtalk({ ...dingtalk, interval_minutes: Number(value) })
+                    }
                   />
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">根部门 ID</label>
+                </Field>
+                <Field label={t('integrationRootDepartment', language)}>
                   <TextInput
                     value={dingtalk.root_dept_id}
-                    onChange={(v) => setDingtalk({ ...dingtalk, root_dept_id: v })}
+                    onChange={(value) => setDingtalk({ ...dingtalk, root_dept_id: value })}
                   />
-                </div>
-                <div>
+                </Field>
+                <Field label={t('integrationMaxRuntime', language)}>
+                  <TextInput
+                    type="number"
+                    value={String(dingtalk.max_runtime_seconds)}
+                    onChange={(value) =>
+                      setDingtalk({ ...dingtalk, max_runtime_seconds: Number(value) })
+                    }
+                  />
+                </Field>
+                <Switch
+                  id="dingtalk-recovery"
+                  label={t('integrationAutoRecovery', language)}
+                  checked={dingtalk.auto_recovery}
+                  onChange={(checked) => setDingtalk({ ...dingtalk, auto_recovery: checked })}
+                />
+                <div className="col-12 d-flex gap-2">
+                  <Button variant="primary" onClick={saveDingTalk}>
+                    {t('save', language)}
+                  </Button>
                   <Button
-                    variant="primary"
-                    onClick={async () => {
-                      await notificationChannelsApi.saveDingTalk({
-                        ...dingtalk,
-                        ...(dingtalk.app_secret ? {} : { app_secret: undefined }),
-                        ...(dingtalk.fallback_webhook_secret
-                          ? {}
-                          : { fallback_webhook_secret: undefined }),
-                      });
-                      toast.success('保存成功');
-                      refresh();
-                    }}
+                    variant="outline-secondary"
+                    onClick={testDingTalk}
+                    loading={busy === 'test'}
                   >
-                    保存
+                    {t('testConnection', language)}
+                  </Button>
+                  <Button
+                    variant="outline-warning"
+                    onClick={syncDingTalk}
+                    loading={busy === 'sync'}
+                  >
+                    {t('integrationSyncNow', language)}
                   </Button>
                 </div>
+                {syncResult && (
+                  <div className="col-12">
+                    <div className="alert alert-success">
+                      <strong>{t('integrationSyncResult', language)}:</strong> {syncResult}
+                    </div>
+                  </div>
+                )}
               </div>
             </Card>
           )}
@@ -287,3 +389,30 @@ export const NotificationIntegration: React.FC = () => {
     </div>
   );
 };
+
+const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <div className="col-md-6">
+    <label className="form-label">{label}</label>
+    {children}
+  </div>
+);
+
+const Switch: React.FC<{
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}> = ({ id, label, checked, onChange }) => (
+  <div className="col-md-6 form-check form-switch ps-5 pt-4">
+    <input
+      id={id}
+      className="form-check-input"
+      type="checkbox"
+      checked={checked}
+      onChange={(event) => onChange(event.target.checked)}
+    />
+    <label className="form-check-label" htmlFor={id}>
+      {label}
+    </label>
+  </div>
+);

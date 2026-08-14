@@ -107,6 +107,12 @@ class AuditAction(Enum):
     FEISHU_CONFIG_SAVE = "feishu_config_save"
     FEISHU_CONFIG_DELETE = "feishu_config_delete"
 
+    # Notification integration configuration actions
+    WEBHOOK_CONFIG_SAVE = "webhook_config_save"
+    WEBHOOK_CONFIG_DELETE = "webhook_config_delete"
+    DINGTALK_CONFIG_SAVE = "dingtalk_config_save"
+    DINGTALK_CONFIG_DELETE = "dingtalk_config_delete"
+
     URL_TOKEN_PATH_VIOLATION = "url_token_path_violation"
     LEGACY_WEBUI_TOKEN_USED = "legacy_webui_token_used"
     TOKEN_LEAK_SUSPECTED = "token_leak_suspected"
