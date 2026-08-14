@@ -41,6 +41,7 @@ from typing import Any
 # Try to import yaml, fall back to basic parsing if not available
 try:
     import yaml
+
     YAML_AVAILABLE = True
 except ImportError:
     YAML_AVAILABLE = False
@@ -335,9 +336,7 @@ def parse_yaml_simple(content: str) -> dict[str, Any]:
                         # Handle inline list
                         if v.startswith("[") and v.endswith("]"):
                             items = [
-                                i.strip().strip("\"'")
-                                for i in v[1:-1].split(",")
-                                if i.strip()
+                                i.strip().strip("\"'") for i in v[1:-1].split(",") if i.strip()
                             ]
                             current_dict_in_list[k] = items
                         else:
@@ -345,9 +344,12 @@ def parse_yaml_simple(content: str) -> dict[str, Any]:
             else:
                 # Scalar item (e.g., "- !clean")
                 # Clean up quotes
-                if item_content.startswith("\"") and item_content.endswith("\""):
-                    item_content = item_content[1:-1]
-                elif item_content.startswith("'") and item_content.endswith("'"):
+                if (
+                    item_content.startswith('"')
+                    and item_content.endswith('"')
+                    or item_content.startswith("'")
+                    and item_content.endswith("'")
+                ):
                     item_content = item_content[1:-1]
 
                 if current_list is not None:
@@ -393,11 +395,7 @@ def parse_yaml_simple(content: str) -> dict[str, Any]:
                 result[key] = current_list
             elif value.startswith("["):
                 # Inline list
-                items = [
-                    i.strip().strip("\"'")
-                    for i in value[1:-1].split(",")
-                    if i.strip()
-                ]
+                items = [i.strip().strip("\"'") for i in value[1:-1].split(",") if i.strip()]
                 result[key] = items
                 current_list = None
             elif value.isdigit():
@@ -406,9 +404,12 @@ def parse_yaml_simple(content: str) -> dict[str, Any]:
                 result[key] = float(value)
             elif value.lower() in ("true", "false"):
                 result[key] = value.lower() == "true"
-            elif value.startswith('"') and value.endswith('"'):
-                result[key] = value[1:-1]
-            elif value.startswith("'") and value.endswith("'"):
+            elif (
+                value.startswith('"')
+                and value.endswith('"')
+                or value.startswith("'")
+                and value.endswith("'")
+            ):
                 result[key] = value[1:-1]
             else:
                 result[key] = value
@@ -426,7 +427,7 @@ def load_config_yaml(config_path: str) -> dict[str, Any]:
         return {}
 
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             content = f.read()
 
         if YAML_AVAILABLE:
@@ -456,7 +457,9 @@ def load_wrapper_config(config_dir: str) -> WrapperConfig:
     # Parse security settings
     security = raw_config.get("security", {})
     prefixes = security.get("allowed_path_prefixes", ["", "/workspace", "/home"])
-    config.allowed_path_prefixes = prefixes if isinstance(prefixes, list) else ["", "/workspace", "/home"]
+    config.allowed_path_prefixes = (
+        prefixes if isinstance(prefixes, list) else ["", "/workspace", "/home"]
+    )
     config.max_arg_length = security.get("max_arg_length", 4096)
     config.max_c_args = security.get("max_c_args", 10)
     config.context_expiry_seconds = security.get("context_expiry_seconds", 300)
@@ -656,7 +659,9 @@ def is_verb_allowed(verb: str, verbs_config: GitVerbsConfig) -> tuple[bool, str]
     return False, f"Verb '{verb}' is not in whitelist"
 
 
-def is_force_with_lease_allowed(subcommand_args: list[str], verbs_config: GitVerbsConfig) -> tuple[bool, str]:
+def is_force_with_lease_allowed(
+    subcommand_args: list[str], verbs_config: GitVerbsConfig
+) -> tuple[bool, str]:
     """
     Check if --force-with-lease is allowed for the given branch.
 
@@ -714,7 +719,7 @@ def load_trusted_context(context_file: str) -> TrustedContext:
         return context
 
     try:
-        with open(context_file, "r", encoding="utf-8") as f:
+        with open(context_file, encoding="utf-8") as f:
             data = json.load(f)
 
         context.git_dir = data.get("git_dir", "")
@@ -807,12 +812,7 @@ def validate_paths_in_args(
 
     # Check --git-dir and --work-tree
     for opt in parsed_args.global_opts:
-        if opt.startswith("--git-dir="):
-            path = opt.split("=", 1)[1]
-            is_valid, error = validate_path(path, allowed_prefixes)
-            if not is_valid:
-                return False, error
-        elif opt.startswith("--work-tree="):
+        if opt.startswith("--git-dir=") or opt.startswith("--work-tree="):
             path = opt.split("=", 1)[1]
             is_valid, error = validate_path(path, allowed_prefixes)
             if not is_valid:
@@ -841,8 +841,7 @@ def cleanup_orphan_files(run_dir: str, max_age_seconds: int) -> int:
     try:
         for filename in os.listdir(run_dir):
             if not (
-                filename.startswith("trusted-context-")
-                or filename.startswith("wrapper-lock-")
+                filename.startswith("trusted-context-") or filename.startswith("wrapper-lock-")
             ):
                 continue
 
@@ -960,13 +959,13 @@ def run_self_check(config: WrapperConfig) -> int:
     run_dir = os.environ.get("OPENACE_RUN_DIR", DEFAULT_RUN_DIR)
     print(f"  run directory: {run_dir}")
     if not os.path.exists(run_dir):
-        print(f"    (will be created on demand)")
+        print("    (will be created on demand)")
 
     # Check log directory
     log_dir = os.path.dirname(config.log_path) if config.log_path else DEFAULT_LOG_DIR
     print(f"  log directory: {log_dir}")
     if config.log_path and not os.path.exists(log_dir):
-        print(f"    (will be created on demand)")
+        print("    (will be created on demand)")
 
     print()
     if errors:
@@ -1097,7 +1096,9 @@ def main() -> int:
         return EXIT_PERMISSION_DENIED
 
     # Validate flags are allowed for this verb (Issue #2650)
-    is_valid, error = validate_flags(parsed_args.subcommand, parsed_args.subcommand_args, verbs_config)
+    is_valid, error = validate_flags(
+        parsed_args.subcommand, parsed_args.subcommand_args, verbs_config
+    )
     if not is_valid:
         print(f"Permission denied: {error}", file=sys.stderr)
         return EXIT_PERMISSION_DENIED
@@ -1106,7 +1107,9 @@ def main() -> int:
     if parsed_args.subcommand == "push":
         is_allowed, _ = is_force_with_lease_allowed(parsed_args.subcommand_args, verbs_config)
         if not is_allowed:
-            print("Permission denied: --force-with-lease not allowed for this branch", file=sys.stderr)
+            print(
+                "Permission denied: --force-with-lease not allowed for this branch", file=sys.stderr
+            )
             return EXIT_PERMISSION_DENIED
 
     # Load and validate trusted context if provided

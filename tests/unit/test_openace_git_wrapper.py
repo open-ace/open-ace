@@ -24,8 +24,8 @@ from unittest import mock
 import pytest
 
 # Import from implementation module to avoid code duplication
-scripts_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'scripts')
-git_wrapper_path = os.path.join(scripts_dir, 'openace-git.py')
+scripts_dir = os.path.join(os.path.dirname(__file__), "..", "..", "scripts")
+git_wrapper_path = os.path.join(scripts_dir, "openace-git.py")
 
 spec = importlib.util.spec_from_file_location("openace_git", git_wrapper_path)
 openace_git = importlib.util.module_from_spec(spec)
@@ -128,9 +128,7 @@ class TestArgumentParsing:
 
     def test_parse_with_global_option_c(self):
         """Test parsing -c global option."""
-        result = parse_git_arguments(
-            ["-c", "safe.directory=/workspace", "status", "--porcelain"]
-        )
+        result = parse_git_arguments(["-c", "safe.directory=/workspace", "status", "--porcelain"])
 
         assert "-c" in result.global_opts
         assert "safe.directory=/workspace" in result.global_opts
@@ -156,9 +154,7 @@ class TestArgumentParsing:
 
     def test_parse_with_git_dir(self):
         """Test parsing --git-dir option."""
-        result = parse_git_arguments(
-            ["--git-dir=/repo/.git", "--work-tree=/repo", "status"]
-        )
+        result = parse_git_arguments(["--git-dir=/repo/.git", "--work-tree=/repo", "status"])
 
         assert any("--git-dir" in opt for opt in result.global_opts)
         assert result.subcommand == "status"
@@ -304,6 +300,7 @@ class TestOrphanFileCleanup:
 
         # After cleanup simulation, file should be deletable
         import time
+
         age = time.time() - os.path.getmtime(orphan_file)
         assert age > 600  # Should be considered orphan
 
@@ -351,10 +348,7 @@ class TestVersionCompatibility:
 class TestWrapperIntegration:
     """Integration tests for the wrapper."""
 
-    @pytest.mark.skipif(
-        not shutil.which("git"),
-        reason="git not available in environment"
-    )
+    @pytest.mark.skipif(not shutil.which("git"), reason="git not available in environment")
     def test_self_check_runs(self):
         """Test that --self-check runs successfully."""
         result = subprocess.run(

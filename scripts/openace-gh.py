@@ -39,6 +39,7 @@ from typing import Any
 # Try to import yaml, fall back to basic parsing if not available
 try:
     import yaml
+
     YAML_AVAILABLE = True
 except ImportError:
     YAML_AVAILABLE = False
@@ -300,9 +301,7 @@ def parse_yaml_simple(content: str) -> dict[str, Any]:
                         # Handle inline list
                         if v.startswith("[") and v.endswith("]"):
                             items = [
-                                i.strip().strip("\"'")
-                                for i in v[1:-1].split(",")
-                                if i.strip()
+                                i.strip().strip("\"'") for i in v[1:-1].split(",") if i.strip()
                             ]
                             current_dict_in_list[k] = items
                         else:
@@ -310,9 +309,12 @@ def parse_yaml_simple(content: str) -> dict[str, Any]:
             else:
                 # Scalar item (e.g., "- !clean")
                 # Clean up quotes
-                if item_content.startswith("\"") and item_content.endswith("\""):
-                    item_content = item_content[1:-1]
-                elif item_content.startswith("'") and item_content.endswith("'"):
+                if (
+                    item_content.startswith('"')
+                    and item_content.endswith('"')
+                    or item_content.startswith("'")
+                    and item_content.endswith("'")
+                ):
                     item_content = item_content[1:-1]
 
                 if current_list is not None:
@@ -358,11 +360,7 @@ def parse_yaml_simple(content: str) -> dict[str, Any]:
                 result[key] = current_list
             elif value.startswith("["):
                 # Inline list
-                items = [
-                    i.strip().strip("\"'")
-                    for i in value[1:-1].split(",")
-                    if i.strip()
-                ]
+                items = [i.strip().strip("\"'") for i in value[1:-1].split(",") if i.strip()]
                 result[key] = items
                 current_list = None
             elif value.isdigit():
@@ -371,9 +369,12 @@ def parse_yaml_simple(content: str) -> dict[str, Any]:
                 result[key] = float(value)
             elif value.lower() in ("true", "false"):
                 result[key] = value.lower() == "true"
-            elif value.startswith('"') and value.endswith('"'):
-                result[key] = value[1:-1]
-            elif value.startswith("'") and value.endswith("'"):
+            elif (
+                value.startswith('"')
+                and value.endswith('"')
+                or value.startswith("'")
+                and value.endswith("'")
+            ):
                 result[key] = value[1:-1]
             else:
                 result[key] = value
@@ -391,7 +392,7 @@ def load_config_yaml(config_path: str) -> dict[str, Any]:
         return {}
 
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             content = f.read()
 
         if YAML_AVAILABLE:
@@ -845,7 +846,11 @@ def main() -> int:
         duration_ms = int((time.time() - start_time) * 1000)
 
         # Log audit
-        full_command = f"{parsed_args.command} {parsed_args.subcommand}" if parsed_args.subcommand else parsed_args.command
+        full_command = (
+            f"{parsed_args.command} {parsed_args.subcommand}"
+            if parsed_args.subcommand
+            else parsed_args.command
+        )
         log_audit(
             event="gh_exec",
             actor=actor,

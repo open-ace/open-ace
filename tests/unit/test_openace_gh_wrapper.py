@@ -24,8 +24,8 @@ from unittest import mock
 import pytest
 
 # Import from implementation module to avoid code duplication
-scripts_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'scripts')
-gh_wrapper_path = os.path.join(scripts_dir, 'openace-gh.py')
+scripts_dir = os.path.join(os.path.dirname(__file__), "..", "..", "scripts")
+gh_wrapper_path = os.path.join(scripts_dir, "openace-gh.py")
 
 spec = importlib.util.spec_from_file_location("openace_gh", gh_wrapper_path)
 openace_gh = importlib.util.module_from_spec(spec)
@@ -313,10 +313,7 @@ class TestGhVersionCompatibility:
 class TestGhWrapperIntegration:
     """Integration tests for the gh wrapper."""
 
-    @pytest.mark.skipif(
-        not shutil.which("gh"),
-        reason="gh not available in environment"
-    )
+    @pytest.mark.skipif(not shutil.which("gh"), reason="gh not available in environment")
     def test_self_check_runs(self):
         """Test that --self-check runs successfully."""
         scripts_dir = str(Path(__file__).parent.parent.parent / "scripts")
@@ -329,10 +326,7 @@ class TestGhWrapperIntegration:
         # Self-check should pass or have config error (acceptable without installed config)
         assert result.returncode in [0, 66]
 
-    @pytest.mark.skipif(
-        not shutil.which("gh"),
-        reason="gh not available in environment"
-    )
+    @pytest.mark.skipif(not shutil.which("gh"), reason="gh not available in environment")
     def test_help_flag_pass_through(self):
         """Test that --help is passed through to gh."""
         scripts_dir = str(Path(__file__).parent.parent.parent / "scripts")
