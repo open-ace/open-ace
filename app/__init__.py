@@ -783,6 +783,7 @@ def register_blueprints(app):
     from app.routes.autonomous import autonomous_bp
     from app.routes.compliance import compliance_bp
     from app.routes.feishu_config import feishu_config_bp
+    from app.routes.notification_integrations import notification_integrations_bp
     from app.routes.fetch import fetch_bp
     from app.routes.fs import fs_bp
     from app.routes.governance import governance_bp
@@ -841,6 +842,7 @@ def register_blueprints(app):
     app.register_blueprint(ai_agent_settings_bp, url_prefix="/api")
     app.register_blueprint(smtp_config_bp, url_prefix="/api")
     app.register_blueprint(feishu_config_bp, url_prefix="/api")
+    app.register_blueprint(notification_integrations_bp, url_prefix="/api")
     # model-gateway (removable): admin config routes for the optional LiteLLM gateway
     from app.routes.model_gateway import model_gateway_bp
 

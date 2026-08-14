@@ -1,0 +1,128 @@
+"""Admin APIs for centralized notification and collaboration settings."""
+
+import logging
+
+import requests
+from flask import Blueprint, g, jsonify, request
+
+from app.auth.decorators import admin_required
+from app.repositories.notification_settings_repository import get_notification_settings_repository
+
+logger = logging.getLogger(__name__)
+notification_integrations_bp = Blueprint("notification_integrations", __name__)
+
+
+@notification_integrations_bp.before_request
+@admin_required
+def require_admin():
+    pass
+
+
+def _user_id():
+    return g.user.get("id") if getattr(g, "user", None) else None
+
+
+@notification_integrations_bp.get("/management/notification-channels/status")
+def channel_status():
+    repo = get_notification_settings_repository()
+    from app.repositories.smtp_config_repository import get_smtp_config_repository
+
+    smtp = get_smtp_config_repository().get_config()
+    webhook = repo.get("webhook")
+    dingtalk = repo.get("dingtalk")
+    feishu = repo.get("feishu")
+    return jsonify(
+        {
+            "success": True,
+            "data": {
+                "email": {
+                    "status": "configured" if smtp else "needs_configuration",
+                    "verified": bool(smtp and smtp.get("is_verified")),
+                },
+                "webhook": {
+                    "status": "disabled"
+                    if webhook and not webhook.get("enabled")
+                    else ("enabled" if webhook else "needs_configuration")
+                },
+                "dingtalk_bot": {
+                    "status": "available",
+                    "fallback_secret_configured": bool(
+                        dingtalk and dingtalk.get("fallback_webhook_secret_configured")
+                    ),
+                },
+                "feishu_bot": {"status": "no_configuration_required"},
+                "feishu_app": {"status": "configured" if feishu else "needs_configuration"},
+                "dingtalk_app": {"status": "configured" if dingtalk else "needs_configuration"},
+            },
+        }
+    )
+
+
+@notification_integrations_bp.route("/management/webhook-config", methods=["GET", "PUT", "DELETE"])
+def webhook_config():
+    repo = get_notification_settings_repository()
+    if request.method == "GET":
+        return jsonify({"success": True, "data": repo.get("webhook")})
+    if request.method == "DELETE":
+        return jsonify({"success": repo.delete("webhook")})
+    data = request.get_json(silent=True) or {}
+    allowed = {"webhook_secret", "allow_private_webhook_urls", "enabled"}
+    values = {k: data[k] for k in allowed if k in data}
+    return jsonify({"success": True, "data": repo.save("webhook", values, _user_id())})
+
+
+@notification_integrations_bp.route("/management/dingtalk-config", methods=["GET", "PUT", "DELETE"])
+def dingtalk_config():
+    repo = get_notification_settings_repository()
+    if request.method == "GET":
+        return jsonify({"success": True, "data": repo.get("dingtalk")})
+    if request.method == "DELETE":
+        return jsonify({"success": repo.delete("dingtalk")})
+    data = request.get_json(silent=True) or {}
+    current = repo.get("dingtalk")
+    if not data.get("app_key") and not current:
+        return jsonify({"success": False, "error": "app_key is required"}), 400
+    if "app_secret" not in data and not current:
+        return jsonify({"success": False, "error": "app_secret is required"}), 400
+    allowed = {
+        "app_key",
+        "app_secret",
+        "fallback_webhook_secret",
+        "sync_enabled",
+        "target_tenant_id",
+        "interval_minutes",
+        "root_dept_id",
+        "max_runtime_seconds",
+        "auto_recovery",
+    }
+    values = {k: data[k] for k in allowed if k in data}
+    return jsonify({"success": True, "data": repo.save("dingtalk", values, _user_id())})
+
+
+@notification_integrations_bp.post("/management/dingtalk-config/test")
+def test_dingtalk_config():
+    data = request.get_json(silent=True) or {}
+    saved = get_notification_settings_repository().get("dingtalk", include_secrets=True) or {}
+    app_key = data.get("app_key") or saved.get("app_key")
+    app_secret = data.get("app_secret") or saved.get("app_secret")
+    if not app_key or not app_secret:
+        return jsonify({"success": False, "message": "AppKey and AppSecret are required"}), 400
+    try:
+        response = requests.post(
+            "https://api.dingtalk.com/v1.0/oauth2/accessToken",
+            json={"appKey": app_key, "appSecret": app_secret},
+            timeout=5,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return jsonify(
+            {
+                "success": bool(payload.get("accessToken")),
+                "message": "DingTalk connection test successful"
+                if payload.get("accessToken")
+                else "DingTalk did not return an access token",
+            }
+        )
+    except requests.RequestException:
+        logger.warning("DingTalk connection test failed", exc_info=True)
+        return jsonify({"success": False, "message": "DingTalk connection test failed"}), 502

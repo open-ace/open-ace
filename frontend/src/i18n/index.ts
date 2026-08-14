@@ -954,6 +954,7 @@ export const translations: Record<Language, Translations> = {
 
     // SMTP Configuration
     smtpConfiguration: 'SMTP Configuration',
+    notificationIntegration: 'Notifications & Integrations',
     smtpHost: 'SMTP Server',
     smtpPort: 'SMTP Port',
     smtpUser: 'SMTP User',
@@ -2804,6 +2805,7 @@ export const translations: Record<Language, Translations> = {
 
     // SMTP Configuration (Chinese)
     smtpConfiguration: 'SMTP 配置',
+    notificationIntegration: '通知与集成',
     smtpHost: 'SMTP 服务器',
     smtpPort: 'SMTP 端口',
     smtpUser: 'SMTP 用户',
