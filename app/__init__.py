@@ -783,13 +783,13 @@ def register_blueprints(app):
     from app.routes.autonomous import autonomous_bp
     from app.routes.compliance import compliance_bp
     from app.routes.feishu_config import feishu_config_bp
-    from app.routes.notification_integrations import notification_integrations_bp
     from app.routes.fetch import fetch_bp
     from app.routes.fs import fs_bp
     from app.routes.governance import governance_bp
     from app.routes.insights import insights_bp
     from app.routes.mapping_rules import mapping_rules_bp
     from app.routes.messages import messages_bp
+    from app.routes.notification_integrations import notification_integrations_bp
     from app.routes.pages import pages_bp
     from app.routes.project_categories import project_categories_bp
     from app.routes.projects import projects_bp

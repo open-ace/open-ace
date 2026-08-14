@@ -113,9 +113,9 @@ def update_feishu_config():
                     "org_sync_interval_minutes": config.pop("interval_minutes"),
                     "org_sync_max_runtime_seconds": config.pop("max_runtime_seconds"),
                     "org_sync_auto_recover": config.pop("auto_recovery"),
-                    "app_secret_masked": "****"
-                    if config.pop("app_secret_configured", False)
-                    else "",
+                    "app_secret_masked": (
+                        "****" if config.pop("app_secret_configured", False) else ""
+                    ),
                 }
             )
 
