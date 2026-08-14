@@ -512,6 +512,89 @@ class TestTenantlessAdminFailsClosed:
         assert repo.password_updates == []
 
 
+class TestDecoratorBranchesNotReachableFromTheRoutes:
+    """Two branches the routes cannot currently exercise.
+
+    All 7 call sites use ``<int:user_id>`` converters, so the "unusable view
+    arg" path is latent -- and an unpinned fail-closed branch is one refactor
+    away from becoming a fail-open one. Driven directly here.
+    """
+
+    @staticmethod
+    def _app_with(view_arg_name, decorated_arg="user_id"):
+        from app.auth.decorators import admin_required, same_tenant_user_required
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+
+        @app.route(f"/probe/<{view_arg_name}>")
+        @admin_required
+        @same_tenant_user_required(arg=decorated_arg)
+        def probe(**kwargs):
+            return {"reached": True}
+
+        return app
+
+    def _call(self, app, actor, path):
+        repo = _FakeUserRepo()
+        with (
+            patch("app.auth.decorators._load_user_from_token", return_value=actor),
+            patch("app.repositories.user_repo.UserRepository", return_value=repo),
+        ):
+            return app.test_client().get(path, headers={"Authorization": "Bearer t"})
+
+    def test_view_arg_mismatch_denies_a_tenant_admin(self):
+        """The decorator names user_id; the route supplies uid."""
+        app = self._app_with("uid")
+
+        response = self._call(app, TENANT_A_ADMIN, "/probe/20")
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+
+    def test_non_numeric_view_arg_denies_a_tenant_admin(self):
+        app = self._app_with("user_id")
+
+        response = self._call(app, TENANT_A_ADMIN, "/probe/not-a-number")
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+
+    def test_view_arg_mismatch_does_not_grant_a_platform_admin_anything_new(self):
+        """Platform admins fall through -- they simply lose the audit entry."""
+        app = self._app_with("uid")
+
+        response = self._call(app, PLATFORM_ADMIN, "/probe/20")
+
+        assert response.status_code == 200
+
+
+class TestCrossTenantAccessIsAudited:
+    """The PR advertises an ADMIN_CROSS_TENANT_ACCESS entry; pin that it happens."""
+
+    def test_platform_admin_reaching_another_tenant_writes_an_audit_entry(self):
+        from app.auth.decorators import _log_cross_tenant_operation  # noqa: F401
+
+        with patch("app.auth.decorators._log_cross_tenant_operation") as mock_log:
+            response, _ = _request(PLATFORM_ADMIN, "POST", "/api/admin/users/20/reset-password")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        mock_log.assert_called_once()
+        assert mock_log.call_args.kwargs["target_tenant_id"] == TENANT_B
+
+    def test_no_audit_entry_when_the_target_is_not_cross_tenant(self):
+        legacy_same_tenant = {
+            "id": 2,
+            "username": "legacy",
+            "role": "admin",
+            "tenant_id": TENANT_A,
+            "must_change_password": False,
+        }
+        with patch("app.auth.decorators._log_cross_tenant_operation") as mock_log:
+            response, _ = _request(legacy_same_tenant, "POST", "/api/admin/users/10/reset-password")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        mock_log.assert_not_called()
+
+
 class _ExplodingUserRepo(_FakeUserRepo):
     """Repository whose target lookup fails, e.g. the database is unreachable."""
 
@@ -756,6 +839,33 @@ class TestQuotaEndpointsDoNotLeakUserLists:
         )
 
         assert response.status_code == 403
+
+    def test_quota_stats_sums_only_the_tenant_it_reports_against(self):
+        """Limits and the users summed against them must be the same tenant.
+
+        Scoping only the user query is not enough: a platform admin calling
+        this with no tenant_id (which is how the dashboard calls it) read
+        tenant 1's limits while summing EVERY tenant's users, producing
+        percentages over 100%.
+        """
+        response, repo = _request(PLATFORM_ADMIN, "GET", "/api/admin/quota/stats")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        body = response.get_json()
+        # USERS holds one quota-bearing user per tenant, each 100 daily tokens.
+        # Summing both tenants would double this.
+        assert body["allocated"]["daily_token"] == 100, body
+
+    def test_quota_stats_uses_the_requested_tenant_for_both_sides(self):
+        response, _ = _request(
+            PLATFORM_ADMIN,
+            "GET",
+            "/api/admin/quota/stats",
+            query_string={"tenant_id": TENANT_B},
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert response.get_json()["allocated"]["daily_token"] == 100
 
     def test_quota_health_check_allows_own_tenant(self):
         response, _ = _request(

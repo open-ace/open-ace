@@ -172,16 +172,21 @@ class TestOrphanedRevisionIsReachable:
 class TestProxyTokenMigrationStaysIdempotent:
     @staticmethod
     def _unguarded_add_columns(func: ast.FunctionDef) -> list[ast.Call]:
-        """Return every ``op.add_column(...)`` NOT inside an ``if``.
+        """Return every ``op.add_column(...)`` NOT behind a real condition.
 
         Association, not counting. A previous version compared the number of
         ``if`` nodes containing an add_column against the number of add_column
         calls, so one extra nested ``if`` around an already-guarded call could
         offset a second call left completely unguarded.
+
+        A constant test (``if True:``) does not count as a guard -- it is the
+        obvious way to neuter this check while keeping its shape.
         """
         guarded: set[int] = set()
         for node in ast.walk(func):
             if not isinstance(node, ast.If):
+                continue
+            if isinstance(node.test, ast.Constant):
                 continue
             for descendant in ast.walk(node):
                 if (
@@ -254,3 +259,12 @@ class TestProxyTokenMigrationStaysIdempotent:
         ).body[0]
         assert isinstance(fully_guarded, ast.FunctionDef)
         assert self._unguarded_add_columns(fully_guarded) == []
+
+    def test_a_constant_condition_does_not_count_as_a_guard(self):
+        """`if True:` keeps the shape while removing the protection."""
+        neutered = ast.parse('def upgrade():\n    if True:\n        op.add_column("t", c1)\n').body[
+            0
+        ]
+        assert isinstance(neutered, ast.FunctionDef)
+
+        assert len(self._unguarded_add_columns(neutered)) == 1

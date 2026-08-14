@@ -755,17 +755,24 @@ def api_quota_stats():
 
     tenant_service = TenantService()
 
-    # Get tenant info (default tenant_id=1 for single-tenant mode)
-    tenant = tenant_service.get_tenant(scope_tenant_id or 1)
+    # This endpoint compares allocation against ONE tenant's limits, so the
+    # limits and the users summed against them must come from the SAME tenant.
+    # Resolve a single concrete id and use it for both.
+    #
+    # Getting this wrong is not hypothetical: scoping only the user query left
+    # a platform admin (scope_tenant_id None, which is how the dashboard calls
+    # it -- getQuotaStats() sends no tenant_id) reading tenant 1's limits while
+    # summing EVERY tenant's users, which reports percentages like 500%.
+    effective_tenant_id = scope_tenant_id or g.user.get("tenant_id") or 1
+
+    # Default tenant_id=1 for single-tenant mode.
+    tenant = tenant_service.get_tenant(effective_tenant_id)
     if not tenant:
         return jsonify({"error": "Tenant not found"}), 404
 
     tenant_quota = tenant.quota
 
-    # Calculate allocated quotas from users in scope. Summing every tenant's
-    # users against one tenant's limit was both a cross-tenant read and an
-    # arithmetically wrong answer.
-    users = user_repo.get_all_users(tenant_id=scope_tenant_id)
+    users = user_repo.get_all_users(tenant_id=effective_tenant_id)
 
     allocated = {
         "daily_token": 0,
