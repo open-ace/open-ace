@@ -236,7 +236,6 @@ def log_audit(
     wrapper: str,
     verb: str,
     args_hash: str,
-    cwd: str,
     context_file: str | None,
     result: str,
     duration_ms: int,
@@ -255,7 +254,6 @@ def log_audit(
         "wrapper_version": WRAPPER_VERSION,
         "verb": verb,
         "args_hash": args_hash,
-        "cwd": cwd,
         "context_file": context_file or "",
         "result": result,
         "duration_ms": duration_ms,
@@ -497,6 +495,53 @@ def validate_c_arguments(c_args: list[str]) -> tuple[bool, str]:
                 if key == "core.hooksPath" and value in ALLOWED_HOOKS_VALUES:
                     continue
                 return False, f"Forbidden config key: {key}"
+
+    return True, ""
+
+
+def validate_flags(verb: str, args: list[str], verbs_config: GitVerbsConfig) -> tuple[bool, str]:
+    """
+    Validate that flags in args are allowed for the given verb.
+
+    Returns: (is_valid, error_message)
+    """
+    # Find the verb configuration
+    verb_config = None
+    for allowed_verb in verbs_config.allowed_verbs:
+        if isinstance(allowed_verb, dict) and allowed_verb.get("verb") == verb:
+            verb_config = allowed_verb
+            break
+
+    if not verb_config:
+        # Verb not in whitelist, will be caught by is_verb_allowed
+        return True, ""
+
+    # Get allowed flags
+    allowed_flags = verb_config.get("allowed_flags", [])
+    if not allowed_flags:
+        # No restrictions defined for this verb
+        return True, ""
+
+    # Check each argument
+    for arg in args:
+        # Skip non-flag arguments (paths, branch names, etc.)
+        if not arg.startswith("-"):
+            continue
+
+        # Check if flag is allowed
+        is_allowed = False
+        for allowed in allowed_flags:
+            # Exact match
+            if arg == allowed:
+                is_allowed = True
+                break
+            # Prefix match for flags with values (e.g., --format=)
+            if allowed.endswith("=") and arg.startswith(allowed):
+                is_allowed = True
+                break
+
+        if not is_allowed:
+            return False, f"Flag '{arg}' is not allowed for verb '{verb}'"
 
     return True, ""
 
@@ -964,6 +1009,12 @@ def main() -> int:
         print(f"Permission denied: {reason}", file=sys.stderr)
         return EXIT_PERMISSION_DENIED
 
+    # Validate flags are allowed for this verb (Issue #2650)
+    is_valid, error = validate_flags(parsed_args.subcommand, parsed_args.subcommand_args, verbs_config)
+    if not is_valid:
+        print(f"Permission denied: {error}", file=sys.stderr)
+        return EXIT_PERMISSION_DENIED
+
     # Check --force-with-lease constraints for push
     if parsed_args.subcommand == "push":
         is_allowed, _ = is_force_with_lease_allowed(parsed_args.subcommand_args, verbs_config)
@@ -990,7 +1041,7 @@ def main() -> int:
     actor = get_current_user()
     target_user = None  # Not available in wrapper context
     args_hash = compute_args_hash(git_args)
-    cwd = os.getcwd()
+    # Note: cwd intentionally not logged to avoid information leakage in multi-user environments
     git_version = get_git_version()
 
     start_time = time.time()
@@ -1010,7 +1061,6 @@ def main() -> int:
             wrapper=WRAPPER_NAME,
             verb=parsed_args.subcommand,
             args_hash=args_hash,
-            cwd=cwd,
             context_file=wrapper_args.context_file,
             result="success" if result.returncode == 0 else "failure",
             duration_ms=duration_ms,
@@ -1034,7 +1084,6 @@ def main() -> int:
             wrapper=WRAPPER_NAME,
             verb=parsed_args.subcommand,
             args_hash=args_hash,
-            cwd=cwd,
             context_file=wrapper_args.context_file,
             result="timeout",
             duration_ms=duration_ms,

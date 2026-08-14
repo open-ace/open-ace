@@ -203,7 +203,6 @@ def log_audit(
     wrapper: str,
     command: str,
     args_hash: str,
-    cwd: str,
     context_file: str | None,
     result: str,
     duration_ms: int,
@@ -222,7 +221,6 @@ def log_audit(
         "wrapper_version": WRAPPER_VERSION,
         "command": command,
         "args_hash": args_hash,
-        "cwd": cwd,
         "context_file": context_file or "",
         "result": result,
         "duration_ms": duration_ms,
@@ -741,7 +739,7 @@ def main() -> int:
     actor = get_current_user()
     target_user = None
     args_hash = compute_args_hash(gh_args)
-    cwd = os.getcwd()
+    # Note: cwd intentionally not logged to avoid information leakage in multi-user environments
     gh_version = get_gh_version()
 
     start_time = time.time()
@@ -762,7 +760,6 @@ def main() -> int:
             wrapper=WRAPPER_NAME,
             command=full_command,
             args_hash=args_hash,
-            cwd=cwd,
             context_file=wrapper_args.context_file,
             result="success" if result.returncode == 0 else "failure",
             duration_ms=duration_ms,
@@ -786,7 +783,6 @@ def main() -> int:
             wrapper=WRAPPER_NAME,
             command=parsed_args.command,
             args_hash=args_hash,
-            cwd=cwd,
             context_file=wrapper_args.context_file,
             result="timeout",
             duration_ms=duration_ms,
