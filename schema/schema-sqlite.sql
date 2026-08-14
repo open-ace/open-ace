@@ -109,10 +109,7 @@ CREATE TABLE agent_tokens (
  revoked_at TIMESTAMP,
  revoked_by integer,
  rotated_at TIMESTAMP,
- token_version INTEGER DEFAULT '0' NOT NULL,
- pending_revoke INTEGER DEFAULT 0 NOT NULL,
- revoke_after TIMESTAMP,
- rotation_id TEXT
+ token_version INTEGER DEFAULT '0' NOT NULL
 );
 
 CREATE TABLE aggregation_history (
@@ -615,6 +612,20 @@ CREATE TABLE notification_preferences (
  dingtalk_webhook_secret text
 );
 
+CREATE TABLE parse_failure_records (
+ id TEXT PRIMARY KEY NOT NULL,
+ session_id TEXT NOT NULL,
+ tool_use_id TEXT NOT NULL,
+ tool_name TEXT NOT NULL,
+ tool_input text NOT NULL,
+ error text NOT NULL,
+ "timestamp" TIMESTAMP NOT NULL,
+ retry_count integer DEFAULT 0 NOT NULL,
+ last_retry_at TIMESTAMP,
+ resolved INTEGER DEFAULT 0 NOT NULL,
+ created_at TIMESTAMP NOT NULL
+);
+
 CREATE TABLE policy_decisions (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  decision_id text NOT NULL,
@@ -813,8 +824,7 @@ CREATE TABLE remote_machines (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  last_heartbeat TIMESTAMP,
- legacy_mode INTEGER DEFAULT 0,
- token_revoke_timeout integer DEFAULT 300
+ legacy_mode INTEGER DEFAULT 0
 );
 
 CREATE TABLE remote_runtime_commands (
@@ -1566,12 +1576,6 @@ CREATE INDEX idx_agent_tokens_machine ON agent_tokens (machine_id);
 
 CREATE INDEX idx_agent_tokens_machine_version ON agent_tokens (machine_id, token_version);
 
-CREATE UNIQUE INDEX idx_agent_tokens_one_active_per_machine ON agent_tokens (machine_id);
-
-CREATE INDEX idx_agent_tokens_pending_revoke_timeout ON agent_tokens (revoke_after);
-
-CREATE INDEX idx_agent_tokens_machine_pending ON agent_tokens (machine_id, pending_revoke, revoke_after);
-
 CREATE INDEX idx_aggregation_history_status ON aggregation_history (status);
 
 CREATE INDEX idx_aggregation_history_type_date ON aggregation_history (type, start_date, end_date);
@@ -1630,7 +1634,7 @@ CREATE INDEX idx_consistency_violations_status ON consistency_violations (status
 
 CREATE INDEX idx_consistency_violations_tenant ON consistency_violations (tenant_id);
 
-CREATE INDEX idx_daily_messages_orphan ON daily_messages (date);
+CREATE INDEX idx_daily_messages_orphan ON daily_messages (date) WHERE (tenant_id IS NULL);
 
 CREATE INDEX idx_daily_messages_tenant_date ON daily_messages (tenant_id, date);
 
@@ -1642,7 +1646,7 @@ CREATE INDEX idx_daily_stats_date_tool_host ON daily_stats (date, tool_name, hos
 
 CREATE INDEX idx_daily_stats_host ON daily_stats (host_name);
 
-CREATE INDEX idx_daily_stats_orphan ON daily_stats (date);
+CREATE INDEX idx_daily_stats_orphan ON daily_stats (date) WHERE (tenant_id IS NULL);
 
 CREATE INDEX idx_daily_stats_project ON daily_stats (project_id);
 
@@ -1674,7 +1678,7 @@ CREATE INDEX idx_hourly_stats_date_hour ON hourly_stats (date, hour);
 
 CREATE INDEX idx_hourly_stats_hour ON hourly_stats (hour);
 
-CREATE INDEX idx_hourly_stats_orphan ON hourly_stats (date);
+CREATE INDEX idx_hourly_stats_orphan ON hourly_stats (date) WHERE (tenant_id IS NULL);
 
 CREATE INDEX idx_hourly_stats_tenant_date ON hourly_stats (tenant_id, date);
 
@@ -1682,7 +1686,7 @@ CREATE INDEX idx_insights_reports_user_date ON insights_reports (user_id, start_
 
 CREATE INDEX idx_knowledge_team ON knowledge_base (team_id);
 
-CREATE INDEX idx_legal_holds_active ON legal_holds (id);
+CREATE INDEX idx_legal_holds_active ON legal_holds (id) WHERE (lifted_at IS NULL);
 
 CREATE INDEX idx_legal_holds_data_type ON legal_holds (data_type);
 
@@ -1722,21 +1726,29 @@ CREATE INDEX idx_messages_sender_date_role ON daily_messages (sender_name, date,
 
 CREATE INDEX idx_messages_sender_id ON daily_messages (sender_id);
 
-CREATE INDEX idx_messages_sender_name ON daily_messages (sender_name);
+CREATE INDEX idx_messages_sender_name ON daily_messages (sender_name) WHERE (sender_name IS NOT NULL);
 
-CREATE INDEX idx_messages_session_list_covering ON daily_messages (agent_session_id, tool_name, host_name, sender_name);
+CREATE INDEX idx_messages_session_list_covering ON daily_messages (agent_session_id, tool_name, host_name, sender_name) WHERE (agent_session_id IS NOT NULL);
 
 CREATE INDEX idx_messages_timestamp ON daily_messages ("timestamp");
 
 CREATE INDEX idx_messages_tool_name ON daily_messages (tool_name);
 
-CREATE INDEX idx_messages_usage_trend_covering ON daily_messages (date, role, sender_name);
+CREATE INDEX idx_messages_usage_trend_covering ON daily_messages (date, role, sender_name) WHERE ((role) = 'assistant');
 
-CREATE INDEX idx_messages_user_date_role_covering ON daily_messages (user_id, date, role);
+CREATE INDEX idx_messages_user_date_role_covering ON daily_messages (user_id, date, role) WHERE ((user_id IS NOT NULL) AND ((role) = 'assistant'));
 
 CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones (workflow_id, phase, status);
 
 CREATE INDEX idx_milestones_workflow_round ON workflow_milestones (workflow_id, dev_round);
+
+CREATE INDEX idx_parse_failure_created_at ON parse_failure_records (created_at);
+
+CREATE INDEX idx_parse_failure_session ON parse_failure_records (session_id);
+
+CREATE INDEX idx_parse_failure_timestamp ON parse_failure_records ("timestamp");
+
+CREATE INDEX idx_parse_failure_unresolved ON parse_failure_records (resolved) WHERE (resolved = false);
 
 CREATE INDEX idx_policy_decisions_fingerprint ON policy_decisions (fingerprint_hash);
 
@@ -1938,7 +1950,7 @@ CREATE INDEX idx_usage_report_receipts_session ON usage_report_receipts (session
 
 CREATE INDEX idx_usage_summary_host ON usage_summary (host_name);
 
-CREATE INDEX idx_usage_summary_host_name_valid ON usage_summary (host_name);
+CREATE INDEX idx_usage_summary_host_name_valid ON usage_summary (host_name) WHERE ((host_name IS NOT NULL) AND ((host_name) <> '') AND ((host_name) NOT LIKE '<%>') AND ((length((host_name)) >= 1) AND (length((host_name)) <= 253)));
 
 CREATE INDEX idx_usage_summary_tool ON usage_summary (tool_name);
 
@@ -1962,11 +1974,11 @@ CREATE INDEX idx_users_email ON users (email);
 
 CREATE INDEX idx_users_role ON users (role);
 
-CREATE INDEX idx_users_system_account ON users (system_account);
+CREATE INDEX idx_users_system_account ON users (system_account) WHERE ((deleted_at IS NULL) AND (is_active = true) AND (system_account IS NOT NULL));
 
 CREATE INDEX idx_users_tenant ON users (tenant_id);
 
-CREATE INDEX idx_users_username ON users (username);
+CREATE INDEX idx_users_username ON users (username) WHERE ((deleted_at IS NULL) AND (is_active = true));
 
 CREATE INDEX idx_webhook_deliveries_alert ON webhook_deliveries (alert_id);
 
@@ -1988,6 +2000,6 @@ CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions (decisi
 
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules (rule_key, version);
 
-CREATE UNIQUE INDEX uq_projects_path ON projects (tenant_id, path);
+CREATE UNIQUE INDEX uq_projects_path ON projects (tenant_id, path) WHERE (is_active IS TRUE);
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects (user_id, project_id);
