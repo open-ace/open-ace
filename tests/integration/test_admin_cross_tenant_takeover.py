@@ -420,7 +420,7 @@ class TestPrivilegeEscalation:
         assert response.status_code == 403
         assert repo.updated == []
 
-    @pytest.mark.parametrize("bogus", [0, -1, "", "abc", "0"])
+    @pytest.mark.parametrize("bogus", [0, -1, "", "abc", "0", 1.9, 2.5, True, False])
     def test_unusable_tenant_id_is_rejected_not_silently_ignored(self, bogus):
         """A value the scope guard cannot normalize returns None, which reads as
         'no tenant requested' -- so re-reading the raw body value afterwards
@@ -433,28 +433,18 @@ class TestPrivilegeEscalation:
         assert response.status_code == 400, response.get_data(as_text=True)
         assert repo.updated == []
 
-    def test_a_float_tenant_id_truncates_but_is_still_boundary_checked(self):
-        """1.9 is not 'unusable' -- _normalize_user_tenant_id truncates it to 1.
+    def test_an_integral_float_tenant_id_is_still_accepted(self):
+        """2.0 is unambiguous, so it is honoured rather than rejected.
 
-        Documented rather than rejected: the truncated value goes through the
-        same comparison as any other, so it cannot cross a boundary. Here it
-        lands on the actor's own tenant and is allowed; the next case shows the
-        foreign-tenant float being denied.
+        Only non-integral floats and bools are refused -- those are the ones
+        that would silently land on a tenant the caller never named.
         """
         response, repo = _request(
-            TENANT_A_ADMIN, "PUT", "/api/admin/users/10", json_body={"tenant_id": 1.9}
+            PLATFORM_ADMIN, "PUT", "/api/admin/users/10", json_body={"tenant_id": 2.0}
         )
 
         assert response.status_code == 200, response.get_data(as_text=True)
         assert repo.updated == [10]
-
-    def test_a_float_tenant_id_pointing_at_another_tenant_is_denied(self):
-        response, repo = _request(
-            TENANT_A_ADMIN, "PUT", "/api/admin/users/10", json_body={"tenant_id": 2.5}
-        )
-
-        assert response.status_code == 403
-        assert repo.updated == []
 
     def test_platform_admin_also_gets_400_for_an_unusable_tenant_id(self):
         response, repo = _request(

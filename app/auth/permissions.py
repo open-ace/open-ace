@@ -33,6 +33,15 @@ def is_platform_admin_strict_mode() -> bool:
         bool: True if strict mode is enabled (only accept explicit platform_admin).
               False if legacy admin is accepted for backward compatibility.
 
+    Scope, so nobody over-trusts this flag: it governs the checks that route
+    through is_platform_admin_role / User.is_platform_admin -- notably
+    platform_admin_required, same_tenant_or_platform_admin and
+    resolve_admin_tenant_scope. It does NOT reach code that compares role
+    strings directly, e.g. admin_required's own allow-list or
+    app/routes/mapping_rules.py, which gates on `user_role == "tenant_admin"`
+    and so leaves a legacy admin with unrestricted reach there. Enabling the
+    flag narrows authorization; it does not make the legacy role disappear.
+
     Deployment Notes:
         1. Migrate every remaining ``role='admin'`` account to
            ``role='platform_admin'`` FIRST -- in strict mode a legacy admin

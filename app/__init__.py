@@ -330,16 +330,9 @@ def create_app(config=None):
     # (Issue #2332). Resolving it lazily on the first role check would work too,
     # but doing it here is what makes the documented "cached at application
     # startup" contract true and puts the ENABLED/DISABLED line in the boot log.
-    from app.auth.permissions import (
-        init_platform_admin_strict_mode,
-        warn_if_strict_mode_locks_out_legacy_admins,
-    )
+    from app.auth.permissions import init_platform_admin_strict_mode
 
     init_platform_admin_strict_mode()
-    # The flag used to be inert, so operators may have set it long ago and seen
-    # nothing happen. Now that it works, say so loudly if turning it on is about
-    # to strip platform access from accounts that still use the legacy role.
-    warn_if_strict_mode_locks_out_legacy_admins()
 
     # Initialize Prometheus metrics (Issue #2186)
     # Only for web workers - scheduler has its own metrics server
@@ -451,6 +444,19 @@ def create_app(config=None):
 
         ensure_all_tables()
         logger.info(f"Development schema bootstrap completed (mode={env_mode})")
+
+    # Deliberately AFTER the schema check above, which is the first thing that
+    # talks to the database. This query is only a diagnostic, and placing it
+    # earlier would make a startup diagnostic the first blocking call -- on an
+    # unreachable host (firewall DROP, no connect_timeout configured) it would
+    # hang before the check whose job is to report exactly that.
+    #
+    # The flag used to be inert, so operators may have set it long ago and seen
+    # nothing happen. Now that it works, say so loudly if turning it on is about
+    # to strip platform access from accounts that still use the legacy role.
+    from app.auth.permissions import warn_if_strict_mode_locks_out_legacy_admins
+
+    warn_if_strict_mode_locks_out_legacy_admins()
 
     # Pre-check encryption key registry (Issue #1820, #2186)
     try:

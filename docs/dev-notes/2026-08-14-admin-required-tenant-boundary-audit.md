@@ -77,34 +77,50 @@ legacy `admin` 行就会突然失去保护，等于「开了更严的开关反�
 | model_gateway.py | 1（before_request） |
 | smtp_config.py | 1（before_request） |
 
-路径里带资源 id 的共 24 个，其中 19 个现在是租户感知的：
+路径里带资源 id 的共 **29** 个，其中 23 个现在是租户感知的：
 
 - **本次加装饰器的 7 个**：admin.py 的 5 个（改/删/改密/重置密码/改配额）、
   compliance.py:452 用户行为画像、governance.py:240 用户活动
 - **本次没动、原本就有自建校验的 2 个用户端点**：mapping_rules.py:84 与 :237
   （#2180 手写的 `_validate_user_in_tenant`，读过，是有效的）
 - 其余非用户资源已有校验的：remote.py 的 3 个（`_check_machine_tenant_access`）、
-  sso.py 的 7 个（provider 按租户取）
+  sso.py 的 7 个（provider 按租户取）、mapping_rules.py 另外 4 个
+  （`update_rule` / `delete_rule` / `suggest_mapping` / `manual_map_account`，
+  同样是 #2180 手写的）
 
 也就是说「9 个用户端点现在都受控」是对的，但其中只有 **7 个**是本次加的装饰器，
 另外 2 个是沿用既有的手写校验（重复实现，将来值得合并到同一个装饰器）。
 
-### 剩余 5 个：有资源 id 且完全没有租户处理
+### 剩余 6 个：有资源 id 且完全没有租户处理
 
-这些**不是**账号接管，所以没有塞进本次 PR，但都是真实的跨租户读写面：
+带路径参数的 `@admin_required` 路由共 **29** 个（第一版这里写 24 是错的：用正则枚举
+时只匹配了固定的几个 id 名，漏掉了 `<int:id>` / `<sender_name>` / `<rule_key>` 这些
+写法。AST 枚举才是准的）。29 个里 23 个已有校验，剩下这 6 个完全没有：
 
 | 位置 | 端点 | 风险 |
 |---|---|---|
-| `app/routes/compliance.py:347` | `GET /reports/<report_id>` | 读到别的租户的合规报告 |
-| `app/routes/governance.py:303` | `POST /quota/alerts/<alert_id>/acknowledge` | 消掉别的租户的配额告警 |
-| `app/routes/governance.py:513` | `PUT /filter-rules/<rule_id>` | 改别的租户的内容过滤规则 |
-| `app/routes/governance.py:552` | `DELETE /filter-rules/<rule_id>` | 删别的租户的内容过滤规则 |
-| `app/routes/policy.py:169` | `PUT /policy/rules/<rule_id>/enabled` | 开关别的租户的策略规则 |
+| `app/routes/policy.py:149` | `PUT /policy/rules/<rule_key>` | **改掉别的租户的策略规则**（整版本 supersede） |
+| `app/routes/policy.py:171` | `PATCH /policy/rules/<rule_id>/enabled` | 开关别的租户的策略规则 |
+| `app/routes/governance.py:515` | `PUT /filter-rules/<rule_id>` | 改别的租户的内容过滤规则 |
+| `app/routes/governance.py:554` | `DELETE /filter-rules/<rule_id>` | 删别的租户的内容过滤规则 |
+| `app/routes/governance.py:305` | `POST /quota/alerts/<alert_id>/acknowledge` | 消掉别的租户的配额告警 |
+| `app/routes/compliance.py:349` | `GET /reports/<report_id>` | 读到别的租户的合规报告 |
 
-后两类（filter-rules / policy rules）值得优先，因为它们是**关掉别人的管控**，
-不是读数据。修法和本次一样：加一个按资源 id 查出 owner tenant 再比对的守卫；
-这几个资源不是 user，所以需要各自的 repo 查询，不能直接复用
-`same_tenant_user_required`。
+**`policy.py:149` 是这批里最严重的**，也是第一版漏掉的：它不是开关，而是
+`PolicyRepository().create_rule(**fields)` 整条规则版本替换——外人可以把别的租户
+当前生效的策略直接顶掉。它比同文件里那个已经列出的 toggle 危险得多。
+
+修法不能直接复用 `same_tenant_user_required`（资源不是 user），要各自按 repo 反查
+owner tenant。分两类：
+
+- **`policy_rules` 与 `compliance_reports` 有 `tenant_id` 列** → 直接比对
+- **`quota_alerts` 没有 tenant 列，但有 `user_id NOT NULL`** → 经 user 反查租户
+- **`content_filter_rules` 一列 tenant 都没有**，repo 层 `get_filter_rule(rule_id)`
+  也不收租户参数——这张表在设计上就是全局的。所以那两个端点不该「补租户比对」，
+  应当收成 `platform_admin_required`：租户管理员改一条全局过滤规则，影响的是所有
+  租户，本来就不该是租户级权限。
+
+全部无需迁移。
 
 ### 潜伏陷阱：`require_tenant_scope()` 把 tenant_admin 当全局管理员
 

@@ -838,8 +838,23 @@ def security_annotated(reason: str = ""):
 
 
 def _normalize_user_tenant_id(value: object) -> int | None:
-    """Coerce a raw ``tenant_id`` value into a positive int or None."""
-    if value in (None, ""):
+    """Coerce a raw ``tenant_id`` value into a positive int, or None.
+
+    Rejects two shapes that ``int()`` would otherwise accept silently, because
+    both let a caller act on a tenant it never named:
+
+    * ``bool`` -- ``int(True) == 1``, so a JSON body of ``{"tenant_id": true}``
+      would resolve to tenant 1.
+    * a non-integral ``float`` -- ``int(1.9) == 1``, so ``{"tenant_id": 1.9}``
+      would silently truncate onto tenant 1.
+
+    Neither can cross a tenant boundary (the result is still compared like any
+    other value), but "acts on a tenant the request did not ask for" is the
+    same failure mode that makes an unusable id a 400 rather than a None.
+    """
+    if value in (None, "") or isinstance(value, bool):
+        return None
+    if isinstance(value, float) and not value.is_integer():
         return None
     try:
         tenant_id = int(value)  # type: ignore[call-overload]

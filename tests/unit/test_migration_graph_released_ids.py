@@ -82,6 +82,24 @@ class TestOrphanedRevisionIsReachable:
         """A stuck database sits at 002's successor; the bridge must be exactly that."""
         assert graph[ORPHANED_ID]["down_revision"] == CI_REPAIR_ID
 
+    @staticmethod
+    def _effective_statements(node: ast.FunctionDef) -> list[ast.stmt]:
+        """Body statements that do something, i.e. everything but a docstring/pass.
+
+        Note what is NOT excluded: a bare ``op.add_column(...)`` parses to
+        ``ast.Expr(value=ast.Call(...))``. Filtering out every ``ast.Expr``
+        would drop exactly the DDL this check exists to catch, so only
+        ``ast.Expr`` wrapping a *constant* (the docstring) is ignored.
+        """
+        out = []
+        for stmt in node.body:
+            if isinstance(stmt, ast.Pass):
+                continue
+            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+                continue
+            out.append(stmt)
+        return out
+
     def test_bridge_applies_no_ddl(self, graph):
         """The DDL lives in 004. Re-applying it here would double-add columns."""
         source = graph[ORPHANED_ID]["path"].read_text(encoding="utf-8")
@@ -93,8 +111,35 @@ class TestOrphanedRevisionIsReachable:
         }
         assert set(funcs) == {"upgrade", "downgrade"}
         for name, node in funcs.items():
-            statements = [s for s in node.body if not isinstance(s, ast.Expr)] or []
-            assert not statements, f"{name}() must stay a no-op, found: {ast.dump(node)}"
+            statements = self._effective_statements(node)
+            assert not statements, (
+                f"{name}() must stay a no-op, found {len(statements)} statement(s): "
+                f"{[ast.dump(s) for s in statements]}"
+            )
+
+    def test_the_no_ddl_check_would_actually_catch_ddl(self):
+        """Guard the guard: the previous version of this check was vacuous.
+
+        It filtered out every ``ast.Expr``, which is precisely how a bare
+        ``op.add_column(...)`` call parses -- so a bridge full of DDL passed.
+        """
+        planted = ast.parse(
+            "def upgrade():\n"
+            '    """doc"""\n'
+            '    op.add_column("t", sa.Column("c"))\n'
+            '    op.execute("DROP TABLE users")\n'
+        ).body[0]
+        assert isinstance(planted, ast.FunctionDef)
+
+        assert len(self._effective_statements(planted)) == 2
+
+        empty = ast.parse('def upgrade():\n    """doc only"""\n').body[0]
+        assert isinstance(empty, ast.FunctionDef)
+        assert self._effective_statements(empty) == []
+
+        just_pass = ast.parse("def upgrade():\n    pass\n").body[0]
+        assert isinstance(just_pass, ast.FunctionDef)
+        assert self._effective_statements(just_pass) == []
 
     def test_teams_index_migration_follows_the_bridge(self, graph):
         """Ordering matters: a stuck database still needs the teams index."""

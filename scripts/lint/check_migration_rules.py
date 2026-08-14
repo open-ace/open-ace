@@ -334,6 +334,12 @@ DEFAULT_BASELINE_REF = os.environ.get("MIG003_BASELINE_REF", "origin/main")
 # ``upgrade()`` — that costs nothing and cannot be wrong.
 RETIRED_REVISION_IDS: frozenset[str] = frozenset()
 
+# Whether the last check_released_revision_ids() call actually compared
+# anything. "No violations" and "did not look" are very different outcomes, and
+# the required `lint` lane checks out shallow with no origin/main -- so without
+# this the summary line would report a skip as a clean pass.
+_released_check_ran = False
+
 
 def _revision_id_from_source(source: str, filename: str = "<baseline>") -> str | None:
     """Extract the module-level ``revision`` id, or None if absent/dynamic.
@@ -362,41 +368,63 @@ def _revision_id_from_source(source: str, filename: str = "<baseline>") -> str |
 
 
 def _git(args: list[str]) -> str | None:
-    """Run a git command from the project root; None if git/ref is unavailable."""
+    """Run a git command from the project root; None if git/ref is unavailable.
+
+    Every failure mode collapses to None so MIG003 degrades to "skip" rather
+    than crashing a commit. That includes decode errors -- migration files
+    contain non-ASCII, and ``text=True`` decodes with the locale encoding, so a
+    C-locale environment could otherwise raise UnicodeDecodeError out of a lint
+    hook -- and a hung git, which without a timeout would block pre-commit
+    indefinitely.
+    """
     try:
         result = subprocess.run(  # nosec: B603 - fixed argv, no shell
             ["git", "-C", str(PROJECT_ROOT), *args],
             capture_output=True,
             text=True,
+            errors="replace",
             check=True,
+            timeout=30,
         )
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        UnicodeDecodeError,
+        FileNotFoundError,
+        OSError,
+    ):
         return None
     return result.stdout
 
 
-def _baseline_commit(ref: str) -> str | None:
-    """Resolve the commit whose revision ids this tree must still contain.
+def _baseline_commits(ref: str) -> list[str]:
+    """Resolve the commits whose revision ids this tree must still contain.
 
-    That is ``merge-base(ref, HEAD)`` -- the point this branch forked from --
-    NOT the tip of ``ref``. Using the tip makes every branch that simply lags
-    behind main fail: a migration merged to main after the fork is "missing"
-    from the branch, and the obvious way to silence that is to add its id to
-    RETIRED_REVISION_IDS, which is precisely the mistake this rule exists to
-    prevent.
+    Those are the merge bases of ``ref`` and ``HEAD`` -- the points this branch
+    forked from -- NOT the tip of ``ref``. Using the tip makes every branch
+    that simply lags behind main fail: a migration merged to main after the
+    fork is "missing" from the branch, and the obvious way to silence that is
+    to add its id to RETIRED_REVISION_IDS, which is precisely the mistake this
+    rule exists to prevent.
 
-    The merge-base is still complete, not a weakening. A branch's diff is
-    computed from its fork point, so it cannot express the deletion of a file
-    that did not exist there; every id a branch is capable of removing is an
-    id present at the merge-base.
+    ALL merge bases, via ``--all``. A criss-cross history has more than one,
+    and plain ``git merge-base`` picks an arbitrary single base: if the id was
+    added on the branch that the chosen base does not descend from, deleting it
+    goes unnoticed. Concretely -- main gains X at B, a side branch forks at C,
+    main merges the side branch, then a feature branch forks from C, merges B
+    (so it has X), and deletes X. The bases are {B, C}; plain merge-base
+    returns C, which never had X, so the deletion passes. Unioning the ids
+    across every base closes that.
 
-    Falls back to ``ref`` when there is no common ancestor (unrelated
-    histories, or a synthetic tree with no HEAD).
+    Falls back to ``ref`` itself when there is no common ancestor (unrelated
+    histories, or a synthetic tree with no HEAD) -- the conservative direction.
+
+    Returns an empty list when nothing can be resolved.
     """
-    merge_base = _git(["merge-base", ref, "HEAD"])
-    if merge_base and merge_base.strip():
-        return merge_base.strip()
-    return ref if _git(["rev-parse", "--verify", f"{ref}^{{commit}}"]) else None
+    all_bases = _git(["merge-base", "--all", ref, "HEAD"])
+    if all_bases and all_bases.strip():
+        return [line.strip() for line in all_bases.splitlines() if line.strip()]
+    return [ref] if _git(["rev-parse", "--verify", f"{ref}^{{commit}}"]) else []
 
 
 def _revision_ids_at_ref(ref: str) -> dict[str, str] | None:
@@ -427,31 +455,48 @@ def check_released_revision_ids(
 ) -> list[Violation]:
     """MIG003: every revision id this branch forked from must still exist.
 
-    The comparison point is ``merge-base(baseline_ref, HEAD)`` rather than the
-    tip of ``baseline_ref`` -- see :func:`_baseline_commit` for why the tip
-    produces false positives on any branch that lags behind.
+    The comparison points are the merge bases of ``baseline_ref`` and ``HEAD``
+    rather than the tip of ``baseline_ref`` -- see :func:`_baseline_commits`
+    for why the tip produces false positives on any branch that lags behind,
+    and why all bases are unioned rather than just one.
     """
-    commit = _baseline_commit(baseline_ref)
-    if commit is None:
+    global _released_check_ran
+    _released_check_ran = False
+
+    commits = _baseline_commits(baseline_ref)
+    if not commits:
         print(
-            f"MIG003: skipped (cannot resolve a baseline commit for '{baseline_ref}').",
+            f"MIG003: SKIPPED (cannot resolve a baseline commit for '{baseline_ref}') "
+            "-- released revision ids were NOT checked.",
             file=sys.stderr,
         )
         return []
 
-    baseline = _revision_ids_at_ref(commit)
-    if baseline is None:
+    baseline: dict[str, str] = {}
+    unreadable = 0
+    for commit in commits:
+        ids = _revision_ids_at_ref(commit)
+        if ids is None:
+            unreadable += 1
+            continue
+        baseline.update(ids)
+
+    if unreadable == len(commits):
         print(
-            f"MIG003: skipped (cannot read migrations from '{baseline_ref}').",
+            f"MIG003: SKIPPED (cannot read migrations from '{baseline_ref}') "
+            "-- released revision ids were NOT checked.",
             file=sys.stderr,
         )
         return []
     if not baseline:
         print(
-            f"MIG003: skipped ('{baseline_ref}' has no migrations to compare).",
+            f"MIG003: SKIPPED ('{baseline_ref}' has no migrations to compare) "
+            "-- released revision ids were NOT checked.",
             file=sys.stderr,
         )
         return []
+
+    _released_check_ran = True
 
     current: set[str] = set()
     for f in sorted(versions_dir.glob("*.py")):
@@ -564,8 +609,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    rules = "MIG001/MIG002" if skip_released else "MIG001/MIG002/MIG003"
-    print(f"OK: {len(migration_files)} migration file(s) pass {rules}.", file=sys.stderr)
+    # Say plainly which rules actually ran. MIG003 skips itself when the git
+    # baseline is unreadable, and claiming it "passed" there is how a check
+    # quietly stops being a check.
+    if skip_released:
+        checked = "MIG001/MIG002 (MIG003 skipped by request)"
+    elif _released_check_ran:
+        checked = "MIG001/MIG002/MIG003"
+    else:
+        checked = "MIG001/MIG002 (MIG003 NOT checked -- no usable git baseline)"
+    print(f"OK: {len(migration_files)} migration file(s) pass {checked}.", file=sys.stderr)
     return 0
 
 
