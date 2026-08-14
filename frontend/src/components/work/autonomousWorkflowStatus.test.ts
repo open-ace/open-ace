@@ -82,4 +82,21 @@ describe('isStaleAcceptancePause (#2634)', () => {
       isStaleAcceptancePause({ ...base, current_phase: 'developing', paused_at: iso(10) }, now)
     ).toBe(false);
   });
+
+  // The backend writes paused_at as "%Y-%m-%d %H:%M:%S" in UTC (no "T", no
+  // timezone). Date.parse of that shape returns NaN in Safari (badge never
+  // fires) and LOCAL time in Chrome (timezone skew). The math must hold
+  // regardless of the runner's local timezone.
+  describe('non-ISO backend timestamps', () => {
+    const backendTs = (daysAgo: number) =>
+      new Date(now - daysAgo * DAY_MS).toISOString().slice(0, 19).replace('T', ' ');
+
+    it('flags acceptance pauses older than 3 days written in backend format', () => {
+      expect(isStaleAcceptancePause({ ...base, paused_at: backendTs(4) }, now)).toBe(true);
+    });
+
+    it('does not flag fresh acceptance pauses written in backend format', () => {
+      expect(isStaleAcceptancePause({ ...base, paused_at: backendTs(1) }, now)).toBe(false);
+    });
+  });
 });

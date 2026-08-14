@@ -144,6 +144,21 @@ export function getPauseReasonCategory(workflow: PauseReasonInput): PauseReasonC
 
 export const ACCEPTANCE_PAUSE_STALE_MS = 3 * 24 * 60 * 60 * 1000;
 
+const BACKEND_DATETIME_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+
+/**
+ * Parse a backend timestamp. The backend writes `"%Y-%m-%d %H:%M:%S"` in UTC
+ * (space separator, no timezone), which `Date.parse` misreads: NaN in Safari
+ * and LOCAL time in Chrome. Normalize that exact shape to ISO-8601 UTC before
+ * parsing; anything else (already ISO) is parsed as-is.
+ */
+export function parseBackendTimestamp(value: string): number {
+  if (BACKEND_DATETIME_RE.test(value)) {
+    return Date.parse(`${value.replace(' ', 'T')}Z`);
+  }
+  return Date.parse(value);
+}
+
 export interface AcceptancePauseAgeInput {
   status: string;
   current_phase: string;
@@ -163,7 +178,7 @@ export function isStaleAcceptancePause(
   if (!anchor) {
     return false;
   }
-  const pausedMs = Date.parse(anchor);
+  const pausedMs = parseBackendTimestamp(anchor);
   if (Number.isNaN(pausedMs)) {
     return false;
   }
