@@ -3315,6 +3315,7 @@ detect_and_load_local_upgrade() {
     # Priority 1: From systemd service file (highest priority - matches running service)
     # Use systemctl show to get actual service file path (not hardcoded)
     # Check unit existence (not is-enabled, which fails for disabled services)
+    # Issue #2616: Use systemctl cat to detect unit file existence (not is-active)
     if command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null 2>&1; then
         local service_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
         if [ -z "$service_file" ] || [ ! -f "$service_file" ]; then
@@ -3324,7 +3325,8 @@ detect_and_load_local_upgrade() {
         # Use "^WorkingDirectory=" to avoid matching comment lines
         local systemd_path=$(grep "^WorkingDirectory=" "$service_file" 2>/dev/null | cut -d= -f2)
         if [ -n "$systemd_path" ] && [ -d "$systemd_path" ] && [ -f "$systemd_path/server.py" ]; then
-            print_info "Found running systemd service pointing to: $systemd_path"
+            # Issue #2616: Correct misleading log - systemctl cat only proves unit file exists
+            print_info "Found systemd unit file pointing to: $systemd_path"
             if [[ ! " ${candidate_paths[*]} " =~ " ${systemd_path} " ]]; then
                 candidate_paths+=("$systemd_path")
             fi
@@ -3961,9 +3963,16 @@ install_local() {
         fi
 
         # -- Phase 2: Update service config if user chose to switch --
-        # Issue #2283: use is-active (not is-enabled) so that a
-        # disabled-but-running service still gets restarted after upgrade.
-        if systemctl is-active --quiet open-ace.service 2>/dev/null; then
+        # Issue #2616: Use systemctl cat (unit file exists) instead of is-active
+        # This ensures inactive services are also restarted after upgrade.
+        # restart will start inactive services, so we just need unit file to exist.
+        if [ -n "$service_file" ] && [ -f "$service_file" ]; then
+            # Check if service was inactive (for user information)
+            local was_inactive=false
+            if ! systemctl is-active --quiet open-ace.service 2>/dev/null; then
+                was_inactive=true
+                print_info "Service was inactive, will start via systemd..."
+            fi
             # If user chose to switch service to this installation, update service config via sed
             # (Preserves SECRET_KEY, avoids double restart, avoids overwriting custom modifications)
             if [ "$UPGRADE_SWITCH_SERVICE" = "yes" ]; then
@@ -4043,7 +4052,8 @@ install_local() {
             sed -i '/^\[Service\]/a NoNewPrivileges=false' "$autonomous_service_file"
         fi
         systemctl daemon-reload
-        systemctl try-restart open-ace.service || \
+        # Issue #2616: Use restart instead of try-restart to ensure inactive services are started
+        systemctl restart open-ace.service || \
             print_warning "Restart open-ace manually to activate autonomous agent isolation"
     fi
 
