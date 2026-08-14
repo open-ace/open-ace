@@ -6759,6 +6759,22 @@ class AutonomousOrchestrator:
         visible = (result.response_text or "").strip()
         return bool(re.match(r"^API Error:\s*400\b", visible, re.IGNORECASE))
 
+    @classmethod
+    def _is_resume_noop_result(cls, result: AgentTaskResult | None) -> bool:
+        """Detect the structural resume-no-op signature (Refs #2570).
+
+        A ``--resume``'d session line whose last turn already ended can
+        synthesize a result-without-turn: the run reports success but
+        produced no measurable output — zero tokens AND empty artifact
+        text. Genuine work always moves at least one of those, so requiring
+        both keeps the retry backstop narrowly scoped.
+        """
+        if not result or not getattr(result, "success", False):
+            return False
+        if int(getattr(result, "total_tokens", 0) or 0) > 0:
+            return False
+        return not cls._artifact_text(result).strip()
+
     def _run_agent_with_context_recovery(
         self,
         wf: dict,
@@ -6775,14 +6791,58 @@ class AutonomousOrchestrator:
         The runner then rebinds the new provider transcript to the SAME tracking
         row. Usage from the rejected attempt is carried into the retry's final
         milestone write; the caller accounts the returned result as usual.
+
+        Resume no-op backstop (Refs #2570): when a NAMED line that actually
+        resumed an existing session returns success-but-empty (see
+        ``_is_resume_noop_result``), retry once with ``force_fresh=True`` on
+        the same tracking line. A fresh run cannot no-op this way and is
+        never retried; genuine failures and overflow/integrity results keep
+        their existing paths. If the retry is also empty, its result is
+        returned as-is so callers still see emptiness and fail closed.
         """
+        # Only a run that actually resumed an established session line can
+        # hit the resume no-op. Resolve that BEFORE the run: afterwards the
+        # line's mapping may have been (re)written by the run itself. Pop the
+        # (rarely passed) force_fresh kwarg so the retry calls below can pass
+        # their own without a duplicate-keyword collision.
+        force_fresh = bool(kwargs.pop("force_fresh", False))
+        resumed = False
+        if not force_fresh and SESSION_LINE_FIELDS.get(session_line):
+            try:
+                _, _, resumed = self._resolve_session_line(wf or self.workflow, session_line)
+            except Exception:
+                # Resolution is read-only; an outage must not block the run.
+                logger.warning(
+                    "Failed to pre-check resume state for session line %s",
+                    session_line,
+                    exc_info=True,
+                )
+                resumed = False
+
         result = self._run_agent(
             wf=wf,
             session_line=session_line,
             milestone_id=milestone_id,
+            force_fresh=force_fresh,
             **kwargs,
         )
         if not self._is_context_overflow(result):
+            if resumed and self._is_resume_noop_result(result):
+                logger.warning(
+                    "Workflow %s: session line %s resumed but returned an empty "
+                    "successful result (resume no-op); retrying once with a "
+                    "fresh provider transcript",
+                    self._workflow_id[:8],
+                    session_line,
+                )
+                self._accumulate_tokens(result)
+                return self._run_agent(
+                    wf=wf,
+                    session_line=session_line,
+                    milestone_id=milestone_id,
+                    force_fresh=True,
+                    **kwargs,
+                )
             return result
 
         field = SESSION_LINE_FIELDS.get(session_line)

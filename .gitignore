@@ -88,3 +88,37 @@ backups/
 
 # Git worktrees (temporary development artifacts)
 .worktrees/
+
+# Process documents in the repository ROOT only (leading slash = root-anchored).
+# Fix write-ups, CI post-mortems, implementation summaries, progress snapshots and
+# per-issue plans belong in docs/dev-notes/ -- see docs/dev-notes/README.md.
+# Between 2026-08-05 and 08-12 the autonomous pipeline committed 23 such files
+# (2,554 lines) straight to the root; these patterns stop that recurring.
+# Enforced as a backstop by scripts/lint/check_root_docs.py (pre-commit).
+/CI_*.md
+/*_SUMMARY.md
+/*_FIX.md
+/*_FIXES.md
+/*_FIX_*.md
+/FIX_*.md
+/FINAL_*.md
+/*_STATUS.md
+/STATUS_*.md
+/PROGRESS*.md
+/IMPLEMENTATION_*.md
+/ISSUE_*.md
+/HANDOVER*.md
+/MERGE_STAGE*.md
+/P[0-9]_*.md
+/[0-9]*-*.md
+/*_NOTE.md
+/*_NOTES.md
+/*_PLAN.md
+/*-plan.md
+/*_ANALYSIS.md
+/*_VERIFICATION.md
+# ...including the hidden-dotfile variant (.issue_2189_implementation_summary.md
+# sat in the root since 2026-08-04 precisely because `ls *.md` never showed it).
+/.issue_*.md
+/.*_summary.md
+/.*_plan.md

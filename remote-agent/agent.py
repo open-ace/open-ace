@@ -4,11 +4,15 @@ Open ACE Remote Agent - Main Daemon
 Connects to the Open ACE server via HTTP polling, handles commands
 (start_session, send_message, stop_session, start_terminal, stop_terminal),
 manages CLI subprocesses through the executor module, and sends heartbeats.
+
+Issue #2499: Added token rotation confirmation mechanism with atomic config writes.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -797,6 +801,7 @@ class RemoteAgent:
     def _cmd_rotate_token(self, data: dict[str, Any]) -> None:
         """Handle a rotate_token command from the server.
 
+        Issue #2499: Enhanced with atomic config write and confirmation mechanism.
         Issue #2530: Implements version-based command filtering to prevent
         rollback to revoked tokens. Only applies token if token_version is
         higher than the locally stored last_token_version.
@@ -807,9 +812,10 @@ class RemoteAgent:
 
         The server pushes a new agent token after an admin rotates it.
         The agent updates its local config so subsequent requests use
-        the new token.
+        the new token, then sends a signed confirmation to the server.
         """
         new_token = data.get("new_token")
+        rotation_id = data.get("rotation_id")
         token_version = data.get("token_version")
 
         if not new_token or len(new_token) < 16:
@@ -842,26 +848,94 @@ class RemoteAgent:
                 return
 
         old_prefix = (self.config.agent_token or "")[:8]
-        self.config.save_agent_token(new_token)
+
+        # Issue #2499: Atomic config write with backup
+        try:
+            self.config.save_agent_token_atomic(new_token)
+            logger.info(
+                "Agent token rotated (old prefix=%s..., new prefix=%s..., rotation_id=%s, version=%s). "
+                "Config updated atomically. Sending confirmation.",
+                old_prefix,
+                new_token[:8],
+                rotation_id[:8] if rotation_id else "none",
+                token_version or "unknown",
+            )
+        except Exception as e:
+            logger.error("Failed to save new token atomically: %s", e)
+            # Fall back to regular save
+            self.config.save_agent_token(new_token)
+            logger.warning("Used fallback config save method")
 
         # Update last_token_version if provided
         if token_version is not None:
             self.config.update({"last_token_version": token_version})
             self.config.save()
-            logger.info(
-                "Agent token rotated (old prefix=%s..., new prefix=%s..., version=%d). "
-                "Config updated. Subsequent requests will use the new token.",
-                old_prefix,
-                new_token[:8],
-                token_version,
-            )
-        else:
-            logger.info(
-                "Agent token rotated (old prefix=%s..., new prefix=%s...). "
-                "Config updated. Subsequent requests will use the new token.",
-                old_prefix,
-                new_token[:8],
-            )
+
+        # Issue #2499: Send confirmation with signature
+        if rotation_id:
+            self._send_rotation_confirmation(rotation_id, new_token)
+
+    def _send_rotation_confirmation(self, rotation_id: str, new_token: str) -> None:
+        """Send signed confirmation of token rotation to server.
+
+        Issue #2499: Implements HMAC signature verification.
+
+        Args:
+            rotation_id: The rotation operation ID from server.
+            new_token: The new token (used for signature).
+        """
+        timestamp = int(time.time())
+        message = f"{rotation_id}:{timestamp}"
+        signature = hmac.new(new_token.encode(), message.encode(), hashlib.sha256).hexdigest()
+
+        # Retry logic: 1s, 2s, 4s (exponential backoff)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Use new token for authentication
+                headers = {"Authorization": f"Bearer {new_token}"}
+                payload = {
+                    "type": "token_rotation_ack",
+                    "machine_id": self.config.machine_id,
+                    "rotation_id": rotation_id,
+                    "signature": signature,
+                    "timestamp": timestamp,
+                    "new_token_hash": new_token[:8],  # For audit only
+                }
+
+                response = self._http_send(payload, headers=headers)
+
+                if response and response.get("success"):
+                    logger.info(
+                        "Token rotation confirmation sent successfully (rotation_id=%s)",
+                        rotation_id[:8],
+                    )
+                    return
+                else:
+                    logger.warning(
+                        "Token rotation confirmation failed (attempt %d/%d): %s",
+                        attempt + 1,
+                        max_retries,
+                        response.get("error") if response else "no response",
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Token rotation confirmation error (attempt %d/%d): %s",
+                    attempt + 1,
+                    max_retries,
+                    e,
+                )
+
+            if attempt < max_retries - 1:
+                sleep_time = 2**attempt  # Exponential backoff: 1s, 2s, 4s
+                logger.info("Retrying confirmation in %d seconds...", sleep_time)
+                time.sleep(sleep_time)
+
+        logger.error(
+            "Failed to send token rotation confirmation after %d attempts (rotation_id=%s)",
+            max_retries,
+            rotation_id[:8],
+        )
 
     def _probe_token(self, token: str, token_version: int | None = None) -> bool:
         """Probe the server to validate a token before applying it.
@@ -1056,6 +1130,46 @@ class RemoteAgent:
                 )
         except Exception as e:
             logger.warning("Failed to sync token version from server: %s", e)
+
+    def _http_send(
+        self, data: dict[str, Any], headers: dict[str, str] | None = None
+    ) -> dict | None:
+        """Send HTTP message to server with optional custom headers.
+
+        Issue #2499: Extracted for reuse by confirmation mechanism.
+
+        Args:
+            data: Message payload to send.
+            headers: Optional custom headers (default: use agent_token).
+
+        Returns:
+            Response dict or None on failure.
+        """
+        if headers is None:
+            headers = {}
+            if self.config.agent_token:
+                headers["Authorization"] = f"Bearer {self.config.agent_token}"
+
+        url = f"{self.config.server_url}/api/remote/agent/message"
+
+        try:
+            response = requests.post(
+                url,
+                json=data,
+                headers=headers,
+                timeout=30,
+                verify=not self.config.skip_ssl_verify,
+            )
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.warning(
+                    "HTTP send failed with status %d: %s", response.status_code, response.text[:200]
+                )
+                return None
+        except Exception as e:
+            logger.warning("HTTP send error: %s", e)
+            return None
 
     def _cmd_start_session(self, data: dict[str, Any]) -> None:
         """Handle a start_session command."""
