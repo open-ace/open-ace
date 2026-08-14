@@ -180,10 +180,10 @@ const navSections: NavSection[] = [
         adminOnly: true,
       },
       {
-        id: 'smtp',
-        label: 'smtpConfiguration',
-        icon: 'bi-envelope',
-        path: '/manage/settings/smtp',
+        id: 'notification-integration',
+        label: 'notificationIntegration',
+        icon: 'bi-bell',
+        path: '/manage/settings/notification-integration',
         adminOnly: true,
       },
       {
@@ -191,13 +191,6 @@ const navSections: NavSection[] = [
         label: 'modelGatewayConfiguration',
         icon: 'bi-shuffle',
         path: '/manage/settings/model-gateway',
-        adminOnly: true,
-      },
-      {
-        id: 'feishu',
-        label: 'feishuIntegration',
-        icon: 'bi-chat-dots',
-        path: '/manage/settings/feishu',
         adminOnly: true,
       },
     ],

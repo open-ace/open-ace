@@ -2,46 +2,6 @@
   "entries": [
     {
       "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1003",
-      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestAddMessageCountUsageGate::test_autonomous_count_usage_false_leaves_counters",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1003",
-      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestAddMessageCountUsageGate::test_legacy_count_usage_true_still_accumulates",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1003",
-      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestIncrementSessionUsage::test_accumulates_across_calls",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1003",
-      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestIncrementSessionUsage::test_starts_from_existing_value",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1003",
-      "nodeid": "tests/issues/1003/test_session_usage_accounting.py::TestMilestoneSessionInvariant::test_session_equals_sum_of_per_call_deltas",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
       "exception_type": "TimeoutError",
       "issue_number": "1006",
       "nodeid": "tests/issues/1006/e2e_conversation_history_default_dates.py::test_default_dates",
@@ -95,38 +55,6 @@
       "nodeid": "tests/issues/1125/test_workspace_session_summary_contract.py::test_list_sessions_hides_autonomous_tracking_wrappers",
       "outcome": "failure",
       "summary": "AssertionError: assert ['track-123',...l-claude-123'] == ['actual-claude-123']"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1128",
-      "nodeid": "tests/issues/1128/test_session_message_transcript_contract.py::test_add_message_merges_duplicate_message_id_without_double_count",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1128",
-      "nodeid": "tests/issues/1128/test_session_message_transcript_contract.py::test_add_message_persists_structured_session_message_columns",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "1128",
-      "nodeid": "tests/issues/1128/test_session_message_transcript_contract.py::test_append_transcript_message_is_summary_side_effect_free",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1128",
-      "nodeid": "tests/issues/1128/test_session_message_transcript_contract.py::test_llm_proxy_records_transcript_without_double_count",
-      "outcome": "failure",
-      "summary": "AssertionError: assert 0 == 1"
     },
     {
       "category": "assertion_failure",
@@ -311,38 +239,6 @@
       "nodeid": "tests/issues/1395/test_system_event_activity.py::TestSystemEventActivityForwarding::test_thinking_tokens_is_not_forwarded",
       "outcome": "failure",
       "summary": "AttributeError: '_StubProcess' object has no attribute 'poll'"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "1425",
-      "nodeid": "tests/issues/1425/test_language_sync.py::test_language_postmessage_sent",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "1425",
-      "nodeid": "tests/issues/1425/test_language_sync.py::test_language_realtime_sync",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "1425",
-      "nodeid": "tests/issues/1425/test_language_sync.py::test_language_url_parameter",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "1425",
-      "nodeid": "tests/issues/1425/test_language_sync.py::test_language_url_parameter_update",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
     },
     {
       "category": "setup_error",
@@ -697,228 +593,12 @@
       "summary": "ValueError: Failed to fetch JWKS: 404 Client Error: Not Found for url: https://example.com/.well-known/jwks.json"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "221",
-      "nodeid": "tests/issues/221/test_tenant_form_validation.py::test_tenant_form_validation",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
       "issue_number": "241",
       "nodeid": "tests/issues/241/test_pagination_migration_head.py::test_single_migration_head",
       "outcome": "failure",
       "summary": "AssertionError: assert '20260809_001...il_dev_rounds' == '20260715_001...lure_head_sha'"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestGetSessionEnvelope::test_include_messages_returns_recent_page_and_metadata",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestGetSessionEnvelope::test_milestone_total_uses_conditional_count",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestGetSessionEnvelope::test_without_include_messages_has_no_pagination_envelope",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestMessagesEndpointWalk::test_cursor_walk_through_endpoint",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestMessagesEndpointWalk::test_limit_clamped_to_max_via_endpoint",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestMessagesEndpointWalk::test_lone_before_timestamp_is_ignored",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_admin_bypasses_owner_check",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_messages_endpoint_404_for_unknown_session",
-      "outcome": "failure",
-      "summary": "assert 500 == 404"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_messages_endpoint_enforces_ownership_before_load",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_non_owner_gets_403",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_same_owner_wrong_tenant_gets_403",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_pagination_routes.py::TestOwnershipAnd404::test_unknown_session_returns_404",
-      "outcome": "failure",
-      "summary": "assert 500 == 404"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestCrossPageContinuity::test_full_walk_no_overlap_no_gap",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestCrossPageContinuity::test_has_more_flag_and_cursor_only_when_older_page_exists",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestDescReverseAdjacency::test_second_page_is_adjacent_not_oldest",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestEmptyAndDefaults::test_default_limit_used_when_none",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestEmptyAndDefaults::test_empty_session_returns_empty_page",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestInternalCallersUnaffected::test_get_session_full_history_when_requested",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestInternalCallersUnaffected::test_get_session_no_messages_by_default",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestLimitClamping::test_max_boundary_returns_exactly_max",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestLimitClamping::test_over_max_clamped_to_max",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestLimitClamping::test_zero_or_negative_falls_back_to_default",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestMilestoneCount::test_count_messages_total_and_milestone_scoped",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestMilestoneCount::test_get_messages_page_respects_milestone_filter",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestNullTimestampSafetyNet::test_schema_rejects_null_timestamp",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "241",
-      "nodeid": "tests/issues/241/test_session_messages_pagination.py::TestSameTimestampTiebreak::test_identical_timestamps_ordered_by_id",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
     },
     {
       "category": "test_body_exception",
@@ -959,14 +639,6 @@
       "nodeid": "tests/issues/394/e2e_terminal_tab.py::test_terminal_tab",
       "outcome": "failure",
       "summary": "AssertionError: Login failed: {\"error\":\"Invalid username or password\"}"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "4",
-      "nodeid": "tests/issues/4/test_conversation_history_icon.py::test_conversation_history_icon",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
     },
     {
       "category": "assertion_failure",
@@ -1593,22 +1265,6 @@
       "summary": "AssertionError: 401 != 200"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "60",
-      "nodeid": "tests/issues/60/test_language_sync.py::test_language_sync",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "65",
-      "nodeid": "tests/issues/65/test_workspace_state_restore.py::test_workspace_state_restore",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
       "issue_number": "716",
@@ -1623,14 +1279,6 @@
       "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsBranch::test_delete_branch",
       "outcome": "failure",
       "summary": "AssertionError: assert 4 == 2"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "716",
-      "nodeid": "tests/issues/716/test_github_ops.py::TestGitHubOpsGit::test_git_add_all",
-      "outcome": "failure",
-      "summary": "AssertionError: assert 'add' in ['git', '-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', ...]"
     },
     {
       "category": "assertion_failure",
@@ -1825,14 +1473,6 @@
       "summary": "assert 502 == 200"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "723",
-      "nodeid": "tests/issues/723/test_mtime_fallback.py::TestListCliSessionIdsForProject::test_returns_distinct_nonempty_ids",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
       "issue_number": "723",
@@ -1943,14 +1583,6 @@
       "nodeid": "tests/issues/733/test_orchestrator_733.py::TestPlanningPromptConstraints::test_refined_plan_prompt_forbids_full_code",
       "outcome": "failure",
       "summary": "sqlite3.OperationalError: no such table: users"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "74",
-      "nodeid": "tests/issues/74/test_restore_button.py::test_restore_button",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
     },
     {
       "category": "assertion_failure",
@@ -2145,108 +1777,12 @@
       "summary": "assert 1800 == 600"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "764",
-      "nodeid": "tests/issues/764/test_session_create_params.py::TestCreateSessionAcceptsWorkspaceParams::test_create_session_defaults_to_local",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "764",
-      "nodeid": "tests/issues/764/test_session_create_params.py::TestCreateSessionAcceptsWorkspaceParams::test_create_session_includes_workspace_in_insert",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "764",
-      "nodeid": "tests/issues/764/test_session_create_params.py::TestCreateSessionAcceptsWorkspaceParams::test_create_session_type_error_fixed",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TenantResolutionError",
-      "issue_number": "764",
-      "nodeid": "tests/issues/764/test_session_create_params.py::TestCreateSessionAcceptsWorkspaceParams::test_create_session_with_workspace_type",
-      "outcome": "failure",
-      "summary": "app.utils.tenant_resolver.TenantResolutionError: Cannot resolve tenant for session write operation. Provide explicit tenant_id or ensure user has valid tenant assignment."
-    },
-    {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
       "issue_number": "786",
       "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_run_gh_no_env_when_not_configured",
       "outcome": "failure",
       "summary": "AssertionError: assert 'env' not in {'cwd': '/tmp', 'capture_output': True, 'text': True, 'timeout': 120, ...}"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "79",
-      "nodeid": "tests/issues/79/test_add_user_final.py::test_add_user",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "79",
-      "nodeid": "tests/issues/79/test_add_user_save.py::test_add_user_save",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "79",
-      "nodeid": "tests/issues/79/test_add_user_save_v2.py::test_add_user_save",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "79",
-      "nodeid": "tests/issues/79/test_conversation_detail_modal.py::test_conversation_history_api",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "79",
-      "nodeid": "tests/issues/79/test_conversation_detail_modal.py::test_conversation_timeline_api",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/79/test_conversation_detail_modal.py, line 44"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "79",
-      "nodeid": "tests/issues/79/test_conversation_detail_modal.py::test_frontend_build",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "79",
-      "nodeid": "tests/issues/79/test_issue79_conversation_detail.py::test_conversation_detail_modal",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "79",
-      "nodeid": "tests/issues/79/test_role_filter.py::test_role_filter",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
     },
     {
       "category": "test_body_exception",
@@ -2279,22 +1815,6 @@
       "nodeid": "tests/issues/811/test_unknown_user_filter.py::TestUnknownUserFilter::test_unknown_user_filtered_out",
       "outcome": "error",
       "summary": "failed on setup with \"file tests/issues/811/test_unknown_user_filter.py, line 61"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "GitHubOpsError",
-      "issue_number": "814",
-      "nodeid": "tests/issues/814/test_worktree_path_selfheal.py::TestEnsureWorktreeSelfHeal::test_no_update_when_path_already_canonical",
-      "outcome": "failure",
-      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='140600398512272'> != auto-dev/1390d553) with uncommitted changes.…"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "GitHubOpsError",
-      "issue_number": "814",
-      "nodeid": "tests/issues/814/test_worktree_path_selfheal.py::TestEnsureWorktreeSelfHeal::test_normalizes_stale_dotdot_path_when_valid",
-      "outcome": "failure",
-      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: Worktree branch mismatch (<MagicMock name='mock.get_current_branch()' id='140600663599696'> != auto-dev/1390d553) with uncommitted changes.…"
     },
     {
       "category": "test_body_exception",
@@ -2417,22 +1937,6 @@
       "summary": "failed on setup with \"AssertionError\""
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "91",
-      "nodeid": "tests/issues/91/test_management_button.py::test_admin_user",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "91",
-      "nodeid": "tests/issues/91/test_management_button.py::test_normal_user",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
       "issue_number": "913",
@@ -2447,46 +1951,6 @@
       "nodeid": "tests/issues/95/test_messages_ui.py::test_messages_ui",
       "outcome": "failure",
       "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/login"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "98",
-      "nodeid": "tests/issues/98/test_conversation_detail.py::test_conversation_detail",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "98",
-      "nodeid": "tests/issues/98/test_data_update.py::test_data_update",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "98",
-      "nodeid": "tests/issues/98/test_global_refresh.py::test_global_refresh",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "98",
-      "nodeid": "tests/issues/98/test_refresh.py::test_messages_refresh",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "98",
-      "nodeid": "tests/issues/98/test_refresh_detailed.py::test_messages_refresh_detailed",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
     },
     {
       "category": "assertion_failure",
@@ -2547,8 +2011,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-13 prune 6 resolved: tests/issues/673/test_session_filter_params.py cluster (5 x setup_error from ambient-Database fixture hitting dev PG / empty isolated-home SQLite, 1 x assertion_failure from unauthenticated live-server request), fixed by self-contained load_schema_from_file fixtures + Flask test_client conversion. Shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31694625293",
+    "prune_note": "2026-08-14 prune 4 residual async entries (#2631 follow-up): the last 4 'async def not natively supported' entries were real UI/lane drift, not missing markers. Fixed per 2457-residual-plan.md (independently reviewed CLEAN): 4/history-icon login used dead input[name=] selectors + wrong seeded password; 79/role_filter checkbox ids were removed and default selection became all-3-roles (rewrote as seeded regression via upload API); 98/refresh_detailed refresh button is now icon-only data-testid=manual-refresh-button and auto-refresh moved into a dropdown; 98/data_update dropped psycopg2/host-PG setup for the lane upload API + shared must_change_password pre-clear. Seeded admin must_change_password=1 was the common blocker (modal blocks clicks; /api/messages 403). Shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31780251110",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",

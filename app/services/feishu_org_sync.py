@@ -191,9 +191,7 @@ class FeishuOrgSyncService:
         # Issue #2179: Fail-Closed - 必须显式配置同步目标租户
         effective_tenant_id = tenant_id or config.get("org_sync_tenant_id")
         if effective_tenant_id is None:
-            raise ValueError(
-                "飞书同步未配置 org_sync_tenant_id。" "请在租户设置中配置同步目标租户。"
-            )
+            raise ValueError("飞书同步未配置 org_sync_tenant_id。请在租户设置中配置同步目标租户。")
         effective_tenant_id = int(effective_tenant_id)
         result = FeishuOrgSyncResult(
             tenant_id=effective_tenant_id,
@@ -498,6 +496,17 @@ class FeishuOrgSyncService:
             else:
                 config = dict(self.config_override)
         else:
+            try:
+                from app.repositories.notification_settings_repository import (
+                    get_notification_settings_repository,
+                )
+
+                stored = get_notification_settings_repository().get("feishu", include_secrets=True)
+            except Exception:
+                logger.warning(
+                    "Unable to load centralized Feishu settings; using legacy config", exc_info=True
+                )
+                stored = None
             config = {
                 "app_id": get_config_value("feishu", "app_id", ""),
                 "app_secret": get_config_value("feishu", "app_secret", ""),
@@ -508,6 +517,20 @@ class FeishuOrgSyncService:
                     get_config_value("feishu", "org_sync_interval_minutes", 60) or 60
                 ),
             }
+            if stored:
+                config.update(
+                    {
+                        "app_id": stored.get("app_id", ""),
+                        "app_secret": stored.get("app_secret", ""),
+                        "org_sync_enabled": bool(stored.get("sync_enabled", False)),
+                        "org_sync_tenant_id": stored.get("target_tenant_id"),
+                        "org_sync_interval_minutes": int(stored.get("interval_minutes", 60)),
+                        "org_sync_max_runtime_seconds": int(
+                            stored.get("max_runtime_seconds", 1800)
+                        ),
+                        "org_sync_auto_recover": bool(stored.get("auto_recovery", False)),
+                    }
+                )
 
         config.setdefault("org_sync_enabled", False)
         # Issue #2179: Fail-Closed - 不再设置默认值

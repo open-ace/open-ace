@@ -41,6 +41,113 @@ if [ "${WORKSPACE_MULTI_USER_MODE}" = "true" ]; then
 fi
 
 # ============================================================================
+# 0. Security Mode Validation (Issue #2331)
+# ============================================================================
+# Require explicit OPENACE_SECURITY_MODE in production-capable paths.
+# Must run BEFORE any database initialization or secret generation.
+
+validate_security_mode() {
+    local mode="${OPENACE_SECURITY_MODE:-}"
+    local scheduler_mode="${SCHEDULER_MODE:-web}"
+    local flask_env="${FLASK_ENV:-}"
+
+    # Check if this is a production-capable path
+    # Production indicators: scheduler running, FLASK_ENV=production, or running in production container
+    local is_production_path=false
+
+    # If SCHEDULER_MODE is set to web or scheduler (not dev), it's production-capable
+    if [ "$scheduler_mode" = "web" ] || [ "$scheduler_mode" = "scheduler" ]; then
+        is_production_path=true
+    fi
+
+    # If FLASK_ENV is production, it's production-capable
+    if [ "$flask_env" = "production" ]; then
+        is_production_path=true
+    fi
+
+    # If running under Kubernetes
+    if [ -n "${KUBERNETES_SERVICE_HOST:-}" ]; then
+        is_production_path=true
+    fi
+
+    # If running under systemd
+    if [ -d "/run/systemd/system" ]; then
+        is_production_path=true
+    fi
+
+    # Test/CI contexts are NOT production-capable
+    if [ "${OPENACE_TEST_MODE:-}" = "1" ] || [ "${CI:-}" = "true" ] || [ "$flask_env" = "test" ]; then
+        is_production_path=false
+    fi
+
+    # Emergency rollback flag (expires after 30 days)
+    # Requires OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP to be set
+    if [ "${OPENACE_ALLOW_IMPLICIT_MODE:-}" = "1" ]; then
+        if [ -z "${OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP:-}" ]; then
+            echo "ERROR: OPENACE_ALLOW_IMPLICIT_MODE=1 requires OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP"
+            echo "       Format: YYYY-MM-DD (e.g., 2025-01-15)"
+            echo "       Flag is being IGNORED. Set OPENACE_SECURITY_MODE explicitly instead."
+        else
+            # Check expiration (30 days)
+            flag_date=$(date -d "${OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP}" +%s 2>/dev/null || date -j -f "%Y-%m-%d" "${OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP}" +%s 2>/dev/null)
+            if [ -n "$flag_date" ]; then
+                now=$(date +%s)
+                age_days=$(( (now - flag_date) / 86400 ))
+                if [ $age_days -gt 30 ]; then
+                    echo "ERROR: EMERGENCY ROLLBACK FLAG EXPIRED (set ${age_days} days ago, max: 30)"
+                    echo "       Flag is being IGNORED. Set OPENACE_SECURITY_MODE explicitly instead."
+                else
+                    echo "WARNING: OPENACE_ALLOW_IMPLICIT_MODE=1 is active"
+                    echo "         Set ${age_days} days ago, expires in $((30 - age_days)) days"
+                    echo "         This flag should not be used in production"
+                    is_production_path=false
+                fi
+            else
+                echo "ERROR: Invalid OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP format: ${OPENACE_ALLOW_IMPLICIT_MODE_TIMESTAMP}"
+                echo "       Expected format: YYYY-MM-DD"
+                echo "       Flag is being IGNORED. Set OPENACE_SECURITY_MODE explicitly instead."
+            fi
+        fi
+    fi
+
+    # Production-capable paths MUST have explicit mode
+    if [ "$is_production_path" = true ] && [ -z "$mode" ]; then
+        echo "ERROR: OPENACE_SECURITY_MODE must be set explicitly in production-capable paths"
+        echo ""
+        echo "Valid values:"
+        echo "  production  - Strict validation, reject weak secrets"
+        echo "  pilot       - Trial mode, auto-generate secrets with warnings"
+        echo "  development - Local dev only, auto-generate secrets"
+        echo ""
+        echo "Examples:"
+        echo "  For production:  OPENACE_SECURITY_MODE=production"
+        echo "  For trial:       OPENACE_SECURITY_MODE=pilot"
+        echo "  For development: OPENACE_SECURITY_MODE=development"
+        echo ""
+        echo "Migration guide: https://github.com/open-ace/open-ace/issues/2331"
+        exit 1
+    fi
+
+    # Validate mode value if set
+    if [ -n "$mode" ]; then
+        case "$mode" in
+            production|pilot|development)
+                # Valid mode
+                ;;
+            *)
+                echo "ERROR: Invalid OPENACE_SECURITY_MODE value: '$mode'"
+                echo ""
+                echo "Valid values: production, pilot, development"
+                exit 1
+                ;;
+        esac
+    fi
+}
+
+# Run security mode validation before any other checks
+validate_security_mode
+
+# ============================================================================
 # 0. Security Baseline Check (Issue #1893)
 # ============================================================================
 # Detect security mode and enforce baseline checks before proceeding.
@@ -690,6 +797,55 @@ CONFIG_EOF
 # falling back to generation only if still unset) and before gunicorn (which
 # needs SECRET_KEY / OPENACE_ENCRYPTION_KEY in env).
 ensure_secret_env
+
+# Issue #2331: Create pilot metadata when in pilot mode with auto-generated secrets
+if [ "${OPENACE_SECURITY_MODE}" = "pilot" ]; then
+    # Check if we have generated secrets (indicates auto-generation occurred)
+    if [ -f "${OPENACE_CONFIG_DIR}/generated-secrets.env" ]; then
+        echo "Creating pilot mode metadata file..."
+
+# Create pilot metadata using Python
+        python3 -c "
+import json
+import os
+from datetime import datetime, timezone
+
+metadata_path = os.path.join(os.environ.get('OPENACE_CONFIG_DIR', '/home/open-ace/.open-ace'), 'pilot-mode-metadata.json')
+
+# Check which secrets were auto-generated
+secrets_generated = []
+secrets_file = os.path.join(os.environ.get('OPENACE_CONFIG_DIR', '/home/open-ace/.open-ace'), 'generated-secrets.env')
+if os.path.exists(secrets_file):
+    with open(secrets_file) as f:
+        for line in f:
+            line = line.strip()
+            if '=' in line and not line.startswith('#'):
+                name = line.split('=', 1)[0]
+                if name in ['SECRET_KEY', 'OPENACE_ENCRYPTION_KEY', 'UPLOAD_AUTH_KEY']:
+                    secrets_generated.append(name)
+
+metadata = {
+    'mode': 'pilot',
+    'generated_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+    'warning': 'NOT FOR PRODUCTION USE - Auto-generated secrets',
+    'secrets_generated': secrets_generated,
+    'persistent_file': 'generated-secrets.env'
+}
+
+with open(metadata_path, 'w') as f:
+    json.dump(metadata, f, indent=2)
+
+print(f'Pilot metadata created at {metadata_path}')
+"
+
+        echo "=========================================="
+        echo "  PILOT MODE WARNING"
+        echo "  Auto-generated secrets - NOT for production use"
+        echo "  Metadata: ${OPENACE_CONFIG_DIR}/pilot-mode-metadata.json"
+        echo "=========================================="
+    fi
+fi
+
 generate_default_config
 
 # ============================================================================
@@ -1220,12 +1376,27 @@ openace ALL=(ALL) NOPASSWD: ${WEBUI_LAUNCH_WRAPPER} * \"${WEBUI_PATH}\" *"
 # 【安全加固 Issue #1514 + #1855】精确参数白名单配置
 # ============================================================================
 # 基于sudoers审计报告(docs/sudoers-audit-report.md)，覆盖100%autonomous工作流必需命令
-# 阻断危险命令：repo delete, push --force, reset --hard, clean -fd, api *（仅允许特定路径）
+# 安全边界说明（诚实版）：动词优先白名单只约束裸 'git <verb>'/'gh <verb>' 形态。
+# 【Issue #2635】前缀锚定条目（-c core.hooksPath=/dev/null * / --git-dir=* /
+# -R * / api *）在 (ALL) runas 下实际上恢复了接近 #2334 之前的 git/gh 能力：
+# 'gh api *' 允许任意 REST 调用（含 -X DELETE），'git -c core.hooksPath=/dev/null *'
+# 允许 clean -fd、reset --hard <任意> 及任意内联 -c 配置（含 alias RCE）。
+# 前缀是公开常量，仅作命令形态兼容锚点，不是安全边界；真正的收紧由
+# 后续 hardened wrapper（openace-git/openace-gh，follow-up issue）承接。
 # Issue #1855: 移除 cat/chown/useradd 通配，改用安全 wrapper
 
-# git精确参数白名单（覆盖100%autonomous工作流）
+# git命令白名单（动词优先条目 + #2635 前缀锚定条目）
 # 【Issue #2334】补充 github_ops 使用的 fetch/pull/merge/rebase 等动词
+# 【Issue #2635】前缀锚定条目：github_ops._run_git 的 sudo 路径在子命令前携带
+# git 全局选项（-c core.hooksPath=/dev/null ... 或 --git-dir=... --work-tree=...），
+# git 语法要求全局选项必须位于子命令之前，因此命令永不以 'git <subcommand>' 开头，
+# 动词优先白名单一条都匹配不上。
+# 注意：前缀锚定条目在 (ALL) runas 下近似恢复旧版 'git *' 能力（非更窄）；
+# 前缀是公开常量 = 形态兼容锚点，非安全边界；真正的收紧由后续
+# hardened wrapper（openace-git）承接（follow-up issue）。
 Cmnd_Alias GIT_SAFE = \
+    ${GIT_PATH} -c core.hooksPath=/dev/null *, \
+    ${GIT_PATH} --git-dir=*, \
     ${GIT_PATH} config --global --add safe.directory *, \
     ${GIT_PATH} remote get-url origin, \
     ${GIT_PATH} remote add *, \
@@ -1267,10 +1438,19 @@ Cmnd_Alias GIT_SAFE = \
     ${GIT_PATH} commit -m * --no-verify, \
     ${GIT_PATH} init
 
-# gh精确参数白名单（覆盖100%autonomous工作流）
+# gh命令白名单（动词优先条目 + #2635 前缀锚定条目）
 # Issue #1855: --admin 仅在 OPENACE_ALLOW_ADMIN_MERGE=1 时启用
 # 【Issue #2334】补充 issue close/reopen, pr list 等动词
+# 【Issue #2635】前缀锚定条目：github_ops._run_gh 的 sudo 路径总是在子命令前插入
+# '-R owner/repo'（gh 无 -C，sudo 下靠 -R 定位仓库）；且 gh api 拒绝 -R、以
+# 'gh api repos/...' 裸形态运行。
+# 注意：'gh api *' 允许任意 REST 调用（含 -X DELETE），'-R *' 下的动词同样
+# 不受白名单约束——此两条在 (ALL) runas 下近似恢复旧版 'gh *' 能力（非更窄）；
+# 前缀是公开常量 = 形态兼容锚点，非安全边界；真正的收紧由后续
+# hardened wrapper（openace-gh）承接（follow-up issue）。
 Cmnd_Alias GH_SAFE = \
+    ${GH_PATH} -R *, \
+    ${GH_PATH} api *, \
     ${GH_PATH} repo create *, \
     ${GH_PATH} repo create * --private, \
     ${GH_PATH} repo create * --public, \

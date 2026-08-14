@@ -80,6 +80,8 @@ class AuditAction(Enum):
     AGENT_REGISTER = "agent_register"
     AGENT_TOKEN_ROTATE = "agent_token_rotate"
     AGENT_TOKEN_REVOKE = "agent_token_revoke"
+    AGENT_TOKEN_ROTATE_CONFIRMED = "agent_token_rotate_confirmed"  # Issue #2499
+    AGENT_TOKEN_FORCE_REVOKED = "agent_token_force_revoked"  # Issue #2499
     AGENT_AUTH_FAILURE = "agent_auth_failure"
     AGENT_RECONNECT = "agent_reconnect"
 
@@ -106,6 +108,12 @@ class AuditAction(Enum):
     # Feishu configuration actions
     FEISHU_CONFIG_SAVE = "feishu_config_save"
     FEISHU_CONFIG_DELETE = "feishu_config_delete"
+
+    # Notification integration configuration actions
+    WEBHOOK_CONFIG_SAVE = "webhook_config_save"
+    WEBHOOK_CONFIG_DELETE = "webhook_config_delete"
+    DINGTALK_CONFIG_SAVE = "dingtalk_config_save"
+    DINGTALK_CONFIG_DELETE = "dingtalk_config_delete"
 
     URL_TOKEN_PATH_VIOLATION = "url_token_path_violation"
     LEGACY_WEBUI_TOKEN_USED = "legacy_webui_token_used"
@@ -958,6 +966,16 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "i18n_key": "actionAgentReconnect",
                 },
                 {
+                    "value": "agent_token_rotate_confirmed",
+                    "label": "Token Rotate Confirmed",
+                    "i18n_key": "actionAgentTokenRotateConfirmed",
+                },
+                {
+                    "value": "agent_token_force_revoked",
+                    "label": "Token Force Revoked",
+                    "i18n_key": "actionAgentTokenForceRevoked",
+                },
+                {
                     "value": "usage_report_accepted",
                     "label": "Usage Report Accepted",
                     "i18n_key": "actionUsageReportAccepted",
@@ -1086,6 +1104,33 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "feishu_config_delete",
                     "label": "Feishu Config Delete",
                     "i18n_key": "actionFeishuConfigDelete",
+                },
+            ],
+        },
+        "notification_integration": {
+            "label": "Notification Integration",
+            "i18n_key": "categoryNotificationIntegration",
+            "resource_types": ["webhook_config", "dingtalk_config"],
+            "actions": [
+                {
+                    "value": "webhook_config_save",
+                    "label": "Webhook Config Save",
+                    "i18n_key": "actionWebhookConfigSave",
+                },
+                {
+                    "value": "webhook_config_delete",
+                    "label": "Webhook Config Delete",
+                    "i18n_key": "actionWebhookConfigDelete",
+                },
+                {
+                    "value": "dingtalk_config_save",
+                    "label": "DingTalk Config Save",
+                    "i18n_key": "actionDingtalkConfigSave",
+                },
+                {
+                    "value": "dingtalk_config_delete",
+                    "label": "DingTalk Config Delete",
+                    "i18n_key": "actionDingtalkConfigDelete",
                 },
             ],
         },

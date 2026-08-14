@@ -39,6 +39,8 @@ export { SessionDetailContent } from './SessionDetailContent';
 export { RunTimeline } from './RunTimeline';
 export { UserSettingsModal } from './UserSettingsModal';
 export { PasswordPolicyHint } from './PasswordPolicyHint';
+export { MultiValueInput } from './MultiValueInput';
+export type { MultiValueInputProps } from './MultiValueInput';
 
 // Mode Switcher - Dual-track system
 export { ModeSwitcher } from './ModeSwitcher';

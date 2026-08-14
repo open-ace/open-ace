@@ -44,6 +44,26 @@ secret_key = get_secret_key()
 if secret_key:
     os.environ["SECRET_KEY"] = secret_key
 
+# Issue #2331/#2654: Set OPENACE_SECURITY_MODE fallback at module level (before
+# create_app) so it applies in both gunicorn and __main__ paths.  In production-
+# capable environments (systemd, Docker, K8s) the service unit or entrypoint
+# must set OPENACE_SECURITY_MODE explicitly; the development fallback only
+# triggers when none of those production indicators are present.
+_security_mode = os.environ.get("OPENACE_SECURITY_MODE", "").strip()
+if not _security_mode:
+    _is_prod_capable = (
+        os.path.isdir("/run/systemd/system")  # systemd
+        or bool(os.environ.get("KUBERNETES_SERVICE_HOST"))  # K8s
+        or os.environ.get("FLASK_ENV") == "production"
+    )
+    if not _is_prod_capable:
+        print("=" * 60)
+        print("  LOCAL DEVELOPMENT MODE")
+        print("  Setting OPENACE_SECURITY_MODE=development")
+        print("  For production: set OPENACE_SECURITY_MODE explicitly")
+        print("=" * 60)
+        os.environ["OPENACE_SECURITY_MODE"] = "development"
+
 # Create the Flask application using the factory
 from app import create_app
 
@@ -55,6 +75,10 @@ from app.repositories.database import DB_PATH, get_database_url, is_postgresql
 from scripts.shared.config import WEB_HOST, WEB_PORT
 
 if __name__ == "__main__":
+    # OPENACE_SECURITY_MODE fallback is now set at module level (before
+    # create_app) to cover both gunicorn and direct execution paths.
+    # See Issue #2654 for details.
+
     print(f"Starting Open ACE on {WEB_HOST}:{WEB_PORT}")
     if is_postgresql():
         # Hide password in URL for display

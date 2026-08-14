@@ -109,6 +109,9 @@ CREATE TABLE agent_tokens (
  revoked_at TIMESTAMP,
  revoked_by integer,
  rotated_at TIMESTAMP,
+ pending_revoke INTEGER DEFAULT 0 NOT NULL,
+ revoke_after TIMESTAMP,
+ rotation_id TEXT,
  token_version INTEGER DEFAULT '0' NOT NULL
 );
 
@@ -402,6 +405,13 @@ CREATE TABLE compliance_reports (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE config_import_state (
+ config_key TEXT PRIMARY KEY NOT NULL,
+ state TEXT NOT NULL,
+ source TEXT,
+ imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
 CREATE TABLE consistency_violations (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer,
@@ -497,6 +507,23 @@ CREATE TABLE daily_usage (
     CONSTRAINT chk_daily_usage_tokens_positive CHECK ((tokens_used >= 0))
 );
 
+CREATE TABLE dingtalk_settings (
+ app_key TEXT,
+ app_secret_enc text,
+ fallback_webhook_secret_enc text,
+ sync_enabled INTEGER DEFAULT 0 NOT NULL,
+ target_tenant_id integer,
+ interval_minutes integer DEFAULT 60 NOT NULL,
+ root_dept_id TEXT DEFAULT '1' NOT NULL,
+ max_runtime_seconds integer DEFAULT 1800 NOT NULL,
+ auto_recovery INTEGER DEFAULT 0 NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ created_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT ck_dingtalk_settings_singleton CHECK ((id = 1))
+);
+
 CREATE TABLE email_notification_logs (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
@@ -509,6 +536,21 @@ CREATE TABLE email_notification_logs (
  error_message text,
  retry_count integer DEFAULT 0,
  next_retry_at TIMESTAMP
+);
+
+CREATE TABLE feishu_settings (
+ app_id TEXT NOT NULL,
+ app_secret_enc text NOT NULL,
+ sync_enabled INTEGER DEFAULT 0 NOT NULL,
+ target_tenant_id integer,
+ interval_minutes integer DEFAULT 60 NOT NULL,
+ max_runtime_seconds integer DEFAULT 1800 NOT NULL,
+ auto_recovery INTEGER DEFAULT 0 NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ created_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT ck_feishu_settings_singleton CHECK ((id = 1))
 );
 
 CREATE TABLE hourly_stats (
@@ -610,6 +652,20 @@ CREATE TABLE notification_preferences (
  notification_email text,
  email_verified INTEGER DEFAULT 0,
  dingtalk_webhook_secret text
+);
+
+CREATE TABLE parse_failure_records (
+ id TEXT PRIMARY KEY NOT NULL,
+ session_id TEXT NOT NULL,
+ tool_use_id TEXT NOT NULL,
+ tool_name TEXT NOT NULL,
+ tool_input text NOT NULL,
+ error text NOT NULL,
+ "timestamp" TIMESTAMP NOT NULL,
+ retry_count integer DEFAULT 0 NOT NULL,
+ last_retry_at TIMESTAMP,
+ resolved INTEGER DEFAULT 0 NOT NULL,
+ created_at TIMESTAMP NOT NULL
 );
 
 CREATE TABLE policy_decisions (
@@ -810,7 +866,8 @@ CREATE TABLE remote_machines (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  last_heartbeat TIMESTAMP,
- legacy_mode INTEGER DEFAULT 0
+ legacy_mode INTEGER DEFAULT 0,
+ token_revoke_timeout integer DEFAULT 300
 );
 
 CREATE TABLE remote_runtime_commands (
@@ -1376,6 +1433,17 @@ CREATE TABLE webhook_deliveries (
     CONSTRAINT ck_webhook_deliveries_status CHECK ((status IN ('pending', 'in_flight', 'delivered', 'dead')))
 );
 
+CREATE TABLE webhook_settings (
+ webhook_secret_enc text,
+ allow_private_webhook_urls INTEGER DEFAULT 0 NOT NULL,
+ enabled INTEGER DEFAULT 1 NOT NULL,
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ created_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT ck_webhook_settings_singleton CHECK ((id = 1))
+);
+
 CREATE TABLE workflow_events (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  workflow_id TEXT NOT NULL,
@@ -1560,7 +1628,13 @@ CREATE INDEX idx_agent_tokens_hash ON agent_tokens (token_hash);
 
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens (machine_id);
 
+CREATE INDEX idx_agent_tokens_machine_pending ON agent_tokens (machine_id, pending_revoke, revoke_after);
+
 CREATE INDEX idx_agent_tokens_machine_version ON agent_tokens (machine_id, token_version);
+
+CREATE UNIQUE INDEX idx_agent_tokens_one_active_per_machine ON agent_tokens (machine_id) WHERE ((is_revoked = false) AND (pending_revoke = false));
+
+CREATE INDEX idx_agent_tokens_pending_revoke_timeout ON agent_tokens (revoke_after) WHERE ((pending_revoke = true) AND (is_revoked = false));
 
 CREATE INDEX idx_aggregation_history_status ON aggregation_history (status);
 
@@ -1727,6 +1801,14 @@ CREATE INDEX idx_messages_user_date_role_covering ON daily_messages (user_id, da
 CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones (workflow_id, phase, status);
 
 CREATE INDEX idx_milestones_workflow_round ON workflow_milestones (workflow_id, dev_round);
+
+CREATE INDEX idx_parse_failure_created_at ON parse_failure_records (created_at);
+
+CREATE INDEX idx_parse_failure_session ON parse_failure_records (session_id);
+
+CREATE INDEX idx_parse_failure_timestamp ON parse_failure_records ("timestamp");
+
+CREATE INDEX idx_parse_failure_unresolved ON parse_failure_records (resolved) WHERE (resolved = false);
 
 CREATE INDEX idx_policy_decisions_fingerprint ON policy_decisions (fingerprint_hash);
 

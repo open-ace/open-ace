@@ -197,6 +197,67 @@ OUTPUT_HISTORY_SIZE = 64 * 1024  # 64 KB
 OUTPUT_TASK_SHUTDOWN_TIMEOUT = 8.0
 
 
+# Windows encoding helpers for terminal I/O
+def _get_windows_codepage() -> str:
+    """Get Windows console output code page.
+
+    Returns the active code page on Windows (e.g., 'cp936' for GBK on Chinese
+    systems, 'utf-8' when code page is 65001). Returns 'utf-8' on non-Windows.
+    """
+    if os.name != "nt":
+        return "utf-8"
+    try:
+        import ctypes
+
+        cp = ctypes.windll.kernel32.GetConsoleOutputCP()
+        if cp == 65001:  # UTF-8 code page
+            return "utf-8"
+        return f"cp{cp}"  # e.g., cp936 (GBK)
+    except Exception:
+        return "cp936"  # Default to Chinese Windows code page
+
+
+def _is_binary_data(data: bytes) -> bool:
+    """Check if data appears to be binary (contains NUL character).
+
+    Binary data should not be passed through encoding conversion as it may
+    corrupt the content. Checks the first 1KB for efficiency.
+    """
+    return b"\x00" in data[:1024]
+
+
+def _decode_windows_output(data: bytes, encoding: str) -> bytes:
+    """Convert Windows system code page output to UTF-8.
+
+    On Windows, shell output (especially PowerShell) may use the system code
+    page (e.g., GBK/CP936 for Chinese Windows). This converts it to UTF-8
+    for the WebSocket terminal. Binary data is passed through unchanged.
+    """
+    if os.name != "nt" or encoding == "utf-8" or _is_binary_data(data):
+        return data
+    try:
+        text = data.decode(encoding, errors="replace")
+        return text.encode("utf-8", errors="replace")
+    except Exception:
+        return data
+
+
+def _encode_for_windows_input(data: bytes, encoding: str) -> bytes:
+    """Convert UTF-8 input to Windows system code page.
+
+    User input from the WebSocket terminal is UTF-8. On Windows, the shell
+    may expect input in the system code page. This converts UTF-8 to the
+    target encoding.
+    """
+    if os.name != "nt" or encoding == "utf-8":
+        return data
+    try:
+        text = data.decode("utf-8", errors="replace")
+        return text.encode(encoding, errors="replace")
+    except Exception:
+        return data
+
+
 class SinglePtyTerminalServer:
     """
     Single-PTY terminal server with WebSocket reconnection support.
@@ -450,6 +511,8 @@ class SinglePtyTerminalServer:
     async def _relay_pipe_output_loop(self) -> None:
         """Read subprocess output continuously and broadcast to WebSockets."""
         loop = asyncio.get_event_loop()
+        # Windows: get system code page for output encoding conversion
+        encoding = _get_windows_codepage() if os.name == "nt" else "utf-8"
         while self._pty_alive and self.process is not None and self.process.stdout is not None:
             try:
                 # Prefer read1() ("return as soon as any data is available, do
@@ -466,8 +529,10 @@ class SinglePtyTerminalServer:
                 # of read call here. Verified by inspecting stdout's type at
                 # runtime; no extra non-blocking refactor introduced.
                 reader = getattr(self.process.stdout, "read1", self.process.stdout.read)
-                data = await loop.run_in_executor(None, reader, 65536)
-                if data:
+                raw_data = await loop.run_in_executor(None, reader, 65536)
+                if raw_data:
+                    # Windows: convert system code page output to UTF-8
+                    data = _decode_windows_output(raw_data, encoding)
                     await self.broadcast_output(data)
                 else:
                     logger.info("Terminal output stream closed (process likely exited)")
@@ -492,6 +557,8 @@ class SinglePtyTerminalServer:
 
     async def handle_websocket_input(self, websocket) -> None:
         """Handle input from a single WebSocket connection."""
+        # Windows: get system code page for input encoding conversion
+        encoding = _get_windows_codepage() if os.name == "nt" else "utf-8"
         try:
             async for message in websocket:
                 # Path-aware guard: the PTY model needs master_fd to write to,
@@ -516,6 +583,9 @@ class SinglePtyTerminalServer:
                         message = message.encode("utf-8")
 
                 if isinstance(message, bytes):
+                    # Windows: convert UTF-8 input to system code page
+                    if os.name == "nt":
+                        message = _encode_for_windows_input(message, encoding)
                     try:
                         if self._uses_pty:
                             os.write(self.master_fd, message)
@@ -731,6 +801,9 @@ def _build_env() -> dict[str, str]:
             except Exception:
                 pass  # Non-critical fallback
     env["TERM"] = "xterm-256color"
+    # Windows: force subprocess to use UTF-8 output encoding
+    if os.name == "nt":
+        env["PYTHONIOENCODING"] = "utf-8"
     # Pass terminal ID to child processes for accurate session-terminal association
     if TERMINAL_ID:
         env["OPEN_ACE_TERMINAL_ID"] = TERMINAL_ID

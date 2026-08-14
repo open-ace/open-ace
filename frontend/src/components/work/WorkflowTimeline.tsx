@@ -26,6 +26,7 @@ import {
   useRetryWorkflow,
   useExtendPlanningTimeout,
   useAcceptanceOverride,
+  useResumeWithFeedback,
   useMilestoneSession,
   useMilestoneDiff,
   useWorkflowPrDiff,
@@ -42,7 +43,10 @@ import { getProgressReportView } from './progressReport';
 import { ForkConnector, BranchColumn } from './ForkConnector';
 import { ScopeExceededBanner } from './ScopeExceededBanner';
 import { ACTIVE_WORKFLOW_STATUSES } from './AutonomousWorkflowList';
-import { getAutonomousWorkflowStatusConfig } from './autonomousWorkflowStatus';
+import {
+  getAutonomousWorkflowStatusConfig,
+  getPauseReasonCategory,
+} from './autonomousWorkflowStatus';
 import type {
   AutonomousWorkflow,
   WorkflowDefinitionSnapshot,
@@ -107,6 +111,59 @@ const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
 // worth viewing after the run finishes (the live activity stream is run-time only).
 const PLAN_CONTENT_TYPES = ['plan_created', 'plan_refined', 'plan_finalized'];
 const REVIEW_CONTENT_TYPES = ['plan_reviewed', 'pr_reviewed', 'pr_review_summary'];
+
+// #2658: render the acceptance milestone's verification report (stored in
+// milestone.metadata as JSON by the acceptance phase) as readable text for
+// the generic content viewer. Sections mirror _format_report_comment in
+// acceptance_verification.py.
+const VERDICT_TONE: Record<string, string> = {
+  confirmed: '✅',
+  rejected: '❌',
+  indeterminate: '⚠️',
+};
+
+export const formatAcceptanceReport = (metadata: string): string => {
+  let report: Record<string, unknown>;
+  try {
+    report = JSON.parse(metadata) as Record<string, unknown>;
+  } catch {
+    return metadata;
+  }
+  const lines: string[] = [];
+  const status = String(report.status ?? '');
+  lines.push(`${VERDICT_TONE[status] ?? '⚠️'} ${status || 'unknown'}`);
+  if (report.merge_sha) lines.push(`Merge SHA: ${String(report.merge_sha)}`);
+  if (report.verified_by) lines.push(`Verifier: ${String(report.verified_by)}`);
+  if (report.infra_error) lines.push(`Infra error: ${String(report.infra_error)}`);
+  const sections: Array<[string, string]> = [
+    ['scope', 'Scope'],
+    ['gates', 'Gates'],
+    ['verifier', 'Verifier findings'],
+  ];
+  for (const [key, label] of sections) {
+    const items = report[key];
+    if (!Array.isArray(items) || items.length === 0) continue;
+    lines.push('', `── ${label} ──`);
+    for (const raw of items) {
+      if (!raw || typeof raw !== 'object') continue;
+      const item = raw as Record<string, unknown>;
+      const verdict = String(item.verdict ?? '');
+      const icon = VERDICT_TONE[verdict] ?? '•';
+      const tail = item.rationale ? ` — ${String(item.rationale)}` : '';
+      lines.push(`${icon} ${String(item.item ?? '')}${tail}`);
+      const evidence = item.evidence;
+      if (Array.isArray(evidence)) {
+        for (const ev of evidence) {
+          if (!ev || typeof ev !== 'object') continue;
+          const e = ev as Record<string, unknown>;
+          const note = e.note ? ` (${String(e.note)})` : '';
+          lines.push(`    ↳ ${String(e.ref ?? '')}${note}`);
+        }
+      }
+    }
+  }
+  return lines.join('\n');
+};
 const MILESTONE_ICON_COLORS: Record<string, string> = {
   dark: 'var(--text-primary)',
   info: 'var(--color-info)',
@@ -333,6 +390,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const retryMutation = useRetryWorkflow();
   const extendTimeoutMutation = useExtendPlanningTimeout();
   const acceptanceOverrideMutation = useAcceptanceOverride();
+  const resumeFeedbackMutation = useResumeWithFeedback();
   const hasPr = !!workflow.github_pr_number;
 
   // Session detail query
@@ -469,6 +527,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   // Modal state for cancel/fork
   const [showCancelModal, setShowCancelModal] = useState<string | null>(null);
   const [showForkModal, setShowForkModal] = useState<string | null>(null);
+
+  // #2634: resume-with-feedback modal state (rejected acceptance workflows —
+  // a plain resume would immediately re-pause on the idempotency guard).
+  const [showResumeFeedbackModal, setShowResumeFeedbackModal] = useState(false);
+  const [resumeFeedback, setResumeFeedback] = useState('');
 
   // ── Fork Detection ────────────────────────────────────────────────
 
@@ -693,15 +756,46 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         : { workflowId: workflow.workflow_id }
     );
 
-  // #2335 S6: admin override for a paused indeterminate acceptance workflow.
-  const showAcceptanceOverride =
-    workflow.status === 'paused' && workflow.verification_status === 'indeterminate';
+  // #2658: every acceptance pause that needs a human offers BOTH exits —
+  // accept (override → close issue → completed; owner+admin, enforced
+  // server-side) and resume-with-feedback (new dev round → new merge → fresh
+  // acceptance; resuming without feedback hits the idempotency guard and
+  // re-pauses immediately, which is why the feedback modal is the resume
+  // path). The explicit current_phase check also fixes a latent bug: the old
+  // indeterminate-only gate could show the override button during a LATER dev
+  // round (verification_status is never cleared between rounds), where the
+  // server would 400.
+  const isAcceptancePaused =
+    workflow.status === 'paused' &&
+    workflow.current_phase === 'acceptance_verification' &&
+    (workflow.verification_status === 'rejected' ||
+      workflow.verification_status === 'indeterminate');
+  const showAcceptanceOverride = isAcceptancePaused;
   const handleAcceptanceOverride = () => {
     const reason = window.prompt(t('autoAcceptanceOverrideReason', language));
     // window.prompt returns null when the user cancels; '' is a valid (empty) reason.
     if (reason === null) return;
     if (!window.confirm(t('autoAcceptanceOverrideConfirm', language))) return;
     acceptanceOverrideMutation.mutate({ workflowId: workflow.workflow_id, reason });
+  };
+
+  const showResumeWithFeedback = isAcceptancePaused;
+  const handleResumeFeedbackSubmit = () => {
+    const feedback = resumeFeedback.trim();
+    if (!feedback) return;
+    resumeFeedbackMutation.mutate(
+      { workflowId: workflow.workflow_id, feedback },
+      {
+        onSuccess: () => {
+          setResumeFeedback('');
+          setShowResumeFeedbackModal(false);
+        },
+      }
+    );
+  };
+  const handleResumeFeedbackClose = () => {
+    if (resumeFeedbackMutation.isPending) return;
+    setShowResumeFeedbackModal(false);
   };
 
   const formatDefinitionValue = (value: unknown) => {
@@ -1065,13 +1159,24 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const milestoneWithFinalChanges = [...milestones]
     .reverse()
     .find((milestone) => milestone.commit_shas);
-  const stateBannerTone = workflow.error_message
-    ? 'error'
-    : workflow.status === 'planning_timeout' ||
-        workflow.status === 'paused' ||
-        workflow.status === 'waiting'
-      ? 'warning'
-      : 'info';
+  // #2634: distinguish "awaiting human acceptance review" (needs explicit
+  // action) and quota pauses from generic paused/failed banners.
+  const pauseReason = getPauseReasonCategory(workflow);
+  const isAcceptanceAwaitingPause = pauseReason === 'acceptance_awaiting';
+  const stateBannerTone = isAcceptanceAwaitingPause
+    ? 'acceptance'
+    : workflow.error_message
+      ? 'error'
+      : workflow.status === 'planning_timeout' ||
+          workflow.status === 'paused' ||
+          workflow.status === 'waiting'
+        ? 'warning'
+        : 'info';
+  const stateBannerTitle = isAcceptanceAwaitingPause
+    ? t('autoBannerAcceptanceAwaiting', language)
+    : pauseReason === 'quota'
+      ? t('autoBannerQuotaPaused', language)
+      : workflowStatusLabel;
   const stateBannerMessage = workflow.error_message
     ? workflow.error_message
     : workflow.status === 'planning_timeout'
@@ -1455,6 +1560,12 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       !compact &&
       REVIEW_CONTENT_TYPES.includes(milestone.milestone_type) &&
       !!milestone.review_content?.trim();
+    // #2658: acceptance milestones carry the full verification report JSON in
+    // `metadata`; expose it through the generic content viewer.
+    const canViewAcceptanceReport =
+      !compact &&
+      milestone.milestone_type === 'acceptance_verification' &&
+      !!milestone.metadata?.trim();
     // progress_reported milestones render from a structured payload in the
     // viewer's UI language (system-authored structured content). Legacy
     // milestones without a payload fall back to verbatim tldr/result_summary.
@@ -1537,6 +1648,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       showInlineSessionButton ||
       canViewPlanContent ||
       canViewReviewContent ||
+      canViewAcceptanceReport ||
       canViewChanges ||
       canFork ||
       canCancel;
@@ -1700,6 +1812,22 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                       >
                         <i className="bi bi-chat-text me-1"></i>
                         {t('autoViewReview', language)}
+                      </Button>
+                    )}
+                    {canViewAcceptanceReport && (
+                      <Button
+                        size="sm"
+                        variant="outline-secondary"
+                        className="timeline-inline-btn timeline-inline-btn--warning"
+                        onClick={() =>
+                          setViewingContent({
+                            title: t('autoViewAcceptanceReportTitle', language),
+                            content: formatAcceptanceReport(milestone.metadata),
+                          })
+                        }
+                      >
+                        <i className="bi bi-clipboard-check me-1"></i>
+                        {t('autoViewAcceptanceReport', language)}
                       </Button>
                     )}
                     {canViewReport && (
@@ -2271,7 +2399,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         {showStateBanner && (
           <div className={`timeline-state-banner timeline-state-banner--${stateBannerTone}`}>
             <div className="timeline-state-banner__copy">
-              <div className="timeline-state-banner__title">{workflowStatusLabel}</div>
+              <div className="timeline-state-banner__title">{stateBannerTitle}</div>
               {stateBannerMessage && (
                 <div className="timeline-state-banner__message">{stateBannerMessage}</div>
               )}
@@ -2286,6 +2414,18 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 >
                   <i className="bi bi-check-circle me-1"></i>
                   {t('autoCompleteWorkflow', language)}
+                </Button>
+              )}
+              {showResumeWithFeedback && (
+                <Button
+                  size="sm"
+                  variant="warning"
+                  onClick={() => setShowResumeFeedbackModal(true)}
+                  disabled={resumeFeedbackMutation.isPending}
+                  title={t('autoResumeWithFeedbackHelp', language)}
+                >
+                  <i className="bi bi-arrow-repeat me-1"></i>
+                  {t('autoResumeWithFeedback', language)}
                 </Button>
               )}
               {showAcceptanceOverride && (
@@ -2990,6 +3130,48 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           milestoneId={showForkModal}
           milestoneTitle={milestones.find((m) => m.milestone_id === showForkModal)?.title ?? ''}
         />
+      )}
+
+      {/* #2634: Resume With Feedback Modal (rejected acceptance) */}
+      {showResumeFeedbackModal && (
+        <Modal
+          isOpen={true}
+          onClose={handleResumeFeedbackClose}
+          title={t('autoResumeWithFeedbackTitle', language)}
+        >
+          <p className="text-muted small">{t('autoResumeWithFeedbackHelp', language)}</p>
+          <div className="mb-3">
+            <label className="form-label fw-semibold">{t('autoFeedbackLabel', language)}</label>
+            <textarea
+              className="form-control"
+              rows={5}
+              value={resumeFeedback}
+              maxLength={5000}
+              onChange={(e) => setResumeFeedback(e.target.value)}
+              placeholder={t('autoFeedbackPlaceholder', language)}
+              disabled={resumeFeedbackMutation.isPending}
+            />
+            {!resumeFeedback.trim() && resumeFeedback.length > 0 && (
+              <div className="form-text text-danger">{t('autoFeedbackRequired', language)}</div>
+            )}
+          </div>
+          <div className="d-flex justify-content-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={handleResumeFeedbackClose}
+              disabled={resumeFeedbackMutation.isPending}
+            >
+              {t('cancel', language)}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleResumeFeedbackSubmit}
+              disabled={!resumeFeedback.trim() || resumeFeedbackMutation.isPending}
+            >
+              {t('autoResumeWithFeedback', language)}
+            </Button>
+          </div>
+        </Modal>
       )}
     </div>
   );
