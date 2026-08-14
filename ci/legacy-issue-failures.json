@@ -59,14 +59,6 @@
     {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
-      "issue_number": "1140",
-      "nodeid": "tests/issues/1140/test_zcode_dev_mode_and_session.py::test_session_line_updates_even_on_resume",
-      "outcome": "failure",
-      "summary": "AssertionError: _run_agent must not skip session line update on resume — see #525 where dev resumed a dead planning session forever"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
       "issue_number": "1277",
       "nodeid": "tests/issues/1277/test_test_skip_false_positive.py::TestRetryCounterPersistence::test_skip_retries_persisted_on_test_skip",
       "outcome": "failure",
@@ -1699,7 +1691,7 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-14 prune 39 resolved issue-517 codex-e2e entries: root causes were lane-infra mismatch, not product bugs (plan reviewed 3 rounds to CLEAN). (a) helpers PROJECT_ROOT was one dirname short -> fetch_codex/remote-agent paths pointed into tests/; (b) tests logged in as test_user which the lane never seeds (admin/admin123 only) and main()-runner login never ran under pytest collection; (c) seeded admin must_change_password=1 blocked API 403; (d) empty lane DB had no codex data — now seeded via upload API + minimal ~/.codex rollout (module fixture, exact-id cleanup, fetch runs tagged --hostname issue517-test); (e) WEBUI_URL defaulted to :3000 dev server -> now falls back to BASE_URL. 31 pass; 8 skip (e2e_codex_real_session module-skip when 192.168.64.3 unreachable + remote_codex_capabilities when no remote machine registered) — comparator treats skip as resolved. Shrink-only.",
+    "prune_note": "2026-08-14 prune 39 resolved issue-517 codex-e2e entries: root causes were lane-infra mismatch, not product bugs (plan reviewed 3 rounds to CLEAN). (a) helpers PROJECT_ROOT was one dirname short -> fetch_codex/remote-agent paths pointed into tests/; (b) tests logged in as test_user which the lane never seeds (admin/admin123 only) and main()-runner login never ran under pytest collection; (c) seeded admin must_change_password=1 blocked API 403; (d) empty lane DB had no codex data — now seeded via upload API + minimal ~/.codex rollout (module fixture, exact-id cleanup, fetch runs tagged --hostname issue517-test); (e) WEBUI_URL defaulted to :3000 dev server -> now falls back to BASE_URL. 31 pass; 8 skip (e2e_codex_real_session module-skip when 192.168.64.3 unreachable + remote_codex_capabilities when no remote machine registered) — comparator treats skip as resolved. Shrink-only. Also prune 1 issue-1140 entry (resolved by #2666's test-drift fix: the #525 static assertion false-positived on the unrelated `not resume_target` variable; now a word-boundary match — verified resolved in run 31816341431).",
     "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31795877644",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
