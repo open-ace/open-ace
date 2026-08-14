@@ -3,7 +3,8 @@
 An admin may override a workflow paused at ``acceptance_verification`` with
 ``verification_status="indeterminate"``: setting it to ``confirmed`` with an
 audit trail, then closing the issue (as @open-ace-bot) and completing the
-workflow. Non-admins get 403; a non-indeterminate workflow is rejected.
+workflow. Unrelated users get 403; the workflow owner may override (#2658); a
+confirmed workflow is rejected.
 """
 
 from __future__ import annotations
@@ -125,13 +126,29 @@ def test_admin_override_confirms_indeterminate_and_closes_issue(app_client):
     assert evt["event_type"] == "acceptance_override"
 
 
-def test_non_admin_override_returns_403(app_client):
+def test_non_owner_non_admin_override_returns_403(app_client):
     client, _repo, _ = app_client
     with ExitStack() as stack:
-        for p in _mock_auth(role="user", user_id=7, username="owner"):
+        for p in _mock_auth(role="user", user_id=99, username="stranger"):
             stack.enter_context(p)
         resp = _post_override(client)
     assert resp.status_code == 403
+
+
+def test_owner_override_now_allowed_2658(app_client):
+    """#2658: the workflow owner (role=user, user_id matching the row) may override."""
+    client, _repo, _ = app_client
+    with (
+        ExitStack() as stack,
+        patch(
+            "app.modules.workspace.autonomous.github_ops.GitHubOps",
+            return_value=MagicMock(),
+        ),
+    ):
+        for p in _mock_auth(role="user", user_id=7, username="owner"):
+            stack.enter_context(p)
+        resp = _post_override(client)
+    assert resp.status_code == 200
 
 
 def test_override_rejects_non_indeterminate_workflow(app_client):
