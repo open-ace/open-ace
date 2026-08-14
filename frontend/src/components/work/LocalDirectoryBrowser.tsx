@@ -829,8 +829,16 @@ export const LocalDirectoryBrowser: React.FC<LocalDirectoryBrowserProps> = ({
                   <li
                     key={file.path}
                     className="list-group-item file-list-item d-flex justify-content-between align-items-center"
-                    onClick={() => void handleDownload(file)}
-                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      if (downloadingPath === file.path) return;
+                      void handleDownload(file);
+                    }}
+                    style={{ cursor: downloadingPath === file.path ? 'wait' : 'pointer' }}
+                    title={
+                      file.is_readable
+                        ? t('clickToDownload', language) || 'Click to download'
+                        : t('fileNotReadable', language) || 'No read permission'
+                    }
                   >
                     <div className="text-truncate">
                       <i
