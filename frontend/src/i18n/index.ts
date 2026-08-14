@@ -64,6 +64,63 @@ export const translations: Record<Language, Translations> = {
     integrationStatusNoConfig: 'No configuration required',
     integrationStatusDisabled: 'Disabled',
     integrationStatusNeedsConfig: 'Needs configuration',
+    integrationStatusBarSource: 'From /api/management/notification-channels/status',
+    integrationSmtpSubtitle: 'SMTP server connection',
+    integrationWebhookSubtitle:
+      'Stored in webhook_settings (database), read uniformly across instances',
+    integrationWebhookPrivateOff: 'Off (recommended)',
+    integrationWebhookPrivateOn: 'On',
+    integrationWebhookStateEnabled: 'Enabled',
+    integrationWebhookStateDisabled: 'Disabled',
+    integrationWebhookSsrfWarning:
+      'Enabling "Allow private addresses" carries SSRF risk. Actions are logged. Only recommended in trusted intranet environments.',
+    integrationTestSend: 'Test send',
+    integrationTestUrlPlaceholder: 'Enter a temporary test URL, used once only, not saved',
+    integrationTestEnterUrl: 'Please enter a temporary test URL',
+    integrationWebhookSecretHint:
+      'Leave signing secret blank = keep unchanged; clearing requires confirmation. API never echoes the full secret (only returns configured true/false).',
+    integrationDeliveryLog: 'Delivery log',
+    integrationDeliveryLogTime: 'Time',
+    integrationDeliveryLogType: 'Type',
+    integrationDeliveryLogTarget: 'Target (hash)',
+    integrationDeliveryLogStatus: 'Status',
+    integrationDeliveryLogRetry: 'Retry',
+    integrationDeliveryLogHashHint:
+      'URLs shown as hashes only, never in plaintext; log access filtered by admin permissions and tenant scope',
+    integrationDingTalkBotSubtitle:
+      'This page does not store bot target URLs; targets are set by users/tenants in Quota & Alerts → Notification settings',
+    integrationDingTalkBotFallbackHint:
+      'Recommended to configure keys per user/tenant; system-level keys serve only as compatibility fallback for legacy setups. Prefer tenant-level keys for new configurations.',
+    integrationTestSendHint:
+      'Test send: temporary URL input, single-use only, does not alter user notification preferences, operations logged',
+    integrationConfigureAlertTarget: 'Configure your alert targets and personal preferences',
+    integrationFeishuBotSubtitle:
+      'Feishu bot has no required system-level parameters; target addresses are set per user/tenant',
+    integrationFeishuBotNoConfigDetail:
+      'No system configuration needed. Each user/tenant can configure their own Feishu bot webhook address and secret in Quota & Alerts → Notification settings.',
+    integrationFeishuAppDesc: 'Feishu app credentials and org sync',
+    integrationDingTalkAppDesc: 'DingTalk app credentials and org sync',
+    integrationFeishuAppSubtitle:
+      'Stored in feishu_settings (database, id=1 system-level single record)',
+    integrationDingTalkAppSubtitle:
+      'Stored in dingtalk_settings (database, id=1 system-level single record)',
+    integrationConnectionConfig: 'Connection configuration',
+    integrationSyncSettings: 'Sync settings',
+    integrationSyncStatusSection: 'Sync status',
+    integrationLastSync: 'Last sync',
+    integrationSyncResultLabel: 'Result',
+    integrationSyncLock: 'Sync lock',
+    integrationSyncIdle: 'Idle',
+    integrationSyncMainEntry:
+      'Main entry in Tenant management; executing here requires selecting a target tenant with confirmation.',
+    integrationBoundaryTitle: 'Responsibility boundary (current scope)',
+    integrationBoundaryBody:
+      'This page manages system-level connection capabilities only: SMTP, Webhook global security config, Feishu/DingTalk app credentials and sync schedules.',
+    integrationBoundaryRecipients:
+      'User/tenant alert targets (email, webhook URL, bot addresses and secrets) remain in Quota & Alerts → Notification settings.',
+    integrationBoundarySync:
+      'Per-tenant immediate sync and sync result handling is managed via Tenant management.',
+    integrationComingSoon: 'Coming soon',
     loading: 'Loading...',
     error: 'Error',
     retry: 'Retry',
@@ -1986,6 +2043,57 @@ export const translations: Record<Language, Translations> = {
     integrationStatusNoConfig: '无需系统配置',
     integrationStatusDisabled: '已停用',
     integrationStatusNeedsConfig: '需要系统配置',
+    integrationStatusBarSource: '来自 /api/management/notification-channels/status',
+    integrationSmtpSubtitle: 'SMTP 服务器连接',
+    integrationWebhookSubtitle: '保存至 webhook_settings（数据库），多实例统一读取',
+    integrationWebhookPrivateOff: '关闭（推荐）',
+    integrationWebhookPrivateOn: '开启',
+    integrationWebhookStateEnabled: '已启用',
+    integrationWebhookStateDisabled: '已停用',
+    integrationWebhookSsrfWarning:
+      '开启「私网地址放行」存在 SSRF 风险，将写入审计日志，仅建议在可信内网环境使用',
+    integrationTestSend: '测试发送',
+    integrationTestUrlPlaceholder: '临时输入测试 URL，仅本次使用、不保存',
+    integrationTestEnterUrl: '请输入临时测试 URL',
+    integrationWebhookSecretHint:
+      '签名密钥留空 = 保持不变；清除需二次确认。API 永不回显完整密钥（仅返回已配置 true/false）',
+    integrationDeliveryLog: '投递日志',
+    integrationDeliveryLogTime: '时间',
+    integrationDeliveryLogType: '类型',
+    integrationDeliveryLogTarget: '目标（哈希）',
+    integrationDeliveryLogStatus: '状态',
+    integrationDeliveryLogRetry: '重试',
+    integrationDeliveryLogHashHint:
+      'URL 仅显示哈希，不明文展示；日志访问按管理员权限与租户作用域过滤',
+    integrationDingTalkBotSubtitle:
+      '系统设置页不保存目标 URL；目标由用户/租户在「配额与告警 → 通知设置」指定',
+    integrationDingTalkBotFallbackHint:
+      '推荐按用户/租户配置密钥；系统级密钥仅作为旧配置的兼容回退，新配置请优先使用租户级密钥',
+    integrationTestSendHint:
+      '测试发送：临时输入 URL，仅本次使用、不保存、不改变用户通知偏好，操作写审计',
+    integrationConfigureAlertTarget: '配置你的告警目标与个人偏好',
+    integrationFeishuBotSubtitle: '飞书机器人无系统级必填参数，目标地址按用户/租户设置',
+    integrationFeishuBotNoConfigDetail:
+      '无需系统配置。每个用户/租户可在「配额与告警 → 通知设置」中配置自己的飞书机器人 Webhook 地址与密钥',
+    integrationFeishuAppDesc: '飞书应用凭证与组织同步',
+    integrationDingTalkAppDesc: '钉钉应用凭证与组织同步',
+    integrationFeishuAppSubtitle: '保存至 feishu_settings（数据库，id=1 系统级单记录）',
+    integrationDingTalkAppSubtitle: '保存至 dingtalk_settings（数据库，id=1 系统级单记录）',
+    integrationConnectionConfig: '连接配置',
+    integrationSyncSettings: '同步设置',
+    integrationSyncStatusSection: '同步状态',
+    integrationLastSync: '最近同步',
+    integrationSyncResultLabel: '结果',
+    integrationSyncLock: '同步锁',
+    integrationSyncIdle: '空闲',
+    integrationSyncMainEntry: '主入口在「租户管理」；此处执行需选择目标租户并二次确认',
+    integrationBoundaryTitle: '职责边界（本期范围）',
+    integrationBoundaryBody:
+      '本页只管系统级「连接能力」：SMTP、Webhook 全局安全配置、飞书/钉钉应用凭证与同步计划。',
+    integrationBoundaryRecipients:
+      '用户/租户的告警目标（邮箱、Webhook URL、机器人地址与密钥）仍在「配额与告警 → 通知设置」；',
+    integrationBoundarySync: '针对具体租户的立即同步与同步结果处理以「租户管理」为主入口。',
+    integrationComingSoon: '即将上线',
     loading: '加载中...',
     error: '错误',
     retry: '重试',
@@ -3852,6 +3960,63 @@ export const translations: Record<Language, Translations> = {
     integrationStatusNoConfig: 'システム設定不要',
     integrationStatusDisabled: '無効',
     integrationStatusNeedsConfig: 'システム設定が必要',
+    integrationStatusBarSource: 'From /api/management/notification-channels/status',
+    integrationSmtpSubtitle: 'SMTPサーバー接続',
+    integrationWebhookSubtitle:
+      'webhook_settings（データベース）に保存、全インスタンスで統一读み取り',
+    integrationWebhookPrivateOff: 'オフ（推奨）',
+    integrationWebhookPrivateOn: 'オン',
+    integrationWebhookStateEnabled: '有効',
+    integrationWebhookStateDisabled: '無効',
+    integrationWebhookSsrfWarning:
+      '「プライベートアドレス許可」を有効にするとSSRFリスクがあります。操作は監査ログに記録されます。信頼されたイントラネット環境でのみ推奨。',
+    integrationTestSend: 'テスト送信',
+    integrationTestUrlPlaceholder: '一時的なテストURLを入力、1回のみ使用、保存されません',
+    integrationTestEnterUrl: '一時的なテストURLを入力してください',
+    integrationWebhookSecretHint:
+      '署名キーを空欄にする = 変更なし；クリアには再確認が必要です。APIは完全なキーをエコーしません（設定済みのtrue/falseのみ返します）。',
+    integrationDeliveryLog: '配信ログ',
+    integrationDeliveryLogTime: '日時',
+    integrationDeliveryLogType: '種類',
+    integrationDeliveryLogTarget: '宛先（ハッシュ）',
+    integrationDeliveryLogStatus: 'ステータス',
+    integrationDeliveryLogRetry: 'リトライ',
+    integrationDeliveryLogHashHint:
+      'URLはハッシュのみ表示、平文表示なし；ログアクセスは管理者権限とテナントスコープでフィルタ',
+    integrationDingTalkBotSubtitle:
+      'このページではボットの宛先URLを保存しません；宛先はユーザー/テナントが「クォータ＆アラート → 通知設定」で設定',
+    integrationDingTalkBotFallbackHint:
+      'ユーザー/テナントごとにキーを設定することを推奨；システムレベルのキーはレガシー設定の互換フォールバックのみ。新設定はテナントレベルキーを優先。',
+    integrationTestSendHint:
+      'テスト送信：一時的URL入力、1回のみ、ユーザー通知設定は変更しません、操作は監査ログに記録',
+    integrationConfigureAlertTarget: 'アラート宛先と個人設定を構成',
+    integrationFeishuBotSubtitle:
+      'Feishuボットにシステムレベルの必須パラメータはありません；宛先アドレスはユーザー/テナントごとに設定',
+    integrationFeishuBotNoConfigDetail:
+      'システム設定不要。各ユーザー/テナントは「クォータ＆アラート → 通知設定」で独自のFeishuボットWebhookアドレスとシークレットを設定できます。',
+    integrationFeishuAppDesc: 'Feishuアプリ資格情報と組織同期',
+    integrationDingTalkAppDesc: 'DingTalkアプリ資格情報と組織同期',
+    integrationFeishuAppSubtitle:
+      'feishu_settingsに保存（データベース、id=1 システムレベル単一レコード）',
+    integrationDingTalkAppSubtitle:
+      'dingtalk_settingsに保存（データベース、id=1 システムレベル単一レコード）',
+    integrationConnectionConfig: '接続設定',
+    integrationSyncSettings: '同期設定',
+    integrationSyncStatusSection: '同期ステータス',
+    integrationLastSync: '最終同期',
+    integrationSyncResultLabel: '結果',
+    integrationSyncLock: '同期ロック',
+    integrationSyncIdle: 'アイドル',
+    integrationSyncMainEntry:
+      'メインエントリは「テナント管理」；ここで実行するにはターゲットテナントの選択と再確認が必要です。',
+    integrationBoundaryTitle: '責任範囲（当期スコープ）',
+    integrationBoundaryBody:
+      'このページはシステムレベルの「接続能力」のみ管理：SMTP、Webhookグローバルセキュリティ設定、Feishu/DingTalkアプリ資格情報と同期スケジュール。',
+    integrationBoundaryRecipients:
+      'ユーザー/テナントのアラート宛先（メール、Webhook URL、ボットアドレスとシークレット）は「クォータ＆アラート → 通知設定」にあります；',
+    integrationBoundarySync:
+      '特定テナントの即時同期と同期結果処理は「テナント管理」がメインエントリです。',
+    integrationComingSoon: '近日公開',
     loading: '読み込み中...',
     modelGatewayConfiguration: 'モデルゲートウェイ設定',
     modelGatewayDesc:
@@ -5602,6 +5767,63 @@ export const translations: Record<Language, Translations> = {
     integrationStatusNoConfig: '시스템 설정 불필요',
     integrationStatusDisabled: '비활성화됨',
     integrationStatusNeedsConfig: '시스템 설정 필요',
+    integrationStatusBarSource: 'From /api/management/notification-channels/status',
+    integrationSmtpSubtitle: 'SMTP 서버 연결',
+    integrationWebhookSubtitle:
+      'webhook_settings(데이터베이스)에 저장, 모든 인스턴스에서 통합 읽기',
+    integrationWebhookPrivateOff: '끔 (권장)',
+    integrationWebhookPrivateOn: '켬',
+    integrationWebhookStateEnabled: '활성화',
+    integrationWebhookStateDisabled: '비활성화',
+    integrationWebhookSsrfWarning:
+      '"프라이빗 주소 허용"을 활성화하면 SSRF 위험이 있습니다. 작업이 감사 로그에 기록됩니다. 신뢰할 수 있는 인트라넷 환경에서만 권장합니다.',
+    integrationTestSend: '테스트 발송',
+    integrationTestUrlPlaceholder: '일시적 테스트 URL 입력, 1회만 사용, 저장되지 않음',
+    integrationTestEnterUrl: '일시적 테스트 URL을 입력하세요',
+    integrationWebhookSecretHint:
+      '서명 키를 비워두기 = 변경 없음; 삭제 시 재확인 필요. API는 전체 키를 반환하지 않습니다(설정됨 true/false만 반환).',
+    integrationDeliveryLog: '전송 로그',
+    integrationDeliveryLogTime: '시간',
+    integrationDeliveryLogType: '유형',
+    integrationDeliveryLogTarget: '대상 (해시)',
+    integrationDeliveryLogStatus: '상태',
+    integrationDeliveryLogRetry: '재시도',
+    integrationDeliveryLogHashHint:
+      'URL은 해시로만 표시, 평문 표시 없음; 로그 접근은 관리자 권한과 테넌트 범위별로 필터링',
+    integrationDingTalkBotSubtitle:
+      '이 페이지에서는 봇 대상 URL을 저장하지 않습니다; 대상은 사용자/테넌트가 "할당량 및 알림 → 알림 설정"에서 설정',
+    integrationDingTalkBotFallbackHint:
+      '사용자/테넌트별로 키를 구성하는 것을 권장; 시스템 수준 키는 레거시 설정에 대한 호환 폴백 역할만 합니다. 새 설정은 테넌트 수준 키를 우선 사용하세요.',
+    integrationTestSendHint:
+      '테스트 발송: 일시적 URL 입력, 1회만 사용, 사용자 알림 환경설정을 변경하지 않음, 작업 감사 기록',
+    integrationConfigureAlertTarget: '알림 대상 및 개인 환경설정 구성',
+    integrationFeishuBotSubtitle:
+      'Feishu 봇은 시스템 수준 필수 매개변수가 없습니다; 대상 주소는 사용자/테넌트별로 설정',
+    integrationFeishuBotNoConfigDetail:
+      '시스템 설정이 필요 없습니다. 각 사용자/테넌트는 "할당량 및 알림 → 알림 설정"에서 자체 Feishu 봇 웹훅 주소와 시크릿을 구성할 수 있습니다.',
+    integrationFeishuAppDesc: 'Feishu 앱 자격증명 및 조직 동기화',
+    integrationDingTalkAppDesc: 'DingTalk 앱 자격증명 및 조직 동기화',
+    integrationFeishuAppSubtitle:
+      'feishu_settings에 저장 (데이터베이스, id=1 시스템 수준 단일 레코드)',
+    integrationDingTalkAppSubtitle:
+      'dingtalk_settings에 저장 (데이터베이스, id=1 시스템 수준 단일 레코드)',
+    integrationConnectionConfig: '연결 구성',
+    integrationSyncSettings: '동기화 설정',
+    integrationSyncStatusSection: '동기화 상태',
+    integrationLastSync: '마지막 동기화',
+    integrationSyncResultLabel: '결과',
+    integrationSyncLock: '동기화 잠금',
+    integrationSyncIdle: '유휴',
+    integrationSyncMainEntry:
+      '주 진입점은 "테넌트 관리"; 여기서 실행하려면 대상 테넌트 선택과 재확인이 필요합니다.',
+    integrationBoundaryTitle: '책임 범위 (현재 범위)',
+    integrationBoundaryBody:
+      '이 페이지는 시스템 수준 "연결 기능"만 관리합니다: SMTP, Webhook 전역 보안 구성, Feishu/DingTalk 앱 자격증명 및 동기화 일정.',
+    integrationBoundaryRecipients:
+      '사용자/테넌트의 알림 대상(이메일, Webhook URL, 봇 주소 및 시크릿)은 "할당량 및 알림 → 알림 설정"에 있습니다;',
+    integrationBoundarySync:
+      '특정 테넌트에 대한 즉시 동기화 및 동기화 결과 처리는 "테넌트 관리"가 주 진입점입니다.',
+    integrationComingSoon: '출시 예정',
     loading: '로딩 중...',
     modelGatewayConfiguration: '모델 게이트웨이 설정',
     modelGatewayDesc:

@@ -323,7 +323,7 @@ export const NotificationIntegration: React.FC = () => {
 
       <div className="ni-status-bar mb-4">
         {channelCards.map(([key, titleKey]) => statusPill(key, titleKey))}
-        <span className="ni-hint">来自 /api/management/notification-channels/status</span>
+        <span className="ni-hint">{t('integrationStatusBarSource', language)}</span>
       </div>
 
       <div className="ni-tabs mb-4" role="tablist">
@@ -380,7 +380,7 @@ export const NotificationIntegration: React.FC = () => {
                 </div>
                 <div>
                   <div className="ni-detail-title">{t('smtpConfiguration', language)}</div>
-                  <div className="ni-detail-subtitle">SMTP 服务器连接</div>
+                  <div className="ni-detail-subtitle">{t('integrationSmtpSubtitle', language)}</div>
                 </div>
               </div>
               <SmtpConfig compact />
@@ -399,7 +399,7 @@ export const NotificationIntegration: React.FC = () => {
                 <div>
                   <div className="ni-detail-title">{t('integrationWebhookTitle', language)}</div>
                   <div className="ni-detail-subtitle">
-                    保存至 webhook_settings（数据库），多实例统一读取
+                    {t('integrationWebhookSubtitle', language)}
                   </div>
                 </div>
               </div>
@@ -426,8 +426,8 @@ export const NotificationIntegration: React.FC = () => {
                       })
                     }
                   >
-                    <option value="0">关闭（推荐）</option>
-                    <option value="1">开启</option>
+                    <option value="0">{t('integrationWebhookPrivateOff', language)}</option>
+                    <option value="1">{t('integrationWebhookPrivateOn', language)}</option>
                   </select>
                 </div>
                 <div className="col-md-4">
@@ -439,14 +439,14 @@ export const NotificationIntegration: React.FC = () => {
                       setWebhook({ ...webhook, enabled: event.target.value === '1' })
                     }
                   >
-                    <option value="1">已启用</option>
-                    <option value="0">已停用</option>
+                    <option value="1">{t('integrationWebhookStateEnabled', language)}</option>
+                    <option value="0">{t('integrationWebhookStateDisabled', language)}</option>
                   </select>
                 </div>
               </div>
 
               <div className="alert alert-warning mt-3 mb-0">
-                开启「私网地址放行」存在 SSRF 风险，将写入审计日志，仅建议在可信内网环境使用
+                {t('integrationWebhookSsrfWarning', language)}
               </div>
 
               <div className="d-flex gap-2 align-items-center mt-3 flex-wrap">
@@ -457,65 +457,52 @@ export const NotificationIntegration: React.FC = () => {
                   variant="outline-secondary"
                   onClick={() => {
                     if (!webhookTestUrl.trim()) {
-                      toast.error(t('validationError', language), '请输入临时测试 URL');
+                      toast.error(
+                        t('validationError', language),
+                        t('integrationTestEnterUrl', language)
+                      );
                       return;
                     }
-                    toast.info('测试发送', `将向 ${webhookTestUrl} 发送一条测试告警（演示占位）`);
+                    toast.info(
+                      t('integrationTestSend', language),
+                      `→ ${webhookTestUrl} (${t('integrationComingSoon', language)})`
+                    );
                   }}
+                  title={t('integrationComingSoon', language)}
                 >
-                  测试发送
+                  {t('integrationTestSend', language)} ({t('integrationComingSoon', language)})
                 </Button>
                 <div className="flex-grow-1" style={{ maxWidth: 360 }}>
                   <TextInput
                     value={webhookTestUrl}
                     onChange={setWebhookTestUrl}
-                    placeholder="临时输入测试 URL，仅本次使用、不保存"
+                    placeholder={t('integrationTestUrlPlaceholder', language)}
                   />
                 </div>
               </div>
-              <div className="ni-hint mt-2">
-                签名密钥留空 = 保持不变；清除需二次确认。API 永不回显完整密钥（仅返回已配置
-                true/false）
-              </div>
+              <div className="ni-hint mt-2">{t('integrationWebhookSecretHint', language)}</div>
 
-              <div className="ni-section">投递日志</div>
+              {/* TODO: 对接后端投递日志 API，当前为占位空状态 */}
+              <div className="ni-section">{t('integrationDeliveryLog', language)}</div>
               <table className="table table-sm" style={{ fontSize: 12.5 }}>
                 <thead>
                   <tr>
-                    <th>时间</th>
-                    <th>类型</th>
-                    <th>目标（哈希）</th>
-                    <th>状态</th>
-                    <th>重试</th>
+                    <th>{t('integrationDeliveryLogTime', language)}</th>
+                    <th>{t('integrationDeliveryLogType', language)}</th>
+                    <th>{t('integrationDeliveryLogTarget', language)}</th>
+                    <th>{t('integrationDeliveryLogStatus', language)}</th>
+                    <th>{t('integrationDeliveryLogRetry', language)}</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
-                    <td>08-14 14:32</td>
-                    <td>配额告警</td>
-                    <td>d41d8cd9…</td>
-                    <td className="text-success">成功</td>
-                    <td>0</td>
-                  </tr>
-                  <tr>
-                    <td>08-14 13:05</td>
-                    <td>配额告警</td>
-                    <td>a94a8fe5…</td>
-                    <td className="text-danger">失败</td>
-                    <td>3</td>
-                  </tr>
-                  <tr>
-                    <td>08-14 11:47</td>
-                    <td>系统通知</td>
-                    <td>0cc175b9…</td>
-                    <td className="text-success">成功</td>
-                    <td>0</td>
+                    <td colSpan={5} className="text-center text-muted py-3">
+                      {t('integrationComingSoon', language)} — API pending
+                    </td>
                   </tr>
                 </tbody>
               </table>
-              <div className="ni-hint">
-                URL 仅显示哈希，不明文展示；日志访问按管理员权限与租户作用域过滤
-              </div>
+              <div className="ni-hint">{t('integrationDeliveryLogHashHint', language)}</div>
             </Card>
           )}
 
@@ -533,7 +520,7 @@ export const NotificationIntegration: React.FC = () => {
                     {t('integrationDingTalkBotTitle', language)}
                   </div>
                   <div className="ni-detail-subtitle">
-                    系统设置页不保存目标 URL；目标由用户/租户在「配额与告警 → 通知设置」指定
+                    {t('integrationDingTalkBotSubtitle', language)}
                   </div>
                 </div>
               </div>
@@ -548,8 +535,7 @@ export const NotificationIntegration: React.FC = () => {
                 />
               </div>
               <div className="alert alert-info mt-3 mb-0">
-                推荐按用户 /
-                租户配置密钥；系统级密钥仅作为旧配置的兼容回退，新配置请优先使用租户级密钥
+                {t('integrationDingTalkBotFallbackHint', language)}
               </div>
 
               <div className="d-flex gap-2 align-items-center mt-3 flex-wrap">
@@ -560,30 +546,35 @@ export const NotificationIntegration: React.FC = () => {
                   variant="outline-secondary"
                   onClick={() => {
                     if (!dingtalkTestUrl.trim()) {
-                      toast.error(t('validationError', language), '请输入临时测试 URL');
+                      toast.error(
+                        t('validationError', language),
+                        t('integrationTestEnterUrl', language)
+                      );
                       return;
                     }
-                    toast.info('测试发送', `将向 ${dingtalkTestUrl} 发送一条测试告警（演示占位）`);
+                    toast.info(
+                      t('integrationTestSend', language),
+                      `→ ${dingtalkTestUrl} (${t('integrationComingSoon', language)})`
+                    );
                   }}
+                  title={t('integrationComingSoon', language)}
                 >
-                  测试发送
+                  {t('integrationTestSend', language)} ({t('integrationComingSoon', language)})
                 </Button>
                 <div className="flex-grow-1" style={{ maxWidth: 360 }}>
                   <TextInput
                     value={dingtalkTestUrl}
                     onChange={setDingtalkTestUrl}
-                    placeholder="临时输入测试 URL，仅本次使用、不保存"
+                    placeholder={t('integrationTestUrlPlaceholder', language)}
                   />
                 </div>
               </div>
-              <div className="ni-hint mt-2">
-                测试发送：临时输入 URL，仅本次使用、不保存、不改变用户通知偏好，操作写审计
-              </div>
+              <div className="ni-hint mt-2">{t('integrationTestSendHint', language)}</div>
 
               <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-4 p-3 rounded-2 ni-metric">
-                <span>配置你的告警目标与个人偏好</span>
+                <span>{t('integrationConfigureAlertTarget', language)}</span>
                 <Link className="btn btn-outline-secondary" to="/manage/quota">
-                  {t('integrationGoToNotifications', language)}（配额与告警）
+                  {t('integrationGoToNotifications', language)}
                 </Link>
               </div>
             </Card>
@@ -601,20 +592,19 @@ export const NotificationIntegration: React.FC = () => {
                 <div>
                   <div className="ni-detail-title">{t('integrationFeishuBotTitle', language)}</div>
                   <div className="ni-detail-subtitle">
-                    飞书机器人无系统级必填参数，目标地址按用户 / 租户设置
+                    {t('integrationFeishuBotSubtitle', language)}
                   </div>
                 </div>
               </div>
 
               <div className="alert alert-info mb-0">
-                无需系统配置。每个用户 / 租户可在「配额与告警 → 通知设置」中配置自己的飞书机器人
-                Webhook 地址与密钥
+                {t('integrationFeishuBotNoConfigDetail', language)}
               </div>
 
               <div className="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-4 p-3 rounded-2 ni-metric">
-                <span>配置你的告警目标与个人偏好</span>
+                <span>{t('integrationConfigureAlertTarget', language)}</span>
                 <Link className="btn btn-primary" to="/manage/quota">
-                  {t('integrationGoToNotifications', language)}（配额与告警）
+                  {t('integrationGoToNotifications', language)}
                 </Link>
               </div>
             </Card>
@@ -641,7 +631,9 @@ export const NotificationIntegration: React.FC = () => {
                       <Badge variant={statusBadgeVariant(st)}>{t(statusKey(st), language)}</Badge>
                     </div>
                     <small className="text-muted d-block mt-2">
-                      {key === 'feishu' ? '飞书应用凭证与组织同步' : '钉钉应用凭证与组织同步'}
+                      {key === 'feishu'
+                        ? t('integrationFeishuAppDesc', language)
+                        : t('integrationDingTalkAppDesc', language)}
                     </small>
                   </div>
                 </div>
@@ -658,7 +650,7 @@ export const NotificationIntegration: React.FC = () => {
                 <div>
                   <div className="ni-detail-title">{t('integrationFeishuApp', language)}</div>
                   <div className="ni-detail-subtitle">
-                    保存至 feishu_settings（数据库，id=1 系统级单记录）
+                    {t('integrationFeishuAppSubtitle', language)}
                   </div>
                 </div>
               </div>
@@ -675,12 +667,12 @@ export const NotificationIntegration: React.FC = () => {
                 <div>
                   <div className="ni-detail-title">{t('integrationDingTalkApp', language)}</div>
                   <div className="ni-detail-subtitle">
-                    保存至 dingtalk_settings（数据库，id=1 系统级单记录）
+                    {t('integrationDingTalkAppSubtitle', language)}
                   </div>
                 </div>
               </div>
 
-              <div className="ni-section">连接配置</div>
+              <div className="ni-section">{t('integrationConnectionConfig', language)}</div>
               <div className="row g-3">
                 <Field label="AppKey">
                   <TextInput
@@ -710,7 +702,7 @@ export const NotificationIntegration: React.FC = () => {
                 </Button>
               </div>
 
-              <div className="ni-section">同步设置</div>
+              <div className="ni-section">{t('integrationSyncSettings', language)}</div>
               <div className="row g-3">
                 <div className="col-md-6">
                   <Switch
@@ -770,35 +762,36 @@ export const NotificationIntegration: React.FC = () => {
                 </div>
               </div>
 
-              <div className="ni-section">同步状态</div>
+              {/* TODO: 对接后端同步状态 API，当前为占位空状态 */}
+              <div className="ni-section">{t('integrationSyncStatusSection', language)}</div>
               <div className="row g-3">
                 <div className="col-md-4">
                   <div className="ni-metric">
                     <div className="text-muted" style={{ fontSize: 12 }}>
-                      最近同步
+                      {t('integrationLastSync', language)}
                     </div>
                     <div className="ni-metric-value" style={{ fontSize: 16 }}>
-                      08-14 14:00
+                      —
                     </div>
                   </div>
                 </div>
                 <div className="col-md-4">
                   <div className="ni-metric">
                     <div className="text-muted" style={{ fontSize: 12 }}>
-                      结果
+                      {t('integrationSyncResultLabel', language)}
                     </div>
-                    <div className="ni-metric-value text-success" style={{ fontSize: 16 }}>
-                      成功 · 8 人
+                    <div className="ni-metric-value" style={{ fontSize: 16 }}>
+                      —
                     </div>
                   </div>
                 </div>
                 <div className="col-md-4">
                   <div className="ni-metric">
                     <div className="text-muted" style={{ fontSize: 12 }}>
-                      同步锁
+                      {t('integrationSyncLock', language)}
                     </div>
                     <div className="ni-metric-value" style={{ fontSize: 16 }}>
-                      空闲
+                      {t('integrationSyncIdle', language)}
                     </div>
                   </div>
                 </div>
@@ -808,9 +801,7 @@ export const NotificationIntegration: React.FC = () => {
                 <Button variant="outline-warning" onClick={syncDingTalk} loading={busy === 'sync'}>
                   {t('integrationSyncNow', language)}
                 </Button>
-                <span className="ni-hint">
-                  主入口在「租户管理」；此处执行需选择目标租户并二次确认
-                </span>
+                <span className="ni-hint">{t('integrationSyncMainEntry', language)}</span>
               </div>
               {syncResult && (
                 <div className="alert alert-success mt-3 mb-0">
@@ -824,13 +815,13 @@ export const NotificationIntegration: React.FC = () => {
 
       <div className="ni-boundary alert alert-light border mt-4">
         <div style={{ fontWeight: 500, color: 'var(--color-text-primary)', marginBottom: 6 }}>
-          职责边界（本期范围）
+          {t('integrationBoundaryTitle', language)}
         </div>
-        本页只管系统级「连接能力」：SMTP、Webhook 全局安全配置、飞书/钉钉应用凭证与同步计划。
+        {t('integrationBoundaryBody', language)}
         <br />
-        用户 / 租户的告警目标（邮箱、Webhook URL、机器人地址与密钥）仍在「配额与告警 → 通知设置」；
+        {t('integrationBoundaryRecipients', language)}
         <br />
-        针对具体租户的立即同步与同步结果处理以「租户管理」为主入口。
+        {t('integrationBoundarySync', language)}
       </div>
     </div>
   );
