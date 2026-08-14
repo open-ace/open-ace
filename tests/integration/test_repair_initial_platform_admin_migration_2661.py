@@ -29,9 +29,7 @@ def connection():
 
 @pytest.fixture
 def migration():
-    return importlib.import_module(
-        "migrations.versions.20260814_003_repair_initial_platform_admin"
-    )
+    return importlib.import_module("migrations.versions.20260814_003_repair_initial_platform_admin")
 
 
 def _insert_user(connection, user_id: int, username: str, role: str, tenant_id: int | None):
