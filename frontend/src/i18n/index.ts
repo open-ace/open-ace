@@ -798,6 +798,7 @@ export const translations: Record<Language, Translations> = {
       "This will remove all associated data but won't affect the actual directory.",
     never: 'Never',
     viewDetails: 'View Details',
+
     auditAnalysis: 'Audit Analysis',
     ssoSettings: 'SSO Settings',
     ssoConfiguration: 'SSO Configuration',
@@ -2652,6 +2653,7 @@ export const translations: Record<Language, Translations> = {
     deleteProjectWarning: '此操作将删除所有关联数据，但不会影响实际目录。',
     never: '从未',
     viewDetails: '查看详情',
+
     auditAnalysis: '审计分析',
     ssoSettings: 'SSO 设置',
     ssoConfiguration: 'SSO 配置',
@@ -3860,7 +3862,9 @@ export const translations: Record<Language, Translations> = {
     deleteProjectWarning:
       'この操作はすべての関連データを削除しますが、実際のディレクトリには影響しません。',
     never: 'なし',
-    viewDetails: '詳細表示',
+    viewDetails: '詳細を見る',
+
+    // Note: 'never' and 'viewDetails' are also defined in previous sections above
     auditAnalysis: '監査分析',
     ssoSettings: 'SSO設定',
     ssoConfiguration: 'SSO構成',
@@ -4588,7 +4592,7 @@ export const translations: Record<Language, Translations> = {
     promptContent: '内容',
     promptContentHelp: 'プロンプト内容を入力。変数には {変数名} を使用してください。',
     category: 'カテゴリ',
-    allCategories: 'すべてのカテゴリ',
+    // Note: 'allCategories' is also defined in Category Management section above
     tags: 'タグ',
     tagsHelp: 'カンマ区切りでタグを入力',
     variables: '変数',
@@ -4842,7 +4846,7 @@ export const translations: Record<Language, Translations> = {
     failedToUpdateTenantQuota: 'テナントクォータ更新に失敗しました',
     requestBodyRequired: 'リクエストボディが必要です',
     noValidFieldsToUpdate: '更新する有効なフィールドがありません',
-    activate: '有効化',
+    // Note: 'activate' is also defined in Category Management section above
     suspend: '停止',
     monthlyTokens: '月間トークン',
     monthlyTokenLimit: '月間トークン制限',
@@ -5559,6 +5563,7 @@ export const translations: Record<Language, Translations> = {
       '이 작업은 모든 관련 데이터를 삭제하지만 실제 디렉토리에는 영향을 주지 않습니다.',
     never: '없음',
     viewDetails: '상세 보기',
+
     auditAnalysis: '감사 분석',
     ssoSettings: 'SSO 설정',
     ssoConfiguration: 'SSO 구성',
@@ -6286,7 +6291,7 @@ export const translations: Record<Language, Translations> = {
     promptContent: '내용',
     promptContentHelp: '프롬프트 내용을 입력하세요. 변수는 {변수명}을 사용하세요.',
     category: '카테고리',
-    allCategories: '모든 카테고리',
+    // Note: 'allCategories' is also defined in Category Management section above
     tags: '태그',
     tagsHelp: '쉼표로 구분하여 태그 입력',
     variables: '변수',
@@ -6541,7 +6546,7 @@ export const translations: Record<Language, Translations> = {
     failedToUpdateTenantQuota: '테넌트 할당량 업데이트 실패',
     requestBodyRequired: '요청 본문 필요',
     noValidFieldsToUpdate: '업데이트할 유효한 필드 없음',
-    activate: '활성화',
+    // Note: 'activate' is also defined in Category Management section above
     suspend: '정지',
     monthlyTokens: '월간 토큰',
     monthlyTokenLimit: '월간 토큰 제한',
