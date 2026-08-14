@@ -670,6 +670,41 @@ class TestGuardsOutsideAdminBlueprint:
 
         assert response.status_code == 200, response.get_data(as_text=True)
 
+    @staticmethod
+    def _reports():
+        from app.routes.compliance import compliance_bp
+
+        generator = MagicMock()
+        generator.get_saved_reports.return_value = []
+        return compliance_bp, [("app.routes.compliance.report_generator", generator)], generator
+
+    def test_saved_reports_list_rejects_another_tenant(self):
+        bp, patches, _ = self._reports()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/reports/saved?tenant_id=2", patches=patches
+        )
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+
+    def test_saved_reports_list_is_narrowed_for_a_tenant_admin(self):
+        """No tenant_id used to mean every tenant's reports."""
+        bp, patches, generator = self._reports()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/reports/saved", patches=patches
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert generator.get_saved_reports.call_args.kwargs["tenant_id"] == TENANT_A
+
+    def test_saved_reports_list_stays_global_for_platform_admin(self):
+        bp, patches, generator = self._reports()
+        response = _request_other_blueprint(
+            PLATFORM_ADMIN, bp, "/api/reports/saved", patches=patches
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert generator.get_saved_reports.call_args.kwargs["tenant_id"] is None
+
 
 class TestQuotaEndpointsDoNotLeakUserLists:
     """GET /admin/quota/usage returns the user list too.
@@ -710,3 +745,64 @@ class TestQuotaEndpointsDoNotLeakUserLists:
         )
 
         assert response.status_code == 403
+
+    def test_quota_health_check_rejects_another_tenant(self):
+        """The body's tenant_id was taken on trust here."""
+        response, _ = _request(
+            TENANT_A_ADMIN,
+            "POST",
+            "/api/admin/quota/health-check",
+            json_body={"tenant_id": TENANT_B},
+        )
+
+        assert response.status_code == 403
+
+    def test_quota_health_check_allows_own_tenant(self):
+        response, _ = _request(
+            TENANT_A_ADMIN,
+            "POST",
+            "/api/admin/quota/health-check",
+            json_body={"tenant_id": TENANT_A},
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+
+
+class TestOrgSyncIsNotACrossTenantWrite:
+    """A sync creates and updates users/teams in the target tenant.
+
+    Taking the body's tenant_id on trust therefore let a tenant admin reshape
+    another tenant's org tree -- a cross-tenant write, not just a read.
+    """
+
+    @pytest.mark.parametrize(
+        ("path", "service"),
+        [
+            ("/api/admin/feishu/sync", "app.services.feishu_org_sync.FeishuOrgSyncService"),
+            ("/api/admin/dingtalk/sync", "app.services.dingtalk_org_sync.DingTalkOrgSyncService"),
+        ],
+    )
+    def test_tenant_admin_cannot_sync_into_another_tenant(self, path, service):
+        with patch(service) as mock_service:
+            response, _ = _request(TENANT_A_ADMIN, "POST", path, json_body={"tenant_id": TENANT_B})
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+        mock_service.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("path", "service"),
+        [
+            ("/api/admin/feishu/sync", "app.services.feishu_org_sync.FeishuOrgSyncService"),
+            ("/api/admin/dingtalk/sync", "app.services.dingtalk_org_sync.DingTalkOrgSyncService"),
+        ],
+    )
+    def test_tenant_admin_sync_is_narrowed_to_own_tenant(self, path, service):
+        """Omitting tenant_id must not mean 'whatever the service defaults to'."""
+        with patch(service) as mock_service:
+            mock_service.return_value.sync_org.return_value = SimpleNamespace(
+                to_dict=lambda: {"ok": True}
+            )
+            response, _ = _request(TENANT_A_ADMIN, "POST", path, json_body={})
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        mock_service.return_value.sync_org.assert_called_once_with(tenant_id=TENANT_A)

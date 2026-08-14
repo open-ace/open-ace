@@ -11,7 +11,12 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, g, jsonify, request
 
-from app.auth.decorators import admin_required, resolve_tenant_scope, same_tenant_user_required
+from app.auth.decorators import (
+    admin_required,
+    enforce_requested_tenant_scope,
+    resolve_tenant_scope,
+    same_tenant_user_required,
+)
 from app.models.user import User
 from app.modules.compliance.audit import AuditAnalyzer
 from app.modules.compliance.report import ReportGenerator, ReportType
@@ -320,10 +325,19 @@ def generate_report():
 @compliance_bp.route("/reports/saved", methods=["GET"])
 @admin_required
 def list_saved_reports():
-    """List saved reports (admin only)."""
+    """List saved reports the caller may see.
+
+    The query's ``tenant_id`` went straight to the repository, so a tenant
+    admin could name another tenant -- or omit it entirely and get every
+    tenant's reports. Reading a single report by id
+    (``GET /reports/<report_id>``) still needs a per-resource owner lookup and
+    is tracked in docs/dev-notes/2026-08-14-admin-required-tenant-boundary-audit.md.
+    """
 
     report_type = request.args.get("report_type")
-    tenant_id = request.args.get("tenant_id", type=int)
+    tenant_id, denial = enforce_requested_tenant_scope(request.args.get("tenant_id"))
+    if denial is not None:
+        return denial
     limit = request.args.get("limit", 50, type=int)
 
     try:

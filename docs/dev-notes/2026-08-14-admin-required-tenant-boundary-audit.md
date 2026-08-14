@@ -104,7 +104,7 @@ legacy `admin` 行就会突然失去保护，等于「开了更严的开关反�
 | `app/routes/governance.py:515` | `PUT /filter-rules/<rule_id>` | 改别的租户的内容过滤规则 |
 | `app/routes/governance.py:554` | `DELETE /filter-rules/<rule_id>` | 删别的租户的内容过滤规则 |
 | `app/routes/governance.py:305` | `POST /quota/alerts/<alert_id>/acknowledge` | 消掉别的租户的配额告警 |
-| `app/routes/compliance.py:349` | `GET /reports/<report_id>` | 读到别的租户的合规报告 |
+| `app/routes/compliance.py:349` | `GET /reports/<report_id>` | 读到别的租户的合规报告（列表侧 `GET /reports/saved` 本次已收紧，单条读还要按 id 反查 owner，留给 follow-up） |
 
 **`policy.py:149` 是这批里最严重的**，也是第一版漏掉的：它不是开关，而是
 `PolicyRepository().create_rule(**fields)` 整条规则版本替换——外人可以把别的租户
@@ -122,16 +122,28 @@ owner tenant。分两类：
 
 全部无需迁移。
 
-### 不带资源 id 但同样泄露：`/admin/quota/usage`
+### 不带资源 id 但同样泄露：从请求里取租户的端点
 
-第一版只收紧了 `GET /admin/users`，漏了 `GET /admin/quota/usage`——它同样
-`user_repo.get_all_users()` 无过滤，返回的还**更多**（`SELECT *` 去掉密码哈希，
-再加用量），其中包含 `role`，正好是「先找出哪个账号是平台管理员」这一步需要的数据。
-本次一并收紧了它和 `/admin/quota/stats`（后者原本还把所有租户的用户配额加总去和
-单个租户的上限比，数字本身就是错的）。
+第一版只收紧了 `GET /admin/users`，漏了同类的一批。**教训**：按「路径里有没有资源
+id」来枚举审计面是错的方法——list / 聚合 / 触发类端点从 query 或 body 取租户，
+同样是跨租户面，而且往往泄露得更多。
 
-**教训**：按「路径里有没有资源 id」来枚举审计面是不够的，list 类端点从 query 或
-body 取租户，同样是跨租户面。
+改用「**谁从请求里读 tenant_id 却没过 `enforce_requested_tenant_scope`**」重新扫
+（AST 枚举全部 route handler + 正则匹配 `data.get("tenant_id")` /
+`request.args.get("tenant_id")`），本次一并收紧的：
+
+| 端点 | 原问题 |
+|---|---|
+| `GET /admin/quota/usage` | `get_all_users()` 无过滤；返回的比 `/admin/users` **还多**（`SELECT *` 去密码哈希 + 用量），含 `role`——正好是「先找出谁是平台管理员」这一步要的数据 |
+| `GET /admin/quota/stats` | 同上；且把所有租户的配额加总去和单租户上限比，数字本身就是错的 |
+| `POST /admin/quota/health-check` | body 的 `tenant_id` 直接采信，可读任意租户的配额余量 |
+| `POST /admin/feishu/sync`、`POST /admin/dingtalk/sync` | body 的 `tenant_id` 直接采信——**这是跨租户写**：同步会在目标租户里建/改用户和团队 |
+| `GET /reports/saved` | query 的 `tenant_id` 直接透传给仓储；不传则返回所有租户的合规报告 |
+
+扫描命中但**核实后是安全的**（各自有自建校验，未改动）：
+`compliance.py:138 generate_report`（`resolve_tenant_scope` + 平台管理员显式门）、
+`sso.py:511/1205`（`validate_tenant_access`）、
+`remote.py:867/956`（#2180 的 fail-closed 处理）。
 
 ### 已知但本次未动：非角色的跨租户路径
 

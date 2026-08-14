@@ -945,8 +945,15 @@ def api_quota_health_check():
 
     data = request.get_json(silent=True) or {}
 
-    # Get tenant_id from request or current user
-    tenant_id = data.get("tenant_id") or g.user.get("tenant_id")
+    # Get tenant_id from request, confined to what the caller may look at. The
+    # body value used to be taken on trust, so a tenant admin could read any
+    # other tenant's quota allocation and headroom by naming it here.
+    tenant_id, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+    if denial is not None:
+        return denial
+    if tenant_id is None:
+        # Platform admin with no tenant named, or a caller with no tenant.
+        tenant_id = g.user.get("tenant_id")
     if not tenant_id:
         return jsonify({"error": "Tenant ID is required"}), 400
 
@@ -1045,15 +1052,18 @@ def api_quota_health_check():
 @admin_bp.route("/admin/feishu/sync", methods=["POST"])
 @admin_required
 def api_sync_feishu_org():
-    """Manually trigger a Feishu organization sync."""
-    data = request.get_json(silent=True) or {}
-    tenant_id = data.get("tenant_id")
+    """Manually trigger a Feishu organization sync.
 
-    if tenant_id is not None:
-        try:
-            tenant_id = int(tenant_id)
-        except (TypeError, ValueError):
-            return jsonify({"error": "tenant_id must be an integer"}), 400
+    The body's ``tenant_id`` used to be taken on trust. Because a sync creates
+    and updates users and teams in the target tenant, that was a cross-tenant
+    *write*: a tenant admin could name somebody else's tenant and reshape its
+    org tree. enforce_requested_tenant_scope also handles the int coercion and
+    the 400 that used to be done by hand here.
+    """
+    data = request.get_json(silent=True) or {}
+    tenant_id, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+    if denial is not None:
+        return denial
 
     try:
         from app.services.feishu_org_sync import FeishuOrgSyncService
@@ -1070,15 +1080,14 @@ def api_sync_feishu_org():
 @admin_bp.route("/admin/dingtalk/sync", methods=["POST"])
 @admin_required
 def api_sync_dingtalk_org():
-    """Manually trigger a DingTalk organization sync."""
-    data = request.get_json(silent=True) or {}
-    tenant_id = data.get("tenant_id")
+    """Manually trigger a DingTalk organization sync.
 
-    if tenant_id is not None:
-        try:
-            tenant_id = int(tenant_id)
-        except (TypeError, ValueError):
-            return jsonify({"error": "tenant_id must be an integer"}), 400
+    Same cross-tenant write as the Feishu sibling above -- see that docstring.
+    """
+    data = request.get_json(silent=True) or {}
+    tenant_id, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+    if denial is not None:
+        return denial
 
     try:
         from app.services.dingtalk_org_sync import DingTalkOrgSyncService
