@@ -540,10 +540,25 @@ export const QuotaAlerts: React.FC = () => {
                 {quotaStats && (
                   <div className="col-12">
                     <Card className="bg-light border-0 mb-3">
-                      <h6 className="mb-2">
-                        <i className="bi bi-bar-chart me-1" />
-                        {t('quotaAllocationReference', language)}
-                      </h6>
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <h6 className="mb-0">
+                          <i className="bi bi-bar-chart me-1" />
+                          {t('quotaAllocationReference', language)}
+                        </h6>
+                        {/* Status indicator badge */}
+                        {quotaStats.percentages.daily_token > 100 ? (
+                          <Badge variant="danger">
+                            <i className="bi bi-exclamation-triangle-fill me-1" />
+                            {language === 'zh' ? '已超限' : 'Over-allocated'}
+                          </Badge>
+                        ) : quotaStats.percentages.daily_token > 80 ? (
+                          <Badge variant="warning">
+                            {language === 'zh' ? '接近上限' : 'Near Limit'}
+                          </Badge>
+                        ) : (
+                          <Badge variant="success">{language === 'zh' ? '正常' : 'OK'}</Badge>
+                        )}
+                      </div>
                       <div className="row g-2 small">
                         <div className="col-6">
                           <span className="text-muted">{t('tenantTotalQuota', language)}:</span>
@@ -554,15 +569,32 @@ export const QuotaAlerts: React.FC = () => {
                         </div>
                         <div className="col-6">
                           <span className="text-muted">{t('allocated', language)}:</span>
-                          <span className="ms-2">
+                          <span
+                            className={cn(
+                              'ms-2',
+                              quotaStats.percentages.daily_token > 100 && 'text-danger fw-bold'
+                            )}
+                          >
                             {quotaStats.allocated.daily_token}M (
-                            {quotaStats.percentages.daily_token}%)
+                            {quotaStats.percentages.daily_token > 100
+                              ? `${language === 'zh' ? '已超限' : 'Over'} ${quotaStats.percentages.daily_token}%`
+                              : `${quotaStats.percentages.daily_token}%`}
+                            )
                           </span>
                         </div>
                         <div className="col-6">
                           <span className="text-muted">{t('available', language)}:</span>
-                          <span className="ms-2 text-success">
-                            {formatTokens(quotaStats.remaining.daily_token)}
+                          <span
+                            className={cn(
+                              'ms-2',
+                              quotaStats.remaining.daily_token < 0
+                                ? 'text-danger fw-bold'
+                                : 'text-success'
+                            )}
+                          >
+                            {quotaStats.remaining.daily_token < 0
+                              ? `${language === 'zh' ? '超出' : 'Over by'} ${formatTokens(Math.abs(quotaStats.remaining.daily_token))}`
+                              : formatTokens(quotaStats.remaining.daily_token)}
                           </span>
                         </div>
                         <div className="col-6">
@@ -572,6 +604,15 @@ export const QuotaAlerts: React.FC = () => {
                           </span>
                         </div>
                       </div>
+                      {/* Warning banner for over-allocated state */}
+                      {quotaStats.percentages.daily_token > 100 && (
+                        <div className="alert alert-warning mt-2 mb-0 py-2 small">
+                          <i className="bi bi-exclamation-triangle-fill me-1" />
+                          {language === 'zh'
+                            ? '租户配额已超限分配，建议调整用户配额'
+                            : 'Tenant quota is over-allocated. Consider adjusting user quotas.'}
+                        </div>
+                      )}
                     </Card>
                   </div>
                 )}

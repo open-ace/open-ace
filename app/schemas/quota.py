@@ -10,6 +10,12 @@ Provides validation and limits for quota values to ensure:
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING:
+    from app.repositories.database import Database, adapt_boolean_condition
+else:
+    from app.repositories.database import adapt_boolean_condition
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +29,15 @@ MAX_REQUEST_QUOTA = 2147483647
 
 # Minimum quota value
 MIN_QUOTA = 0
+
+
+class QuotaAllocationResult(TypedDict):
+    """Type definition for tenant allocation validation result."""
+
+    is_valid: bool
+    error: str
+    available: dict[str, int]
+    is_unlimited_tenant: bool
 
 
 def validate_token_quota(value: int | None, quota_name: str = "token_quota") -> tuple[bool, str]:
@@ -163,3 +178,204 @@ def get_quota_limits() -> dict:
             "description": "Request quotas are stored as actual counts",
         },
     }
+
+
+def validate_tenant_allocation(
+    tenant_id: int,
+    user_id: int | None = None,
+    new_daily_token_quota: int | None = None,
+    new_monthly_token_quota: int | None = None,
+    new_daily_request_quota: int | None = None,
+    new_monthly_request_quota: int | None = None,
+    db: Database | None = None,
+) -> QuotaAllocationResult:
+    """
+    Validate tenant quota allocation to ensure user quotas don't exceed tenant limits.
+
+    This function checks if allocating new quota values to a user would cause
+    the total allocated quota to exceed the tenant's limits.
+
+    Args:
+        tenant_id: ID of the tenant.
+        user_id: ID of the user being updated (None for new users).
+        new_daily_token_quota: New daily token quota in M units (None for unlimited).
+        new_monthly_token_quota: New monthly token quota in M units (None for unlimited).
+        new_daily_request_quota: New daily request quota (None for unlimited).
+        new_monthly_request_quota: New monthly request quota (None for unlimited).
+        db: Database instance for queries.
+
+    Returns:
+        Dict with keys:
+            - is_valid: bool - Whether the allocation is valid
+            - error: Optional[str] - Error message key (i18n) if invalid
+            - available: Dict with remaining available quota values
+            - is_unlimited_tenant: bool - Whether tenant has unlimited quota
+    """
+    # Import Database at runtime to avoid circular imports
+    if db is None:
+        from app.repositories.database import Database as DatabaseClass
+
+        db = DatabaseClass()
+
+    result: QuotaAllocationResult = {
+        "is_valid": True,
+        "error": "",
+        "available": {
+            "daily_token": 0,
+            "monthly_token": 0,
+            "daily_request": 0,
+            "monthly_request": 0,
+        },
+        "is_unlimited_tenant": False,
+    }
+
+    # Get tenant quota limits from tenant_quotas table
+    tenant_quota_row = db.fetch_one(
+        """
+        SELECT daily_token_limit, monthly_token_limit,
+               daily_request_limit, monthly_request_limit
+        FROM tenant_quotas
+        WHERE tenant_id = ?
+    """,
+        (tenant_id,),
+    )
+
+    if not tenant_quota_row:
+        # Tenant not found - return error
+        result["is_valid"] = False
+        result["error"] = "Tenant not found"
+        return result
+
+    # Check if tenant has unlimited quota (all limits are NULL or 0)
+    daily_token_limit = tenant_quota_row.get("daily_token_limit")
+    monthly_token_limit = tenant_quota_row.get("monthly_token_limit")
+    daily_request_limit = tenant_quota_row.get("daily_request_limit")
+    monthly_request_limit = tenant_quota_row.get("monthly_request_limit")
+
+    # If tenant has unlimited quota (all limits are None or 0), allow any allocation
+    if (
+        (daily_token_limit is None or daily_token_limit == 0)
+        and (monthly_token_limit is None or monthly_token_limit == 0)
+        and (daily_request_limit is None or daily_request_limit == 0)
+        and (monthly_request_limit is None or monthly_request_limit == 0)
+    ):
+        result["is_unlimited_tenant"] = True
+        return result
+
+    # Decision D1: For limited tenants, reject unlimited user quota (null values)
+    # Exception: If the tenant has unlimited quota (handled above), null is allowed
+    if new_daily_token_quota is None and daily_token_limit not in (None, 0):
+        result["is_valid"] = False
+        result["error"] = "Cannot set unlimited quota for a tenant with quota limits"
+        return result
+
+    if new_monthly_token_quota is None and monthly_token_limit not in (None, 0):
+        result["is_valid"] = False
+        result["error"] = "Cannot set unlimited quota for a tenant with quota limits"
+        return result
+
+    if new_daily_request_quota is None and daily_request_limit not in (None, 0):
+        result["is_valid"] = False
+        result["error"] = "Cannot set unlimited quota for a tenant with quota limits"
+        return result
+
+    if new_monthly_request_quota is None and monthly_request_limit not in (None, 0):
+        result["is_valid"] = False
+        result["error"] = "Cannot set unlimited quota for a tenant with quota limits"
+        return result
+
+    # Calculate currently allocated quota (excluding current user)
+    # Each quota field handles NULL values independently using conditional aggregation
+    # Token quotas are stored in M units
+    allocated_row = db.fetch_one(
+        f"""
+        SELECT
+            COALESCE(SUM(CASE WHEN daily_token_quota IS NOT NULL THEN daily_token_quota ELSE 0 END), 0) as daily_token,
+            COALESCE(SUM(CASE WHEN monthly_token_quota IS NOT NULL THEN monthly_token_quota ELSE 0 END), 0) as monthly_token,
+            COALESCE(SUM(CASE WHEN daily_request_quota IS NOT NULL THEN daily_request_quota ELSE 0 END), 0) as daily_request,
+            COALESCE(SUM(CASE WHEN monthly_request_quota IS NOT NULL THEN monthly_request_quota ELSE 0 END), 0) as monthly_request
+        FROM users
+        WHERE tenant_id = ?
+          AND {adapt_boolean_condition('is_active', True)}
+          AND (id IS NULL OR id != ?)
+    """,
+        (tenant_id, user_id or 0),
+    )
+
+    allocated_daily_token = allocated_row.get("daily_token", 0) if allocated_row else 0
+    allocated_monthly_token = allocated_row.get("monthly_token", 0) if allocated_row else 0
+    allocated_daily_request = allocated_row.get("daily_request", 0) if allocated_row else 0
+    allocated_monthly_request = allocated_row.get("monthly_request", 0) if allocated_row else 0
+
+    # Add new quota values to calculate total
+    total_daily_token = allocated_daily_token + (new_daily_token_quota or 0)
+    total_monthly_token = allocated_monthly_token + (new_monthly_token_quota or 0)
+    total_daily_request = allocated_daily_request + (new_daily_request_quota or 0)
+    total_monthly_request = allocated_monthly_request + (new_monthly_request_quota or 0)
+
+    # Token quotas are stored in M units, need to convert for comparison
+    # Tenant limits are in actual token counts
+    TOKEN_QUOTA_MULTIPLIER = 1_000_000
+
+    # Check daily token quota
+    if daily_token_limit and daily_token_limit > 0:
+        # Convert allocated (M units) to actual tokens for comparison
+        total_daily_tokens_actual = total_daily_token * TOKEN_QUOTA_MULTIPLIER
+        if total_daily_tokens_actual > daily_token_limit:
+            available_daily = max(
+                0,
+                (daily_token_limit - allocated_daily_token * TOKEN_QUOTA_MULTIPLIER)
+                // TOKEN_QUOTA_MULTIPLIER,
+            )
+            result["is_valid"] = False
+            result["error"] = "Tenant daily token quota exceeded"
+            result["available"]["daily_token"] = available_daily
+            return result
+        result["available"]["daily_token"] = max(
+            0,
+            (daily_token_limit - allocated_daily_token * TOKEN_QUOTA_MULTIPLIER)
+            // TOKEN_QUOTA_MULTIPLIER,
+        )
+
+    # Check monthly token quota
+    if monthly_token_limit and monthly_token_limit > 0:
+        total_monthly_tokens_actual = total_monthly_token * TOKEN_QUOTA_MULTIPLIER
+        if total_monthly_tokens_actual > monthly_token_limit:
+            available_monthly = max(
+                0,
+                (monthly_token_limit - allocated_monthly_token * TOKEN_QUOTA_MULTIPLIER)
+                // TOKEN_QUOTA_MULTIPLIER,
+            )
+            result["is_valid"] = False
+            result["error"] = "Tenant monthly token quota exceeded"
+            result["available"]["monthly_token"] = available_monthly
+            return result
+        result["available"]["monthly_token"] = max(
+            0,
+            (monthly_token_limit - allocated_monthly_token * TOKEN_QUOTA_MULTIPLIER)
+            // TOKEN_QUOTA_MULTIPLIER,
+        )
+
+    # Check daily request quota
+    if daily_request_limit and daily_request_limit > 0:
+        if total_daily_request > daily_request_limit:
+            available_daily = max(0, daily_request_limit - allocated_daily_request)
+            result["is_valid"] = False
+            result["error"] = "Tenant daily request quota exceeded"
+            result["available"]["daily_request"] = available_daily
+            return result
+        result["available"]["daily_request"] = max(0, daily_request_limit - allocated_daily_request)
+
+    # Check monthly request quota
+    if monthly_request_limit and monthly_request_limit > 0:
+        if total_monthly_request > monthly_request_limit:
+            available_monthly = max(0, monthly_request_limit - allocated_monthly_request)
+            result["is_valid"] = False
+            result["error"] = "Tenant monthly request quota exceeded"
+            result["available"]["monthly_request"] = available_monthly
+            return result
+        result["available"]["monthly_request"] = max(
+            0, monthly_request_limit - allocated_monthly_request
+        )
+
+    return result
