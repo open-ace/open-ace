@@ -65,7 +65,7 @@ def _command_key(evidence: TestExecutionEvidence) -> tuple:
 
 def _latest_state(
     authoritative: list[tuple[int, TestExecutionEvidence]],
-) -> dict[tuple, tuple[str, _PytestScope | None, int]]:
+) -> dict[tuple, tuple[str, _PytestScope | None, int, TestExecutionEvidence]]:
     """Reduce to the latest verdict/scope/order per normalized command.
 
     ``authoritative`` is ordered by execution (the caller passes evidences in
@@ -75,9 +75,10 @@ def _latest_state(
 
     The scope is read per evidence, not gated on a run-level framework string
     (#2376 D4): a pytest evidence carries its own ``coverage_scope`` even when
-    the project as a whole infers ``"mixed"``.
+    the project as a whole infers ``"mixed"``. The evidence itself rides along
+    so coverer selection can apply ``_has_test_semantics`` (#2665).
     """
-    latest: dict[tuple, tuple[str, _PytestScope | None, int]] = {}
+    latest: dict[tuple, tuple[str, _PytestScope | None, int, TestExecutionEvidence]] = {}
     for order, evidence in authoritative:
         key = _command_key(evidence)
         scope = (
@@ -85,8 +86,31 @@ def _latest_state(
         )
         previous = latest.get(key)
         if previous is None or order > previous[2]:
-            latest[key] = (evidence.verdict, scope, order)
+            latest[key] = (evidence.verdict, scope, order, evidence)
     return latest
+
+
+def _has_test_semantics(evidence: TestExecutionEvidence) -> bool:
+    """Whether the evidence structurally proves a TEST command ran.
+
+    True when the parse produced pytest scope/counts/selectors, or came from
+    a framework parser that only fires on framework-specific output
+    (jest/go_test/cargo). False for the exit-0 fallbacks — ``_parse_generic``
+    on any clean command and ``_parse_pytest``'s exit-0-unparseable-output
+    arm — which yield a count-less, scope-less MEDIUM pass indistinguishable
+    from lint/format commands (pre-commit/black/ruff).
+    """
+    if evidence.parser in ("jest", "go_test", "cargo"):
+        return True
+    return (
+        evidence.coverage_scope is not None
+        or evidence.collected is not None
+        or evidence.passed is not None
+        or evidence.failed is not None
+        or evidence.skipped is not None
+        or evidence.errors is not None
+        or bool(evidence.selectors)
+    )
 
 
 def _classify_failures(authoritative: list[tuple[int, TestExecutionEvidence]]) -> str:
@@ -116,17 +140,17 @@ def _classify_failures(authoritative: list[tuple[int, TestExecutionEvidence]]) -
     """
     latest = _latest_state(authoritative)
     passing = [
-        (scope, order)
-        for verdict, scope, order in latest.values()
+        (scope, order, evidence)
+        for verdict, scope, order, evidence in latest.values()
         if verdict == ExecutionVerdict.PASSED.value
     ]
     result = "none"
-    for verdict, failed_scope, order in latest.values():
+    for verdict, failed_scope, order, failed_evidence in latest.values():
         if verdict == ExecutionVerdict.PASSED.value:
             continue
         covered = False
         undecidable = False
-        for passing_scope, passing_order in passing:
+        for passing_scope, passing_order, passing_evidence in passing:
             if passing_order <= order:
                 continue
             if _pytest_scope_covers(passing_scope, failed_scope):
@@ -134,8 +158,20 @@ def _classify_failures(authoritative: list[tuple[int, TestExecutionEvidence]]) -
                 break
             # Both scopes known means non-coverage was *decided* (a targeted
             # pass genuinely does not clear a failed broader run — #1967). Only
-            # a missing scope on either side leaves it undecidable.
+            # a missing scope on either side leaves it undecidable…
             if passing_scope is None or failed_scope is None:
+                # …unless the failure is structurally a TEST failure (parsed
+                # scope/counts) while the passing command carries no test
+                # semantics at all (#2665). pre-commit/black/ruff exit-0 pass
+                # through the same fallback arms, and letting them soften a
+                # decisive pytest "3 failed, 24 passed" into "uncertain" →
+                # INCONCLUSIVE spun #2590's workflow in retry loops instead of
+                # the tests-failed → dev-fix loop. Both-generic runs (bash
+                # exit-code scripts) keep the #2376 PR-2 deferral.
+                if _has_test_semantics(failed_evidence) and not _has_test_semantics(
+                    passing_evidence
+                ):
+                    continue
                 undecidable = True
         if covered:
             continue

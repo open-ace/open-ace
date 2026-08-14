@@ -26,6 +26,8 @@ def _te(
     selectors: list[str] | None = None,
     context: str = _CTX,
     framework: str = "python",
+    passed: int | None = None,
+    failed: int | None = None,
 ) -> TestExecutionEvidence:
     """Build a TestExecutionEvidence with an explicit scope for verdict tests."""
     coverage_scope = None
@@ -38,6 +40,8 @@ def _te(
         parser_confidence=confidence,
         selectors=selectors or [],
         coverage_scope=coverage_scope,
+        passed=passed,
+        failed=failed,
     )
 
 
@@ -147,11 +151,68 @@ def test_non_pytest_cross_command_pass_is_undecidable_not_a_failure():
     # flow for every non-pytest runner. Decided non-coverage (both scopes known,
     # pytest) still yields FAILED — see
     # test_targeted_pass_does_not_cover_failed_full_suite_1967.
+    # (Counts made explicit post-#2665: a pass that never parsed any test
+    # output has no test semantics at all — see
+    # test_lint_pass_after_pytest_failure_stays_failed_2665.)
     evidences = [
-        _te("c1", ExecutionVerdict.FAILED.value, framework="javascript"),
-        _te("c2", ExecutionVerdict.PASSED.value, framework="javascript"),
+        _te("c1", ExecutionVerdict.FAILED.value, framework="javascript", passed=2, failed=1),
+        _te("c2", ExecutionVerdict.PASSED.value, framework="javascript", passed=3),
     ]
     assert not _run_failed(evidences, "javascript")
+    assert compute_run_verdict(evidences) is ExecutionVerdict.INCONCLUSIVE
+
+
+def _lint_pass(command_id: str) -> TestExecutionEvidence:
+    """A generic exit-0 command (pre-commit/black/ruff style).
+
+    ``_parse_generic`` marks a clean exit-0 MEDIUM PASSED with NO counts and
+    NO coverage scope — the shape of a lint/format command, which carries no
+    test semantics (#2665).
+    """
+    return TestExecutionEvidence(
+        command_id=command_id,
+        framework="python",
+        verdict=ExecutionVerdict.PASSED.value,
+        parser_confidence=ParserConfidence.MEDIUM.value,
+        parser="generic",
+        selectors=[],
+        coverage_scope=None,
+    )
+
+
+def test_lint_pass_after_pytest_failure_stays_failed_2665():
+    # pre-commit/black/ruff exiting 0 after a DECISIVE pytest failure (3
+    # failed, 24 passed) must not defuse the verdict. Before #2665 the bare
+    # generic pass's None scope hit the undecidable branch ("uncertain" →
+    # INCONCLUSIVE), so the workflow retried forever instead of entering the
+    # productive tests-failed → dev-fix loop (#2590's workflow, verified
+    # against prod evidence rows).
+    evidences = [
+        _te("t1", ExecutionVerdict.PASSED.value, selectors=["tests/x.py::test_a"]),
+        _te("t2", ExecutionVerdict.FAILED.value, selectors=["tests/x.py"]),
+        _lint_pass("lint1"),
+    ]
+    assert compute_run_verdict(evidences) is ExecutionVerdict.FAILED
+
+
+def test_counted_generic_pass_after_failure_stays_uncertain_2665():
+    # A generic pass WITH parsed counts (an unmodeled test framework rerun)
+    # keeps the #2376 PR-2 undecidable semantics — only count-less/scope-less
+    # generic passes are stripped of coverer status.
+    counted = TestExecutionEvidence(
+        command_id="g1",
+        framework="javascript",
+        verdict=ExecutionVerdict.PASSED.value,
+        parser_confidence=ParserConfidence.MEDIUM.value,
+        parser="generic",
+        selectors=[],
+        coverage_scope=None,
+        passed=5,
+    )
+    evidences = [
+        _te("t1", ExecutionVerdict.FAILED.value, selectors=["tests/x.py"]),
+        counted,
+    ]
     assert compute_run_verdict(evidences) is ExecutionVerdict.INCONCLUSIVE
 
 
