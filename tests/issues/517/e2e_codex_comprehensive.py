@@ -917,13 +917,16 @@ def test_api_usage_data():
 
 
 def test_api_tools_list():
-    """Tools list API includes codex."""
-    r = requests.get(
-        f"{BASE_URL}/api/tools",
-        cookies={"session_token": _helpers_mod._auth_token},
-    )
-    data = r.json()
-    tools = data if isinstance(data, list) else data.get("data", [])
+    """Tools list query includes codex.
+
+    /api/tools is served from a ttl=300 in-process cache; a sibling browser
+    test can prime it with the empty pre-seed list, so assert the underlying
+    repository query (what the endpoint computes) instead of the cached HTTP
+    response — order-independent within the shard.
+    """
+    from app.repositories.usage_repo import UsageRepository
+
+    tools = UsageRepository().get_all_tools(tenant_id=1)
     assert "codex" in tools, f"codex not in tools: {tools}"
     print(f"    Tools: {tools}")
 

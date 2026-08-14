@@ -60,16 +60,20 @@ def _remote_reachable(host: str, timeout: float = 2.0) -> bool:
         return False
 
 
-if not _remote_reachable(REMOTE_HOST):
-    # These tests drive a real remote machine (SSH + agent + codex binary),
-    # which the issues lane cannot provide. Keep them runnable in real
-    # environments; skip wholesale when the host is unreachable.
-    import pytest
+import pytest
 
-    pytest.skip(
-        f"remote host {REMOTE_HOST} unreachable — real-session e2e needs the test machine",
-        allow_module_level=True,
-    )
+
+@pytest.fixture(autouse=True)
+def _require_remote_host():
+    """Skip each test unless the remote test machine is reachable.
+
+    These tests drive a real remote machine (SSH + agent + codex binary),
+    which the issues lane cannot provide. Per-test skip (not module-level)
+    so each nodeid reports its own skip outcome in JUnit.
+    """
+    if not _remote_reachable(REMOTE_HOST):
+        pytest.skip(f"remote host {REMOTE_HOST} unreachable — needs the test machine")
+
 
 auth_token = None
 codex_session_file = None
