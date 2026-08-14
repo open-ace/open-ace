@@ -148,7 +148,8 @@ def test_zcode_build_resume_args(cli_adapters_pkg):
         ("auto", "build"),
         ("auto-edit", "edit"),
         ("plan", "plan"),
-        (None, "yolo"),
+        # Issue #2591: Default changed from "yolo" to "build" for permission prompts
+        (None, "build"),
     ],
 )
 def test_zcode_permission_mode_mapping(cli_adapters_pkg, mode, expected):
