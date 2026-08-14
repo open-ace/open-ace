@@ -1080,8 +1080,10 @@ class RemoteAgentManager:
         if is_revoked:
             return False
 
-        # Issue #2499: Check pending_revoke status
-        pending_revoke = row.get("pending_revoke")
+        # Issue #2499: Check pending_revoke status.
+        # Raw-cursor rows are sqlite3.Row on SQLite (no .get) and
+        # RealDictRow on PostgreSQL (.get works) — index uniformly.
+        pending_revoke = row["pending_revoke"]
         if is_postgresql():
             pending_revoke = bool(pending_revoke) if pending_revoke is not None else False
         else:
@@ -1089,7 +1091,7 @@ class RemoteAgentManager:
 
         if pending_revoke:
             # Check if temporarily valid (within timeout window)
-            is_temporarily_valid = row.get("is_temporarily_valid")
+            is_temporarily_valid = row["is_temporarily_valid"]
             if is_postgresql():
                 is_temporarily_valid = (
                     bool(is_temporarily_valid) if is_temporarily_valid is not None else False
@@ -1287,7 +1289,7 @@ class RemoteAgentManager:
                     (machine_id,),
                 )
                 row = cursor.fetchone()
-                if row and row.get("token_revoke_timeout"):
+                if row and row["token_revoke_timeout"]:
                     timeout = int(row["token_revoke_timeout"])
                     # Clamp to valid range
                     return max(MIN_TOKEN_REVOKE_TIMEOUT, min(timeout, MAX_TOKEN_REVOKE_TIMEOUT))

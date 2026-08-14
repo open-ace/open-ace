@@ -503,8 +503,10 @@ class TestValidRequests:
         # Old token works
         assert manager.validate_agent_token(old_token, machine_id) is True
 
-        # Rotate
-        new_result = manager.rotate_agent_token(machine_id, rotated_by=1)
+        # Rotate (immediate/emergency mode: default rotation is delayed since
+        # #2499 — the old token stays valid inside its revoke window, which
+        # would not satisfy "old token no longer works")
+        new_result = manager.rotate_agent_token(machine_id, rotated_by=1, immediate=True)
         assert new_result is not None
         new_token = new_result["new_token"]
 

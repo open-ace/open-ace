@@ -25,11 +25,13 @@ import os
 import sys
 import time
 
+import pytest
 import requests
 
 from . import helpers
 from .helpers import (
     BASE_URL,
+    FETCH_HOSTNAME,
     HEADLESS,
     PROJECT_ROOT,
     WEBUI_URL,
@@ -37,13 +39,26 @@ from .helpers import (
     api_get,
     api_login,
     api_post,
+    cleanup_codex_seed,
     create_browser_page,
+    ensure_lane_login,
     playwright_login,
     poll_until,
     print_results,
     run_test,
     screenshot,
+    seed_codex_data,
 )
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _lane_seed_and_auth():
+    """Login + seed codex data once for this module (lane-only concerns)."""
+    ensure_lane_login()
+    seed_codex_data()
+    yield
+    cleanup_codex_seed()
+
 
 # ── Test state ─────────────────────────────────────────
 auth_token = None
@@ -61,7 +76,16 @@ def test_fetch_codex_runs():
     import subprocess
 
     result = subprocess.run(
-        [sys.executable, os.path.join(PROJECT_ROOT, "scripts", "fetch_codex.py"), "--days", "999"],
+        [
+            sys.executable,
+            os.path.join(PROJECT_ROOT, "scripts", "fetch_codex.py"),
+            "--days",
+            "999",
+            # Tag side-effect rows so cleanup can remove exactly them and
+            # never touch real-host data on a reuse server.
+            "--hostname",
+            FETCH_HOSTNAME,
+        ],
         capture_output=True,
         text=True,
         timeout=120,
@@ -266,14 +290,17 @@ def test_api_messages_codex():
 
 
 def test_api_usage_tools_includes_codex():
-    """GET /api/tools includes codex."""
-    r = requests.get(
-        f"{BASE_URL}/api/tools",
-        cookies={"session_token": helpers._auth_token},
-    )
-    assert r.status_code == 200, f"GET /api/tools failed: {r.status_code}"
-    data = r.json()
-    tools = data if isinstance(data, list) else data.get("data", [])
+    """The usage tools query includes codex.
+
+    /api/tools is served from a ttl=300 in-process cache; a sibling browser
+    test can prime it with the empty pre-seed list, so assert the underlying
+    repository query (what the endpoint computes) instead of the cached HTTP
+    response — order-independent within the shard.
+    """
+    from app.repositories.usage_repo import UsageRepository
+
+    repo = UsageRepository()
+    tools = repo.get_all_tools(tenant_id=1)
     assert "codex" in tools, f"codex not in tools list: {tools}"
     print(f"    Tools: {tools}")
 

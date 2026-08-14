@@ -29,7 +29,11 @@ _REMOTE_AGENT_DIR = os.path.normpath(
 
 
 def test_zcode_adapter_maps_yolo_correctly():
-    """The yolo permission_mode must map to zcode --mode yolo."""
+    """The bypass permission_mode must map to zcode --mode yolo.
+
+    Issue #2591 removed the bare "yolo" key from the mode map (default is now
+    "build"); full-autonomy is requested via "bypass"/"full-auto".
+    """
     if _REMOTE_AGENT_DIR not in sys.path:
         sys.path.insert(0, _REMOTE_AGENT_DIR)
     from cli_adapters.zcode import ZCodeAdapter
@@ -39,7 +43,7 @@ def test_zcode_adapter_maps_yolo_correctly():
         "test-sid",
         "/tmp/proj",
         "glm-5.2",
-        permission_mode="yolo",
+        permission_mode="bypass",
     )
     assert "--mode" in args
     idx = args.index("--mode")
@@ -162,7 +166,11 @@ def test_session_line_updates_even_on_resume():
     source = inspect.getsource(AutonomousOrchestrator._run_agent)
     # The old buggy condition was: `if field and not resume and not ...`
     # The fix removes the `not resume` guard so resume also updates.
-    assert "not resume" not in source, (
+    # Match the bare `not resume` token (word boundary) — later code legitimately
+    # contains `not resume_target`, a different variable in the retry path.
+    import re
+
+    assert not re.search(r"\bnot resume\b(?!_)", source), (
         "_run_agent must not skip session line update on resume — "
         "see #525 where dev resumed a dead planning session forever"
     )
