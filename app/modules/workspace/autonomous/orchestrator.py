@@ -10214,14 +10214,20 @@ class AutonomousOrchestrator:
         # anything — the evidence gate only recognizes fresh output, so every
         # retry lands inconclusive until exhaustion. Switch to a FRESH session
         # (the test prompt is self-contained: plan + changed files + scopes)
-        # and state the retry obligation explicitly.
+        # and state the retry obligation explicitly. Covers both retry
+        # counters: test_retries (inconclusive/failed/requirer) and
+        # skip_retries (agent reported TEST_STATUS: skipped) — both leave a
+        # prior round in the resumed session that the agent would cite.
         test_retries_before = int(wf.get("test_retries", 0) or 0)
+        skip_retries_before = int(wf.get("skip_retries", 0) or 0)
+        retry_round = max(test_retries_before, skip_retries_before)
         test_session_line = "test"
-        if test_retries_before > 0:
+        if retry_round > 0:
             test_session_line = "fresh"
             test_prompt += (
                 "## 重试指令\n"
-                f"上一轮验证未通过证据门（第 {test_retries_before} 次重试：未捕获到可识别的新测试输出）。"
+                f"这是第 {retry_round} 次重试：上一轮的验证结果未被采信"
+                "（未捕获到可识别的新测试输出，或结果不可用/被跳过）。"
                 "本轮必须：\n"
                 "1. 重新执行验证矩阵中的测试命令，并在回复中包含每条命令的原始输出；\n"
                 "2. 不得引用之前回合的结果作为本轮验证证据；\n"

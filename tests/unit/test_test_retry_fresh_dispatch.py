@@ -29,7 +29,8 @@ _STRUCTURED = (
 _PASSING_TOOL = "app.modules.workspace.autonomous.orchestrator._has_passing_test_tool_result"
 _TEST_REPO = "app.repositories.test_evidence_repo.TestExecutionEvidenceRepository"
 
-RETRY_BLOCK_MARKER = "上一轮验证未通过证据门"
+RETRY_BLOCK_MARKER = "这是第"
+RETRY_BLOCK_TAIL = "次重试：上一轮的验证结果未被采信"
 
 
 def _workflow(**overrides):
@@ -58,13 +59,13 @@ def _workflow(**overrides):
     return base
 
 
-def _dispatch(test_retries: int) -> dict:
+def _dispatch(**overrides) -> dict:
     """Drive ``_run_test_phase`` once; return the ``_run_agent`` kwargs."""
     from app.modules.workspace.autonomous.command_evidence.types import ExecutionVerdict
     from app.modules.workspace.autonomous.models import AgentTaskResult
     from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
-    wf = _workflow(test_retries=test_retries)
+    wf = _workflow(**overrides)
     with (
         patch("app.modules.workspace.autonomous.orchestrator.Database"),
         patch(
@@ -129,7 +130,21 @@ def test_retry_dispatches_fresh_session_with_retry_instructions():
     kwargs = _dispatch(test_retries=1)
     assert kwargs["session_line"] == "fresh"
     prompt = kwargs["prompt"]
-    assert RETRY_BLOCK_MARKER in prompt
+    assert f"{RETRY_BLOCK_MARKER} 1 {RETRY_BLOCK_TAIL}" in prompt
     # The instruction must demand re-execution and forbid citing prior rounds.
     assert "重新执行" in prompt
     assert "不得引用之前回合" in prompt
+
+
+def test_second_retry_also_fresh():
+    kwargs = _dispatch(test_retries=2)
+    assert kwargs["session_line"] == "fresh"
+    assert f"{RETRY_BLOCK_MARKER} 2 {RETRY_BLOCK_TAIL}" in kwargs["prompt"]
+
+
+def test_skip_retry_also_fresh():
+    """skip_retries (agent reported TEST_STATUS: skipped) shares the same
+    cite-prior-round failure mode — its one retry must also run fresh."""
+    kwargs = _dispatch(test_retries=0, skip_retries=1)
+    assert kwargs["session_line"] == "fresh"
+    assert f"{RETRY_BLOCK_MARKER} 1 {RETRY_BLOCK_TAIL}" in kwargs["prompt"]
