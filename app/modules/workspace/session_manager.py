@@ -904,7 +904,11 @@ class SessionManager:
         conn.commit()
         conn.close()
 
-        if success and session.status in (SessionStatus.COMPLETED.value, SessionStatus.STOPPED.value, SessionStatus.ERROR.value):
+        if success and session.status in (
+            SessionStatus.COMPLETED.value,
+            SessionStatus.STOPPED.value,
+            SessionStatus.ERROR.value,
+        ):
             try:
                 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 
