@@ -130,6 +130,7 @@ export interface CreateRemoteSessionRequest {
   model?: string;
   title?: string;
   ha_pool_token?: string;
+  permission_mode?: string; // Issue #2591: Permission mode for tool calls
 }
 
 export interface SessionModelsResponse {
