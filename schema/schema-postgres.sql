@@ -592,6 +592,13 @@ CREATE SEQUENCE compliance_reports_id_seq
     CACHE 1;
 
 ALTER SEQUENCE compliance_reports_id_seq OWNED BY compliance_reports.id;
+CREATE TABLE config_import_state (
+    config_key character varying(64) NOT NULL,
+    state character varying(32) NOT NULL,
+    source character varying(255),
+    imported_at timestamp without time zone DEFAULT now() NOT NULL
+);
+
 CREATE TABLE consistency_violations (
     id integer NOT NULL,
     tenant_id integer,
@@ -732,6 +739,32 @@ CREATE SEQUENCE daily_usage_id_seq
     CACHE 1;
 
 ALTER SEQUENCE daily_usage_id_seq OWNED BY daily_usage.id;
+CREATE TABLE dingtalk_settings (
+    app_key character varying(255),
+    app_secret_enc text,
+    fallback_webhook_secret_enc text,
+    sync_enabled boolean DEFAULT false NOT NULL,
+    target_tenant_id integer,
+    interval_minutes integer DEFAULT 60 NOT NULL,
+    root_dept_id character varying(255) DEFAULT '1'::character varying NOT NULL,
+    max_runtime_seconds integer DEFAULT 1800 NOT NULL,
+    auto_recovery boolean DEFAULT false NOT NULL,
+    id integer NOT NULL,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_dingtalk_settings_singleton CHECK ((id = 1))
+);
+
+CREATE SEQUENCE dingtalk_settings_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE dingtalk_settings_id_seq OWNED BY dingtalk_settings.id;
 CREATE TABLE email_notification_logs (
     id integer NOT NULL,
     user_id integer NOT NULL,
@@ -755,6 +788,30 @@ CREATE SEQUENCE email_notification_logs_id_seq
     CACHE 1;
 
 ALTER SEQUENCE email_notification_logs_id_seq OWNED BY email_notification_logs.id;
+CREATE TABLE feishu_settings (
+    app_id character varying(255) NOT NULL,
+    app_secret_enc text NOT NULL,
+    sync_enabled boolean DEFAULT false NOT NULL,
+    target_tenant_id integer,
+    interval_minutes integer DEFAULT 60 NOT NULL,
+    max_runtime_seconds integer DEFAULT 1800 NOT NULL,
+    auto_recovery boolean DEFAULT false NOT NULL,
+    id integer NOT NULL,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_feishu_settings_singleton CHECK ((id = 1))
+);
+
+CREATE SEQUENCE feishu_settings_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE feishu_settings_id_seq OWNED BY feishu_settings.id;
 CREATE SEQUENCE fencing_token_seq
     START WITH 1
     INCREMENT BY 1
@@ -2144,6 +2201,26 @@ CREATE SEQUENCE webhook_deliveries_id_seq
     CACHE 1;
 
 ALTER SEQUENCE webhook_deliveries_id_seq OWNED BY webhook_deliveries.id;
+CREATE TABLE webhook_settings (
+    webhook_secret_enc text,
+    allow_private_webhook_urls boolean DEFAULT false NOT NULL,
+    enabled boolean DEFAULT true NOT NULL,
+    id integer NOT NULL,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_webhook_settings_singleton CHECK ((id = 1))
+);
+
+CREATE SEQUENCE webhook_settings_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE webhook_settings_id_seq OWNED BY webhook_settings.id;
 CREATE TABLE workflow_events (
     id integer NOT NULL,
     workflow_id character varying(36) NOT NULL,
@@ -2250,7 +2327,11 @@ ALTER TABLE ONLY daily_messages ALTER COLUMN id SET DEFAULT nextval('daily_messa
 
 ALTER TABLE ONLY daily_usage ALTER COLUMN id SET DEFAULT nextval('daily_usage_id_seq'::regclass);
 
+ALTER TABLE ONLY dingtalk_settings ALTER COLUMN id SET DEFAULT nextval('dingtalk_settings_id_seq'::regclass);
+
 ALTER TABLE ONLY email_notification_logs ALTER COLUMN id SET DEFAULT nextval('email_notification_logs_id_seq'::regclass);
+
+ALTER TABLE ONLY feishu_settings ALTER COLUMN id SET DEFAULT nextval('feishu_settings_id_seq'::regclass);
 
 ALTER TABLE ONLY insights_reports ALTER COLUMN id SET DEFAULT nextval('insights_reports_id_seq'::regclass);
 
@@ -2354,6 +2435,8 @@ ALTER TABLE ONLY web_user_auth_sessions ALTER COLUMN id SET DEFAULT nextval('web
 
 ALTER TABLE ONLY webhook_deliveries ALTER COLUMN id SET DEFAULT nextval('webhook_deliveries_id_seq'::regclass);
 
+ALTER TABLE ONLY webhook_settings ALTER COLUMN id SET DEFAULT nextval('webhook_settings_id_seq'::regclass);
+
 ALTER TABLE ONLY workflow_events ALTER COLUMN id SET DEFAULT nextval('workflow_events_id_seq'::regclass);
 
 ALTER TABLE ONLY workflow_milestones ALTER COLUMN id SET DEFAULT nextval('workflow_milestones_id_seq'::regclass);
@@ -2442,6 +2525,9 @@ ALTER TABLE ONLY compliance_reports
 ALTER TABLE ONLY compliance_reports
     ADD CONSTRAINT compliance_reports_report_id_key UNIQUE (report_id);
 
+ALTER TABLE ONLY config_import_state
+    ADD CONSTRAINT config_import_state_pkey PRIMARY KEY (config_key);
+
 ALTER TABLE ONLY consistency_violations
     ADD CONSTRAINT consistency_violations_pkey PRIMARY KEY (id);
 
@@ -2454,8 +2540,14 @@ ALTER TABLE ONLY daily_messages
 ALTER TABLE ONLY daily_usage
     ADD CONSTRAINT daily_usage_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY dingtalk_settings
+    ADD CONSTRAINT dingtalk_settings_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY email_notification_logs
     ADD CONSTRAINT email_notification_logs_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY feishu_settings
+    ADD CONSTRAINT feishu_settings_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY insights_reports
     ADD CONSTRAINT insights_reports_pkey PRIMARY KEY (id);
@@ -2750,6 +2842,9 @@ ALTER TABLE ONLY web_user_auth_sessions
 
 ALTER TABLE ONLY webhook_deliveries
     ADD CONSTRAINT webhook_deliveries_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY webhook_settings
+    ADD CONSTRAINT webhook_settings_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY workflow_events
     ADD CONSTRAINT workflow_events_pkey PRIMARY KEY (id);

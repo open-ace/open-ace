@@ -138,20 +138,15 @@ const APIKeyManagement = lazy(() =>
     default: m.APIKeyManagement,
   }))
 );
-const SmtpConfig = lazy(() =>
-  import('@/components/features/management/SmtpConfig').then((m) => ({
-    default: m.SmtpConfig,
-  }))
-);
 // model-gateway (removable)
 const ModelGatewayConfig = lazy(() =>
   import('@/components/features/management/ModelGatewayConfig').then((m) => ({
     default: m.ModelGatewayConfig,
   }))
 );
-const FeishuConfig = lazy(() =>
-  import('@/components/features/settings/FeishuConfig').then((m) => ({
-    default: m.FeishuConfig,
+const NotificationIntegration = lazy(() =>
+  import('@/components/features/settings/NotificationIntegration').then((m) => ({
+    default: m.NotificationIntegration,
   }))
 );
 const ForceChangePasswordModal = lazy(() =>
@@ -363,9 +358,26 @@ const ManageRoutes: React.FC = () => {
           <Route path="settings/sso" element={<SSOSettings />} />
           <Route path="settings/api-keys" element={<APIKeyManagement />} />
           <Route path="settings/ai-agent" element={<AiAgentSettings />} />
-          <Route path="settings/smtp" element={<SmtpConfig />} />
+          <Route path="settings/notification-integration" element={<NotificationIntegration />} />
+          <Route
+            path="settings/smtp"
+            element={
+              <Navigate
+                to="/manage/settings/notification-integration?section=channels&channel=email"
+                replace
+              />
+            }
+          />
           <Route path="settings/model-gateway" element={<ModelGatewayConfig />} />
-          <Route path="settings/feishu" element={<FeishuConfig />} />
+          <Route
+            path="settings/feishu"
+            element={
+              <Navigate
+                to="/manage/settings/notification-integration?section=collaboration&platform=feishu"
+                replace
+              />
+            }
+          />
 
           {/* Default */}
           <Route path="*" element={<Navigate to="/manage/dashboard" replace />} />
