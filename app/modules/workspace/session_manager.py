@@ -130,6 +130,7 @@ class SessionStatus(Enum):
     ACTIVE = "active"
     PAUSED = "paused"
     COMPLETED = "completed"
+    STOPPED = "stopped"
     ERROR = "error"
 
 
@@ -903,7 +904,7 @@ class SessionManager:
         conn.commit()
         conn.close()
 
-        if success and session.status in (SessionStatus.COMPLETED.value, SessionStatus.ERROR.value):
+        if success and session.status in (SessionStatus.COMPLETED.value, SessionStatus.STOPPED.value, SessionStatus.ERROR.value):
             try:
                 from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
 
@@ -1956,6 +1957,66 @@ class SessionManager:
 
         if success:
             logger.info(f"Completed session: {session_id}")
+        return success
+
+    def stop_session(self, session_id: str, tenant_id: int | None = None) -> bool:
+        """
+        Mark a session as stopped (user-initiated termination).
+
+        Idempotent: calling multiple times has the same effect.
+
+        Args:
+            session_id: Session ID to stop.
+
+        Returns:
+            bool: True if successful or already in terminal state.
+        """
+        session = self.get_session(session_id)
+        if not session:
+            return False
+
+        # Idempotency: already in terminal state
+        if session.status in (
+            SessionStatus.STOPPED.value,
+            SessionStatus.COMPLETED.value,
+            SessionStatus.ERROR.value,
+        ):
+            logger.info(f"Session {session_id} already in terminal state: {session.status}")
+            return True
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        tenant_clause, tenant_params = self._tenant_scope_condition(
+            cursor, "agent_sessions", tenant_id
+        )
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now_iso = now.isoformat()
+
+        cursor.execute(
+            f"""
+            UPDATE agent_sessions
+            SET status = {_param()}, completed_at = {_param()}, updated_at = {_param()}
+            WHERE session_id = {_param()}{tenant_clause}
+        """,
+            (SessionStatus.STOPPED.value, now_iso, now_iso, session_id, *tenant_params),
+        )
+
+        success = cursor.rowcount > 0
+        conn.commit()
+        conn.close()
+
+        if success:
+            try:
+                from app.modules.workspace.api_key_proxy import get_api_key_proxy_service
+
+                get_api_key_proxy_service().revoke_proxy_tokens_for_session(
+                    session_id,
+                    reason="session_stopped",
+                )
+            except Exception as e:
+                logger.warning("Failed to revoke proxy tokens for session %s: %s", session_id, e)
+            logger.info(f"Stopped session: {session_id}")
         return success
 
     def delete_session(self, session_id: str, tenant_id: int | None = None) -> bool:

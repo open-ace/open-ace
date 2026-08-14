@@ -2482,7 +2482,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           <div>
             <div className="mb-3">
               <strong>{t('status', language)}:</strong>{' '}
-              <Badge variant={session.status === 'completed' ? 'success' : 'primary'}>
+              <Badge variant={session.status === 'completed' ? 'success' : session.status === 'stopped' ? 'warning' : 'primary'}>
                 {session.status}
               </Badge>
             </div>
