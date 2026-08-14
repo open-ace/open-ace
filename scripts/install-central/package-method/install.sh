@@ -2910,7 +2910,7 @@ configure_scheduler_service() {
     web_unit=$(systemctl show open-ace.service -p FragmentPath --value 2>/dev/null)
     [ -n "$web_unit" ] && [ -f "$web_unit" ] || web_unit="/etc/systemd/system/open-ace.service"
 
-    local cs_user cs_group cs_path cs_python cs_home cs_secret cs_workspace
+    local cs_user cs_group cs_path cs_python cs_home cs_secret cs_workspace cs_security_mode
     cs_user=$(grep '^User=' "$web_unit" | tail -1 | cut -d= -f2)
     cs_group=$(grep '^Group=' "$web_unit" | tail -1 | cut -d= -f2)
     cs_path=$(grep '^WorkingDirectory=' "$web_unit" | tail -1 | cut -d= -f2)
@@ -2920,6 +2920,9 @@ configure_scheduler_service() {
     cs_secret=$(grep '^Environment=SECRET_KEY=' "$web_unit" | tail -1 | cut -d= -f3)
     cs_workspace=$(grep '^Environment=WORKSPACE_BASE_DIR=' "$web_unit" | tail -1 | cut -d= -f3)
     cs_home=$(grep '^Environment=HOME=' "$web_unit" | tail -1 | cut -d= -f3)
+    # Issue #2654: Inherit OPENACE_SECURITY_MODE from the web service unit
+    cs_security_mode=$(grep '^Environment=OPENACE_SECURITY_MODE=' "$web_unit" | tail -1 | cut -d= -f3)
+    [ -n "$cs_security_mode" ] || cs_security_mode="production"
     [ -n "$cs_group" ] || cs_group=$(id -gn "$cs_user" 2>/dev/null || echo "$cs_user")
     [ -n "$cs_home" ] || cs_home=$(getent passwd "$cs_user" | cut -d: -f6)
     [ -n "$cs_workspace" ] || cs_workspace="/home"
@@ -2932,6 +2935,7 @@ configure_scheduler_service() {
         -e "s|__HOME__|$cs_home|g" \
         -e "s|__SECRET_KEY__|$cs_secret|g" \
         -e "s|__WORKSPACE_BASE_DIR__|$cs_workspace|g" \
+        -e "s|__SECURITY_MODE__|$cs_security_mode|g" \
         "$scheduler_template" > "$scheduler_file" || {
         print_warning "Failed to render $scheduler_file; scheduler service not updated"
         return 1
@@ -3030,6 +3034,11 @@ install_systemd_service() {
     local enc_key="${OPENACE_ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
     print_info "Generated OPENACE_ENCRYPTION_KEY for sensitive data encryption"
 
+    # Issue #2654: OPENACE_SECURITY_MODE is required by create_app() in
+    # production-capable paths (systemd, Docker, K8s). Default to production
+    # for systemd deployments; can be overridden via environment variable.
+    local security_mode="${OPENACE_SECURITY_MODE:-production}"
+
     # Create service file from template
     print_info "Creating systemd service file..."
     sed -e "s|__USER__|$user|g" \
@@ -3042,6 +3051,7 @@ install_systemd_service() {
         -e "s|__SECRET_KEY__|$secret_key|g" \
         -e "s|__OPENACE_ENCRYPTION_KEY__|$enc_key|g" \
         -e "s|__WORKSPACE_BASE_DIR__|$WORKSPACE_BASE_DIR|g" \
+        -e "s|__SECURITY_MODE__|$security_mode|g" \
         "$service_template" > "$service_file"
 
     if [ $? -ne 0 ]; then
@@ -3150,6 +3160,9 @@ install_systemd_service_remote() {
     local enc_key="${OPENACE_ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
     print_info "Generated OPENACE_ENCRYPTION_KEY for sensitive data encryption"
 
+    # Issue #2654: OPENACE_SECURITY_MODE required by create_app()
+    local security_mode="${OPENACE_SECURITY_MODE:-production}"
+
     # Generate service file content locally using sed
     local service_content=$(sed -e "s|__USER__|$user|g" \
         -e "s|__GROUP__|$group|g" \
@@ -3161,6 +3174,7 @@ install_systemd_service_remote() {
         -e "s|__SECRET_KEY__|$secret_key|g" \
         -e "s|__OPENACE_ENCRYPTION_KEY__|$enc_key|g" \
         -e "s|__WORKSPACE_BASE_DIR__|$WORKSPACE_BASE_DIR|g" \
+        -e "s|__SECURITY_MODE__|$security_mode|g" \
         "$service_template")
 
     # If multi-user workspace mode is enabled, allow sudo (set NoNewPrivileges=false)
@@ -4070,6 +4084,17 @@ install_local() {
                 local enc_key="${OPENACE_ENCRYPTION_KEY:-$current_secret}"
                 sed -i "/^Environment=SECRET_KEY=/a Environment=OPENACE_ENCRYPTION_KEY=$enc_key" "$service_file"
                 print_info "Initialized OPENACE_ENCRYPTION_KEY from the existing encryption secret (Issue #2626)"
+            fi
+
+            # Issue #2654: Inject OPENACE_SECURITY_MODE if missing (PR #2446 follow-up)
+            # create_app() requires this env var in production-capable paths (systemd).
+            # Existing service files created before PR #2446 won't have it.
+            local has_security_mode=$(grep -q "^Environment=OPENACE_SECURITY_MODE=" "$service_file" 2>/dev/null && echo "yes" || echo "no")
+            if [ "$has_security_mode" = "no" ]; then
+                local security_mode="${OPENACE_SECURITY_MODE:-production}"
+                print_warning "Adding missing OPENACE_SECURITY_MODE to systemd service..."
+                sed -i "/^Environment=WORKSPACE_BASE_DIR=/a Environment=OPENACE_SECURITY_MODE=$security_mode" "$service_file"
+                print_info "Set OPENACE_SECURITY_MODE=$security_mode (Issue #2654)"
             fi
         fi
 
