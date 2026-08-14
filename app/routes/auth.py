@@ -245,7 +245,8 @@ def _refresh_auth_session(token: str) -> int | None:
         logger.debug(
             f"Session refresh check: remaining={remaining / 60:.1f}min, threshold={threshold / 60:.1f}min"
         )
-        # Do not refresh if session is already expired (remaining <= 0) or has plenty of time left (remaining > threshold)
+        # Do not refresh if session is already expired (remaining <= 0)
+        # or has plenty of time left (remaining > threshold)
         if remaining <= 0 or remaining > threshold:
             logger.debug(
                 f"Session not refreshed: remaining ({remaining / 60:.1f}min), threshold ({threshold / 60:.1f}min)"
