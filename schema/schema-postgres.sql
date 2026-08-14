@@ -2879,6 +2879,14 @@ CREATE INDEX idx_agent_approvals_status ON agent_approvals USING btree (status);
 --
 --
 
+CREATE INDEX idx_approval_log_rule_time ON filter_rule_approval_log USING btree (rule_id, "timestamp");
+
+CREATE INDEX idx_approval_log_tenant_time ON filter_rule_approval_log USING btree (tenant_id, "timestamp");
+
+
+--
+--
+
 CREATE UNIQUE INDEX idx_agent_runs_session_id ON agent_runs USING btree (session_id);
 
 CREATE INDEX idx_agent_runs_status ON agent_runs USING btree (status);
@@ -3056,6 +3064,14 @@ CREATE INDEX idx_consistency_violations_status ON consistency_violations USING b
 --
 
 CREATE INDEX idx_consistency_violations_tenant ON consistency_violations USING btree (tenant_id);
+
+CREATE INDEX idx_cache_sync_unprocessed ON rule_cache_sync USING btree (processed, "timestamp");
+
+CREATE INDEX idx_cache_sync_tenant_unprocessed ON rule_cache_sync USING btree (tenant_id, processed, "timestamp");
+
+
+--
+--
 
 CREATE INDEX idx_daily_messages_orphan ON daily_messages USING btree (date) WHERE (tenant_id IS NULL);
 
@@ -3410,6 +3426,8 @@ CREATE INDEX idx_registration_tokens_hash ON registration_tokens USING btree (to
 CREATE INDEX idx_remote_machines_hostname_tenant ON remote_machines USING btree (hostname, tenant_id);
 
 CREATE INDEX idx_remote_machines_machine_id ON remote_machines USING btree (machine_id);
+
+CREATE INDEX idx_rule_versions_rule_version ON filter_rule_versions USING btree (rule_id, version_number);
 
 
 --
