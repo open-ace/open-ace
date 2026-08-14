@@ -32,8 +32,8 @@ def get_user_role() -> str | None:
     if not hasattr(g, "user") or g.user is None:
         return None
 
-    # 检查是否是系统管理员
-    if g.user.get("is_platform_admin") or g.user.get("role") == "admin":
+    # 检查是否是系统管理员（平台管理员）
+    if g.user.get("is_platform_admin"):
         return RULE_ROLES["system_admin"]
 
     # 检查角色字段
