@@ -96,6 +96,9 @@ allowed_commands:
       create: [--title, --body, --base, --head, --draft]
       view: [--json]
       merge: [--merge, --squash, --rebase, --auto]
+    admin_merge:
+      enabled: false
+      env_var: "OPENACE_ALLOW_ADMIN_MERGE"
   - command: api
     special_handling: true
 forbidden_commands:
@@ -261,12 +264,9 @@ class TestAdminMergeValidation:
         monkeypatch.setenv("OPENACE_ALLOW_ADMIN_MERGE", "1")
 
         commands_config = load_gh_commands_config(str(temp_config_dir))
-        # Verify the env var mechanism works (result not needed for this test)
-        _ = is_admin_merge_allowed(commands_config)
-
-        # The test config doesn't have admin_merge enabled, so this should still fail
-        # unless we update the config
-        # This test verifies the env var mechanism works
+        # Verify the env var mechanism works - should return True when env var is set
+        is_allowed = is_admin_merge_allowed(commands_config)
+        assert is_allowed
 
 
 class TestApiArgExtraction:
