@@ -5,6 +5,7 @@ Test for issue 74: Restore session button not working
 import asyncio
 import os
 
+import pytest
 from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
@@ -19,6 +20,7 @@ USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
+@pytest.mark.asyncio
 async def test_restore_button():
     """Test that the restore session button works correctly"""
     async with async_playwright() as p:

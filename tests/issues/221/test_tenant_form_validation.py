@@ -22,6 +22,7 @@ import asyncio
 import os
 import sys
 
+import pytest
 from playwright.async_api import async_playwright
 
 # Configuration
@@ -30,6 +31,7 @@ SESSION_TOKEN = os.environ.get("SESSION_TOKEN", "")
 SCREENSHOT_DIR = os.environ.get("SCREENSHOT_DIR", "./screenshots/issues/221")
 
 
+@pytest.mark.asyncio
 async def test_tenant_form_validation():
     """Test Add Tenant dialog form validation"""
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
