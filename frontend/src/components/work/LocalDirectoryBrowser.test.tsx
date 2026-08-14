@@ -239,7 +239,6 @@ describe('LocalDirectoryBrowser', () => {
     });
   });
 
-
   it('downloads a file when clicking the file list item', async () => {
     const blob = new Blob(['content'], { type: 'text/plain' });
     downloadFileMock.mockResolvedValue(blob);
