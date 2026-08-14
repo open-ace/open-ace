@@ -245,9 +245,10 @@ def _refresh_auth_session(token: str) -> int | None:
         logger.debug(
             f"Session refresh check: remaining={remaining / 60:.1f}min, threshold={threshold / 60:.1f}min"
         )
-        if remaining > threshold:
+        # Do not refresh if session is already expired (remaining <= 0) or has plenty of time left (remaining > threshold)
+        if remaining <= 0 or remaining > threshold:
             logger.debug(
-                f"Session not refreshed: remaining ({remaining / 60:.1f}min) > threshold ({threshold / 60:.1f}min)"
+                f"Session not refreshed: remaining ({remaining / 60:.1f}min), threshold ({threshold / 60:.1f}min)"
             )
             return None
 
@@ -278,9 +279,12 @@ def api_auth_check():
     if not token:
         return jsonify({"authenticated": False})
 
-    session = auth_service.get_session(token)
-    if not session:
+    # Use validate_session to check expiration, not just get_session
+    is_valid, session_or_error = auth_service.validate_session(token)
+    if not is_valid:
         return jsonify({"authenticated": False})
+
+    session = session_or_error
 
     # Check if session needs refresh (sliding expiration)
     new_timeout_seconds = _refresh_auth_session(token)
