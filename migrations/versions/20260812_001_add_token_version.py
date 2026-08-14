@@ -18,7 +18,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "20260812_001"
-down_revision = "20260810_002_add_scheduler_lock_tracking"
+down_revision = "20260811_001"
 branch_labels = None
 depends_on = None
 

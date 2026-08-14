@@ -2,6 +2,31 @@
 
 Guidance for Claude Code and human contributors.
 
+## Where process documents go
+
+Fix write-ups, CI post-mortems, implementation summaries, progress snapshots,
+handover notes and per-issue plans go in **`docs/dev-notes/`** — never the
+repository root.
+
+- Name them `<issue>-<slug>.md` (`2437-flock-reclaim-plan.md`) or
+  `<date>-<slug>.md` (`2026-08-11-ci-lint-fix.md`).
+- Do not open a second file for the same effort. There must never be another
+  `..._ROUND2.md` / `..._FINAL.md` / `..._FINAL_VERIFICATION.md` chain —
+  update the existing note instead.
+- Prefer not writing a file at all: a code comment, a docstring, or the PR
+  description is usually the better home. Write a dev-note only when the
+  reasoning must outlive the PR.
+- The repository root keeps only user-facing docs (`README.md`, `CHANGELOG.md`,
+  `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `ROADMAP.md`, `SECURITY.md`) plus AI
+  tool instruction files. Everything else in the root is rejected by
+  `scripts/lint/check_root_docs.py` (pre-commit) and ignored by `.gitignore`.
+
+Why this rule exists: between 2026-08-05 and 08-12 the autonomous pipeline
+committed 23 such files (2,554 lines) to the root. They referenced only each
+other, nothing else referenced them, and they pushed the product README below a
+wall of CI firefighting logs — right as the project received its first external
+visitors. See `docs/dev-notes/README.md`.
+
 ## Test placement and CI semantics
 
 - Choose one canonical location by runtime contract: `tests/unit/`,

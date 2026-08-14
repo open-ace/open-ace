@@ -80,6 +80,8 @@ class AuditAction(Enum):
     AGENT_REGISTER = "agent_register"
     AGENT_TOKEN_ROTATE = "agent_token_rotate"
     AGENT_TOKEN_REVOKE = "agent_token_revoke"
+    AGENT_TOKEN_ROTATE_CONFIRMED = "agent_token_rotate_confirmed"  # Issue #2499
+    AGENT_TOKEN_FORCE_REVOKED = "agent_token_force_revoked"  # Issue #2499
     AGENT_AUTH_FAILURE = "agent_auth_failure"
     AGENT_RECONNECT = "agent_reconnect"
 
@@ -956,6 +958,16 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "agent_reconnect",
                     "label": "Agent Reconnect",
                     "i18n_key": "actionAgentReconnect",
+                },
+                {
+                    "value": "agent_token_rotate_confirmed",
+                    "label": "Token Rotate Confirmed",
+                    "i18n_key": "actionAgentTokenRotateConfirmed",
+                },
+                {
+                    "value": "agent_token_force_revoked",
+                    "label": "Token Force Revoked",
+                    "i18n_key": "actionAgentTokenForceRevoked",
                 },
                 {
                     "value": "usage_report_accepted",
