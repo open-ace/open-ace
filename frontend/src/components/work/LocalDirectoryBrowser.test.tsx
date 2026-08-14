@@ -286,7 +286,7 @@ describe('LocalDirectoryBrowser', () => {
     });
 
     const fileItem = screen.getByText('slow.txt').closest('li')!;
-    
+
     fireEvent.click(fileItem);
     await waitFor(() => {
       expect(downloadFileMock).toHaveBeenCalledTimes(1);
@@ -294,7 +294,7 @@ describe('LocalDirectoryBrowser', () => {
 
     fireEvent.click(fileItem);
     await new Promise((r) => setTimeout(r, 100));
-    
+
     expect(downloadFileMock).toHaveBeenCalledTimes(1);
   });
 
