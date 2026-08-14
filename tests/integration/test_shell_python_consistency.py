@@ -78,7 +78,7 @@ class TestShellPythonConsistency:
 
         # Python detection
         with patch.dict(os.environ, env, clear=False):
-            python_mode = detect_security_mode()
+            python_mode, python_source = detect_security_mode()
 
         # Shell detection
         shell_mode = self.get_shell_security_mode(env)
@@ -94,7 +94,7 @@ class TestShellPythonConsistency:
 
         # Python detection
         with patch.dict(os.environ, env, clear=False):
-            python_mode = detect_security_mode()
+            python_mode, python_source = detect_security_mode()
 
         # Shell detection
         shell_mode = self.get_shell_security_mode(env)
@@ -110,7 +110,7 @@ class TestShellPythonConsistency:
 
         # Python detection
         with patch.dict(os.environ, env, clear=False):
-            python_mode = detect_security_mode()
+            python_mode, python_source = detect_security_mode()
 
         # Shell detection
         shell_mode = self.get_shell_security_mode(env)
@@ -130,7 +130,7 @@ class TestShellPythonConsistency:
         # Python detection
         with patch.dict(os.environ, env, clear=False):
             os.environ.pop("OPENACE_SECURITY_MODE", None)
-            python_mode = detect_security_mode()
+            python_mode, python_source = detect_security_mode()
 
         # Shell detection
         shell_mode = self.get_shell_security_mode(env)
@@ -149,7 +149,7 @@ class TestShellPythonConsistency:
 
         # Python detection
         with patch.dict(os.environ, env, clear=False):
-            python_mode = detect_security_mode()
+            python_mode, python_source = detect_security_mode()
 
         # Shell detection
         shell_mode = self.get_shell_security_mode(env)

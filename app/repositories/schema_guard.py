@@ -305,44 +305,52 @@ def check_schema_compatibility(
         logger.info("Database schema version check passed")
 
 
-def get_environment_mode() -> str:
-    """Determine the current runtime environment mode.
+# Track whether deprecation warning has been logged
+_deprecation_warned = False
 
-    Priority:
-    1. OPENACE_PRODUCTION_MODE=1 → production
-    2. Database type inference (PostgreSQL → production candidate)
-    3. FLASK_ENV=production → production
-    4. Default → development
+
+def get_environment_mode() -> str:
+    """Get environment mode (deprecated - remove in v2.1.0).
+
+    Issue #2331: Compatibility layer maintaining backward compatibility.
+
+    Migration: Use app.utils.security_mode.get_security_mode() instead.
+    This wrapper ensures backward compatibility during migration period.
 
     Returns:
         "production" or "development"
     """
-    # Priority 1: Explicit environment variable
-    if os.environ.get("OPENACE_PRODUCTION_MODE") == "1":
-        return "production"
+    global _deprecation_warned
 
-    # Priority 2: Database type inference
-    # PostgreSQL indicates production candidate, but continue checking other signals
+    # Log deprecation warning once per process
+    if not _deprecation_warned:
+        logger.warning(
+            "get_environment_mode() is deprecated and will be removed in v2.1.0. "
+            "Use app.utils.security_mode.get_security_mode() instead. "
+            "Migration guide: https://github.com/open-ace/open-ace/issues/2331"
+        )
+        _deprecation_warned = True
+
+    # Delegate to unified security mode API
+    from app.utils.security_mode import get_security_mode
+
     try:
-        from app.repositories.database import is_postgresql
-
-        if is_postgresql():
-            return "production"
-    except ImportError:
-        pass
-
-    # Priority 3: Flask environment
-    if os.environ.get("FLASK_ENV") == "production":
-        return "production"
-
-    # Default: development
-    return "development"
+        mode = get_security_mode()
+        return mode.value  # Return string for backward compatibility
+    except RuntimeError:
+        # Re-raise - if security mode detection fails, it's a configuration error
+        # Issue #2331: Fail-closed principle - propagate errors, don't mask them
+        raise
 
 
 def is_production_environment() -> bool:
-    """Check if running in production environment.
+    """Check if running in production environment (deprecated).
+
+    Issue #2331: Use security_mode.is_production() instead.
 
     Returns:
         True if production, False otherwise
     """
-    return get_environment_mode() == "production"
+    from app.utils.security_mode import is_production
+
+    return is_production()

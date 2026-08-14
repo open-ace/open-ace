@@ -15,12 +15,40 @@ forward, remote-sourced move is graph-distinguishable from a local commit.
 """
 
 import subprocess
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.modules.workspace.autonomous.github_ops import GitHubOps
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+
+def _git_is_functional() -> bool:
+    """Check if git can execute repository operations.
+
+    Returns True only if git can successfully initialize a repository.
+    Returns False if git is restricted or not functional.
+    """
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                ["git", "init", "--bare", str(Path(tmp) / "test.git")],
+                capture_output=True,
+                timeout=2,
+            )
+            return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+# Git is required for these integration tests (creates local repos)
+# Skip if git is restricted or not functional
+requires_git = pytest.mark.skipif(
+    not _git_is_functional(),
+    reason="git init is restricted or non-functional - required for repo drift integration tests",
+)
 
 
 def _git(repo, *args, check=True):
@@ -90,6 +118,7 @@ def _make_orchestrator():
     return o
 
 
+@requires_git
 @pytest.mark.regression
 class TestRepoDriftIntegration:
     def test_external_pull_is_allowed(self, tmp_path):

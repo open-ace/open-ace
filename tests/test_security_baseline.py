@@ -8,6 +8,7 @@ Tests cover:
 - Root user authorization checking
 
 Issue #2185: Security mode detection is now in security_mode.py
+Issue #2331: Security mode now returns (mode, source) tuple
 """
 
 import os
@@ -27,7 +28,12 @@ from app.utils.security_baseline import (
 )
 
 # Import from security_mode.py for unified mode detection (Issue #2185)
-from app.utils.security_mode import SecurityMode, detect_security_mode, reset_security_mode_cache
+from app.utils.security_mode import (
+    SecurityMode,
+    SecurityModeSource,
+    detect_security_mode,
+    reset_security_mode_cache,
+)
 
 
 class TestDetectSecurityMode:
@@ -37,46 +43,60 @@ class TestDetectSecurityMode:
         """Test production mode detection from OPENACE_SECURITY_MODE."""
         reset_security_mode_cache()
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
-        assert detect_security_mode() == SecurityMode.PRODUCTION
+        mode, source = detect_security_mode()
+        assert mode == SecurityMode.PRODUCTION
+        assert source == SecurityModeSource.EXPLICIT
 
     def test_pilot_mode_from_openace_security_mode(self, monkeypatch):
         """Test pilot mode detection from OPENACE_SECURITY_MODE."""
         reset_security_mode_cache()
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "pilot")
-        assert detect_security_mode() == SecurityMode.PILOT
+        mode, source = detect_security_mode()
+        assert mode == SecurityMode.PILOT
+        assert source == SecurityModeSource.EXPLICIT
 
     def test_development_mode_from_openace_security_mode(self, monkeypatch):
         """Test development mode detection from OPENACE_SECURITY_MODE."""
         reset_security_mode_cache()
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
-        assert detect_security_mode() == SecurityMode.DEVELOPMENT
+        mode, source = detect_security_mode()
+        assert mode == SecurityMode.DEVELOPMENT
+        assert source == SecurityModeSource.EXPLICIT
 
     def test_production_mode_from_flask_env(self, monkeypatch):
         """Test production mode detection from FLASK_ENV (backward compatibility)."""
         reset_security_mode_cache()
         monkeypatch.delenv("OPENACE_SECURITY_MODE", raising=False)
         monkeypatch.setenv("FLASK_ENV", "production")
-        assert detect_security_mode() == SecurityMode.PRODUCTION
+        mode, source = detect_security_mode()
+        assert mode == SecurityMode.PRODUCTION
+        assert source == SecurityModeSource.INFERRED_FLASK_ENV
 
     def test_openace_security_mode_priority_over_flask_env(self, monkeypatch):
         """Test OPENACE_SECURITY_MODE has priority over FLASK_ENV."""
         reset_security_mode_cache()
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
         monkeypatch.setenv("FLASK_ENV", "production")
-        assert detect_security_mode() == SecurityMode.DEVELOPMENT
+        mode, source = detect_security_mode()
+        assert mode == SecurityMode.DEVELOPMENT
+        assert source == SecurityModeSource.EXPLICIT
 
     def test_default_mode_returns_development(self, monkeypatch):
         """Test default returns development mode when not configured (Issue #2185 backward compat)."""
         reset_security_mode_cache()
         monkeypatch.delenv("OPENACE_SECURITY_MODE", raising=False)
         monkeypatch.delenv("FLASK_ENV", raising=False)
-        assert detect_security_mode() == SecurityMode.DEVELOPMENT
+        mode, source = detect_security_mode()
+        assert mode == SecurityMode.DEVELOPMENT
+        assert source == SecurityModeSource.DEFAULT
 
     def test_case_insensitive_mode_detection(self, monkeypatch):
         """Test case-insensitive mode detection."""
         reset_security_mode_cache()
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "PRODUCTION")
-        assert detect_security_mode() == SecurityMode.PRODUCTION
+        mode, source = detect_security_mode()
+        assert mode == SecurityMode.PRODUCTION
+        assert source == SecurityModeSource.EXPLICIT
 
 
 class TestForbiddenPasswords:

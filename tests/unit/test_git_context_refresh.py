@@ -10,11 +10,38 @@ gitdir identity at lifecycle entry points.
 import os
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 
 import pytest
 
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+
+def _git_is_functional() -> bool:
+    """Check if git can execute repository operations.
+
+    Returns True only if git can successfully initialize a repository.
+    Returns False if git is restricted or not functional.
+    """
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                ["git", "init", "--bare", str(Path(tmp) / "test.git")],
+                capture_output=True,
+                timeout=2,
+            )
+            return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+# Skip all tests in this module if git is not functional
+pytestmark = pytest.mark.skipif(
+    not _git_is_functional(),
+    reason="git init is restricted or non-functional - required for git context refresh tests",
+)
 
 
 @pytest.fixture

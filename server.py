@@ -55,6 +55,19 @@ from app.repositories.database import DB_PATH, get_database_url, is_postgresql
 from scripts.shared.config import WEB_HOST, WEB_PORT
 
 if __name__ == "__main__":
+    # Issue #2331: Local development mode injection
+    # If OPENACE_SECURITY_MODE is not set or empty, inject development mode
+    # This allows local development without explicit configuration
+    current_mode = os.environ.get("OPENACE_SECURITY_MODE", "").strip()
+    if not current_mode:
+        print("=" * 60)
+        print("  LOCAL DEVELOPMENT MODE")
+        print("  Setting OPENACE_SECURITY_MODE=development")
+        print("  For production: set OPENACE_SECURITY_MODE explicitly")
+        print("=" * 60)
+        os.environ["OPENACE_SECURITY_MODE"] = "development"
+    # else: respect explicit mode (allows testing production mode locally)
+
     print(f"Starting Open ACE on {WEB_HOST}:{WEB_PORT}")
     if is_postgresql():
         # Hide password in URL for display
