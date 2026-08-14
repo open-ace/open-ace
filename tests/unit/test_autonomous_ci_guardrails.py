@@ -2623,3 +2623,140 @@ def test_review_fix_genuine_failure_does_not_trigger_fresh_retry():
     assert orch._run_agent_with_context_recovery.call_count == 1
     milestone_update = orch.repo.update_milestone.call_args.args[1]
     assert "agent failed" in milestone_update["error_message"]
+
+
+# ── #2529: system-layer resume-noop fresh-retry ──────────────────────────
+#
+# Root cause (confirmed): a --resumed stream-json agent whose stale background
+# shell re-injects a <status>stopped</status> notification causes the provider
+# to emit a terminal result event WITHOUT an assistant turn. The controller
+# sees success=True, 0 tokens, empty artifact_text. The per-agent backstops
+# (#2570 summary / #2611 pr_review fix) only cover two call sites; this backstop
+# lives in _run_agent_with_context_recovery so EVERY resumed agent line is
+# covered. When a resumed (non-fresh) line returns success-but-empty, retry
+# ONCE on a fresh session. Guards: retry once only, never retry genuine
+# failures/overflow/integrity.
+
+
+def _make_recovery_orchestrator():
+    """Minimal AutonomousOrchestrator for _run_agent_with_context_recovery
+    resume-noop tests: _run_agent behaviour is set per-test via side_effect."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-2529"
+    orch.repo = MagicMock()
+    orch.repo.get_workflow.return_value = {}
+    orch._accumulate_tokens = MagicMock()
+    orch._is_context_overflow = MagicMock(return_value=False)
+    orch._update_workflow = MagicMock()
+    orch._runner = MagicMock()
+    return orch
+
+
+@pytest.mark.regression
+@pytest.mark.issue(2529)
+def test_resumed_empty_success_retries_fresh_and_returns_nonempty():
+    """#2529: a resumed main line that returns success+empty (0 tokens) is a
+    resume-noop. _run_agent_with_context_recovery retries ONCE on a fresh
+    session; the fresh run's non-empty result is returned."""
+    orch = _make_recovery_orchestrator()
+    empty_resume = AgentTaskResult(success=True, response_text="", total_tokens=0)
+    fresh_ok = AgentTaskResult(success=True, response_text="did the work", total_tokens=42)
+    orch._run_agent = MagicMock(side_effect=[empty_resume, fresh_ok])
+
+    result = orch._run_agent_with_context_recovery(
+        wf={"main_session_id": "track-main"},
+        session_line="main",
+        prompt="do X",
+    )
+
+    assert result.success is True
+    assert result.response_text == "did the work"
+    # Agent ran twice: resumed main (empty) + fresh (non-empty).
+    assert orch._run_agent.call_count == 2
+    # The retry (2nd call) must start a fresh provider transcript.
+    retry_kwargs = orch._run_agent.call_args_list[1].kwargs
+    assert retry_kwargs.get("force_fresh") is True
+    # Same line id / prompt (not a different task).
+    first_kwargs = orch._run_agent.call_args_list[0].kwargs
+    assert retry_kwargs.get("prompt") == first_kwargs.get("prompt")
+
+
+@pytest.mark.regression
+@pytest.mark.issue(2529)
+def test_resumed_empty_success_retries_once_even_if_still_empty():
+    """#2529 guard: the fresh retry happens at most ONCE. If the retry also
+    returns empty, return that empty result (do NOT loop)."""
+    orch = _make_recovery_orchestrator()
+    empty_resume = AgentTaskResult(success=True, response_text="", total_tokens=0)
+    empty_fresh = AgentTaskResult(success=True, response_text="   ", total_tokens=0)
+    orch._run_agent = MagicMock(side_effect=[empty_resume, empty_fresh])
+
+    result = orch._run_agent_with_context_recovery(
+        wf={"main_session_id": "track-main"},
+        session_line="main",
+        prompt="do X",
+    )
+
+    # Only two runs (resumed + one fresh retry) — no third attempt.
+    assert orch._run_agent.call_count == 2
+    assert result.success is True
+    assert result.response_text.strip() == ""
+
+
+@pytest.mark.regression
+@pytest.mark.issue(2529)
+def test_genuine_failure_not_retried():
+    """#2529 guard: a real failure (success=False) is NOT retried. The existing
+    failure path handles it; the backstop is reserved for success-but-empty."""
+    orch = _make_recovery_orchestrator()
+    failed = AgentTaskResult(success=False, error="agent exited 1")
+    orch._run_agent = MagicMock(return_value=failed)
+
+    result = orch._run_agent_with_context_recovery(
+        wf={"main_session_id": "track-main"},
+        session_line="main",
+        prompt="do X",
+    )
+
+    assert result.success is False
+    assert orch._run_agent.call_count == 1
+
+
+@pytest.mark.regression
+@pytest.mark.issue(2529)
+def test_already_fresh_empty_not_retried():
+    """#2529 guard: a session_line="fresh" run that returns empty is not
+    retried again — there is no resume to no-op on, so retrying would loop."""
+    orch = _make_recovery_orchestrator()
+    empty_fresh = AgentTaskResult(success=True, response_text="", total_tokens=0)
+    orch._run_agent = MagicMock(return_value=empty_fresh)
+
+    result = orch._run_agent_with_context_recovery(
+        wf={},
+        session_line="fresh",
+        prompt="do X",
+    )
+
+    assert result.response_text == ""
+    assert orch._run_agent.call_count == 1
+
+
+@pytest.mark.regression
+@pytest.mark.issue(2529)
+def test_resumed_nonempty_success_not_retried():
+    """#2529 guard: a resumed line that returns NON-empty success is a normal
+    run — no retry."""
+    orch = _make_recovery_orchestrator()
+    ok = AgentTaskResult(success=True, response_text="real work done", total_tokens=100)
+    orch._run_agent = MagicMock(return_value=ok)
+
+    result = orch._run_agent_with_context_recovery(
+        wf={"review_session_id": "track-review"},
+        session_line="review",
+        prompt="do X",
+    )
+
+    assert result.response_text == "real work done"
+    assert orch._run_agent.call_count == 1

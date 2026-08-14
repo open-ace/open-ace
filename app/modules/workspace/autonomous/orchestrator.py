@@ -6708,6 +6708,45 @@ class AutonomousOrchestrator:
             **kwargs,
         )
         if not self._is_context_overflow(result):
+            # Resume-noop backstop (#2618, system layer). A --resumed stream-json
+            # agent whose stale background shell re-injects a <status>stopped</status>
+            # notification can terminally report success with 0 tokens and empty
+            # artifact text (the provider emits a result event with no assistant
+            # turn). The per-agent backstops in pr_review.py (#2570) and
+            # _apply_pr_review_fix (#2611) cover only two call sites; this lower-
+            # level guard covers EVERY resumed line. Retry ONCE on a fresh
+            # transcript (same prompt/line id) so the real prompt is actually
+            # processed. Guards: only when resumed (named line, not already
+            # force_fresh), only for success-but-empty with no tokens, and at
+            # most once (force_fresh=True on the retry prevents re-entry).
+            line_field = SESSION_LINE_FIELDS.get(session_line)
+            if (
+                line_field
+                and not kwargs.get("force_fresh")
+                and result.success
+                and not self._artifact_text(result).strip()
+                and int(result.total_tokens or 0) == 0
+            ):
+                self._accumulate_tokens(result)
+                logger.warning(
+                    "Workflow %s: resumed session line %s returned success with "
+                    "no artifact (resume no-op); retrying once on a fresh session",
+                    self._workflow_id[:8],
+                    session_line,
+                )
+                return self._run_agent(
+                    wf=wf,
+                    session_line=session_line,
+                    milestone_id=milestone_id,
+                    force_fresh=True,
+                    prior_usage={
+                        "total_tokens": int(result.total_tokens or 0),
+                        "total_input_tokens": int(result.total_input_tokens or 0),
+                        "total_output_tokens": int(result.total_output_tokens or 0),
+                        "request_count": int(result.request_count or 0),
+                    },
+                    **{k: v for k, v in kwargs.items() if k not in ("force_fresh", "prior_usage")},
+                )
             return result
 
         field = SESSION_LINE_FIELDS.get(session_line)
