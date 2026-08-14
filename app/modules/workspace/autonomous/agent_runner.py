@@ -3897,6 +3897,25 @@ class AutonomousAgentRunner:
                     )
                     if getattr(stored, "_was_inserted", False):
                         persisted_count += 1
+
+                    # Extract file changes from tool_use events (Issue #2589)
+                    try:
+                        from scripts.shared.file_change_parser import extract_file_changes
+                        changes = extract_file_changes(
+                            {"name": event.get("tool_name"), "input": tool_input},
+                            self.project_path,
+                        )
+                        if changes:
+                            self.session_manager.append_transcript_message(
+                                session_id=session_id,
+                                role="assistant",
+                                content="",
+                                metadata={"content_blocks": [{"type": "file_change", "changes": changes, "status": "accepted"}]},
+                                milestone_id=milestone_id,
+                                source="file_change_parser",
+                            )
+                    except Exception as e:
+                        logger.debug(f"Failed to extract file changes: {e}")
             if final_assistant:
                 assistant_content = pick_best_artifact_text(
                     final_assistant.get("text", ""),
