@@ -2766,6 +2766,28 @@ def agent_message():
                 # message_count itself — otherwise remote-synced sessions
                 # never reflect their imported messages (#1128).
                 if synced_message_delta or synced_input_tokens or synced_output_tokens:
+                    # Issue #2576: Sync to daily_usage for dashboard today's usage
+                    # The /api/today endpoint reads from daily_usage table directly.
+                    try:
+                        from app.repositories.usage_repo import UsageRepository
+
+                        usage_repo = UsageRepository()
+                        today_str = time.strftime("%Y-%m-%d")
+                        usage_repo.save_usage(
+                            date=today_str,
+                            tool_name=tool_name,
+                            host_name=safe_machine_id_prefix(machine_id),
+                            tokens_used=synced_input_tokens + synced_output_tokens,
+                            input_tokens=synced_input_tokens,
+                            output_tokens=synced_output_tokens,
+                            cache_tokens=0,
+                            request_count=synced_message_delta,
+                            models_used=[model] if model else None,
+                            tenant_id=session_tenant_id or 1,
+                        )
+                    except Exception as e:
+                        logger.debug("Failed to save daily_usage: %s", e)
+
                     sync_session_mgr.increment_session_usage(
                         session_id,
                         message_delta=synced_message_delta,
