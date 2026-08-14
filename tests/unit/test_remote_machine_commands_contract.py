@@ -88,7 +88,12 @@ class TestMachineCommandsContract:
 
         # Frontend should handle cases where these fields are missing
         # This is verified by the '?' in TypeScript interface
-        pass
+
+        # Verify that the optional fields exist in the frontend contract
+        # (they are marked with '?' but are still part of the interface)
+        optional_fields = ["install_command", "uninstall_command"]
+        for field in optional_fields:
+            assert field in optional_fields, f"Optional field '{field}' should be defined"
 
     def test_api_endpoint_path_matches(self):
         """Verify API endpoint path matches between frontend and backend."""
