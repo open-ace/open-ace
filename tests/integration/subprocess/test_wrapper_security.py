@@ -272,7 +272,9 @@ class TestOpenaceRm:
             capture_output=True,
             text=True,
         )
-        test_user = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        test_user = (
+            result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        )
 
         # If no suitable user found, skip this test
         if not test_user:
@@ -296,7 +298,9 @@ class TestOpenaceRm:
             capture_output=True,
             text=True,
         )
-        test_user = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        test_user = (
+            result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        )
 
         if not test_user:
             pytest.skip("No user with UID >= 1000 and < 60000 found for testing")
@@ -323,7 +327,9 @@ class TestOpenaceRm:
             capture_output=True,
             text=True,
         )
-        test_user = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        test_user = (
+            result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        )
 
         if not test_user:
             pytest.skip("No user with UID >= 1000 and < 60000 found for testing")
@@ -346,7 +352,9 @@ class TestOpenaceRm:
             capture_output=True,
             text=True,
         )
-        test_user = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        test_user = (
+            result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        )
 
         if not test_user:
             pytest.skip("No user with UID >= 1000 and < 60000 found for testing")
@@ -369,7 +377,9 @@ class TestOpenaceRm:
             capture_output=True,
             text=True,
         )
-        test_user = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        test_user = (
+            result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        )
 
         if not test_user:
             pytest.skip("No user with UID >= 1000 and < 60000 found for testing")
@@ -392,7 +402,9 @@ class TestOpenaceRm:
             capture_output=True,
             text=True,
         )
-        test_user = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        test_user = (
+            result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        )
 
         if not test_user:
             pytest.skip("No user with UID >= 1000 and < 60000 found for testing")
