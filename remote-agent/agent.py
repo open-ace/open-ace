@@ -483,18 +483,23 @@ class RemoteAgent:
                 except Exception as e:
                     logger.error("Error handling command: %s", e)
 
-    def _http_send(self, message: dict[str, Any]) -> dict[str, Any] | None:
+    def _http_send(
+        self, message: dict[str, Any], headers: dict[str, str] | None = None
+    ) -> dict[str, Any] | None:
         """
         POST a message to the server's HTTP fallback endpoint.
 
         Returns the parsed JSON response or None on failure.
         Sets self._token_revoked = True on 401 responses.
+
+        ``headers`` overrides the default Content-Type + Bearer auth headers
+        (used by the confirmation mechanism, issue #2499).
         """
         url = f"{self.config.server_url}/api/remote/agent/message"
-        headers = {"Content-Type": "application/json"}
-
-        if self.config.agent_token:
-            headers["Authorization"] = f"Bearer {self.config.agent_token}"
+        if headers is None:
+            headers = {"Content-Type": "application/json"}
+            if self.config.agent_token:
+                headers["Authorization"] = f"Bearer {self.config.agent_token}"
 
         try:
             resp = requests.post(
@@ -903,7 +908,7 @@ class RemoteAgent:
                     "new_token_hash": new_token[:8],  # For audit only
                 }
 
-                response = self._http_send(payload, headers=headers)
+                response = self._http_send_with_custom_headers(payload, headers=headers)
 
                 if response and response.get("success"):
                     logger.info(
@@ -1131,25 +1136,15 @@ class RemoteAgent:
         except Exception as e:
             logger.warning("Failed to sync token version from server: %s", e)
 
-    def _http_send(
-        self, data: dict[str, Any], headers: dict[str, str] | None = None
+    def _http_send_with_custom_headers(
+        self, data: dict[str, Any], headers: dict[str, str]
     ) -> dict | None:
-        """Send HTTP message to server with optional custom headers.
+        """Send HTTP message with explicit headers (no auth auto-injection).
 
-        Issue #2499: Extracted for reuse by confirmation mechanism.
-
-        Args:
-            data: Message payload to send.
-            headers: Optional custom headers (default: use agent_token).
-
-        Returns:
-            Response dict or None on failure.
+        Issue #2499: used by the confirmation mechanism, which supplies its
+        own auth headers. Regular sends (including 401 → _token_revoked
+        handling) go through _http_send.
         """
-        if headers is None:
-            headers = {}
-            if self.config.agent_token:
-                headers["Authorization"] = f"Bearer {self.config.agent_token}"
-
         url = f"{self.config.server_url}/api/remote/agent/message"
 
         try:
