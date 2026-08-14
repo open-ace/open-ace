@@ -13,6 +13,7 @@ import asyncio
 from datetime import datetime
 
 import aiohttp
+import pytest
 
 BASE_URL = "http://localhost:19888"
 
@@ -125,6 +126,7 @@ async def test_conversation_timeline_api(session_id):
                 return False
 
 
+@pytest.mark.asyncio
 async def test_frontend_build():
     """Test that the frontend build exists."""
     print("\n=== Testing Frontend Build ===")

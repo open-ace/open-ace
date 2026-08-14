@@ -10,6 +10,7 @@ Tests:
 import asyncio
 import os
 
+import pytest
 from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
@@ -19,6 +20,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "91")
 
 
+@pytest.mark.asyncio
 async def test_admin_user():
     """Test admin user can access both Work and Manage modes."""
     async with async_playwright() as p:
@@ -64,6 +66,7 @@ async def test_admin_user():
         }
 
 
+@pytest.mark.asyncio
 async def test_normal_user():
     """Test normal user is restricted to Work mode only."""
     async with async_playwright() as p:

@@ -15,11 +15,13 @@ will only work on iframe reload (via URL parameter).
 import asyncio
 import os
 
+import pytest
 from playwright.async_api import async_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 
 
+@pytest.mark.asyncio
 async def test_language_url_parameter():
     """Test that iframe URL contains lang parameter"""
     async with async_playwright() as p:
@@ -63,6 +65,7 @@ async def test_language_url_parameter():
         print("\nTest 1 completed!")
 
 
+@pytest.mark.asyncio
 async def test_language_url_parameter_update():
     """Test that iframe URL lang parameter updates when language changes"""
     async with async_playwright() as p:
@@ -211,6 +214,7 @@ async def test_language_postmessage_sent():
         print("\nTest 3 completed!")
 
 
+@pytest.mark.asyncio
 async def test_language_realtime_sync():
     """
     Test real-time language sync without page reload.

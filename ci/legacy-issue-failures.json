@@ -249,30 +249,6 @@
       "summary": "Failed: async def functions are not natively supported."
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "1425",
-      "nodeid": "tests/issues/1425/test_language_sync.py::test_language_realtime_sync",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "1425",
-      "nodeid": "tests/issues/1425/test_language_sync.py::test_language_url_parameter",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "1425",
-      "nodeid": "tests/issues/1425/test_language_sync.py::test_language_url_parameter_update",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
       "category": "setup_error",
       "exception_type": "AssertionError",
       "issue_number": "144",
@@ -623,14 +599,6 @@
       "nodeid": "tests/issues/22/test_issue22.py::TestOIDCSignatureVerification::test_jwks_caching",
       "outcome": "failure",
       "summary": "ValueError: Failed to fetch JWKS: 404 Client Error: Not Found for url: https://example.com/.well-known/jwks.json"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "221",
-      "nodeid": "tests/issues/221/test_tenant_form_validation.py::test_tenant_form_validation",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
     },
     {
       "category": "assertion_failure",
@@ -1315,14 +1283,6 @@
     {
       "category": "test_body_exception",
       "exception_type": "",
-      "issue_number": "60",
-      "nodeid": "tests/issues/60/test_language_sync.py::test_language_sync",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
       "issue_number": "65",
       "nodeid": "tests/issues/65/test_workspace_state_restore.py::test_workspace_state_restore",
       "outcome": "failure",
@@ -1649,14 +1609,6 @@
       "summary": "sqlite3.OperationalError: no such table: users"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "74",
-      "nodeid": "tests/issues/74/test_restore_button.py::test_restore_button",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
       "issue_number": "740",
@@ -1860,30 +1812,6 @@
       "category": "test_body_exception",
       "exception_type": "",
       "issue_number": "79",
-      "nodeid": "tests/issues/79/test_add_user_final.py::test_add_user",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "79",
-      "nodeid": "tests/issues/79/test_add_user_save.py::test_add_user_save",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "79",
-      "nodeid": "tests/issues/79/test_add_user_save_v2.py::test_add_user_save",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "79",
       "nodeid": "tests/issues/79/test_conversation_detail_modal.py::test_conversation_history_api",
       "outcome": "failure",
       "summary": "Failed: async def functions are not natively supported."
@@ -1895,22 +1823,6 @@
       "nodeid": "tests/issues/79/test_conversation_detail_modal.py::test_conversation_timeline_api",
       "outcome": "error",
       "summary": "failed on setup with \"file tests/issues/79/test_conversation_detail_modal.py, line 44"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "79",
-      "nodeid": "tests/issues/79/test_conversation_detail_modal.py::test_frontend_build",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "79",
-      "nodeid": "tests/issues/79/test_issue79_conversation_detail.py::test_conversation_detail_modal",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
     },
     {
       "category": "test_body_exception",
@@ -2073,22 +1985,6 @@
       "summary": "failed on setup with \"AssertionError\""
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "91",
-      "nodeid": "tests/issues/91/test_management_button.py::test_admin_user",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "91",
-      "nodeid": "tests/issues/91/test_management_button.py::test_normal_user",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
       "issue_number": "913",
@@ -2108,23 +2004,7 @@
       "category": "test_body_exception",
       "exception_type": "",
       "issue_number": "98",
-      "nodeid": "tests/issues/98/test_conversation_detail.py::test_conversation_detail",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "98",
       "nodeid": "tests/issues/98/test_data_update.py::test_data_update",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "98",
-      "nodeid": "tests/issues/98/test_global_refresh.py::test_global_refresh",
       "outcome": "failure",
       "summary": "Failed: async def functions are not natively supported."
     },
@@ -2203,8 +2083,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-13 prune 37+3+1 resolved: TenantResolutionError session-write cluster plus 3 same-file baseline entries resolved by the tenant-context test fixes, plus 716 test_git_add_all resolved on main by #2601 (fb9c5128, observed passing in run 31709302597). Shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31709302597",
+    "prune_note": "2026-08-14 prune 15 resolved: async-def cluster subset revived with @pytest.mark.asyncio (spike run 31700276891 proved them passing against the live CI server). The other 8 async entries stay unmarked/known: 4 hardcode localhost:19888 (isolated-home uses an ephemeral port), 2 real UI drift, 2 test bugs. Shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31700276891",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
