@@ -199,7 +199,13 @@ class TestRateLimitDecorator:
         """Test that decorator allows requests under limit."""
         from flask import Flask
 
+        RateLimiter.reset_instance()
+
         app = Flask(__name__)
+
+        # Setup backend first
+        backend = InMemoryRateLimiterBackend()
+        limiter = RateLimiter(backend=backend)
 
         @rate_limit(max_requests=10, window=60)
         def test_endpoint():
@@ -215,11 +221,12 @@ class TestRateLimitDecorator:
                 response = test_endpoint()
                 assert response == {"status": "ok"}
 
+        RateLimiter.reset_instance()
+
     def test_blocks_requests_over_limit(self):
         """Test that decorator blocks requests over limit."""
         from flask import Flask
 
-        # Reset before test
         RateLimiter.reset_instance()
 
         app = Flask(__name__)
@@ -247,7 +254,7 @@ class TestRateLimitDecorator:
                 # Third should be blocked
                 result3 = test_endpoint()
                 # When rate limited, returns a tuple (error_dict, status_code)
-                assert isinstance(result3, tuple)
+                assert isinstance(result3, tuple), f"Expected tuple, got {type(result3)}: {result3}"
                 assert result3[1] == 429
                 assert "Rate limit exceeded" in result3[0]["error"]
 
@@ -266,6 +273,8 @@ class TestGetRateLimitHeaders:
 
         # Create limiter with mock backend - this becomes the singleton
         limiter = RateLimiter(backend=backend)
+        # Ensure backend is set
+        limiter._backend = backend
 
         # Now get_rate_limit_headers will use this limiter
         headers = get_rate_limit_headers("test:key", max_requests=10, window=60)
