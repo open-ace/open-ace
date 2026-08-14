@@ -4003,12 +4003,13 @@ install_local() {
         # -- Phase 1: Fix missing config in service file (runs always) --
         if [ -n "$service_file" ] && [ -f "$service_file" ]; then
             # Check if systemd service is missing SECRET_KEY (upgrade from older version)
-            local current_secret=$(grep "^Environment=SECRET_KEY=" "$service_file" 2>/dev/null | cut -d'=' -f3)
+            local current_secret=$(sed -n 's/^Environment=SECRET_KEY=//p' "$service_file" 2>/dev/null | tail -1)
             if [ -z "$current_secret" ]; then
                 print_warning "Adding missing SECRET_KEY to systemd service..."
                 local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
                 sed -i "/^Environment=HOME=/a Environment=SECRET_KEY=$secret_key" "$service_file"
                 print_info "Generated SECRET_KEY for Flask encryption"
+                current_secret="$secret_key"
             fi
 
             # Check and fix WORKSPACE_BASE_DIR (Issue #1217, #1308, #2290)
@@ -4039,9 +4040,13 @@ install_local() {
 
             if [ "$has_enc_key_in_service" = "no" ] && [ "$has_secrets_env" != "yes" ]; then
                 print_warning "Adding missing OPENACE_ENCRYPTION_KEY to systemd service..."
-                local enc_key="${OPENACE_ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
+                # Before OPENACE_ENCRYPTION_KEY was introduced, persisted API keys,
+                # SMTP passwords, and SSO secrets were encrypted with SECRET_KEY.
+                # Reusing it here is required for upgrade compatibility. Generating
+                # a new random key would leave every existing ciphertext unreadable.
+                local enc_key="${OPENACE_ENCRYPTION_KEY:-$current_secret}"
                 sed -i "/^Environment=SECRET_KEY=/a Environment=OPENACE_ENCRYPTION_KEY=$enc_key" "$service_file"
-                print_info "Generated OPENACE_ENCRYPTION_KEY for sensitive data encryption (Issue #2359)"
+                print_info "Initialized OPENACE_ENCRYPTION_KEY from the existing encryption secret (Issue #2626)"
             fi
         fi
 
