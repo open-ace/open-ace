@@ -566,19 +566,54 @@ class TestGithubOpsCommandShapeCoverage:
             f"(Issue #2635). Keep the three generators consistent."
         )
 
+    # Bare-wildcard shapes the #2635 acceptance criterion forbids: an entry
+    # that is just the binary plus ``*`` — whether written with a resolved
+    # path, the unexpanded ${GIT_PATH}/${GH_PATH} variable, or a bare
+    # ``git``/``gh`` name — after stripping line-continuation backslashes.
+    BARE_WILDCARD_RE = re.compile(
+        r"^(?:\\\s*)?"
+        r"(\$\{GIT_PATH\}|\$\{GH_PATH\}|/usr/bin/git|/usr/local/bin/gh|git|gh)"
+        r"\s+\*\s*$"
+    )
+
     def test_no_bare_git_or_gh_wildcard_reintroduced(self):
         """The prefix entries must not degenerate into bare `git *`/`gh *`.
 
         Acceptance criterion of #2635: no re-introduction of the pre-#2334
-        unprefixed wildcards. Only prefix-anchored forms are allowed.
+        unprefixed wildcards. The guard runs against BOTH the generator's
+        expanded dry-run output (where ${GIT_PATH}/${GH_PATH} resolve to the
+        host's binary path — a reintroduction appears as ``<bin> *``) and the
+        raw Cmnd_Alias entries of all three generator files (covering the
+        natural unexpanded ``${GIT_PATH} *`` source form, which the previous
+        text-only check silently let through), with leading line-continuation
+        ``\\`` prefixes stripped.
         """
+        # 1. Expanded generator output: a bare wildcard shows up as
+        #    ``<absolute-binary-path> *``.
+        try:
+            content = self._generate_sudoers()
+        except (FileNotFoundError, OSError):
+            pytest.skip("bash unavailable; cannot run generate-sudoers.sh --dry-run")
+        for alias_name in ("GIT_SAFE", "GH_SAFE"):
+            for cmd in _extract_cmnd_alias(content, alias_name):
+                stripped = cmd.strip()
+                rest = re.sub(r"^\S*/(?:git|gh)\s+", "", stripped)
+                assert rest != "*", (
+                    f"generate-sudoers.sh dry-run output: bare wildcard "
+                    f"{stripped!r} in {alias_name} re-introduces the "
+                    f"pre-#2334 `git *`/`gh *` wildcard "
+                    f"(Issue #2635 forbids this)"
+                )
+
+        # 2. Raw generator sources (docker-entrypoint.sh and install.sh are
+        #    not exercised by the dry-run): catch the unexpanded
+        #    ``${GIT_PATH} *``/``${GH_PATH} *`` and bare ``git *``/``gh *``
+        #    forms in the extracted alias entries.
         for label, path in self.GENERATOR_FILES:
             for alias_name in ("GIT_SAFE", "GH_SAFE"):
-                commands = _extract_cmnd_alias(path.read_text(), alias_name)
-                for cmd in commands:
+                for cmd in _extract_cmnd_alias(path.read_text(), alias_name):
                     stripped = cmd.strip()
-                    bare = stripped.endswith("*") and stripped.count("*") == 1
-                    assert not (bare and re.search(r"(git|gh)\s+\*\s*$", stripped)), (
+                    assert not self.BARE_WILDCARD_RE.match(stripped), (
                         f"{label}: bare wildcard {stripped!r} in {alias_name} "
                         f"re-introduces the pre-#2334 `git *`/`gh *` wildcard "
                         f"(Issue #2635 forbids this)"
@@ -693,6 +728,23 @@ class TestGithubOpsCommandShapeCoverage:
             "generate-sudoers.sh, scripts/install-central/package-method/"
             "install.sh, docker-entrypoint.sh) must be updated in lockstep "
             "(Issue #2635)"
+        )
+
+        # 4. Ordering (M1): within _run_git's sudo branch, the
+        #    '-c core.hooksPath=/dev/null' lead-in must be built BEFORE the
+        #    '-C'/positional part of the command. The sudoers prefix entry
+        #    '${GIT_PATH} -c core.hooksPath=/dev/null *' only matches because
+        #    the sudo-path command starts with those -c options; if '-C' (or
+        #    anything else) ever moves ahead of them, sudo silently stops
+        #    matching the prefix entry.
+        assert text.index('"core.hooksPath=/dev/null"') < text.index('["-C", self.repo_path]'), (
+            "github_ops._run_git builds '-C <repo>' (or positional args) "
+            "before the '-c core.hooksPath=/dev/null' options; the command "
+            "no longer starts with the prefix the sudoers entry "
+            "'${GIT_PATH} -c core.hooksPath=/dev/null *' anchors on "
+            "(scripts/generate-sudoers.sh, scripts/install-central/"
+            "package-method/install.sh, docker-entrypoint.sh) — update the "
+            "sudoers entries in lockstep (Issue #2635)"
         )
 
 
