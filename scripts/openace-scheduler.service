@@ -24,6 +24,7 @@ Environment=SCHEDULER_MODE=scheduler
 Environment=HOME=__HOME__
 Environment=SECRET_KEY=__SECRET_KEY__
 Environment=WORKSPACE_BASE_DIR=__WORKSPACE_BASE_DIR__
+Environment=OPENACE_SECURITY_MODE=__SECURITY_MODE__
 
 # Secrets (OPENACE_ENCRYPTION_KEY at minimum; encrypts API keys / SMTP
 # passwords). The leading '-' makes the file OPTIONAL: installs without it
