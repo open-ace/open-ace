@@ -157,7 +157,14 @@ def upgrade():
 
 
 def downgrade():
-    """回滚迁移"""
+    """回滚迁移
+
+    SQLite does not support DROP COLUMN before version 3.35.0 (2021-03-12).
+    Use batch_alter_table for SQLite compatibility.
+    """
+    bind = op.get_bind()
+    is_postgres = bind.dialect.name == "postgresql"
+
     # 删除索引
     op.execute("DROP INDEX IF EXISTS idx_filter_rules_is_test")
     op.execute("DROP INDEX IF EXISTS idx_filter_rules_approval_status")
@@ -165,12 +172,26 @@ def downgrade():
     op.execute("DROP INDEX IF EXISTS idx_filter_rules_tenant_id")
 
     # 删除字段
-    op.drop_column("content_filter_rules", "valid_until")
-    op.drop_column("content_filter_rules", "valid_from")
-    op.drop_column("content_filter_rules", "tenant_id")
-    op.drop_column("content_filter_rules", "priority")
-    op.drop_column("content_filter_rules", "created_by")
-    op.drop_column("content_filter_rules", "approved_at")
-    op.drop_column("content_filter_rules", "approved_by")
-    op.drop_column("content_filter_rules", "approval_status")
-    op.drop_column("content_filter_rules", "is_test")
+    if is_postgres:
+        # PostgreSQL: 直接删除列
+        op.drop_column("content_filter_rules", "valid_until")
+        op.drop_column("content_filter_rules", "valid_from")
+        op.drop_column("content_filter_rules", "tenant_id")
+        op.drop_column("content_filter_rules", "priority")
+        op.drop_column("content_filter_rules", "created_by")
+        op.drop_column("content_filter_rules", "approved_at")
+        op.drop_column("content_filter_rules", "approved_by")
+        op.drop_column("content_filter_rules", "approval_status")
+        op.drop_column("content_filter_rules", "is_test")
+    else:
+        # SQLite: 使用 batch_alter_table
+        with op.batch_alter_table("content_filter_rules") as batch_op:
+            batch_op.drop_column("valid_until")
+            batch_op.drop_column("valid_from")
+            batch_op.drop_column("tenant_id")
+            batch_op.drop_column("priority")
+            batch_op.drop_column("created_by")
+            batch_op.drop_column("approved_at")
+            batch_op.drop_column("approved_by")
+            batch_op.drop_column("approval_status")
+            batch_op.drop_column("is_test")
