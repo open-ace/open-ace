@@ -49,10 +49,10 @@ def upgrade():
             sa.PrimaryKeyConstraint("id"),
         )
 
-    if "filter_rule_approval_log" in existing_tables:
-        approval_log_indexes = {
-            idx["name"] for idx in inspector.get_indexes("filter_rule_approval_log")
-        }
+    # 创建索引（无论表是刚创建还是已存在）
+    approval_log_indexes = {
+        idx["name"] for idx in inspector.get_indexes("filter_rule_approval_log")
+    }
         if "idx_approval_log_rule_time" not in approval_log_indexes:
             if is_postgres:
                 op.execute("""
@@ -98,10 +98,10 @@ def upgrade():
             sa.PrimaryKeyConstraint("id"),
         )
 
-    if "filter_rule_trigger_log" in existing_tables:
-        trigger_log_indexes = {
-            idx["name"] for idx in inspector.get_indexes("filter_rule_trigger_log")
-        }
+    # 创建索引（无论表是刚创建还是已存在）
+    trigger_log_indexes = {
+        idx["name"] for idx in inspector.get_indexes("filter_rule_trigger_log")
+    }
         if "idx_trigger_log_rule_time" not in trigger_log_indexes:
             if is_postgres:
                 op.execute("""
@@ -183,10 +183,10 @@ def upgrade():
             sa.UniqueConstraint("rule_id", "version_number", name="uq_rule_version"),
         )
 
-    if "filter_rule_versions" in existing_tables:
-        rule_versions_indexes = {
-            idx["name"] for idx in inspector.get_indexes("filter_rule_versions")
-        }
+    # 创建索引（无论表是刚创建还是已存在）
+    rule_versions_indexes = {
+        idx["name"] for idx in inspector.get_indexes("filter_rule_versions")
+    }
         if "idx_rule_versions_rule_version" not in rule_versions_indexes:
             if is_postgres:
                 op.execute("""
@@ -218,8 +218,8 @@ def upgrade():
             sa.PrimaryKeyConstraint("id"),
         )
 
-    if "rule_cache_sync" in existing_tables:
-        cache_sync_indexes = {idx["name"] for idx in inspector.get_indexes("rule_cache_sync")}
+    # 创建索引（无论表是刚创建还是已存在）
+    cache_sync_indexes = {idx["name"] for idx in inspector.get_indexes("rule_cache_sync")}
         if "idx_cache_sync_unprocessed" not in cache_sync_indexes:
             if is_postgres:
                 op.execute("""
