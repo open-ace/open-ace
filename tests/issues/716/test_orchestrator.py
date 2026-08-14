@@ -70,6 +70,43 @@ def _trusted_repo_boundary_for_state_machine_tests(monkeypatch):
     )
 
 
+def _fake_git_run(*args, **kwargs):
+    """Fake ``GitHubOps._run_git`` satisfying the phases/* preconditions.
+
+    The migrated phase handlers verify PR heads / branch relations / bases
+    through real git probes (``cat-file -e``, ``merge-base``, ``rev-parse``).
+    A bare MagicMock returns a MagicMock whose ``returncode`` is truthy-but-
+    nonzero, routing every guard to its deferral branch. This side_effect
+    makes the probes look like a healthy repo:
+
+    - ``cat-file -e`` / ``fetch``: success (objects exist);
+    - ``show-ref --verify``: rc=1 (branch does not exist yet — preparation
+      must take the create_worktree path, not attach to an existing branch);
+    - ``merge-base --is-ancestor``: rc=1 (branch NOT behind main — rc=0 is
+      the "timing issue" terminal path in pr_review);
+    - ``merge-base``: a SHA on stdout (cumulative-base derivation parses it);
+    - ``rev-parse <ref>``: distinct stable SHAs per ref; ``<sha>^2`` rc=1
+      (heads are ordinary commits, not merge commits).
+    """
+
+    def _rc(rc=0, out=""):
+        return MagicMock(returncode=rc, stdout=out, stderr="")
+
+    cmd = list(args[0]) if args else []
+    if cmd[:1] == ["show-ref"]:
+        return _rc(1)
+    if cmd[:2] == ["merge-base", "--is-ancestor"]:
+        return _rc(1)
+    if cmd[:1] == ["merge-base"]:
+        return _rc(0, "base0f1e2d3c4b5a6978901234f5e6d7\n")
+    if cmd[:1] == ["rev-parse"]:
+        target = cmd[1] if len(cmd) > 1 else ""
+        if target.endswith("^2"):
+            return _rc(1)
+        return _rc(0, f"{abs(hash(target)) % (10**12):040x}\n")
+    return _rc(0)
+
+
 def _make_workflow(**overrides):
     """Create a minimal workflow dict for testing."""
     base = {
@@ -411,9 +448,11 @@ class TestOrchestratorPreparation:
         mock_gh.create_issue.return_value = {"number": 1, "url": ""}
         mock_gh.create_worktree.return_value = {
             "worktree_path": "/tmp/wt-path",
-            "branch": "auto-dev/test-wf",
+            "branch": "auto-dev/test-wf-uuid",
         }
-        mock_gh.get_current_branch.return_value = "auto-dev/test-wf-"
+        # The #1573 post-create guard compares against the derived full branch
+        # name f"auto-dev/{workflow_id[:12]}" — return exactly that.
+        mock_gh.get_current_branch.return_value = "auto-dev/test-wf-uuid"
         mock_gh_cls.return_value = mock_gh
 
         ctx = orch._build_workflow_context(wf)
@@ -446,6 +485,9 @@ class TestOrchestratorPreparation:
             "branch": "auto-dev/test-wf",
         }
         mock_gh.get_current_branch.return_value = "auto-dev/test-wf"
+        # _do_preparation resolves the symbolic base via rev-parse and passes
+        # the immutable SHA to create_worktree (#1552 scope-check contract).
+        mock_gh._run_git.side_effect = _fake_git_run
         mock_gh_cls.return_value = mock_gh
 
         ctx = orch._build_workflow_context(wf)
@@ -453,10 +495,11 @@ class TestOrchestratorPreparation:
         if result is not None:
             orch._commit_phase_result(result)
 
+        resolved_base = _fake_git_run(["rev-parse", "origin/main"]).stdout.strip()
         mock_gh.create_worktree.assert_called_once_with(
             path="/tmp/project/.worktrees/test-wf",
             branch="auto-dev/test-wf",
-            base="origin/main",
+            base=resolved_base,
         )
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
@@ -570,6 +613,7 @@ class TestOrchestratorPreparation:
         mock_gh = MagicMock()
         mock_gh.create_issue.return_value = {"number": 1, "url": ""}
         mock_gh.create_branch.return_value = {"branch": "auto-dev/test-wf"}
+        mock_gh._run_git.side_effect = _fake_git_run
         mock_gh_cls.return_value = mock_gh
 
         ctx = orch._build_workflow_context(wf)
@@ -577,17 +621,14 @@ class TestOrchestratorPreparation:
         if result is not None:
             orch._commit_phase_result(result)
 
-        # Should fetch origin/main before creating branch
-        fetch_calls = [c for c in mock_gh._run_git.call_args_list if "fetch" in str(c)]
-        assert len(fetch_calls) >= 1
-        assert "origin" in str(fetch_calls[0])
-        assert "main" in str(fetch_calls[0])
-
-        # Should create branch with base="origin/main"
+        # Should create the branch from the resolved immutable base
+        # (#1552: the symbolic origin/main is rev-parse'd to a SHA before
+        # create_branch; scope checks must never use a moving ref).
+        resolved_base = _fake_git_run(["rev-parse", "origin/main"]).stdout.strip()
         mock_gh.create_branch.assert_called_once()
         create_call = mock_gh.create_branch.call_args
-        assert create_call[1].get("base") == "origin/main" or (
-            len(create_call[0]) > 1 and create_call[0][1] == "origin/main"
+        assert create_call[1].get("base") == resolved_base or (
+            len(create_call[0]) > 1 and create_call[0][1] == resolved_base
         )
 
 
@@ -1114,6 +1155,7 @@ class TestOrchestratorMerge:
         mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
+        mock_gh._run_git.side_effect = _fake_git_run
         orch._validate_pre_merge_change_scope = MagicMock(return_value="")
         orch._sync_failed_pr_with_main = MagicMock(return_value=False)
 
@@ -1122,10 +1164,16 @@ class TestOrchestratorMerge:
         mock_gh.merge_pr.assert_called_once_with(10, strategy="merge")
         mock_gh.delete_branch.assert_called_once_with("feature/test")
 
-        # Should mark workflow completed
+        # Merge success now hands off to acceptance verification (#2335):
+        # the terminal pair is (acceptance_verification, verification_pending).
         update_calls = mock_repo.update_workflow.call_args_list
-        status_updates = [c for c in update_calls if c[0][1].get("status") == "completed"]
-        assert len(status_updates) > 0
+        handoffs = [
+            c
+            for c in update_calls
+            if c[0][1].get("current_phase") == "acceptance_verification"
+            and c[0][1].get("status") == "verification_pending"
+        ]
+        assert len(handoffs) > 0
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_merge_with_worktree_cleanup(self, mock_gh_cls):
@@ -1143,6 +1191,7 @@ class TestOrchestratorMerge:
         mock_gh.get_pr_checks.return_value = [{"name": "test", "bucket": "pass"}]
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
+        mock_gh._run_git.side_effect = _fake_git_run
         orch._validate_pre_merge_change_scope = MagicMock(return_value="")
         orch._sync_failed_pr_with_main = MagicMock(return_value=False)
 
@@ -1162,14 +1211,20 @@ class TestOrchestratorMerge:
         mock_gh = MagicMock()
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
+        mock_gh._run_git.side_effect = _fake_git_run
 
         orch._do_merge(wf)
 
         mock_gh.merge_pr.assert_not_called()
-        # Should still complete workflow
+        # No PR: merge phase hands off to acceptance verification (#2335).
         update_calls = mock_repo.update_workflow.call_args_list
-        status_updates = [c for c in update_calls if c[0][1].get("status") == "completed"]
-        assert len(status_updates) > 0
+        handoffs = [
+            c
+            for c in update_calls
+            if c[0][1].get("current_phase") == "acceptance_verification"
+            and c[0][1].get("status") == "verification_pending"
+        ]
+        assert len(handoffs) > 0
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_merge_unstable_skips_ci_repair(self, mock_gh_cls):
@@ -1198,6 +1253,7 @@ class TestOrchestratorMerge:
         }
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
+        mock_gh._run_git.side_effect = _fake_git_run
         orch._validate_pre_merge_change_scope = MagicMock(return_value="")
         orch._sync_failed_pr_with_main = MagicMock(return_value=False)
         orch._start_ci_repair_round = MagicMock()
@@ -1236,6 +1292,7 @@ class TestOrchestratorMerge:
         }
         mock_gh_cls.return_value = mock_gh
         orch._gh = mock_gh
+        mock_gh._run_git.side_effect = _fake_git_run
         orch._validate_pre_merge_change_scope = MagicMock(return_value="")
         orch._sync_failed_pr_with_main = MagicMock(return_value=False)
         orch._start_ci_repair_round = MagicMock()
@@ -1647,6 +1704,13 @@ class TestOrchestratorPrReview:
             orch._gh.git_push.return_value = None
             orch._gh.create_pr.return_value = {"number": 99, "url": "https://github.com/pull/99"}
             orch._gh.get_current_branch.return_value = wf_data.get("branch_name") or "main"
+            # Real-looking git probes for the phases/pr_review preconditions
+            # (rev-parse / merge-base --is-ancestor / merge-base; see
+            # _fake_git_run). has_uncommitted_changes must be an explicit
+            # False — a MagicMock truthy would detour through the
+            # git_add_all/git_commit path before pushing.
+            orch._gh._run_git.side_effect = _fake_git_run
+            orch._gh.has_uncommitted_changes.return_value = False
 
         return orch, mock_repo
 
@@ -1675,7 +1739,9 @@ class TestOrchestratorPrReview:
         pr_call = orch._gh.create_pr.call_args
         assert pr_call[1]["head"] == wf["branch_name"]
         assert pr_call[1]["base"] == "main"
-        assert "Closes #42" in pr_call[1]["body"]
+        # #2335: autonomous PRs use the Implements close-ref (never auto-close
+        # the tracking issue on merge).
+        assert "Implements #42" in pr_call[1]["body"]
 
     def test_pr_review_uses_github_pr_diff_not_two_point_main_diff(self):
         """Main advancing after branch creation must not pollute review context."""

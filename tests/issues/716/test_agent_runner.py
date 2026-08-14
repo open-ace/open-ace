@@ -956,7 +956,14 @@ class TestStopSession:
 
         def create_remote_session(**_kwargs):
             create_started.set()
-            assert allow_create_to_finish.wait(timeout=2)
+            # Wait for the shutdown signal (set by stop_session BEFORE it
+            # blocks on the lifecycle lock this create holds) instead of an
+            # event the main thread can only set after stop_session returns —
+            # that ordering deadlocks (stop waits the lock; create waits the
+            # event). #2078: the cancel_check window fires after create
+            # returns, so the provider stops the actual remote session before
+            # any prompt dispatch.
+            tracker_stopped.wait(timeout=2)
             return {"session_id": "remote-actual-race"}
 
         remote_manager.create_remote_session.side_effect = create_remote_session
@@ -970,6 +977,22 @@ class TestStopSession:
             remote_session_manager=remote_manager,
         )
         result_box = {}
+        tracker_stopped = threading.Event()
+
+        original_stop = runner.stop_session
+
+        def stop_and_flag(session_id):
+            # Flag as soon as the tracker's _stopped is set so create returns
+            # and releases the lifecycle lock stop_session is waiting on.
+            def watch():
+                tracker = runner._local_sessions.get("tracking-race")
+                if tracker is not None and tracker._stopped.wait(timeout=2):
+                    tracker_stopped.set()
+
+            threading.Thread(target=watch, daemon=True).start()
+            return original_stop(session_id)
+
+        runner.stop_session = stop_and_flag
 
         def run_remote():
             result_box["result"] = runner._run_remote(
