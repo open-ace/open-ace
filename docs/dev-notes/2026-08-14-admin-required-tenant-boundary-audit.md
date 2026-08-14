@@ -122,6 +122,25 @@ owner tenant。分两类：
 
 全部无需迁移。
 
+### 不带资源 id 但同样泄露：`/admin/quota/usage`
+
+第一版只收紧了 `GET /admin/users`，漏了 `GET /admin/quota/usage`——它同样
+`user_repo.get_all_users()` 无过滤，返回的还**更多**（`SELECT *` 去掉密码哈希，
+再加用量），其中包含 `role`，正好是「先找出哪个账号是平台管理员」这一步需要的数据。
+本次一并收紧了它和 `/admin/quota/stats`（后者原本还把所有租户的用户配额加总去和
+单个租户的上限比，数字本身就是错的）。
+
+**教训**：按「路径里有没有资源 id」来枚举审计面是不够的，list 类端点从 query 或
+body 取租户，同样是跨租户面。
+
+### 已知但本次未动：非角色的跨租户路径
+
+`app/routes/remote.py:1043` 的 `assign_user` 不校验被指派的 `user_id` 是否属于该机器
+的租户。平台管理员可以把租户 A 的普通用户设为租户 B 机器的管理员；那个账号
+`role='user'`，所以 `is_platform_level_role` 保护不到它，租户 A 的管理员接管它之后就
+继承了伸进租户 B 的机器管理权。先于本 PR 存在，范围外，但它是「除了角色以外还有没有
+别的跨租户途径」这个问题的真实答案，记在这里。
+
 ### 潜伏陷阱：`require_tenant_scope()` 把 tenant_admin 当全局管理员
 
 `app/models/user.py:24` 的 `ADMIN_ROLES` 里**包含 `tenant_admin`**，所以
@@ -137,6 +156,17 @@ owner tenant。分两类：
 平台管理员，而 `is_admin_role` 把租户管理员也算了进去。**下一个照着签名用返回值的调用者
 就会给租户管理员全局作用域。** 要么收窄 `resolve_tenant_scope` 的 admin 判断，要么把
 返回值改成不可忽略的形状。
+
+`app/routes/analysis.py:36` 另有一份同模式的复制品，那一份**确实**把返回值当作用域用，
+所以租户管理员在那里拿到的是全局作用域。先于本 PR 存在，未在本次改动范围内，一并记下。
+
+### 副作用：跨租户读也会写审计
+
+平台管理员的 `tenant_id` 是 NULL，所以任何带租户的目标都算跨租户，
+`same_tenant_user_required` 会为它写一条 `ADMIN_CROSS_TENANT_ACCESS`。
+`GET /audit/user/<id>/profile` 与 `GET /audit/user/<id>/activity` 是仪表盘轮询的
+GET，于是每刷一次就多一行审计。这是刻意保留的——「谁看了别的租户的审计画像」正是
+合规产品该留痕的事——但如果前端轮询频率高，值得改成按会话去重，而不是删掉。
 
 ### 剩余 68 个不带资源 id 的端点
 

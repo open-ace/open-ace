@@ -17,6 +17,7 @@ but left ``admin_required`` itself boundary-free.
 
 from __future__ import annotations
 
+import contextlib
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -186,7 +187,20 @@ def _request(actor, method, path, *, json_body=None, repo=None, query_string=Non
     tenant_service.can_add_user.return_value = True
     tenant_service.increment_user_count.return_value = True
     tenant_service.decrement_user_count.return_value = True
-    tenant_service.get_tenant.return_value = SimpleNamespace(quota=SimpleNamespace(max_users=100))
+    tenant_service.get_tenant.return_value = SimpleNamespace(
+        quota=SimpleNamespace(
+            max_users=100,
+            daily_token_limit=10**9,
+            monthly_token_limit=10**9,
+            daily_request_limit=10**9,
+            monthly_request_limit=10**9,
+        )
+    )
+
+    # The quota endpoints join per-user usage; stub the repo so these stay
+    # database-free like the rest of the module.
+    usage_repo = MagicMock()
+    usage_repo.get_combined_usage.return_value = {"tokens": 0, "requests": 0}
 
     with (
         patch("app.auth.decorators._load_user_from_token", return_value=actor),
@@ -197,6 +211,7 @@ def _request(actor, method, path, *, json_body=None, repo=None, query_string=Non
         patch("app.routes.admin.audit_logger"),
         patch("app.routes.admin.get_security_settings_cached", return_value=None),
         patch("app.services.tenant_service.TenantService", return_value=tenant_service),
+        patch("app.routes.admin.usage_repo", usage_repo),
     ):
         client = app.test_client()
         response = client.open(
@@ -476,10 +491,8 @@ class TestPrivilegeEscalation:
             },
         )
 
-        # Not 403 -- the tenant-scope guard must not fire for a platform admin.
-        # (Quota/creation may still fail on the mocked tenant service; the point
-        # here is only that authorization let it through.)
-        assert response.status_code != 403
+        assert response.status_code == 201, response.get_data(as_text=True)
+        assert [c["role"] for c in repo.created] == ["platform_admin"]
 
 
 class TestTenantlessAdminFailsClosed:
@@ -544,3 +557,156 @@ class TestLookupFailureIsFailClosedForTenantAdmins:
 
         assert response.status_code == 200, response.get_data(as_text=True)
         assert repo.password_updates == [20]
+
+
+def _request_other_blueprint(actor, blueprint, path, *, patches=()):
+    """Same as _request but for a blueprint other than admin_bp.
+
+    The guards added to compliance.py and governance.py had no coverage at all
+    -- deleting either decorator left the whole suite green -- because every
+    other test here registers only admin_bp.
+    """
+    repo = _FakeUserRepo()
+
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(blueprint, url_prefix="/api")
+
+    with (
+        patch("app.auth.decorators._load_user_from_token", return_value=actor),
+        patch("app.repositories.user_repo.UserRepository", return_value=repo),
+    ):
+        with contextlib.ExitStack() as stack:
+            for target, replacement in patches:
+                stack.enter_context(patch(target, replacement))
+            response = app.test_client().get(path, headers={"Authorization": "Bearer test-token"})
+    return response
+
+
+class TestGuardsOutsideAdminBlueprint:
+    """compliance.py and governance.py carry the same decorator.
+
+    Neither is reachable from admin_bp, so without these the guards could be
+    deleted and nothing would fail.
+    """
+
+    @staticmethod
+    def _compliance():
+        from app.routes.compliance import compliance_bp
+
+        analyzer = MagicMock()
+        analyzer.get_user_behavior_profile.return_value = {"user_id": 20, "total_actions": 7}
+        return compliance_bp, [("app.routes.compliance._get_audit_analyzer", lambda: analyzer)]
+
+    @staticmethod
+    def _governance():
+        from app.routes.governance import governance_bp
+
+        logger_mock = MagicMock()
+        logger_mock.get_user_activity.return_value = {"user_id": 20, "actions": 7}
+        return governance_bp, [("app.routes.governance.audit_logger", logger_mock)]
+
+    def test_compliance_user_profile_denies_cross_tenant(self):
+        bp, patches = self._compliance()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/audit/user/20/profile", patches=patches
+        )
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+
+    def test_compliance_user_profile_allows_own_tenant(self):
+        bp, patches = self._compliance()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/audit/user/10/profile", patches=patches
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+
+    def test_compliance_user_profile_denies_platform_account_in_own_tenant(self):
+        bp, patches = self._compliance()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/audit/user/98/profile", patches=patches
+        )
+
+        assert response.status_code == 403
+
+    def test_compliance_user_profile_allows_platform_admin(self):
+        bp, patches = self._compliance()
+        response = _request_other_blueprint(
+            PLATFORM_ADMIN, bp, "/api/audit/user/20/profile", patches=patches
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+
+    def test_governance_user_activity_denies_cross_tenant(self):
+        bp, patches = self._governance()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/audit/user/20/activity", patches=patches
+        )
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+
+    def test_governance_user_activity_allows_own_tenant(self):
+        bp, patches = self._governance()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/audit/user/10/activity", patches=patches
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+
+    def test_governance_user_activity_denies_platform_account_in_own_tenant(self):
+        bp, patches = self._governance()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/audit/user/98/activity", patches=patches
+        )
+
+        assert response.status_code == 403
+
+    def test_governance_user_activity_allows_platform_admin(self):
+        bp, patches = self._governance()
+        response = _request_other_blueprint(
+            PLATFORM_ADMIN, bp, "/api/audit/user/20/activity", patches=patches
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+
+
+class TestQuotaEndpointsDoNotLeakUserLists:
+    """GET /admin/quota/usage returns the user list too.
+
+    Narrowing only /admin/users left cross-tenant enumeration open at a
+    sibling URL -- and this one exposes more, including each account's role,
+    which is the targeting data an attacker actually wants.
+    """
+
+    def test_quota_usage_is_narrowed_to_own_tenant(self):
+        response, _ = _request(TENANT_A_ADMIN, "GET", "/api/admin/quota/usage")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert {u.get("tenant_id") for u in response.get_json()} == {TENANT_A}
+
+    def test_quota_usage_rejects_another_tenant(self):
+        response, _ = _request(
+            TENANT_A_ADMIN,
+            "GET",
+            "/api/admin/quota/usage",
+            query_string={"tenant_id": TENANT_B},
+        )
+
+        assert response.status_code == 403
+
+    def test_quota_usage_still_global_for_platform_admin(self):
+        response, _ = _request(PLATFORM_ADMIN, "GET", "/api/admin/quota/usage")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert {u.get("tenant_id") for u in response.get_json()} == {TENANT_A, TENANT_B, None}
+
+    def test_quota_stats_rejects_another_tenant(self):
+        response, _ = _request(
+            TENANT_A_ADMIN,
+            "GET",
+            "/api/admin/quota/stats",
+            query_string={"tenant_id": TENANT_B},
+        )
+
+        assert response.status_code == 403

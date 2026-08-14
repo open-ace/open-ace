@@ -170,6 +170,36 @@ class TestOrphanedRevisionIsReachable:
 
 
 class TestProxyTokenMigrationStaysIdempotent:
+    @staticmethod
+    def _unguarded_add_columns(func: ast.FunctionDef) -> list[ast.Call]:
+        """Return every ``op.add_column(...)`` NOT inside an ``if``.
+
+        Association, not counting. A previous version compared the number of
+        ``if`` nodes containing an add_column against the number of add_column
+        calls, so one extra nested ``if`` around an already-guarded call could
+        offset a second call left completely unguarded.
+        """
+        guarded: set[int] = set()
+        for node in ast.walk(func):
+            if not isinstance(node, ast.If):
+                continue
+            for descendant in ast.walk(node):
+                if (
+                    isinstance(descendant, ast.Call)
+                    and isinstance(descendant.func, ast.Attribute)
+                    and descendant.func.attr == "add_column"
+                ):
+                    guarded.add(id(descendant))
+
+        return [
+            node
+            for node in ast.walk(func)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "add_column"
+            and id(node) not in guarded
+        ]
+
     def test_add_column_calls_are_guarded(self, graph):
         """A recovered database already has these columns from the old id.
 
@@ -194,18 +224,33 @@ class TestProxyTokenMigrationStaysIdempotent:
         ]
         assert add_columns, "expected add_column calls in upgrade()"
 
-        guarded = [
-            node
-            for node in ast.walk(upgrade)
-            if isinstance(node, ast.If)
-            and any(
-                isinstance(c, ast.Call)
-                and isinstance(c.func, ast.Attribute)
-                and c.func.attr == "add_column"
-                for c in ast.walk(node)
-            )
-        ]
-        assert len(guarded) >= len(add_columns), (
-            "every op.add_column in 20260731_004 must sit behind an existence check "
-            "-- databases recovered from the orphaned revision id already have these columns"
+        unguarded = self._unguarded_add_columns(upgrade)
+        assert not unguarded, (
+            f"{len(unguarded)} op.add_column call(s) in 20260731_004 are not behind an "
+            "existence check -- databases recovered from the orphaned revision id "
+            "already have these columns and would fail on duplicate column"
         )
+
+    def test_the_guard_check_catches_a_single_unguarded_call(self):
+        """Guard the guard: counting could be defeated by an extra nested if."""
+        mixed = ast.parse(
+            "def upgrade():\n"
+            "    if a:\n"
+            "        if b:\n"
+            '            op.add_column("t", c1)\n'
+            '    op.add_column("t", c2)\n'
+        ).body[0]
+        assert isinstance(mixed, ast.FunctionDef)
+
+        unguarded = self._unguarded_add_columns(mixed)
+        assert len(unguarded) == 1, "the bare add_column must be reported"
+
+        fully_guarded = ast.parse(
+            "def upgrade():\n"
+            "    if a:\n"
+            '        op.add_column("t", c1)\n'
+            "    if b:\n"
+            '        op.add_column("t", c2)\n'
+        ).body[0]
+        assert isinstance(fully_guarded, ast.FunctionDef)
+        assert self._unguarded_add_columns(fully_guarded) == []

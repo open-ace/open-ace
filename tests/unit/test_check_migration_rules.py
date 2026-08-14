@@ -681,6 +681,12 @@ class TestMig003AgainstRealMigrations:
     """MIG003 on the committed tree, using git for real rather than stubs."""
 
     def test_committed_tree_is_clean(self):
+        # Skip when there is no baseline to compare against, rather than
+        # asserting == [] and passing on a skip -- which is exactly the
+        # "a skip must not read like a pass" defect fixed in the script.
+        if not rules._baseline_commits(rules.DEFAULT_BASELINE_REF):
+            pytest.skip(f"no git baseline for {rules.DEFAULT_BASELINE_REF} in this checkout")
+
         violations = rules.check_released_revision_ids(rules.DEFAULT_VERSIONS_DIR)
         assert (
             violations == []
@@ -816,8 +822,16 @@ class TestMig003BaselineResolutionAgainstRealGit:
 
         main gains X at B. A side branch forks at C and is merged into main, so
         main has X. feature forks from C, merges B (so feature has X too), then
-        deletes X. The bases are {B, C}; C never had X, so a single-base
-        comparison misses the deletion entirely.
+        deletes X. The merge bases are {B, C}, and only B has X.
+
+        Which of the two plain ``git merge-base`` returns is git's choice, not
+        something a test can pin -- in this fixture it happens to return B, so
+        the deletion would be caught either way here. What this test therefore
+        asserts is the property that makes the outcome independent of that
+        choice: BOTH bases are resolved, and the union of their ids is what the
+        comparison uses. Do not weaken the ``set(bases) ==`` assertion to a
+        length or membership check; it is the only thing standing between this
+        test and vacuity.
         """
         repo = self._new_repo(tmp_path / "repo")
         self._add_migration(repo, "rev_base")

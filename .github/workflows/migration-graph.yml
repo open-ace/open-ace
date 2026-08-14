@@ -106,10 +106,15 @@ jobs:
       # surface when migrations load from a synthetic tree without the app/
       # package, and because MIG003's post-merge id set is only knowable here.
       #
-      # MIG003's baseline is the PR's own base branch, so the comparison is
-      # exactly "what does main have today vs what will exist after this
-      # merges". The git commands run against $GITHUB_WORKSPACE (the script
-      # resolves the repo from its own location), not $MERGED_DIR.
+      # MIG003 compares against the merge bases of the base branch and HEAD,
+      # not the base branch's tip. On `pull_request`, actions/checkout checks
+      # out the MERGE ref, so the base tip IS a merge base and the comparison
+      # is effectively "what does main have today vs what exists after this
+      # merges" -- the strongest form. That equivalence depends on checking out
+      # the merge ref: adding `ref: github.event.pull_request.head.sha` here
+      # would silently downgrade this gate to fork-point semantics with no
+      # visible change. The git commands run against $GITHUB_WORKSPACE (the
+      # script resolves the repo from its own location), not $MERGED_DIR.
       - name: Enforce migration authoring rules (MIG001/MIG002/MIG003)
         working-directory: ${{ env.MERGED_DIR }}
         env:

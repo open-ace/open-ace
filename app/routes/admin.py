@@ -88,7 +88,7 @@ def api_get_users():
     ``tenant_id`` is narrowed to theirs rather than left as "all tenants",
     and naming somebody else's tenant is rejected.
     """
-    tenant_id, denial = enforce_requested_tenant_scope(request.args.get("tenant_id", type=int))
+    tenant_id, denial = enforce_requested_tenant_scope(request.args.get("tenant_id"))
     if denial is not None:
         return denial
 
@@ -692,10 +692,22 @@ def api_update_user_quota(user_id):
 @admin_bp.route("/admin/quota/usage", methods=["GET"])
 @admin_required
 def api_quota_usage():
-    """Get quota usage for all users."""
+    """Get quota usage for all users the caller may see.
+
+    Same tenant confinement as ``GET /admin/users`` -- this endpoint returns
+    the user list too (``SELECT *`` minus the password hash, plus usage), so
+    leaving it unscoped would reopen cross-tenant user enumeration at a
+    sibling URL. It actually exposes more than /admin/users does, including
+    each account's role, which is precisely the targeting data an attacker
+    needs.
+    """
     from datetime import datetime
 
-    users = user_repo.get_all_users()
+    scope_tenant_id, denial = enforce_requested_tenant_scope(request.args.get("tenant_id"))
+    if denial is not None:
+        return denial
+
+    users = user_repo.get_all_users(tenant_id=scope_tenant_id)
     today = datetime.now().strftime("%Y-%m-%d")
     month_start = datetime.now().replace(day=1).strftime("%Y-%m-%d")
 
@@ -737,17 +749,23 @@ def api_quota_stats():
     """Get quota allocation statistics for reference."""
     from app.services.tenant_service import TenantService
 
+    scope_tenant_id, denial = enforce_requested_tenant_scope(request.args.get("tenant_id"))
+    if denial is not None:
+        return denial
+
     tenant_service = TenantService()
 
     # Get tenant info (default tenant_id=1 for single-tenant mode)
-    tenant = tenant_service.get_tenant(1)
+    tenant = tenant_service.get_tenant(scope_tenant_id or 1)
     if not tenant:
         return jsonify({"error": "Tenant not found"}), 404
 
     tenant_quota = tenant.quota
 
-    # Calculate allocated quotas from all users
-    users = user_repo.get_all_users()
+    # Calculate allocated quotas from users in scope. Summing every tenant's
+    # users against one tenant's limit was both a cross-tenant read and an
+    # arithmetically wrong answer.
+    users = user_repo.get_all_users(tenant_id=scope_tenant_id)
 
     allocated = {
         "daily_token": 0,
