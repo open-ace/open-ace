@@ -908,36 +908,6 @@ CREATE TABLE notification_preferences (
     dingtalk_webhook_secret text
 );
 
-CREATE TABLE parse_failure_records (
-    id character varying(64) NOT NULL,
-    session_id character varying(64) NOT NULL,
-    tool_use_id character varying(128) NOT NULL,
-    tool_name character varying(64) NOT NULL,
-    tool_input text NOT NULL,
-    error text NOT NULL,
-    "timestamp" timestamp with time zone NOT NULL,
-    retry_count integer DEFAULT 0 NOT NULL,
-    last_retry_at timestamp with time zone,
-    resolved boolean DEFAULT false NOT NULL,
-    created_at timestamp with time zone NOT NULL
-);
-
-CREATE TABLE policy_decisions (
-    id integer NOT NULL,
-    decision_id text NOT NULL,
-    request_id text,
-    run_id text,
-    session_id text,
-    tenant_id integer,
-    workspace_scope text,
-    machine_id text,
-    model text,
-    provider text,
-    tool_name text,
-    action text,
-    resource_target text,
-    args_digest text,
-    normalization_profile_id text,
     normalization_profile_version integer,
     fingerprint_hash text,
     policy_rule_id integer,
@@ -2484,8 +2454,6 @@ ALTER TABLE ONLY model_gateway_config
 ALTER TABLE ONLY notification_preferences
     ADD CONSTRAINT notification_preferences_pkey PRIMARY KEY (user_id);
 
-ALTER TABLE ONLY parse_failure_records
-    ADD CONSTRAINT parse_failure_records_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY policy_decisions
     ADD CONSTRAINT policy_decisions_pkey PRIMARY KEY (id);
@@ -3182,17 +3150,13 @@ CREATE INDEX idx_milestones_workflow_round ON workflow_milestones USING btree (w
 --
 --
 
-CREATE INDEX idx_parse_failure_created_at ON parse_failure_records USING btree (created_at);
 
-CREATE INDEX idx_parse_failure_session ON parse_failure_records USING btree (session_id);
 
 
 --
 --
 
-CREATE INDEX idx_parse_failure_timestamp ON parse_failure_records USING btree ("timestamp");
 
-CREATE INDEX idx_parse_failure_unresolved ON parse_failure_records USING btree (resolved) WHERE (resolved = false);
 
 
 --
