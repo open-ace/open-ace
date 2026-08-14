@@ -18,7 +18,6 @@ from playwright.async_api import async_playwright
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 
 
-@pytest.mark.asyncio
 async def test_messages_refresh_detailed():
     """Test Messages page refresh functionality in detail."""
     async with async_playwright() as p:

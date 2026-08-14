@@ -241,14 +241,6 @@
       "summary": "AttributeError: '_StubProcess' object has no attribute 'poll'"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "1425",
-      "nodeid": "tests/issues/1425/test_language_sync.py::test_language_postmessage_sent",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
       "category": "setup_error",
       "exception_type": "AssertionError",
       "issue_number": "144",
@@ -1281,14 +1273,6 @@
       "summary": "AssertionError: 401 != 200"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "65",
-      "nodeid": "tests/issues/65/test_workspace_state_restore.py::test_workspace_state_restore",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
       "issue_number": "716",
@@ -1812,22 +1796,6 @@
       "category": "test_body_exception",
       "exception_type": "",
       "issue_number": "79",
-      "nodeid": "tests/issues/79/test_conversation_detail_modal.py::test_conversation_history_api",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "79",
-      "nodeid": "tests/issues/79/test_conversation_detail_modal.py::test_conversation_timeline_api",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/79/test_conversation_detail_modal.py, line 44"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "79",
       "nodeid": "tests/issues/79/test_role_filter.py::test_role_filter",
       "outcome": "failure",
       "summary": "Failed: async def functions are not natively supported."
@@ -2012,14 +1980,6 @@
       "category": "test_body_exception",
       "exception_type": "",
       "issue_number": "98",
-      "nodeid": "tests/issues/98/test_refresh.py::test_messages_refresh",
-      "outcome": "failure",
-      "summary": "Failed: async def functions are not natively supported."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "",
-      "issue_number": "98",
       "nodeid": "tests/issues/98/test_refresh_detailed.py::test_messages_refresh_detailed",
       "outcome": "failure",
       "summary": "Failed: async def functions are not natively supported."
@@ -2083,8 +2043,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-14 prune 15 resolved: async-def cluster subset revived with @pytest.mark.asyncio (spike run 31700276891 proved them passing against the live CI server). The other 8 async entries stay unmarked/known: 4 hardcode localhost:19888 (isolated-home uses an ephemeral port), 2 real UI drift, 2 test bugs. Shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31700276891",
+    "prune_note": "2026-08-14 prune 15+5 resolved: async-def cluster — 15 revived with the pytest-asyncio marker alone (spike run 31700276891) plus 5 revived by port/env/fixture/dead-JS fixes (run 31764889447). Remaining 3 unmarked/known: 98/refresh_detailed + 79/role_filter + 4/conversation_history_icon have real UI-selector drift; 98/data_update requires PostgreSQL (issues lane is SQLite-only). Shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31764889447",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
