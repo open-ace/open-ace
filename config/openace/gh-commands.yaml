@@ -1,0 +1,44 @@
+# GitHub CLI commands whitelist configuration
+# Version: 1.0.0
+# Issue: #2650
+#
+# This file defines allowed gh subcommands and their constraints.
+
+version: 1
+
+allowed_commands:
+  - command: repo
+    subcommands: [create, view]
+    allowed_flags:
+      create: [--private, --public, --description]
+      view: [--json]
+
+  - command: issue
+    subcommands: [create, view, comment, edit, close, reopen]
+    allowed_flags:
+      create: [--title, --body, --label]
+      view: [--json, --comments]
+      comment: [--body]
+      edit: [--title, --body]
+
+  - command: pr
+    subcommands: [create, view, comment, merge, checks, diff, list]
+    allowed_flags:
+      create: [--title, --body, --base, --head, --draft]
+      view: [--json]
+      comment: [--body]
+      merge: [--merge, --squash, --rebase, --auto]
+      checks: [--json]
+      diff: []
+      list: []
+    admin_merge:
+      enabled: false
+      env_var: "OPENACE_ALLOW_ADMIN_MERGE"
+
+  - command: api
+    special_handling: true
+    path_whitelist_file: gh-api-paths.yaml
+
+forbidden_commands:
+  - "!repo delete"
+  - "!repo fork"

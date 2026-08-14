@@ -1,0 +1,40 @@
+# Open ACE Git/GH Security Wrapper Configuration
+# Version: 1.0.0
+# Issue: #2650
+#
+# This configuration file defines security boundaries for git/gh operations
+# executed through the openace-git/openace-gh wrappers.
+
+version: 1
+metadata:
+  generated_at: "2026-08-14T10:00:00Z"
+  generator: "openace-config-generator"
+
+general:
+  log_path: /var/log/openace/wrapper-audit.log
+  error_log_path: /var/log/openace/wrapper-error.log
+  log_level: INFO
+  command_timeout: 120
+  audit_buffer_size: 100
+  audit_flush_interval: 1.0
+
+security:
+  allowed_path_prefixes:
+    - /workspace
+    - /home
+  max_arg_length: 4096
+  max_c_args: 10
+  context_expiry_seconds: 300
+  orphan_cleanup_age_seconds: 600
+
+rate_limit:
+  enabled: true
+  high_freq_limit: 100
+  burst_limit: 20
+
+version_compat:
+  git_min_version: "2.30.0"
+  git_max_version: "3.0.0"
+  gh_min_version: "2.20.0"
+  gh_max_version: "3.0.0"
+  warn_on_untested: true

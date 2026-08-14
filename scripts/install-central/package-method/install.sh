@@ -2471,130 +2471,24 @@ Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
     local GIT_PATH=$(which git 2>/dev/null || echo "/usr/bin/git")
     local GH_PATH=$(which gh 2>/dev/null || echo "/usr/bin/gh")
 
-    local cmnd_alias_section="# 【安全加固 Issue #2334】安全命令别名定义
-# git命令白名单（动词优先条目 + #2635 前缀锚定条目）
-# 【安全边界说明（诚实版）】动词优先白名单只约束裸 'git <verb>'/'gh <verb>' 形态；
-# #2635 前缀锚定条目（-c core.hooksPath=/dev/null * / --git-dir=* / -R * / api *）
-# 在 (ALL) runas 下实际上恢复了接近 #2334 之前的 git/gh 能力。前缀是公开常量，
-# 仅作命令形态兼容锚点，不是安全边界；真正的收紧由后续 hardened wrapper
-# （openace-git/openace-gh，follow-up issue）承接。
-# 【Issue #2334】使用 (ALL) runas 以允许 github_ops 跨用户 git 操作
-# 【Issue #2635】前缀锚定条目：github_ops._run_git 的 sudo 路径在子命令前携带
-# git 全局选项（-c core.hooksPath=/dev/null ... 或 --git-dir=... --work-tree=...），
-# git 语法要求全局选项必须位于子命令之前，因此命令永不以 'git <subcommand>' 开头，
-# 动词优先白名单一条都匹配不上。
-# 注意：前缀锚定条目在 (ALL) runas 下近似恢复旧版 'git *' 能力（非更窄）；
-# 前缀是公开常量 = 形态兼容锚点，非安全边界；真正的收紧由后续
-# hardened wrapper（openace-git）承接（follow-up issue）。
-Cmnd_Alias GIT_SAFE = \\
-    ${GIT_PATH} -c core.hooksPath=/dev/null *, \\
-    ${GIT_PATH} --git-dir=*, \\
-    ${GIT_PATH} config --global --add safe.directory *, \\
-    ${GIT_PATH} remote get-url origin, \\
-    ${GIT_PATH} remote add *, \\
-    ${GIT_PATH} checkout *, \\
-    ${GIT_PATH} checkout -b *, \\
-    ${GIT_PATH} checkout -b * *, \\
-    ${GIT_PATH} push *, \\
-    ${GIT_PATH} push -u *, \\
-    ${GIT_PATH} push origin *, \\
-    ${GIT_PATH} push origin --delete *, \\
-    ${GIT_PATH} push origin * --force-with-lease, \\
-    ${GIT_PATH} fetch *, \\
-    ${GIT_PATH} pull *, \\
-    ${GIT_PATH} merge *, \\
-    ${GIT_PATH} rebase *, \\
-    ${GIT_PATH} reset --hard HEAD, \\
-    ${GIT_PATH} branch *, \\
-    ${GIT_PATH} branch --show-current, \\
-    ${GIT_PATH} branch -D *, \\
-    ${GIT_PATH} rev-parse *, \\
-    ${GIT_PATH} rev-list --count *, \\
-    ${GIT_PATH} worktree add *, \\
-    ${GIT_PATH} worktree add -b *, \\
-    ${GIT_PATH} worktree remove *, \\
-    ${GIT_PATH} worktree remove * --force, \\
-    ${GIT_PATH} worktree list --porcelain, \\
-    ${GIT_PATH} diff *, \\
-    ${GIT_PATH} diff --numstat *, \\
-    ${GIT_PATH} show *, \\
-    ${GIT_PATH} show --format= *, \\
-    ${GIT_PATH} show --numstat --format= *, \\
-    ${GIT_PATH} status --porcelain, \\
-    ${GIT_PATH} status *, \\
-    ${GIT_PATH} log *, \\
-    ${GIT_PATH} add *, \\
-    ${GIT_PATH} add -A, \\
-    ${GIT_PATH} commit *, \\
-    ${GIT_PATH} commit -m *, \\
-    ${GIT_PATH} commit -m * --no-verify, \\
-    ${GIT_PATH} init
+    local cmnd_alias_section="# 【安全加固 Issue #2650】Git/GH 安全包装器配置
+# Issue #2650: 通过 openace-git/openace-gh 包装器实现命令白名单：
+# - 只允许 github_ops 实际构造的命令形状
+# - 阻止 -c alias.* 等 RCE 攻击向量
+# - 阻止 clean -fd、reset --hard 等破坏性操作
+# - 阻止 gh repo delete、gh api -X DELETE 等危险操作
+#
+# 配置文件: /etc/openace/wrapper.yaml, git-verbs.yaml, gh-commands.yaml
+# See Issue #2650 for design details.
 
-# gh命令白名单（动词优先条目 + #2635 前缀锚定条目）
-# Issue #1855: --admin 仅在 OPENACE_ALLOW_ADMIN_MERGE=1 时启用
-# 【Issue #2334】使用 (ALL) runas 以允许 github_ops 跨用户 gh 操作
-# 【Issue #2635】前缀锚定条目：github_ops._run_gh 的 sudo 路径总是在子命令前插入
-# '-R owner/repo'（gh 无 -C，sudo 下靠 -R 定位仓库）；且 gh api 拒绝 -R、以
-# 'gh api repos/...' 裸形态运行。
-# 注意：'gh api *' 允许任意 REST 调用（含 -X DELETE），'-R *' 下的动词同样
-# 不受白名单约束——此两条在 (ALL) runas 下近似恢复旧版 'gh *' 能力（非更窄）；
-# 前缀是公开常量 = 形态兼容锚点，非安全边界；真正的收紧由后续
-# hardened wrapper（openace-gh）承接（follow-up issue）。
-Cmnd_Alias GH_SAFE = \\
-    ${GH_PATH} -R *, \\
-    ${GH_PATH} api *, \\
-    ${GH_PATH} repo create *, \\
-    ${GH_PATH} repo create * --private, \\
-    ${GH_PATH} repo create * --public, \\
-    ${GH_PATH} repo create * --description *, \\
-    ${GH_PATH} repo view --json *, \\
-    ${GH_PATH} issue create --title * --body *, \\
-    ${GH_PATH} issue create --title * --body * --label *, \\
-    ${GH_PATH} issue view * --json *, \\
-    ${GH_PATH} issue comment * --body *, \\
-    ${GH_PATH} issue view * --comments --json *, \\
-    ${GH_PATH} issue edit * --title *, \\
-    ${GH_PATH} issue edit * --body *, \\
-    ${GH_PATH} issue close *, \\
-    ${GH_PATH} issue reopen *, \\
-    ${GH_PATH} pr create --title * --body * --base *, \\
-    ${GH_PATH} pr create --title * --body * --base * --head *, \\
-    ${GH_PATH} pr create --title * --body * --base * --head * --draft, \\
-    ${GH_PATH} pr view * --json *, \\
-    ${GH_PATH} pr comment * --body *, \\
-    ${GH_PATH} pr merge *, \\
-    ${GH_PATH} pr merge * --merge, \\
-    ${GH_PATH} pr merge * --squash, \\
-    ${GH_PATH} pr merge * --rebase, \\
-    ${GH_PATH} pr merge * --auto, \\
-    ${GH_PATH} pr view * --json commits, \\
-    ${GH_PATH} pr checks * --json *, \\
-    ${GH_PATH} pr diff *, \\
-    ${GH_PATH} pr list *, \\
-    ${GH_PATH} api user, \\
-    ${GH_PATH} api repos/*/pulls/*/comments --jq *, \\
-    ${GH_PATH} api repos/*/issues/*/comments --jq *
+# Git 安全包装器（Issue #2650）
+# 所有 git 操作必须通过包装器，直接 git 调用被阻断
+Cmnd_Alias GIT_SAFE = /usr/local/bin/openace-git *
 
-# 【安全加固 Issue #2334】OPENACE_UTILS 收紧
-# 移除 git/gh 通配（改用 GIT_SAFE/GH_SAFE），消除 runas 漂移
-# 移除 mkdir（改用 openace-mkdir wrapper）
-# 保留低风险只读命令：test, ls, stat, id, find
-# find 是只读操作，DAC 已保护敏感目录
-# 【Issue #2334】runas 使用 (ALL) 以支持 github_ops 跨用户工具调用
-Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/id *, /usr/bin/find *
+# GH 安全包装器（Issue #2650）
+# 所有 gh 操作必须通过包装器，直接 gh 调用被阻断
+Cmnd_Alias GH_SAFE = /usr/local/bin/openace-gh *"
 
-# 【安全加固 Issue #2181】安全 wrapper 规则
-# 以下 wrapper 替代原通配命令，内部验证参数安全性
-# openace-chown: 替代 chown *
-# openace-useradd: 替代 useradd *
-# openace-cat: 替代 cat *
-# openace-mkdir: 安全目录创建
-# openace-rm: 替代 rm *，验证路径/用户/owner
-# openace-write-as: 跨用户文件写入
-# openace-webui-launch: WebUI 进程启动，限定首参为 webui_path 防权限提升
-# 注意：openace-webui-launch 不在 security_wrapper_rules 循环中，
-# 因为它需要受限规则（首参必须为 webui_path），不能使用通配规则。
-# 其受限规则在 current_user_rules 中动态生成（仅当 wrapper 存在时）。"
 
     # ===== Incremental update logic =====
     if [ -f "$sudoers_file" ]; then

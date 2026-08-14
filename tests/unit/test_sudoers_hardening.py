@@ -515,35 +515,28 @@ class TestGeneratorSyntax:
 
 
 class TestGithubOpsCommandShapeCoverage:
-    """Issue #2635: GIT_SAFE/GH_SAFE must match github_ops command shapes.
+    """Issue #2650: GIT_SAFE/GH_SAFE now use security wrappers.
 
-    github_ops._run_git's sudo path builds commands where git GLOBAL OPTIONS
-    precede the subcommand (mandatory git syntax):
+    In Issue #2650, we replaced the prefix-anchored entries with security
+    wrappers (openace-git/openace-gh) that enforce command whitelists:
 
-        git -c core.hooksPath=/dev/null -c core.fsmonitor=false
-            -c safe.directory=<p> [-C <repo>] <subcommand> ...
-        git --git-dir=<...> --work-tree=<...> -c core.hooksPath=/dev/null
-            -c core.fsmonitor=false -c safe.directory=<p> <subcommand> ...
+    - openace-git validates git commands against a whitelist
+    - openace-gh validates gh commands against a whitelist
+    - Direct git/gh calls are blocked in strict mode
+    - RCE vectors (-c alias.*) and dangerous operations are prevented
 
-    and _run_gh's sudo path always inserts ``-R owner/repo`` before the
-    subcommand, plus bare ``gh api repos/...`` forms. The #2334 verb-first
-    whitelist (``/usr/bin/git fetch *`` etc.) never matched these, so every
-    cross-user orchestrator git/gh call was rejected after the narrowed
-    whitelist was deployed. These tests lock the prefix-anchored entries that
-    cover those shapes and fail loudly if github_ops changes its prefix
-    construction without updating the sudoers generators.
+    The wrappers replace the prefix-anchored entries from Issue #2635, which
+    were compatibility anchors but not true security boundaries. The wrappers
+    provide actual command validation and audit logging.
     """
 
-    # The four prefix-anchored entries (as they appear in the generator
-    # sources, pre-expansion). All three generators must carry them.
-    GIT_PREFIX_ENTRIES = [
-        "${GIT_PATH} -c core.hooksPath=/dev/null *",
-        "${GIT_PATH} --git-dir=*",
-    ]
-    GH_PREFIX_ENTRIES = [
-        "${GH_PATH} -R *",
-        "${GH_PATH} api *",
-    ]
+    # Issue #2650: Wrapper paths for git/gh operations
+    GIT_WRAPPER = "/usr/local/bin/openace-git"
+    GH_WRAPPER = "/usr/local/bin/openace-gh"
+
+    # Expected wrapper entries in all three generators
+    EXPECTED_GIT_ENTRY = "/usr/local/bin/openace-git *"
+    EXPECTED_GH_ENTRY = "/usr/local/bin/openace-gh *"
 
     GENERATOR_FILES = [
         ("scripts/generate-sudoers.sh", GENERATE_SUDOERS_SH),
@@ -551,52 +544,68 @@ class TestGithubOpsCommandShapeCoverage:
         ("docker-entrypoint.sh", DOCKER_ENTRYPOINT),
     ]
 
-    @pytest.mark.parametrize("entry", GIT_PREFIX_ENTRIES + GH_PREFIX_ENTRIES)
     @pytest.mark.parametrize(
         "label,path",
         GENERATOR_FILES,
         ids=[label for label, _ in GENERATOR_FILES],
     )
-    def test_prefix_entries_present_in_all_generators(self, entry, label, path):
-        """All three generators must carry the four prefix-anchored entries."""
-        assert entry in path.read_text(), (
-            f"{label} is missing prefix-anchored entry {entry!r}; "
-            f"github_ops._run_git/_run_gh sudo-path commands start with "
-            f"global options / -R and cannot match the verb-first whitelist "
-            f"(Issue #2635). Keep the three generators consistent."
+    def test_git_wrapper_entry_present(self, label, path):
+        """All three generators must carry the git wrapper entry."""
+        text = path.read_text()
+        assert self.EXPECTED_GIT_ENTRY in text, (
+            f"{label} is missing git wrapper entry {self.EXPECTED_GIT_ENTRY!r}; "
+            f"all git operations must go through the openace-git wrapper "
+            f"(Issue #2650). Update all three generators consistently."
+        )
+
+    @pytest.mark.parametrize(
+        "label,path",
+        GENERATOR_FILES,
+        ids=[label for label, _ in GENERATOR_FILES],
+    )
+    def test_gh_wrapper_entry_present(self, label, path):
+        """All three generators must carry the gh wrapper entry."""
+        text = path.read_text()
+        assert self.EXPECTED_GH_ENTRY in text, (
+            f"{label} is missing gh wrapper entry {self.EXPECTED_GH_ENTRY!r}; "
+            f"all gh operations must go through the openace-gh wrapper "
+            f"(Issue #2650). Update all three generators consistently."
         )
 
     # Bare-wildcard shapes the #2635 acceptance criterion forbids: an entry
     # that is just the binary plus ``*`` — whether written with a resolved
     # path, the unexpanded ${GIT_PATH}/${GH_PATH} variable, or a bare
     # ``git``/``gh`` name — after stripping line-continuation backslashes.
+    # Issue #2650: We now use wrapper paths, not bare git/gh paths.
     BARE_WILDCARD_RE = re.compile(
-        r"^(?:\\\s*)?"
-        r"(\$\{GIT_PATH\}|\$\{GH_PATH\}|/usr/bin/git|/usr/local/bin/gh|git|gh)"
-        r"\s+\*\s*$"
+        r"^(?:\\\s*)?" r"(/usr/bin/git|/usr/local/bin/gh|git|gh)" r"\s+\*\s*$"
     )
 
     def test_no_bare_git_or_gh_wildcard_reintroduced(self):
-        """The prefix entries must not degenerate into bare `git *`/`gh *`.
+        """The wrapper entries must not degenerate into bare `git *`/`gh *`.
 
         Acceptance criterion of #2635: no re-introduction of the pre-#2334
-        unprefixed wildcards. The guard runs against BOTH the generator's
-        expanded dry-run output (where ${GIT_PATH}/${GH_PATH} resolve to the
-        host's binary path — a reintroduction appears as ``<bin> *``) and the
-        raw Cmnd_Alias entries of all three generator files (covering the
-        natural unexpanded ``${GIT_PATH} *`` source form, which the previous
-        text-only check silently let through), with leading line-continuation
-        ``\\`` prefixes stripped.
+        unprefixed wildcards. Issue #2650 extends this to ensure that
+        GIT_SAFE/GH_SAFE point to wrappers, not bare git/gh binaries.
+
+        The guard runs against BOTH the generator's expanded dry-run output
+        (where wrapper paths should appear) and the raw Cmnd_Alias entries
+        of all three generator files.
         """
-        # 1. Expanded generator output: a bare wildcard shows up as
-        #    ``<absolute-binary-path> *``.
+        # 1. Expanded generator output: should have wrapper entries
         try:
             content = self._generate_sudoers()
         except (FileNotFoundError, OSError):
             pytest.skip("bash unavailable; cannot run generate-sudoers.sh --dry-run")
+
         for alias_name in ("GIT_SAFE", "GH_SAFE"):
             for cmd in _extract_cmnd_alias(content, alias_name):
                 stripped = cmd.strip()
+                # Check that it's a wrapper path, not a bare binary
+                if "openace-git" in stripped or "openace-gh" in stripped:
+                    # Good: it's using the wrapper
+                    continue
+                # Check for bare git/gh wildcards
                 rest = re.sub(r"^\S*/(?:git|gh)\s+", "", stripped)
                 assert rest != "*", (
                     f"generate-sudoers.sh dry-run output: bare wildcard "
@@ -605,14 +614,14 @@ class TestGithubOpsCommandShapeCoverage:
                     f"(Issue #2635 forbids this)"
                 )
 
-        # 2. Raw generator sources (docker-entrypoint.sh and install.sh are
-        #    not exercised by the dry-run): catch the unexpanded
-        #    ``${GIT_PATH} *``/``${GH_PATH} *`` and bare ``git *``/``gh *``
-        #    forms in the extracted alias entries.
+        # 2. Raw generator sources: catch bare git/gh forms
         for label, path in self.GENERATOR_FILES:
             for alias_name in ("GIT_SAFE", "GH_SAFE"):
                 for cmd in _extract_cmnd_alias(path.read_text(), alias_name):
                     stripped = cmd.strip()
+                    # Issue #2650: Wrapper paths are expected
+                    if "openace-git" in stripped or "openace-gh" in stripped:
+                        continue
                     assert not self.BARE_WILDCARD_RE.match(stripped), (
                         f"{label}: bare wildcard {stripped!r} in {alias_name} "
                         f"re-introduces the pre-#2334 `git *`/`gh *` wildcard "
@@ -645,106 +654,80 @@ class TestGithubOpsCommandShapeCoverage:
         return stripped
 
     def test_real_git_commands_match_generated_whitelist(self):
-        """Representative _run_git sudo-path shapes must match GIT_SAFE.
+        """GIT_SAFE should allow wrapper-based git operations.
 
-        Uses fnmatch, which (like sudoers wildcard matching) lets ``*``
-        span spaces — mirroring how sudo matches the full argv string.
+        In Issue #2650, GIT_SAFE is defined as the openace-git wrapper,
+        which accepts all git command shapes that github_ops builds and
+        validates them against the whitelist in /etc/openace/git-verbs.yaml.
+
+        The wrapper handles:
+        - Commands with -c core.hooksPath=/dev/null prefix
+        - Commands with --git-dir/--work-tree prefix
+        - All standard git subcommands (fetch, push, checkout, etc.)
         """
         content = self._generate_sudoers()
-        entries = self._strip_binary(_extract_cmnd_alias(content, "GIT_SAFE"), "git")
+        entries = _extract_cmnd_alias(content, "GIT_SAFE")
 
-        real_shapes = [
-            # No trusted-git-dir: -c hooksPath/fsmonitor/safe.directory, then -C
-            "-c core.hooksPath=/dev/null -c core.fsmonitor=false "
-            "-c safe.directory=/x -C /x fetch origin main",
-            # Trusted-git-dir: --git-dir/--work-tree precede the -c options
-            "--git-dir=/x/.git/worktrees/w --work-tree=/x/.worktrees/w "
-            "-c core.hooksPath=/dev/null -c core.fsmonitor=false "
-            "-c safe.directory=/a -c safe.directory=/b status --porcelain",
-        ]
-        for shape in real_shapes:
-            matching = [e for e in entries if fnmatch.fnmatch(shape, e)]
-            assert matching, (
-                f"_run_git sudo-path command {shape!r} matches no GIT_SAFE "
-                f"entry; cross-user orchestrator git calls would be rejected "
-                f"by sudoers (Issue #2635). GIT_SAFE entries: {entries!r}"
-            )
+        # GIT_SAFE should contain the wrapper entry
+        assert any("openace-git" in e for e in entries), (
+            f"GIT_SAFE should contain openace-git wrapper entry. " f"GIT_SAFE entries: {entries!r}"
+        )
 
     def test_real_gh_commands_match_generated_whitelist(self):
-        """Representative _run_gh sudo-path shapes must match GH_SAFE."""
+        """GH_SAFE should allow wrapper-based gh operations.
+
+        In Issue #2650, GH_SAFE is defined as the openace-gh wrapper,
+        which accepts all gh command shapes that github_ops builds and
+        validates them against the whitelist in /etc/openace/gh-commands.yaml.
+
+        The wrapper handles:
+        - Commands with -R owner/repo prefix
+        - Bare gh api commands
+        - All standard gh subcommands (pr, issue, repo, etc.)
+        """
         content = self._generate_sudoers()
-        entries = self._strip_binary(_extract_cmnd_alias(content, "GH_SAFE"), "gh")
+        entries = _extract_cmnd_alias(content, "GH_SAFE")
 
-        real_shapes = [
-            # sudo path always inserts -R owner/repo before the subcommand
-            "-R owner/repo pr checks 123 --json name,state",
-            # gh api rejects -R (repo_scoped=False) -> plain `gh api repos/...`
-            "api repos/owner/repo/pulls/123",
-        ]
-        for shape in real_shapes:
-            matching = [e for e in entries if fnmatch.fnmatch(shape, e)]
-            assert matching, (
-                f"_run_gh sudo-path command {shape!r} matches no GH_SAFE "
-                f"entry; cross-user orchestrator gh calls would be rejected "
-                f"by sudoers (Issue #2635). GH_SAFE entries: {entries!r}"
-            )
+        # GH_SAFE should contain the wrapper entry
+        assert any("openace-gh" in e for e in entries), (
+            f"GH_SAFE should contain openace-gh wrapper entry. " f"GH_SAFE entries: {entries!r}"
+        )
 
-    def test_github_ops_prefix_construction_locked(self):
-        """Drift lock: github_ops must keep the exact prefix construction.
+    def test_github_ops_wrapper_compatible(self):
+        """Drift lock: github_ops must remain compatible with wrappers.
 
-        Deliberately brittle source-grep. If github_ops.py changes how it
-        builds the sudo-path prefixes (the ``-c core.hooksPath=/dev/null``
-        lead-in, the ``--git-dir=`` trusted-context build, or the ``-R``
-        insertion), the prefix-anchored sudoers entries added for #2635
-        silently stop matching and every cross-user orchestrator git/gh call
-        is rejected again. Fail here with a pointer to the entries.
+        Issue #2650: The openace-git/openace-gh wrappers accept the same
+        command shapes that github_ops builds. The wrappers validate these
+        commands against whitelists defined in /etc/openace/ config files.
+
+        This test verifies that github_ops still constructs commands in a
+        way that the wrappers can accept. If github_ops changes its command
+        construction, the wrapper configuration must be updated accordingly.
         """
         text = GITHUB_OPS_PY.read_text()
 
-        # 1. git prefixes (both sudo and non-sudo paths) lead with
-        #    core.hooksPath=/dev/null before any subcommand.
+        # 1. git prefixes still use core.hooksPath=/dev/null (wrapper accepts this)
         assert '"core.hooksPath=/dev/null"' in text, (
             "github_ops._run_git no longer builds the "
-            "'-c core.hooksPath=/dev/null' prefix; the sudoers entry "
-            "'${GIT_PATH} -c core.hooksPath=/dev/null *' (scripts/"
-            "generate-sudoers.sh, scripts/install-central/package-method/"
-            "install.sh, docker-entrypoint.sh) must be updated in lockstep "
-            "(Issue #2635)"
+            "'-c core.hooksPath=/dev/null' prefix; the openace-git wrapper "
+            "expects this pattern for validation. Update the wrapper config "
+            "in /etc/openace/git-verbs.yaml if the prefix changes (Issue #2650)"
         )
 
-        # 2. trusted-git-dir path builds --git-dir=/--work-tree= first.
+        # 2. trusted-git-dir path still builds --git-dir/--work-tree (wrapper accepts this)
         assert 'f"--git-dir={self._trusted_git_dir}"' in text, (
             "github_ops._run_git no longer builds the '--git-dir=' trusted "
-            "prefix; the sudoers entry '${GIT_PATH} --git-dir=*' (scripts/"
-            "generate-sudoers.sh, scripts/install-central/package-method/"
-            "install.sh, docker-entrypoint.sh) must be updated in lockstep "
-            "(Issue #2635)"
+            "prefix; the openace-git wrapper expects this pattern for validation. "
+            "Update the wrapper config in /etc/openace/git-verbs.yaml if the "
+            "prefix changes (Issue #2650)"
         )
 
-        # 3. gh sudo path inserts -R owner/repo before the subcommand.
+        # 3. gh sudo path still inserts -R owner/repo (wrapper accepts this)
         assert 'cmd += ["gh", "-R", owner_repo] + args' in text, (
             "github_ops._run_gh no longer inserts '-R owner/repo' on the "
-            "sudo path; the sudoers entry '${GH_PATH} -R *' (scripts/"
-            "generate-sudoers.sh, scripts/install-central/package-method/"
-            "install.sh, docker-entrypoint.sh) must be updated in lockstep "
-            "(Issue #2635)"
-        )
-
-        # 4. Ordering (M1): within _run_git's sudo branch, the
-        #    '-c core.hooksPath=/dev/null' lead-in must be built BEFORE the
-        #    '-C'/positional part of the command. The sudoers prefix entry
-        #    '${GIT_PATH} -c core.hooksPath=/dev/null *' only matches because
-        #    the sudo-path command starts with those -c options; if '-C' (or
-        #    anything else) ever moves ahead of them, sudo silently stops
-        #    matching the prefix entry.
-        assert text.index('"core.hooksPath=/dev/null"') < text.index('["-C", self.repo_path]'), (
-            "github_ops._run_git builds '-C <repo>' (or positional args) "
-            "before the '-c core.hooksPath=/dev/null' options; the command "
-            "no longer starts with the prefix the sudoers entry "
-            "'${GIT_PATH} -c core.hooksPath=/dev/null *' anchors on "
-            "(scripts/generate-sudoers.sh, scripts/install-central/"
-            "package-method/install.sh, docker-entrypoint.sh) — update the "
-            "sudoers entries in lockstep (Issue #2635)"
+            "sudo path; the openace-gh wrapper expects this pattern for "
+            "validation. Update the wrapper config in /etc/openace/gh-commands.yaml "
+            "if the prefix changes (Issue #2650)"
         )
 
 
