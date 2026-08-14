@@ -284,51 +284,138 @@ def find_config_dir() -> str:
 
 
 def parse_yaml_simple(content: str) -> dict[str, Any]:
-    """Simple YAML parser for basic config files (fallback when yaml not available)."""
+    """
+    Simple YAML parser for basic config files (fallback when yaml not available).
+
+    Handles:
+    - Key: value pairs
+    - Inline lists [a, b, c]
+    - List items starting with -
+    - Nested dict items in lists (verb: x, flags: [...])
+    - Scalar list items ("- item")
+    """
     result: dict[str, Any] = {}
-    current_section = result
-    current_key = ""
+    current_list: list[Any] | None = None
+    current_dict_in_list: dict[str, Any] | None = None
+    prev_indent = 0
 
     for line in content.split("\n"):
-        line = line.rstrip()
-
         # Skip empty lines and comments
-        if not line or line.startswith("#"):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
             continue
 
-        # Count indentation
+        # Calculate indentation
         indent = len(line) - len(line.lstrip())
-        line = line.strip()
 
-        if ":" in line:
-            key, _, value = line.partition(":")
+        # Handle list items (lines starting with "- ")
+        if stripped.startswith("- "):
+            # Start a new list item
+            # First, save previous dict if exists
+            if current_dict_in_list is not None and current_list is not None:
+                current_list.append(current_dict_in_list)
+                current_dict_in_list = None
+
+            # Parse the item content
+            item_content = stripped[2:].strip()
+
+            # Check if it's a scalar or a dict
+            if ":" in item_content:
+                # Start a new dict item
+                current_dict_in_list = {}
+
+                # Parse key: value pairs on this line
+                # Handle both "verb: status" and "verb: status, flags: [...]"
+                parts = [p.strip() for p in item_content.split(",")]
+                for part in parts:
+                    if ":" in part:
+                        k, v = part.split(":", 1)
+                        k = k.strip()
+                        v = v.strip()
+                        # Handle inline list
+                        if v.startswith("[") and v.endswith("]"):
+                            items = [
+                                i.strip().strip("\"'")
+                                for i in v[1:-1].split(",")
+                                if i.strip()
+                            ]
+                            current_dict_in_list[k] = items
+                        else:
+                            current_dict_in_list[k] = v
+            else:
+                # Scalar item (e.g., "- !clean")
+                # Clean up quotes
+                if item_content.startswith("\"") and item_content.endswith("\""):
+                    item_content = item_content[1:-1]
+                elif item_content.startswith("'") and item_content.endswith("'"):
+                    item_content = item_content[1:-1]
+
+                if current_list is not None:
+                    current_list.append(item_content)
+
+            # Mark that we're in a list
+            if current_list is None:
+                # Error: list item without a list container
+                continue
+
+            prev_indent = indent
+            continue
+
+        # Handle regular key: value lines
+        if ":" in stripped:
+            key, _, value = stripped.partition(":")
             key = key.strip()
             value = value.strip()
 
+            # Check if this is a continuation of a dict in a list item
+            # (indented more than the "- ")
+            if current_dict_in_list is not None and indent > prev_indent:
+                # This is an attribute of the current list item
+                if value == "":
+                    # Nested dict/list start - store as dict
+                    current_dict_in_list[key] = {}
+                elif value.startswith("["):
+                    items = [i.strip().strip("\"'") for i in value[1:-1].split(",") if i.strip()]
+                    current_dict_in_list[key] = items
+                else:
+                    current_dict_in_list[key] = value
+                continue
+
+            # Not in a list item, so handle as regular key: value
+            # First, save any pending dict from previous list
+            if current_dict_in_list is not None and current_list is not None:
+                current_list.append(current_dict_in_list)
+                current_dict_in_list = None
+
             if value == "":
-                # New section
-                current_section[key] = {}
-                current_section = result  # Reset for nested parsing
+                # Start of a new list container
+                current_list = []
+                result[key] = current_list
             elif value.startswith("["):
-                # List value
-                items = []
-                for item in value[1:-1].split(","):
-                    item = item.strip().strip("\"'")
-                    if item:
-                        items.append(item)
-                current_section[key] = items
+                # Inline list
+                items = [
+                    i.strip().strip("\"'")
+                    for i in value[1:-1].split(",")
+                    if i.strip()
+                ]
+                result[key] = items
+                current_list = None
             elif value.isdigit():
-                current_section[key] = int(value)
+                result[key] = int(value)
             elif value.replace(".", "").isdigit():
-                current_section[key] = float(value)
+                result[key] = float(value)
             elif value.lower() in ("true", "false"):
-                current_section[key] = value.lower() == "true"
+                result[key] = value.lower() == "true"
             elif value.startswith('"') and value.endswith('"'):
-                current_section[key] = value[1:-1]
+                result[key] = value[1:-1]
             elif value.startswith("'") and value.endswith("'"):
-                current_section[key] = value[1:-1]
+                result[key] = value[1:-1]
             else:
-                current_section[key] = value
+                result[key] = value
+
+    # Don't forget to add the last dict item
+    if current_dict_in_list is not None and current_list is not None:
+        current_list.append(current_dict_in_list)
 
     return result
 
