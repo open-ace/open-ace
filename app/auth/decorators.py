@@ -1347,6 +1347,47 @@ def resolve_admin_tenant_scope() -> tuple[int | None, tuple[Response, int] | Non
     return tenant_id, None
 
 
+def _load_target_user(user_id: int) -> dict | None:
+    """Fetch the user an admin endpoint is about to act on.
+
+    Single choke point so the boundary check and any future caller agree on
+    where target-user data comes from. Raises whatever the repository raises;
+    callers decide whether that is fatal (see ``same_tenant_user_required``).
+    """
+    from app.repositories.user_repo import UserRepository
+
+    return UserRepository().get_user_by_id(user_id)
+
+
+def _audit_cross_tenant_user_access(target_user: dict | None) -> None:
+    """Record a platform admin reaching into another tenant's user.
+
+    No-op when the target is in the actor's own tenant, has no tenant, or
+    could not be resolved.
+    """
+    if not target_user:
+        return
+
+    target_tenant_id = _normalize_user_tenant_id(target_user.get("tenant_id"))
+    if target_tenant_id is None:
+        return
+
+    actor_id = getattr(g, "user_id", None)
+    if not isinstance(actor_id, int):
+        return
+
+    own_tenant_id = _normalize_user_tenant_id((getattr(g, "user", None) or {}).get("tenant_id"))
+    if target_tenant_id == own_tenant_id:
+        return
+
+    _log_cross_tenant_operation(
+        actor_user_id=actor_id,
+        actor_tenant_id=own_tenant_id,
+        target_tenant_id=target_tenant_id,
+        action=f"{request.method} {request.path}",
+    )
+
+
 def enforce_target_user_tenant(target_user: dict | None) -> tuple[Response, int] | None:
     """Deny when the current admin may not operate on ``target_user``.
 
@@ -1372,19 +1413,7 @@ def enforce_target_user_tenant(target_user: dict | None) -> tuple[Response, int]
 
     if actor_tenant_id is None:
         # Platform admin: permitted, but record the boundary crossing.
-        actor_id = getattr(g, "user_id", None)
-        own_tenant_id = _normalize_user_tenant_id((getattr(g, "user", None) or {}).get("tenant_id"))
-        if (
-            isinstance(actor_id, int)
-            and target_tenant_id is not None
-            and target_tenant_id != own_tenant_id
-        ):
-            _log_cross_tenant_operation(
-                actor_user_id=actor_id,
-                actor_tenant_id=own_tenant_id,
-                target_tenant_id=target_tenant_id,
-                action=f"{request.method} {request.path}",
-            )
+        _audit_cross_tenant_user_access(target_user)
         return None
 
     if target_tenant_id is None or target_tenant_id != actor_tenant_id:
@@ -1411,8 +1440,10 @@ def same_tenant_user_required(f=None, *, arg: str = "user_id"):
         @same_tenant_user_required
         def api_reset_user_password(user_id): ...
 
-    The looked-up target user is cached on ``g.target_user`` so the view can
-    reuse it instead of issuing a second query.
+    A platform admin costs no extra query: there is no boundary to check, so
+    the target is only fetched to name the tenant in the audit entry, and that
+    fetch is best-effort. A tenant-scoped admin does pay one lookup, and there
+    the lookup is load-bearing -- if it fails, the request is denied.
 
     Args:
         f: the view function, when applied bare as ``@same_tenant_user_required``.
@@ -1422,18 +1453,74 @@ def same_tenant_user_required(f=None, *, arg: str = "user_id"):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            target_user_id = kwargs.get(arg)
-            target_user = None
-            if target_user_id is not None:
-                from app.repositories.user_repo import UserRepository
+            actor_tenant_id, denial = resolve_admin_tenant_scope()
+            if denial is not None:
+                return denial
 
-                target_user = UserRepository().get_user_by_id(target_user_id)
+            raw_target_id = kwargs.get(arg)
+            try:
+                target_user_id: int | None = int(raw_target_id)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                target_user_id = None
+
+            if actor_tenant_id is None:
+                # Platform admin. There is no boundary to enforce, so the
+                # lookup here exists only to name the target tenant in the
+                # cross-tenant audit entry. Keep it strictly best-effort: a
+                # repository failure must not turn a permitted request into a
+                # 500, and the endpoint writes its own audit record either way.
+                if target_user_id is not None:
+                    try:
+                        target_user = _load_target_user(target_user_id)
+                    except Exception as exc:  # pragma: no cover - defensive
+                        logger.warning(
+                            "Cross-tenant audit lookup failed for user %s at %s: %s",
+                            target_user_id,
+                            request.path,
+                            exc,
+                        )
+                    else:
+                        _audit_cross_tenant_user_access(target_user)
+                return func(*args, **kwargs)
+
+            # Tenant-scoped admin. Here the lookup gates access, so it is not
+            # optional: if the target's tenant cannot be established the
+            # request is denied rather than allowed or 500'd.
+            if target_user_id is None:
+                logger.warning(
+                    "Tenant boundary check has no usable %s view arg at %s (got %r)",
+                    arg,
+                    request.path,
+                    raw_target_id,
+                )
+                return jsonify({"error": "Cross-tenant access denied"}), 403
+
+            try:
+                target_user = _load_target_user(target_user_id)
+            except Exception as exc:
+                logger.warning(
+                    "Tenant boundary check could not resolve user %s at %s: %s",
+                    target_user_id,
+                    request.path,
+                    exc,
+                )
+                return jsonify({"error": "Cross-tenant access denied"}), 403
+
+            if target_user is None:
+                # Deny rather than fall through to the view's own 404. Two
+                # reasons: api_update_user / api_delete_user act on the raw
+                # user_id without a not-found branch, so any divergence between
+                # this lookup and theirs would be a fail-open; and a 403 gives
+                # a tenant admin no oracle for whether an id exists elsewhere.
+                logger.warning(
+                    "Tenant boundary check found no user %s at %s", target_user_id, request.path
+                )
+                return jsonify({"error": "Cross-tenant access denied"}), 403
 
             denial = enforce_target_user_tenant(target_user)
             if denial is not None:
                 return denial
 
-            g.target_user = target_user
             return func(*args, **kwargs)
 
         return wrapper

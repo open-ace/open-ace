@@ -17,7 +17,8 @@ but left ``admin_required`` itself boundary-free.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 from flask import Flask
@@ -135,28 +136,47 @@ class _FakeUserRepo:
         return True
 
 
-def _request(actor, method, path, *, json_body=None, repo=None, query_string=None):
+def _request(actor, method, path, *, json_body=None, repo=None, query_string=None, guard_repo=None):
     """Issue one authenticated request against a bare admin blueprint.
 
     Uses a minimal Flask app rather than ``create_app()`` so the shared
     module-level blueprint singletons are not mutated for other test modules
     (same reasoning as tests/integration/test_admin_tenant_isolation_2180.py).
+
+    ``guard_repo`` overrides only the repository the tenant guard resolves
+    through, leaving the view's own ``user_repo`` intact -- so a test can make
+    the guard's lookup fail without also breaking the endpoint underneath it.
     """
     from app.routes.admin import admin_bp
 
     repo = repo or _FakeUserRepo()
+    guard_repo = guard_repo if guard_repo is not None else repo
 
     app = Flask(__name__)
     app.config["TESTING"] = True
     app.register_blueprint(admin_bp, url_prefix="/api")
 
+    # TenantService is imported inside the view functions and talks to the
+    # tenants table; stub it so these tests need no database at all.
+    tenant_service = MagicMock()
+    tenant_service.list_tenants.return_value = [
+        SimpleNamespace(id=TENANT_A, name="tenant-a"),
+        SimpleNamespace(id=TENANT_B, name="tenant-b"),
+    ]
+    tenant_service.can_add_user.return_value = True
+    tenant_service.increment_user_count.return_value = True
+    tenant_service.decrement_user_count.return_value = True
+    tenant_service.get_tenant.return_value = SimpleNamespace(quota=SimpleNamespace(max_users=100))
+
     with (
         patch("app.auth.decorators._load_user_from_token", return_value=actor),
-        # same_tenant_user_required constructs its own repository.
-        patch("app.repositories.user_repo.UserRepository", return_value=repo),
+        # same_tenant_user_required resolves the target through _load_target_user,
+        # which constructs its own repository.
+        patch("app.repositories.user_repo.UserRepository", return_value=guard_repo),
         patch("app.routes.admin.user_repo", repo),
         patch("app.routes.admin.audit_logger"),
         patch("app.routes.admin.get_security_settings_cached", return_value=None),
+        patch("app.services.tenant_service.TenantService", return_value=tenant_service),
     ):
         client = app.test_client()
         response = client.open(
@@ -352,3 +372,50 @@ class TestTenantlessAdminFailsClosed:
 
         assert response.status_code == 403
         assert repo.password_updates == []
+
+
+class _ExplodingUserRepo(_FakeUserRepo):
+    """Repository whose target lookup fails, e.g. the database is unreachable."""
+
+    def get_user_by_id(self, user_id):
+        raise RuntimeError("database unavailable")
+
+
+class TestLookupFailureIsFailClosedForTenantAdmins:
+    """The target lookup gates access for a tenant admin, so it cannot be optional.
+
+    For a platform admin the same lookup only names the tenant in the audit
+    entry, so a failure there must not turn a permitted request into a 500 --
+    that asymmetry is deliberate.
+    """
+
+    def test_tenant_admin_denied_when_target_cannot_be_resolved(self):
+        response, repo = _request(
+            TENANT_A_ADMIN,
+            "POST",
+            "/api/admin/users/10/reset-password",
+            guard_repo=_ExplodingUserRepo(),
+        )
+
+        assert response.status_code == 403
+        assert repo.password_updates == []
+
+    def test_tenant_admin_denied_for_a_user_that_does_not_exist(self):
+        """Not a 404 fall-through: api_update_user/api_delete_user have no
+        not-found branch, so 'unresolved' must never mean 'allowed'."""
+        response, repo = _request(TENANT_A_ADMIN, "DELETE", "/api/admin/users/12345")
+
+        assert response.status_code == 403
+        assert repo.deleted == []
+
+    def test_platform_admin_unaffected_by_audit_lookup_failure(self):
+        """This is the case CI caught: no database, platform admin, must still work."""
+        response, repo = _request(
+            PLATFORM_ADMIN,
+            "POST",
+            "/api/admin/users/20/reset-password",
+            guard_repo=_ExplodingUserRepo(),
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert repo.password_updates == [20]
