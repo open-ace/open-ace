@@ -517,6 +517,18 @@ class TestMig003ReleasedRevisionIds:
     id, not the filename.
     """
 
+    @pytest.fixture(autouse=True)
+    def _stub_baseline_commit(self, monkeypatch):
+        """Pin the baseline commit so these tests do not depend on git state.
+
+        check_released_revision_ids resolves merge-base(ref, HEAD) before it
+        reads any ids. CI checks out shallow and has no origin/main, so an
+        unpinned _baseline_commit returns None there, the check short-circuits
+        to "skip", and every stubbed expectation below silently passes for the
+        wrong reason. Tests that exercise _baseline_commit itself override this.
+        """
+        monkeypatch.setattr(rules, "_baseline_commit", lambda ref: "baseline_sha")
+
     def _tree(self, tmp_path: Path, ids: dict[str, str]) -> Path:
         for name, rev in ids.items():
             _write_migration(
