@@ -2985,14 +2985,6 @@ CREATE INDEX idx_annotations_session ON annotations USING btree (session_id);
 
 CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store USING btree (tenant_id, provider);
 
-CREATE INDEX idx_approval_log_rule_time ON filter_rule_approval_log USING btree (rule_id, "timestamp");
-
-
---
---
-
-CREATE INDEX idx_approval_log_tenant_time ON filter_rule_approval_log USING btree (tenant_id, "timestamp");
-
 CREATE INDEX idx_archive_files_batch ON archive_files USING btree (execution_id, batch_id);
 
 
@@ -3042,14 +3034,6 @@ CREATE INDEX idx_audit_tenant_id ON audit_logs USING btree (tenant_id);
 CREATE INDEX idx_audit_timestamp ON audit_logs USING btree ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs USING btree (user_id);
-
-
---
---
-
-CREATE INDEX idx_cache_sync_tenant_unprocessed ON rule_cache_sync USING btree (tenant_id, processed, "timestamp");
-
-CREATE INDEX idx_cache_sync_unprocessed ON rule_cache_sync USING btree (processed, "timestamp");
 
 
 --
@@ -3489,247 +3473,223 @@ CREATE INDEX idx_retention_policies_enabled ON retention_policies USING btree (e
 
 CREATE INDEX idx_retention_policies_tenant ON retention_policies USING btree (tenant_id);
 
-CREATE INDEX idx_rule_versions_rule_version ON filter_rule_versions USING btree (rule_id, version_number);
-
-
---
---
-
 CREATE INDEX idx_run_events_created_at ON agent_run_events USING btree (created_at);
+
+
+--
+--
 
 CREATE INDEX idx_run_events_event_type ON agent_run_events USING btree (event_type);
 
-
---
---
-
 CREATE INDEX idx_run_events_run_id ON agent_run_events USING btree (run_id);
+
+
+--
+--
 
 CREATE INDEX idx_run_events_session_id ON agent_run_events USING btree (session_id, id);
 
-
---
---
-
 CREATE INDEX idx_scheduler_leaders_expires ON scheduler_leaders USING btree (expires_at);
+
+
+--
+--
 
 CREATE INDEX idx_scheduler_leaders_heartbeat ON scheduler_leaders USING btree (heartbeat_at);
 
-
---
---
-
 CREATE INDEX idx_scheduler_runs_job_time ON scheduler_runs USING btree (job_name, started_at DESC);
+
+
+--
+--
 
 CREATE INDEX idx_scheduler_runs_status ON scheduler_runs USING btree (status);
 
-
---
---
-
 CREATE INDEX idx_security_settings_key ON security_settings USING btree (setting_key);
+
+
+--
+--
 
 CREATE INDEX idx_session_messages_external_message_id ON session_messages USING btree (session_id, external_message_id);
 
-
---
---
-
 CREATE INDEX idx_session_messages_session_id ON session_messages USING btree (session_id);
+
+
+--
+--
 
 CREATE INDEX idx_session_messages_session_timestamp ON session_messages USING btree (session_id, "timestamp", id);
 
-
---
---
-
 CREATE INDEX idx_session_messages_source ON session_messages USING btree (session_id, source);
+
+
+--
+--
 
 CREATE INDEX idx_session_messages_tenant_session ON session_messages USING btree (tenant_id, session_id);
 
-
---
---
-
 CREATE INDEX idx_session_messages_tenant_session_timestamp ON session_messages USING btree (tenant_id, session_id, "timestamp", id);
+
+
+--
+--
 
 CREATE INDEX idx_session_stats_session_id ON session_stats USING btree (session_id);
 
-
---
---
-
 CREATE INDEX idx_session_stats_tool_host ON session_stats USING btree (tool_name, host_name);
+
+
+--
+--
 
 CREATE INDEX idx_session_stats_updated_at ON session_stats USING btree (updated_at DESC);
 
-
---
---
-
 CREATE INDEX idx_sessions_active ON sessions USING btree (is_active, expires_at);
+
+
+--
+--
 
 CREATE INDEX idx_sessions_expires ON sessions USING btree (expires_at);
 
-
---
---
-
 CREATE INDEX idx_sessions_token ON sessions USING btree (token);
+
+
+--
+--
 
 CREATE INDEX idx_sessions_user_id ON sessions USING btree (user_id);
 
-
---
---
-
 CREATE INDEX idx_shared_sessions_session ON shared_sessions USING btree (session_id);
+
+
+--
+--
 
 CREATE INDEX idx_shared_sessions_target ON shared_sessions USING btree (target_id);
 
-
---
---
-
 CREATE INDEX idx_sso_auth_states_expires ON sso_auth_states USING btree (expires_at);
+
+
+--
+--
 
 CREATE INDEX idx_sso_identities_provider ON sso_identities USING btree (provider_name, provider_user_id);
 
-
---
---
-
 CREATE INDEX idx_sso_identities_user ON sso_identities USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_sso_providers_tenant ON sso_providers USING btree (tenant_id);
 
-
---
---
-
 CREATE INDEX idx_sso_sessions_token ON sso_sessions USING btree (session_token);
+
+
+--
+--
 
 CREATE INDEX idx_sso_sessions_user ON sso_sessions USING btree (user_id);
 
-
---
---
-
 CREATE INDEX idx_sync_events_session_id ON sync_events USING btree (session_id);
+
+
+--
+--
 
 CREATE INDEX idx_sync_events_timestamp ON sync_events USING btree ("timestamp");
 
-
---
---
-
 CREATE INDEX idx_sync_events_user_id ON sync_events USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_team_members_team ON team_members USING btree (team_id);
 
-
---
---
-
 CREATE INDEX idx_team_members_user ON team_members USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_teams_owner ON teams USING btree (owner_id);
 
-
---
---
-
 CREATE INDEX idx_teams_sync_source ON teams USING btree ((((settings)::jsonb ->> 'sync_source'::text)));
+
+
+--
+--
 
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations USING btree (status);
 
-
---
---
-
 CREATE INDEX idx_tenant_migrations_user ON tenant_migrations USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_tenant_period_history_dates ON tenant_period_history USING btree (period_start, period_end);
 
-
---
---
-
 CREATE INDEX idx_tenant_period_history_tenant ON tenant_period_history USING btree (tenant_id);
+
+
+--
+--
 
 CREATE INDEX idx_tenant_plans_active ON tenant_plans USING btree (is_active);
 
-
---
---
-
 CREATE INDEX idx_tenant_plans_slug ON tenant_plans USING btree (slug);
+
+
+--
+--
 
 CREATE INDEX idx_tenant_quotas_tenant ON tenant_quotas USING btree (tenant_id);
 
-
---
---
-
 CREATE INDEX idx_tenant_settings_tenant ON tenant_settings USING btree (tenant_id);
+
+
+--
+--
 
 CREATE INDEX idx_tenant_usage_date ON tenant_usage USING btree (date);
 
-
---
---
-
 CREATE INDEX idx_tenant_usage_tenant ON tenant_usage USING btree (tenant_id);
+
+
+--
+--
 
 CREATE INDEX idx_tenants_billing_cycle ON tenants USING btree (billing_cycle_end);
 
-
---
---
-
 CREATE INDEX idx_tenants_deleted ON tenants USING btree (deleted_at);
+
+
+--
+--
 
 CREATE INDEX idx_tenants_slug ON tenants USING btree (slug);
 
-
---
---
-
 CREATE INDEX idx_tenants_status ON tenants USING btree (status);
+
+
+--
+--
 
 CREATE INDEX idx_test_evidence_session_command ON test_execution_evidence USING btree (session_id, command_id);
 
-
---
---
-
 CREATE INDEX idx_test_evidence_workflow_milestone ON test_execution_evidence USING btree (workflow_id, milestone_id);
+
+
+--
+--
 
 CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts USING btree (tool_account);
 
-
---
---
-
 CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts USING btree (user_id);
-
-CREATE INDEX idx_trigger_log_rule_time ON filter_rule_trigger_log USING btree (rule_id, matched_at);
-
-
---
---
-
-CREATE INDEX idx_trigger_log_rule_time_action ON filter_rule_trigger_log USING btree (rule_id, matched_at, action_taken);
-
-CREATE INDEX idx_trigger_log_tenant_time ON filter_rule_trigger_log USING btree (tenant_id, matched_at);
-
-
---
---
-
-CREATE INDEX idx_trigger_log_time_action ON filter_rule_trigger_log USING btree (matched_at, action_taken);
-
-CREATE INDEX idx_trigger_log_user_time ON filter_rule_trigger_log USING btree (user_id, matched_at);
 
 
 --

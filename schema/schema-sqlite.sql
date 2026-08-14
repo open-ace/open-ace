@@ -1650,10 +1650,6 @@ CREATE INDEX idx_annotations_session ON annotations (session_id);
 
 CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store (tenant_id, provider);
 
-CREATE INDEX idx_approval_log_rule_time ON filter_rule_approval_log (rule_id, "timestamp");
-
-CREATE INDEX idx_approval_log_tenant_time ON filter_rule_approval_log (tenant_id, "timestamp");
-
 CREATE INDEX idx_archive_files_batch ON archive_files (execution_id, batch_id);
 
 CREATE INDEX idx_archive_files_checksum ON archive_files (checksum);
@@ -1679,10 +1675,6 @@ CREATE INDEX idx_audit_tenant_id ON audit_logs (tenant_id);
 CREATE INDEX idx_audit_timestamp ON audit_logs ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs (user_id);
-
-CREATE INDEX idx_cache_sync_tenant_unprocessed ON rule_cache_sync (tenant_id, processed, "timestamp");
-
-CREATE INDEX idx_cache_sync_unprocessed ON rule_cache_sync (processed, "timestamp");
 
 CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence (session_id, command_id);
 
@@ -1902,8 +1894,6 @@ CREATE INDEX idx_retention_policies_enabled ON retention_policies (enabled);
 
 CREATE INDEX idx_retention_policies_tenant ON retention_policies (tenant_id);
 
-CREATE INDEX idx_rule_versions_rule_version ON filter_rule_versions (rule_id, version_number);
-
 CREATE INDEX idx_run_events_created_at ON agent_run_events (created_at);
 
 CREATE INDEX idx_run_events_event_type ON agent_run_events (event_type);
@@ -2007,16 +1997,6 @@ CREATE INDEX idx_test_evidence_workflow_milestone ON test_execution_evidence (wo
 CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts (tool_account);
 
 CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts (user_id);
-
-CREATE INDEX idx_trigger_log_rule_time ON filter_rule_trigger_log (rule_id, matched_at);
-
-CREATE INDEX idx_trigger_log_rule_time_action ON filter_rule_trigger_log (rule_id, matched_at, action_taken);
-
-CREATE INDEX idx_trigger_log_tenant_time ON filter_rule_trigger_log (tenant_id, matched_at);
-
-CREATE INDEX idx_trigger_log_time_action ON filter_rule_trigger_log (matched_at, action_taken);
-
-CREATE INDEX idx_trigger_log_user_time ON filter_rule_trigger_log (user_id, matched_at);
 
 CREATE INDEX idx_usage_date ON daily_usage (date);
 
