@@ -460,4 +460,120 @@ describe('AutonomousWorkflowList', () => {
     expect(screen.getByText(/Completed\s+1/i)).toBeInTheDocument();
     expect(screen.getByText(/Failed\s+1/i)).toBeInTheDocument();
   });
+
+  // ── Paused workflows (#2634) ───────────────────────────────────────
+
+  it('adds a paused tab that filters exactly by paused status', () => {
+    mockWorkflowList([
+      workflow({ workflow_id: 'wf-paused', status: 'paused' }),
+      workflow({ workflow_id: 'wf-active', status: 'developing' }),
+    ]);
+
+    render(
+      <AutonomousWorkflowList selectedId={null} onSelect={vi.fn()} onClearSelection={vi.fn()} />
+    );
+
+    const pausedTab = screen.getByRole('button', { name: 'Paused' });
+    fireEvent.click(pausedTab);
+
+    const lastFilters = lastWorkflowFilters();
+    // Exact match — the active tab's comma list also contains "paused" as a
+    // substring, so toContain() would pass trivially here.
+    expect(lastFilters?.status).toBe('paused');
+  });
+
+  it('labels pause reasons for acceptance, quota, and manual pauses', () => {
+    mockWorkflowList([
+      workflow({
+        workflow_id: 'wf-accept',
+        status: 'paused',
+        current_phase: 'acceptance_verification',
+        error_message: 'Acceptance verification rejected; awaiting review',
+        paused_at: '2026-06-10T00:00:00Z',
+      }),
+      workflow({
+        workflow_id: 'wf-quota',
+        status: 'paused',
+        current_phase: 'developing',
+        error_message: 'Quota exceeded: daily usage at 100% (1000/1000)',
+        paused_at: '2026-06-10T00:00:00Z',
+      }),
+      workflow({
+        workflow_id: 'wf-manual',
+        status: 'paused',
+        current_phase: 'developing',
+        error_message: '',
+        paused_at: '2026-06-10T00:00:00Z',
+      }),
+    ]);
+
+    const { container } = render(
+      <AutonomousWorkflowList selectedId={null} onSelect={vi.fn()} onClearSelection={vi.fn()} />
+    );
+
+    expect(screen.getByText('Awaiting acceptance review')).toBeInTheDocument();
+    expect(screen.getByText('Quota paused')).toBeInTheDocument();
+    expect(screen.getByText('Paused manually')).toBeInTheDocument();
+
+    // Visual distinction: acceptance=danger, quota=warning, manual=secondary
+    const badgeFor = (text: string) => screen.getByText(text).closest('.badge') as HTMLElement;
+    expect(badgeFor('Awaiting acceptance review').className).toContain('danger');
+    expect(badgeFor('Quota paused').className).toContain('warning');
+    expect(badgeFor('Paused manually').className).toContain('secondary');
+    expect(container).toBeTruthy();
+  });
+
+  it('does not show pause reason badges for non-paused workflows', () => {
+    mockWorkflowList([
+      workflow({
+        workflow_id: 'wf-active',
+        status: 'developing',
+        current_phase: 'acceptance_verification',
+      }),
+    ]);
+
+    render(
+      <AutonomousWorkflowList selectedId={null} onSelect={vi.fn()} onClearSelection={vi.fn()} />
+    );
+
+    expect(screen.queryByText('Awaiting acceptance review')).not.toBeInTheDocument();
+    expect(screen.queryByText('Quota paused')).not.toBeInTheDocument();
+  });
+
+  it('flags acceptance-awaiting workflows paused more than 3 days ago', () => {
+    // Fake timers freeze Date.now(), so compute the fixture relative to now.
+    const now = Date.now();
+    const iso = (daysAgo: number) => new Date(now - daysAgo * 24 * 60 * 60 * 1000).toISOString();
+
+    mockWorkflowList([
+      workflow({
+        workflow_id: 'wf-old',
+        status: 'paused',
+        current_phase: 'acceptance_verification',
+        error_message: 'Acceptance verification rejected; awaiting review',
+        paused_at: iso(5),
+      }),
+      workflow({
+        workflow_id: 'wf-fresh',
+        status: 'paused',
+        current_phase: 'acceptance_verification',
+        error_message: 'Acceptance verification rejected; awaiting review',
+        paused_at: iso(1),
+      }),
+      workflow({
+        workflow_id: 'wf-old-quota',
+        status: 'paused',
+        current_phase: 'developing',
+        error_message: 'Quota exceeded: daily usage at 100% (1000/1000)',
+        paused_at: iso(5),
+      }),
+    ]);
+
+    render(
+      <AutonomousWorkflowList selectedId="wf-old" onSelect={vi.fn()} onClearSelection={vi.fn()} />
+    );
+
+    expect(screen.getAllByText('Unreviewed >3 days')).toHaveLength(1);
+    // The fresh (<3d) acceptance pause and the old quota pause stay unflagged.
+  });
 });

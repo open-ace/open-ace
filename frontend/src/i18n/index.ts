@@ -1897,6 +1897,16 @@ export const translations: Record<Language, Translations> = {
     autoActiveHintVerificationPending:
       'Finalizing the delivered workflow after its post-merge acceptance checkpoint.',
     autoBannerPaused: 'This workflow is paused. Resume it to continue the remaining steps.',
+    // #2634: paused-state distinction + resume-with-feedback entry
+    autoBannerAcceptanceAwaiting: 'Awaiting human acceptance review',
+    autoBannerQuotaPaused: 'Quota paused',
+    autoPauseReasonAcceptance: 'Awaiting acceptance review',
+    autoPauseReasonQuota: 'Quota paused',
+    autoPauseReasonManual: 'Paused manually',
+    autoPauseAcceptanceStale: 'Unreviewed >3 days',
+    autoResumeWithFeedbackTitle: 'Restart development with feedback',
+    autoResumeWithFeedbackHelp:
+      'This starts a NEW development round driven by your feedback. The workflow will merge again and re-run acceptance verification after the new merge.',
     autoAcceptanceOverrideTitle: 'Acceptance pending human review',
     autoAcceptanceOverrideDesc:
       'The verifier could not reach a confident verdict. If you have reviewed the merged code, you can confirm acceptance and close the issue.',
@@ -1915,6 +1925,7 @@ export const translations: Record<Language, Translations> = {
     autoFilterActive: 'Active',
     autoFilterCompleted: 'Completed',
     autoFilterFailed: 'Failed',
+    autoFilterPaused: 'Paused',
     autoDeleteWorkflow: 'Delete',
     autoDeleteConfirm: 'Delete this workflow?',
     autoIssueBadge: 'Issue',
@@ -3815,6 +3826,16 @@ export const translations: Record<Language, Translations> = {
     autoActiveHintMerging: '正在合并最终变更并收尾当前工作流。',
     autoActiveHintVerificationPending: '正在通过合并后的验收检查点，并完成已交付工作流的收尾。',
     autoBannerPaused: '当前工作流已暂停，恢复后会继续执行剩余步骤。',
+    // #2634: 暂停状态区分 + 带反馈重启入口
+    autoBannerAcceptanceAwaiting: '验收等待人工处理',
+    autoBannerQuotaPaused: '配额暂停',
+    autoPauseReasonAcceptance: '等待验收处理',
+    autoPauseReasonQuota: '配额暂停',
+    autoPauseReasonManual: '手动暂停',
+    autoPauseAcceptanceStale: '超3天未处理',
+    autoResumeWithFeedbackTitle: '带反馈重启开发',
+    autoResumeWithFeedbackHelp:
+      '这将根据你的反馈开启新一轮开发；工作流会重新合并代码并再次执行验收验证。',
     autoAcceptanceOverrideTitle: '验收待人工复核',
     autoAcceptanceOverrideDesc:
       '验证器无法给出确定性结论。如果你已审查合并后的代码，可以确认验收并关闭 Issue。',
@@ -3831,6 +3852,7 @@ export const translations: Record<Language, Translations> = {
     autoFilterActive: '进行中',
     autoFilterCompleted: '已完成',
     autoFilterFailed: '失败',
+    autoFilterPaused: '已暂停',
     autoDeleteWorkflow: '删除',
     autoDeleteConfirm: '确定删除此工作流？',
     autoIssueBadge: 'Issue',
@@ -5505,6 +5527,16 @@ export const translations: Record<Language, Translations> = {
     autoActiveHintVerificationPending:
       'マージ後の受け入れチェックポイントを通過し、完了処理を進めています。',
     autoBannerPaused: 'このワークフローは一時停止中です。再開すると残りのステップを続行します。',
+    // #2634: 一時停止状態の区別 + フィードバック付き再開入口
+    autoBannerAcceptanceAwaiting: '承認確認が人間の処理を待っています',
+    autoBannerQuotaPaused: 'クォータ一時停止',
+    autoPauseReasonAcceptance: '承認確認待ち',
+    autoPauseReasonQuota: 'クォータ一時停止',
+    autoPauseReasonManual: '手動一時停止',
+    autoPauseAcceptanceStale: '3日以上未処理',
+    autoResumeWithFeedbackTitle: 'フィードバック付きで開発を再開',
+    autoResumeWithFeedbackHelp:
+      'フィードバックに基づいて新しい開発ラウンドを開始します。ワークフローは再度マージし、その後承認確認を再実行します。',
     autoAcceptanceOverrideTitle: '承認確認が人間のレビューを待っています',
     autoAcceptanceOverrideDesc:
       '検証エージェントが確定的な結論に達しませんでした。マージ済みコードを確認した場合、承認を確定して Issue をクローズできます。',
@@ -5523,6 +5555,7 @@ export const translations: Record<Language, Translations> = {
     autoFilterActive: 'アクティブ',
     autoFilterCompleted: '完了',
     autoFilterFailed: '失敗',
+    autoFilterPaused: '一時停止',
     autoDeleteWorkflow: '削除',
     autoDeleteConfirm: 'このワークフローを削除しますか？',
     autoIssueBadge: 'Issue',
@@ -7317,6 +7350,16 @@ export const translations: Record<Language, Translations> = {
     autoActiveHintVerificationPending:
       '병합 후 인수 확인 단계를 통과하고 전달된 워크플로를 마무리하고 있습니다.',
     autoBannerPaused: '이 워크플로는 일시정지 상태입니다. 재개하면 남은 단계를 계속 진행합니다.',
+    // #2634: 일시정지 상태 구분 + 피드백 재시작 진입점
+    autoBannerAcceptanceAwaiting: '수락 확인이 사람의 처리를 기다리는 중',
+    autoBannerQuotaPaused: '쿼터 일시정지',
+    autoPauseReasonAcceptance: '수락 검토 대기',
+    autoPauseReasonQuota: '쿼터 일시정지',
+    autoPauseReasonManual: '수동 일시정지',
+    autoPauseAcceptanceStale: '3일 이상 미처리',
+    autoResumeWithFeedbackTitle: '피드백과 함께 개발 재시작',
+    autoResumeWithFeedbackHelp:
+      '피드백을 반영해 새로운 개발 라운드를 시작합니다. 워크플로는 다시 병합한 후 수락 확인을 재실행합니다.',
     autoAcceptanceOverrideTitle: '수락 확인이 사람 검토를 기다리는 중',
     autoAcceptanceOverrideDesc:
       '검증 에이전트가 확정적인 결론에 도달하지 못했습니다. 병합된 코드를 검토했다면 수락을 확정하고 Issue를 닫을 수 있습니다.',
@@ -7335,6 +7378,7 @@ export const translations: Record<Language, Translations> = {
     autoFilterActive: '진행 중',
     autoFilterCompleted: '완료',
     autoFilterFailed: '실패',
+    autoFilterPaused: '일시정지',
     autoDeleteWorkflow: '삭제',
     autoDeleteConfirm: '이 워크플로우를 삭제하시겠습니까?',
     autoIssueBadge: 'Issue',
