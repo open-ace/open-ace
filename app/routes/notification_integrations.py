@@ -52,7 +52,13 @@ def channel_status():
                 },
                 "feishu_bot": {"status": "no_configuration_required"},
                 "feishu_app": {"status": "configured" if feishu else "needs_configuration"},
-                "dingtalk_app": {"status": "configured" if dingtalk else "needs_configuration"},
+                "dingtalk_app": {
+                    "status": "configured"
+                    if dingtalk
+                    and dingtalk.get("app_key")
+                    and dingtalk.get("app_secret_configured")
+                    else "needs_configuration"
+                },
             },
         }
     )
@@ -79,11 +85,6 @@ def dingtalk_config():
     if request.method == "DELETE":
         return jsonify({"success": repo.delete("dingtalk")})
     data = request.get_json(silent=True) or {}
-    current = repo.get("dingtalk")
-    if not data.get("app_key") and not current:
-        return jsonify({"success": False, "error": "app_key is required"}), 400
-    if "app_secret" not in data and not current:
-        return jsonify({"success": False, "error": "app_secret is required"}), 400
     allowed = {
         "app_key",
         "app_secret",

@@ -36,8 +36,8 @@ def upgrade() -> None:
     )
     op.create_table(
         "dingtalk_settings",
-        sa.Column("app_key", sa.String(255), nullable=False),
-        sa.Column("app_secret_enc", sa.Text(), nullable=False),
+        sa.Column("app_key", sa.String(255), nullable=True),
+        sa.Column("app_secret_enc", sa.Text(), nullable=True),
         sa.Column("fallback_webhook_secret_enc", sa.Text(), nullable=True),
         sa.Column("sync_enabled", sa.Boolean(), server_default=sa.false(), nullable=False),
         sa.Column("target_tenant_id", sa.Integer(), nullable=True),

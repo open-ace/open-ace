@@ -78,8 +78,11 @@ class NotificationSettingsRepository:
         except (OSError, ValueError):
             conn.close()
             return False
-        source = root.get(kind) or (root.get("alerts", {}) if kind == "webhook" else {})
-        if not source:
+        alerts = root.get("alerts", {})
+        source = root.get(kind) or (alerts if kind == "webhook" else {})
+        if kind == "dingtalk" and not source and alerts.get("dingtalk_webhook_secret"):
+            source = {}
+        if not source and not (kind == "dingtalk" and alerts.get("dingtalk_webhook_secret")):
             conn.close()
             return False
         conn.close()
@@ -97,9 +100,7 @@ class NotificationSettingsRepository:
             values = {
                 "app_key": source.get("app_key", ""),
                 "app_secret": source.get("app_secret", ""),
-                "fallback_webhook_secret": root.get("alerts", {}).get(
-                    "dingtalk_webhook_secret", ""
-                ),
+                "fallback_webhook_secret": alerts.get("dingtalk_webhook_secret", ""),
                 "sync_enabled": bool(source.get("org_sync_enabled", False)),
                 "target_tenant_id": source.get("org_sync_tenant_id"),
                 "interval_minutes": source.get("org_sync_interval_minutes", 60),
