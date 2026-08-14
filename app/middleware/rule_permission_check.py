@@ -46,8 +46,8 @@ def get_user_role() -> str | None:
     elif role == "rule_creator":
         return RULE_ROLES["creator"]
 
-    # 默认为创建者
-    return RULE_ROLES["creator"]
+    # 未知角色返回 None，表示无权限
+    return None
 
 
 def check_permission(required_role: str) -> bool:

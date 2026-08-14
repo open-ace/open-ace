@@ -72,6 +72,8 @@ class RuleCache:
         """
         获取规则（优先从缓存获取）。
 
+        使用双重检查锁定避免竞态条件。
+
         Args:
             tenant_id: 租户ID
 
@@ -80,21 +82,25 @@ class RuleCache:
         """
         cache_key = self._get_cache_key(tenant_id)
 
-        # 检查缓存有效性
+        # 第一次检查（无锁）
+        if self._cache_valid.get(cache_key, False) and cache_key in self._cache:
+            return self._cache[cache_key]
+
+        # 加锁后重新检查
         with self._lock:
+            # 双重检查：防止多个线程同时进入后重复加载
             if self._cache_valid.get(cache_key, False) and cache_key in self._cache:
                 return self._cache[cache_key]
 
-        # 缓存失效，重新加载
-        rules = self.rule_loader.load_rules(tenant_id=tenant_id)
+            # 缓存失效，重新加载
+            rules = self.rule_loader.load_rules(tenant_id=tenant_id)
 
-        # 更新缓存
-        with self._lock:
+            # 更新缓存
             self._cache[cache_key] = rules
             self._cache_timestamps[cache_key] = datetime.now(timezone.utc).replace(tzinfo=None)
             self._cache_valid[cache_key] = True
 
-        return rules
+            return rules
 
     def invalidate(self, tenant_id: int | None = None):
         """
