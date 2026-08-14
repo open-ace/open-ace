@@ -25,11 +25,13 @@ import os
 import sys
 import time
 
+import pytest
 import requests
 
 from . import helpers
 from .helpers import (
     BASE_URL,
+    FETCH_HOSTNAME,
     HEADLESS,
     PROJECT_ROOT,
     WEBUI_URL,
@@ -37,13 +39,26 @@ from .helpers import (
     api_get,
     api_login,
     api_post,
+    cleanup_codex_seed,
     create_browser_page,
+    ensure_lane_login,
     playwright_login,
     poll_until,
     print_results,
     run_test,
     screenshot,
+    seed_codex_data,
 )
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _lane_seed_and_auth():
+    """Login + seed codex data once for this module (lane-only concerns)."""
+    ensure_lane_login()
+    seed_codex_data()
+    yield
+    cleanup_codex_seed()
+
 
 # ── Test state ─────────────────────────────────────────
 auth_token = None
@@ -61,7 +76,16 @@ def test_fetch_codex_runs():
     import subprocess
 
     result = subprocess.run(
-        [sys.executable, os.path.join(PROJECT_ROOT, "scripts", "fetch_codex.py"), "--days", "999"],
+        [
+            sys.executable,
+            os.path.join(PROJECT_ROOT, "scripts", "fetch_codex.py"),
+            "--days",
+            "999",
+            # Tag side-effect rows so cleanup can remove exactly them and
+            # never touch real-host data on a reuse server.
+            "--hostname",
+            FETCH_HOSTNAME,
+        ],
         capture_output=True,
         text=True,
         timeout=120,

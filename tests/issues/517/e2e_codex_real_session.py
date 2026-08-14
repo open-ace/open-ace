@@ -48,6 +48,29 @@ REMOTE_HOST = REMOTE_TEST_HOST
 REMOTE_USER = os.environ.get("REMOTE_TEST_USER", "root")
 MACHINE_ID = os.environ.get("REMOTE_MACHINE_ID", "6f85734e-9b21-4320-a857-a67bc36b9078")
 
+
+def _remote_reachable(host: str, timeout: float = 2.0) -> bool:
+    """Fast TCP probe of the remote host's SSH port."""
+    import socket
+
+    try:
+        with socket.create_connection((host, 22), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+if not _remote_reachable(REMOTE_HOST):
+    # These tests drive a real remote machine (SSH + agent + codex binary),
+    # which the issues lane cannot provide. Keep them runnable in real
+    # environments; skip wholesale when the host is unreachable.
+    import pytest
+
+    pytest.skip(
+        f"remote host {REMOTE_HOST} unreachable — real-session e2e needs the test machine",
+        allow_module_level=True,
+    )
+
 auth_token = None
 codex_session_file = None
 results = TestResults()
@@ -649,7 +672,7 @@ def test_codex_quota_tracking():
         "FROM agent_sessions WHERE tool_name = 'codex'"
     )
     row = cur.fetchone()
-    print(f"    [7a] Codex sessions: {row['cnt']}, total tokens: {row.get('tokens', 0):,}")
+    print(f"    [7a] Codex sessions: {row['cnt']}, total tokens: {(row['tokens'] or 0):,}")
 
     # Step 7b: Check workspace quota
     data = api_get("/workspace/status")
