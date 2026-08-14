@@ -1,0 +1,28 @@
+# GitHub API paths whitelist configuration
+# Version: 1.0.0
+# Issue: #2650
+#
+# This file defines allowed gh api paths.
+# Format: path patterns with * as single-segment wildcard.
+
+version: 1
+
+allowed_paths:
+  # User endpoints
+  - "user"
+
+  # Pull request comments
+  - "repos/*"
+  - "repos/*/*"
+  - "repos/*/pulls/*"
+  - "repos/*/pulls/*/comments"
+  - "repos/*/issues/*/comments"
+
+  # Issue endpoints
+  - "repos/*/issues/*"
+  - "repos/*/issues/*/comments"
+
+forbidden_methods:
+  - "DELETE"
+  - "PUT"
+  - "PATCH"

@@ -1,0 +1,80 @@
+# Git verbs whitelist configuration
+# Version: 1.0.0
+# Issue: #2650
+#
+# This file defines allowed git subcommands and their constraints.
+# Format: verb followed by allowed flags and constraints.
+
+version: 1
+
+allowed_verbs:
+  - verb: config
+    allowed_flags: [--global, --add, --get]
+    constraints:
+      patterns:
+        - "safe.directory"
+        - "user.name"
+        - "user.email"
+
+  - verb: remote
+    allowed_flags: [get-url, add, set-url]
+
+  - verb: checkout
+    allowed_flags: [-b, -B, --track]
+
+  - verb: push
+    allowed_flags: [-u, origin, --force-with-lease, --set-upstream]
+    constraints:
+      force_with_lease_branches:
+        - "auto-dev/*"
+        - "review-fix/*"
+        - "ci-repair/*"
+
+  - verb: fetch
+    allowed_flags: [--all, --prune, origin]
+
+  - verb: pull
+    allowed_flags: [--rebase, origin]
+
+  - verb: merge
+    allowed_flags: [--no-ff, --ff-only, origin]
+
+  - verb: rebase
+    allowed_flags: [origin, --onto, --continue, --abort]
+
+  - verb: branch
+    allowed_flags: [--show-current, -D, -d, -a, -r]
+
+  - verb: rev-parse
+    allowed_flags: [HEAD, --abbrev-ref, --short]
+
+  - verb: rev-list
+    allowed_flags: [--count, -n]
+
+  - verb: worktree
+    allowed_flags: [add, remove, list, --force]
+
+  - verb: diff
+    allowed_flags: [--numstat, --name-only, HEAD]
+
+  - verb: show
+    allowed_flags: [--format=, --numstat, --stat]
+
+  - verb: status
+    allowed_flags: [--porcelain, --short, -s]
+
+  - verb: add
+    allowed_flags: [-A, -u, .]
+
+  - verb: commit
+    allowed_flags: [-m, --no-verify, --amend]
+
+  - verb: init
+    allowed_flags: []
+
+forbidden_verbs:
+  - "!clean"
+  - "!reset"
+  - "!gc"
+  - "!filter-branch"
+  - "!filter-repo"
