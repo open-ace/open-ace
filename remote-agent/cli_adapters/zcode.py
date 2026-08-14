@@ -197,7 +197,7 @@ class ZCodeAdapter(BaseCLIAdapter):
             "auto-edit": "edit",
             "plan": "plan",
         }
-        return mode_map.get(permission_mode or "", "yolo")
+        return mode_map.get(permission_mode or "", "build")  # Issue #2591: Default to build for permission prompts
 
     def provides_full_command(self) -> bool:
         """Return True; build_start_args returns a self-contained command.
