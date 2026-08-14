@@ -34,10 +34,13 @@ def is_platform_admin_strict_mode() -> bool:
               False if legacy admin is accepted for backward compatibility.
 
     Deployment Notes:
-        1. Set OPENACE_PLATFORM_ADMIN_STRICT_MODE=true before deployment
-        2. Deploy new code with strict mode enabled
-        3. Restart all application processes to pick up new value
-        4. Verify strict mode is active via /api/system/config endpoint
+        1. Migrate every remaining ``role='admin'`` account to
+           ``role='platform_admin'`` FIRST -- in strict mode a legacy admin
+           stops being a platform admin and loses access.
+        2. Set OPENACE_PLATFORM_ADMIN_STRICT_MODE=true
+        3. Restart all application processes to pick up the new value
+        4. Verify: each process logs "Platform admin strict mode: ENABLED"
+           once at startup (see init_platform_admin_strict_mode).
 
     Issue #2332: Feature flag for phased rollout.
     """
@@ -59,12 +62,49 @@ def is_platform_admin_strict_mode() -> bool:
 
 
 def get_cached_strict_mode() -> bool:
-    """Get the cached strict mode value without re-reading env var.
+    """Get the strict mode value, resolving the cache on first access.
 
     Used by decorators and utility functions to ensure consistent behavior
     across all checks within a single process.
+
+    This delegates to :func:`is_platform_admin_strict_mode` so the flag is
+    populated on first use. Before this delegation existed the function read
+    the module global directly and returned ``_PLATFORM_ADMIN_STRICT_MODE or
+    False``; because nothing in production ever called
+    ``is_platform_admin_strict_mode``, the global stayed ``None`` forever and
+    every consumer saw ``False``. ``OPENACE_PLATFORM_ADMIN_STRICT_MODE=true``
+    had no effect at all -- the flag was dead code while reading as wired up.
+
+    Call :func:`init_platform_admin_strict_mode` at application startup so the
+    value is frozen (and logged) before the first request rather than on
+    whichever request happens to check a role first.
     """
-    return _PLATFORM_ADMIN_STRICT_MODE or False
+    return is_platform_admin_strict_mode()
+
+
+def init_platform_admin_strict_mode() -> bool:
+    """Resolve and freeze the strict mode flag at application startup.
+
+    Idempotent: the first call reads the environment variable and caches it;
+    later calls return the cached value. Called from ``create_app`` so the
+    documented "cached at application startup" contract is actually true and
+    the mode is logged once at boot.
+
+    Returns:
+        bool: the resolved strict mode value.
+    """
+    return is_platform_admin_strict_mode()
+
+
+def reset_strict_mode_cache() -> None:
+    """Clear the cached strict mode flag. Test-only.
+
+    Production code must not call this: the cache exists precisely so that a
+    mid-flight environment change cannot make two requests in the same process
+    disagree about who counts as a platform admin.
+    """
+    global _PLATFORM_ADMIN_STRICT_MODE
+    _PLATFORM_ADMIN_STRICT_MODE = None
 
 
 def is_platform_admin_role(role: str | None) -> bool:

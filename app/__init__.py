@@ -325,6 +325,15 @@ def create_app(config=None):
     # Register error handlers
     register_error_handlers(app)
 
+    # Freeze the platform-admin strict mode flag before serving any request, so
+    # every request in this process agrees on who counts as a platform admin
+    # (Issue #2332). Resolving it lazily on the first role check would work too,
+    # but doing it here is what makes the documented "cached at application
+    # startup" contract true and puts the ENABLED/DISABLED line in the boot log.
+    from app.auth.permissions import init_platform_admin_strict_mode
+
+    init_platform_admin_strict_mode()
+
     # Initialize Prometheus metrics (Issue #2186)
     # Only for web workers - scheduler has its own metrics server
     scheduler_mode = os.environ.get("SCHEDULER_MODE", "web")

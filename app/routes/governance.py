@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, g, jsonify, request
 
-from app.auth.decorators import admin_required, auth_required
+from app.auth.decorators import admin_required, auth_required, same_tenant_user_required
 from app.modules.governance.audit_logger import AuditAction, AuditLogger, get_action_categories
 from app.modules.governance.content_filter import ContentFilter
 from app.modules.governance.quota_manager import QuotaManager
@@ -239,8 +239,13 @@ def api_export_audit_logs():
 
 @governance_bp.route("/audit/user/<int:user_id>/activity", methods=["GET"])
 @admin_required
+@same_tenant_user_required
 def api_user_activity(user_id):
-    """Get activity summary for a user."""
+    """Get activity summary for a user.
+
+    The tenant_id passed below already narrows the query, but that only makes
+    a foreign user look inactive. Deny the request outright instead.
+    """
 
     days = request.args.get("days", default=30, type=int)
 

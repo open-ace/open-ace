@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, Response, g, jsonify, request
 
-from app.auth.decorators import admin_required, resolve_tenant_scope
+from app.auth.decorators import admin_required, resolve_tenant_scope, same_tenant_user_required
 from app.models.user import User
 from app.modules.compliance.audit import AuditAnalyzer
 from app.modules.compliance.report import ReportGenerator, ReportType
@@ -451,8 +451,13 @@ def detect_anomalies():
 
 @compliance_bp.route("/audit/user/<int:user_id>/profile", methods=["GET"])
 @admin_required
+@same_tenant_user_required
 def get_user_profile(user_id: int):
-    """Get user behavior profile (admin only)."""
+    """Get user behavior profile (admin only).
+
+    get_user_behavior_profile applies no tenant filter of its own, so the
+    boundary has to be enforced here.
+    """
 
     days = request.args.get("days", 30, type=int)
 

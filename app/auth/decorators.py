@@ -1307,6 +1307,177 @@ def _log_cross_tenant_operation(
         logger.warning(f"Failed to log cross-tenant operation: {e}")
 
 
+# ── Tenant boundary for admin endpoints that target a specific user ───────
+#
+# admin_required authenticates admin/platform_admin/tenant_admin and sets
+# g.tenant_id, but it does NOT compare that tenant against the tenant of the
+# resource being operated on. On endpoints keyed by a user id that gap is a
+# cross-tenant account takeover: any tenant admin could reset any user's
+# password -- including a platform admin's -- and read the new password out of
+# the response. The helpers below close that gap without requiring all 90+
+# admin_required call sites to migrate to the tenant-aware decorators at once.
+
+
+def resolve_admin_tenant_scope() -> tuple[int | None, tuple[Response, int] | None]:
+    """Return the tenant an already-authenticated admin may act within.
+
+    Must run behind an admin decorator (``g.user`` populated).
+
+    Returns:
+        ``(None, None)``  -- platform admin; global scope, no confinement.
+        ``(tid, None)``   -- tenant-scoped admin, confined to ``tid``.
+        ``(None, resp)``  -- deny; caller must return ``resp``.
+
+    Unlike :func:`resolve_tenant_scope`, a tenant-scoped admin with no usable
+    ``tenant_id`` is denied rather than silently handed global scope.
+    """
+    from app.auth.permissions import is_platform_admin_role
+
+    user = getattr(g, "user", None) or {}
+    role = user.get("role")
+
+    if is_platform_admin_role(role):
+        return None, None
+
+    tenant_id = _normalize_user_tenant_id(user.get("tenant_id"))
+    if tenant_id is None:
+        # tenant_admin without a tenant, or a non-admin role that reached here.
+        # Either way there is no scope to confine to, so fail closed.
+        return None, (jsonify({"error": "Tenant scope required"}), 403)
+    return tenant_id, None
+
+
+def enforce_target_user_tenant(target_user: dict | None) -> tuple[Response, int] | None:
+    """Deny when the current admin may not operate on ``target_user``.
+
+    Returns ``None`` when the request may proceed, otherwise the error
+    response the caller must return.
+
+    * Platform admin: always allowed; a cross-tenant target is audit-logged.
+    * Tenant-scoped admin: allowed only when the target user carries the same
+      ``tenant_id``. A target with no tenant (platform-level accounts) is
+      denied -- fail closed rather than treating NULL as a wildcard.
+    * ``target_user is None``: allowed through, so the endpoint keeps emitting
+      its own 404/500 for a missing user. A tenant admin cannot learn anything
+      from this that a plain 404 would not already tell them.
+    """
+    actor_tenant_id, denial = resolve_admin_tenant_scope()
+    if denial is not None:
+        return denial
+
+    if target_user is None:
+        return None
+
+    target_tenant_id = _normalize_user_tenant_id(target_user.get("tenant_id"))
+
+    if actor_tenant_id is None:
+        # Platform admin: permitted, but record the boundary crossing.
+        actor_id = getattr(g, "user_id", None)
+        own_tenant_id = _normalize_user_tenant_id((getattr(g, "user", None) or {}).get("tenant_id"))
+        if (
+            isinstance(actor_id, int)
+            and target_tenant_id is not None
+            and target_tenant_id != own_tenant_id
+        ):
+            _log_cross_tenant_operation(
+                actor_user_id=actor_id,
+                actor_tenant_id=own_tenant_id,
+                target_tenant_id=target_tenant_id,
+                action=f"{request.method} {request.path}",
+            )
+        return None
+
+    if target_tenant_id is None or target_tenant_id != actor_tenant_id:
+        logger.warning(
+            "Cross-tenant user operation denied: actor=%s actor_tenant=%s "
+            "target_tenant=%s path=%s",
+            getattr(g, "user_id", None),
+            actor_tenant_id,
+            target_tenant_id,
+            request.path,
+        )
+        return jsonify({"error": "Cross-tenant access denied"}), 403
+
+    return None
+
+
+def same_tenant_user_required(f=None, *, arg: str = "user_id"):
+    """Confine a user-targeted admin endpoint to the caller's tenant.
+
+    Stack this *below* the authenticating decorator so ``g.user`` is set::
+
+        @admin_bp.route("/admin/users/<int:user_id>/reset-password", ...)
+        @admin_required
+        @same_tenant_user_required
+        def api_reset_user_password(user_id): ...
+
+    The looked-up target user is cached on ``g.target_user`` so the view can
+    reuse it instead of issuing a second query.
+
+    Args:
+        f: the view function, when applied bare as ``@same_tenant_user_required``.
+        arg: name of the view argument holding the target user id.
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            target_user_id = kwargs.get(arg)
+            target_user = None
+            if target_user_id is not None:
+                from app.repositories.user_repo import UserRepository
+
+                target_user = UserRepository().get_user_by_id(target_user_id)
+
+            denial = enforce_target_user_tenant(target_user)
+            if denial is not None:
+                return denial
+
+            g.target_user = target_user
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    if f is not None:
+        return decorator(f)
+    return decorator
+
+
+def enforce_requested_tenant_scope(
+    requested_tenant_id: object,
+) -> tuple[int | None, tuple[Response, int] | None]:
+    """Resolve the tenant filter an admin endpoint should actually apply.
+
+    For list/create endpoints that take ``tenant_id`` from the request rather
+    than from a resource. Returns ``(effective_tenant_id, None)`` on success:
+
+    * Platform admin -> whatever was requested (``None`` means all tenants).
+    * Tenant-scoped admin -> their own tenant. Asking for a different tenant
+      is denied instead of silently rewritten, so a caller never believes it
+      read another tenant's data.
+    """
+    actor_tenant_id, denial = resolve_admin_tenant_scope()
+    if denial is not None:
+        return None, denial
+
+    requested = _normalize_user_tenant_id(requested_tenant_id)
+
+    if actor_tenant_id is None:
+        return requested, None
+
+    if requested is not None and requested != actor_tenant_id:
+        logger.warning(
+            "Cross-tenant scope denied: actor=%s actor_tenant=%s requested_tenant=%s path=%s",
+            getattr(g, "user_id", None),
+            actor_tenant_id,
+            requested,
+            request.path,
+        )
+        return None, (jsonify({"error": "Cross-tenant access denied"}), 403)
+
+    return actor_tenant_id, None
+
+
 # ── ActorScope and Tenant Authorization (Issue #2327) ─────────────────────
 
 

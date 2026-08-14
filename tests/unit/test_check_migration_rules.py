@@ -386,10 +386,34 @@ class TestMainAndDiscovery:
             """,
             name="0001_clean.py",
         )
-        rc = rules.main([str(tmp_path)])
+        # --skip-released-check: this fixture is a one-file tree, not a full
+        # migrations/versions/, so MIG003 would (correctly) report every real
+        # revision id as missing.
+        rc = rules.main([str(tmp_path), "--skip-released-check"])
         assert rc == 0
         err = capsys.readouterr().err
         assert "pass MIG001/MIG002" in err
+
+    def test_main_runs_mig003_by_default(self, tmp_path: Path, capsys):
+        """The released-id check is on unless explicitly skipped."""
+        _write_migration(
+            tmp_path,
+            """
+            revision = "rev_test"
+            down_revision = None
+
+            def upgrade():
+                pass
+            """,
+            name="0001_clean.py",
+        )
+        rc = rules.main([str(tmp_path)])
+
+        err = capsys.readouterr().err
+        # Either the baseline was readable and every real id is reported
+        # missing from this one-file tree, or it was unreadable and skipped.
+        assert ("MIG003" in err) or ("MIG003: skipped" in err)
+        assert rc in (0, 1)
 
     def test_main_fails_on_violation(self, tmp_path: Path, capsys):
         _write_migration(
@@ -446,3 +470,104 @@ class TestRealMigrationsInvariant:
         assert violations == [], "Committed migrations violate authoring rules:\n  " + "\n  ".join(
             v.format() for v in violations
         )
+
+
+# ---------------------------------------------------------------------------
+# MIG003: a revision id that shipped must never disappear
+# ---------------------------------------------------------------------------
+
+
+class TestMig003ReleasedRevisionIds:
+    """The rule that would have caught the 20260731_003 renumbering.
+
+    ``20260731_003_add_proxy_token_terminated_fields`` shipped on main, was
+    later renumbered to ``..._004_...`` so a newer migration could take the 003
+    slot, and every database stamped with the old id started failing
+    ``upgrade head`` with "Can't locate revision". Alembic keys history off the
+    id, not the filename.
+    """
+
+    def _tree(self, tmp_path: Path, ids: dict[str, str]) -> Path:
+        for name, rev in ids.items():
+            _write_migration(
+                tmp_path,
+                f"""
+                revision = "{rev}"
+                down_revision = None
+
+                def upgrade():
+                    pass
+                """,
+                name=name,
+            )
+        return tmp_path
+
+    @staticmethod
+    def _baseline(**ids: str):
+        """Stub for _revision_ids_at_ref: revision id -> path."""
+        return lambda ref: dict(ids)
+
+    def test_revision_id_parsed_from_annotated_assignment(self):
+        source = 'revision: str = "abc123"\ndown_revision: str | None = None\n'
+        assert rules._revision_id_from_source(source) == "abc123"
+
+    def test_revision_id_parsed_from_plain_assignment(self):
+        assert rules._revision_id_from_source('revision = "abc123"\n') == "abc123"
+
+    def test_revision_id_absent_returns_none(self):
+        assert rules._revision_id_from_source("x = 1\n") is None
+
+    def test_dynamic_revision_id_returns_none(self):
+        """A computed id cannot be compared statically; do not guess."""
+        assert rules._revision_id_from_source('revision = "a" + "b"\n') is None
+
+    def test_missing_baseline_id_is_reported(self, tmp_path: Path, monkeypatch):
+        tree = self._tree(tmp_path, {"new.py": "rev_b"})
+        monkeypatch.setattr(
+            rules, "_revision_ids_at_ref", self._baseline(rev_a="migrations/versions/old.py")
+        )
+
+        violations = rules.check_released_revision_ids(tree, "origin/main")
+
+        assert len(violations) == 1
+        assert violations[0].rule == "MIG003"
+        assert "rev_a" in violations[0].message
+
+    def test_renaming_the_file_but_keeping_the_id_passes(self, tmp_path: Path, monkeypatch):
+        """Filenames are cosmetic to Alembic; only the id is history."""
+        tree = self._tree(tmp_path, {"renamed_to_something_else.py": "rev_a"})
+        monkeypatch.setattr(
+            rules, "_revision_ids_at_ref", self._baseline(rev_a="migrations/versions/old.py")
+        )
+
+        assert rules.check_released_revision_ids(tree, "origin/main") == []
+
+    def test_adding_new_ids_passes(self, tmp_path: Path, monkeypatch):
+        tree = self._tree(tmp_path, {"old.py": "rev_a", "new.py": "rev_b"})
+        monkeypatch.setattr(
+            rules, "_revision_ids_at_ref", self._baseline(rev_a="migrations/versions/old.py")
+        )
+
+        assert rules.check_released_revision_ids(tree, "origin/main") == []
+
+    def test_retired_id_allowlist_suppresses_the_violation(self, tmp_path: Path, monkeypatch):
+        tree = self._tree(tmp_path, {"new.py": "rev_b"})
+        monkeypatch.setattr(
+            rules, "_revision_ids_at_ref", self._baseline(rev_a="migrations/versions/old.py")
+        )
+        monkeypatch.setattr(rules, "RETIRED_REVISION_IDS", frozenset({"rev_a"}))
+
+        assert rules.check_released_revision_ids(tree, "origin/main") == []
+
+    def test_unreadable_baseline_skips_instead_of_failing(self, tmp_path: Path, monkeypatch):
+        """A shallow clone or unfetched remote must not manufacture a failure."""
+        tree = self._tree(tmp_path, {"new.py": "rev_b"})
+        monkeypatch.setattr(rules, "_revision_ids_at_ref", lambda ref: None)
+
+        assert rules.check_released_revision_ids(tree, "origin/main") == []
+
+    def test_empty_baseline_skips(self, tmp_path: Path, monkeypatch):
+        tree = self._tree(tmp_path, {"new.py": "rev_b"})
+        monkeypatch.setattr(rules, "_revision_ids_at_ref", lambda ref: {})
+
+        assert rules.check_released_revision_ids(tree, "origin/main") == []

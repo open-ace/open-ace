@@ -12,7 +12,12 @@ from typing import Any, cast
 import bcrypt
 from flask import Blueprint, g, jsonify, request
 
-from app.auth.decorators import admin_required
+from app.auth.decorators import (
+    admin_required,
+    enforce_requested_tenant_scope,
+    resolve_admin_tenant_scope,
+    same_tenant_user_required,
+)
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.usage_repo import UsageRepository
 from app.repositories.user_repo import UserRepository
@@ -42,11 +47,51 @@ def get_client_info():
     }
 
 
+# Roles a tenant-scoped admin must not be able to hand out. Granting these is
+# equivalent to escaping the tenant: the grantee (possibly the grantor's own
+# account) becomes a platform admin and can then reach every other tenant.
+PLATFORM_LEVEL_ROLES = ("platform_admin", "admin")
+
+
+def reject_privilege_escalation(role: object) -> tuple[Any, int] | None:
+    """Deny a tenant-scoped admin assigning a platform-level role.
+
+    Returns ``None`` when the assignment is allowed (no role given, an
+    ordinary role, or the actor is a platform admin), otherwise the 403 the
+    caller must return.
+    """
+    if role is None or role not in PLATFORM_LEVEL_ROLES:
+        return None
+
+    actor_tenant_id, denial = resolve_admin_tenant_scope()
+    if denial is not None:
+        return denial
+    if actor_tenant_id is None:
+        # Platform admin: allowed to create peers.
+        return None
+
+    logger.warning(
+        "Privilege escalation denied: actor=%s actor_tenant=%s requested_role=%s path=%s",
+        g.user_id,
+        actor_tenant_id,
+        role,
+        request.path,
+    )
+    return jsonify({"error": "Cannot assign platform-level role"}), 403
+
+
 @admin_bp.route("/admin/users", methods=["GET"])
 @admin_required
 def api_get_users():
-    """Get all users, optionally filtered by tenant."""
-    tenant_id = request.args.get("tenant_id", type=int)
+    """Get all users, optionally filtered by tenant.
+
+    A tenant-scoped admin only ever sees their own tenant: an omitted
+    ``tenant_id`` is narrowed to theirs rather than left as "all tenants",
+    and naming somebody else's tenant is rejected.
+    """
+    tenant_id, denial = enforce_requested_tenant_scope(request.args.get("tenant_id", type=int))
+    if denial is not None:
+        return denial
 
     users = user_repo.get_all_users(tenant_id=tenant_id)
 
@@ -81,6 +126,20 @@ def api_create_user():
     tenant_id = data.get("tenant_id")
     if tenant_id is None:
         return jsonify({"error": "tenant_id is required"}), 400
+
+    # A tenant-scoped admin may only populate their own tenant, and may not
+    # mint a platform-level account there.
+    tenant_id, denial = enforce_requested_tenant_scope(tenant_id)
+    if denial is not None:
+        return denial
+    if tenant_id is None:
+        # The raw value was present but not a usable tenant id (non-numeric,
+        # zero, negative). Reject rather than fall through to an unscoped
+        # create.
+        return jsonify({"error": "Invalid tenant_id"}), 400
+    escalation = reject_privilege_escalation(role)
+    if escalation is not None:
+        return escalation
 
     # Validate inputs
     if not validate_username(username):
@@ -160,12 +219,24 @@ def api_create_user():
 
 @admin_bp.route("/admin/users/<int:user_id>", methods=["PUT"])
 @admin_required
+@same_tenant_user_required
 def api_update_user(user_id):
     """Update a user."""
     data = request.get_json() or {}
 
     # Get current user state for audit diff (before update)
     current_user = user_repo.get_user_by_id(user_id)
+
+    # A tenant-scoped admin must not grant a platform-level role, and must not
+    # move a user across the tenant boundary in either direction: pulling a
+    # foreign user in is takeover, pushing one out is exfiltration.
+    escalation = reject_privilege_escalation(data.get("role"))
+    if escalation is not None:
+        return escalation
+    if data.get("tenant_id") is not None:
+        _, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+        if denial is not None:
+            return denial
 
     # Auto-create system user if system_account is being set
     system_account = data.get("system_account")
@@ -244,6 +315,7 @@ def api_update_user(user_id):
 
 @admin_bp.route("/admin/users/<int:user_id>", methods=["DELETE"])
 @admin_required
+@same_tenant_user_required
 def api_delete_user(user_id):
     """Delete a user."""
     # Prevent deleting yourself
@@ -276,6 +348,7 @@ def api_delete_user(user_id):
 
 @admin_bp.route("/admin/users/<int:user_id>/password", methods=["PUT"])
 @admin_required
+@same_tenant_user_required
 def api_update_user_password(user_id):
     """Update a user's password."""
     data = request.get_json() or {}
@@ -313,6 +386,7 @@ def api_update_user_password(user_id):
 
 @admin_bp.route("/admin/users/<int:user_id>/reset-password", methods=["POST"])
 @admin_required
+@same_tenant_user_required
 def api_reset_user_password(user_id):
     """Reset user password and generate a temporary password.
 
@@ -400,6 +474,7 @@ def api_reset_user_password(user_id):
 
 @admin_bp.route("/admin/users/<int:user_id>/quota", methods=["PUT"])
 @admin_required
+@same_tenant_user_required
 def api_update_user_quota(user_id):
     """Update a user's quota.
 
