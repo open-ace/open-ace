@@ -10209,6 +10209,30 @@ class AutonomousOrchestrator:
             AUTONOMOUS_CONTEXT + "请基于最终方案和本轮实际改动，设计并执行一份定向验证矩阵。"
             "如果有失败，修复问题并重新测试。确保必测项全部通过后再结束。\n\n"
         )
+        # #2663: on a retry, resuming the test session lets the agent cite the
+        # prior round's results ("已在前面回合完成验证") instead of re-running
+        # anything — the evidence gate only recognizes fresh output, so every
+        # retry lands inconclusive until exhaustion. Switch to a FRESH session
+        # (the test prompt is self-contained: plan + changed files + scopes)
+        # and state the retry obligation explicitly. Covers both retry
+        # counters: test_retries (inconclusive/failed/requirer) and
+        # skip_retries (agent reported TEST_STATUS: skipped) — both leave a
+        # prior round in the resumed session that the agent would cite.
+        test_retries_before = int(wf.get("test_retries", 0) or 0)
+        skip_retries_before = int(wf.get("skip_retries", 0) or 0)
+        retry_round = max(test_retries_before, skip_retries_before)
+        test_session_line = "test"
+        if retry_round > 0:
+            test_session_line = "fresh"
+            test_prompt += (
+                "## 重试指令\n"
+                f"这是第 {retry_round} 次重试：上一轮的验证结果未被采信"
+                "（未捕获到可识别的新测试输出，或结果不可用/被跳过）。"
+                "本轮必须：\n"
+                "1. 重新执行验证矩阵中的测试命令，并在回复中包含每条命令的原始输出；\n"
+                "2. 不得引用之前回合的结果作为本轮验证证据；\n"
+                "3. 如果确认测试无法执行，在回复末尾单独一行输出 `TEST_STATUS: skipped` 并说明原因。\n\n"
+            )
         if issue_number:
             test_prompt += (
                 f"## 关联 Issue\n"
@@ -10264,7 +10288,7 @@ class AutonomousOrchestrator:
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
             allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
-            session_line="test",
+            session_line=test_session_line,
             milestone_id=test_ms.get("milestone_id", ""),
         )
 
