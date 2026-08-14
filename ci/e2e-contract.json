@@ -1,0 +1,44 @@
+{
+  "schema_name": "openace-e2e-contract",
+  "schema_version": 1,
+  "description": "E2E governance contract key definition (issue #2491): the single bucketing identity for flaky/p95 statistics and observation windows",
+  "key_fields": {
+    "os_image_major": "ubuntu-24.04 (major segment only)",
+    "python": "major.minor of the lane interpreter",
+    "node": "major of the frontend build Node",
+    "playwright": "major of the locked playwright package",
+    "pytest": "major of the locked pytest package",
+    "pytest_rerunfailures": "major of the locked pytest-rerunfailures package",
+    "pytest_timeout": "major of the locked pytest-timeout package",
+    "actions": "major of checkout/setup-python/setup-node/upload-artifact",
+    "frontend_lockfile": "package-lock.json digest (build contract identity)",
+    "envelope_schema_version": "schema_version of the run envelope"
+  },
+  "excluded_from_key": {
+    "runner_patch_version": "GitHub hosted image patch versions are recorded only, never compared",
+    "timestamps": "run timestamps never participate in identity"
+  },
+  "current": {
+    "os_image_major": "ubuntu-24.04",
+    "python": "3.11",
+    "node": "20",
+    "playwright": "1",
+    "pytest": "9",
+    "pytest_rerunfailures": "16",
+    "pytest_timeout": "2",
+    "actions": "checkout=6;setup-python=6;setup-node=6;upload-artifact=7",
+    "frontend_lockfile": "PENDING-P2",
+    "envelope_schema_version": "1"
+  },
+  "observation_window_resets": [],
+  "rules": {
+    "reset_triggers": [
+      "os_image_major change",
+      "key capability change (browser engine major, remote provider)",
+      "support contract change (actions/python/node majors above)"
+    ],
+    "reset_procedure": "only an reviewed PR may reset an observation window; CI never auto-extends",
+    "promotion_sample_minimum": 20,
+    "promotion_requires": "flaky=0 and p95<=15m over >=20 effective runs under the CURRENT contract key"
+  }
+}
