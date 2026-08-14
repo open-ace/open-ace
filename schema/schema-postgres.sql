@@ -157,7 +157,10 @@ CREATE TABLE agent_tokens (
     revoked_at timestamp without time zone,
     revoked_by integer,
     rotated_at timestamp without time zone,
-    token_version bigint DEFAULT '0'::bigint NOT NULL
+    token_version bigint DEFAULT '0'::bigint NOT NULL,
+    pending_revoke boolean DEFAULT false NOT NULL,
+    revoke_after timestamp without time zone,
+    rotation_id character varying(36)
 );
 
 CREATE SEQUENCE agent_tokens_id_seq
@@ -1207,7 +1210,8 @@ CREATE TABLE remote_machines (
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     last_heartbeat timestamp without time zone,
-    legacy_mode boolean DEFAULT false
+    legacy_mode boolean DEFAULT false,
+    token_revoke_timeout integer DEFAULT 300
 );
 
 CREATE SEQUENCE remote_machines_id_seq
@@ -2829,6 +2833,12 @@ CREATE INDEX idx_agent_tokens_hash ON agent_tokens USING btree (token_hash);
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens USING btree (machine_id);
 
 CREATE INDEX idx_agent_tokens_machine_version ON agent_tokens USING btree (machine_id, token_version);
+
+CREATE UNIQUE INDEX idx_agent_tokens_one_active_per_machine ON agent_tokens USING btree (machine_id) WHERE ((is_revoked = false) AND (pending_revoke = false));
+
+CREATE INDEX idx_agent_tokens_pending_revoke_timeout ON agent_tokens USING btree (revoke_after) WHERE ((pending_revoke = true) AND (is_revoked = false));
+
+CREATE INDEX idx_agent_tokens_machine_pending ON agent_tokens USING btree (machine_id, pending_revoke, revoke_after);
 
 
 --

@@ -109,7 +109,10 @@ CREATE TABLE agent_tokens (
  revoked_at TIMESTAMP,
  revoked_by integer,
  rotated_at TIMESTAMP,
- token_version INTEGER DEFAULT '0' NOT NULL
+ token_version INTEGER DEFAULT '0' NOT NULL,
+ pending_revoke INTEGER DEFAULT 0 NOT NULL,
+ revoke_after TEXT,
+ rotation_id TEXT
 );
 
 CREATE TABLE aggregation_history (
@@ -824,7 +827,8 @@ CREATE TABLE remote_machines (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  last_heartbeat TIMESTAMP,
- legacy_mode INTEGER DEFAULT 0
+ legacy_mode INTEGER DEFAULT 0,
+ token_revoke_timeout integer DEFAULT 300
 );
 
 CREATE TABLE remote_runtime_commands (
@@ -1575,6 +1579,12 @@ CREATE INDEX idx_agent_tokens_hash ON agent_tokens (token_hash);
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens (machine_id);
 
 CREATE INDEX idx_agent_tokens_machine_version ON agent_tokens (machine_id, token_version);
+
+CREATE UNIQUE INDEX idx_agent_tokens_one_active_per_machine ON agent_tokens (machine_id);
+
+CREATE INDEX idx_agent_tokens_pending_revoke_timeout ON agent_tokens (revoke_after);
+
+CREATE INDEX idx_agent_tokens_machine_pending ON agent_tokens (machine_id, pending_revoke, revoke_after);
 
 CREATE INDEX idx_aggregation_history_status ON aggregation_history (status);
 
