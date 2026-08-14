@@ -49,6 +49,7 @@ def repository(tmp_path, monkeypatch):
     conn.close()
     monkeypatch.setattr(module, "CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(module, "is_postgresql", lambda: False)
+    monkeypatch.setattr(module, "adapt_sql", lambda sql: sql)
     monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "notification-settings-test-key")
     get_password_manager.cache_clear()
     result = module.NotificationSettingsRepository()
