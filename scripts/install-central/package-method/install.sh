@@ -3827,6 +3827,89 @@ configure_deploy_remaining() {
     INSTALL_SERVICE="$install_service"
 }
 
+# Stop only the package installer's own non-systemd fallback process.  The PID
+# file is untrusted/stale input: validate the PID, owner, cwd, and command before
+# sending a signal so PID reuse can never terminate an unrelated process.
+stop_legacy_package_server() {
+    local target_path="$1"
+    local deploy_user="$2"
+    local pid_file="$target_path/logs/server.pid"
+
+    [ -f "$pid_file" ] || return 0
+
+    local legacy_pid
+    legacy_pid=$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)
+    if ! [[ "$legacy_pid" =~ ^[1-9][0-9]*$ ]]; then
+        print_warning "Removing malformed legacy server PID file"
+        rm -f -- "$pid_file"
+        return 0
+    fi
+
+    if ! kill -0 "$legacy_pid" 2>/dev/null; then
+        print_info "Removing stale legacy server PID file"
+        rm -f -- "$pid_file"
+        return 0
+    fi
+
+    # A stale PID file can occasionally point at the current systemd process.
+    # Let systemd stop its own MainPID instead of signaling it here.
+    local service_pid
+    service_pid=$(systemctl show open-ace.service -p MainPID --value 2>/dev/null || true)
+    if [ "$legacy_pid" = "$service_pid" ] && [ "$service_pid" != "0" ]; then
+        rm -f -- "$pid_file"
+        return 0
+    fi
+
+    local process_user process_cwd process_cmd
+    process_user=$(ps -o user= -p "$legacy_pid" 2>/dev/null | xargs || true)
+    process_cwd=$(readlink -f "/proc/$legacy_pid/cwd" 2>/dev/null || true)
+    process_cmd=$(tr '\0' ' ' < "/proc/$legacy_pid/cmdline" 2>/dev/null || true)
+
+    if [ "$process_user" != "$deploy_user" ] || \
+       [ "$process_cwd" != "$target_path" ] || \
+       ! printf '%s\n' "$process_cmd" | grep -Eq '(^|[[:space:]])server\.py([[:space:]]|$)'; then
+        print_warning "Legacy server PID file does not match the expected Open ACE process; removing it without signaling PID $legacy_pid"
+        rm -f -- "$pid_file"
+        return 0
+    fi
+
+    print_info "Stopping legacy non-systemd Open ACE server (PID: $legacy_pid)..."
+    kill "$legacy_pid" 2>/dev/null || true
+    local waited=0
+    while kill -0 "$legacy_pid" 2>/dev/null && [ "$waited" -lt 10 ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if kill -0 "$legacy_pid" 2>/dev/null; then
+        print_error "Legacy Open ACE server did not stop after ${waited}s"
+        return 1
+    fi
+
+    rm -f -- "$pid_file"
+    print_success "Legacy non-systemd Open ACE server stopped"
+}
+
+# Confirm both that systemd considers the unit active and that its MainPID owns
+# the configured web port.  This avoids treating a short-lived process in an
+# auto-restart loop as a successful upgrade.
+wait_for_openace_service() {
+    local port="${1:-19888}"
+    local timeout="${2:-15}"
+    local waited=0 main_pid
+
+    while [ "$waited" -lt "$timeout" ]; do
+        main_pid=$(systemctl show open-ace.service -p MainPID --value 2>/dev/null || true)
+        if systemctl is-active --quiet open-ace.service 2>/dev/null && \
+           [[ "$main_pid" =~ ^[1-9][0-9]*$ ]] && \
+           ss -ltnp 2>/dev/null | grep -E ":${port}[[:space:]]" | grep -q "pid=${main_pid},"; then
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    return 1
+}
+
 # ============================================================================
 # Local Installation
 # ============================================================================
@@ -4011,14 +4094,27 @@ install_local() {
                 print_success "Service configuration updated (SECRET_KEY preserved)"
             fi
 
+            # A previous package install may have used the non-systemd fallback
+            # and left a server.py process outside this unit's cgroup.  A plain
+            # systemctl restart cannot stop that process, so it would retain the
+            # web port and make the upgraded unit restart forever (#2624).
+            if ! stop_legacy_package_server "$target_path" "$DEPLOY_USER"; then
+                print_error "Unable to stop the legacy Open ACE server safely"
+                return 1
+            fi
+
             print_info "Restarting open-ace service..."
             systemctl daemon-reload
-            systemctl restart open-ace.service
-            sleep 3
-            if systemctl is-active --quiet open-ace.service; then
+            if ! systemctl restart open-ace.service; then
+                print_error "Failed to restart open-ace.service"
+                return 1
+            fi
+            if wait_for_openace_service "$SERVICE_PORT" 15; then
                 print_success "Service restarted successfully"
             else
-                print_warning "Service not yet active, check with: systemctl status open-ace"
+                print_error "open-ace.service did not become ready on port ${SERVICE_PORT:-19888}"
+                print_info "Check: systemctl status open-ace && journalctl -u open-ace -n 100"
+                return 1
             fi
             INSTALL_SERVICE="yes"
         fi
