@@ -2,22 +2,23 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Every acceptance-paused workflow (rejected OR indeterminate) offers its owner/admin two page exits — accept (override → close issue → completed) or resume-with-feedback — plus an in-page full verification-report viewer.
+**Goal:** Every acceptance-paused workflow (rejected OR indeterminate) offers its owner/admin two page exits — accept (override → close issue → completed) or resume-with-feedback — plus an in-page full verification-report viewer; resume-with-feedback actually delivers a FRESH verification (stale merge-SHA cache cleared).
 
-**Architecture:** Single backend route change (`acceptance_verification_override`: status guard + permission), frontend gating unification in `WorkflowTimeline.tsx`, report viewer reusing the existing `viewingContent` generic modal fed by a pure formatter over `milestone.metadata` (already returned by `/timeline` — zero API change).
+**Architecture:** Backend route changes (`acceptance_verification_override`: status guard + permission reorder; `resume_with_feedback`: clear the verification cache), frontend gating unification in `WorkflowTimeline.tsx`, report viewer reusing the existing `viewingContent` generic modal fed by a pure formatter over `milestone.metadata` (already returned by `/timeline` — zero API change).
 
-**Tech Stack:** Flask + pytest (unittest.mock), React + TS + Bootstrap, Playwright E2E (headless-first per project rule).
+**Tech Stack:** Flask + pytest (unittest.mock), React + TS + Bootstrap + vitest, Playwright E2E (headless-first per project rule).
 
 **Spec:** `docs/dev-notes/2658-acceptance-paused-user-actions-design.md`. Issue #2658.
+**Plan review:** independent review 2026-08-14 — all findings (1 Critical, 4 Important, 5 Minor) folded in below.
 
 ---
 
-### Task 1: Backend — extend `verification_override` to rejected + owner
+### Task 1: Backend — override extension + resume-cache reset
 
 **Files:**
 - Test: `tests/unit/test_acceptance_override_2658.py` (new)
-- Modify: `app/routes/autonomous.py` (`acceptance_verification_override`, ~L1312-1445)
-- Modify: `tests/issues/2335/test_acceptance_override_route.py` (legacy opt-in lane — update semantics in place; do NOT create new files there)
+- Modify: `app/routes/autonomous.py` (`acceptance_verification_override` ~L1312-1445; `resume_with_feedback` ~L1676-1710)
+- Modify: `tests/issues/2335/test_acceptance_override_route.py` (existing file, updated IN PLACE — do not create new files under tests/issues/; note this dir runs only in the extended `category=issues` lane, never in required PR CI)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -29,7 +30,9 @@
 Regression for the route extension: the workflow owner (not just admins) may
 override a paused acceptance verdict — confirming it, closing the issue and
 completing the workflow. Rejected verdicts are overridable; confirmed ones
-still 400; unrelated users still 403.
+still 400; unrelated users still 403. resume-with-feedback must clear the
+cached verification merge SHA so the next acceptance run re-verifies instead
+of replaying the prior verdict on a stale (merge_sha, snapshot) pair.
 """
 
 from __future__ import annotations
@@ -182,22 +185,42 @@ class TestOverrideStatusGuard:
             resp = _post_override(client)
         assert resp.status_code == 400
 
-    def test_reason_over_2000_chars_400(self, app_client):
-        client, _repo, _ = app_client
-        with ExitStack() as stack:
-            stack.enter_context(_mock_auth(user_id=1, role="admin"))
-            resp = _post_override(client, {"reason": "x" * 2001})
-        assert resp.status_code == 400
-```
 
-Note: check whether `pytest.mark.issue` is a registered marker (`pytest.ini` / a plugin). If not registered, add the marker declaration to `pytest.ini` — first grep `tests/unit/` for an existing `pytest.mark.issue(` usage; if it exists, the marker is already registered.
+class TestResumeWithFeedbackClearsVerificationCache:
+    """#2658: a fresh dev round must not replay the prior acceptance verdict.
+
+    The acceptance phase caches ``verification_merge_sha`` on the workflow and
+    its idempotency replays a terminal verdict for the same
+    (merge_sha, snapshot) pair. Nothing else ever cleared the SHA between
+    rounds, so resume-with-feedback → new dev round → new merge would still
+    re-verify the OLD merge. The route must clear the cached SHA.
+    """
+
+    def _post_feedback(self, client):
+        return client.post(
+            "/api/autonomous/workflows/wf-override/resume-with-feedback",
+            json={"user_feedback": "please also handle the edge case"},
+        )
+
+    def test_resume_clears_cached_merge_sha(self, app_client):
+        client, repo, _ = app_client
+        with ExitStack() as stack:
+            stack.enter_context(_mock_auth(user_id=7, role="user", username="owner"))
+            resp = self._post_feedback(client)
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        updates = repo.update_workflow.call_args.args[1]
+        assert updates["verification_merge_sha"] == ""
+        assert updates["current_phase"] == "wait"
+        assert updates["status"] == "waiting"
+        assert updates["user_feedback"] == "please also handle the edge case"
+```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest tests/unit/test_acceptance_override_2658.py -v`
-Expected: `test_owner_can_override_rejected` FAIL 403, `test_owner_can_override_indeterminate` FAIL 403, `test_admin_can_override_rejected` FAIL 400 (rejected not allowed yet). Permission/guard tests that assert old behavior unchanged (`test_unrelated_user_gets_403`, `test_confirmed_still_400`, `test_wrong_phase_400`, `test_reason_over_2000_chars_400`) may pass already — that's fine.
+Expected FAILs: `test_owner_can_override_rejected` (403), `test_owner_can_override_indeterminate` (403), `test_admin_can_override_rejected` (400), `test_resume_clears_cached_merge_sha` (no `verification_merge_sha` in updates). `test_unrelated_user_gets_403` / guard tests may already pass.
 
-- [ ] **Step 3: Implement the route change**
+- [ ] **Step 3: Implement the override route change**
 
 In `app/routes/autonomous.py` `acceptance_verification_override`:
 
@@ -220,7 +243,17 @@ In `app/routes/autonomous.py` `acceptance_verification_override`:
     """
 ```
 
-2. Permission (replace the `is_admin_role` block):
+2. **Permission check MOVES after the 404** (it currently sits before
+   `get_workflow` and would raise NameError on `workflow` otherwise). Delete:
+
+```python
+    if not User.is_admin_role(g.user_role):
+        return jsonify({"error": "Admin permission required"}), 403
+```
+
+and insert right AFTER the `if not workflow: return 404` block (mirroring
+`resume_with_feedback`'s order — an unrelated user probing an unknown id now
+gets 404, consistent with every other route):
 
 ```python
     if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
@@ -245,7 +278,7 @@ In `app/routes/autonomous.py` `acceptance_verification_override`:
         )
 ```
 
-4. Comment title (in the `lines = [...]` construction): make the first line conditional:
+4. Comment title — make the first line conditional:
 
 ```python
             override_title = (
@@ -260,9 +293,32 @@ In `app/routes/autonomous.py` `acceptance_verification_override`:
             ]
 ```
 
-- [ ] **Step 4: Update the legacy 2335 test file in place**
+- [ ] **Step 4: Implement the resume-with-feedback cache reset**
 
-`tests/issues/2335/test_acceptance_override_route.py`: `test_non_admin_override_returns_403` currently patches the OWNER (user_id=7, role user) and expects 403 — that user must now succeed. Change it to an unrelated user, and add an owner-success test:
+In `resume_with_feedback`, extend the `update_workflow` dict:
+
+```python
+    # Store feedback and set to waiting (scheduler will pick up via _do_wait).
+    # #2658: clear the cached acceptance merge SHA — the acceptance phase's
+    # idempotency replays a terminal verdict for the same
+    # (merge_sha, snapshot) pair, and nothing else resets it between dev
+    # rounds, so without this the next acceptance run would re-verify the OLD
+    # merge instead of the new one (stale-replay loop for both rejected and
+    # indeterminate resumes).
+    _get_repo().update_workflow(
+        workflow_id,
+        {
+            "user_feedback": user_feedback,
+            "current_phase": "wait",
+            "status": "waiting",
+            "verification_merge_sha": "",
+        },
+    )
+```
+
+- [ ] **Step 5: Update the legacy 2335 test file in place**
+
+`tests/issues/2335/test_acceptance_override_route.py`: `test_non_admin_override_returns_403` currently patches the OWNER (user_id=7, role user) and expects 403 — that user must now succeed. Replace it with:
 
 ```python
 def test_non_owner_non_admin_override_returns_403(app_client):
@@ -292,16 +348,16 @@ def test_owner_override_now_allowed_2658(app_client):
 
 Also update the module docstring line "Non-admins get 403" → "Unrelated users get 403; the workflow owner may override (#2658)".
 
-- [ ] **Step 5: Run both test files**
+- [ ] **Step 6: Run both test files**
 
 Run: `python -m pytest tests/unit/test_acceptance_override_2658.py tests/issues/2335/test_acceptance_override_route.py -v`
 Expected: ALL PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add app/routes/autonomous.py tests/unit/test_acceptance_override_2658.py tests/issues/2335/test_acceptance_override_route.py
-git commit -m "feat(#2658): acceptance override for rejected+indeterminate, owner+admin"
+git commit -m "feat(#2658): owner+admin override for rejected/indeterminate + fresh re-verify on feedback resume"
 ```
 
 ---
@@ -310,6 +366,7 @@ git commit -m "feat(#2658): acceptance override for rejected+indeterminate, owne
 
 **Files:**
 - Modify: `frontend/src/components/work/WorkflowTimeline.tsx`
+- Modify: `frontend/src/components/work/WorkflowTimeline.test.tsx` (🔴 existing vitest locks the OLD rejected-only behavior — CI runs it via `npm run test:coverage` on `frontend/**` changes)
 - Modify: `frontend/src/i18n/index.ts`
 
 - [ ] **Step 1: Unify the gating constants**
@@ -339,9 +396,12 @@ with:
   // #2658: every acceptance pause that needs a human offers BOTH exits —
   // accept (override → close issue → completed; owner+admin, enforced
   // server-side) and resume-with-feedback (new dev round → new merge → fresh
-  // acceptance). Resuming a rejected verdict without feedback hits the
-  // idempotency guard and re-pauses immediately, which is why the feedback
-  // modal is the resume path.
+  // acceptance; resuming without feedback hits the idempotency guard and
+  // re-pauses immediately, which is why the feedback modal is the resume
+  // path). The explicit current_phase check also fixes a latent bug: the old
+  // indeterminate-only gate could show the override button during a LATER dev
+  // round (verification_status is never cleared between rounds), where the
+  // server would 400.
   const isAcceptancePaused =
     workflow.status === 'paused' &&
     workflow.current_phase === 'acceptance_verification' &&
@@ -419,7 +479,20 @@ Next to `canViewReviewContent` in the milestone render (~L1495):
       !!milestone.metadata?.trim();
 ```
 
-And in the card actions after the `canViewReviewContent` button block (~L1733):
+Extend `showInlineActionGroup` (~L1581) — without this the button silently never renders on the `showForkCancel: false` render path (~L1903):
+
+```tsx
+    const showInlineActionGroup =
+      showInlineSessionButton ||
+      canViewPlanContent ||
+      canViewReviewContent ||
+      canViewAcceptanceReport ||
+      canViewChanges ||
+      canFork ||
+      canCancel;
+```
+
+Card action button, after the `canViewReviewContent` button block (~L1733) — note `milestone.metadata` is a plain `string` on the `WorkflowMilestone` type (`api/autonomous.ts:139`), used directly:
 
 ```tsx
                     {canViewAcceptanceReport && (
@@ -430,7 +503,7 @@ And in the card actions after the `canViewReviewContent` button block (~L1733):
                         onClick={() =>
                           setViewingContent({
                             title: t('autoViewAcceptanceReportTitle', language),
-                            content: formatAcceptanceReport(mstoneMetadata(milestone)),
+                            content: formatAcceptanceReport(milestone.metadata),
                           })
                         }
                       >
@@ -439,8 +512,6 @@ And in the card actions after the `canViewReviewContent` button block (~L1733):
                       </Button>
                     )}
 ```
-
-(If `milestone.metadata` is directly accessible at that point — it is, the map variable is `milestone` — use `milestone.metadata` inline instead of a helper: `content: formatAcceptanceReport(milestone.metadata)`.)
 
 - [ ] **Step 4: i18n keys ×4 locales**
 
@@ -472,17 +543,44 @@ ko:
     autoViewAcceptanceReportTitle: '승인 검증 리포트',
 ```
 
-Also update `autoAcceptanceOverrideDesc` in each locale if its text says the action is admin-only — change to "workflow owner or admin" wording (zh: 「工作流所有者或管理员可确认验收并关闭 issue」).
+**Reword `autoAcceptanceOverrideDesc`** in all 4 locales — current text only covers indeterminate ("verifier could not reach a confident verdict"); rejected means the verifier DID decide and a human disagrees:
 
-- [ ] **Step 5: Typecheck + build**
+en: `'Accept the delivered result (confirmed by human review), close the issue and complete the workflow. Available to the workflow owner or an admin.'`
+zh: `'人工确认验收通过并关闭 issue、完成工作流。工作流所有者或管理员可操作；若验收器已拒绝，此操作将推翻该拒绝。'`
+ja: `'人間の確認により受理し、issue をクローズしてワークフローを完了します。ワークフロー所有者または管理者が操作できます。検証者が拒否した場合はその判定を覆します。'`
+ko: `'사람의 확인으로 승인하고 issue를 닫아 워크플로를 완료합니다. 워크플로 소유자 또는 관리자가 실행할 수 있습니다. 검증자가 거부한 경우 해당 판정을 뒤집습니다.'`
 
-Run: `cd frontend && npx tsc --noEmit && npm run build`
-Expected: no type errors, build succeeds.
+- [ ] **Step 5: Rewrite the vitest that locks old behavior**
 
-- [ ] **Step 6: Commit**
+`frontend/src/components/work/WorkflowTimeline.test.tsx` (~L147-163): the test `shows resume-with-feedback only for rejected acceptance, not indeterminate` asserts indeterminate has NO resume button and finds the override button by its OLD title regex `/confirm acceptance and close the issue/i` — both flip. Rewrite as:
+
+```tsx
+  it('#2658 shows BOTH exits (override + resume-with-feedback) for rejected AND indeterminate acceptance pauses', () => {
+    for (const status of ['rejected', 'indeterminate'] as const) {
+      const view = renderTimeline(pausedWorkflow({ verification_status: status }));
+      // The banner button's accessible name is the help text (title -> aria-label).
+      expect(screen.getByRole('button', { name: /new development round/i })).toBeInTheDocument();
+      // Override button: accessible name is its descriptive title (reworded for
+      // #2658 — covers rejected-overturn and indeterminate alike).
+      expect(
+        screen.getByRole('button', { name: /accept the delivered result/i })
+      ).toBeInTheDocument();
+      view.unmount();
+    }
+  });
+```
+
+(Adjust the title regex to whatever the reworded `autoAcceptanceOverrideDesc` renders — the assertion and the i18n string MUST match; check other tests in the file that reference the old title text and update them too, e.g. grep the file for `confirm acceptance`.)
+
+- [ ] **Step 6: Typecheck + vitest + build**
+
+Run: `cd frontend && npx tsc --noEmit && npm run test -- --run && npm run build`
+Expected: no type errors, all vitest specs pass, build succeeds.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add frontend/src/components/work/WorkflowTimeline.tsx frontend/src/i18n/index.ts
+git add frontend/src/components/work/WorkflowTimeline.tsx frontend/src/components/work/WorkflowTimeline.test.tsx frontend/src/i18n/index.ts
 git commit -m "feat(#2658): unified acceptance-pause exits + in-page report viewer"
 ```
 
@@ -493,14 +591,12 @@ git commit -m "feat(#2658): unified acceptance-pause exits + in-page report view
 **Files:**
 - Modify: `tests/e2e/work/e2e_paused_acceptance_ui_playwright.py`
 
-- [ ] **Step 1: Extend the E2E**
+- [ ] **Step 1: Extend + FLIP the E2E**
 
-In the existing file (it already seeds rejected + indeterminate workflows and drives the paused tab), add:
-
-1. A milestone seed helper (the timeline API needs a milestone row so the report button renders):
+1. Milestone seed helper — call it INSIDE the same `app.app_context()` block the existing `seed_workflow` uses (repo calls need request/app context; mirror `seed_workflow` at ~L118):
 
 ```python
-def seed_acceptance_milestone(repo, workflow_id: str, status: str) -> str:
+def seed_acceptance_milestone(repo, workflow_id: str, status: str) -> None:
     import json as _json
 
     report = {
@@ -529,15 +625,33 @@ def seed_acceptance_milestone(repo, workflow_id: str, status: str) -> str:
             "metadata": _json.dumps(report, ensure_ascii=False),
         }
     )
-    return report
 ```
 
-(Adapt to the file's existing `repo` seeding mechanism — `seed_workflow` uses the same repo object; keep the style consistent.)
+(Keep the file's existing naming/style; `create_milestone` accepts exactly these keys — `dev_round` defaults to 1, FK matches the seeded workflow.)
 
-2. Assertions, for BOTH the rejected and indeterminate seeded workflows:
-   - 「带反馈恢复」 button visible (was rejected-only; indeterminate is the #2658 change),
-   - 「确认验收（覆盖）」 button visible (rejected is the #2658 change),
-   - open the workflow detail timeline, click 「查看验收报告」, assert the viewer modal shows the seeded item text (`修复登录失败`) and the evidence ref (`tests/test_login.py:12`).
+2. **FLIP section 3** (~L320-334): the current assertion
+`expect(page.locator(".timeline-state-banner")).not_to_contain_text("Resume with Feedback")`
+now contradicts #2658 — indeterminate MUST show the resume button. Replace with:
+
+```python
+            expect(
+                page.locator(".timeline-state-banner").get_by_text("Resume with Feedback")
+            ).to_be_visible()
+```
+
+and update the final print to `"[PASS] indeterminate workflow shows override + resume-with-feedback"`.
+
+3. NEW section 4 — report viewer, run for the rejected workflow: on the timeline, click 「View acceptance report」 and assert the viewer modal shows the seeded item + evidence:
+
+```python
+            page.get_by_role("button", name="View acceptance report").click()
+            expect(page.get_by_text("修复登录失败")).to_be_visible()
+            expect(page.get_by_text("tests/test_login.py:12")).to_be_visible()
+```
+
+(Localize the button name if the E2E drives a zh UI — follow however the existing test selects banner buttons.)
+
+Note (plan-review #7): this E2E logs in as an admin who also owns the seeds, so it cannot distinguish owner vs admin permissions — that matrix is fully covered by the unit tests in Task 1.
 
 - [ ] **Step 2: Run headless until green**
 
@@ -562,18 +676,16 @@ Expected: no new failures vs `origin/main`.
 
 - [ ] **Step 2: pre-commit on changed files (NOT --all-files — scope-guard rule)**
 
-Run: `pre-commit run --files app/routes/autonomous.py tests/unit/test_acceptance_override_2658.py tests/issues/2335/test_acceptance_override_route.py frontend/src/components/work/WorkflowTimeline.tsx frontend/src/i18n/index.ts tests/e2e/work/e2e_paused_acceptance_ui_playwright.py`
+Run: `pre-commit run --files app/routes/autonomous.py tests/unit/test_acceptance_override_2658.py tests/issues/2335/test_acceptance_override_route.py frontend/src/components/work/WorkflowTimeline.tsx frontend/src/components/work/WorkflowTimeline.test.tsx frontend/src/i18n/index.ts tests/e2e/work/e2e_paused_acceptance_ui_playwright.py`
 Expected: clean (watch for pyupgrade `X | None`, TC003 TYPE_CHECKING moves, black 25.1.0 formatting).
 
 - [ ] **Step 3: Push + PR**
 
 ```bash
 git push -u origin fix/2658-acceptance-paused-user-actions
-gh pr create --title "feat(#2658): unify acceptance-paused user actions" --body "<summary; NO closes/fixes/resolves keywords near #2658>"
+gh pr create --title "feat(#2658): unify acceptance-paused user actions" --body "<summary; NO closes/fixes/resolves keywords near #2658 — 'Refs #2658' only>"
 ```
 
-PR body must reference the issue with "Refs #2658" only (GitHub auto-close trap).
-
-- [ ] **Step 4: Required CI green** (lint / test(3.10) / test(3.11) / test(3.12) / build) → independent review (`superpowers:requesting-code-review` on `gh pr diff`) → merge `--merge --delete-branch` → deploy hotpatch (orchestrator/routes change needs scheduler restart; frontend build+deploy + open-ace.service restart) → verify on prod.
+- [ ] **Step 4: Required CI green** (lint / test(3.10) / test(3.11) / test(3.12) / build + Frontend CI vitest) → independent review (`superpowers:requesting-code-review` on `gh pr diff`) → merge `--merge --delete-branch` → deploy hotpatch (routes change: cp autonomous.py + restart openace-scheduler.service AND open-ace.service; frontend build+deploy + open-ace.service restart) → verify on prod.
 
 - [ ] **Step 5: headless=false demo to user** (project E2E rule step 3).
