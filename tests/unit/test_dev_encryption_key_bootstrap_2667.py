@@ -109,8 +109,11 @@ class TestDevelopmentMode:
         assert "UPLOAD_AUTH_KEY='aabbccdd'" in content
         assert f"OPENACE_ENCRYPTION_KEY='{key}'" in content
 
-    def test_explicit_env_value_wins(self, tmp_path: Path):
-        os.environ["OPENACE_ENCRYPTION_KEY"] = "e" * 64
+    def test_explicit_env_value_wins(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        # setenv (not a bare os.environ write) so the value is rolled back
+        # after the test — a leaked key would poison every later test in the
+        # same process that expects the key unset.
+        monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "e" * 64)
 
         key = ensure_generated_encryption_key()
 

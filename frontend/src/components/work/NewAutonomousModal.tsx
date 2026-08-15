@@ -106,7 +106,11 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   // the wrong (or cross-tenant) key list. Gate the query so remote only
   // fetches once a machine is selected.
   const modelsEnabled = !!cliTool && (workspaceType !== 'remote' || !!selectedMachineId);
-  const { data: modelsData, isLoading: modelsLoading, error: modelsError } = useAvailableModels(
+  const {
+    data: modelsData,
+    isLoading: modelsLoading,
+    error: modelsError,
+  } = useAvailableModels(
     { tool: cliTool, workspace_type: workspaceType, machine_id: selectedMachineId || undefined },
     modelsEnabled
   );

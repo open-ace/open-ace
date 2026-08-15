@@ -8,7 +8,6 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { vi } from 'vitest';
 
 vi.mock('./client', () => ({
   apiClient: {
@@ -34,9 +33,9 @@ describe('autonomousApi.getAvailableModels (issue #2667)', () => {
     };
     getMock.mockResolvedValueOnce(payload);
 
-    await expect(
-      autonomousApi.getAvailableModels({ tool: 'claude-code' })
-    ).resolves.toEqual(payload);
+    await expect(autonomousApi.getAvailableModels({ tool: 'claude-code' })).resolves.toEqual(
+      payload
+    );
   });
 
   it('throws on a 200 response carrying success:false', async () => {
@@ -46,16 +45,16 @@ describe('autonomousApi.getAvailableModels (issue #2667)', () => {
       error: 'Failed to load models for this tool',
     });
 
-    await expect(
-      autonomousApi.getAvailableModels({ tool: 'claude-code' })
-    ).rejects.toThrow('Failed to load models for this tool');
+    await expect(autonomousApi.getAvailableModels({ tool: 'claude-code' })).rejects.toThrow(
+      'Failed to load models for this tool'
+    );
   });
 
   it('throws a generic message when success:false has no error field', async () => {
     getMock.mockResolvedValueOnce({ success: false, models: [] });
 
-    await expect(
-      autonomousApi.getAvailableModels({ tool: 'claude-code' })
-    ).rejects.toThrow('Failed to load models for this tool');
+    await expect(autonomousApi.getAvailableModels({ tool: 'claude-code' })).rejects.toThrow(
+      'Failed to load models for this tool'
+    );
   });
 });

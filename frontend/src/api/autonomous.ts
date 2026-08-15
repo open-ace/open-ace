@@ -395,8 +395,8 @@ export const autonomousApi = {
     // apiClient only throws on non-2xx; a 200 carrying success:false (e.g.
     // from an older backend) is a failure too and must reach React Query's
     // error branch, never render as an empty model list. Issue #2667.
-    if (result && result.success === false) {
-      throw new Error(result.error || 'Failed to load models for this tool');
+    if (result?.success === false) {
+      throw new Error(result.error ?? 'Failed to load models for this tool');
     }
     return result;
   },
