@@ -124,6 +124,41 @@ def _make_orchestrator(wf_data):
 # ── Test: Idempotency ────────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _trusted_repo_boundary_for_wrapper_tests(monkeypatch):
+    """Provide a trusted repo boundary for synthetic /tmp paths.
+
+    Production local runs fail closed (#2271 repo-integrity guard) when they
+    cannot snapshot a real Git repository; these tests use synthetic paths.
+    Dedicated guardrail tests exercise the fail-closed behavior itself.
+    """
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    def snapshot(orchestrator, wf, workspace_type, system_account):
+        if workspace_type != "local":
+            return None
+        context = orchestrator._resolve_effective_repo_context(wf)
+        repo_path = context.get("repo_path", "/tmp/test-project")
+        return {
+            "context": context,
+            "effective": {
+                "repo_path": repo_path,
+                "top_level": repo_path,
+                "git_dir": f"{repo_path}/.git",
+                "git_identity": "1:1",
+                "common_dir": f"{repo_path}/.git",
+                "common_identity": "1:1",
+                "origin": "git@github.com:open-ace/open-ace.git",
+            },
+        }
+
+    monkeypatch.setattr(AutonomousOrchestrator, "_snapshot_repo_context", snapshot)
+    # Post-run verification would probe the same synthetic path with real git.
+    monkeypatch.setattr(
+        AutonomousOrchestrator, "_validate_repo_context_after_run", lambda self, *a, **k: ""
+    )
+
+
 class TestIdempotency:
     """Verify _find_existing_milestone prevents duplicate milestones."""
 
@@ -246,20 +281,20 @@ class TestPathValidation:
         orig = db_mod.adapt_sql
         db_mod.adapt_sql = lambda sql: sql
 
-        db = db_mod.Database(db_path)
+        db = db_mod.Database(f"sqlite:///{db_path}")
         try:
             with db.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'user', is_active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT)"
-                )
+                from app.repositories.schema_init import load_schema_from_file
+
+                # Let the authoritative schema create users: the old hand-rolled
+                # CREATE TABLE drifted (no deleted_at/system_account columns —
+                # the schema's partial indexes on those columns then failed).
+                load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
                 cursor.execute(
                     "INSERT OR IGNORE INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
                     ("admin", "admin@test.com", "hash123", "admin"),
                 )
-                from app.repositories.schema_init import load_schema_from_file
-
-                load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
                 conn.commit()
         finally:
             pass
@@ -477,20 +512,20 @@ class TestRetryLimit:
         orig = db_mod.adapt_sql
         db_mod.adapt_sql = lambda sql: sql
 
-        db = db_mod.Database(db_path)
+        db = db_mod.Database(f"sqlite:///{db_path}")
         try:
             with db.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'user', is_active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT)"
-                )
+                from app.repositories.schema_init import load_schema_from_file
+
+                # Let the authoritative schema create users: the old hand-rolled
+                # CREATE TABLE drifted (no deleted_at/system_account columns —
+                # the schema's partial indexes on those columns then failed).
+                load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
                 cursor.execute(
                     "INSERT OR IGNORE INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
                     ("admin", "admin@test.com", "hash123", "admin"),
                 )
-                from app.repositories.schema_init import load_schema_from_file
-
-                load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
                 conn.commit()
         finally:
             pass
