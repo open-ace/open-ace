@@ -5548,7 +5548,8 @@ export const translations: Record<Language, Translations> = {
     autoBannerPaused: 'このワークフローは一時停止中です。再開すると残りのステップを続行します。',
     // #2634: 一時停止状態の区別 + フィードバック付き再開入口
     autoBannerAcceptanceAwaiting: '承認確認が人間の処理を待っています',
-    autoBannerFeedbackPending: 'フィードバックを受信しました。まもなく次の開発ラウンドを自動開始します',
+    autoBannerFeedbackPending:
+      'フィードバックを受信しました。まもなく次の開発ラウンドを自動開始します',
     autoBannerQuotaPaused: 'クォータ一時停止',
     autoPauseReasonAcceptance: '承認確認待ち',
     autoPauseReasonQuota: 'クォータ一時停止',

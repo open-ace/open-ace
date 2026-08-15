@@ -225,9 +225,7 @@ describe('WorkflowTimeline feedback-pending restart state (#2491 UX)', () => {
     expect(
       within(banner).getByText('Feedback received — a new development round will start shortly')
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /complete development/i })
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /complete development/i })).not.toBeInTheDocument();
   });
 
   it('keeps Complete Development for waiting rows WITHOUT feedback', () => {

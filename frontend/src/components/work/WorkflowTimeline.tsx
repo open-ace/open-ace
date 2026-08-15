@@ -2457,7 +2457,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     // #2491 UX: pre-fill with the verifier's failed-items list
                     // (server-derived from the verification report) so the user
                     // can submit it verbatim or lightly edit it.
-                    setResumeFeedback(workflow.acceptance_feedback_prefill || '');
+                    setResumeFeedback(workflow.acceptance_feedback_prefill ?? '');
                     setShowResumeFeedbackModal(true);
                   }}
                   disabled={resumeFeedbackMutation.isPending}
