@@ -225,6 +225,21 @@ class TestCompareRun:
         )
         assert diff["verdict_exit_code"] == 0
 
+    def test_expected_xfail_covers_xfail_but_not_skip(self):
+        record = {"reason": "r", "owner": "o", "issue": 1, "expiry": "2099-01-01T00:00:00+00:00"}
+        ok = comparator.compare_run(
+            ["a"],
+            {"a": {"final_outcome": "xfail"}},
+            {"a": {"debt": "stable-pass", "expected_xfail": record}},
+        )
+        assert ok["verdict_exit_code"] == 0
+        flipped = comparator.compare_run(
+            ["a"],
+            {"a": {"final_outcome": "skip"}},
+            {"a": {"debt": "stable-pass", "expected_xfail": record}},
+        )
+        assert flipped["unexpected_skips"] == ["a"]  # skip<->xfail flip is caught
+
     def test_infra_observed_blocks_even_if_known(self):
         diff = comparator.compare_run(
             ["a"],

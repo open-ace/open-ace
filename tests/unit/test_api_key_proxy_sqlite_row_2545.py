@@ -28,9 +28,7 @@ def force_sqlite_backend(monkeypatch):
     raw ``?`` placeholders would fail. Same hermeticity pattern as
     tests/unit/test_run_timeline_repo.py.
     """
-    monkeypatch.setattr(
-        "app.modules.workspace.api_key_proxy.is_postgresql", lambda: False
-    )
+    monkeypatch.setattr("app.modules.workspace.api_key_proxy.is_postgresql", lambda: False)
 
 
 class TestCollectToolKeySettingsSqliteRow:

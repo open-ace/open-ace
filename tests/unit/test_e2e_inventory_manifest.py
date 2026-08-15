@@ -242,3 +242,25 @@ class TestAttemptsPlugin:
             "exception_class": "AssertionError",
             "message": "x",
         }
+
+    def test_summarize_setup_error_first_attempt_keeps_fail_signal(self):
+        # attempt 1 dies in setup (no call record); the first-attempt signal
+        # must not silently fall back to the final (rerun-passed) outcome
+        lines = [
+            json.dumps(
+                {
+                    "nodeid": "a",
+                    "attempt": 1,
+                    "phase": "setup",
+                    "outcome": "failed",
+                    "exception_class": "FixtureError",
+                    "message": "fixture boom",
+                }
+            ),
+            json.dumps({"nodeid": "a", "attempt": 2, "phase": "setup", "outcome": "passed"}),
+            json.dumps({"nodeid": "a", "attempt": 2, "phase": "call", "outcome": "passed"}),
+        ]
+        summary = attempts.summarize_attempts(lines)
+        assert summary["a"]["first_outcome"] == "fail"
+        assert summary["a"]["final_outcome"] == "pass"
+        assert summary["a"]["attempts"] == 2

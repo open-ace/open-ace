@@ -42,7 +42,13 @@ EXPECTED_SKIP_REQUIRED_FIELDS = ("reason", "owner", "issue", "expiry")
 
 
 def _parse_date(value: str) -> datetime:
-    return datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+    """Parse an ISO date; naive values are read as UTC, offsets are kept.
+
+    ``replace(tzinfo=utc)`` would silently re-stamp an already-offset value
+    (e.g. +08:00) as UTC and shift the instant by the offset.
+    """
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
 def load_state(path: Path = DEFAULT_STATE) -> dict[str, Any]:

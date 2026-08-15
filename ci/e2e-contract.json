@@ -26,7 +26,7 @@
     "pytest": "9",
     "pytest_rerunfailures": "16",
     "pytest_timeout": "2",
-    "actions": "checkout=6;setup-python=6;setup-node=6;upload-artifact=7",
+    "actions": "checkout=6;setup-python=6;setup-node=6;upload-artifact=7;download-artifact=7",
     "frontend_lockfile": "PENDING-P2",
     "envelope_schema_version": "1"
   },

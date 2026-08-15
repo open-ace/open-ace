@@ -49,9 +49,7 @@ def sync_env(tmp_path, monkeypatch):
     # adapt_sql(), which follow the globally configured DATABASE_URL; patch
     # them to the SQLite dialect so the temp SQLite database is exercised
     # regardless of the dev box's config (pattern: test_run_timeline_repo).
-    monkeypatch.setattr(
-        "app.repositories.database.is_postgresql", lambda: False
-    )
+    monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: False)
 
     db = Database(db_url=f"sqlite:///{tmp_path / 'dingtalk-sync.db'}")
     load_schema_from_file(db_url=db.db_url, dialect="sqlite")

@@ -234,8 +234,12 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             nodeids = collect(args.root)
-        except GovernanceError:
-            nodeids = []
+        except GovernanceError as exc:
+            # Fail closed: a snapshot written with an empty collection would
+            # mark every file collects=false "legitimately" and hide the
+            # collection failure inside a reviewable-looking artifact.
+            print(f"ERROR: pytest collection failed, refusing to snapshot: {exc}", file=sys.stderr)
+            return 1
         collected_files = {n.split("::")[0] for n in nodeids}
         rows = snapshot_inventory(
             project_root=args.root, out_path=args.out, collected_files=collected_files

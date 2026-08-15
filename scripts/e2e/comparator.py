@@ -230,7 +230,10 @@ def compare_run(
                 continue
             continue
         if outcome in ("skip", "xfail"):
-            expected = state.get("expected_skip") or state.get("expected_xfail")
+            # strict match: a skip is only expected by an expected_skip record
+            # and an xfail by an expected_xfail record - the loose or-match
+            # would let a skip<->xfail flip pass unnoticed
+            expected = state.get(f"expected_{outcome}")
             if not expected:
                 diff["unexpected_skips"].append(item_id)
             continue

@@ -717,7 +717,11 @@ class GitHubOps:
         # only guard shim; the harness exposes the real binary via
         # OPENACE_REAL_GIT for code that must run git directly (tests,
         # tooling). Unset everywhere else, so this defaults to plain "git".
-        git_bin = os.environ.get("OPENACE_REAL_GIT", "git")
+        # The sudo branch deliberately keeps the literal "git": prod sudoers
+        # whitelist only the bare command name, and a resolved absolute path
+        # under ``sudo -u <account>`` would be silently denied.
+        needs_sudo = self._needs_sudo()
+        git_bin = os.environ.get("OPENACE_REAL_GIT", "git") if not needs_sudo else "git"
         # Trust the canonical repo via per-command ``-c`` (never the global
         # ``safe.directory *`` that used to be written via
         # _ensure_safe_directory). git's dubious-ownership check covers every
@@ -740,7 +744,7 @@ class GitHubOps:
         safe_cfgs: list[str] = []
         for p in safe_paths:
             safe_cfgs += ["-c", f"safe.directory={p}"]
-        if self._needs_sudo():
+        if needs_sudo:
             # git supports `-C <path>` (unlike gh), so we use it to set the
             # working directory under a sudo wrapper where cwd would trigger a
             # Python permission check as the service user (Issue #1421).

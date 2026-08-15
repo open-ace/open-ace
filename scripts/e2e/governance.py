@@ -452,7 +452,12 @@ def cmd_classify(args: argparse.Namespace) -> int:
             by_id.setdefault(record["nodeid"], []).append(record)
     state_map: dict[str, Any] = {}
     for item_id, item_runs in sorted(by_id.items()):
-        debt = classify_three_way(item_runs)
+        try:
+            debt = classify_three_way(item_runs)
+        except GovernanceError as exc:
+            # e.g. a nodeid present in fewer than 3 reference runs
+            print(f"ERROR: {item_id}: {exc}", file=sys.stderr)
+            return 1
         entry: dict[str, Any] = {"debt": debt}
         if debt == "deterministic-known-fail":
             entry["fingerprint"] = item_runs[0].get("fingerprint")

@@ -302,13 +302,14 @@ def run_cli(argv: list[str] | None = None) -> int:
         inventory = load_inventory(args.inventory)
         state = load_state(args.state)
         promotion = load_promotion(args.promotion)
+        # build/select also fail closed on malformed state entries (e.g. an
+        # unparseable quarantine expiry inside Item.quarantine_active)
+        items = build_items(inventory, state, promotion, manifest.get("nodeids", []))
+        selection = select(args.event, items)
+        applicable, _ = applicable_ids(args.event, items)
     except GovernanceError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
-
-    items = build_items(inventory, state, promotion, manifest.get("nodeids", []))
-    selection = select(args.event, items)
-    applicable, _ = applicable_ids(args.event, items)
     closure = selection.closure_errors(applicable)
 
     payload = {

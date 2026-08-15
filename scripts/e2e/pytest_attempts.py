@@ -115,11 +115,15 @@ def summarize_attempts(lines: list[str]) -> dict[str, dict[str, object]]:
         # last call-phase outcome decides; fall back to the last record
         call_records = [r for r in records if r["phase"] == "call"]
         decision = call_records[-1] if call_records else final
-        first = next((r for r in records if r["phase"] == "call"), {"outcome": final["outcome"]})
+        # first attempt: a setup-phase error in attempt 1 leaves no call
+        # record, so decide from every record of the lowest attempt number
+        # instead of silently falling back to the final outcome
+        first_attempt_records = [r for r in records if r["attempt"] == attempts[0]]
+        first_passed = all(r["outcome"] == "passed" for r in first_attempt_records)
         failed = [r for r in records if r["outcome"] != "passed"]
         summary[nodeid] = {
             "final_outcome": "pass" if decision["outcome"] == "passed" else "fail",
-            "first_outcome": "pass" if first["outcome"] == "passed" else "fail",
+            "first_outcome": "pass" if first_passed else "fail",
             "attempts": len(attempts),
             "exception_class": failed[-1].get("exception_class") if failed else None,
             "message": failed[-1].get("message") if failed else None,
