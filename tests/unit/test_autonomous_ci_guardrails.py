@@ -324,6 +324,38 @@ def test_agent_environment_binds_python_and_git_guards(monkeypatch, tmp_path):
     assert "SKIP" not in env
 
 
+@pytest.mark.regression
+@pytest.mark.issue(2680)
+def test_agent_env_scrubs_scheduler_mode(monkeypatch, tmp_path):
+    """进程拓扑不得泄漏进 agent 子进程（class-2 幽灵暂停，2026-08-15）。
+
+    agent 继承 SCHEDULER_MODE=scheduler 后，其在 worktree 内运行的
+    pytest 会在测试进程内启动真 scheduler（TESTING 守卫之外的路径）。"""
+    from app.modules.workspace.autonomous import agent_runner
+
+    guard_dir = tmp_path / "agent-bin"
+    guard_dir.mkdir()
+    for name in agent_runner._AGENT_GUARD_EXECUTABLES:
+        guard = guard_dir / name
+        guard.write_text("#!/bin/sh\n", encoding="utf-8")
+        guard.chmod(0o755)
+    monkeypatch.setattr(agent_runner, "_OPENACE_AGENT_GUARD_BIN", str(guard_dir))
+    monkeypatch.setenv("SCHEDULER_MODE", "scheduler")
+
+    adapter = MagicMock()
+    adapter.get_env_vars.return_value = {}
+    env = agent_runner.AutonomousAgentRunner._build_agent_env(
+        adapter,
+        "claude-code",
+        None,
+        "session",
+        "",
+        [sys.executable],
+    )
+
+    assert "SCHEDULER_MODE" not in env
+
+
 def test_agent_guard_bin_falls_back_to_source_when_install_is_incomplete(monkeypatch, tmp_path):
     from pathlib import Path
 
