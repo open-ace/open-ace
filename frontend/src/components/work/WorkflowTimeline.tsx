@@ -113,16 +113,29 @@ const PLAN_CONTENT_TYPES = ['plan_created', 'plan_refined', 'plan_finalized'];
 const REVIEW_CONTENT_TYPES = ['plan_reviewed', 'pr_reviewed', 'pr_review_summary'];
 
 // #2658: render the acceptance milestone's verification report (stored in
-// milestone.metadata as JSON by the acceptance phase) as readable text for
-// the generic content viewer. Sections mirror _format_report_comment in
-// acceptance_verification.py.
+// milestone.metadata as JSON by the acceptance phase) for the generic content
+// viewer. Sections mirror _format_report_comment in acceptance_verification.py.
+// The viewer renders MarkdownContent, so emit real markdown: a heading for
+// the status, a meta bullet list, section subheadings, and nested list items
+// for verdicts/evidence. (Plain-text emission soft-wrapped adjacent lines
+// into one paragraph and 4-space-indented evidence lines became code blocks.)
 const VERDICT_TONE: Record<string, string> = {
   confirmed: '✅',
   rejected: '❌',
   indeterminate: '⚠️',
 };
 
-export const formatAcceptanceReport = (metadata: string): string => {
+const ACCEPTANCE_STATUS_KEYS: Record<string, string> = {
+  confirmed: 'autoAcceptanceStatusConfirmed',
+  rejected: 'autoAcceptanceStatusRejected',
+  indeterminate: 'autoAcceptanceStatusIndeterminate',
+};
+
+export const formatAcceptanceReport = (metadata: string, language: Language): string => {
+  const translate = (key: string, fallback: string) => {
+    const value = t(key, language);
+    return value === key ? fallback : value;
+  };
   let report: Record<string, unknown>;
   try {
     report = JSON.parse(metadata) as Record<string, unknown>;
@@ -131,38 +144,45 @@ export const formatAcceptanceReport = (metadata: string): string => {
   }
   const lines: string[] = [];
   const status = String(report.status ?? '');
-  lines.push(`${VERDICT_TONE[status] ?? '⚠️'} ${status || 'unknown'}`);
-  if (report.merge_sha) lines.push(`Merge SHA: ${String(report.merge_sha)}`);
-  if (report.verified_by) lines.push(`Verifier: ${String(report.verified_by)}`);
-  if (report.infra_error) lines.push(`Infra error: ${String(report.infra_error)}`);
-  const sections: Array<[string, string]> = [
-    ['scope', 'Scope'],
-    ['gates', 'Gates'],
-    ['verifier', 'Verifier findings'],
+  const statusLabel =
+    ACCEPTANCE_STATUS_KEYS[status] !== undefined
+      ? translate(ACCEPTANCE_STATUS_KEYS[status], status)
+      : status || 'unknown';
+  lines.push(`## ${VERDICT_TONE[status] ?? '⚠️'} ${statusLabel}`, '');
+  const meta: string[] = [];
+  if (report.merge_sha) meta.push(`- **Merge SHA:** \`${String(report.merge_sha)}\``);
+  if (report.verified_by) meta.push(`- **Verifier:** \`${String(report.verified_by)}\``);
+  if (report.infra_error) meta.push(`- **Infra error:** ${String(report.infra_error)}`);
+  if (meta.length > 0) lines.push(...meta, '');
+  const sections: Array<[string, string, string]> = [
+    ['scope', 'autoAcceptanceSectionScope', 'Scope'],
+    ['gates', 'autoAcceptanceSectionGates', 'Mechanical gates'],
+    ['verifier', 'autoAcceptanceSectionVerifier', 'Verifier findings'],
   ];
-  for (const [key, label] of sections) {
+  for (const [key, i18nKey, fallback] of sections) {
     const items = report[key];
     if (!Array.isArray(items) || items.length === 0) continue;
-    lines.push('', `── ${label} ──`);
+    lines.push(`### ${translate(i18nKey, fallback)}`, '');
     for (const raw of items) {
       if (!raw || typeof raw !== 'object') continue;
       const item = raw as Record<string, unknown>;
       const verdict = String(item.verdict ?? '');
       const icon = VERDICT_TONE[verdict] ?? '•';
       const tail = item.rationale ? ` — ${String(item.rationale)}` : '';
-      lines.push(`${icon} ${String(item.item ?? '')}${tail}`);
+      lines.push(`- ${icon} **${String(item.item ?? '')}**${tail}`);
       const evidence = item.evidence;
       if (Array.isArray(evidence)) {
         for (const ev of evidence) {
           if (!ev || typeof ev !== 'object') continue;
           const e = ev as Record<string, unknown>;
-          const note = e.note ? ` (${String(e.note)})` : '';
-          lines.push(`    ↳ ${String(e.ref ?? '')}${note}`);
+          const note = e.note ? `（${String(e.note)}）` : '';
+          lines.push(`  - ↳ \`${String(e.ref ?? '')}\`${note}`);
         }
       }
     }
+    lines.push('');
   }
-  return lines.join('\n');
+  return lines.join('\n').trim();
 };
 const MILESTONE_ICON_COLORS: Record<string, string> = {
   dark: 'var(--text-primary)',
@@ -1822,7 +1842,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                         onClick={() =>
                           setViewingContent({
                             title: t('autoViewAcceptanceReportTitle', language),
-                            content: formatAcceptanceReport(milestone.metadata),
+                            content: formatAcceptanceReport(milestone.metadata, language),
                           })
                         }
                       >
