@@ -131,6 +131,35 @@ def list_policy_rules():
     return jsonify({"success": True, "rules": [r.to_dict() for r in rules], "total": len(rules)})
 
 
+def _scope_policy_rule_write(rule_key: str, requested_tenant_id: object):
+    """Shared tenant guard for writing a policy rule (create or versioned update).
+
+    Both ``POST /policy/rules`` and ``PUT /policy/rules/<rule_key>`` funnel into
+    ``PolicyRepository.create_rule``, whose supersede UPDATE is keyed on
+    ``rule_key`` **with no tenant filter**. So *both* must:
+
+    1. If the key already has a current version, confirm the caller may overwrite
+       its owner (``enforce_resource_tenant_scope`` -- a global/other-tenant
+       owner is denied for a tenant admin). Otherwise POSTing an existing key is
+       a cross-tenant clobber even though it looks like a "create".
+    2. Confine the new version's own scope (``enforce_requested_tenant_scope`` --
+       a tenant admin cannot author a global or other-tenant rule).
+
+    Keeping this in one place stops create and update from drifting apart;
+    leaving create without step 1 was exactly such a drift. Returns
+    ``(scoped_tenant_id, denial)``; on success set ``fields["tenant_id"]``.
+    """
+    from app.modules.policy.repo import PolicyRepository
+
+    if rule_key:
+        current = PolicyRepository().get_current_rule_by_key(rule_key)
+        if current is not None:
+            denial = enforce_resource_tenant_scope(current.tenant_id)
+            if denial is not None:
+                return None, denial
+    return enforce_requested_tenant_scope(requested_tenant_id)
+
+
 @policy_bp.route("/policy/rules", methods=["POST"])
 @admin_required
 def create_policy_rule():
@@ -138,12 +167,9 @@ def create_policy_rule():
     from app.modules.policy.repo import PolicyRepository
 
     data = request.get_json(silent=True) or {}
-    # A rule's tenant_id is a scope field: which tenant the rule governs. A
-    # tenant admin may only author rules for its own tenant and never a global
-    # (tenant_id=None) rule that would govern everyone; a platform admin may
-    # target any tenant. Resolve the effective scope from the request rather
-    # than trusting the body.
-    scoped_tenant_id, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+    scoped_tenant_id, denial = _scope_policy_rule_write(
+        (data.get("rule_key") or "").strip(), data.get("tenant_id")
+    )
     if denial is not None:
         return denial
     fields, err = _parse_rule_body(data)
@@ -167,20 +193,12 @@ def update_policy_rule(rule_key: str):
     """
     from app.modules.policy.repo import PolicyRepository
 
-    repo = PolicyRepository()
-    # Superseding a key rewrites whichever tenant currently owns it (the
-    # supersede UPDATE is keyed on rule_key alone), so first confirm the caller
-    # may touch the existing version. A missing key is a create and skips this.
-    current = repo.get_current_rule_by_key(rule_key)
-    if current is not None:
-        denial = enforce_resource_tenant_scope(current.tenant_id)
-        if denial is not None:
-            return denial
-
     data = request.get_json(silent=True) or {}
     data["rule_key"] = rule_key
-    # Confine the new version's scope the same way create does.
-    scoped_tenant_id, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+    # Same guard as create: confirm the caller may overwrite the key's current
+    # owner (the supersede is keyed on rule_key alone) and confine the new
+    # version's scope.
+    scoped_tenant_id, denial = _scope_policy_rule_write(rule_key, data.get("tenant_id"))
     if denial is not None:
         return denial
     fields, err = _parse_rule_body(data)
@@ -188,7 +206,7 @@ def update_policy_rule(rule_key: str):
         return jsonify({"error": err}), 400
     fields["tenant_id"] = scoped_tenant_id
     fields["created_by"] = g_user_id()
-    rule = repo.create_rule(**fields)
+    rule = PolicyRepository().create_rule(**fields)
     invalidate_policy_rule_cache()
     logger.info("Policy rule updated: %s v%d", rule.rule_key, rule.version)
     return jsonify({"success": True, "rule": rule.to_dict()})

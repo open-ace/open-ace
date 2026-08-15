@@ -616,9 +616,16 @@ def api_get_security_settings():
 
 
 @governance_bp.route("/security-settings", methods=["PUT"])
-@admin_required
+@platform_admin_required
 def api_update_security_settings():
-    """Update security settings."""
+    """Update security settings.
+
+    security_settings has no tenant column -- it is global config (2FA toggle,
+    password policy, login-attempt limit, IP whitelist, audit thresholds), so a
+    write governs every tenant. Same reasoning as the content-filter mutations:
+    a tenant admin must not rewrite platform-wide security posture. Reads
+    (GET /security-settings) stay admin-level.
+    """
 
     data = request.get_json() or {}
 

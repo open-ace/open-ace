@@ -370,6 +370,58 @@ class TestPolicyCreateTenantBoundary:
         assert response.status_code == 201
         assert repo.created[0]["tenant_id"] == TENANT_B
 
+    # POST funnels into the same rule_key-keyed supersede as PUT (create_rule
+    # supersedes WHERE rule_key = ? with no tenant filter), so POSTing an
+    # EXISTING key is a cross-tenant clobber unless the owner is checked too.
+    def test_tenant_admin_cannot_post_over_another_tenants_existing_key_was_the_hole(self):
+        repo = _FakePolicyRepo(by_key={"k1": _rule(TENANT_B)})
+        response, repo, _ = _policy_request(
+            TENANT_A_ADMIN,
+            "POST",
+            "/api/policy/rules",
+            json_body=self._body(rule_key="k1"),
+            policy_repo=repo,
+        )
+        assert response.status_code == 403, response.get_data(as_text=True)
+        assert repo.created == []
+
+    def test_tenant_admin_cannot_post_over_a_global_key(self):
+        repo = _FakePolicyRepo(by_key={"k1": _rule(None)})
+        response, repo, _ = _policy_request(
+            TENANT_A_ADMIN,
+            "POST",
+            "/api/policy/rules",
+            json_body=self._body(rule_key="k1"),
+            policy_repo=repo,
+        )
+        assert response.status_code == 403
+        assert repo.created == []
+
+    def test_tenant_admin_can_post_over_own_tenants_existing_key(self):
+        repo = _FakePolicyRepo(by_key={"k1": _rule(TENANT_A)})
+        response, repo, _ = _policy_request(
+            TENANT_A_ADMIN,
+            "POST",
+            "/api/policy/rules",
+            json_body=self._body(rule_key="k1"),
+            policy_repo=repo,
+        )
+        assert response.status_code == 201, response.get_data(as_text=True)
+        assert repo.created[0]["tenant_id"] == TENANT_A
+
+    def test_platform_admin_can_post_over_any_existing_key(self):
+        repo = _FakePolicyRepo(by_key={"k1": _rule(TENANT_B)})
+        response, repo, audit = _policy_request(
+            PLATFORM_ADMIN,
+            "POST",
+            "/api/policy/rules",
+            json_body=self._body(rule_key="k1", tenant_id=TENANT_B),
+            policy_repo=repo,
+        )
+        assert response.status_code == 201, response.get_data(as_text=True)
+        assert repo.created[0]["tenant_id"] == TENANT_B
+        audit.assert_called_once()
+
 
 class TestPolicyUpdateTenantBoundary:
     """PUT /api/policy/rules/<rule_key> -- versioned supersede."""
@@ -494,6 +546,54 @@ class TestContentFilterMutationsArePlatformAdminOnly:
     def test_legacy_admin_is_allowed_in_non_strict_mode(self, method, path, body):
         response, _ = _governance_request(LEGACY_ADMIN, method, path, json_body=body)
         assert response.status_code not in (401, 403), response.get_data(as_text=True)
+
+
+# ── security settings (global config table -> platform admin only) ─────────
+
+
+class TestSecuritySettingsIsPlatformAdminOnly:
+    """PUT /api/security-settings -- security_settings has no tenant column.
+
+    Same class as the content-filter mutations: a write governs every tenant
+    (2FA, password policy, login-attempt limit, IP whitelist), so a tenant
+    admin must not reach it.
+    """
+
+    def test_tenant_admin_is_denied(self):
+        response, _ = _governance_request(
+            TENANT_A_ADMIN,
+            "PUT",
+            "/api/security-settings",
+            json_body={"two_factor_enabled": False},
+        )
+        assert response.status_code == 403, response.get_data(as_text=True)
+
+    def test_plain_user_is_denied(self):
+        response, _ = _governance_request(
+            TENANT_A_USER,
+            "PUT",
+            "/api/security-settings",
+            json_body={"two_factor_enabled": False},
+        )
+        assert response.status_code == 403
+
+    def test_platform_admin_is_allowed(self):
+        response, _ = _governance_request(
+            PLATFORM_ADMIN,
+            "PUT",
+            "/api/security-settings",
+            json_body={"two_factor_enabled": False},
+        )
+        assert response.status_code not in (401, 403), response.get_data(as_text=True)
+
+    def test_legacy_admin_is_allowed_in_non_strict_mode(self):
+        response, _ = _governance_request(
+            LEGACY_ADMIN,
+            "PUT",
+            "/api/security-settings",
+            json_body={"two_factor_enabled": False},
+        )
+        assert response.status_code not in (401, 403)
 
 
 # ── quota alert acknowledge (tenant resolved through the alert's user) ─────
@@ -650,5 +750,22 @@ class TestComplianceGenerateReportTenantBoundary:
         )
         assert response.status_code == 200, response.get_data(as_text=True)
         # The report was generated for the caller's own tenant, not all tenants.
+        _, kwargs = gen.generate_report.call_args
+        assert kwargs["tenant_id"] == TENANT_A
+
+    def test_tenant_admin_naming_own_tenant_as_string_is_allowed(self):
+        """Regression: a body "1" must not read as != int tenant 1 and 403."""
+        gen = MagicMock()
+        gen.generate_report.return_value.to_dict.return_value = {"report_id": "R1"}
+        gen.save_report.return_value = True
+        response, _ = _compliance_request(
+            TENANT_A_ADMIN,
+            "POST",
+            "/api/compliance/reports",
+            json_body={"report_type": "usage_summary", "tenant_id": str(TENANT_A)},
+            report_gen=gen,
+        )
+        assert response.status_code == 200, response.get_data(as_text=True)
+        gen.generate_report.assert_called_once()
         _, kwargs = gen.generate_report.call_args
         assert kwargs["tenant_id"] == TENANT_A

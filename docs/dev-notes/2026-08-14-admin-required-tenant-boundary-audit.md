@@ -212,7 +212,7 @@ follow-up PR 收口了「剩余 6 个」和「从请求里取租户」两批，�
 |---|---|---|
 | `policy.py` `PATCH /policy/rules/<rule_id>/enabled` | `get_rule(id).tenant_id` | 全局规则(None)对租户管理员=拒；查不到=拒(fail closed，无存在性 oracle) |
 | `policy.py` `PUT /policy/rules/<rule_key>` | `get_current_rule_by_key(key).tenant_id` | supersede 的 UPDATE 只按 rule_key，会顶掉当前 owner，故先校验既有版本；**新版本**的 scope 再走 `enforce_requested_tenant_scope`，租户管理员不能建全局/别租户规则 |
-| `policy.py` `POST /policy/rules` | —（新建） | 两轮枚举都漏了：body 的 `tenant_id` 走 `_parse_rule_body` 间接读，正则没跟进去。同 update 一样收敛新版本 scope |
+| `policy.py` `POST /policy/rules` | `get_current_rule_by_key(key)`（key 已存在时） | 两轮枚举都漏了：body 的 `tenant_id` 走 `_parse_rule_body` 间接读，正则没跟进去。**独立评审又抓到一层**：POST 和 PUT 一样落到按 rule_key 的 supersede，POST 一个**已存在**的 key 照样顶掉 owner——只收敛新版本 scope 不够。故与 PUT 共用 `_scope_policy_rule_write`（既有 owner 校验 + 新版本 scope 一处写），杜绝二者再次漂移 |
 | `governance.py` `POST /quota/alerts/<id>/acknowledge` | `get_alert(id).user_id` → `user.tenant_id` | `quota_alerts` 无租户列但 `user_id NOT NULL`；alert/user 任一查不到=拒 |
 | `compliance.py` `GET /reports/<report_id>` | `get_saved_report(id).metadata.tenant_id` | 单条读；列表侧 `/reports/saved` 上个 PR 已收紧 |
 
@@ -232,6 +232,13 @@ follow-up PR 收口了「剩余 6 个」和「从请求里取租户」两批，�
 和「按 `data.get('tenant_id')` 枚举」都扫不到。只锁 PUT/DELETE 而留着 create 是不自洽的
 （建一条 `effect=deny` 的全局规则比改一条更危险），故一并收口。
 
+**独立评审又补一处**：`PUT /security-settings`（`governance.py`）也是同一类——
+`security_settings` 无租户列（全局的 2FA 开关 / 密码策略 / 登录尝试上限 / IP 白名单 /
+审计阈值），租户管理员能改一条就动了**所有租户**的安全基线，比内容过滤影响更大。同样收成
+`platform_admin_required`（`GET` 不动）。这三处（policy POST、content-filter create/pattern/
+keyword、security-settings PUT）都属「全局配置写但既无资源 id 又不读 tenant_id」，是两轴枚
+举的共同盲区，教训记这里：**审「全局配置写端点」要单列一轴，不能靠资源 id / 请求租户去扫**。
+
 ### 一致性收敛
 
 `compliance.py::generate_report` 的租户管理员分支原来点名别的租户时只记日志、仍返回**自己
@@ -240,9 +247,13 @@ follow-up PR 收口了「剩余 6 个」和「从请求里取租户」两批，�
 
 ### 验证
 
-新增 `tests/integration/test_admin_cross_tenant_followup.py`（48 项），覆盖每个端点的
+新增 `tests/integration/test_admin_cross_tenant_followup.py`（57 项），覆盖每个端点的
 「租户管理员拒 / 平台管理员放行 / fail-closed / 无 oracle」四类，平台管理员跨租户放行处
-断言写了审计。8 处守卫逐一 source-mutation：破一个必挂一条具名测试（全部 CAUGHT）。
+断言写了审计。9 处守卫逐一 source-mutation：破一个必挂一条具名测试（全部 CAUGHT）。
+
+独立对抗评审跑了一轮，抓到 3 个真问题并已修：POST /policy/rules 的 supersede 顶 owner
+（HIGH）、`PUT /security-settings` 漏收（同全局配置类）、`generate_report` 把 body 的字符串
+`"1"` 当成 `!= int 1` 误拒本租户（LOW，改用 `enforce_requested_tenant_scope` 归一化）。
 
 ### 仍未动（范围外，记账）
 

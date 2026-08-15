@@ -179,23 +179,15 @@ def generate_report():
             g.user.get("id"),
             target_tenant_id,
         )
-    # Tenant admin can only generate reports for their own tenant
+    # Tenant admin can only generate reports for their own tenant. Reuse the
+    # shared request-scope guard: it normalizes the body value (a string "1"
+    # must not read as != int 1), denies naming another tenant outright, and
+    # rejects a tenant admin with no tenant -- consistent with the hardened
+    # list/read siblings (get_saved_reports / get_saved_report).
     elif user_role == "tenant_admin":
-        if caller_tenant_id is None:
-            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
-        # Naming another tenant is denied outright rather than silently served
-        # the caller's own report -- matches the hardened list/read siblings
-        # (get_saved_reports / get_saved_report) so the whole surface behaves
-        # consistently.
-        if data.get("tenant_id") is not None and data.get("tenant_id") != caller_tenant_id:
-            logger.warning(
-                "Tenant admin %s attempted to generate report for tenant %s (own tenant: %s)",
-                g.user.get("id"),
-                data.get("tenant_id"),
-                caller_tenant_id,
-            )
-            return jsonify({"error": "Cross-tenant access denied"}), 403
-        target_tenant_id = caller_tenant_id
+        target_tenant_id, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+        if denial is not None:
+            return denial
     # Legacy admin: backward compatibility
     # - With tenant_id: scoped to that tenant (like tenant_admin)
     # - Without tenant_id: global access (like platform_admin)
