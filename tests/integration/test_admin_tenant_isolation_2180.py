@@ -124,10 +124,52 @@ class TestMappingRulesTenantIsolation:
         from app.routes.mapping_rules import _validate_user_in_tenant
 
         with patch("app.routes.mapping_rules.user_repo") as mock_repo:
-            mock_repo.get_user_by_id.return_value = {"id": 2, "tenant_id": 1}
+            mock_repo.get_user_by_id.return_value = {"id": 2, "tenant_id": 1, "role": "user"}
 
             result = _validate_user_in_tenant(user_id=2, tenant_id=1)
             assert result is True
+
+    @pytest.mark.parametrize("platform_role", ["platform_admin", "admin"])
+    def test_tenant_admin_cannot_target_a_platform_account_in_its_own_tenant(self, platform_role):
+        """The check must be vertical as well as horizontal.
+
+        A platform-level account can carry a tenant id -- api_create_user
+        requires one, and the schema only forces tenant_admin to have it. So
+        comparing tenants alone lets a tenant admin operate on a platform admin
+        filed under its own tenant. The two tests above pass target dicts with
+        no ``role`` key, which exercises only the horizontal half.
+        """
+        from app.routes.mapping_rules import _validate_user_in_tenant
+
+        with patch("app.routes.mapping_rules.user_repo") as mock_repo:
+            mock_repo.get_user_by_id.return_value = {
+                "id": 2,
+                "tenant_id": 1,
+                "role": platform_role,
+            }
+
+            assert _validate_user_in_tenant(user_id=2, tenant_id=1) is False
+
+    def test_a_peer_tenant_admin_in_the_same_tenant_is_still_allowed(self):
+        """The vertical check must not over-reach: tenant_admin is not platform-level."""
+        from app.routes.mapping_rules import _validate_user_in_tenant
+
+        with patch("app.routes.mapping_rules.user_repo") as mock_repo:
+            mock_repo.get_user_by_id.return_value = {
+                "id": 2,
+                "tenant_id": 1,
+                "role": "tenant_admin",
+            }
+
+            assert _validate_user_in_tenant(user_id=2, tenant_id=1) is True
+
+    def test_a_target_with_no_tenant_is_denied(self):
+        from app.routes.mapping_rules import _validate_user_in_tenant
+
+        with patch("app.routes.mapping_rules.user_repo") as mock_repo:
+            mock_repo.get_user_by_id.return_value = {"id": 2, "tenant_id": None, "role": "user"}
+
+            assert _validate_user_in_tenant(user_id=2, tenant_id=1) is False
 
 
 class TestAPIKeyTenantIsolation:

@@ -12,7 +12,13 @@ from typing import Any, cast
 import bcrypt
 from flask import Blueprint, g, jsonify, request
 
-from app.auth.decorators import admin_required
+from app.auth.decorators import (
+    admin_required,
+    enforce_requested_tenant_scope,
+    resolve_admin_tenant_scope,
+    same_tenant_user_required,
+)
+from app.auth.permissions import is_platform_level_role
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.usage_repo import UsageRepository
 from app.repositories.user_repo import UserRepository
@@ -42,11 +48,49 @@ def get_client_info():
     }
 
 
+def reject_privilege_escalation(role: object) -> tuple[Any, int] | None:
+    """Deny a tenant-scoped admin assigning a platform-level role.
+
+    Granting one is equivalent to escaping the tenant: the grantee (possibly
+    the grantor's own account) becomes a platform admin and can then reach
+    every other tenant.
+
+    Returns ``None`` when the assignment is allowed (no role given, an
+    ordinary role, or the actor is a platform admin), otherwise the 403 the
+    caller must return.
+    """
+    if role is None or not is_platform_level_role(cast("str | None", role)):
+        return None
+
+    actor_tenant_id, denial = resolve_admin_tenant_scope()
+    if denial is not None:
+        return denial
+    if actor_tenant_id is None:
+        # Platform admin: allowed to create peers.
+        return None
+
+    logger.warning(
+        "Privilege escalation denied: actor=%s actor_tenant=%s requested_role=%s path=%s",
+        g.user_id,
+        actor_tenant_id,
+        role,
+        request.path,
+    )
+    return jsonify({"error": "Cannot assign platform-level role"}), 403
+
+
 @admin_bp.route("/admin/users", methods=["GET"])
 @admin_required
 def api_get_users():
-    """Get all users, optionally filtered by tenant."""
-    tenant_id = request.args.get("tenant_id", type=int)
+    """Get all users, optionally filtered by tenant.
+
+    A tenant-scoped admin only ever sees their own tenant: an omitted
+    ``tenant_id`` is narrowed to theirs rather than left as "all tenants",
+    and naming somebody else's tenant is rejected.
+    """
+    tenant_id, denial = enforce_requested_tenant_scope(request.args.get("tenant_id"))
+    if denial is not None:
+        return denial
 
     users = user_repo.get_all_users(tenant_id=tenant_id)
 
@@ -81,6 +125,17 @@ def api_create_user():
     tenant_id = data.get("tenant_id")
     if tenant_id is None:
         return jsonify({"error": "tenant_id is required"}), 400
+
+    # A tenant-scoped admin may only populate their own tenant, and may not
+    # mint a platform-level account there.
+    # Also 400s an unusable tenant_id, so nothing unvalidated reaches the
+    # quota check or the INSERT.
+    tenant_id, denial = enforce_requested_tenant_scope(tenant_id)
+    if denial is not None:
+        return denial
+    escalation = reject_privilege_escalation(role)
+    if escalation is not None:
+        return escalation
 
     # Validate inputs
     if not validate_username(username):
@@ -160,12 +215,31 @@ def api_create_user():
 
 @admin_bp.route("/admin/users/<int:user_id>", methods=["PUT"])
 @admin_required
+@same_tenant_user_required
 def api_update_user(user_id):
     """Update a user."""
     data = request.get_json() or {}
 
     # Get current user state for audit diff (before update)
     current_user = user_repo.get_user_by_id(user_id)
+
+    # A tenant-scoped admin must not grant a platform-level role, and must not
+    # move a user across the tenant boundary in either direction: pulling a
+    # foreign user in is takeover, pushing one out is exfiltration.
+    escalation = reject_privilege_escalation(data.get("role"))
+    if escalation is not None:
+        return escalation
+
+    # Use the value the scope guard returns, never the raw body value. A value
+    # the guard cannot normalize (0, -1, "", "abc") comes back as None, which
+    # enforce_requested_tenant_scope treats as "no tenant requested" and lets
+    # through -- so re-reading data["tenant_id"] afterwards would hand that
+    # unvalidated value to the quota check and the UPDATE.
+    new_tenant_id = None
+    if data.get("tenant_id") is not None:
+        new_tenant_id, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+        if denial is not None:
+            return denial
 
     # Auto-create system user if system_account is being set
     system_account = data.get("system_account")
@@ -176,7 +250,6 @@ def api_update_user(user_id):
         ensure_system_user(system_account, uid=uid)
 
     # Handle tenant_id change
-    new_tenant_id = data.get("tenant_id")
     if new_tenant_id is not None:
         from app.services.tenant_service import TenantService
 
@@ -244,6 +317,7 @@ def api_update_user(user_id):
 
 @admin_bp.route("/admin/users/<int:user_id>", methods=["DELETE"])
 @admin_required
+@same_tenant_user_required
 def api_delete_user(user_id):
     """Delete a user."""
     # Prevent deleting yourself
@@ -276,6 +350,7 @@ def api_delete_user(user_id):
 
 @admin_bp.route("/admin/users/<int:user_id>/password", methods=["PUT"])
 @admin_required
+@same_tenant_user_required
 def api_update_user_password(user_id):
     """Update a user's password."""
     data = request.get_json() or {}
@@ -313,6 +388,7 @@ def api_update_user_password(user_id):
 
 @admin_bp.route("/admin/users/<int:user_id>/reset-password", methods=["POST"])
 @admin_required
+@same_tenant_user_required
 def api_reset_user_password(user_id):
     """Reset user password and generate a temporary password.
 
@@ -400,6 +476,7 @@ def api_reset_user_password(user_id):
 
 @admin_bp.route("/admin/users/<int:user_id>/quota", methods=["PUT"])
 @admin_required
+@same_tenant_user_required
 def api_update_user_quota(user_id):
     """Update a user's quota.
 
@@ -615,10 +692,22 @@ def api_update_user_quota(user_id):
 @admin_bp.route("/admin/quota/usage", methods=["GET"])
 @admin_required
 def api_quota_usage():
-    """Get quota usage for all users."""
+    """Get quota usage for all users the caller may see.
+
+    Same tenant confinement as ``GET /admin/users`` -- this endpoint returns
+    the user list too (``SELECT *`` minus the password hash, plus usage), so
+    leaving it unscoped would reopen cross-tenant user enumeration at a
+    sibling URL. It actually exposes more than /admin/users does, including
+    each account's role, which is precisely the targeting data an attacker
+    needs.
+    """
     from datetime import datetime
 
-    users = user_repo.get_all_users()
+    scope_tenant_id, denial = enforce_requested_tenant_scope(request.args.get("tenant_id"))
+    if denial is not None:
+        return denial
+
+    users = user_repo.get_all_users(tenant_id=scope_tenant_id)
     today = datetime.now().strftime("%Y-%m-%d")
     month_start = datetime.now().replace(day=1).strftime("%Y-%m-%d")
 
@@ -660,17 +749,30 @@ def api_quota_stats():
     """Get quota allocation statistics for reference."""
     from app.services.tenant_service import TenantService
 
+    scope_tenant_id, denial = enforce_requested_tenant_scope(request.args.get("tenant_id"))
+    if denial is not None:
+        return denial
+
     tenant_service = TenantService()
 
-    # Get tenant info (default tenant_id=1 for single-tenant mode)
-    tenant = tenant_service.get_tenant(1)
+    # This endpoint compares allocation against ONE tenant's limits, so the
+    # limits and the users summed against them must come from the SAME tenant.
+    # Resolve a single concrete id and use it for both.
+    #
+    # Getting this wrong is not hypothetical: scoping only the user query left
+    # a platform admin (scope_tenant_id None, which is how the dashboard calls
+    # it -- getQuotaStats() sends no tenant_id) reading tenant 1's limits while
+    # summing EVERY tenant's users, which reports percentages like 500%.
+    effective_tenant_id = scope_tenant_id or g.user.get("tenant_id") or 1
+
+    # Default tenant_id=1 for single-tenant mode.
+    tenant = tenant_service.get_tenant(effective_tenant_id)
     if not tenant:
         return jsonify({"error": "Tenant not found"}), 404
 
     tenant_quota = tenant.quota
 
-    # Calculate allocated quotas from all users
-    users = user_repo.get_all_users()
+    users = user_repo.get_all_users(tenant_id=effective_tenant_id)
 
     allocated = {
         "daily_token": 0,
@@ -850,8 +952,15 @@ def api_quota_health_check():
 
     data = request.get_json(silent=True) or {}
 
-    # Get tenant_id from request or current user
-    tenant_id = data.get("tenant_id") or g.user.get("tenant_id")
+    # Get tenant_id from request, confined to what the caller may look at. The
+    # body value used to be taken on trust, so a tenant admin could read any
+    # other tenant's quota allocation and headroom by naming it here.
+    tenant_id, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+    if denial is not None:
+        return denial
+    if tenant_id is None:
+        # Platform admin with no tenant named, or a caller with no tenant.
+        tenant_id = g.user.get("tenant_id")
     if not tenant_id:
         return jsonify({"error": "Tenant ID is required"}), 400
 
@@ -950,15 +1059,18 @@ def api_quota_health_check():
 @admin_bp.route("/admin/feishu/sync", methods=["POST"])
 @admin_required
 def api_sync_feishu_org():
-    """Manually trigger a Feishu organization sync."""
-    data = request.get_json(silent=True) or {}
-    tenant_id = data.get("tenant_id")
+    """Manually trigger a Feishu organization sync.
 
-    if tenant_id is not None:
-        try:
-            tenant_id = int(tenant_id)
-        except (TypeError, ValueError):
-            return jsonify({"error": "tenant_id must be an integer"}), 400
+    The body's ``tenant_id`` used to be taken on trust. Because a sync creates
+    and updates users and teams in the target tenant, that was a cross-tenant
+    *write*: a tenant admin could name somebody else's tenant and reshape its
+    org tree. enforce_requested_tenant_scope also handles the int coercion and
+    the 400 that used to be done by hand here.
+    """
+    data = request.get_json(silent=True) or {}
+    tenant_id, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+    if denial is not None:
+        return denial
 
     try:
         from app.services.feishu_org_sync import FeishuOrgSyncService
@@ -975,15 +1087,14 @@ def api_sync_feishu_org():
 @admin_bp.route("/admin/dingtalk/sync", methods=["POST"])
 @admin_required
 def api_sync_dingtalk_org():
-    """Manually trigger a DingTalk organization sync."""
-    data = request.get_json(silent=True) or {}
-    tenant_id = data.get("tenant_id")
+    """Manually trigger a DingTalk organization sync.
 
-    if tenant_id is not None:
-        try:
-            tenant_id = int(tenant_id)
-        except (TypeError, ValueError):
-            return jsonify({"error": "tenant_id must be an integer"}), 400
+    Same cross-tenant write as the Feishu sibling above -- see that docstring.
+    """
+    data = request.get_json(silent=True) or {}
+    tenant_id, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+    if denial is not None:
+        return denial
 
     try:
         from app.services.dingtalk_org_sync import DingTalkOrgSyncService

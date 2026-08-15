@@ -1,0 +1,918 @@
+"""Tenant boundary on the admin user-management endpoints.
+
+``admin_required`` authenticates ``admin`` / ``platform_admin`` / ``tenant_admin``
+and populates ``g.tenant_id``, but never compared that tenant against the tenant
+of the resource being operated on. On ``/api/admin/users/<id>/...`` that gap was
+a full cross-tenant account takeover: a tenant admin could reset any user's
+password -- a platform admin's included -- and read the new password straight
+out of the response body.
+
+Each test below is the exploit, run against the fixed code and asserting the
+denial. ``test_..._was_the_exploit`` names spell out the attack that used to
+work.
+
+Lineage: Issue #2180 (admin-route tenant isolation), which fixed 22 endpoints
+but left ``admin_required`` itself boundary-free.
+"""
+
+from __future__ import annotations
+
+import contextlib
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+from flask import Flask
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.security,
+    pytest.mark.regression,
+    pytest.mark.issue(2180),
+]
+
+
+# Two tenants, and one platform-level account with no tenant at all.
+TENANT_A = 1
+TENANT_B = 2
+
+USERS: dict[int, dict] = {
+    10: {
+        "id": 10,
+        "username": "alice",
+        "email": "alice@a.example",
+        "role": "user",
+        "tenant_id": TENANT_A,
+        "must_change_password": False,
+        "daily_token_quota": 100,
+        "monthly_token_quota": 1000,
+        "daily_request_quota": 10,
+        "monthly_request_quota": 100,
+    },
+    20: {
+        "id": 20,
+        "username": "bob",
+        "email": "bob@b.example",
+        "role": "user",
+        "tenant_id": TENANT_B,
+        "must_change_password": False,
+        "daily_token_quota": 100,
+        "monthly_token_quota": 1000,
+        "daily_request_quota": 10,
+        "monthly_request_quota": 100,
+    },
+    99: {
+        "id": 99,
+        "username": "root",
+        "email": "root@example",
+        "role": "platform_admin",
+        "tenant_id": None,
+        "must_change_password": False,
+    },
+    # A platform admin FILED UNDER tenant A. This is not an exotic row:
+    # api_create_user rejects a missing tenant_id (400), so every platform
+    # admin minted through the admin API carries some tenant, and the schema
+    # only requires a tenant for tenant_admin.
+    98: {
+        "id": 98,
+        "username": "root-in-tenant-a",
+        "email": "root-a@a.example",
+        "role": "platform_admin",
+        "tenant_id": TENANT_A,
+        "must_change_password": False,
+    },
+    97: {
+        "id": 97,
+        "username": "legacy-admin-in-tenant-a",
+        "email": "legacy-a@a.example",
+        "role": "admin",
+        "tenant_id": TENANT_A,
+        "must_change_password": False,
+    },
+}
+
+TENANT_A_ADMIN = {
+    "id": 11,
+    "username": "a-admin",
+    "role": "tenant_admin",
+    "tenant_id": TENANT_A,
+    "must_change_password": False,
+}
+PLATFORM_ADMIN = {
+    "id": 1,
+    "username": "platform",
+    "role": "platform_admin",
+    "tenant_id": None,
+    "must_change_password": False,
+}
+
+
+class _FakeUserRepo:
+    """Just enough of UserRepository for the routes under test."""
+
+    def __init__(self, users: dict[int, dict] | None = None):
+        self.users = users if users is not None else USERS
+        self.password_updates: list[int] = []
+        self.deleted: list[int] = []
+        self.updated: list[int] = []
+        self.created: list[dict] = []
+
+    def get_user_by_id(self, user_id):
+        user = self.users.get(int(user_id))
+        return dict(user) if user else None
+
+    def get_all_users(self, tenant_id=None, **kwargs):
+        return [
+            dict(u)
+            for u in self.users.values()
+            if tenant_id is None or u.get("tenant_id") == tenant_id
+        ]
+
+    def get_user_by_username(self, username):
+        return None
+
+    def get_user_by_email(self, email):
+        return None
+
+    def update_password(self, user_id, password_hash):
+        self.password_updates.append(int(user_id))
+        return True
+
+    def set_must_change_password(self, user_id, value):
+        return True
+
+    def delete_user(self, user_id):
+        self.deleted.append(int(user_id))
+        return True
+
+    def update_user(self, user_id, **kwargs):
+        self.updated.append(int(user_id))
+        return True
+
+    def create_user(self, username, email, password_hash, role, **kwargs):
+        self.created.append({"username": username, "role": role, **kwargs})
+        return 500
+
+    def update_user_quota(self, *args, **kwargs):
+        return True
+
+
+def _request(actor, method, path, *, json_body=None, repo=None, query_string=None, guard_repo=None):
+    """Issue one authenticated request against a bare admin blueprint.
+
+    Uses a minimal Flask app rather than ``create_app()`` so the shared
+    module-level blueprint singletons are not mutated for other test modules
+    (same reasoning as tests/integration/test_admin_tenant_isolation_2180.py).
+
+    ``guard_repo`` overrides only the repository the tenant guard resolves
+    through, leaving the view's own ``user_repo`` intact -- so a test can make
+    the guard's lookup fail without also breaking the endpoint underneath it.
+    """
+    from app.routes.admin import admin_bp
+
+    repo = repo or _FakeUserRepo()
+    guard_repo = guard_repo if guard_repo is not None else repo
+
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(admin_bp, url_prefix="/api")
+
+    # TenantService is imported inside the view functions and talks to the
+    # tenants table; stub it so these tests need no database at all.
+    tenant_service = MagicMock()
+    tenant_service.list_tenants.return_value = [
+        SimpleNamespace(id=TENANT_A, name="tenant-a"),
+        SimpleNamespace(id=TENANT_B, name="tenant-b"),
+    ]
+    tenant_service.can_add_user.return_value = True
+    tenant_service.increment_user_count.return_value = True
+    tenant_service.decrement_user_count.return_value = True
+    tenant_service.get_tenant.return_value = SimpleNamespace(
+        quota=SimpleNamespace(
+            max_users=100,
+            daily_token_limit=10**9,
+            monthly_token_limit=10**9,
+            daily_request_limit=10**9,
+            monthly_request_limit=10**9,
+        )
+    )
+
+    # The quota endpoints join per-user usage; stub the repo so these stay
+    # database-free like the rest of the module.
+    usage_repo = MagicMock()
+    usage_repo.get_combined_usage.return_value = {"tokens": 0, "requests": 0}
+
+    with (
+        patch("app.auth.decorators._load_user_from_token", return_value=actor),
+        # same_tenant_user_required resolves the target through _load_target_user,
+        # which constructs its own repository.
+        patch("app.repositories.user_repo.UserRepository", return_value=guard_repo),
+        patch("app.routes.admin.user_repo", repo),
+        patch("app.routes.admin.audit_logger"),
+        patch("app.routes.admin.get_security_settings_cached", return_value=None),
+        patch("app.services.tenant_service.TenantService", return_value=tenant_service),
+        patch("app.routes.admin.usage_repo", usage_repo),
+    ):
+        client = app.test_client()
+        response = client.open(
+            path,
+            method=method,
+            json=json_body,
+            query_string=query_string,
+            headers={"Authorization": "Bearer test-token"},
+        )
+    return response, repo
+
+
+class TestPasswordResetTakeover:
+    """POST /api/admin/users/<id>/reset-password."""
+
+    def test_tenant_admin_cannot_reset_other_tenants_user_was_the_exploit(self):
+        """The P0: tenant A's admin resets tenant B's user and reads the password."""
+        response, repo = _request(TENANT_A_ADMIN, "POST", "/api/admin/users/20/reset-password")
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+        assert "temporary_password" not in response.get_json()
+        assert repo.password_updates == []
+
+    def test_tenant_admin_cannot_reset_platform_admin_was_the_worst_case(self):
+        """User 99 is a platform admin with tenant_id=None -- NULL is not a wildcard."""
+        response, repo = _request(TENANT_A_ADMIN, "POST", "/api/admin/users/99/reset-password")
+
+        assert response.status_code == 403
+        assert repo.password_updates == []
+
+    def test_tenant_admin_can_still_reset_own_tenants_user(self):
+        """The fix must not break the legitimate case it is wrapped around."""
+        response, repo = _request(TENANT_A_ADMIN, "POST", "/api/admin/users/10/reset-password")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert response.get_json()["temporary_password"]
+        assert repo.password_updates == [10]
+
+    def test_platform_admin_keeps_cross_tenant_reach(self):
+        response, repo = _request(PLATFORM_ADMIN, "POST", "/api/admin/users/20/reset-password")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert repo.password_updates == [20]
+
+    def test_legacy_admin_keeps_cross_tenant_reach(self):
+        """Legacy 'admin' is a platform admin while strict mode is off."""
+        legacy = {
+            "id": 2,
+            "username": "legacy",
+            "role": "admin",
+            "tenant_id": TENANT_A,
+            "must_change_password": False,
+        }
+        response, repo = _request(legacy, "POST", "/api/admin/users/20/reset-password")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert repo.password_updates == [20]
+
+
+class TestVerticalEscalationViaSameTenantPlatformAdmin:
+    """Sharing a tenant must not make a platform admin a valid target.
+
+    A tenant-only check is purely horizontal and misses this: file a
+    platform_admin under tenant A, and tenant A's admin can reset its password
+    and read the result -- full escape, without ever granting itself a role.
+    ``reject_privilege_escalation`` does not help, because nothing is granted.
+    """
+
+    @pytest.mark.parametrize("target_id", [98, 97])
+    def test_tenant_admin_cannot_reset_a_platform_account_in_its_own_tenant(self, target_id):
+        response, repo = _request(
+            TENANT_A_ADMIN, "POST", f"/api/admin/users/{target_id}/reset-password"
+        )
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+        assert "temporary_password" not in response.get_json()
+        assert repo.password_updates == []
+
+    @pytest.mark.parametrize(
+        ("method", "path", "body"),
+        [
+            ("PUT", "/api/admin/users/98", {"username": "pwned"}),
+            ("DELETE", "/api/admin/users/98", None),
+            ("PUT", "/api/admin/users/98/password", {"password": "NewP@ssw0rd123"}),
+            ("PUT", "/api/admin/users/98/quota", {"daily_token_quota": 999999}),
+        ],
+    )
+    def test_every_sibling_endpoint_denies_it_too(self, method, path, body):
+        response, repo = _request(TENANT_A_ADMIN, method, path, json_body=body)
+
+        assert (
+            response.status_code == 403
+        ), f"{method} {path} returned {response.status_code}: {response.get_data(as_text=True)}"
+        assert repo.updated == []
+        assert repo.deleted == []
+        assert repo.password_updates == []
+
+    def test_protection_does_not_depend_on_strict_mode(self, monkeypatch):
+        """is_platform_level_role is flag-independent on purpose.
+
+        Routing this through the strict-mode-sensitive is_platform_admin_role
+        would stop protecting legacy 'admin' rows the moment strict mode is
+        switched on -- protection must not narrow as a side effect.
+        """
+        from app.auth.permissions import reset_strict_mode_cache
+
+        reset_strict_mode_cache()
+        monkeypatch.setenv("OPENACE_PLATFORM_ADMIN_STRICT_MODE", "true")
+        try:
+            response, repo = _request(TENANT_A_ADMIN, "POST", "/api/admin/users/97/reset-password")
+            assert response.status_code == 403
+            assert repo.password_updates == []
+        finally:
+            reset_strict_mode_cache()
+
+    def test_platform_admin_may_still_manage_its_peers(self):
+        response, repo = _request(PLATFORM_ADMIN, "POST", "/api/admin/users/98/reset-password")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert repo.password_updates == [98]
+
+
+class TestOtherUserTargetedEndpoints:
+    """The same gap existed on every sibling endpoint keyed by a user id."""
+
+    @pytest.mark.parametrize(
+        ("method", "path", "body"),
+        [
+            ("PUT", "/api/admin/users/20", {"username": "pwned"}),
+            ("DELETE", "/api/admin/users/20", None),
+            ("PUT", "/api/admin/users/20/password", {"password": "NewP@ssw0rd123"}),
+            ("PUT", "/api/admin/users/20/quota", {"daily_token_quota": 999999}),
+        ],
+    )
+    def test_tenant_admin_denied_across_tenants(self, method, path, body):
+        response, repo = _request(TENANT_A_ADMIN, method, path, json_body=body)
+
+        assert (
+            response.status_code == 403
+        ), f"{method} {path} returned {response.status_code}: {response.get_data(as_text=True)}"
+        assert repo.updated == []
+        assert repo.deleted == []
+        assert repo.password_updates == []
+
+
+class TestUserEnumeration:
+    """GET /api/admin/users -- the reconnaissance step before a takeover."""
+
+    def test_tenant_admin_listing_is_narrowed_to_own_tenant(self):
+        """No tenant_id used to mean 'every tenant'."""
+        response, _ = _request(TENANT_A_ADMIN, "GET", "/api/admin/users")
+
+        assert response.status_code == 200
+        tenants = {u.get("tenant_id") for u in response.get_json()}
+        assert tenants == {TENANT_A}
+
+    def test_tenant_admin_cannot_request_another_tenants_listing(self):
+        response, _ = _request(
+            TENANT_A_ADMIN, "GET", "/api/admin/users", query_string={"tenant_id": TENANT_B}
+        )
+
+        assert response.status_code == 403
+
+    def test_platform_admin_still_sees_every_tenant(self):
+        response, _ = _request(PLATFORM_ADMIN, "GET", "/api/admin/users")
+
+        assert response.status_code == 200
+        assert {u.get("tenant_id") for u in response.get_json()} == {TENANT_A, TENANT_B, None}
+
+
+class TestPrivilegeEscalation:
+    """A tenant admin minting platform-level accounts is takeover by another route."""
+
+    def test_tenant_admin_cannot_create_platform_admin(self):
+        response, repo = _request(
+            TENANT_A_ADMIN,
+            "POST",
+            "/api/admin/users",
+            json_body={
+                "username": "backdoor",
+                "email": "backdoor@a.example",
+                "password": "S0me!LongPassword",
+                "role": "platform_admin",
+                "tenant_id": TENANT_A,
+            },
+        )
+
+        assert response.status_code == 403
+        assert repo.created == []
+
+    def test_tenant_admin_cannot_create_into_another_tenant(self):
+        response, repo = _request(
+            TENANT_A_ADMIN,
+            "POST",
+            "/api/admin/users",
+            json_body={
+                "username": "planted",
+                "email": "planted@b.example",
+                "password": "S0me!LongPassword",
+                "role": "user",
+                "tenant_id": TENANT_B,
+            },
+        )
+
+        assert response.status_code == 403
+        assert repo.created == []
+
+    def test_tenant_admin_cannot_promote_own_user_to_platform_admin(self):
+        response, repo = _request(
+            TENANT_A_ADMIN, "PUT", "/api/admin/users/10", json_body={"role": "platform_admin"}
+        )
+
+        assert response.status_code == 403
+        assert repo.updated == []
+
+    def test_tenant_admin_cannot_move_own_user_into_another_tenant(self):
+        response, repo = _request(
+            TENANT_A_ADMIN, "PUT", "/api/admin/users/10", json_body={"tenant_id": TENANT_B}
+        )
+
+        assert response.status_code == 403
+        assert repo.updated == []
+
+    @pytest.mark.parametrize("bogus", [0, -1, "", "abc", "0", 1.9, 2.5, True, False])
+    def test_unusable_tenant_id_is_rejected_not_silently_ignored(self, bogus):
+        """A value the scope guard cannot normalize returns None, which reads as
+        'no tenant requested' -- so re-reading the raw body value afterwards
+        would hand it straight to the quota check and the UPDATE.
+        """
+        response, repo = _request(
+            TENANT_A_ADMIN, "PUT", "/api/admin/users/10", json_body={"tenant_id": bogus}
+        )
+
+        assert response.status_code == 400, response.get_data(as_text=True)
+        assert repo.updated == []
+
+    def test_an_integral_float_tenant_id_is_still_accepted(self):
+        """2.0 is unambiguous, so it is honoured rather than rejected.
+
+        Only non-integral floats and bools are refused -- those are the ones
+        that would silently land on a tenant the caller never named.
+        """
+        response, repo = _request(
+            PLATFORM_ADMIN, "PUT", "/api/admin/users/10", json_body={"tenant_id": 2.0}
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert repo.updated == [10]
+
+    def test_platform_admin_also_gets_400_for_an_unusable_tenant_id(self):
+        response, repo = _request(
+            PLATFORM_ADMIN, "PUT", "/api/admin/users/10", json_body={"tenant_id": "abc"}
+        )
+
+        assert response.status_code == 400
+        assert repo.updated == []
+
+    def test_platform_admin_can_still_move_a_user_between_tenants(self):
+        response, repo = _request(
+            PLATFORM_ADMIN, "PUT", "/api/admin/users/10", json_body={"tenant_id": TENANT_B}
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert repo.updated == [10]
+
+    def test_platform_admin_may_still_create_platform_admins(self):
+        response, repo = _request(
+            PLATFORM_ADMIN,
+            "POST",
+            "/api/admin/users",
+            json_body={
+                "username": "peer",
+                "email": "peer@example.com",
+                "password": "S0me!LongPassword",
+                "role": "platform_admin",
+                "tenant_id": TENANT_A,
+            },
+        )
+
+        assert response.status_code == 201, response.get_data(as_text=True)
+        assert [c["role"] for c in repo.created] == ["platform_admin"]
+
+
+class TestTenantlessAdminFailsClosed:
+    """A tenant_admin row with no tenant_id has no scope to confine to."""
+
+    def test_tenant_admin_without_tenant_id_is_denied(self):
+        broken = {
+            "id": 12,
+            "username": "no-tenant",
+            "role": "tenant_admin",
+            "tenant_id": None,
+            "must_change_password": False,
+        }
+        response, repo = _request(broken, "POST", "/api/admin/users/10/reset-password")
+
+        assert response.status_code == 403
+        assert repo.password_updates == []
+
+
+class TestDecoratorBranchesNotReachableFromTheRoutes:
+    """Two branches the routes cannot currently exercise.
+
+    All 7 call sites use ``<int:user_id>`` converters, so the "unusable view
+    arg" path is latent -- and an unpinned fail-closed branch is one refactor
+    away from becoming a fail-open one. Driven directly here.
+    """
+
+    @staticmethod
+    def _app_with(view_arg_name, decorated_arg="user_id"):
+        from app.auth.decorators import admin_required, same_tenant_user_required
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+
+        @app.route(f"/probe/<{view_arg_name}>")
+        @admin_required
+        @same_tenant_user_required(arg=decorated_arg)
+        def probe(**kwargs):
+            return {"reached": True}
+
+        return app
+
+    def _call(self, app, actor, path):
+        repo = _FakeUserRepo()
+        with (
+            patch("app.auth.decorators._load_user_from_token", return_value=actor),
+            patch("app.repositories.user_repo.UserRepository", return_value=repo),
+        ):
+            return app.test_client().get(path, headers={"Authorization": "Bearer t"})
+
+    def test_view_arg_mismatch_denies_a_tenant_admin(self):
+        """The decorator names user_id; the route supplies uid."""
+        app = self._app_with("uid")
+
+        response = self._call(app, TENANT_A_ADMIN, "/probe/20")
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+
+    def test_non_numeric_view_arg_denies_a_tenant_admin(self):
+        app = self._app_with("user_id")
+
+        response = self._call(app, TENANT_A_ADMIN, "/probe/not-a-number")
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+
+    def test_view_arg_mismatch_does_not_grant_a_platform_admin_anything_new(self):
+        """Platform admins fall through -- they simply lose the audit entry."""
+        app = self._app_with("uid")
+
+        response = self._call(app, PLATFORM_ADMIN, "/probe/20")
+
+        assert response.status_code == 200
+
+
+class TestCrossTenantAccessIsAudited:
+    """The PR advertises an ADMIN_CROSS_TENANT_ACCESS entry; pin that it happens."""
+
+    def test_platform_admin_reaching_another_tenant_writes_an_audit_entry(self):
+        from app.auth.decorators import _log_cross_tenant_operation  # noqa: F401
+
+        with patch("app.auth.decorators._log_cross_tenant_operation") as mock_log:
+            response, _ = _request(PLATFORM_ADMIN, "POST", "/api/admin/users/20/reset-password")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        mock_log.assert_called_once()
+        assert mock_log.call_args.kwargs["target_tenant_id"] == TENANT_B
+
+    def test_no_audit_entry_when_the_target_is_not_cross_tenant(self):
+        legacy_same_tenant = {
+            "id": 2,
+            "username": "legacy",
+            "role": "admin",
+            "tenant_id": TENANT_A,
+            "must_change_password": False,
+        }
+        with patch("app.auth.decorators._log_cross_tenant_operation") as mock_log:
+            response, _ = _request(legacy_same_tenant, "POST", "/api/admin/users/10/reset-password")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        mock_log.assert_not_called()
+
+
+class _ExplodingUserRepo(_FakeUserRepo):
+    """Repository whose target lookup fails, e.g. the database is unreachable."""
+
+    def get_user_by_id(self, user_id):
+        raise RuntimeError("database unavailable")
+
+
+class TestLookupFailureIsFailClosedForTenantAdmins:
+    """The target lookup gates access for a tenant admin, so it cannot be optional.
+
+    For a platform admin the same lookup only names the tenant in the audit
+    entry, so a failure there must not turn a permitted request into a 500 --
+    that asymmetry is deliberate.
+    """
+
+    def test_tenant_admin_denied_when_target_cannot_be_resolved(self):
+        response, repo = _request(
+            TENANT_A_ADMIN,
+            "POST",
+            "/api/admin/users/10/reset-password",
+            guard_repo=_ExplodingUserRepo(),
+        )
+
+        assert response.status_code == 403
+        assert repo.password_updates == []
+
+    def test_tenant_admin_denied_for_a_user_that_does_not_exist(self):
+        """Not a 404 fall-through: api_update_user/api_delete_user have no
+        not-found branch, so 'unresolved' must never mean 'allowed'."""
+        response, repo = _request(TENANT_A_ADMIN, "DELETE", "/api/admin/users/12345")
+
+        assert response.status_code == 403
+        assert repo.deleted == []
+
+    def test_platform_admin_unaffected_by_audit_lookup_failure(self):
+        """This is the case CI caught: no database, platform admin, must still work."""
+        response, repo = _request(
+            PLATFORM_ADMIN,
+            "POST",
+            "/api/admin/users/20/reset-password",
+            guard_repo=_ExplodingUserRepo(),
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert repo.password_updates == [20]
+
+
+def _request_other_blueprint(actor, blueprint, path, *, patches=()):
+    """Same as _request but for a blueprint other than admin_bp.
+
+    The guards added to compliance.py and governance.py had no coverage at all
+    -- deleting either decorator left the whole suite green -- because every
+    other test here registers only admin_bp.
+    """
+    repo = _FakeUserRepo()
+
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(blueprint, url_prefix="/api")
+
+    with (
+        patch("app.auth.decorators._load_user_from_token", return_value=actor),
+        patch("app.repositories.user_repo.UserRepository", return_value=repo),
+    ):
+        with contextlib.ExitStack() as stack:
+            for target, replacement in patches:
+                stack.enter_context(patch(target, replacement))
+            response = app.test_client().get(path, headers={"Authorization": "Bearer test-token"})
+    return response
+
+
+class TestGuardsOutsideAdminBlueprint:
+    """compliance.py and governance.py carry the same decorator.
+
+    Neither is reachable from admin_bp, so without these the guards could be
+    deleted and nothing would fail.
+    """
+
+    @staticmethod
+    def _compliance():
+        from app.routes.compliance import compliance_bp
+
+        analyzer = MagicMock()
+        analyzer.get_user_behavior_profile.return_value = {"user_id": 20, "total_actions": 7}
+        return compliance_bp, [("app.routes.compliance._get_audit_analyzer", lambda: analyzer)]
+
+    @staticmethod
+    def _governance():
+        from app.routes.governance import governance_bp
+
+        logger_mock = MagicMock()
+        logger_mock.get_user_activity.return_value = {"user_id": 20, "actions": 7}
+        return governance_bp, [("app.routes.governance.audit_logger", logger_mock)]
+
+    def test_compliance_user_profile_denies_cross_tenant(self):
+        bp, patches = self._compliance()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/audit/user/20/profile", patches=patches
+        )
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+
+    def test_compliance_user_profile_allows_own_tenant(self):
+        bp, patches = self._compliance()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/audit/user/10/profile", patches=patches
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+
+    def test_compliance_user_profile_denies_platform_account_in_own_tenant(self):
+        bp, patches = self._compliance()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/audit/user/98/profile", patches=patches
+        )
+
+        assert response.status_code == 403
+
+    def test_compliance_user_profile_allows_platform_admin(self):
+        bp, patches = self._compliance()
+        response = _request_other_blueprint(
+            PLATFORM_ADMIN, bp, "/api/audit/user/20/profile", patches=patches
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+
+    def test_governance_user_activity_denies_cross_tenant(self):
+        bp, patches = self._governance()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/audit/user/20/activity", patches=patches
+        )
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+
+    def test_governance_user_activity_allows_own_tenant(self):
+        bp, patches = self._governance()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/audit/user/10/activity", patches=patches
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+
+    def test_governance_user_activity_denies_platform_account_in_own_tenant(self):
+        bp, patches = self._governance()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/audit/user/98/activity", patches=patches
+        )
+
+        assert response.status_code == 403
+
+    def test_governance_user_activity_allows_platform_admin(self):
+        bp, patches = self._governance()
+        response = _request_other_blueprint(
+            PLATFORM_ADMIN, bp, "/api/audit/user/20/activity", patches=patches
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+
+    @staticmethod
+    def _reports():
+        from app.routes.compliance import compliance_bp
+
+        generator = MagicMock()
+        generator.get_saved_reports.return_value = []
+        return compliance_bp, [("app.routes.compliance.report_generator", generator)], generator
+
+    def test_saved_reports_list_rejects_another_tenant(self):
+        bp, patches, _ = self._reports()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/reports/saved?tenant_id=2", patches=patches
+        )
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+
+    def test_saved_reports_list_is_narrowed_for_a_tenant_admin(self):
+        """No tenant_id used to mean every tenant's reports."""
+        bp, patches, generator = self._reports()
+        response = _request_other_blueprint(
+            TENANT_A_ADMIN, bp, "/api/reports/saved", patches=patches
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert generator.get_saved_reports.call_args.kwargs["tenant_id"] == TENANT_A
+
+    def test_saved_reports_list_stays_global_for_platform_admin(self):
+        bp, patches, generator = self._reports()
+        response = _request_other_blueprint(
+            PLATFORM_ADMIN, bp, "/api/reports/saved", patches=patches
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert generator.get_saved_reports.call_args.kwargs["tenant_id"] is None
+
+
+class TestQuotaEndpointsDoNotLeakUserLists:
+    """GET /admin/quota/usage returns the user list too.
+
+    Narrowing only /admin/users left cross-tenant enumeration open at a
+    sibling URL -- and this one exposes more, including each account's role,
+    which is the targeting data an attacker actually wants.
+    """
+
+    def test_quota_usage_is_narrowed_to_own_tenant(self):
+        response, _ = _request(TENANT_A_ADMIN, "GET", "/api/admin/quota/usage")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert {u.get("tenant_id") for u in response.get_json()} == {TENANT_A}
+
+    def test_quota_usage_rejects_another_tenant(self):
+        response, _ = _request(
+            TENANT_A_ADMIN,
+            "GET",
+            "/api/admin/quota/usage",
+            query_string={"tenant_id": TENANT_B},
+        )
+
+        assert response.status_code == 403
+
+    def test_quota_usage_still_global_for_platform_admin(self):
+        response, _ = _request(PLATFORM_ADMIN, "GET", "/api/admin/quota/usage")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert {u.get("tenant_id") for u in response.get_json()} == {TENANT_A, TENANT_B, None}
+
+    def test_quota_stats_rejects_another_tenant(self):
+        response, _ = _request(
+            TENANT_A_ADMIN,
+            "GET",
+            "/api/admin/quota/stats",
+            query_string={"tenant_id": TENANT_B},
+        )
+
+        assert response.status_code == 403
+
+    def test_quota_health_check_rejects_another_tenant(self):
+        """The body's tenant_id was taken on trust here."""
+        response, _ = _request(
+            TENANT_A_ADMIN,
+            "POST",
+            "/api/admin/quota/health-check",
+            json_body={"tenant_id": TENANT_B},
+        )
+
+        assert response.status_code == 403
+
+    def test_quota_stats_sums_only_the_tenant_it_reports_against(self):
+        """Limits and the users summed against them must be the same tenant.
+
+        Scoping only the user query is not enough: a platform admin calling
+        this with no tenant_id (which is how the dashboard calls it) read
+        tenant 1's limits while summing EVERY tenant's users, producing
+        percentages over 100%.
+        """
+        response, repo = _request(PLATFORM_ADMIN, "GET", "/api/admin/quota/stats")
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        body = response.get_json()
+        # USERS holds one quota-bearing user per tenant, each 100 daily tokens.
+        # Summing both tenants would double this.
+        assert body["allocated"]["daily_token"] == 100, body
+
+    def test_quota_stats_uses_the_requested_tenant_for_both_sides(self):
+        response, _ = _request(
+            PLATFORM_ADMIN,
+            "GET",
+            "/api/admin/quota/stats",
+            query_string={"tenant_id": TENANT_B},
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert response.get_json()["allocated"]["daily_token"] == 100
+
+    def test_quota_health_check_allows_own_tenant(self):
+        response, _ = _request(
+            TENANT_A_ADMIN,
+            "POST",
+            "/api/admin/quota/health-check",
+            json_body={"tenant_id": TENANT_A},
+        )
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+
+
+class TestOrgSyncIsNotACrossTenantWrite:
+    """A sync creates and updates users/teams in the target tenant.
+
+    Taking the body's tenant_id on trust therefore let a tenant admin reshape
+    another tenant's org tree -- a cross-tenant write, not just a read.
+    """
+
+    @pytest.mark.parametrize(
+        ("path", "service"),
+        [
+            ("/api/admin/feishu/sync", "app.services.feishu_org_sync.FeishuOrgSyncService"),
+            ("/api/admin/dingtalk/sync", "app.services.dingtalk_org_sync.DingTalkOrgSyncService"),
+        ],
+    )
+    def test_tenant_admin_cannot_sync_into_another_tenant(self, path, service):
+        with patch(service) as mock_service:
+            response, _ = _request(TENANT_A_ADMIN, "POST", path, json_body={"tenant_id": TENANT_B})
+
+        assert response.status_code == 403, response.get_data(as_text=True)
+        mock_service.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("path", "service"),
+        [
+            ("/api/admin/feishu/sync", "app.services.feishu_org_sync.FeishuOrgSyncService"),
+            ("/api/admin/dingtalk/sync", "app.services.dingtalk_org_sync.DingTalkOrgSyncService"),
+        ],
+    )
+    def test_tenant_admin_sync_is_narrowed_to_own_tenant(self, path, service):
+        """Omitting tenant_id must not mean 'whatever the service defaults to'."""
+        with patch(service) as mock_service:
+            mock_service.return_value.sync_org.return_value = SimpleNamespace(
+                to_dict=lambda: {"ok": True}
+            )
+            response, _ = _request(TENANT_A_ADMIN, "POST", path, json_body={})
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        mock_service.return_value.sync_org.assert_called_once_with(tenant_id=TENANT_A)

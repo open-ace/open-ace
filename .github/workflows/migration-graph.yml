@@ -12,9 +12,12 @@ name: Migration Graph
 # Authoring rules (Issue #1704) are enforced on the same pre-merged tree:
 #   - MIG001: no runtime app.* imports (migrations load from a tree without app/)
 #   - MIG002: CONCURRENTLY ops use the approved autocommit_block() pattern
-# These surface only when migrations load from a synthetic tree without the
-# app/ package, which the pre-merged tree reproduces — so they are checked here
-# in addition to pre-commit.
+#   - MIG003: a revision id that shipped on the base branch must still exist
+# MIG001/MIG002 surface only when migrations load from a synthetic tree without
+# the app/ package, which the pre-merged tree reproduces. MIG003 needs the same
+# tree for a different reason: it compares post-merge ids against the base
+# branch, which is precisely what a deployed database will experience.
+# All three are checked here in addition to pre-commit.
 
 on:
   pull_request:
@@ -97,12 +100,25 @@ jobs:
         run: python "$GITHUB_WORKSPACE/scripts/check_migration_heads.py"
 
       # Enforce repository migration authoring rules (Issue #1704) against the
-      # same pre-merged tree: no runtime app.* imports (MIG001) and the approved
-      # CONCURRENTLY pattern (MIG002). Run here — not just in pre-commit —
-      # because these failures surface when migrations load from a synthetic tree
-      # without the app/ package, which the pre-merged tree reproduces.
-      - name: Enforce migration authoring rules (MIG001/MIG002)
+      # same pre-merged tree: no runtime app.* imports (MIG001), the approved
+      # CONCURRENTLY pattern (MIG002), and no vanishing released revision ids
+      # (MIG003). Run here — not just in pre-commit — because MIG001/MIG002
+      # surface when migrations load from a synthetic tree without the app/
+      # package, and because MIG003's post-merge id set is only knowable here.
+      #
+      # MIG003 compares against the merge bases of the base branch and HEAD,
+      # not the base branch's tip. On `pull_request`, actions/checkout checks
+      # out the MERGE ref, so the base tip IS a merge base and the comparison
+      # is effectively "what does main have today vs what exists after this
+      # merges" -- the strongest form. That equivalence depends on checking out
+      # the merge ref: adding `ref: github.event.pull_request.head.sha` here
+      # would silently downgrade this gate to fork-point semantics with no
+      # visible change. The git commands run against $GITHUB_WORKSPACE (the
+      # script resolves the repo from its own location), not $MERGED_DIR.
+      - name: Enforce migration authoring rules (MIG001/MIG002/MIG003)
         working-directory: ${{ env.MERGED_DIR }}
+        env:
+          MIG003_BASELINE_REF: origin/${{ github.base_ref }}
         run: python "$GITHUB_WORKSPACE/scripts/lint/check_migration_rules.py" migrations/versions
 
       - name: Cleanup merged tree
