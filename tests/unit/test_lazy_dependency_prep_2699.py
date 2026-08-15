@@ -100,22 +100,157 @@ class TestProactiveRule:
     def test_directive_wired_into_retry_and_repair_paths(self):
         """Drift lock: the signature translation must be consulted at both
         delivery sites — the fresh-retry prompt (prior milestone summary) and
-        the #2590 dev-repair feedback."""
+        the #2590 dev-repair feedback. Pins the exact call shapes: a bare
+        substring count would also match the _prior_ helper's own name."""
         text = ORCHESTRATOR_PY.read_text()
-        assert text.count("_dependency_failure_directive") >= 3, (
-            "expected _dependency_failure_directive at: definition + retry "
-            "prompt site + dev-repair feedback site (Issue #2699)"
-        )
+        # Retry-prompt site (method call; the `def` line spells it without the
+        # `self.` prefix, so this only matches the call).
+        assert "self._prior_dependency_failure_directive(" in text
+        # Dev-repair feedback site (module-level call with the report text).
+        assert '_dependency_failure_directive(test_summary or "")' in text
 
 
 class TestPriorSummaryDirective:
     def test_orchestrator_helper_reads_prior_tests_run_summary(self):
         """The retry-path helper must read the PRIOR tests_run milestone's
         result_summary (excluding the current milestone) — same milestone
-        selection as _recompute_prior_test_milestone_verdict."""
+        selection as _carry_forward_prior_test_verdict."""
         text = ORCHESTRATOR_PY.read_text()
         assert "_prior_dependency_failure_directive" in text
         # Exclusion of the current milestone is load-bearing: without it the
         # just-created in_progress tests_run milestone (empty summary) could
         # shadow the prior round's report.
-        assert "!= current_milestone_id" in text or "!= current_milestone_id" in text
+        assert "!= current_milestone_id" in text
+
+
+class TestRetryPromptDelivery:
+    """Behavioral: drive ``_run_test_phase`` (harness mirrors
+    tests/unit/test_prior_milestone_verdict_carryforward.py) and assert the
+    directive actually lands in the dispatched agent prompt — not merely that
+    the source references it."""
+
+    @staticmethod
+    def _drive(test_retries: int, prior_summary: str):
+        from unittest.mock import MagicMock, patch
+
+        from app.modules.workspace.autonomous.models import AgentTaskResult
+
+        wf = {
+            "workflow_id": "wf-2699",
+            "user_id": 1,
+            "title": "T",
+            "status": "developing",
+            "requirements_text": "r",
+            "project_path": "/tmp/p",
+            "worktree_path": "/tmp/p",
+            "workspace_type": "local",
+            "cli_tool": "claude-code",
+            "branch_name": "auto-dev/x",
+            "branch_strategy": "worktree",
+            "current_phase": "development",
+            "dev_round": 1,
+            "current_round": 1,
+            "github_issue_number": 2699,
+            "test_retries": test_retries,
+            "skip_retries": 0,
+            "dev_retries_on_test_fail": 0,
+            "error_message": "",
+        }
+        result = AgentTaskResult(
+            session_id="sess",
+            response_text="1 passed",
+            visible_response_text="1 passed",
+            success=True,
+        )
+        with (
+            patch("app.modules.workspace.autonomous.orchestrator.Database"),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator." "AutonomousWorkflowRepository"
+            ) as repo_cls,
+        ):
+            repo = MagicMock()
+            repo.get_workflow.return_value = wf
+            repo.list_milestones.return_value = [
+                {
+                    "milestone_id": "ms-prior",
+                    "workflow_id": "wf-2699",
+                    "phase": "development",
+                    "milestone_type": "tests_run",
+                    "id": 10,
+                    "result_summary": prior_summary,
+                },
+                {
+                    "milestone_id": "ms-cur",
+                    "workflow_id": "wf-2699",
+                    "phase": "development",
+                    "milestone_type": "tests_run",
+                    "id": 11,
+                    "result_summary": "",
+                },
+            ]
+            repo.create_milestone.return_value = {"milestone_id": "ms-cur"}
+            repo.update_workflow.return_value = wf
+            repo.update_milestone.return_value = {}
+            repo.create_event.return_value = {"id": 1}
+            repo_cls.return_value = repo
+            from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+            orch = AutonomousOrchestrator("wf-2699")
+            orch.repo = repo
+            orch.emitter = MagicMock()
+            orch._gh = MagicMock()
+            orch._gh.has_uncommitted_changes.return_value = False
+        orch._update_workflow = MagicMock()
+        orch._post_github_comment = MagicMock()
+        orch._run_agent = MagicMock(return_value=result)
+        orch._runtime_environment_gate = MagicMock(return_value="")
+        orch._build_test_execution_context = MagicMock(return_value=("", []))
+        orch._project_runtime_contract = MagicMock(return_value="")
+        orch._artifact_visible_text = MagicMock(return_value="1 passed")
+        orch._artifact_text = MagicMock(return_value="1 passed")
+        orch._artifact_tldr = MagicMock(return_value="")
+        orch._shadow_compare_evidence = MagicMock()
+        orch._validate_test_report_format = MagicMock(return_value=(True, ""))
+        structured = (
+            "app.modules.workspace.autonomous.orchestrator."
+            "AutonomousOrchestrator._compute_structured_test_verdict"
+        )
+        passing = "app.modules.workspace.autonomous.orchestrator." "_has_passing_test_tool_result"
+        with (
+            patch(structured, return_value=("passed", [], "scripted")),
+            patch(passing, return_value=True),
+        ):
+            orch._run_test_phase(wf, 1, orch._gh)
+        return orch
+
+    def test_retry_prompt_contains_directive_when_prior_report_hits_signature(self):
+        orch = self._drive(
+            test_retries=1,
+            prior_summary=(
+                "Error: EACCES: permission denied, open "
+                "'/r/frontend/node_modules/.vite-temp/config.json'"
+            ),
+        )
+        prompt = orch._run_agent.call_args.kwargs["prompt"]
+        assert "依赖环境修复指令" in prompt
+        assert "npm ci" in prompt
+
+    def test_retry_prompt_clean_prior_report_no_directive(self):
+        orch = self._drive(
+            test_retries=1,
+            prior_summary="2 passed, 0 failed (pytest)",
+        )
+        prompt = orch._run_agent.call_args.kwargs["prompt"]
+        assert "依赖环境修复指令" not in prompt
+
+    def test_first_round_never_gets_directive_even_with_stale_summary(self):
+        """No retry → no directive, regardless of what an old milestone says —
+        the proactive rule (item 5) is the only first-round guidance."""
+        orch = self._drive(
+            test_retries=0,
+            prior_summary="EACCES: permission denied node_modules/.vite-temp",
+        )
+        prompt = orch._run_agent.call_args.kwargs["prompt"]
+        assert "依赖环境修复指令" not in prompt
+        # The proactive rule IS present on every round.
+        assert "npm ci" in prompt

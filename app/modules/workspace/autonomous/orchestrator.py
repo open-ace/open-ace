@@ -2138,7 +2138,8 @@ def _cleanup_backoff_time(attempts: int) -> str:
 # a permissions bug — it retries around permissions instead of installing.
 _DEPENDENCY_FAILURE_PATTERNS = (
     re.compile(r"node_modules[/\\]\.vite-temp", re.IGNORECASE),
-    re.compile(r"Cannot find module ['\"]?vitest", re.IGNORECASE),
+    re.compile(r"Cannot find (?:module|package) ['\"]?vitest", re.IGNORECASE),
+    re.compile(r"vitest: command not found", re.IGNORECASE),
     re.compile(r"EACCES: permission denied[^\n]*node_modules", re.IGNORECASE),
 )
 
@@ -6511,7 +6512,7 @@ class AutonomousOrchestrator:
         (excluding ``current_milestone_id`` — the just-created in_progress
         milestone for THIS round has an empty summary and must not shadow the
         prior report; same milestone selection as
-        ``_recompute_prior_test_milestone_verdict``) and runs the
+        ``_carry_forward_prior_test_verdict``) and runs the
         :func:`_dependency_failure_directive` signature match over it. Any
         lookup error returns ``""`` — the directive is additive.
         """
