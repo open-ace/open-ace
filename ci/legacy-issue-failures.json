@@ -979,102 +979,6 @@
     {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
-      "issue_number": "733",
-      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_allows_different_commits",
-      "outcome": "failure",
-      "summary": "AssertionError: assert 2 == 0"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "733",
-      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_auto_commit_failure_falls_back_to_fail",
-      "outcome": "failure",
-      "summary": "AssertionError: Expected 'git_commit' to have been called once. Called 0 times."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "733",
-      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_auto_commits_uncommitted_changes",
-      "outcome": "failure",
-      "summary": "AssertionError: Expected 'git_add_all' to have been called once. Called 0 times."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "733",
-      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_detects_no_code_changes",
-      "outcome": "failure",
-      "summary": "AssertionError: assert 'no code changes' in 'cannot establish a trusted git context before agent execution'"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "733",
-      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_skip_check_when_agent_fails",
-      "outcome": "failure",
-      "summary": "AssertionError: assert 'timeout' in 'cannot establish a trusted git context before agent execution'"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "733",
-      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestDevelopmentCommitVerification::test_skip_check_when_commit_unavailable",
-      "outcome": "failure",
-      "summary": "AssertionError: assert 2 == 0"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "733",
-      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestFinalPlanAnnotation::test_final_plan_includes_last_review",
-      "outcome": "failure",
-      "summary": "AssertionError: assert False"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "733",
-      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestFinalPlanAnnotation::test_final_plan_without_review",
-      "outcome": "failure",
-      "summary": "AssertionError: assert False"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
-      "issue_number": "733",
-      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestPermissionModePassthrough::test_default_permission_mode_is_auto_edit",
-      "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
-      "issue_number": "733",
-      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestPermissionModePassthrough::test_development_passes_permission_mode",
-      "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "733",
-      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestPlanningPromptConstraints::test_initial_plan_prompt_forbids_full_code",
-      "outcome": "failure",
-      "summary": "assert 0 >= 1"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "OperationalError",
-      "issue_number": "733",
-      "nodeid": "tests/issues/733/test_orchestrator_733.py::TestPlanningPromptConstraints::test_refined_plan_prompt_forbids_full_code",
-      "outcome": "failure",
-      "summary": "sqlite3.OperationalError: no such table: users"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
       "issue_number": "740",
       "nodeid": "tests/issues/740/test_batch1_session_wiring.py::TestBackwardCompatibility::test_do_development_still_works",
       "outcome": "failure",
@@ -1499,8 +1403,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-15 prune 24 resolved issue-716 orchestrator-tail entries: all were stale test fixtures/assertions vs evolved production preconditions (plan reviewed 2 rounds to CLEAN). (a) phases/*.handle verify PR heads/branch relations/cumulative scope via real git probes — bare MagicMock _run_git routed every guard to its deferral branch; fixed with a shared _fake_git_run side_effect (cat-file ok, show-ref rc=1, merge-base --is-ancestor rc=1, merge-base SHA, rev-parse distinct SHAs); (b) stale assertions: merge terminal pair now acceptance_verification/verification_pending (#2335), PR bodies use Implements (never Closes); (c) preparation: #1573 derived full branch name + #1552 rev-parse-resolved immutable base; (d) delete_branch #2043 structured result; (e) TestStopSession fixture deadlock reordered to preserve the #2078 cancel window. Negative control: removing the helper re-fails merge+pr_review. Shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31818445454",
+    "prune_note": "2026-08-15 prune 12 resolved issue-733 entries: stale fixtures vs evolved guards. (a) autouse _trusted_repo_boundary fixture (716 pattern) for the #2271 repo-integrity family + module-level UserRepository owner lookup; (b) dev flow rebinds self._gh via _get_gh after the fixture's class patch expires — commit-verification tests keep GitHubOps patched through _do_development; (c) 'no code changes' semantics narrowed to the resume shape (branch changes vs base, no new commit) — tests seed that shape; (d) milestone diff stats must be JSON-safe; scope probes via _fake_git_run; (e) final-plan 'not yet addressed' warning intentionally dropped in 97466e1c. Negative control: removing the fixture's snapshot stub re-fails the dev representative. Shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31859516985",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
