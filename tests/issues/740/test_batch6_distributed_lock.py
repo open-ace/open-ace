@@ -193,18 +193,28 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
     """Tests for remote machine admin permission check in create_workflow."""
 
     def _make_client(self):
+        import os as _os
+
         import app.repositories.database as db_mod
 
         db_path = tempfile.mktemp(suffix=".db")
         orig = db_mod.adapt_sql
         db_mod.adapt_sql = lambda sql: sql
 
-        db = db_mod.Database(db_path)
+        db = db_mod.Database(f"sqlite:///{db_path}")
+        # Pin the app's DATABASE_URL to the temp DB: without this the app
+        # resolves its own default (env PostgreSQL locally, the shared lane DB
+        # in CI) and the route under test reads a different database.
+        self._db_env = patch.dict(_os.environ, {"DATABASE_URL": f"sqlite:///{db_path}"})
+        self._db_env.start()
         with db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'user', is_active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT)"
-            )
+            from app.repositories.schema_init import load_schema_from_file
+
+            # Let the authoritative schema create users (the hand-rolled DDL
+            # drifted: no deleted_at/system_account — the schema's partial
+            # indexes on those columns then failed).
+            load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
             cursor.execute(
                 "INSERT OR IGNORE INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
                 ("admin", "admin@test.com", "hash123", "admin"),
@@ -213,9 +223,6 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
                 "INSERT OR IGNORE INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
                 ("testuser", "user@test.com", "hash123", "user"),
             )
-            from app.repositories.schema_init import load_schema_from_file
-
-            load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
             conn.commit()
 
         from app import create_app
@@ -224,6 +231,24 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
         c = app.test_client()
         c.set_cookie("session_token", "test-token")
         return c, db_path, orig, db_mod
+
+    def _app_repos(self, user_id=1, role="admin"):
+        """Patch the route-level user_repo singleton (bound at import time to
+        whatever DATABASE_URL was then active — cannot be pointed at the temp
+        DB via env) with a stub returning the test user."""
+        user = {
+            "id": user_id,
+            "username": "admin" if role == "admin" else "testuser",
+            "email": f"{role}@test.com",
+            "role": role,
+            "tenant_id": 1,
+            "is_active": 1,
+            # The local-workspace permission check requires a system account.
+            "system_account": "testacct",
+        }
+        repo = MagicMock()
+        repo.get_user_by_id.return_value = user
+        return patch("app.routes.autonomous.user_repo", repo)
 
     def _mock_auth(self, user_id=1, role="admin"):
         return patch(
@@ -241,11 +266,15 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
         c, db_path, orig, db_mod = self._make_client()
         try:
             mock_repo = MagicMock()
+            mock_repo.count_active_workflows_by_user.return_value = 0
             mock_repo.create_workflow.return_value = {"workflow_id": "wf-1"}
+            mock_repo.count_active_workflows_by_user.return_value = 0
 
-            with self._mock_auth(user_id=2, role="user"):
+            with self._mock_auth(user_id=2, role="user"), self._app_repos(user_id=2, role="user"):
                 with patch("app.routes.autonomous._get_repo", return_value=mock_repo):
-                    with patch("app.auth.decorators._check_machine_admin", return_value=False):
+                    with patch(
+                        "app.routes.autonomous.check_machine_admin_permission", return_value=False
+                    ):
                         resp = c.post(
                             "/api/autonomous/workflows",
                             json={
@@ -254,6 +283,7 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
                                 "project_path": "/tmp/project",
                                 "workspace_type": "remote",
                                 "remote_machine_id": "machine-123",
+                                "branch_strategy": "worktree",
                             },
                         )
 
@@ -262,6 +292,7 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
             self.assertIn("machine admin", data["error"].lower())
         finally:
             db_mod.adapt_sql = orig
+            self._db_env.stop()
             try:
                 os.unlink(db_path)
             except OSError:
@@ -272,12 +303,13 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
         c, db_path, orig, db_mod = self._make_client()
         try:
             mock_repo = MagicMock()
+            mock_repo.count_active_workflows_by_user.return_value = 0
             mock_repo.create_workflow.return_value = {
                 "workflow_id": "wf-1",
                 "title": "",
             }
 
-            with self._mock_auth(user_id=1, role="admin"):
+            with self._mock_auth(user_id=1, role="admin"), self._app_repos(user_id=1, role="admin"):
                 with patch("app.routes.autonomous._get_repo", return_value=mock_repo):
                     with patch("app.routes.autonomous._get_event_emitter"):
                         resp = c.post(
@@ -288,12 +320,14 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
                                 "project_path": "/tmp/project",
                                 "workspace_type": "remote",
                                 "remote_machine_id": "machine-123",
+                                "branch_strategy": "worktree",
                             },
                         )
 
             self.assertEqual(resp.status_code, 201)
         finally:
             db_mod.adapt_sql = orig
+            self._db_env.stop()
             try:
                 os.unlink(db_path)
             except OSError:
@@ -304,27 +338,36 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
         c, db_path, orig, db_mod = self._make_client()
         try:
             mock_repo = MagicMock()
+            mock_repo.count_active_workflows_by_user.return_value = 0
             mock_repo.create_workflow.return_value = {
                 "workflow_id": "wf-1",
                 "title": "",
             }
 
-            with self._mock_auth(user_id=2, role="user"):
+            with self._mock_auth(user_id=2, role="user"), self._app_repos(user_id=2, role="user"):
                 with patch("app.routes.autonomous._get_repo", return_value=mock_repo):
                     with patch("app.routes.autonomous._get_event_emitter"):
-                        resp = c.post(
-                            "/api/autonomous/workflows",
-                            json={
-                                "requirements_text": "test",
-                                "cli_tool": "claude-code",
-                                "project_path": "/tmp/project",
-                                "workspace_type": "local",
-                            },
-                        )
+                        # Path-access probing (sudo test -e/-r/-w) is not what
+                        # this test exercises; stub it accessible.
+                        with patch(
+                            "app.routes.autonomous._run_as_user",
+                            return_value=MagicMock(returncode=0),
+                        ):
+                            resp = c.post(
+                                "/api/autonomous/workflows",
+                                json={
+                                    "requirements_text": "test",
+                                    "cli_tool": "claude-code",
+                                    "project_path": "/tmp/project",
+                                    "workspace_type": "local",
+                                    "branch_strategy": "worktree",
+                                },
+                            )
 
             self.assertEqual(resp.status_code, 201)
         finally:
             db_mod.adapt_sql = orig
+            self._db_env.stop()
             try:
                 os.unlink(db_path)
             except OSError:
@@ -335,12 +378,13 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
         c, db_path, orig, db_mod = self._make_client()
         try:
             mock_repo = MagicMock()
+            mock_repo.count_active_workflows_by_user.return_value = 0
             mock_repo.create_workflow.return_value = {
                 "workflow_id": "wf-1",
                 "title": "",
             }
 
-            with self._mock_auth(user_id=2, role="user"):
+            with self._mock_auth(user_id=2, role="user"), self._app_repos(user_id=2, role="user"):
                 with patch("app.routes.autonomous._get_repo", return_value=mock_repo):
                     with patch("app.auth.decorators._check_machine_admin", return_value=True):
                         with patch("app.routes.autonomous._get_event_emitter"):
@@ -352,12 +396,14 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
                                     "project_path": "/tmp/project",
                                     "workspace_type": "remote",
                                     "remote_machine_id": "machine-123",
+                                    "branch_strategy": "worktree",
                                 },
                             )
 
             self.assertEqual(resp.status_code, 201)
         finally:
             db_mod.adapt_sql = orig
+            self._db_env.stop()
             try:
                 os.unlink(db_path)
             except OSError:

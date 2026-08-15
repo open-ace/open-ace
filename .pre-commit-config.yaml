@@ -34,10 +34,14 @@ repos:
       #            migration-graph load with an opaque ImportError)
       #   MIG002 — CONCURRENTLY index ops must use the approved
       #            autocommit_block() + postgresql_concurrently=True pattern
+      #   MIG003 — a revision id present on origin/main must still exist here;
+      #            deleting or rewriting one wedges every database stamped with
+      #            it (skipped automatically if origin/main is unreadable, so a
+      #            stale local remote can miss a violation but never invent one)
       # This sees only the current working tree; the migration-graph CI job runs
       # the authoritative check against the pre-merged tree (see that workflow).
       - id: check-migration-rules
-        name: Check migration authoring rules (MIG001/MIG002)
+        name: Check migration authoring rules (MIG001/MIG002/MIG003)
         entry: python3 scripts/lint/check_migration_rules.py
         language: system
         files: ^migrations/versions/.*\.py$

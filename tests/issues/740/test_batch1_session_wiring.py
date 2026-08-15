@@ -148,6 +148,58 @@ def _make_orchestrator(wf_data):
 # ── Test: SessionManager wiring ──────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _trusted_repo_boundary_for_wrapper_tests(monkeypatch):
+    """Provide a trusted repo boundary for synthetic /tmp paths.
+
+    Production local runs fail closed (#2271 repo-integrity guard) when they
+    cannot snapshot a real Git repository; these tests use synthetic paths.
+    Dedicated guardrail tests exercise the fail-closed behavior itself.
+    """
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+    from app.repositories.user_repo import UserRepository
+
+    # _get_gh resolves the workflow owner via a module-level UserRepository()
+    # bound at import time — neither the tests' orchestrator.Database patch
+    # nor the instance _resolve_system_account stub covers it, and the lane
+    # DB may be unreachable/schema-less from this process.
+    monkeypatch.setattr(
+        UserRepository,
+        "get_user_by_id",
+        lambda self, user_id: {
+            "id": user_id,
+            "username": "owner",
+            "system_account": None,
+            "role": "platform_admin",
+            "tenant_id": None,
+        },
+    )
+
+    def snapshot(orchestrator, wf, workspace_type, system_account):
+        if workspace_type != "local":
+            return None
+        context = orchestrator._resolve_effective_repo_context(wf)
+        repo_path = context.get("repo_path", "/tmp/test-project")
+        return {
+            "context": context,
+            "effective": {
+                "repo_path": repo_path,
+                "top_level": repo_path,
+                "git_dir": f"{repo_path}/.git",
+                "git_identity": "1:1",
+                "common_dir": f"{repo_path}/.git",
+                "common_identity": "1:1",
+                "origin": "git@github.com:open-ace/open-ace.git",
+            },
+        }
+
+    monkeypatch.setattr(AutonomousOrchestrator, "_snapshot_repo_context", snapshot)
+    # Post-run verification would probe the same synthetic path with real git.
+    monkeypatch.setattr(
+        AutonomousOrchestrator, "_validate_repo_context_after_run", lambda self, *a, **k: ""
+    )
+
+
 class TestSessionManagerWiring:
     """Verify SessionManager is passed to AutonomousAgentRunner."""
 
@@ -645,16 +697,16 @@ class TestStopPauseCancelsTask:
         try:
             with db.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'user', is_active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT)"
-                )
+                from app.repositories.schema_init import load_schema_from_file
+
+                # Let the authoritative schema create users: the old hand-rolled
+                # CREATE TABLE drifted (no deleted_at/system_account columns —
+                # the schema's partial indexes on those columns then failed).
+                load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
                 cursor.execute(
                     "INSERT OR IGNORE INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
                     ("admin", "admin@test.com", "hash123", "admin"),
                 )
-                from app.repositories.schema_init import load_schema_from_file
-
-                load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
                 conn.commit()
         finally:
             pass
@@ -688,7 +740,7 @@ class TestStopPauseCancelsTask:
 
         with self._mock_auth():
             with patch("app.routes.autonomous.auto_repo", repo):
-                with patch("app.routes.autonomous._cancel_running_task") as mock_cancel:
+                with patch("app.routes.autonomous._stop_running_task") as mock_cancel:
                     resp = c.post("/api/autonomous/workflows/wf-stop-test/stop")
 
         assert resp.status_code == 200
@@ -714,7 +766,7 @@ class TestStopPauseCancelsTask:
 
         with self._mock_auth():
             with patch("app.routes.autonomous.auto_repo", repo):
-                with patch("app.routes.autonomous._cancel_running_task") as mock_cancel:
+                with patch("app.routes.autonomous._pause_running_task") as mock_cancel:
                     resp = c.post("/api/autonomous/workflows/wf-pause-test/pause")
 
         assert resp.status_code == 200

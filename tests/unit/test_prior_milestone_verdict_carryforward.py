@@ -92,13 +92,24 @@ def _orchestrator(wf):
         return orch, repo
 
 
-def _run(orch, wf, *, verdict, text, tool_pass, prior_evidences=None, prior_milestones=None):
+def _run(
+    orch,
+    wf,
+    *,
+    verdict,
+    text,
+    tool_pass,
+    prior_evidences=None,
+    prior_milestones=None,
+    evidences=None,
+):
     """Drive _run_test_phase with a scripted structured verdict + agent output.
 
     ``prior_evidences`` sets what the prior milestone's test-evidence repo
     returns (used by carry-forward). ``prior_milestones`` sets what
     ``list_milestones`` returns so the carry-forward can find the prior test
-    milestone.
+    milestone. ``evidences`` sets the CURRENT milestone's structured evidence
+    rows (the second element of ``_compute_structured_test_verdict``).
     """
     result = AgentTaskResult(
         session_id="sess",
@@ -125,7 +136,7 @@ def _run(orch, wf, *, verdict, text, tool_pass, prior_evidences=None, prior_mile
     orch.repo.list_milestones.return_value = prior_milestones or []
 
     with (
-        patch(_STRUCTURED, return_value=(verdict, [], "scripted")),
+        patch(_STRUCTURED, return_value=(verdict, evidences or [], "scripted")),
         patch(_PASSING_TOOL, return_value=tool_pass),
         patch(_TEST_REPO) as _test_repo_cls,
     ):
@@ -322,3 +333,163 @@ def test_carry_forward_only_on_retry():
     assert (
         "structured evidence reports a failing test command" not in comment
     ), "carry-forward must not fire on test_retries=0"
+
+
+# --- #2590 Option A: exhausted structured FAILED routes into a dev-repair round
+
+
+def _failed_evidence():
+    return TestExecutionEvidence(
+        command_id="c-fail",
+        verdict=ExecutionVerdict.FAILED.value,
+        framework="python",
+        parser_confidence="high",
+        passed=243,
+        failed=3,
+    )
+
+
+def test_structured_failed_at_retry_exhaustion_enters_dev_repair_round():
+    """(a) test retries exhausted + decisive structured FAILED → dev-repair
+    round (same counter/cap as Situation B), NOT terminal failed; the failing
+    output rides in ``user_feedback`` so the dev prompt starts from it."""
+    wf = _workflow(test_retries=2, dev_retries_on_test_fail=0)
+    orch, _ = _orchestrator(wf)
+
+    patches, orch = _run(
+        orch,
+        wf,
+        verdict=ExecutionVerdict.FAILED,
+        text=(
+            "=== 3 failed, 243 passed in 30.12s ===\n"
+            "FAILED tests/unit/test_widget.py::test_click"
+        ),
+        tool_pass=False,
+        evidences=[_failed_evidence()],
+    )
+    dev_bumps = [p for p in patches if "dev_round" in p]
+    assert dev_bumps, f"expected a dev-repair round, got {patches}"
+    bump = dev_bumps[0]
+    assert bump.get("dev_round") == 2
+    assert bump.get("dev_retries_on_test_fail") == 1
+    # The repaired code gets a fresh test-phase budget: with test_retries left
+    # exhausted, the new round's first FAILED would skip test retries entirely
+    # and burn a dev round on a run the test agent could have settled itself.
+    assert bump.get("test_retries") == 0
+    feedback = bump.get("user_feedback") or ""
+    # The structured failure summary (counts) and the test report excerpt
+    # (raw failing output) must both reach the dev round.
+    assert "failed=3" in feedback, feedback
+    assert "tests/unit/test_widget.py::test_click" in feedback, feedback
+    # Workflow stays developing — no terminal failure.
+    assert not any(p.get("status") == "failed" for p in patches), patches
+
+
+def test_dev_repair_round_resets_skip_retries_too():
+    """The dev-repair bump must clear ``skip_retries`` alongside
+    ``test_retries``: phases/development.py skips the dev agent when
+    ``test_retries > 0 OR skip_retries > 0``, so a stale ``skip_retries=1``
+    (e.g. a skipped-tests retry earlier in the same round) would make BOTH
+    repair retries test-only re-runs — the dev agent is never invoked and the
+    failures can never be fixed."""
+    wf = _workflow(test_retries=2, skip_retries=1, dev_retries_on_test_fail=0)
+    orch, _ = _orchestrator(wf)
+
+    patches, orch = _run(
+        orch,
+        wf,
+        verdict=ExecutionVerdict.FAILED,
+        text="=== 3 failed, 243 passed in 30.12s ===",
+        tool_pass=False,
+        evidences=[_failed_evidence()],
+    )
+    dev_bumps = [p for p in patches if "dev_round" in p]
+    assert dev_bumps, f"expected a dev-repair round, got {patches}"
+    bump = dev_bumps[0]
+    assert bump.get("skip_retries") == 0, (
+        "stale skip_retries=1 keeps the dev agent skipped on the repair " f"round: {bump}"
+    )
+    assert bump.get("test_retries") == 0, bump
+
+
+def test_structured_failed_before_retry_exhaustion_retries_tests_first():
+    """Boundary: a structured FAILED with retries remaining (test_retries=1 <
+    MAX_TEST_RETRIES=2) takes the plain test-retry path — bump test_retries,
+    no dev_round, no user_feedback. The dev-repair round is reserved for
+    exhaustion; jumping early would waste dev rounds on flakes the test agent
+    can settle itself."""
+    wf = _workflow(test_retries=1, dev_retries_on_test_fail=0)
+    orch, _ = _orchestrator(wf)
+
+    patches, orch = _run(
+        orch,
+        wf,
+        verdict=ExecutionVerdict.FAILED,
+        text="=== 3 failed, 243 passed in 30.12s ===",
+        tool_pass=False,
+        evidences=[_failed_evidence()],
+    )
+    retry_bumps = [p for p in patches if "test_retries" in p]
+    assert retry_bumps, f"expected a test retry, got {patches}"
+    assert retry_bumps[0].get("test_retries") == 2, retry_bumps[0]
+    assert not any("dev_round" in p for p in patches), patches
+    assert not any("user_feedback" in p for p in patches), patches
+    assert not any(p.get("status") == "failed" for p in patches), patches
+
+
+def test_repair_feedback_excerpt_preserves_tail():
+    """The report excerpt must be tail-preserving: pytest-style output puts the
+    actionable summary (short summary of failures) at the END — a head-only
+    cut at 6000 chars discards exactly what the dev round needs. The excerpt
+    keeps head+tail with a truncation marker between."""
+    from app.modules.workspace.autonomous.orchestrator import _head_tail_excerpt
+
+    long_report = "A" * 4000 + "B" * 3000 + "SHORT SUMMARY: test_click FAILED\n"
+    excerpt = _head_tail_excerpt(long_report, 6000)
+    assert "SHORT SUMMARY: test_click FAILED" in excerpt, "tail content must survive truncation"
+    assert excerpt.startswith("A" * 10), "head content must survive truncation"
+    assert "…[truncated]…" in excerpt
+    # Short reports pass through untouched.
+    assert _head_tail_excerpt("short", 6000) == "short"
+
+
+def test_structured_failed_dev_retries_exhausted_is_terminal():
+    """(b) dev-repair retries ALSO exhausted with structured FAILED → terminal
+    failed, and the message mentions both counters."""
+    wf = _workflow(test_retries=2, dev_retries_on_test_fail=2)
+    orch, _ = _orchestrator(wf)
+
+    patches, orch = _run(
+        orch,
+        wf,
+        verdict=ExecutionVerdict.FAILED,
+        text="=== 3 failed, 243 passed in 30.12s ===",
+        tool_pass=False,
+        evidences=[_failed_evidence()],
+    )
+    failures = [p for p in patches if p.get("status") == "failed"]
+    assert failures, f"expected terminal failure, got {patches}"
+    message = failures[0].get("error_message", "")
+    assert "test retries" in message, message
+    assert "dev" in message, message
+    assert not any("dev_round" in p for p in patches), patches
+
+
+def test_inconclusive_at_retry_exhaustion_keeps_terminal_path():
+    """(c) inconclusive exhaustion is unchanged: terminal failed, no dev round,
+    no user_feedback written — there is no actionable failure to hand over."""
+    wf = _workflow(test_retries=2)
+    orch, _ = _orchestrator(wf)
+
+    patches, orch = _run(
+        orch,
+        wf,
+        verdict=ExecutionVerdict.NOT_RUN,
+        text="=== AssertionError ===",
+        tool_pass=False,
+    )
+    failures = [p for p in patches if p.get("status") == "failed"]
+    assert failures, f"expected terminal failure, got {patches}"
+    assert failures[0].get("error_message", "").startswith("Test execution is inconclusive")
+    assert not any("dev_round" in p for p in patches), patches
+    assert not any("user_feedback" in p for p in patches), patches

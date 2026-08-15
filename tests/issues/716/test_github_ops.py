@@ -179,9 +179,22 @@ class TestGitHubOpsBranch:
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_delete_branch(self, mock_run):
+        # #2043: delete_branch probes existence (show-ref / ls-remote) before
+        # each deletion and returns a structured result instead of None.
         mock_run.return_value = MagicMock(returncode=0, stdout="")
-        self.gh.delete_branch("feature/test")
-        assert mock_run.call_count == 2  # local + remote
+        result = self.gh.delete_branch("feature/test")
+        assert mock_run.call_count == 4  # show-ref, branch -D, ls-remote, push --delete
+        commands = [
+            " ".join(c[0][0]) if c[0] else str(c.kwargs.get("args", ""))
+            for c in mock_run.call_args_list
+        ]
+        assert any("show-ref" in c and "refs/heads/feature/test" in c for c in commands)
+        assert any("branch" in c and "-D" in c for c in commands)
+        assert any("ls-remote" in c for c in commands)
+        assert any("push" in c and "--delete" in c for c in commands)
+        assert result["local"] == "deleted"
+        assert result["remote"] == "deleted"
+        assert result.get("errors") == []
 
 
 class TestGitHubOpsPR:

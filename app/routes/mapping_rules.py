@@ -13,6 +13,7 @@ import logging
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required
+from app.auth.permissions import is_platform_level_role
 from app.models.user import User
 from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
 from app.repositories.user_repo import UserRepository
@@ -27,12 +28,21 @@ user_repo = UserRepository()
 
 def _validate_user_in_tenant(user_id: int, tenant_id: int) -> bool:
     """
-    Validate that a user belongs to the specified tenant.
+    Validate that a tenant admin may operate on ``user_id``.
 
     Issue #2180: Ensures tenant admin can only operate on users in their tenant.
+
+    The role check is not redundant with the tenant check. Comparing tenants
+    alone is horizontal-only, and a platform-level account can perfectly well
+    carry a tenant id -- ``api_create_user`` requires one, and the schema only
+    forces ``tenant_admin`` to have it. Without this, a tenant admin can act on
+    a ``platform_admin`` filed under its own tenant. Mirrors
+    ``app.auth.decorators.enforce_target_user_tenant``.
     """
     user = user_repo.get_user_by_id(user_id)
     if not user:
+        return False
+    if is_platform_level_role(user.get("role")):
         return False
     user_tenant_id = user.get("tenant_id")
     return user_tenant_id == tenant_id

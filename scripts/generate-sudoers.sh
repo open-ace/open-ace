@@ -250,10 +250,17 @@ Cmnd_Alias GH_SAFE = \\
 
 # 【安全加固 Issue #2334】OPENACE_UTILS 收紧
 # 移除 git/gh 通配（改用 GIT_SAFE/GH_SAFE）
-# 移除 mkdir（改用 openace-mkdir wrapper）
+# 移除 root-runas mkdir（改用 openace-mkdir wrapper）
 # 保留低风险只读命令：test, ls, stat, id, find
 # find 是只读操作，DAC 已保护敏感目录
 Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/id *, /usr/bin/find *
+
+# 【Issue #2674】跨用户 mkdir：github_ops.create_verification_worktree_dir 发
+# 'sudo -u <account> mkdir -p -- <path>' / 'mkdir -m 700 -- <path>'（裸 mkdir，
+# 非 openace-mkdir wrapper——wrapper 仅 (root) runas 且产生 root 属主目录，
+# 而 verifier worktree 必须由执行 git 的身份持有）。sudo 按调用方 PATH 解析
+# 裸 mkdir，/usr/bin 与 /bin 两种解析路径都必须匹配。
+Cmnd_Alias MKDIR_SAFE = /usr/bin/mkdir *, /bin/mkdir *
 
 # ============================================================================
 # 用户权限配置
@@ -263,6 +270,8 @@ Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr
 # These allow github_ops to run git/gh as system_account
 ${RUN_USER} ALL=(ALL) NOPASSWD: GIT_SAFE
 ${RUN_USER} ALL=(ALL) NOPASSWD: GH_SAFE
+# 【Issue #2674】跨用户 mkdir：github_ops verifier worktree 目录创建
+${RUN_USER} ALL=(ALL) NOPASSWD: MKDIR_SAFE
 
 # WebUI launcher - wrapper required (no fallback per Issue #2334)
 ${WEBUI_RULES}

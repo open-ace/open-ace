@@ -1084,6 +1084,28 @@ class GitHubOps:
         logger.info("Reopened issue #%s", number)
         return {"number": number}
 
+    def close_pr(self, number: int) -> dict:
+        """Close a PR (api_only → service-user/bot identity).
+
+        Issue #2673: mechanical CI retrigger — closing and reopening a PR
+        re-delivers the ``pull_request`` ``closed``/``reopened`` events when
+        GitHub dropped the push/synchronize events for the head (zero
+        check-runs). This is a CI nudge, not a code/PR-content change.
+        """
+        self._run_gh(["pr", "close", str(number)], api_only=True)
+        logger.info("Closed PR #%s", number)
+        return {"number": number}
+
+    def reopen_pr(self, number: int) -> dict:
+        """Reopen a PR (api_only → service-user/bot identity).
+
+        Issue #2673: second half of the mechanical CI retrigger — see
+        :meth:`close_pr`.
+        """
+        self._run_gh(["pr", "reopen", str(number)], api_only=True)
+        logger.info("Reopened PR #%s", number)
+        return {"number": number}
+
     def list_issue_comments(self, number: int, since: str | None = None) -> list:
         """List every issue comment, optionally since a timestamp.
 
