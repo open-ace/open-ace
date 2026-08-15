@@ -1448,6 +1448,11 @@ class AutonomousAgentRunner:
         # convergence command. Never let a service-level SKIP leak into a
         # normal autonomous agent and silently suppress repository hooks.
         env.pop("SKIP", None)
+        # Process topology must not leak into agent subprocesses: the agent's
+        # pytest run would start real schedulers inside the test process
+        # (TESTING guard covers create_app; this keeps topology out entirely so
+        # non-TESTING create_app calls are safe too). (class-2, 2026-08-15)
+        env.pop("SCHEDULER_MODE", None)
         env["GH_CONFIG_DIR"] = "/var/empty/openace-autonomous-gh"
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["PATH"] = guard_bin + os.pathsep + env.get("PATH", "")
