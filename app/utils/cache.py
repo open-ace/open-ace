@@ -413,11 +413,9 @@ class CacheManager:
         key_parts.extend(f"{k}={v}" for k, v in sorted(kwargs.items()))
         key_string = ":".join(key_parts)
 
-        # Hash long keys
+        # Hash long keys (non-security: key shortening only)
         if len(key_string) > 200:
-            return hashlib.md5(
-                key_string.encode()
-            ).hexdigest()  # nosec B324 - non-security key shortening (#2482)
+            return hashlib.md5(key_string.encode(), usedforsecurity=False).hexdigest()
 
         return key_string
 

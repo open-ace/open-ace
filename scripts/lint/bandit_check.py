@@ -84,9 +84,14 @@ def run_bandit(targets: list[str]) -> dict[str, Any]:
             print(f"::error::Bandit output is not valid JSON: {payload[:200]!r}")
             sys.exit(2)
 
-    # Bandit exits non-zero when issues found, but we need JSON output
-    if result.returncode != 0 and result.stderr:
-        print(f"::error::Bandit execution failed: {result.stderr}")
+    # Bandit exits non-zero when issues found, but we need JSON output.
+    # No parseable JSON at all (even with empty stderr) means the tool did not
+    # really run — fail closed rather than silently passing the gate (#2482).
+    if result.returncode != 0 and not payload:
+        print(
+            f"::error::Bandit execution failed (rc={result.returncode}): "
+            f"{result.stderr or '<no stderr>'}"
+        )
         sys.exit(2)
 
     return {"results": [], "errors": []}
