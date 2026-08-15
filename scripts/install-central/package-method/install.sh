@@ -2252,6 +2252,13 @@ install_mkdir_wrapper() {
     _install_wrapper "openace-mkdir" "$1"
 }
 
+# Install the node_modules shim wrapper BEFORE configure_sudoers (Issue #2694):
+# NM_SHIM_SAFE whitelists /usr/local/bin/openace-nm-shim for cross-user
+# invocation by git_workspace._ensure_frontend_node_modules_shim.
+install_nm_shim_wrapper() {
+    _install_wrapper "openace-nm-shim" "$1"
+}
+
 # Install the rm wrapper BEFORE configure_sudoers (Issue #2349):
 # the sudoers rule keys off `[ -x /usr/local/bin/openace-rm ]`.
 install_rm_wrapper() {
@@ -2416,7 +2423,8 @@ ${utility_rule}"
     current_user_rules="${current_user_rules}
 $run_user ALL=(ALL) NOPASSWD: GIT_SAFE
 $run_user ALL=(ALL) NOPASSWD: GH_SAFE
-$run_user ALL=(ALL) NOPASSWD: MKDIR_SAFE"
+$run_user ALL=(ALL) NOPASSWD: MKDIR_SAFE
+$run_user ALL=(ALL) NOPASSWD: NM_SHIM_SAFE"
 
     # Add security wrapper rules if any
     if [ -n "$security_wrapper_rules" ]; then
@@ -2593,6 +2601,13 @@ Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr
 # 裸 mkdir，/usr/bin 与 /bin 两种解析路径都必须匹配。
 Cmnd_Alias MKDIR_SAFE = /usr/bin/mkdir *, /bin/mkdir *
 
+# 【Issue #2694】跨用户 node_modules shim：git_workspace._ensure_frontend_node_modules_shim
+# 发 'sudo -u <account> /usr/local/bin/openace-nm-shim <wt_fe> <main_nm>'（root-owned
+# wrapper，严格校验两个绝对路径参数后以目标用户执行 symlink 填充；历史上的
+# 'bash -c <script>' 形态被 sudoers 有意拒绝——#2650：多步 bash-as-owner 是
+# root-RCE 面）。
+Cmnd_Alias NM_SHIM_SAFE = /usr/local/bin/openace-nm-shim *
+
 # 【安全加固 Issue #2181】安全 wrapper 规则
 # 以下 wrapper 替代原通配命令，内部验证参数安全性
 # openace-chown: 替代 chown *
@@ -2688,6 +2703,18 @@ ${line}"
         if ! grep -q "Cmnd_Alias MKDIR_SAFE" "$sudoers_file" 2>/dev/null || \
            ! grep -E "^${run_user} ALL=\(ALL\) NOPASSWD: MKDIR_SAFE" "$sudoers_file" 2>/dev/null; then
             print_warning "Sudoers missing MKDIR_SAFE cross-user mkdir rule for user '$run_user'"
+            need_update=true
+        fi
+
+        # 【修复 Issue #2694】Check cross-user node_modules shim rule (NM_SHIM_SAFE).
+        # git_workspace._ensure_frontend_node_modules_shim emits
+        # 'sudo -u <account> /usr/local/bin/openace-nm-shim ...' on multi-user
+        # deployments. Without this probe an incremental upgrade keeps the old
+        # sudoers and the shim fail-softs on every advance (plus one duplicate
+        # milestone per new script version).
+        if ! grep -q "Cmnd_Alias NM_SHIM_SAFE" "$sudoers_file" 2>/dev/null || \
+           ! grep -E "^${run_user} ALL=\(ALL\) NOPASSWD: NM_SHIM_SAFE" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing NM_SHIM_SAFE cross-user node_modules shim rule for user '$run_user'"
             need_update=true
         fi
 
@@ -4285,6 +4312,7 @@ install_local() {
         install_useradd_wrapper "$sudoers_install_dir"
         install_cat_wrapper "$sudoers_install_dir"
         install_mkdir_wrapper "$sudoers_install_dir"
+        install_nm_shim_wrapper "$sudoers_install_dir"
         install_rm_wrapper "$sudoers_install_dir"
 
         configure_sudoers "$sudoers_run_user" "$sudoers_install_dir"

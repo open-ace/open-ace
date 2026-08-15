@@ -15,6 +15,7 @@ call; a later cleanup can narrow this to explicit dependencies.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -57,6 +58,16 @@ def _GitHubOps(*args, **kwargs):
 # config write to ``.vite-temp`` (#23: c88afdc0/83ffb529/ee678c63). Frozenset so
 # future vite/vitest versions can add dirs without code surgery.
 _FRONTEND_NODE_MODULES_CACHE_DIRS = frozenset({".vite-temp", ".vite", ".vitest", ".cache"})
+
+# Root-owned wrapper that performs the node_modules symlink population as the
+# target user (#2694). Multi-user deployments execute the shim via
+# ``sudo -u <owner> /usr/local/bin/openace-nm-shim <wt_fe> <main_nm>`` — the
+# historical ``sudo -u <owner> bash -c <script>`` shape is rejected by sudoers
+# BY DESIGN (#2650: multi-step bash-as-owner is a root-RCE surface), so without
+# this wrapper the shim never succeeds on prod. Covered by the NM_SHIM_SAFE
+# sudoers alias (scripts/generate-sudoers.sh + install.sh + docker-entrypoint.sh,
+# drift-locked in tests/unit/test_sudoers_hardening.py).
+_NM_SHIM_WRAPPER = "/usr/local/bin/openace-nm-shim"
 
 
 def _build_node_modules_shim_script(
@@ -400,9 +411,29 @@ class GitWorkspaceService:
         failure is logged + recorded as a ``frontend_node_modules_shim_failed``
         milestone and the worktree is used as-is (the agent falls back to the
         pre-fix behavior — no worse than today).
+
+        #2694 dedup: the failure is keyed on the script's sha256. A later
+        advance with the SAME script does not re-attempt (nor re-record) —
+        ensure_worktree self-heals on every advance, and a parked wait-phase
+        workflow polls every ~13s, which wrote 3.7k duplicate fail-soft
+        milestones on one workflow in four days. A changed script (a deployed
+        fix) gets exactly one fresh attempt.
         """
+        script = _build_node_modules_shim_script(
+            os.path.join(canonical, "frontend"),
+            os.path.join(main_gh.repo_path, "frontend", "node_modules"),
+        )
+        script_sha = hashlib.sha256(script.encode()).hexdigest()
+        if self._shim_failed_for_script(script_sha):
+            logger.debug(
+                "Worktree %s: skipping node_modules shim retry (same script "
+                "already failed, sha=%s)",
+                canonical,
+                script_sha[:12],
+            )
+            return
         try:
-            self._ensure_frontend_node_modules_shim_impl(canonical, main_gh)
+            self._ensure_frontend_node_modules_shim_impl(canonical, main_gh, script)
         except Exception as exc:  # noqa: BLE001 — fail-soft must never block the worktree
             logger.warning(
                 "Worktree %s: frontend node_modules shim failed (fail-soft): %s",
@@ -415,9 +446,35 @@ class GitWorkspaceService:
                 status="failed",
                 title="Frontend node_modules shim failed (fail-soft)",
                 error_message=str(exc)[:300],
+                metadata=json.dumps({"script_sha": script_sha}),
             )
 
-    def _ensure_frontend_node_modules_shim_impl(self, canonical: str, main_gh: GitHubOps) -> None:
+    def _shim_failed_for_script(self, script_sha: str) -> bool:
+        """Whether the CURRENT script already failed once (#2694 dedup).
+
+        Reads the newest-first milestone list for a ``frontend_node_modules_shim_failed``
+        entry whose recorded ``script_sha`` matches. Any lookup error resolves
+        False (attempt, as before) — the dedup must never silently disable the
+        shim.
+        """
+        try:
+            milestones = self._orch.repo.list_milestones(self._orch._workflow_id)
+        except Exception:  # noqa: BLE001 — dedup lookup is best-effort
+            return False
+        for ms in reversed(list(milestones or [])):
+            if ms.get("milestone_type") != "frontend_node_modules_shim_failed":
+                continue
+            try:
+                meta = json.loads(ms.get("metadata") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                meta = {}
+            if isinstance(meta, dict) and meta.get("script_sha") == script_sha:
+                return True
+        return False
+
+    def _ensure_frontend_node_modules_shim_impl(
+        self, canonical: str, main_gh: GitHubOps, script: str
+    ) -> None:
         # ``main_gh.repo_path`` is the workflow's project_path — the main clone
         # the worktree branches from, and where the owner's ``npm install``
         # lives. Reuse its ``frontend/node_modules`` (the worktree's is
@@ -430,11 +487,20 @@ class GitWorkspaceService:
             and main_gh.path_exists_as_user(os.path.join(main_fe, "node_modules"))
         ):
             return  # not a frontend project, or no install to reuse → no-op
-        script = _build_node_modules_shim_script(
-            os.path.join(canonical, "frontend"),
-            os.path.join(main_fe, "node_modules"),
-        )
-        r = main_gh._run_as_account(["bash", "-c", script], timeout=300)
+        if main_gh._needs_sudo() and os.access(_NM_SHIM_WRAPPER, os.X_OK):
+            # Cross-user deployment: run the whitelisted root-owned wrapper as
+            # the owner (#2694). ``bash -c`` is rejected by sudoers by design.
+            r = main_gh._run_as_account(
+                [
+                    _NM_SHIM_WRAPPER,
+                    os.path.join(canonical, "frontend"),
+                    os.path.join(main_fe, "node_modules"),
+                ],
+                timeout=300,
+            )
+        else:
+            # Same-user deployment (dev/CI) or wrapper not installed.
+            r = main_gh._run_as_account(["bash", "-c", script], timeout=300)
         if r.returncode != 0:
             raise RuntimeError(
                 "node_modules shim script exited "

@@ -26,6 +26,9 @@ DOCKER_ENTRYPOINT = PROJECT_ROOT / "docker-entrypoint.sh"
 INSTALL_SH = PROJECT_ROOT / "scripts" / "install-central" / "package-method" / "install.sh"
 GENERATE_SUDOERS_SH = PROJECT_ROOT / "scripts" / "generate-sudoers.sh"
 GITHUB_OPS_PY = PROJECT_ROOT / "app" / "modules" / "workspace" / "autonomous" / "github_ops.py"
+GIT_WORKSPACE_PY = (
+    PROJECT_ROOT / "app" / "modules" / "workspace" / "autonomous" / "git_workspace.py"
+)
 
 # Test markers for Issue #2334 (sudoers hardening regression)
 pytestmark = [pytest.mark.issue(2334), pytest.mark.regression, pytest.mark.security]
@@ -870,6 +873,97 @@ class TestMkdirShapeCoverage:
             "package-method/install.sh, docker-entrypoint.sh) must be "
             "updated in lockstep (Issue #2674)"
         )
+
+
+class TestNmShimShapeCoverage:
+    """#2694: the node_modules shim's cross-user execution shape.
+
+    git_workspace._ensure_frontend_node_modules_shim emits
+    ``sudo -u <account> /usr/local/bin/openace-nm-shim <wt_fe> <main_nm>``
+    (root-owned wrapper). The historical ``sudo -u <account> bash -c <script>``
+    shape is rejected by sudoers by design (#2650: multi-step bash-as-owner is
+    a root-RCE surface), so without these entries the shim NEVER succeeds on
+    multi-user prod — it fail-softs on every advance and spammed 5.2k duplicate
+    ``frontend_node_modules_shim_failed`` milestones in four days.
+    """
+
+    NM_SHIM_ENTRIES = [
+        "/usr/local/bin/openace-nm-shim *",
+    ]
+
+    GENERATOR_FILES = [
+        ("scripts/generate-sudoers.sh", GENERATE_SUDOERS_SH),
+        ("scripts/install-central/package-method/install.sh", INSTALL_SH),
+        ("docker-entrypoint.sh", DOCKER_ENTRYPOINT),
+    ]
+
+    @pytest.mark.issue(2694)
+    @pytest.mark.parametrize("entry", NM_SHIM_ENTRIES)
+    @pytest.mark.parametrize(
+        "label,path",
+        GENERATOR_FILES,
+        ids=[label for label, _ in GENERATOR_FILES],
+    )
+    def test_nm_shim_entries_present_in_all_generators(self, entry, label, path):
+        """All three generators must carry the nm-shim wrapper whitelist."""
+        assert entry in _extract_cmnd_alias(path.read_text(), "NM_SHIM_SAFE"), (
+            f"{label} is missing the NM_SHIM_SAFE entry {entry!r}; "
+            f"git_workspace._ensure_frontend_node_modules_shim emits "
+            f"'sudo -u <account> /usr/local/bin/openace-nm-shim ...' on "
+            f"multi-user deployments, which sudoers rejects without this "
+            f"entry (Issue #2694). Keep the three generators consistent."
+        )
+
+    @pytest.mark.issue(2694)
+    @pytest.mark.parametrize(
+        "label,path",
+        GENERATOR_FILES,
+        ids=[label for label, _ in GENERATOR_FILES],
+    )
+    def test_nm_shim_safe_has_all_runas_in_all_generators(self, label, path):
+        """NM_SHIM_SAFE user rules must use (ALL) runas (cross-owner shim)."""
+        targets = _get_runas_for_alias(path.read_text(), "NM_SHIM_SAFE")
+        assert targets, f"No NM_SHIM_SAFE user-rule found in {label} (Issue #2694)"
+        assert "ALL" in targets, (
+            f"NM_SHIM_SAFE runas is {targets!r} in {label}; must be (ALL) for "
+            f"the cross-user node_modules shim (Issue #2694)"
+        )
+
+    @pytest.mark.issue(2694)
+    def test_generated_sudoers_matches_shim_invocation_shape(self):
+        """git_workspace's emitted wrapper invocation must fnmatch the entries."""
+        result = subprocess.run(
+            ["bash", str(GENERATE_SUDOERS_SH), "--dry-run", "--output", "/dev/null"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"Generator failed: {result.stderr}"
+
+        entries = _extract_cmnd_alias(result.stdout, "NM_SHIM_SAFE")
+        real_shapes = [
+            "/usr/local/bin/openace-nm-shim /srv/repos/x/.worktrees/wid/frontend /srv/repos/x/frontend/node_modules",
+        ]
+        for shape in real_shapes:
+            matching = [e for e in entries if fnmatch.fnmatch(shape, e)]
+            assert matching, (
+                f"git_workspace shim command {shape!r} matches no NM_SHIM_SAFE "
+                f"entry; the node_modules shim would be rejected by sudoers "
+                f"(Issue #2694). NM_SHIM_SAFE entries: {entries!r}"
+            )
+
+    @pytest.mark.issue(2694)
+    def test_git_workspace_wrapper_invocation_locked(self):
+        """Drift lock: git_workspace must keep invoking the whitelisted wrapper
+        (not a bare ``bash -c``) on cross-user deployments, mirroring the
+        #2635/#2674 source-grep locks."""
+        text = GIT_WORKSPACE_PY.read_text()
+        assert "_NM_SHIM_WRAPPER" in text, (
+            "git_workspace no longer references _NM_SHIM_WRAPPER; the "
+            "NM_SHIM_SAFE entries in scripts/generate-sudoers.sh, "
+            "scripts/install-central/package-method/install.sh and "
+            "docker-entrypoint.sh must be updated in lockstep (Issue #2694)"
+        )
+        assert '"bash", "-c"' in text, "same-user bash -c fallback should remain (dev/CI)"
 
 
 class TestSudoersDrift:

@@ -262,6 +262,13 @@ Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr
 # 裸 mkdir，/usr/bin 与 /bin 两种解析路径都必须匹配。
 Cmnd_Alias MKDIR_SAFE = /usr/bin/mkdir *, /bin/mkdir *
 
+# 【Issue #2694】跨用户 node_modules shim：git_workspace._ensure_frontend_node_modules_shim
+# 发 'sudo -u <account> /usr/local/bin/openace-nm-shim <wt_fe> <main_nm>'（root-owned
+# wrapper，严格校验两个绝对路径参数后以目标用户执行 symlink 填充；历史上的
+# 'bash -c <script>' 形态被 sudoers 有意拒绝——#2650：多步 bash-as-owner 是
+# root-RCE 面）。wrapper 由 install.sh 的 _install_wrapper 部署。
+Cmnd_Alias NM_SHIM_SAFE = /usr/local/bin/openace-nm-shim *
+
 # ============================================================================
 # 用户权限配置
 # ============================================================================
@@ -272,6 +279,8 @@ ${RUN_USER} ALL=(ALL) NOPASSWD: GIT_SAFE
 ${RUN_USER} ALL=(ALL) NOPASSWD: GH_SAFE
 # 【Issue #2674】跨用户 mkdir：github_ops verifier worktree 目录创建
 ${RUN_USER} ALL=(ALL) NOPASSWD: MKDIR_SAFE
+# 【Issue #2694】跨用户 node_modules shim：git_workspace worktree 前端环境注入
+${RUN_USER} ALL=(ALL) NOPASSWD: NM_SHIM_SAFE
 
 # WebUI launcher - wrapper required (no fallback per Issue #2334)
 ${WEBUI_RULES}
