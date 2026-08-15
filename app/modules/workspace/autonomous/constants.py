@@ -153,6 +153,13 @@ _TRANSIENT_ORCHESTRATOR_KEYWORDS = [
     "fetch first",
     "non-fast-forward",
     "[rejected]",
+    # Issue #2673: a PR head reporting zero check-runs after a mechanical
+    # close+reopen retrigger means GitHub dropped the branch's event delivery
+    # entirely (no push/synchronize/check-run events). That is transient
+    # infrastructure, not a code failure — advance()'s Layer-2 retry makes the
+    # stall visible (error_message + bounded retries) instead of a silent
+    # wait-spin.
+    "zero check-runs",
 ]
 
 

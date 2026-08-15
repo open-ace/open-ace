@@ -156,6 +156,19 @@ class PhaseHost(Protocol):
         git_workspace service directly for what is logically a phase action.
         """
 
+    def zero_check_runs_fallback(self, gh, pr_number, pr_head_sha, base_branch, checks) -> bool:
+        """Issue #2673: bounded mechanical fallback for a PR head reporting
+        ZERO check-runs (GitHub event-delivery gap). Persists its cycle
+        counter in a ``pr_zero_check_runs`` milestone, retriggers event
+        delivery via PR close+reopen after
+        ``ZERO_CHECK_RUNS_RETRIGGER_CYCLES`` consecutive zero-check cycles,
+        then escalates a still-zero head as a transient-classified
+        ``GitHubOpsError``. Returns True when it took over the cycle (caller
+        should defer). Stays on the host because the counter/audit state is
+        orchestrator bookkeeping (milestones + events), not a service-owned
+        field.
+        """
+
     # ── PR-review-phase helpers (#2044 Phase B T11) ──────────────────────────
     # Same rationale as the merge helpers above: orchestrator-private methods
     # (agent runner wrappers, artifact readers, CI polling, scope validation,
