@@ -166,29 +166,81 @@ def _normalized_item(value: object) -> str:
 
 # Conservative similarity floor for the paraphrase fallback (#2675). The real
 # prod paraphrase pair ("..., Windows, and Darwin variants" vs the same minus
-# "and") scores 0.875; genuinely different requirements that merely share
+# "and") scores 0.889; genuinely different requirements that merely share
 # vocabulary (CSV vs XLSX export) score at most 0.75 and stay unmatched.
 _FUZZY_ITEM_MATCH_THRESHOLD = 0.8
+
+# Tokens that flip the meaning of a requirement when added or removed.
+_NEGATION_MARKER_TOKENS = frozenset({"not", "no", "never", "without"})
+
+
+def _negation_markers(tokens: list[str]) -> set[str]:
+    """Canonical negation markers carried by a token list.
+
+    Contractions ending in ``n't`` and ``cannot`` are canonicalized to
+    ``not`` so a paraphrase that only swaps the contraction form ("must
+    not" vs "mustn't") keeps matching, while an actual negation flip always
+    yields a different set.
+    """
+    markers: set[str] = set()
+    for token in tokens:
+        word = token.strip(".,;:!?()[]\"'")
+        if not word:
+            continue
+        if word == "cannot" or word.endswith("n't"):
+            markers.add("not")
+        elif word in _NEGATION_MARKER_TOKENS:
+            markers.add(word)
+    return markers
+
+
+def _contains_token_subsequence(haystack: list[str], needle: list[str]) -> bool:
+    """True when ``needle`` appears as a contiguous run of tokens in ``haystack``."""
+    if not needle or len(needle) > len(haystack):
+        return False
+    return any(
+        haystack[i : i + len(needle)] == needle for i in range(len(haystack) - len(needle) + 1)
+    )
 
 
 def _items_match_fuzzy(a: str, b: str) -> float:
     """Conservative similarity in [0, 1] between two checklist item strings.
 
-    1.0 when one normalized string is contained in the other (identity or
-    elaboration of the same requirement); otherwise the token-set Jaccard
-    similarity of the normalized strings. Deliberately ignores word order.
+    1.0 for identical normalized strings, or for an elaboration of the same
+    requirement — the short side's full token sequence appears as a
+    contiguous token run of the long side AND the short side carries at
+    least 3 tokens and at least half the long side's token count. Bare
+    character-level substrings ("Auth" inside "OAuth2 token refresh")
+    therefore never score 1.0; they fall through to Jaccard. A negation
+    flip (one side negates, the other does not) scores 0.0 outright: those
+    are semantic opposites, never paraphrases. Everything else is the
+    token-set Jaccard similarity of the normalized strings, which
+    deliberately ignores word order.
     """
     normalized_a = _normalized_item(a)
     normalized_b = _normalized_item(b)
     if not normalized_a or not normalized_b:
         return 0.0
-    if normalized_a == normalized_b or normalized_a in normalized_b or normalized_b in normalized_a:
+    if normalized_a == normalized_b:
         return 1.0
-    tokens_a = set(normalized_a.split())
-    tokens_b = set(normalized_b.split())
+    tokens_a = normalized_a.split()
+    tokens_b = normalized_b.split()
     if not tokens_a or not tokens_b:
         return 0.0
-    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
+    if _negation_markers(tokens_a) != _negation_markers(tokens_b):
+        # One side negates and the other does not: a semantic opposite must
+        # never inherit the other's verdict, however similar the wording.
+        return 0.0
+    short_tokens, long_tokens = (
+        (tokens_a, tokens_b) if len(tokens_a) <= len(tokens_b) else (tokens_b, tokens_a)
+    )
+    if (
+        len(short_tokens) >= 3
+        and len(short_tokens) / len(long_tokens) >= 0.5
+        and _contains_token_subsequence(long_tokens, short_tokens)
+    ):
+        return 1.0
+    return len(set(tokens_a) & set(tokens_b)) / len(set(tokens_a) | set(tokens_b))
 
 
 def _cover_missing_checklist_items(
@@ -198,11 +250,11 @@ def _cover_missing_checklist_items(
 
     Exact normalized match is the primary coverage path. Checklist items the
     verifier only paraphrased fall back to a conservative fuzzy matcher
-    (containment or token-Jaccard >= ``_FUZZY_ITEM_MATCH_THRESHOLD``) assigned
-    one-to-one, highest similarity first; a fuzzy match reuses the matched
-    verdict's own status — only the identity matching is fuzzy, never the
-    decision. Anything still unmatched gets a synthetic INDETERMINATE so it
-    cannot disappear from the aggregate.
+    (token-boundary containment or token-Jaccard >=
+    ``_FUZZY_ITEM_MATCH_THRESHOLD``) assigned one-to-one, highest similarity
+    first; a fuzzy match reuses the matched verdict's own status — only the
+    identity matching is fuzzy, never the decision. Anything still unmatched
+    gets a synthetic INDETERMINATE so it cannot disappear from the aggregate.
     """
     covered: set[str] = set()
     for verdict in verifier_verdicts:
@@ -210,12 +262,17 @@ def _cover_missing_checklist_items(
         if normalized:
             covered.add(normalized)
 
-    # Greedy one-to-one fuzzy assignment for checklist items without an exact match.
+    # Greedy one-to-one fuzzy assignment for checklist items without an exact
+    # match. Deduplicate by normalized text BEFORE generating candidates so a
+    # duplicate entry (discarded by the extension loop anyway) cannot consume
+    # the only verdict able to cover a distinct later item.
     candidates: list[tuple[float, int, ItemVerdict]] = []
+    seen_for_candidates: set[str] = set()
     for index, checklist_item in enumerate(checklist):
         normalized = _normalized_item(checklist_item)
-        if not normalized or normalized in covered:
+        if not normalized or normalized in covered or normalized in seen_for_candidates:
             continue
+        seen_for_candidates.add(normalized)
         for verdict in verifier_verdicts:
             score = _items_match_fuzzy(checklist_item, verdict.item)
             if score >= _FUZZY_ITEM_MATCH_THRESHOLD:
@@ -247,7 +304,7 @@ def _cover_missing_checklist_items(
                 ItemVerdict(
                     item=checklist_item,
                     verdict=matched.verdict,
-                    evidence=matched.evidence,
+                    evidence=list(matched.evidence),
                     rationale=matched.rationale,
                 )
             )

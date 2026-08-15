@@ -97,6 +97,85 @@ class TestItemsMatchFuzzy:
         assert _items_match_fuzzy("", "anything") == 0.0
         assert _items_match_fuzzy("anything", "") == 0.0
 
+    def test_bare_word_prefix_does_not_cross_match(self):
+        # Review round 1 (#2677): character-level containment let a bare
+        # short word match any string merely containing it as a character
+        # substring ("Auth" inside "OAuth2"/"Author"). Containment must be
+        # token-boundary aware, so these fall through to Jaccard 0.
+        from app.modules.workspace.autonomous.phases.acceptance_verification import (
+            _items_match_fuzzy,
+        )
+
+        assert _items_match_fuzzy("Auth", "OAuth2 token refresh flow works") == 0.0
+        assert _items_match_fuzzy("Auth", "Author page shows avatar") == 0.0
+
+    def test_containment_requires_at_least_three_tokens(self):
+        # Even a token-boundary-aligned containment with fewer than 3 tokens
+        # on the short side is not evidence of the same requirement.
+        from app.modules.workspace.autonomous.phases.acceptance_verification import (
+            _items_match_fuzzy,
+        )
+
+        assert (
+            _items_match_fuzzy("Rate limiter", "Rate limiter caps at 10 requests per minute") < 0.8
+        )
+
+    def test_containment_requires_half_the_long_token_count(self):
+        # A 3-token item buried in a 10-token elaboration is a different
+        # requirement; containment is denied and Jaccard stays below 0.8.
+        from app.modules.workspace.autonomous.phases.acceptance_verification import (
+            _items_match_fuzzy,
+        )
+
+        assert (
+            _items_match_fuzzy(
+                "Login page renders",
+                "Login page renders the SSO button with animation and focus trap",
+            )
+            < 0.8
+        )
+
+    def test_negation_flip_never_matches(self):
+        # A negation flip is a semantic OPPOSITE, never a paraphrase: matching
+        # it could auto-confirm a criterion the delivery violates.
+        from app.modules.workspace.autonomous.phases.acceptance_verification import (
+            _items_match_fuzzy,
+        )
+
+        assert (
+            _items_match_fuzzy(
+                "The retention job must not delete records older than 30 days",
+                "The retention job must delete records older than 30 days",
+            )
+            == 0.0
+        )
+
+    def test_negation_flip_with_contraction_never_matches(self):
+        from app.modules.workspace.autonomous.phases.acceptance_verification import (
+            _items_match_fuzzy,
+        )
+
+        assert (
+            _items_match_fuzzy(
+                "The export mustn't overwrite existing files",
+                "The export must overwrite existing files",
+            )
+            == 0.0
+        )
+
+    def test_negation_preserving_paraphrase_still_matches(self):
+        from app.modules.workspace.autonomous.phases.acceptance_verification import (
+            _items_match_fuzzy,
+        )
+
+        assert (
+            _items_match_fuzzy(
+                "The retention job must not delete records older than 30 days",
+                "The retention job must not delete records older than thirty days",
+            )
+            >= 0.8
+        )
+
 
 class TestCoverMissingChecklistItems:
     def _run(self, verdicts, checklist):
@@ -184,3 +263,83 @@ class TestCoverMissingChecklistItems:
 
     def test_empty_checklist_and_verdicts(self):
         assert self._run([], []) == []
+
+    def test_short_word_prefix_stays_indeterminate_fail_closed(self):
+        # "Auth" must not inherit the CONFIRMED verdict of an unrelated
+        # "OAuth2 token refresh flow works" item.
+        verdicts = [_verdict("OAuth2 token refresh flow works", Verdict.CONFIRMED)]
+        result = self._run(verdicts, ["Auth"])
+
+        assert len(result) == 2
+        assert result[-1].item == "Auth"
+        assert result[-1].verdict is Verdict.INDETERMINATE
+        assert result[-1].evidence[0]["ref"] == "verifier:missing-item"
+        assert aggregate_verdicts(result) == "indeterminate"
+
+    def test_negation_flip_does_not_inherit_verdict_fail_closed(self):
+        # The verifier confirmed the OPPOSITE of the checklist item ("must
+        # delete" vs "must not delete"). Reusing that verdict would
+        # auto-close an issue the delivery demonstrably violates; the item
+        # must stay indeterminate for human follow-up.
+        verdicts = [
+            _verdict(
+                "The retention job must delete records older than 30 days",
+                Verdict.CONFIRMED,
+            )
+        ]
+        result = self._run(
+            verdicts, ["The retention job must not delete records older than 30 days"]
+        )
+
+        assert len(result) == 2
+        assert result[-1].verdict is Verdict.INDETERMINATE
+        assert result[-1].evidence[0]["ref"] == "verifier:missing-item"
+        assert aggregate_verdicts(result) == "indeterminate"
+
+    def test_cjk_paraphrase_without_spaces_stays_indeterminate_fail_closed(self):
+        # Known boundary: Chinese acceptance items written without spaces
+        # tokenize as a single token, so even a close paraphrase scores
+        # Jaccard 0 and must stay fail-closed (INDETERMINATE), never
+        # silently confirmed or dropped.
+        verdicts = [_verdict("登录页面上展示SSO按钮", Verdict.CONFIRMED)]
+        result = self._run(verdicts, ["登录页面显示单点登录按钮"])
+
+        assert len(result) == 2
+        assert result[-1].item == "登录页面显示单点登录按钮"
+        assert result[-1].verdict is Verdict.INDETERMINATE
+        assert result[-1].evidence[0]["ref"] == "verifier:missing-item"
+        assert aggregate_verdicts(result) == "indeterminate"
+
+    def test_fuzzy_matched_verdict_copies_evidence_list(self):
+        verdicts = [_verdict(PROD_VERIFIER_ITEM, Verdict.CONFIRMED, evidence_ref="os.py:12")]
+        result = self._run(verdicts, [PROD_CHECKLIST_ITEM])
+
+        checklist_verdict = result[-1]
+        assert checklist_verdict.evidence is not verdicts[0].evidence
+        assert checklist_verdict.evidence == verdicts[0].evidence
+
+    def test_duplicate_checklist_entries_do_not_consume_verdicts(self):
+        # Dedup happens before fuzzy-candidate generation: a duplicate
+        # checklist entry (discarded by the extension loop anyway) must not
+        # consume the only verdict that could cover a distinct later item.
+        verdicts = [
+            _verdict("The rate limiter caps at 10 requests per minute", Verdict.CONFIRMED),
+            _verdict("Rate limiter caps at 10 requests per minute strictly", Verdict.REJECTED),
+        ]
+        result = self._run(
+            verdicts,
+            [
+                "Rate limiter caps at 10 requests per minute",
+                "Rate limiter caps at 10 requests per minute",
+                "Rate limiter caps at 10 requests per minute strictly enforced",
+            ],
+        )
+        appended = result[2:]
+        by_item = {v.item: v.verdict for v in appended}
+        assert by_item["Rate limiter caps at 10 requests per minute"] is Verdict.CONFIRMED
+        # Without dedup, the duplicate at index 1 greedily consumed the
+        # "strictly" verdict and this item fell to INDETERMINATE.
+        assert (
+            by_item["Rate limiter caps at 10 requests per minute strictly enforced"]
+            is Verdict.REJECTED
+        )
