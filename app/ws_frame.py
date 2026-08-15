@@ -118,7 +118,8 @@ def get_max_message_size() -> int:
 
 
 def _compute_accept_key(client_key: str) -> str:
-    raw = hashlib.sha1(client_key.encode() + _WS_GUID).digest()
+    # SHA-1 is mandated by RFC 6455 for the Sec-WebSocket-Accept handshake.
+    raw = hashlib.sha1(client_key.encode() + _WS_GUID).digest()  # nosec B324 - RFC 6455 (#2482)
     return b64encode(raw).decode()
 
 

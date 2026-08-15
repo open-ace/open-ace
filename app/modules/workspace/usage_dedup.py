@@ -152,7 +152,9 @@ class UsageDedupCache:
             f"{evidence.output_tokens}|"
             f"{timestamp_bucket}"
         )
-        return hashlib.md5(key_data.encode()).hexdigest()
+        return hashlib.md5(
+            key_data.encode()
+        ).hexdigest()  # nosec B324 - non-security dedup key (#2482)
 
     def clear(self) -> None:
         """Clear all entries from cache."""

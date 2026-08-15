@@ -66,9 +66,13 @@ def run_command(
     """Run a shell command."""
     try:
         if capture:
-            return subprocess.run(cmd, shell=True, check=check, capture_output=True, text=True)
+            # nosec justification: internal admin CLI; commands are built
+            # in-script, never from untrusted user input (#2482)
+            return subprocess.run(
+                cmd, shell=True, check=check, capture_output=True, text=True
+            )  # nosec B602
         else:
-            return subprocess.run(cmd, shell=True, check=check)
+            return subprocess.run(cmd, shell=True, check=check)  # nosec B602
     except subprocess.CalledProcessError as e:
         print_error(f"Command failed: {e}")
         return None

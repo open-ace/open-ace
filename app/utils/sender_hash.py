@@ -62,7 +62,8 @@ def compute_sender_hash(sender_name: str, max_length: int = MAX_SENDER_LENGTH) -
         sender_name = sender_name[:max_length]
 
     # Compute MD5 hash (UTF-8 encoding for consistency)
-    md5_hex = hashlib.md5(sender_name.encode("utf-8")).hexdigest()
+    # MD5 is required to match PostgreSQL's SQL-level MD5() (see docstring).
+    md5_hex = hashlib.md5(sender_name.encode("utf-8")).hexdigest()  # nosec B324 - PG parity (#2482)
 
     # Take first 16 hex characters (64 bits)
     hex_prefix = md5_hex[:16]

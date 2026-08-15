@@ -387,7 +387,10 @@ def process_jsonl_file(
                     continue
                 role = "assistant"
                 # Generate a synthetic message_id for reasoning
-                content_hash = hashlib.md5((ts + "reasoning").encode()).hexdigest()[:10]
+                # nosec justification: non-security synthetic id (#2482)
+                content_hash = hashlib.md5((ts + "reasoning").encode()).hexdigest()[  # nosec B324
+                    :10
+                ]
                 message_id = f"reasoning-{content_hash}"
 
             else:
@@ -397,7 +400,7 @@ def process_jsonl_file(
             if not message_id:
                 # Use timestamp + role as unique key
                 raw = f"{ts}-{role}-{payload_type}"
-                message_id = f"codex-{hashlib.md5(raw.encode()).hexdigest()[:12]}"
+                message_id = f"codex-{hashlib.md5(raw.encode()).hexdigest()[:12]}"  # nosec B324 - non-security synthetic id (#2482)
 
             # Extract content
             content = extract_content_from_response_item(event)

@@ -415,7 +415,9 @@ class CacheManager:
 
         # Hash long keys
         if len(key_string) > 200:
-            return hashlib.md5(key_string.encode()).hexdigest()
+            return hashlib.md5(
+                key_string.encode()
+            ).hexdigest()  # nosec B324 - non-security key shortening (#2482)
 
         return key_string
 
