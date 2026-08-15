@@ -16,6 +16,25 @@ import pytest
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
 
+def _fake_git_run(*args, **kwargs):
+    """Fake GitHubOps._run_git for the scope-verification probes (as in 716)."""
+
+    def _rc(rc=0, out=""):
+        return MagicMock(returncode=rc, stdout=out, stderr="")
+
+    cmd = list(args[0]) if args else []
+    if cmd[:2] == ["merge-base", "--is-ancestor"]:
+        return _rc(1)
+    if cmd[:1] == ["merge-base"]:
+        return _rc(0, "base0f1e2d3c4b5a6978901234f5e6d7\n")
+    if cmd[:1] == ["rev-parse"]:
+        target = cmd[1] if len(cmd) > 1 else ""
+        if target.endswith("^2"):
+            return _rc(1)
+        return _rc(0, f"{abs(hash(target)) % (10**12):040x}\n")
+    return _rc(0)
+
+
 def _make_workflow(**overrides):
     """Create a minimal workflow dict for testing."""
     base = {
@@ -114,6 +133,63 @@ def _make_orchestrator(wf_data):
         orch._gh = mock_gh
 
     return orch, mock_repo
+
+
+@pytest.fixture(autouse=True)
+def _trusted_repo_boundary(monkeypatch):
+    """Trusted repo/git/user boundary for synthetic /tmp paths.
+
+    Production local runs fail closed (#2271 repo-integrity guard,
+    trusted-git-context registration, owner lookup) when they cannot
+    touch a real repository; these tests use synthetic paths. Dedicated
+    guardrail tests exercise the fail-closed behavior itself. (Same
+    pattern as tests/issues/716 and 740.)
+    """
+    from app.modules.workspace.autonomous.github_ops import GitHubOps
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+    from app.repositories.user_repo import UserRepository
+
+    def snapshot(orchestrator, wf, workspace_type, system_account):
+        if workspace_type != "local":
+            return None
+        context = orchestrator._resolve_effective_repo_context(wf)
+        repo_path = context.get("repo_path", "/tmp/test-project")
+        return {
+            "context": context,
+            "effective": {
+                "repo_path": repo_path,
+                "top_level": repo_path,
+                "git_dir": f"{repo_path}/.git",
+                "git_identity": "1:1",
+                "common_dir": f"{repo_path}/.git",
+                "common_identity": "1:1",
+                "origin": "git@github.com:open-ace/open-ace.git",
+            },
+        }
+
+    monkeypatch.setattr(AutonomousOrchestrator, "_snapshot_repo_context", snapshot)
+    monkeypatch.setattr(
+        AutonomousOrchestrator,
+        "_validate_repo_context_after_run",
+        lambda self, before_state, system_account: "",
+    )
+    monkeypatch.setattr(
+        GitHubOps,
+        "register_trusted_git_context",
+        classmethod(lambda cls, *args, **kwargs: None),
+    )
+    monkeypatch.setattr(GitHubOps, "bind_trusted_git_context", lambda self, *args, **kwargs: None)
+    monkeypatch.setattr(
+        UserRepository,
+        "get_user_by_id",
+        lambda self, user_id: {
+            "id": user_id,
+            "username": "owner",
+            "system_account": None,
+            "role": "platform_admin",
+            "tenant_id": None,
+        },
+    )
 
 
 class TestAutonomousContext:
@@ -243,19 +319,38 @@ class TestDevelopmentCommitVerification:
         orch._gh.get_current_commit.return_value = "abc123"
         # No uncommitted changes either
         orch._gh.has_uncommitted_changes.return_value = False
-        # No existing branch changes vs base — truly no code changes
+        # Branch carries pre-existing changes vs base (resume scenario), but the
+        # agent produced no NEW commit this session: production now fails with
+        # "no code changes" only in this shape (a bare empty branch proceeds —
+        # nothing to verify against).
         orch._gh.get_diff_stats.return_value = {
-            "additions": 0,
-            "deletions": 0,
-            "files": 0,
-            "commits": 0,
+            "additions": 3,
+            "deletions": 1,
+            "files": 2,
+            "commits": 2,
         }
+        # The divergence log holds no agent-authored commits, so the resume
+        # acceptance path does not apply.
+        orch._gh._run_git.return_value = MagicMock(
+            returncode=0, stdout="abc123 other work\n", stderr=""
+        )
+        # The post-dev branch check re-reads the current branch; keep it on the
+        # workflow's branch so the round isn't failed as a branch escape.
+        orch._gh.get_current_branch.return_value = "auto-dev/test"
 
         mock_repo.list_milestones.return_value = [
             {"milestone_type": "plan_created", "plan_content": "Build feature X"},
         ]
 
-        orch._do_development(wf)
+        # Keep GitHubOps patched for the whole call: _make_orchestrator's
+        # `with patch(...)` expires before _do_development runs, and the dev
+        # flow rebinds self._gh via _get_gh() — which would otherwise build a
+        # REAL GitHubOps against the synthetic /tmp path.
+        with patch(
+            "app.modules.workspace.autonomous.orchestrator.GitHubOps",
+            return_value=orch._gh,
+        ):
+            orch._do_development(wf)
 
         failed_updates = self._get_failed_updates(mock_repo)
         assert len(failed_updates) >= 1
@@ -298,12 +393,27 @@ class TestDevelopmentCommitVerification:
         # Same commit before and after agent runs, then changes after auto-commit
         orch._gh.get_current_commit.side_effect = ["abc123", "abc123", "def456"]
         orch._gh.has_uncommitted_changes.return_value = True
+        orch._gh.get_current_branch.return_value = "auto-dev/test"
+        # Post-commit diff stats are recorded on the milestone (must be JSON-safe)
+        orch._gh.get_commit_diff_stats.return_value = {
+            "additions": 5,
+            "deletions": 1,
+            "files": 2,
+            "commits": 1,
+        }
+        # Scope verification probes (merge-base/rev-parse) need real-looking git.
+        orch._gh._run_git.side_effect = _fake_git_run
 
         mock_repo.list_milestones.return_value = [
             {"milestone_type": "plan_created", "plan_content": "Build feature X"},
         ]
 
-        orch._do_development(wf)
+        # Keep GitHubOps patched for the whole call (see test_detects_no_code_changes).
+        with patch(
+            "app.modules.workspace.autonomous.orchestrator.GitHubOps",
+            return_value=orch._gh,
+        ):
+            orch._do_development(wf)
 
         # Should have auto-committed with no_verify=True
         orch._gh.git_add_all.assert_called_once()
@@ -328,19 +438,30 @@ class TestDevelopmentCommitVerification:
         orch._gh.get_current_commit.return_value = "abc123"
         orch._gh.has_uncommitted_changes.return_value = True
         orch._gh.git_commit.side_effect = Exception("pre-commit hook rejected")
-        # No existing branch changes vs base
+        orch._gh.get_current_branch.return_value = "auto-dev/test"
+        # Branch carries pre-existing changes vs base (the only shape where a
+        # no-new-commit round fails with "no code changes" under current
+        # semantics), with no agent-authored commits in the divergence log.
         orch._gh.get_diff_stats.return_value = {
-            "additions": 0,
-            "deletions": 0,
-            "files": 0,
-            "commits": 0,
+            "additions": 3,
+            "deletions": 1,
+            "files": 2,
+            "commits": 2,
         }
+        orch._gh._run_git.return_value = MagicMock(
+            returncode=0, stdout="abc123 other work\n", stderr=""
+        )
 
         mock_repo.list_milestones.return_value = [
             {"milestone_type": "plan_created", "plan_content": "Build feature X"},
         ]
 
-        orch._do_development(wf)
+        # Keep GitHubOps patched for the whole call (see test_detects_no_code_changes).
+        with patch(
+            "app.modules.workspace.autonomous.orchestrator.GitHubOps",
+            return_value=orch._gh,
+        ):
+            orch._do_development(wf)
 
         # Should have attempted auto-commit
         orch._gh.git_commit.assert_called_once()
@@ -523,11 +644,13 @@ class TestFinalPlanAnnotation:
             orch._commit_phase_result(result)
 
         # add_issue_comment is called 3 times: plan, review, final
-        # Check the last call (Final Plan)
+        # Check the last call (Final Plan). Since 97466e1c the "feedback not
+        # yet addressed" warning is gone — the last review's feedback drives a
+        # final refine instead, so the final plan simply carries the refined
+        # content.
         comment = self._get_last_comment(orch._gh)
         assert "Final Implementation Plan" in comment
-        assert "not yet addressed" in comment
-        assert "Still need to handle timeout edge case" in comment
+        assert "Final refined plan content" in comment
 
     def test_final_plan_without_review(self):
         """When no review content exists, Final Plan is posted without annotation."""
