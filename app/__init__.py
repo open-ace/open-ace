@@ -806,7 +806,13 @@ def create_app(config=None):
     # - "web" or unset: Do NOT start schedulers (web worker)
     # Development mode (server.py) starts both web and scheduler
     scheduler_mode = os.environ.get("SCHEDULER_MODE", "web")
-    if scheduler_mode == "scheduler":
+    # TESTING guard (class-2, 2026-08-15): a test process must never start
+    # real schedulers — they operate on the real DB (orphan-kill advancing
+    # workflows, ghost-pausing rows). Tests that need a scheduler call
+    # init_autonomous_scheduler() directly.
+    if scheduler_mode == "scheduler" and app.config.get("TESTING"):
+        logger.info("Background services skipped (TESTING mode)")
+    elif scheduler_mode == "scheduler":
         start_background_services()
         logger.info("Background services started (SCHEDULER_MODE=scheduler)")
     else:
