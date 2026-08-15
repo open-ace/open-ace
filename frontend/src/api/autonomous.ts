@@ -84,6 +84,12 @@ export interface AutonomousWorkflow {
   parent_workflow_id: string | null;
   fork_milestone_id: string | null;
   user_feedback: string;
+  /**
+   * Verifier failed-items prefill (#2491 UX) for the resume-with-feedback
+   * modal — server-derived from the stored verification report on rejected/
+   * indeterminate acceptance pauses. Empty string otherwise.
+   */
+  acceptance_feedback_prefill?: string;
   original_branch_name: string;
   /**
    * JSON snapshot (#2020 Phase B) of the resource/isolation policy actually in

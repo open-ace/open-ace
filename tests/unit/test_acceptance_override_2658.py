@@ -229,3 +229,79 @@ class TestResumeWithFeedbackClearsVerificationCache:
         assert updates["current_phase"] == "wait"
         assert updates["status"] == "waiting"
         assert updates["user_feedback"] == "please also handle the edge case"
+
+    def test_resume_clears_stale_error_message(self, app_client):
+        """#2491 UX: the header banner renders ``error_message`` verbatim, so
+        the stale "rejected; awaiting review" text survived the resume and the
+        page kept telling the user the workflow awaited review. Resuming with
+        feedback IS the review outcome — the route must clear it."""
+        client, repo, _ = app_client
+        with ExitStack() as stack:
+            stack.enter_context(_mock_auth(user_id=7, role="user", username="owner"))
+            resp = self._post_feedback(client)
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        updates = repo.update_workflow.call_args.args[1]
+        assert updates["error_message"] == ""
+
+
+_REPORT_REJECTED = (
+    '{"status": "rejected", "merge_sha": "abc123",'
+    ' "scope": [], "gates": ['
+    '{"item": "call-chain", "verdict": "confirmed", "evidence": []}'
+    "],"
+    ' "verifier": ['
+    '{"item": "wire CI lanes", "verdict": "rejected", "evidence": [],'
+    ' "rationale": "no producer job in workflows"},'
+    '{"item": "summary artifact", "verdict": "indeterminate",'
+    ' "evidence": [{"note": "single stdlib implementation"}]}'
+    "]}"
+)
+
+
+class TestAcceptanceFeedbackPrefill:
+    """The resume-with-feedback modal pre-fills the verifier's failed-items
+    list so the user can submit it as feedback verbatim or lightly edit it.
+    Derived server-side from the stored ``verification_report`` so the issue
+    comment and the prefill share one formatter."""
+
+    def _get_workflow(self, client, **overrides):
+        client_app = client.application
+        with client_app.test_request_context():
+            from app.routes.autonomous import _workflow_response
+
+            return _workflow_response(_workflow_row(**overrides))
+
+    def test_rejected_pause_gets_prefill_with_failed_items(self, app_client):
+        client, _, _ = app_client
+        resp = self._get_workflow(client, verification_report=_REPORT_REJECTED)
+        prefill = resp["acceptance_feedback_prefill"]
+        assert "- [verifier] `wire CI lanes` (rejected) — no producer job in workflows" in prefill
+        # rationale missing → falls back to the first evidence note
+        assert "`summary artifact` (indeterminate)" in prefill
+        assert "single stdlib implementation" in prefill
+        # confirmed gates must not leak into the prefill
+        assert "call-chain" not in prefill
+
+    def test_prefill_survives_malformed_report(self, app_client):
+        client, _, _ = app_client
+        resp = self._get_workflow(client, verification_report="{not json")
+        assert resp.get("acceptance_feedback_prefill", "") == ""
+
+    def test_non_rejected_pause_has_no_prefill(self, app_client):
+        client, _, _ = app_client
+        resp = self._get_workflow(
+            client,
+            verification_status="confirmed",
+            verification_report='{"status": "confirmed", "verifier": []}',
+        )
+        assert resp.get("acceptance_feedback_prefill", "") == ""
+
+    def test_waiting_row_has_no_prefill(self, app_client):
+        client, _, _ = app_client
+        resp = self._get_workflow(
+            client,
+            status="waiting",
+            current_phase="wait",
+            verification_report=_REPORT_REJECTED,
+        )
+        assert resp.get("acceptance_feedback_prefill", "") == ""

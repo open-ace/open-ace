@@ -1899,6 +1899,8 @@ export const translations: Record<Language, Translations> = {
     autoBannerPaused: 'This workflow is paused. Resume it to continue the remaining steps.',
     // #2634: paused-state distinction + resume-with-feedback entry
     autoBannerAcceptanceAwaiting: 'Awaiting human acceptance review',
+    // #2491 UX: feedback already submitted — the workflow restarts on its own
+    autoBannerFeedbackPending: 'Feedback received — a new development round will start shortly',
     autoBannerQuotaPaused: 'Quota paused',
     autoPauseReasonAcceptance: 'Awaiting acceptance review',
     autoPauseReasonQuota: 'Quota paused',
@@ -3836,6 +3838,7 @@ export const translations: Record<Language, Translations> = {
     autoBannerPaused: '当前工作流已暂停，恢复后会继续执行剩余步骤。',
     // #2634: 暂停状态区分 + 带反馈重启入口
     autoBannerAcceptanceAwaiting: '验收等待人工处理',
+    autoBannerFeedbackPending: '已收到反馈，即将自动开始新一轮开发',
     autoBannerQuotaPaused: '配额暂停',
     autoPauseReasonAcceptance: '等待验收处理',
     autoPauseReasonQuota: '配额暂停',
@@ -5545,6 +5548,8 @@ export const translations: Record<Language, Translations> = {
     autoBannerPaused: 'このワークフローは一時停止中です。再開すると残りのステップを続行します。',
     // #2634: 一時停止状態の区別 + フィードバック付き再開入口
     autoBannerAcceptanceAwaiting: '承認確認が人間の処理を待っています',
+    autoBannerFeedbackPending:
+      'フィードバックを受信しました。まもなく次の開発ラウンドを自動開始します',
     autoBannerQuotaPaused: 'クォータ一時停止',
     autoPauseReasonAcceptance: '承認確認待ち',
     autoPauseReasonQuota: 'クォータ一時停止',
@@ -7376,6 +7381,7 @@ export const translations: Record<Language, Translations> = {
     autoBannerPaused: '이 워크플로는 일시정지 상태입니다. 재개하면 남은 단계를 계속 진행합니다.',
     // #2634: 일시정지 상태 구분 + 피드백 재시작 진입점
     autoBannerAcceptanceAwaiting: '수락 확인이 사람의 처리를 기다리는 중',
+    autoBannerFeedbackPending: '피드백이 접수되었습니다. 곧 새 개발 라운드가 자동으로 시작됩니다',
     autoBannerQuotaPaused: '쿼터 일시정지',
     autoPauseReasonAcceptance: '수락 검토 대기',
     autoPauseReasonQuota: '쿼터 일시정지',
