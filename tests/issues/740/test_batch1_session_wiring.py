@@ -157,6 +157,23 @@ def _trusted_repo_boundary_for_wrapper_tests(monkeypatch):
     Dedicated guardrail tests exercise the fail-closed behavior itself.
     """
     from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+    from app.repositories.user_repo import UserRepository
+
+    # _get_gh resolves the workflow owner via a module-level UserRepository()
+    # bound at import time — neither the tests' orchestrator.Database patch
+    # nor the instance _resolve_system_account stub covers it, and the lane
+    # DB may be unreachable/schema-less from this process.
+    monkeypatch.setattr(
+        UserRepository,
+        "get_user_by_id",
+        lambda self, user_id: {
+            "id": user_id,
+            "username": "owner",
+            "system_account": None,
+            "role": "platform_admin",
+            "tenant_id": None,
+        },
+    )
 
     def snapshot(orchestrator, wf, workspace_type, system_account):
         if workspace_type != "local":
