@@ -160,6 +160,118 @@ def _verdict_from_str(s: str) -> Verdict:
     return Verdict.INDETERMINATE
 
 
+def _normalized_item(value: object) -> str:
+    return " ".join(str(value or "").split()).casefold()
+
+
+# Conservative similarity floor for the paraphrase fallback (#2675). The real
+# prod paraphrase pair ("..., Windows, and Darwin variants" vs the same minus
+# "and") scores 0.875; genuinely different requirements that merely share
+# vocabulary (CSV vs XLSX export) score at most 0.75 and stay unmatched.
+_FUZZY_ITEM_MATCH_THRESHOLD = 0.8
+
+
+def _items_match_fuzzy(a: str, b: str) -> float:
+    """Conservative similarity in [0, 1] between two checklist item strings.
+
+    1.0 when one normalized string is contained in the other (identity or
+    elaboration of the same requirement); otherwise the token-set Jaccard
+    similarity of the normalized strings. Deliberately ignores word order.
+    """
+    normalized_a = _normalized_item(a)
+    normalized_b = _normalized_item(b)
+    if not normalized_a or not normalized_b:
+        return 0.0
+    if normalized_a == normalized_b or normalized_a in normalized_b or normalized_b in normalized_a:
+        return 1.0
+    tokens_a = set(normalized_a.split())
+    tokens_b = set(normalized_b.split())
+    if not tokens_a or not tokens_b:
+        return 0.0
+    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
+
+
+def _cover_missing_checklist_items(
+    verifier_verdicts: list[ItemVerdict], checklist: list[str]
+) -> list[ItemVerdict]:
+    """Return verdicts extended to explicitly cover every checklist item (#2675).
+
+    Exact normalized match is the primary coverage path. Checklist items the
+    verifier only paraphrased fall back to a conservative fuzzy matcher
+    (containment or token-Jaccard >= ``_FUZZY_ITEM_MATCH_THRESHOLD``) assigned
+    one-to-one, highest similarity first; a fuzzy match reuses the matched
+    verdict's own status — only the identity matching is fuzzy, never the
+    decision. Anything still unmatched gets a synthetic INDETERMINATE so it
+    cannot disappear from the aggregate.
+    """
+    covered: set[str] = set()
+    for verdict in verifier_verdicts:
+        normalized = _normalized_item(verdict.item)
+        if normalized:
+            covered.add(normalized)
+
+    # Greedy one-to-one fuzzy assignment for checklist items without an exact match.
+    candidates: list[tuple[float, int, ItemVerdict]] = []
+    for index, checklist_item in enumerate(checklist):
+        normalized = _normalized_item(checklist_item)
+        if not normalized or normalized in covered:
+            continue
+        for verdict in verifier_verdicts:
+            score = _items_match_fuzzy(checklist_item, verdict.item)
+            if score >= _FUZZY_ITEM_MATCH_THRESHOLD:
+                candidates.append((score, index, verdict))
+    candidates.sort(key=lambda entry: entry[0], reverse=True)
+    fuzzy_matched: dict[int, ItemVerdict] = {}
+    consumed: set[int] = set()
+    for score, index, verdict in candidates:
+        if index in fuzzy_matched or id(verdict) in consumed:
+            continue
+        fuzzy_matched[index] = verdict
+        consumed.add(id(verdict))
+        logger.info(
+            "acceptance verifier paraphrase match: checklist item %r covered by "
+            "verifier verdict %r (similarity %.3f)",
+            checklist[index],
+            verdict.item,
+            score,
+        )
+
+    extended = list(verifier_verdicts)
+    for index, checklist_item in enumerate(checklist):
+        normalized = _normalized_item(checklist_item)
+        if not normalized or normalized in covered:
+            continue
+        matched = fuzzy_matched.get(index)
+        if matched is not None:
+            extended.append(
+                ItemVerdict(
+                    item=checklist_item,
+                    verdict=matched.verdict,
+                    evidence=matched.evidence,
+                    rationale=matched.rationale,
+                )
+            )
+        else:
+            extended.append(
+                ItemVerdict(
+                    item=checklist_item,
+                    verdict=Verdict.INDETERMINATE,
+                    evidence=[
+                        {
+                            "ref": "verifier:missing-item",
+                            "note": "The verifier returned no verdict for this acceptance item.",
+                        }
+                    ],
+                    rationale=(
+                        "The verifier did not cover this checklist item; no acceptance "
+                        "decision was made for it."
+                    ),
+                )
+            )
+        covered.add(normalized)
+    return extended
+
+
 def _parse_issue_body(gh, issue_number) -> str:
     """Fetch the issue body via gh (best-effort; '' on failure/non-dict)."""
     if not issue_number:
@@ -526,34 +638,10 @@ def handle(ctx, deps) -> PhaseResult:
     # A syntactically valid verifier response is not necessarily complete.  A
     # missing checklist verdict must never disappear from the aggregate and
     # let unrelated scope/gate confirmations close the issue.  Require an
-    # exact item match after harmless whitespace/case normalization; anything
-    # omitted remains explicitly indeterminate for human follow-up.
-    def _normalized_item(value: object) -> str:
-        return " ".join(str(value or "").split()).casefold()
-
-    covered_items = {
-        _normalized_item(verdict.item) for verdict in verifier_verdicts if verdict.item
-    }
-    for checklist_item in snapshot.checklist:
-        normalized = _normalized_item(checklist_item)
-        if normalized and normalized not in covered_items:
-            verifier_verdicts.append(
-                ItemVerdict(
-                    item=checklist_item,
-                    verdict=Verdict.INDETERMINATE,
-                    evidence=[
-                        {
-                            "ref": "verifier:missing-item",
-                            "note": "The verifier returned no verdict for this acceptance item.",
-                        }
-                    ],
-                    rationale=(
-                        "The verifier did not cover this checklist item; no acceptance "
-                        "decision was made for it."
-                    ),
-                )
-            )
-            covered_items.add(normalized)
+    # exact item match after harmless whitespace/case normalization (with a
+    # conservative paraphrase fallback, #2675); anything still omitted remains
+    # explicitly indeterminate for human follow-up.
+    verifier_verdicts = _cover_missing_checklist_items(verifier_verdicts, snapshot.checklist)
 
     # Mechanical scope gate (deterministic): required paths must be in the diff.
     scope_verdicts = run_scope_gate(gh, snapshot.required_paths, base_sha, merge_sha)
