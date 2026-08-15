@@ -88,6 +88,28 @@ def pause(seconds):
 
 
 def login(page):
+    # Testability hook for local runs against a dev backend whose admin
+    # password is not the default (and whose in-memory login rate limiter
+    # locks the account after a few probes): E2E_SESSION_TOKEN injects a
+    # pre-minted session cookie instead of driving the login form. CI runs
+    # leave it unset and use TEST_REAL_USER/TEST_REAL_PASS.
+    injected = os.environ.get("E2E_SESSION_TOKEN")
+    if injected:
+        log("LOGIN", "Injecting E2E_SESSION_TOKEN cookie (no form login)")
+        page.goto(f"{BASE_URL}/login")
+        page.context.add_cookies(
+            [
+                {
+                    "name": "session_token",
+                    "value": injected,
+                    "url": BASE_URL,
+                }
+            ]
+        )
+        page.wait_for_timeout(500)
+        log("LOGIN", "✅ Session cookie injected")
+        return
+
     log("LOGIN", f"Logging in as {TEST_USER}")
     page.goto(f"{BASE_URL}/login")
     page.wait_for_timeout(500)
@@ -154,9 +176,11 @@ def step_server_error_shows_load_error(page):
 
     open_new_task_modal(page)
     select_claude_code(page)
-    # React Query retries once globally (retry: 1) before surfacing the
-    # error, so wait for the element instead of a fixed delay.
-    page.locator("[data-testid='models-load-error']").first.wait_for(state="visible", timeout=10000)
+    # The error state takes a while to surface: apiClient retries 500s
+    # internally (MAX_RETRIES=3 with 1s/2s/3s backoff ≈ 6s) and React Query
+    # then retries the queryFn once more (retry: 1) — ~12-15s total. Wait
+    # for the element instead of a fixed delay, with headroom over that.
+    page.locator("[data-testid='models-load-error']").first.wait_for(state="visible", timeout=30000)
     shot(page, "02-models-load-error")
 
     error_box = page.locator("[data-testid='models-load-error']")
