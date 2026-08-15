@@ -808,10 +808,15 @@ def create_app(config=None):
     scheduler_mode = os.environ.get("SCHEDULER_MODE", "web")
     # TESTING guard (class-2, 2026-08-15): a test process must never start
     # real schedulers — they operate on the real DB (orphan-kill advancing
-    # workflows, ghost-pausing rows). Tests that need a scheduler call
-    # init_autonomous_scheduler() directly.
-    if scheduler_mode == "scheduler" and app.config.get("TESTING"):
-        logger.info("Background services skipped (TESTING mode)")
+    # workflows, ghost-pausing rows). PYTEST_VERSION covers post-hoc
+    # config["TESTING"] assignments and bare create_app() calls under pytest.
+    # Tests that need a scheduler call init_autonomous_scheduler() directly.
+    # Note: PYTEST_VERSION propagates to test-spawned server subprocesses; a
+    # future test that wants a live scheduler child must unset it.
+    if scheduler_mode == "scheduler" and (
+        app.config.get("TESTING") or "PYTEST_VERSION" in os.environ
+    ):
+        logger.info("Background services skipped (test process)")
     elif scheduler_mode == "scheduler":
         start_background_services()
         logger.info("Background services started (SCHEDULER_MODE=scheduler)")

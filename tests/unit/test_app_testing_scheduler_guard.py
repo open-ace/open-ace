@@ -25,7 +25,10 @@ def test_testing_mode_skips_background_services():
     mock_sbs.assert_not_called()
 
 
-def test_scheduler_mode_still_starts_services_when_not_testing():
+def test_scheduler_mode_still_starts_services_when_not_testing(monkeypatch):
+    # 必须删除键（置空无效——守卫是 in os.environ 成员判断）：本测试跑在
+    # pytest 下，PYTEST_VERSION 存在会触发测试进程守卫。
+    monkeypatch.delenv("PYTEST_VERSION", raising=False)
     with (
         patch.dict("os.environ", {"SCHEDULER_MODE": "scheduler"}),
         patch("app.start_background_services") as mock_sbs,
@@ -33,3 +36,13 @@ def test_scheduler_mode_still_starts_services_when_not_testing():
         create_app({"TESTING": False})
 
     mock_sbs.assert_called_once()
+
+
+def test_pytest_process_skips_background_services_even_without_testing():
+    with (
+        patch.dict("os.environ", {"SCHEDULER_MODE": "scheduler", "PYTEST_VERSION": "9.0.3"}),
+        patch("app.start_background_services") as mock_sbs,
+    ):
+        create_app({})
+
+    mock_sbs.assert_not_called()
