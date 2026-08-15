@@ -511,6 +511,46 @@ class TestPolicyUpdateTenantBoundary:
         assert repo.created[0]["tenant_id"] == TENANT_B
         audit.assert_called_once()
 
+    # The owner check must normalize the key the same way create_rule's supersede
+    # does (_parse_rule_body strips it). A whitespace-padded path key must not
+    # skip the check while the supersede still clobbers the trimmed key.
+    def test_tenant_admin_cannot_bypass_owner_check_with_whitespace_key(self):
+        repo = _FakePolicyRepo(by_key={"k1": _rule(TENANT_B)})
+        response, repo, _ = _policy_request(
+            TENANT_A_ADMIN,
+            "PUT",
+            "/api/policy/rules/k1%20",  # trailing space -> supersede hits "k1"
+            json_body=self._body(),
+            policy_repo=repo,
+        )
+        assert response.status_code == 403, response.get_data(as_text=True)
+        assert repo.created == []
+
+    def test_tenant_admin_cannot_bypass_owner_check_on_a_global_key_with_whitespace(self):
+        repo = _FakePolicyRepo(by_key={"k1": _rule(None)})
+        response, repo, _ = _policy_request(
+            TENANT_A_ADMIN,
+            "PUT",
+            "/api/policy/rules/%20k1",  # leading space
+            json_body=self._body(),
+            policy_repo=repo,
+        )
+        assert response.status_code == 403
+        assert repo.created == []
+
+    def test_tenant_admin_padded_key_for_own_rule_still_works(self):
+        """The normalization must not over-block the caller's own key."""
+        repo = _FakePolicyRepo(by_key={"k1": _rule(TENANT_A)})
+        response, repo, _ = _policy_request(
+            TENANT_A_ADMIN,
+            "PUT",
+            "/api/policy/rules/k1%20",
+            json_body=self._body(),
+            policy_repo=repo,
+        )
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert repo.created[0]["tenant_id"] == TENANT_A
+
 
 # ── content-filter mutations (global table -> platform admin only) ─────────
 

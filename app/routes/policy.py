@@ -148,11 +148,18 @@ def _scope_policy_rule_write(rule_key: str, requested_tenant_id: object):
     Keeping this in one place stops create and update from drifting apart;
     leaving create without step 1 was exactly such a drift. Returns
     ``(scoped_tenant_id, denial)``; on success set ``fields["tenant_id"]``.
+
+    The owner lookup normalizes ``rule_key`` the SAME way ``create_rule`` will:
+    ``_parse_rule_body`` strips the key before the supersede runs, so a
+    whitespace-padded key (e.g. ``PUT /policy/rules/k1%20``) must strip here too
+    -- otherwise the check looks up ``"k1 "`` (miss), skips, and the supersede
+    still clobbers the trimmed ``"k1"``.
     """
     from app.modules.policy.repo import PolicyRepository
 
-    if rule_key:
-        current = PolicyRepository().get_current_rule_by_key(rule_key)
+    normalized_key = rule_key.strip() if isinstance(rule_key, str) else rule_key
+    if normalized_key:
+        current = PolicyRepository().get_current_rule_by_key(normalized_key)
         if current is not None:
             denial = enforce_resource_tenant_scope(current.tenant_id)
             if denial is not None:

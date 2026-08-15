@@ -251,9 +251,16 @@ keyword、security-settings PUT）都属「全局配置写但既无资源 id 又
 「租户管理员拒 / 平台管理员放行 / fail-closed / 无 oracle」四类，平台管理员跨租户放行处
 断言写了审计。9 处守卫逐一 source-mutation：破一个必挂一条具名测试（全部 CAUGHT）。
 
-独立对抗评审跑了一轮，抓到 3 个真问题并已修：POST /policy/rules 的 supersede 顶 owner
-（HIGH）、`PUT /security-settings` 漏收（同全局配置类）、`generate_report` 把 body 的字符串
-`"1"` 当成 `!= int 1` 误拒本租户（LOW，改用 `enforce_requested_tenant_scope` 归一化）。
+独立对抗评审跑了两轮，抓到 4 个真问题并已修：
+
+- **R1**：`POST /policy/rules` 的 supersede 顶 owner（HIGH）、`PUT /security-settings` 漏收
+  （同全局配置类）、`generate_report` 把 body 的字符串 `"1"` 当成 `!= int 1` 误拒本租户
+  （LOW，改用 `enforce_requested_tenant_scope` 归一化）。
+- **R2**：修 R1 后 `PUT /policy/rules/<key>` 仍可用**首/尾空格的 key** 绕过 owner 校验——
+  owner 查 raw key 落空跳过，supersede 却按 `_parse_rule_body` strip 后的 key 顶掉受害规则
+  （HIGH）。修法：`_scope_policy_rule_write` 里按同一规则 strip 后再查。**教训：校验用的 key
+  必须和落库/supersede 用的 key 走同一归一化**——本轮两个 HIGH 都是「守卫的 key ≠ 实际写的
+  key」这同一个根因的不同变体。
 
 ### 仍未动（范围外，记账）
 
@@ -262,6 +269,14 @@ keyword、security-settings PUT）都属「全局配置写但既无资源 id 又
 - **list/聚合端点靠仓储过滤**的那批（`GET /quota/alerts`、`GET /quota/status/all` 等）：
   底层 repo 没按 `g.tenant_id` 过滤，属 #2429 数据层收敛，不是逐端点补装饰器能治的。ack
   端点已按资源收口，但同特性的 list 侧读泄露仍在该边界内。
+- **全局配置写但既无资源 id 又不读 tenant_id 的一批**（R2 评审点名，归 #2429 的专项 sweep）：
+  `ai_agent_settings.py:44 PUT /ai-agent/settings`（`ai_agent_settings` 无租户列，与
+  `security_settings` **完全同形**，只是不在本 PR 改的三个文件里）、`smtp_config.py` /
+  `feishu_config.py` / `model_gateway.py` 的 `@admin_required` before_request 守卫（全局
+  smtp / 飞书·钉钉 / model-gateway 配置写）、`notification_integrations.py:73,104` 的
+  webhook / 钉钉配置写。全部先于本系列存在。本 PR 只收口它**已经在动**的 governance.py
+  （内容过滤 + security-settings）；跨文件的「全局配置写」一轴留给 #2429 一次扫清，别在本
+  PR 里零敲碎打（改一个就得改这一整批，等于把 #2429 提前拆进来）。
 
 ## 该往哪走
 
