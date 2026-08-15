@@ -17,6 +17,10 @@ from unittest.mock import MagicMock, patch
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
+# Sentinel distinguishing "never captured" from a legitimately-None original
+# in the tearDown restore guards.
+_UNSET = object()
+
 
 # ==================== Route Tests ====================
 
@@ -29,7 +33,16 @@ class TestCreateRemoteDirectoryRoute(unittest.TestCase):
         from flask import Flask
 
         import app.modules.workspace.remote_agent_manager as ram_mod
+
+        # Capture every binding BEFORE patching so tearDown can restore the
+        # originals (capturing after would save the mocks and re-leak them).
+        import app.modules.workspace.session_access as session_access_mod
+        from app.auth import decorators as auth_dec
         from app.routes import remote as remote_mod
+
+        self._orig_loader = auth_dec._load_user_from_token
+        self._orig_sa_loader = session_access_mod._load_user_from_token
+        self._orig_agent_manager = ram_mod._agent_manager
 
         ram_mod._agent_manager = mgr
 
@@ -52,12 +65,29 @@ class TestCreateRemoteDirectoryRoute(unittest.TestCase):
                     }
             return None
 
-        from app.auth import decorators as auth_dec
-
         auth_dec._load_user_from_token = _mock_load_user
-        remote_mod._load_user_from_token = _mock_load_user
+        # The remote blueprint's before_request resolves the user through
+        # session_access._set_user_from_token, which imported
+        # _load_user_from_token BY VALUE at module load — patch the bound name
+        # there too, or every request still 401s. (remote_mod itself never
+        # imports _load_user_from_token; there is no third binding to patch.)
+        session_access_mod._load_user_from_token = _mock_load_user
         self._auth_dec = auth_dec
+        self._session_access_mod = session_access_mod
         return app
+
+    def tearDown(self):
+        # Sentinel-based guards: the module defaults can legitimately be None
+        # (_agent_manager is), and a truthiness guard would then skip the
+        # restore and leak the mock into the rest of the pytest process.
+        if getattr(self, "_orig_loader", _UNSET) is not _UNSET:
+            self._auth_dec._load_user_from_token = self._orig_loader
+        if getattr(self, "_orig_sa_loader", _UNSET) is not _UNSET:
+            self._session_access_mod._load_user_from_token = self._orig_sa_loader
+        if getattr(self, "_orig_agent_manager", _UNSET) is not _UNSET:
+            import app.modules.workspace.remote_agent_manager as _ram
+
+            _ram._agent_manager = self._orig_agent_manager
 
     def _auth_post(self, client, url, token, **kwargs):
         client.set_cookie("session_token", token)
@@ -185,10 +215,20 @@ class TestCreateRemoteDirectoryRoute(unittest.TestCase):
             self.assertFalse(data["success"])
             self.assertIn("Permission denied", data["error"])
 
-    def test_send_command_failure_returns_500(self):
+    def test_agent_side_failure_returns_200_success_false(self):
         mgr = MagicMock()
         mgr.get_machine.return_value = {"status": "online"}
         mgr.send_command.return_value = False
+        # The route ignores send_command's return entirely: the outcome comes
+        # from the browse result. An agent-side failure payload yields
+        # 200 + success=False (same contract as the permission-denied case).
+        # Note: a False send_command with NO browse result (enqueue failed, no
+        # agent ever replies) is unreachable in this mock — in production that
+        # path hangs ~15s and answers 504 "Timeout" via get_browse_result=None.
+        mgr.get_browse_result.return_value = {
+            "success": False,
+            "error": "Agent failed to create directory",
+        }
         app = self._make_app(mgr)
         with app.test_client() as client:
             resp = self._auth_post(
@@ -197,7 +237,9 @@ class TestCreateRemoteDirectoryRoute(unittest.TestCase):
                 "test-token-1-admin",
                 json={"path": "/tmp/test"},
             )
-            self.assertEqual(resp.status_code, 500)
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertFalse(data["success"])
 
     def test_agent_timeout_returns_504(self):
         mgr = MagicMock()
@@ -301,7 +343,10 @@ class TestAgentCreateDirectory(unittest.TestCase):
         agent._cmd_create_directory({"request_id": "r1", "path": "/nonexistent/path/test"})
         result = self._get_last_send(agent)
         self.assertFalse(result["success"])
-        self.assertIn("Parent directory does not exist", result["error"])
+        # Current semantics: the agent walks up to the nearest existing
+        # ancestor and mkdir -p's from there; only a fully-missing chain
+        # (no existing ancestor at all) errors, with this text.
+        self.assertIn("No existing ancestor directory found", result["error"])
 
     def test_parent_not_directory_returns_error(self):
         with tempfile.NamedTemporaryFile() as f:
@@ -336,15 +381,16 @@ class TestAgentCreateDirectory(unittest.TestCase):
             self.assertFalse(result["success"])
             self.assertIn("Invalid directory name", result["error"])
 
-    def test_already_exists_returns_error(self):
+    def test_already_exists_is_idempotent_success(self):
+        """An existing directory is now success (idempotent create)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             existing = os.path.join(tmpdir, "existing")
             os.makedirs(existing)
             agent = self._make_agent()
             agent._cmd_create_directory({"request_id": "r1", "path": existing})
             result = self._get_last_send(agent)
-            self.assertFalse(result["success"])
-            self.assertIn("already exists", result["error"])
+            self.assertTrue(result["success"])
+            self.assertIn("already exists", result["result"]["message"])
 
     def test_successful_creation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
