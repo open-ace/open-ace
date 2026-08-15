@@ -277,6 +277,12 @@ keyword、security-settings PUT）都属「全局配置写但既无资源 id 又
   webhook / 钉钉配置写。全部先于本系列存在。本 PR 只收口它**已经在动**的 governance.py
   （内容过滤 + security-settings）；跨文件的「全局配置写」一轴留给 #2429 一次扫清，别在本
   PR 里零敲碎打（改一个就得改这一整批，等于把 #2429 提前拆进来）。
+- **policy supersede 的并发裂缝**（评审 R1/R3 两次点名，先于本系列存在）：`create_rule`
+  的 supersede（`repo.py:76` `WHERE rule_key=? AND is_current=?`）与随后的 insert 分处两个
+  事务，且 schema 只有 `UNIQUE(rule_key, version)`——并发双写可能瞬时留下两行 `is_current`
+  分属不同租户，此时 owner 校验的 `fetch_one` 只读到其一、supersede 却顶掉两行。本 PR 的
+  owner 校验相对「原来完全不查」是净改善，但要彻底堵这条竞态需 partial unique index /
+  单事务 supersede——那是 policy 数据模型的活（带迁移），不属本租户边界 PR，记 #2429。
 
 ## 该往哪走
 
