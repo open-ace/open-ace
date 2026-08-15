@@ -274,18 +274,12 @@ def handle(ctx, deps) -> PhaseResult:
             # required checks can never appear, so the merge below can only
             # be rejected and the phase used to retry silently forever.
             # ``zero_check_runs_fallback`` owns the gate (only fires when the
-            # base branch actually requires checks), the bounded cycle
-            # counter, the close+reopen retrigger and the final visible
-            # transient escalation. With check-runs present the same call
-            # just closes out any tracker an earlier episode left open.
-            if not checks:
-                if deps.host.zero_check_runs_fallback(
-                    gh, pr_number, pr_head_sha, base_branch, checks
-                ):
-                    return PhaseResult.retry()
-            elif deps.host.zero_check_runs_fallback(
-                gh, pr_number, pr_head_sha, base_branch, checks
-            ):
+            # base branch actually requires checks), the wall-clock floored
+            # observation window, the close+reopen retrigger and the final
+            # visible transient escalation. With check-runs present the same
+            # call just closes out any tracker an earlier episode left open
+            # (returning False) — one unconditional call, no branching.
+            if deps.host.zero_check_runs_fallback(gh, pr_number, pr_head_sha, base_branch, checks):
                 return PhaseResult.retry()
             failed = _ci_repair_targets(checks)
             if failed:

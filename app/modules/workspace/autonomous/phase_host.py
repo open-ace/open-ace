@@ -158,15 +158,16 @@ class PhaseHost(Protocol):
 
     def zero_check_runs_fallback(self, gh, pr_number, pr_head_sha, base_branch, checks) -> bool:
         """Issue #2673: bounded mechanical fallback for a PR head reporting
-        ZERO check-runs (GitHub event-delivery gap). Persists its cycle
-        counter in a ``pr_zero_check_runs`` milestone, retriggers event
-        delivery via PR close+reopen after
-        ``ZERO_CHECK_RUNS_RETRIGGER_CYCLES`` consecutive zero-check cycles,
-        then escalates a still-zero head as a transient-classified
-        ``GitHubOpsError``. Returns True when it took over the cycle (caller
-        should defer). Stays on the host because the counter/audit state is
-        orchestrator bookkeeping (milestones + events), not a service-owned
-        field.
+        ZERO check-runs (GitHub event-delivery gap). Persists its observation
+        window in a ``pr_zero_check_runs`` milestone (first_seen_at wall-clock
+        floor + cycle counter), retriggers event delivery via PR close+reopen
+        once ``ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR`` elapsed AND
+        ``ZERO_CHECK_RUNS_RETRIGGER_CYCLES`` cycles were observed (retrying a
+        failed reopen via a bounded ``reopen_pending`` state), then escalates
+        a still-zero head as a transient-classified ``GitHubOpsError``.
+        Returns True when it took over the cycle (caller should defer).
+        Stays on the host because the counter/audit state is orchestrator
+        bookkeeping (milestones + events), not a service-owned field.
         """
 
     # ── PR-review-phase helpers (#2044 Phase B T11) ──────────────────────────
