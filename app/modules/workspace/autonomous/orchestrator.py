@@ -1758,8 +1758,49 @@ CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 # the workflow is marked failed for manual intervention.
 TRANSIENT_RETRY_MAX = 6
 
+# Issue #2673: bounded mechanical fallback for a check-gated PR whose head
+# reports ZERO check-runs (GitHub dropped the branch's event delivery).
+# Timing model: the scheduler hot loop is ``self._stop_event.wait(10)`` with
+# no per-phase backoff, so consecutive merge cycles can arrive ~10s apart
+# (especially right after the sync_failed_pr_with_main fresh-push retry). A
+# pure cycle counter would therefore terminally retrigger/escalate a
+# slow-CI-provisioning head within a couple of minutes — a regression vs.
+# the old (recoverable) spin. The PRIMARY gate is thus the WALL-CLOCK
+# observation floor below, persisted per head SHA as ``first_seen_at`` in the
+# tracker milestone; the cycle count is only a secondary debounce on top of
+# it (retrigger requires floor elapsed AND cycles ≥ RETRIGGER_CYCLES).
+ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR = 1200  # seconds (20 minutes)
+ZERO_CHECK_RUNS_RETRIGGER_CYCLES = 2  # secondary signal; floor must ALSO elapse
+# Partial-state cap (#2673 review): after a successful close whose reopen
+# failed, total reopen attempts before the closed-PR state escalates visibly.
+ZERO_CHECK_RUNS_REOPEN_RETRY_MAX = 2
+
 # _TRANSIENT_ORCHESTRATOR_KEYWORDS + _is_transient_git_error moved to
 # constants.py (shared with phases/pr_review.py); re-imported above.
+
+
+def _utcnow() -> datetime:
+    """Patchable UTC clock for the #2673 zero-check-runs state machine.
+
+    Tests freeze this to make the wall-clock observation floor
+    (``ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR``) deterministic.
+    """
+    return datetime.now(timezone.utc)
+
+
+def _parse_iso_utc(value) -> datetime | None:
+    """Best-effort parse of an ISO timestamp from tracker metadata (#2673).
+
+    Naive timestamps are interpreted as UTC; unparsable/missing values
+    return None so callers can fall back to a conservative default.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 # GitHub rejects comment bodies longer than 65536 chars. Agent output (plan /
@@ -7980,6 +8021,460 @@ class AutonomousOrchestrator:
 
     def resolve_merge_conflicts(self, gh, branch_name, pr_number):
         return self._resolve_merge_conflicts(gh, branch_name, pr_number)
+
+    def zero_check_runs_fallback(self, gh, pr_number, pr_head_sha, base_branch, checks):
+        return self._zero_check_runs_fallback(gh, pr_number, pr_head_sha, base_branch, checks)
+
+    def _zero_check_runs_fallback(
+        self, gh, pr_number: int, pr_head_sha: str, base_branch: str, checks: list
+    ) -> bool:
+        """Issue #2673: bounded mechanical fallback for a zero-check-runs PR.
+
+        A GitHub event-delivery gap leaves a PR's head with ZERO check-runs
+        (no push/synchronize events, so ci.yml never runs): required checks
+        can then never appear, ``mergeStateStatus`` stays BLOCKED, and the
+        merge phase used to retry silently forever with no detection, no
+        fallback and no alert (workflow #2550 / PR #2578 spun 4h+).
+
+        State machine, persisted in a ``pr_zero_check_runs`` milestone (no
+        schema change; ``transient_retry_count`` is unusable because
+        advance() resets it on every clean retry) and keyed on the verified
+        head SHA so a new push starts a fresh observation window:
+
+        - zero-check cycles BEFORE the wall-clock observation floor
+          (``ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR``, measured from the persisted
+          ``first_seen_at``): record the observation, defer (retry). The
+          scheduler hot loop (``_stop_event.wait(10)``) has no per-phase
+          backoff, so cycles alone cannot distinguish a slow-CI-provisioning
+          head from an event-delivery gap — only elapsed time can;
+        - floor elapsed AND ``ZERO_CHECK_RUNS_RETRIGGER_CYCLES`` cycles
+          observed: mechanically retrigger event delivery via PR close+reopen
+          (a CI nudge, not a code/PR-content change), audit it (milestone +
+          event), then wait out a fresh floor so the reopened events can
+          provision CI. If the reopen half fails after a successful close,
+          a ``reopen_pending`` tracker state makes the next cycle RETRY the
+          reopen (bounded by ``ZERO_CHECK_RUNS_REOPEN_RETRY_MAX``) instead of
+          the closed-PR guard permanently skipping while the PR stays closed;
+        - retrigger completed and its own observation floor elapsed with
+          still-zero check-runs: raise a transient-classified
+          ``GitHubOpsError`` ("zero check-runs") so advance()'s existing
+          Layer-2 machinery makes the stall VISIBLE (error_message + bounded
+          retries, then a diagnosable failure) instead of silent spinning,
+          and close the tracker milestone (status failed).
+
+        Returns True when the merge cycle should defer to the next scheduler
+        cycle. Returns False when the fallback does not apply (check-runs
+        present — closes out any open tracker; base branch requires no
+        checks; required set unobservable; PR not open; head SHA missing).
+        """
+        head = (pr_head_sha or "").strip()
+        if checks:
+            # Check-runs exist — delivery is healthy. Close out any tracker
+            # an earlier zero-check episode left open so the timeline shows
+            # the episode ended.
+            self._close_zero_check_runs_tracker()
+            return False
+        if not head:
+            return False
+
+        # Zero check-runs is only an incident when the base branch actually
+        # REQUIRES checks — otherwise it is the normal state of a repo with
+        # no CI gating and the merge must proceed untouched. An unobservable
+        # required set degrades to the legacy behaviour (no fallback) rather
+        # than fabricating an incident (#1989 fail-closed spirit).
+        try:
+            protection = gh.get_branch_protection(base_branch)
+            required_contexts = set(
+                ((protection or {}).get("required_status_checks") or {}).get("contexts") or []
+            )
+        except Exception as exc:  # noqa: BLE001 — degrade, never block the merge
+            logger.warning(
+                "Workflow %s: could not resolve required checks for '%s' "
+                "before the zero-check-runs fallback: %s",
+                self._workflow_id[:8],
+                base_branch,
+                exc,
+            )
+            return False
+        if not required_contexts:
+            return False
+
+        tracker, meta, load_ok = self._load_zero_check_runs_tracker()
+        if not load_ok:
+            # The tracker state is unobservable — recording now would create
+            # a SECOND in_progress tracker while the (unread) first one stays
+            # orphaned in the timeline. Defer without recording; the next
+            # cycle re-reads the tracker.
+            logger.warning(
+                "Workflow %s PR #%s: zero-check-runs tracker unobservable; "
+                "deferring without recording to avoid a duplicate tracker",
+                self._workflow_id[:8],
+                pr_number,
+            )
+            return True
+
+        now = _utcnow()
+        if tracker is not None and meta.get("head_sha") == head:
+            cycles = int(meta.get("cycles") or 0)
+            retriggered = bool(meta.get("retriggered"))
+            reopen_pending = bool(meta.get("reopen_pending"))
+            reopen_attempts = int(meta.get("reopen_attempts") or 0)
+            # A pre-floor tracker (no first_seen_at) restarts the observation
+            # floor from now — never retrigger/escalate EARLY.
+            first_seen = _parse_iso_utc(meta.get("first_seen_at")) or now
+            # A retriggered tracker missing retriggered_at falls back to
+            # first_seen (always earlier) — the conservative direction.
+            retriggered_at = _parse_iso_utc(meta.get("retriggered_at")) or first_seen
+        else:
+            # No tracker, or the head moved (new push): fresh window.
+            cycles = 0
+            retriggered = False
+            reopen_pending = False
+            reopen_attempts = 0
+            first_seen = now
+            retriggered_at = now
+        cycles += 1
+        floor_elapsed = (now - first_seen).total_seconds() >= ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR
+        record = {
+            "head_sha": head,
+            "cycles": cycles,
+            "first_seen_at": first_seen.isoformat(),
+            "retriggered": retriggered,
+            "retriggered_at": retriggered_at.isoformat() if retriggered else "",
+            "reopen_pending": reopen_pending,
+            "reopen_attempts": reopen_attempts,
+        }
+
+        if reopen_pending:
+            # A previous cycle closed the PR but the reopen half failed: the
+            # PR is sitting CLOSED with a half-fired retrigger. Retry the
+            # reopen (bounded) instead of letting the closed-PR guard skip
+            # the retrigger forever (#2673 review: partial state).
+            try:
+                pr_state = str((gh.get_pr(pr_number) or {}).get("state") or "").lower()
+            except GitHubOpsError:
+                logger.warning(
+                    "Workflow %s PR #%s: could not read PR state before the "
+                    "zero-check-runs reopen retry; deferring to next cycle",
+                    self._workflow_id[:8],
+                    pr_number,
+                )
+                return True
+            if pr_state == "open":
+                # Reopened out-of-band (manual, or the earlier failure was
+                # spurious): the retrigger is complete — start its floor.
+                record["reopen_pending"] = False
+                record["retriggered"] = True
+                record["retriggered_at"] = now.isoformat()
+                self._record_zero_check_runs_tracker(tracker, record, pr_number=pr_number)
+                logger.info(
+                    "Workflow %s PR #%s: reopen-pending resolved (PR is open "
+                    "again); zero-check-runs retrigger considered complete",
+                    self._workflow_id[:8],
+                    pr_number,
+                )
+                return True
+            if reopen_attempts >= ZERO_CHECK_RUNS_REOPEN_RETRY_MAX:
+                err = GitHubOpsError(
+                    f"PR #{pr_number} head {head} reports zero check-runs and "
+                    f"stays closed: reopen failed after {reopen_attempts} "
+                    f"attempts — GitHub event delivery gap on this branch; "
+                    f"treating as transient infrastructure"
+                )
+                self._finalize_zero_check_runs_tracker(tracker, "failed", str(err))
+                logger.error(
+                    "Workflow %s PR #%s: zero-check-runs reopen retry "
+                    "exhausted (head=%s, attempts=%d) — escalating as "
+                    "transient infrastructure",
+                    self._workflow_id[:8],
+                    pr_number,
+                    head,
+                    reopen_attempts,
+                )
+                raise err
+            try:
+                gh.reopen_pr(pr_number)
+            except GitHubOpsError as exc:
+                record["reopen_attempts"] = reopen_attempts + 1
+                self._record_zero_check_runs_tracker(
+                    tracker, record, pr_number=pr_number, error_message=str(exc)
+                )
+                logger.warning(
+                    "Workflow %s PR #%s: zero-check-runs reopen retry %d "
+                    "failed (%s); deferring to next cycle",
+                    self._workflow_id[:8],
+                    pr_number,
+                    reopen_attempts + 1,
+                    exc,
+                )
+                return True
+            record["reopen_pending"] = False
+            record["retriggered"] = True
+            record["retriggered_at"] = now.isoformat()
+            record["reopen_attempts"] = reopen_attempts + 1
+            self._record_zero_check_runs_tracker(
+                tracker,
+                record,
+                pr_number=pr_number,
+                summary=(
+                    f"Retriggered CI via PR close+reopen " f"(reopen retry {reopen_attempts + 1})"
+                ),
+            )
+            self._emit(
+                "zero_check_runs_retrigger",
+                {
+                    "pr_number": pr_number,
+                    "head_sha": head,
+                    "cycles": cycles,
+                    "action": "reopen_retry",
+                },
+            )
+            logger.warning(
+                "Workflow %s PR #%s: zero-check-runs reopen retry succeeded "
+                "(head=%s) — event delivery retriggered (issue #2673)",
+                self._workflow_id[:8],
+                pr_number,
+                head,
+            )
+            return True
+
+        if retriggered:
+            if (now - retriggered_at).total_seconds() < ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR:
+                # The retrigger fired but its own observation floor has not
+                # elapsed yet — CI provisioning after the reopened events
+                # takes time. Keep observing, do not escalate.
+                self._record_zero_check_runs_tracker(tracker, record, pr_number=pr_number)
+                logger.info(
+                    "Workflow %s PR #%s: zero check-runs after the retrigger "
+                    "(head=%s, cycle=%d) — within the observation floor, "
+                    "deferring",
+                    self._workflow_id[:8],
+                    pr_number,
+                    head,
+                    cycles,
+                )
+                return True
+            # The close+reopen retrigger fired and its observation floor
+            # elapsed — GitHub still reports zero check-runs for this head.
+            # Escalate as transient infrastructure (keyword-matched in
+            # _TRANSIENT_ORCHESTRATOR_KEYWORDS) so advance() retries with
+            # backoff and finally fails visibly; close the tracker so no
+            # in_progress orphan remains.
+            err = GitHubOpsError(
+                f"PR #{pr_number} head {head} reports zero check-runs after a "
+                f"close+reopen retrigger — GitHub event delivery gap on this "
+                f"branch; treating as transient infrastructure"
+            )
+            self._finalize_zero_check_runs_tracker(tracker, "failed", str(err))
+            logger.error(
+                "Workflow %s PR #%s: zero check-runs persisted past the "
+                "mechanical retrigger (head=%s, cycle=%d) — escalating as "
+                "transient infrastructure",
+                self._workflow_id[:8],
+                pr_number,
+                head,
+                cycles,
+            )
+            raise err
+
+        if floor_elapsed and cycles >= ZERO_CHECK_RUNS_RETRIGGER_CYCLES:
+            # Observation floor elapsed AND enough cycles observed: nudge
+            # event delivery via close+reopen. Only meaningful on an open PR
+            # — a closed one falls through to the legacy merge path (its
+            # rejection handles it).
+            try:
+                pr_state = str((gh.get_pr(pr_number) or {}).get("state") or "").lower()
+            except GitHubOpsError:
+                logger.warning(
+                    "Workflow %s PR #%s: could not read PR state before the "
+                    "zero-check-runs retrigger; deferring to next cycle",
+                    self._workflow_id[:8],
+                    pr_number,
+                )
+                return True
+            if pr_state != "open":
+                logger.info(
+                    "Workflow %s PR #%s is %s; skipping zero-check-runs retrigger",
+                    self._workflow_id[:8],
+                    pr_number,
+                    pr_state or "unknown",
+                )
+                return False
+            gh.close_pr(pr_number)
+            try:
+                gh.reopen_pr(pr_number)
+            except GitHubOpsError as exc:
+                # Partial state: the close succeeded but the reopen failed —
+                # the PR is now CLOSED. Record reopen_pending so the next
+                # cycle retries the reopen instead of the closed-PR guard
+                # permanently skipping the retrigger (#2673 review).
+                record["reopen_pending"] = True
+                record["reopen_attempts"] = 1
+                self._record_zero_check_runs_tracker(
+                    tracker, record, pr_number=pr_number, error_message=str(exc)
+                )
+                logger.warning(
+                    "Workflow %s PR #%s: zero-check-runs retrigger closed the "
+                    "PR but the reopen failed (%s) — reopen_pending recorded, "
+                    "retrying next cycle",
+                    self._workflow_id[:8],
+                    pr_number,
+                    exc,
+                )
+                return True
+            record["retriggered"] = True
+            record["retriggered_at"] = now.isoformat()
+            self._record_zero_check_runs_tracker(
+                tracker,
+                record,
+                pr_number=pr_number,
+                summary=f"Retriggered CI via PR close+reopen (cycle {cycles})",
+            )
+            self._emit(
+                "zero_check_runs_retrigger",
+                {
+                    "pr_number": pr_number,
+                    "head_sha": head,
+                    "cycles": cycles,
+                    "action": "close_reopen",
+                },
+            )
+            logger.warning(
+                "Workflow %s PR #%s: head %s has had zero check-runs for %d "
+                "consecutive cycles past the %ds observation floor — "
+                "mechanically retriggered event delivery via PR close+reopen "
+                "(issue #2673)",
+                self._workflow_id[:8],
+                pr_number,
+                head,
+                cycles,
+                ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR,
+            )
+            return True
+
+        # Below the threshold: this may just be slow CI provisioning right
+        # after the push. Record the observation and defer.
+        self._record_zero_check_runs_tracker(tracker, record, pr_number=pr_number)
+        elapsed_s = int((now - first_seen).total_seconds())
+        logger.info(
+            "Workflow %s PR #%s: head %s reports zero check-runs "
+            "(observation %d cycles, %ds/%ds floor elapsed, issue #2673)",
+            self._workflow_id[:8],
+            pr_number,
+            head,
+            cycles,
+            elapsed_s,
+            ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR,
+        )
+        return True
+
+    def _load_zero_check_runs_tracker(self) -> tuple[dict | None, dict, bool]:
+        """Return (latest open pr_zero_check_runs milestone, parsed metadata,
+        load_ok).
+
+        ``load_ok`` is False when the milestone list itself failed: callers
+        must then NOT record (a create would orphan the unread tracker).
+        """
+        try:
+            milestones = self.repo.list_milestones(
+                self._workflow_id, phase="merge", status="in_progress"
+            )
+        except Exception as exc:  # noqa: BLE001 — degrade, never block the merge
+            logger.warning(
+                "Workflow %s: could not list milestones for the zero-check-runs " "tracker: %s",
+                self._workflow_id[:8],
+                exc,
+            )
+            return None, {}, False
+        for ms in reversed(milestones or []):
+            if ms.get("milestone_type") != "pr_zero_check_runs":
+                continue
+            try:
+                meta = json.loads(ms.get("metadata") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                meta = {}
+            return ms, meta if isinstance(meta, dict) else {}, True
+        return None, {}, True
+
+    def _record_zero_check_runs_tracker(
+        self,
+        tracker: dict | None,
+        record: dict,
+        *,
+        pr_number: int,
+        summary: str = "",
+        error_message: str = "",
+    ) -> None:
+        """Create/update the pr_zero_check_runs milestone (audit + state).
+
+        ``record`` is the full tracker metadata dict (head_sha, cycles,
+        first_seen_at, retriggered, retriggered_at, reopen_pending,
+        reopen_attempts).
+        """
+        metadata = json.dumps(record)
+        dev_round = int((self.workflow or {}).get("dev_round", 1) or 1)
+        if tracker is not None:
+            updates: dict = {"metadata": metadata}
+            if summary:
+                updates["result_summary"] = summary
+            if error_message:
+                updates["error_message"] = error_message
+            self.repo.update_milestone(tracker.get("milestone_id", ""), updates)
+            return
+        kwargs = {
+            "workflow_id": self._workflow_id,
+            "phase": "merge",
+            "milestone_type": "pr_zero_check_runs",
+            "status": "in_progress",
+            "dev_round": dev_round,
+            "github_pr_number": pr_number,
+            "title": f"PR #{pr_number} head reports zero check-runs (issue #2673)",
+            "metadata": metadata,
+        }
+        if summary:
+            kwargs["result_summary"] = summary
+        if error_message:
+            kwargs["error_message"] = error_message
+        ms = self.repo.create_milestone(kwargs)
+        self._emit(
+            "milestone_created",
+            {
+                "milestone_id": (ms or {}).get("milestone_id", ""),
+                "milestone_type": "pr_zero_check_runs",
+                "title": kwargs["title"],
+            },
+        )
+
+    def _finalize_zero_check_runs_tracker(
+        self, tracker: dict | None, status: str, error_message: str = ""
+    ) -> None:
+        """Terminal close of the tracker on the escalation path (#2673).
+
+        Update-only: with no loaded tracker there is nothing to close (the
+        caller defers instead of recording when the load failed).
+        """
+        if tracker is None:
+            return
+        updates = {
+            "status": status,
+            "result_summary": ("Zero-check-runs episode escalated as transient infrastructure"),
+        }
+        if error_message:
+            updates["error_message"] = error_message
+        self.repo.update_milestone(tracker.get("milestone_id", ""), updates)
+
+    def _close_zero_check_runs_tracker(self) -> None:
+        """Complete an open tracker when check-runs appear again (#2673)."""
+        tracker, _meta, load_ok = self._load_zero_check_runs_tracker()
+        if not load_ok or tracker is None:
+            return
+        self.repo.update_milestone(
+            tracker.get("milestone_id", ""),
+            {
+                "status": "completed",
+                "result_summary": "Check-runs appeared; zero-check-runs episode ended",
+            },
+        )
 
     # --- PhaseHost pr_review-phase helpers (#2044 Phase B T11) ---
     # Thin public aliases over the orchestrator-private underscore helpers so
