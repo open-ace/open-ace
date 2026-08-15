@@ -213,6 +213,7 @@ psql -d ace_repro -tc "select status, paused_at from autonomous_workflows"
 ```
 
 Expected: `developing | `（未被暂停）——修复前同场景必 paused。
+（注意：本场景只验证层①；层②由 Task 2 单测覆盖——双 create_app 均为 TESTING 路径。）
 
 - [ ] **Step 3: 本地相关单测回归**
 
@@ -233,7 +234,7 @@ dropdb ace_repro
 ### Task 4: PR 与合并
 
 - [ ] 建 GitHub issue（ghost-pause 事故记录，含调用栈证据）
-- [ ] push 分支、开 PR（正文含事故摘要；**不用** `Closes #N` 关键词以外的自动关闭陷阱措辞——如需关 issue 用显式 `Fixes #N`）
+- [ ] push 分支、开 PR（正文含事故摘要；如需关联 issue 用显式 `Fixes #N`，其余措辞避免无意触发 GitHub auto-close）
 - [ ] 独立 agent 审查 `gh pr diff`（requesting-code-review 流程）至 CLEAN
 - [ ] 等 5 个 required checks 全绿（lint / test(3.10/3.11/3.12) / build）
 - [ ] `gh pr merge <N> --merge --delete-branch`

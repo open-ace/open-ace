@@ -52,7 +52,7 @@ create_app({'TESTING': True})
 `init_autonomous_scheduler()`（现有 test_scheduler_guard 等即如此），
 不提供逃生门环境变量。
 
-### 改动 2（纵深）：`agent_runner.py::_build_env` 剔除 SCHEDULER_MODE
+### 改动 2（纵深）：`agent_runner.py::_build_agent_env` 剔除 SCHEDULER_MODE
 
 在现有 `env.pop("SKIP", None)`（同样是"服务级 env 不进 agent"的先例）
 旁增加 `env.pop("SCHEDULER_MODE", None)`，注释说明：进程拓扑不得泄漏进
