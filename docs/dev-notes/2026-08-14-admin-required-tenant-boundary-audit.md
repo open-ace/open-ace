@@ -2,6 +2,11 @@
 
 配套 PR 修的是**跨租户账号接管**。这份笔记记录顺带做完的全量审计，给后续 PR 留工作清单。
 
+> **2026-08-15 更新**：下面「剩余 6 个」以及从请求里取租户的那批，已由 follow-up
+> PR（`fix/p0-remaining-tenant-scoped-endpoints`）全部修完。落地时又发现两处**同类
+> 但两轮枚举都漏掉的洞**（见 [§ follow-up 落地](#follow-up-落地2026-08-15)），一并
+> 收进同一 PR 以免修一半。
+
 ## 洞是什么
 
 `admin_required` 认证 `admin` / `platform_admin` / `tenant_admin` 三种角色并写入
@@ -91,7 +96,7 @@ legacy `admin` 行就会突然失去保护，等于「开了更严的开关反�
 也就是说「9 个用户端点现在都受控」是对的，但其中只有 **7 个**是本次加的装饰器，
 另外 2 个是沿用既有的手写校验（重复实现，将来值得合并到同一个装饰器）。
 
-### 剩余 6 个：有资源 id 且完全没有租户处理
+### 剩余 6 个：有资源 id 且完全没有租户处理（✅ follow-up PR 已修）
 
 带路径参数的 `@admin_required` 路由共 **29** 个（第一版这里写 24 是错的：用正则枚举
 时只匹配了固定的几个 id 名，漏掉了 `<int:id>` / `<sender_name>` / `<rule_key>` 这些
@@ -186,6 +191,66 @@ GET，于是每刷一次就多一行审计。这是刻意保留的——「谁�
 过滤，这份审计没有逐个核实 repo——那是 #2429 数据层收敛的范围，而且报告已经点明
 根因：**26 个 repository 里 11 个完全没有 tenant_id 概念，隔离靠「记得调对装饰器」，
 不是靠架构**。逐端点补装饰器只能压住症状。
+
+## follow-up 落地（2026-08-15）
+
+follow-up PR 收口了「剩余 6 个」和「从请求里取租户」两批，共触及三个蓝图。
+
+### 新复用件
+
+`app/auth/decorators.py::enforce_resource_tenant_scope(resource_tenant_id)`——
+按**资源自己的租户**（先从仓储反查）判断当前 admin 能不能动它。与
+`enforce_requested_tenant_scope` 的关键区别：那里 `None` 表示「没点名租户」会收敛到
+调用者自己的租户；这里 `None` 表示**资源本身是全局的**，租户管理员必须**拒**而不是
+被悄悄改写租户——否则租户管理员就能改一条治所有租户的规则。等价于
+`enforce_target_user_tenant` 的租户那半段（NULL→拒），但没有纵向角色判断（这些资源不
+带角色，接管它不继承任何账号权限）。平台管理员放行并写跨租户审计。
+
+### 按资源反查 owner 再比对
+
+| 端点 | 反查路径 | 说明 |
+|---|---|---|
+| `policy.py` `PATCH /policy/rules/<rule_id>/enabled` | `get_rule(id).tenant_id` | 全局规则(None)对租户管理员=拒；查不到=拒(fail closed，无存在性 oracle) |
+| `policy.py` `PUT /policy/rules/<rule_key>` | `get_current_rule_by_key(key).tenant_id` | supersede 的 UPDATE 只按 rule_key，会顶掉当前 owner，故先校验既有版本；**新版本**的 scope 再走 `enforce_requested_tenant_scope`，租户管理员不能建全局/别租户规则 |
+| `policy.py` `POST /policy/rules` | —（新建） | 两轮枚举都漏了：body 的 `tenant_id` 走 `_parse_rule_body` 间接读，正则没跟进去。同 update 一样收敛新版本 scope |
+| `governance.py` `POST /quota/alerts/<id>/acknowledge` | `get_alert(id).user_id` → `user.tenant_id` | `quota_alerts` 无租户列但 `user_id NOT NULL`；alert/user 任一查不到=拒 |
+| `compliance.py` `GET /reports/<report_id>` | `get_saved_report(id).metadata.tenant_id` | 单条读；列表侧 `/reports/saved` 上个 PR 已收紧 |
+
+新增仓储方法：`PolicyRepository.get_current_rule_by_key`、`QuotaManager.get_alert`。
+
+### 全局表 → 收成 `platform_admin_required`
+
+`content_filter_rules` 一列租户都没有，`add_custom_pattern`/`add_custom_keyword` 也不带
+租户参数——整个内容过滤特性在设计上就是全局的。改一条会影响所有租户，本就不该是租户级
+权限。故把它的**全部 5 个写端点**收成平台管理员专属（`admin_required` →
+`platform_admin_required`）：`POST /content/filter/patterns`、
+`POST /content/filter/keywords`、`POST /filter-rules`、`PUT /filter-rules/<id>`、
+`DELETE /filter-rules/<id>`。读端点（list/stats/check）不动。
+
+其中 `POST /content/filter/patterns`、`/keywords`、`POST /filter-rules` 三个是**第二处
+两轮都漏的洞**：它们既没有路径资源 id，又不从请求读 `tenant_id`，所以「按资源 id 枚举」
+和「按 `data.get('tenant_id')` 枚举」都扫不到。只锁 PUT/DELETE 而留着 create 是不自洽的
+（建一条 `effect=deny` 的全局规则比改一条更危险），故一并收口。
+
+### 一致性收敛
+
+`compliance.py::generate_report` 的租户管理员分支原来点名别的租户时只记日志、仍返回**自己
+租户**的报告（不是泄露，但和刚收紧的 list/单读兄弟端点行为不一致）。改成点名别人=403，
+整个 compliance 面统一。
+
+### 验证
+
+新增 `tests/integration/test_admin_cross_tenant_followup.py`（48 项），覆盖每个端点的
+「租户管理员拒 / 平台管理员放行 / fail-closed / 无 oracle」四类，平台管理员跨租户放行处
+断言写了审计。8 处守卫逐一 source-mutation：破一个必挂一条具名测试（全部 CAUGHT）。
+
+### 仍未动（范围外，记账）
+
+- `remote.py:1043 assign_user`——非角色的跨租户路径（把 A 租户的普通用户设成 B 租户机器
+  管理员）。`role='user'` 所以 `is_platform_level_role` 保护不到，先于本系列存在。
+- **list/聚合端点靠仓储过滤**的那批（`GET /quota/alerts`、`GET /quota/status/all` 等）：
+  底层 repo 没按 `g.tenant_id` 过滤，属 #2429 数据层收敛，不是逐端点补装饰器能治的。ack
+  端点已按资源收口，但同特性的 list 侧读泄露仍在该边界内。
 
 ## 该往哪走
 

@@ -18,7 +18,11 @@ import re
 
 from flask import Blueprint, jsonify, request
 
-from app.auth.decorators import admin_required
+from app.auth.decorators import (
+    admin_required,
+    enforce_requested_tenant_scope,
+    enforce_resource_tenant_scope,
+)
 from app.modules.policy.cache import invalidate_policy_rule_cache
 
 logger = logging.getLogger(__name__)
@@ -134,9 +138,18 @@ def create_policy_rule():
     from app.modules.policy.repo import PolicyRepository
 
     data = request.get_json(silent=True) or {}
+    # A rule's tenant_id is a scope field: which tenant the rule governs. A
+    # tenant admin may only author rules for its own tenant and never a global
+    # (tenant_id=None) rule that would govern everyone; a platform admin may
+    # target any tenant. Resolve the effective scope from the request rather
+    # than trusting the body.
+    scoped_tenant_id, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+    if denial is not None:
+        return denial
     fields, err = _parse_rule_body(data)
     if err:
         return jsonify({"error": err}), 400
+    fields["tenant_id"] = scoped_tenant_id
     fields["created_by"] = g_user_id()
     rule = PolicyRepository().create_rule(**fields)
     invalidate_policy_rule_cache()
@@ -154,13 +167,28 @@ def update_policy_rule(rule_key: str):
     """
     from app.modules.policy.repo import PolicyRepository
 
+    repo = PolicyRepository()
+    # Superseding a key rewrites whichever tenant currently owns it (the
+    # supersede UPDATE is keyed on rule_key alone), so first confirm the caller
+    # may touch the existing version. A missing key is a create and skips this.
+    current = repo.get_current_rule_by_key(rule_key)
+    if current is not None:
+        denial = enforce_resource_tenant_scope(current.tenant_id)
+        if denial is not None:
+            return denial
+
     data = request.get_json(silent=True) or {}
     data["rule_key"] = rule_key
+    # Confine the new version's scope the same way create does.
+    scoped_tenant_id, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+    if denial is not None:
+        return denial
     fields, err = _parse_rule_body(data)
     if err:
         return jsonify({"error": err}), 400
+    fields["tenant_id"] = scoped_tenant_id
     fields["created_by"] = g_user_id()
-    rule = PolicyRepository().create_rule(**fields)
+    rule = repo.create_rule(**fields)
     invalidate_policy_rule_cache()
     logger.info("Policy rule updated: %s v%d", rule.rule_key, rule.version)
     return jsonify({"success": True, "rule": rule.to_dict()})
@@ -172,10 +200,19 @@ def toggle_policy_rule(rule_id: int):
     """Toggle enabled on the current version of a rule."""
     from app.modules.policy.repo import PolicyRepository
 
+    repo = PolicyRepository()
+    # Resolve the rule's owning tenant before touching it. Passing None for a
+    # missing rule denies a tenant admin (fail closed) and gives no existence
+    # oracle; a platform admin falls through to the same 404 as before.
+    rule = repo.get_rule(rule_id)
+    denial = enforce_resource_tenant_scope(rule.tenant_id if rule else None)
+    if denial is not None:
+        return denial
+
     data = request.get_json(silent=True) or {}
     if "enabled" not in data:
         return jsonify({"error": "enabled is required"}), 400
-    updated = PolicyRepository().set_rule_enabled(rule_id, bool(data["enabled"]))
+    updated = repo.set_rule_enabled(rule_id, bool(data["enabled"]))
     if not updated:
         return jsonify({"error": "Rule not found or not current"}), 404
     invalidate_policy_rule_cache()
