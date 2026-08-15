@@ -16,9 +16,10 @@ Open ACE - Issue #165: 远程会话管理与体验完善 E2E Test
   B3: 永久权限允许 UI — 权限面板
   B6: 错误消息国际化 — 中英文错误展示
 
-Run:
-  HEADLESS=true  python tests/165/test_remote_session_ux.py
-  HEADLESS=false python tests/165/test_remote_session_ux.py
+Run (via the lane runner, which starts the isolated server):
+  python scripts/run_extended_tests.py --category issues --issue-numbers 165
+  # direct script mode (requires a server at BASE_URL with admin/admin123):
+  HEADLESS=true  python tests/issues/165/test_remote_session_ux.py
 """
 
 import json
@@ -33,6 +34,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 import contextlib
 
+import pytest
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -40,12 +42,14 @@ from playwright.sync_api import sync_playwright
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:3000")
-TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
+# The lane seeds only admin/admin123; test_user never existed there.
+TEST_USER = os.environ.get("TEST_REAL_USER", "admin")
 TEST_PASS = "admin123"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-165")
 
 # ── 全局状态 ──
 machine_id = None
+agent_bearer = None
 session_id = None
 auth_token = None
 admin_token = None
@@ -97,8 +101,39 @@ def api_admin_login():
     return api_login_as("admin", "admin123")
 
 
+def api_seed_model_key(atoken):
+    """Seed an API key whose cli_settings advertise qwen3-coder-plus.
+
+    create_remote_session's HA-pool gate rejects a model that no active
+    api_key_store row advertises (remote_session_manager "Requested model %s
+    is not supported by remote HA pool") — the lane DB starts with zero keys.
+    """
+    r = requests.post(
+        f"{BASE_URL}/api/api-keys",
+        json={
+            "provider": "openai",
+            "key_name": "e2e-165-model-key",
+            "api_key": "sk-e2e-165-placeholder-key-000000000000",
+            "tenant_id": 1,
+            "scope": "shared",
+            "cli_tools": json.dumps(["qwen-code"]),
+            "cli_settings": json.dumps(
+                {
+                    "qwen-code": {
+                        "modelProviders": {
+                            "openai": [{"id": "qwen3-coder-plus", "name": "qwen3-coder-plus"}]
+                        }
+                    }
+                }
+            ),
+        },
+        cookies={"session_token": atoken},
+    )
+    assert r.status_code == 200, f"Seed api key failed: {r.status_code} {r.text[:200]}"
+
+
 def api_register_machine(atoken):
-    global machine_id
+    global machine_id, agent_bearer
     r = requests.post(
         f"{BASE_URL}/api/remote/machines/register",
         json={"tenant_id": 1},
@@ -122,6 +157,10 @@ def api_register_machine(atoken):
         },
     )
     assert r.status_code == 200
+    # The registration issues a Bearer token; every /agent/message call other
+    # than "register" must present it (Bearer enforcement, agent_tokens table).
+    agent_bearer = r.json()["machine"].get("agent_token")
+    assert agent_bearer, "No agent_token in register response"
 
     r = requests.post(
         f"{BASE_URL}/api/remote/agent/message",
@@ -133,9 +172,12 @@ def api_register_machine(atoken):
     )
     assert r.status_code == 200
 
+    # Assign to the admin (user_id 1 in the lane seed). The create-session
+    # caller is platform_admin and bypasses the assignment check, but keep the
+    # row consistent with the actual test user (the old 89 was a phantom).
     r = requests.post(
         f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
-        json={"user_id": 89, "permission": "admin"},
+        json={"user_id": 1, "permission": "admin"},
         cookies={"session_token": atoken},
     )
     assert r.status_code == 200
@@ -179,6 +221,7 @@ def api_agent_output(data_str, stream="stdout", is_complete=False, sid=None):
             "stream": stream,
             "is_complete": is_complete,
         },
+        headers={"Authorization": f"Bearer {agent_bearer}"},
     )
     return r.status_code == 200
 
@@ -192,21 +235,26 @@ def api_agent_permission_request(control_request_dict, sid=None):
             "session_id": sid or session_id,
             "control_request": control_request_dict,
         },
+        headers={"Authorization": f"Bearer {agent_bearer}"},
     )
     return r.status_code == 200
 
 
 def api_send_usage(sid=None, tokens=None, requests_count=1):
     tokens = tokens or {"input": 1000, "output": 500}
+    # report_id is mandatory since the legacy migration window expired
+    # (2026-08-04): report_id-less payloads are rejected with 400.
     r = requests.post(
         f"{BASE_URL}/api/remote/agent/message",
         json={
             "type": "usage_report",
             "machine_id": machine_id,
             "session_id": sid or session_id,
+            "report_id": f"e2e-165-{uuid.uuid4()}",
             "tokens": tokens,
             "requests": requests_count,
         },
+        headers={"Authorization": f"Bearer {agent_bearer}"},
     )
     return r.status_code == 200
 
@@ -260,6 +308,7 @@ def api_get_pending_commands():
             "status": "busy",
             "active_sessions": 1,
         },
+        headers={"Authorization": f"Bearer {agent_bearer}"},
     )
     assert r.status_code == 200
     return r.json().get("pending_commands", [])
@@ -344,6 +393,50 @@ def _open_chatpage(page, webui_url, webui_token, **extra_params):
         params.append(f"&{k}={v}")
     chat_url = f"{webui_url}/projects{''.join(params)}"
     page.goto(chat_url, wait_until="domcontentloaded", timeout=30000)
+
+
+# ══════════════════════════════════════════════════════
+#  pytest 收集路径下的 setup（main() runner 之外）
+# ══════════════════════════════════════════════════════
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _lane_setup():
+    """Replicate main()'s setup under pytest collection.
+
+    Login (the lane seeds only admin/admin123 — test_user never existed),
+    clear the seeded must_change_password flag, register the test machine,
+    and start the shared browser the UI tests drive.
+    """
+    global admin_token, auth_token, machine_id, _browser, _context, _page
+    import sqlite3
+
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if os.path.exists(db_path):
+        conn = sqlite3.connect(db_path)
+        try:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+            if "must_change_password" in cols:
+                conn.execute("UPDATE users SET must_change_password=0 WHERE username='admin'")
+                conn.commit()
+        finally:
+            conn.close()
+
+    admin_token = api_admin_login()
+    auth_token = api_admin_login()
+    api_seed_model_key(admin_token)
+    api_register_machine(admin_token)
+
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        _browser = p.chromium.launch(headless=HEADLESS)
+        _context = _browser.new_context(viewport={"width": 1440, "height": 900}, locale="zh-CN")
+        _page = _context.new_page()
+        _page.set_default_timeout(30000)
+        _browser_login(_page)
+        yield
+        _browser.close()
 
 
 # ══════════════════════════════════════════════════════
@@ -1017,6 +1110,7 @@ def run_tests():
     # 登录 + 注册机器
     admin_token = api_admin_login()
     auth_token = api_login_as()
+    api_seed_model_key(admin_token)
     api_register_machine(admin_token)
     print(f"  ✓ Machine registered: {machine_id[:8]}...")
 
