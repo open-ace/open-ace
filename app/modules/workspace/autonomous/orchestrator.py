@@ -6290,6 +6290,47 @@ class AutonomousOrchestrator:
             logger.debug("prior verdict carry-forward failed: %s", e)
             return ExecutionVerdict.NOT_RUN, f"carry-forward failed: {e}"
 
+    def _structured_failure_repair_feedback(
+        self, structured_reason: str, evidences: list, test_summary: str
+    ) -> str:
+        """Build the #2590 dev-repair round's failure context (user_feedback).
+
+        The test retries re-ran the failing tests but never routed the output
+        back into development; this payload does. Composed from the structured
+        per-command verdicts (framework + counts) plus an excerpt of the test
+        agent's report — the structured rows keep counts, not excerpts, so the
+        raw failing output only survives in the report text. Persisted on the
+        workflow as ``user_feedback`` because the dev prompt already surfaces
+        that field (``_get_user_feedback_prompt``) and clears it after the
+        round, so no new plumbing is needed.
+        """
+        lines = [
+            "#2590 测试修复轮：测试重试已耗尽，且结构化证据判定测试命令真实失败"
+            f"（{structured_reason}）。",
+            "请先根据以下失败信息修复测试或修复被测试暴露的产品代码，"
+            "再重新执行验证；不得跳过测试或改写断言来让测试通过。",
+        ]
+        failed_lines = []
+        for evidence in evidences or []:
+            if getattr(evidence, "verdict", "") != ExecutionVerdict.FAILED.value:
+                continue
+            counts = f"passed={evidence.passed}, failed={evidence.failed}"
+            if evidence.errors:
+                counts += f", errors={evidence.errors}"
+            failed_lines.append(
+                f"- 失败的测试命令证据（framework={evidence.framework or 'unknown'}，{counts}）"
+            )
+        if failed_lines:
+            lines.extend(failed_lines)
+        else:
+            # Carry-forward (#2590 Option A) leaves the current milestone's
+            # evidence list empty — the verdict came from the prior milestone.
+            lines.append("- （本轮无结构化失败行，失败详情见下方测试报告摘录）")
+        lines.append("")
+        lines.append("### 测试阶段报告摘录（截断至 6000 字符）")
+        lines.append((test_summary or "")[:6000])
+        return "\n".join(lines)
+
     def _emit_structured_test_fallback(
         self,
         verdict: ExecutionVerdict,
@@ -10759,6 +10800,61 @@ class AutonomousOrchestrator:
             test_retries = int(wf.get("test_retries", 0) or 0) + 1
             if test_retries <= MAX_TEST_RETRIES:
                 self._update_workflow({"test_retries": test_retries})
+                return
+            # #2590: a decisive structured FAILED at test-retry exhaustion is a
+            # fixable defect, not an evidence gap. The retries (fresh sessions
+            # since #2663) only re-ran the same failing tests — nobody routed
+            # the failure output back into development, so the workflow went
+            # terminal without a single repair attempt. An inconclusive run
+            # keeps the terminal path below (nothing actionable to hand a dev
+            # round); a structured FAILED enters a dev-repair round exactly
+            # like Situation B ([UNFIXABLE]): same dev_retries_on_test_fail
+            # counter and cap, one dev_round bump, and the failing output
+            # persisted as user_feedback so the dev prompt
+            # (_get_user_feedback_prompt) starts from "these tests failed
+            # with this output, fix them" instead of a blank slate.
+            if structured_verdict == ExecutionVerdict.FAILED:
+                dev_retries = int(wf.get("dev_retries_on_test_fail", 0) or 0) + 1
+                if dev_retries <= MAX_DEV_RETRIES_ON_TEST_FAIL:
+                    logger.warning(
+                        "Structured test failures survived %d test retries, starting "
+                        "dev-repair round %d (retry %d/%d)",
+                        MAX_TEST_RETRIES,
+                        dev_round + 1,
+                        dev_retries,
+                        MAX_DEV_RETRIES_ON_TEST_FAIL,
+                    )
+                    prior_feedback = (wf.get("user_feedback") or "").strip()
+                    feedback = self._structured_failure_repair_feedback(
+                        structured_reason, _structured_evidences, test_summary
+                    )
+                    if prior_feedback:
+                        feedback = f"{prior_feedback}\n\n{feedback}"
+                    self._update_workflow(
+                        {
+                            "dev_round": dev_round + 1,
+                            "dev_retries_on_test_fail": dev_retries,
+                            # Fresh test budget for the repaired code: with the
+                            # counter left exhausted, the new round's first
+                            # inconclusive/FAILED would skip test retries
+                            # entirely and burn a dev round on a run the test
+                            # agent could have settled itself.
+                            "test_retries": 0,
+                            "user_feedback": feedback,
+                        }
+                    )
+                    return
+                self._update_workflow(
+                    {
+                        "status": "failed",
+                        "error_message": (
+                            f"Tests failed: structured evidence reports a failing test "
+                            f"command, and no conclusive passing rerun superseded it "
+                            f"(after {MAX_TEST_RETRIES} test retries and "
+                            f"{MAX_DEV_RETRIES_ON_TEST_FAIL} dev-repair retries)"
+                        ),
+                    }
+                )
                 return
             self._update_workflow({"status": "failed", "error_message": message})
             return
