@@ -153,78 +153,6 @@
       "summary": "failed on setup with \"AssertionError\""
     },
     {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "165",
-      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_a1_token_detail",
-      "outcome": "failure",
-      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "165",
-      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_a2_system_message_storage",
-      "outcome": "failure",
-      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "165",
-      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_a3_request_count_no_double_count",
-      "outcome": "failure",
-      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "165",
-      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_a4_abort_request",
-      "outcome": "failure",
-      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "165",
-      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_a5_allow_permanent",
-      "outcome": "failure",
-      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "165",
-      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_a6_quota_exceeded_detection",
-      "outcome": "failure",
-      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "165",
-      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_b1_reconnect_history",
-      "outcome": "failure",
-      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "165",
-      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_b2_abort_ui",
-      "outcome": "failure",
-      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "165",
-      "nodeid": "tests/issues/165/test_remote_session_ux.py::test_b3_permission_permanent_ui",
-      "outcome": "failure",
-      "summary": "AssertionError: Create session failed: 401 {\"error\":\"Authentication required\"}"
-    },
-    {
       "category": "setup_error",
       "exception_type": "",
       "issue_number": "166",
@@ -1067,8 +995,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-15 prune 11 resolved issue-584 remote-directory entries: stale expectations. (a) the remote blueprint's before_request resolves the user via session_access._set_user_from_token whose _load_user_from_token was imported BY VALUE — the fixture now patches that binding (remote_mod itself never imports it), with a tearDown capturing originals BEFORE patching and restoring auth_dec + session_access loaders and remote_agent_manager._agent_manager (no cross-test leak); (b) agent create-directory semantics drifted: existing dir = idempotent success, missing parent walks to the nearest ancestor, False send_command no longer 500s (outcome from browse result; enqueue-failure with no reply yields 504-by-timeout in production). Negative control: dropping the session_access patch re-fails with 401. Shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31861753845",
+    "prune_note": "2026-08-15 prune 9 resolved issue-165 remote-session e2e entries: stale setup/auth. (a) main()-only runner setup never executed under pytest collection — module-scoped autouse fixture now does lane setup (must_change_password clear, admin login, machine register+assign user_id 1); (b) HA-pool gate requires an api_key_store row advertising the model — fixture seeds qwen3-coder-plus via /api/api-keys; (c) /agent/message needs the agent Bearer token from registration; usage_report needs report_id (legacy window expired 2026-08-04). Negative control: removing the key-seed call re-fails all 9 with the original 400. Shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31878610663",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
