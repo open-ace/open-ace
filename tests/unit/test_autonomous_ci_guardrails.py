@@ -356,6 +356,35 @@ def test_agent_env_scrubs_scheduler_mode(monkeypatch, tmp_path):
     assert "SCHEDULER_MODE" not in env
 
 
+@pytest.mark.regression
+@pytest.mark.issue(2680)
+def test_agent_env_scrubs_anthropic_auth_token(monkeypatch, tmp_path):
+    """#2680 跟进：ANTHROPIC_AUTH_TOKEN（Claude Code 实际认证变量）必须剥离。"""
+    from app.modules.workspace.autonomous import agent_runner
+
+    guard_dir = tmp_path / "agent-bin"
+    guard_dir.mkdir()
+    for name in agent_runner._AGENT_GUARD_EXECUTABLES:
+        guard = guard_dir / name
+        guard.write_text("#!/bin/sh\n", encoding="utf-8")
+        guard.chmod(0o755)
+    monkeypatch.setattr(agent_runner, "_OPENACE_AGENT_GUARD_BIN", str(guard_dir))
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "sk-raw-token-leak-probe")
+
+    adapter = MagicMock()
+    adapter.get_env_vars.return_value = {}
+    env = agent_runner.AutonomousAgentRunner._build_agent_env(
+        adapter,
+        "claude-code",
+        None,
+        "session",
+        "",
+        [sys.executable],
+    )
+
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+
+
 def test_agent_guard_bin_falls_back_to_source_when_install_is_incomplete(monkeypatch, tmp_path):
     from pathlib import Path
 

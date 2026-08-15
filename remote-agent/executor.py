@@ -966,6 +966,7 @@ class ProcessExecutor:
             Dict of environment variable name -> value.
         """
         env = dict(os.environ)
+        env.pop("SCHEDULER_MODE", None)  # topology must not reach CLI subprocesses (#2680)
 
         # Build the proxy URL that the CLI should use as its API base
         proxy_url = f"{self.server_url}/api/remote/llm-proxy"
