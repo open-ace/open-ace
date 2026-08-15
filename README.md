@@ -186,6 +186,8 @@ python3 server.py
 # 访问 http://localhost:19888
 ```
 
+> 💡 直接 `python3 server.py` 启动时，若未显式设置 `OPENACE_ENCRYPTION_KEY`，开发/试用模式下会在首次启动自动生成并持久化到 `~/.open-ace/generated-secrets.env`（重启复用、不轮转；生产模式仍要求显式设置），与 Docker 路径的零配置行为一致（Issue #2667）。
+
 ### 默认账号
 
 | 角色 | 用户名 | 密码 |
@@ -509,6 +511,8 @@ python3 server.py
 
 # Visit http://localhost:19888 (AI + ace mnemonic port)
 ```
+
+> 💡 When starting directly via `python3 server.py` without an explicit `OPENACE_ENCRYPTION_KEY`, development/pilot mode auto-generates and persists it to `~/.open-ace/generated-secrets.env` on first startup (reused across restarts, never rotated; production still requires explicit values) — matching the Docker path's zero-config behavior (Issue #2667).
 
 ### Default Credentials
 

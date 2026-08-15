@@ -75,9 +75,7 @@ class TestFailurePaths:
         with (
             _mock_auth(),
             _proxy_class_raising(
-                RuntimeError(
-                    "OPENACE_ENCRYPTION_KEY not set in development mode."
-                )
+                RuntimeError("OPENACE_ENCRYPTION_KEY not set in development mode.")
             ),
         ):
             resp = client.get("/api/autonomous/models?tool=claude-code")
@@ -134,8 +132,7 @@ class TestSuccessPaths:
                 {
                     "models": [],
                     "empty_reason": (
-                        "No active claude-code API keys configured "
-                        "for scope 'local'"
+                        "No active claude-code API keys configured " "for scope 'local'"
                     ),
                 }
             ),
@@ -153,9 +150,7 @@ class TestSuccessPaths:
             _mock_auth(),
             _proxy_returning(
                 {
-                    "models": [
-                        {"name": "claude-sonnet-4-6", "id": "claude-sonnet-4-6"}
-                    ],
+                    "models": [{"name": "claude-sonnet-4-6", "id": "claude-sonnet-4-6"}],
                     "empty_reason": None,
                 }
             ),
@@ -182,3 +177,24 @@ class TestSuccessPaths:
         data = resp.get_json()
         assert data["success"] is True
         assert "empty_reason" in data
+
+
+class TestCrossRouteConsistency:
+    def test_api_keys_route_same_failure_is_also_5xx(self):
+        """/api/api-keys and /api/autonomous/models must agree on the same
+        APIKeyProxyService construction failure (#2667 acceptance): both are
+        server errors, not a success-with-empty-list."""
+        from app import create_app
+
+        app = create_app({"TESTING": True, "PROPAGATE_EXCEPTIONS": False})
+        with app.test_client() as c:
+            c.set_cookie("session_token", "test-token")
+            with (
+                _mock_auth(),
+                patch(
+                    "app.routes.api_keys.get_api_key_proxy_service",
+                    side_effect=RuntimeError("OPENACE_ENCRYPTION_KEY not set in development mode."),
+                ),
+            ):
+                resp = c.get("/api/api-keys?tenant_id=1")
+        assert resp.status_code >= 500

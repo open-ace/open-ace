@@ -106,7 +106,7 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
   // the wrong (or cross-tenant) key list. Gate the query so remote only
   // fetches once a machine is selected.
   const modelsEnabled = !!cliTool && (workspaceType !== 'remote' || !!selectedMachineId);
-  const { data: modelsData, isLoading: modelsLoading } = useAvailableModels(
+  const { data: modelsData, isLoading: modelsLoading, error: modelsError } = useAvailableModels(
     { tool: cliTool, workspace_type: workspaceType, machine_id: selectedMachineId || undefined },
     modelsEnabled
   );
@@ -488,6 +488,15 @@ export const NewAutonomousModal: React.FC<NewAutonomousModalProps> = ({
               <div className="form-text text-muted">{t('autoSelectMachineFirst', language)}</div>
             ) : modelsLoading ? (
               <div className="form-text text-muted">{t('autoLoadingModels', language)}</div>
+            ) : modelsError ? (
+              // Issue #2667: a failed models fetch (server-side 500) is a
+              // load error, NOT "no models configured" — the key hint would
+              // send the user chasing a configuration that is actually fine.
+              <div className="form-text text-danger" data-testid="models-load-error">
+                {`${t('autoModelsLoadFailed', language) || 'Failed to load models.'} ${
+                  (modelsError as { message?: string }).message ?? ''
+                }`.trim()}
+              </div>
             ) : (
               <div className="form-text text-danger">{t('autoNoModelsForTool', language)}</div>
             )}
