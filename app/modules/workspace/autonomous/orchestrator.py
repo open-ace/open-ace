@@ -2081,6 +2081,22 @@ def _cleanup_backoff_time(attempts: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=delay)).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _head_tail_excerpt(text: str, limit: int = 6000) -> str:
+    """Truncate ``text`` preserving BOTH ends (#2590).
+
+    Test-report tails carry the failure summary (short summary lines, exit
+    status) while the head carries the command/context — a head-only cut
+    discards exactly the part a dev-repair round needs. Split the budget
+    roughly 2:1 head:tail (test output front-loads verbose tracebacks; the
+    actionable summary at the end is usually short).
+    """
+    if len(text) <= limit:
+        return text
+    head = max(limit * 2 // 3, 1)
+    tail = max(limit - head - len("\n…[truncated]…\n"), 1)
+    return f"{text[:head]}\n…[truncated]…\n{text[-tail:]}"
+
+
 try:
     MAX_AUTONOMOUS_CHANGED_FILES = int(os.environ.get("AUTONOMOUS_MAX_CHANGED_FILES", "60"))
 except ValueError:
@@ -6328,7 +6344,7 @@ class AutonomousOrchestrator:
             lines.append("- （本轮无结构化失败行，失败详情见下方测试报告摘录）")
         lines.append("")
         lines.append("### 测试阶段报告摘录（截断至 6000 字符）")
-        lines.append((test_summary or "")[:6000])
+        lines.append(_head_tail_excerpt(test_summary or "", 6000))
         return "\n".join(lines)
 
     def _emit_structured_test_fallback(
@@ -10838,8 +10854,13 @@ class AutonomousOrchestrator:
                             # counter left exhausted, the new round's first
                             # inconclusive/FAILED would skip test retries
                             # entirely and burn a dev round on a run the test
-                            # agent could have settled itself.
+                            # agent could have settled itself. skip_retries
+                            # too: phases/development.py skips the dev agent
+                            # when test_retries > 0 OR skip_retries > 0, so a
+                            # stale skip_retries=1 would burn BOTH repair
+                            # retries without ever invoking the dev agent.
                             "test_retries": 0,
+                            "skip_retries": 0,
                             "user_feedback": feedback,
                         }
                     )

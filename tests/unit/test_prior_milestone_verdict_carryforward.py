@@ -385,6 +385,74 @@ def test_structured_failed_at_retry_exhaustion_enters_dev_repair_round():
     assert not any(p.get("status") == "failed" for p in patches), patches
 
 
+def test_dev_repair_round_resets_skip_retries_too():
+    """The dev-repair bump must clear ``skip_retries`` alongside
+    ``test_retries``: phases/development.py skips the dev agent when
+    ``test_retries > 0 OR skip_retries > 0``, so a stale ``skip_retries=1``
+    (e.g. a skipped-tests retry earlier in the same round) would make BOTH
+    repair retries test-only re-runs — the dev agent is never invoked and the
+    failures can never be fixed."""
+    wf = _workflow(test_retries=2, skip_retries=1, dev_retries_on_test_fail=0)
+    orch, _ = _orchestrator(wf)
+
+    patches, orch = _run(
+        orch,
+        wf,
+        verdict=ExecutionVerdict.FAILED,
+        text="=== 3 failed, 243 passed in 30.12s ===",
+        tool_pass=False,
+        evidences=[_failed_evidence()],
+    )
+    dev_bumps = [p for p in patches if "dev_round" in p]
+    assert dev_bumps, f"expected a dev-repair round, got {patches}"
+    bump = dev_bumps[0]
+    assert bump.get("skip_retries") == 0, (
+        "stale skip_retries=1 keeps the dev agent skipped on the repair " f"round: {bump}"
+    )
+    assert bump.get("test_retries") == 0, bump
+
+
+def test_structured_failed_before_retry_exhaustion_retries_tests_first():
+    """Boundary: a structured FAILED with retries remaining (test_retries=1 <
+    MAX_TEST_RETRIES=2) takes the plain test-retry path — bump test_retries,
+    no dev_round, no user_feedback. The dev-repair round is reserved for
+    exhaustion; jumping early would waste dev rounds on flakes the test agent
+    can settle itself."""
+    wf = _workflow(test_retries=1, dev_retries_on_test_fail=0)
+    orch, _ = _orchestrator(wf)
+
+    patches, orch = _run(
+        orch,
+        wf,
+        verdict=ExecutionVerdict.FAILED,
+        text="=== 3 failed, 243 passed in 30.12s ===",
+        tool_pass=False,
+        evidences=[_failed_evidence()],
+    )
+    retry_bumps = [p for p in patches if "test_retries" in p]
+    assert retry_bumps, f"expected a test retry, got {patches}"
+    assert retry_bumps[0].get("test_retries") == 2, retry_bumps[0]
+    assert not any("dev_round" in p for p in patches), patches
+    assert not any("user_feedback" in p for p in patches), patches
+    assert not any(p.get("status") == "failed" for p in patches), patches
+
+
+def test_repair_feedback_excerpt_preserves_tail():
+    """The report excerpt must be tail-preserving: pytest-style output puts the
+    actionable summary (short summary of failures) at the END — a head-only
+    cut at 6000 chars discards exactly what the dev round needs. The excerpt
+    keeps head+tail with a truncation marker between."""
+    from app.modules.workspace.autonomous.orchestrator import _head_tail_excerpt
+
+    long_report = "A" * 4000 + "B" * 3000 + "SHORT SUMMARY: test_click FAILED\n"
+    excerpt = _head_tail_excerpt(long_report, 6000)
+    assert "SHORT SUMMARY: test_click FAILED" in excerpt, "tail content must survive truncation"
+    assert excerpt.startswith("A" * 10), "head content must survive truncation"
+    assert "…[truncated]…" in excerpt
+    # Short reports pass through untouched.
+    assert _head_tail_excerpt("short", 6000) == "short"
+
+
 def test_structured_failed_dev_retries_exhausted_is_terminal():
     """(b) dev-repair retries ALSO exhausted with structured FAILED → terminal
     failed, and the message mentions both counters."""
