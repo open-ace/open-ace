@@ -125,10 +125,8 @@ class TestEnsureWorktreeSelfHeal:
         # _ensure_worktree now checks validity via main_gh.path_exists_as_user
         # (cross-user safe; replaced the old os.path.isfile probe, Issue #1395).
         fake_gh = MagicMock()
-        # Only the worktree's .git marker "exists": the #23 node_modules shim
-        # (later in ensure_worktree) probes the main clone's frontend and must
-        # find no install, else it runs _run_as_account on the mock and records
-        # a fail-soft milestone this test asserts never happens.
+        # Only the worktree's .git marker "exists" (the #23 node_modules shim
+        # was reverted, #2694 — nothing else probes the filesystem here).
         fake_gh.path_exists_as_user.side_effect = lambda p, **_kw: str(p).endswith("/.git")
         # #1573 branch consistency: the worktree's actual branch must match
         # branch_name, else the fake's MagicMock branch trips the mismatch
@@ -157,10 +155,8 @@ class TestEnsureWorktreeSelfHeal:
         canonical = wf["worktree_path"]
 
         fake_gh = MagicMock()
-        # Only the worktree's .git marker "exists": the #23 node_modules shim
-        # (later in ensure_worktree) probes the main clone's frontend and must
-        # find no install, else it runs _run_as_account on the mock and records
-        # a fail-soft milestone this test asserts never happens.
+        # Only the worktree's .git marker "exists" (the #23 node_modules shim
+        # was reverted, #2694 — nothing else probes the filesystem here).
         fake_gh.path_exists_as_user.side_effect = lambda p, **_kw: str(p).endswith("/.git")
         # #1573 branch consistency: the worktree's actual branch must match
         # branch_name, else the fake's MagicMock branch trips the mismatch

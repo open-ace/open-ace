@@ -339,6 +339,15 @@ def create_app(config=None):
     # Register error handlers
     register_error_handlers(app)
 
+    # Freeze the platform-admin strict mode flag before serving any request, so
+    # every request in this process agrees on who counts as a platform admin
+    # (Issue #2332). Resolving it lazily on the first role check would work too,
+    # but doing it here is what makes the documented "cached at application
+    # startup" contract true and puts the ENABLED/DISABLED line in the boot log.
+    from app.auth.permissions import init_platform_admin_strict_mode
+
+    init_platform_admin_strict_mode()
+
     # Initialize Prometheus metrics (Issue #2186)
     # Only for web workers - scheduler has its own metrics server
     scheduler_mode = os.environ.get("SCHEDULER_MODE", "web")
@@ -450,6 +459,19 @@ def create_app(config=None):
 
         ensure_all_tables()
         logger.info(f"Development schema bootstrap completed (mode={env_mode})")
+
+    # Deliberately AFTER the schema check above, which is the first thing that
+    # talks to the database. This query is only a diagnostic, and placing it
+    # earlier would make a startup diagnostic the first blocking call -- on an
+    # unreachable host (firewall DROP, no connect_timeout configured) it would
+    # hang before the check whose job is to report exactly that.
+    #
+    # The flag used to be inert, so operators may have set it long ago and seen
+    # nothing happen. Now that it works, say so loudly if turning it on is about
+    # to strip platform access from accounts that still use the legacy role.
+    from app.auth.permissions import warn_if_strict_mode_locks_out_legacy_admins
+
+    warn_if_strict_mode_locks_out_legacy_admins()
 
     # Pre-check encryption key registry (Issue #1820, #2186)
     try:
@@ -806,7 +828,18 @@ def create_app(config=None):
     # - "web" or unset: Do NOT start schedulers (web worker)
     # Development mode (server.py) starts both web and scheduler
     scheduler_mode = os.environ.get("SCHEDULER_MODE", "web")
-    if scheduler_mode == "scheduler":
+    # TESTING guard (class-2, 2026-08-15): a test process must never start
+    # real schedulers — they operate on the real DB (orphan-kill advancing
+    # workflows, ghost-pausing rows). PYTEST_VERSION covers post-hoc
+    # config["TESTING"] assignments and bare create_app() calls under pytest.
+    # Tests that need a scheduler call init_autonomous_scheduler() directly.
+    # Note: PYTEST_VERSION propagates to test-spawned server subprocesses; a
+    # future test that wants a live scheduler child must unset it.
+    if scheduler_mode == "scheduler" and (
+        app.config.get("TESTING") or "PYTEST_VERSION" in os.environ
+    ):
+        logger.info("Background services skipped (test process)")
+    elif scheduler_mode == "scheduler":
         start_background_services()
         logger.info("Background services started (SCHEDULER_MODE=scheduler)")
     else:

@@ -24,6 +24,9 @@ def test_phase_host_protocol_has_narrow_surface():
         "start_ci_repair_round",
         "perform_git_cleanup",
         "resolve_merge_conflicts",
+        # Issue #2673: zero-check-runs fallback (milestone-backed counter +
+        # close+reopen retrigger + transient escalation).
+        "zero_check_runs_fallback",
     ]:
         assert hasattr(PhaseHost, method), f"PhaseHost missing {method}"
     # annotation-only data member lives in __annotations__, not dir()

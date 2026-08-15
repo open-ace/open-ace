@@ -269,6 +269,18 @@ def handle(ctx, deps) -> PhaseResult:
                 raise GitHubOpsError(
                     f"Unable to query CI checks before merging PR #{pr_number}: {e}"
                 ) from e
+            # Issue #2673: a PR whose head reports ZERO check-runs on a
+            # check-gated base is the GitHub event-delivery-gap signature —
+            # required checks can never appear, so the merge below can only
+            # be rejected and the phase used to retry silently forever.
+            # ``zero_check_runs_fallback`` owns the gate (only fires when the
+            # base branch actually requires checks), the wall-clock floored
+            # observation window, the close+reopen retrigger and the final
+            # visible transient escalation. With check-runs present the same
+            # call just closes out any tracker an earlier episode left open
+            # (returning False) — one unconditional call, no branching.
+            if deps.host.zero_check_runs_fallback(gh, pr_number, pr_head_sha, base_branch, checks):
+                return PhaseResult.retry()
             failed = _ci_repair_targets(checks)
             if failed:
                 deps.host.start_ci_repair_round(wf, pr_number, failed)

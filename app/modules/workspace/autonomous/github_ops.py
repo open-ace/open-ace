@@ -462,27 +462,6 @@ class GitHubOps:
             return True
         return current_user != self.system_account
 
-    def _run_as_account(
-        self, argv: list[str], *, timeout: int = 180
-    ) -> subprocess.CompletedProcess:
-        """Run a non-git shell command as ``system_account`` (#23).
-
-        Mirrors ONLY the ``sudo -u`` wrapping of :meth:`_run_git` — not its
-        trusted-git-context machinery (``safe.directory``/hooksPath/fsmonitor),
-        which is git-specific; this runs ``mkdir``/``ln`` for the node_modules
-        shim. No ``cwd`` is accepted: under ``sudo -u`` the service user cannot
-        ``chdir`` into a user-private worktree (the PermissionError of #1421),
-        so callers must pass absolute paths. When the service already runs as
-        ``system_account`` (``_needs_sudo()`` False — single-user/CI), the
-        command runs directly.
-        """
-        if self._needs_sudo():
-            assert self.system_account is not None  # _needs_sudo() guarantees non-empty
-            cmd: list[str] = ["sudo", "-u", self.system_account, *argv]
-        else:
-            cmd = list(argv)
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-
     def _resolve_owner_repo(self) -> str | None:
         """Resolve the ``owner/repo`` slug for the local repo's origin remote.
 
@@ -713,6 +692,15 @@ class GitHubOps:
                 f"--git-dir={self._trusted_git_dir}",
                 f"--work-tree={self._trusted_work_tree or os.path.realpath(self.repo_path)}",
             ]
+        # Inside the agent sandbox PATH, "git" resolves to the orchestrator-
+        # only guard shim; the harness exposes the real binary via
+        # OPENACE_REAL_GIT for code that must run git directly (tests,
+        # tooling). Unset everywhere else, so this defaults to plain "git".
+        # The sudo branch deliberately keeps the literal "git": prod sudoers
+        # whitelist only the bare command name, and a resolved absolute path
+        # under ``sudo -u <account>`` would be silently denied.
+        needs_sudo = self._needs_sudo()
+        git_bin = os.environ.get("OPENACE_REAL_GIT", "git") if not needs_sudo else "git"
         # Trust the canonical repo via per-command ``-c`` (never the global
         # ``safe.directory *`` that used to be written via
         # _ensure_safe_directory). git's dubious-ownership check covers every
@@ -735,7 +723,7 @@ class GitHubOps:
         safe_cfgs: list[str] = []
         for p in safe_paths:
             safe_cfgs += ["-c", f"safe.directory={p}"]
-        if self._needs_sudo():
+        if needs_sudo:
             # git supports `-C <path>` (unlike gh), so we use it to set the
             # working directory under a sudo wrapper where cwd would trigger a
             # Python permission check as the service user (Issue #1421).
@@ -745,7 +733,7 @@ class GitHubOps:
                     "sudo",
                     "-u",
                     account,
-                    "git",
+                    git_bin,
                     *trusted_args,
                     "-c",
                     "core.hooksPath=/dev/null",
@@ -759,7 +747,7 @@ class GitHubOps:
             kwargs.pop("cwd", None)  # Remove cwd to avoid Python permission check
         else:
             cmd = [
-                "git",
+                git_bin,
                 *trusted_args,
                 "-c",
                 "core.hooksPath=/dev/null",
@@ -1073,6 +1061,28 @@ class GitHubOps:
         """
         self._run_gh(["issue", "reopen", str(number)], api_only=True)
         logger.info("Reopened issue #%s", number)
+        return {"number": number}
+
+    def close_pr(self, number: int) -> dict:
+        """Close a PR (api_only → service-user/bot identity).
+
+        Issue #2673: mechanical CI retrigger — closing and reopening a PR
+        re-delivers the ``pull_request`` ``closed``/``reopened`` events when
+        GitHub dropped the push/synchronize events for the head (zero
+        check-runs). This is a CI nudge, not a code/PR-content change.
+        """
+        self._run_gh(["pr", "close", str(number)], api_only=True)
+        logger.info("Closed PR #%s", number)
+        return {"number": number}
+
+    def reopen_pr(self, number: int) -> dict:
+        """Reopen a PR (api_only → service-user/bot identity).
+
+        Issue #2673: second half of the mechanical CI retrigger — see
+        :meth:`close_pr`.
+        """
+        self._run_gh(["pr", "reopen", str(number)], api_only=True)
+        logger.info("Reopened PR #%s", number)
         return {"number": number}
 
     def list_issue_comments(self, number: int, since: str | None = None) -> list:

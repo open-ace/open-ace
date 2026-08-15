@@ -205,7 +205,7 @@ describe('WorkflowTimeline paused-state banner (#2634)', () => {
 });
 
 describe('formatAcceptanceReport (#2658)', () => {
-  it('renders per-item verdicts, rationale and evidence refs from metadata JSON', () => {
+  it('renders markdown structure: status heading, meta list, sections, nested evidence', () => {
     const report = {
       merge_sha: 'abc123',
       status: 'rejected',
@@ -221,24 +221,45 @@ describe('formatAcceptanceReport (#2658)', () => {
         },
       ],
     };
-    const out = formatAcceptanceReport(JSON.stringify(report));
-    expect(out).toContain('❌ rejected');
-    expect(out).toContain('Merge SHA: abc123');
-    expect(out).toContain('── Scope ──');
-    expect(out).toContain('✅ src/app.py');
-    expect(out).toContain('❌ 修复登录失败 — 合并后用例依旧失败');
-    expect(out).toContain('↳ tests/test_login.py:12 (用例仍然失败)');
+    const out = formatAcceptanceReport(JSON.stringify(report), 'en');
+    // Status heading (i18n label) + meta bullet list items on separate lines.
+    expect(out).toContain('## ❌ Not accepted');
+    expect(out).toContain('- **Merge SHA:** `abc123`');
+    expect(out).toContain('- **Verifier:** `glm-5`');
+    // Section subheadings.
+    expect(out).toContain('### Scope check');
+    // Verdict item as a bolded list entry with rationale tail.
+    expect(out).toContain('- ✅ **src/app.py**');
+    expect(out).toContain('- ❌ **修复登录失败** — 合并后用例依旧失败');
+    // Evidence as a NESTED list item (2-space indent — never a 4-space code
+    // block) with the ref in inline code.
+    expect(out).toContain('  - ↳ `tests/test_login.py:12`（用例仍然失败）');
     // Empty sections are skipped (gates omitted above).
-    expect(out).not.toContain('── Gates ──');
+    expect(out).not.toContain('Mechanical gates');
+    // No plain-text emission artifacts (soft-wrap paragraphs / code blocks).
+    expect(out).not.toContain('──');
+    expect(out).not.toMatch(/^ {4}/);
+  });
+
+  it('localizes section headings and status label', () => {
+    const out = formatAcceptanceReport(
+      JSON.stringify({
+        status: 'rejected',
+        verifier: [{ item: 'x', verdict: 'rejected', evidence: [] }],
+      }),
+      'zh'
+    );
+    expect(out).toContain('## ❌ 未通过');
+    expect(out).toContain('### 验收器结论');
   });
 
   it('falls back to raw metadata when the JSON is malformed', () => {
-    expect(formatAcceptanceReport('not-json{')).toBe('not-json{');
+    expect(formatAcceptanceReport('not-json{', 'en')).toBe('not-json{');
   });
 
   it('omits optional fields gracefully', () => {
-    const out = formatAcceptanceReport(JSON.stringify({ status: 'indeterminate' }));
-    expect(out).toContain('⚠️ indeterminate');
+    const out = formatAcceptanceReport(JSON.stringify({ status: 'indeterminate' }), 'en');
+    expect(out).toContain('## ⚠️ Inconclusive');
     expect(out).not.toContain('Merge SHA');
     expect(out).not.toContain('Infra error');
   });

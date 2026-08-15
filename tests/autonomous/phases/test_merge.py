@@ -56,6 +56,9 @@ def _build_deps(
     host = MagicMock(name="host")
     # perform_git_cleanup returns (status, error) — default to completed.
     host.perform_git_cleanup.return_value = ("completed", "")
+    # zero_check_runs_fallback returns False (did not take over the cycle) by
+    # default; only zero-check-runs tests opt into True (#2673).
+    host.zero_check_runs_fallback.return_value = False
     # validate_pre_merge_change_scope returns "" (no scope error) by default;
     # tests that want the scope-fail branch override this.
     host.validate_pre_merge_change_scope.return_value = ""
@@ -334,3 +337,61 @@ def test_merge_policy_block_with_settled_ci_still_pauses():
 
     assert result.outcome == "pause"
     host.emit_status_change.assert_called_once()
+
+
+# ── zero check-runs fallback (#2673) ──────────────────────────────────────
+
+
+def test_merge_zero_check_runs_with_required_gate_defers_to_fallback():
+    """A PR whose head reports ZERO check-runs on a check-gated base branch is
+    the #2673 signature (GitHub event-delivery gap): required checks can never
+    appear, so attempting the merge can only be rejected. The handler must
+    hand the cycle to the bounded mechanical fallback instead."""
+    deps, host = _build_deps(
+        checks=[],
+        merge_state={"mergeable": True, "mergeable_state": "blocked"},
+    )
+    deps.gh.get_branch_protection.return_value = {
+        "required_status_checks": {"contexts": ["PR Gate"]}
+    }
+    host.zero_check_runs_fallback.return_value = True
+    result = merge_phase.handle(_ctx(_workflow()), deps)
+
+    assert isinstance(result, PhaseResult)
+    assert result.outcome == "retry"
+    host.zero_check_runs_fallback.assert_called_once_with(deps.gh, 123, "abc123", "main", [])
+    # The merge attempt is deferred to the fallback — merge_pr is not called.
+    deps.gh.merge_pr.assert_not_called()
+
+
+def test_merge_zero_check_runs_ungated_base_merges_directly():
+    """Zero check-runs on a base branch with NO required checks is the normal
+    state (no CI gating). The handler still consults the fallback (the gate —
+    required-contexts — lives inside it), but its False return lets the merge
+    proceed untouched."""
+    deps, host = _build_deps(
+        checks=[],
+        merge_state={"mergeable": True, "mergeable_state": "clean"},
+    )
+    deps.gh.get_branch_protection.return_value = {"required_status_checks": {"contexts": []}}
+    result = merge_phase.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "completed"
+    host.zero_check_runs_fallback.assert_called_once_with(deps.gh, 123, "abc123", "main", [])
+    deps.gh.merge_pr.assert_called_once_with(123, strategy="merge")
+
+
+def test_merge_checks_present_closes_out_tracker_and_merges():
+    """With check-runs present the fallback is only a tracker close-out call
+    (returns False); the normal merge flow is untouched."""
+    deps, host = _build_deps(
+        checks=[{"name": "PR Gate", "bucket": "pass"}],
+        merge_state={"mergeable": True, "mergeable_state": "clean"},
+    )
+    result = merge_phase.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "completed"
+    host.zero_check_runs_fallback.assert_called_once_with(
+        deps.gh, 123, "abc123", "main", [{"name": "PR Gate", "bucket": "pass"}]
+    )
+    deps.gh.merge_pr.assert_called_once_with(123, strategy="merge")

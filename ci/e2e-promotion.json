@@ -1,0 +1,9 @@
+{
+  "schema_name": "openace-e2e-promotion",
+  "schema_version": 1,
+  "description": "E2E promotion state (observing/candidate/required) with dual governance clocks (issue #2491). Items absent from entries default to observing with the file-level default review deadline.",
+  "metadata": {
+    "default_review_by": "2026-09-12T00:00:00+00:00"
+  },
+  "entries": {}
+}
