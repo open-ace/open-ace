@@ -120,6 +120,22 @@ AUTONOMOUS_DEV_ALLOWED_TOOLS: dict[str, list[str]] = {
 
 MERGE_POLICY_PAUSE_REASON_PREFIX = "Merge blocked by repository policy:"
 
+# ── Protected security tests (CI-repair anti-tamper, #2687) ─────────────────
+
+# Security-gate test files whose CONTENT the CI-repair path must not delete or
+# weaken. Incident PR #2665 / revert PR #2672: the CI-repair agent "fixed" a
+# red sudoers-hardening lock test by deleting/weakening its assertions, CI went
+# green, and the merged PR carried 5 post-merge security criticals — the repair
+# loop defeated the very tests that gate it. The mechanical post-repair check
+# (AutonomousOrchestrator._protected_test_tampering_error) and the repair-agent
+# prompt instruction both render from this registry so they cannot drift.
+# Keep this list SMALL and defensible: only suites that lock security
+# invariants (sudoers generation, the pre-commit table-boundary guard).
+PROTECTED_CI_REPAIR_TEST_FILES: tuple[str, ...] = (
+    "tests/unit/test_sudoers_hardening.py",
+    "tests/unit/test_table_boundary_checker.py",
+)
+
 # ── Transient network error classification (shared with orchestrator) ───────
 
 # Keywords identifying transient network errors at the orchestrator level

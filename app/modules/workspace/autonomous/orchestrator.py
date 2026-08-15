@@ -60,6 +60,7 @@ from app.modules.workspace.autonomous.constants import (  # noqa: F401
     AUTONOMOUS_CONTEXT,
     AUTONOMOUS_DEV_ALLOWED_TOOLS,
     MERGE_POLICY_PAUSE_REASON_PREFIX,
+    PROTECTED_CI_REPAIR_TEST_FILES,
     READ_ONLY_REVIEW_UNSUPPORTED_TOOLS,
     REVIEW_ALLOWED_TOOLS,
     VERIFICATION_ALLOWED_TOOLS,
@@ -3835,6 +3836,11 @@ class AutonomousOrchestrator:
             "Bandit 由 CI 独立检查。\n"
             "7. 不要执行 git add、git commit 或 git push；编排器会在范围校验通过后统一提交并推送。\n"
             "8. 结束时请明确说明：你复现了哪些完整命令、最终 exit code、修复了什么、还剩什么风险。\n"
+            "9. 以下受保护的安全测试文件是本仓库的安全锁，**禁止删除**；对它们唯一允许的修改是"
+            "**新增更严格的断言**，禁止删除、注释、跳过或放宽任何现有断言：\n"
+            + "".join(f"    - `{path}`\n" for path in PROTECTED_CI_REPAIR_TEST_FILES)
+            + "    编排器在提交前会对上述文件做机械校验（净删除即整轮作废），"
+            "不要试图让安全测试变绿来掩盖真实的安全回归（事故 PR #2665）。\n"
         )
         # Runtime contract is already embedded in ci_repair_context; do not
         # duplicate it in the fresh-session prompt.
@@ -4048,6 +4054,66 @@ class AutonomousOrchestrator:
             logger.warning("pre-commit target collection: working-tree lookup failed: %s", exc)
             working = []
         return sorted({path for path in (*committed, *working) if path})
+
+    @staticmethod
+    def _protected_test_tampering_error(gh: GitHubOps, commit_before: str) -> str:
+        """Mechanical anti-tamper check for protected security tests (#2687).
+
+        Incident PR #2665 / revert PR #2672: the CI-repair agent silenced a red
+        sudoers-hardening lock test by deleting/weakening its assertions — a
+        prompt instruction alone did not stop it, so this check mechanically
+        refuses to push any repair round that deletes or net-shrinks a file in
+        ``PROTECTED_CI_REPAIR_TEST_FILES``. Net-negative line changes
+        (removals > additions) is the conservative proxy for "weakened": a
+        legitimate strengthening is net-additive and always passes.
+
+        ``git diff --numstat <base>`` covers everything between the round
+        boundary and the working tree (committed since ``commit_before`` plus
+        uncommitted edits — the same universe the per-round scope guard
+        counts). Fails closed like the scope guard: if the diff cannot be
+        verified, refuse rather than silently skip.
+
+        Returns "" when the round is clean, else a human-readable rejection
+        reason.
+        """
+        base = commit_before or "HEAD"
+        try:
+            result = gh._run_git(["diff", "--numstat", base])
+        except Exception as exc:
+            return (
+                "protected security test verification could not run "
+                f"(git diff --numstat failed: {exc}); refusing to push"
+            )
+        offenders: list[str] = []
+        for line in (result.stdout or "").splitlines():
+            parts = line.split("\t")
+            if len(parts) < 3:
+                continue
+            added_raw, removed_raw, path = (
+                parts[0].strip(),
+                parts[1].strip(),
+                "\t".join(parts[2:]).strip(),
+            )
+            if path not in PROTECTED_CI_REPAIR_TEST_FILES:
+                continue
+            if added_raw == "-" or removed_raw == "-":
+                offenders.append(f"{path} (rewritten as binary)")
+                continue
+            try:
+                added, removed = int(added_raw), int(removed_raw)
+            except ValueError:
+                offenders.append(f"{path} (unparseable numstat: {line.strip()})")
+                continue
+            if removed > added:
+                label = "deleted" if added == 0 else "net-negative edit"
+                offenders.append(f"{path} ({label}: -{removed}/+{added})")
+        if not offenders:
+            return ""
+        return (
+            "protected security test files cannot be deleted or weakened via "
+            "CI-repair (only additions of stricter assertions are allowed); "
+            f"offenders: {'; '.join(offenders)}"
+        )
 
     @staticmethod
     def _detect_and_push_ci_repair_changes(
@@ -4300,6 +4366,42 @@ class AutonomousOrchestrator:
             logger.warning(pre_commit_error, exc_info=True)
 
         self._accumulate_tokens(repair_result)
+
+        # #2687 anti-tamper guard: mechanically refuse to commit/push a repair
+        # round that deletes or weakens a protected security test. The incident
+        # (PR #2665, reverted in #2672) proved agents will silence the lock
+        # tests that gate them under CI pressure, so this must NOT rely on the
+        # prompt instruction. Rejected rounds discard the tampered edits and
+        # defer with the no-change prefix so the bounded
+        # MAX_CI_REPAIR_NO_CHANGE_RETRIES budget (not ci_repair_attempts) stops
+        # an agent that keeps retrying the same tampering; the failed
+        # milestone's error text feeds the next round's prompt via
+        # _collect_prior_ci_repair_failures so the agent sees why.
+        tamper_error = self._protected_test_tampering_error(gh, commit_before)
+        if tamper_error:
+            try:
+                # Discard everything round-local (working-tree edits AND any
+                # commit the agent made despite the prompt) back to the PR
+                # remote head, mirroring the scope-reject reset.
+                if commit_before:
+                    gh.reset_hard_to(commit_before)
+                else:
+                    gh.reset_hard_to_head()
+            except Exception as exc:
+                logger.warning("Failed to discard tampered CI-repair edits: %s", exc)
+            message = (
+                "CI repair deferred: agent produced no code changes " f"(rejected: {tamper_error})"
+            )
+            self.repo.update_milestone(
+                repair_ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "session_id": repair_result.session_id,
+                    "error_message": message,
+                },
+            )
+            self._update_workflow({"status": "merging", "error_message": message})
+            return
 
         commit_sha, sha_changed, push_error = self._detect_and_push_ci_repair_changes(
             gh,
