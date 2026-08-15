@@ -1,0 +1,6 @@
+{
+  "schema_name": "openace-e2e-state",
+  "schema_version": 1,
+  "description": "E2E debt state keyed by normalized nodeid / standalone entry id (issue #2491). Entries are built by 'governance.py classify' from 3 same-SHA same-contract reference runs (P3); empty here means every item defaults to unclassified, which the selector routes to the observation lane.",
+  "entries": {}
+}

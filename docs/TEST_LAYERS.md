@@ -176,3 +176,35 @@ Baseline 是防止测试静默消失的下限，不是覆盖率指标。降低 b
 `run_extended_tests.py` 的 `require_review_threshold`（10%）同时是 comparator 的
 文件数地板来源，避免两套门禁口径不一致。Targeted（`--issue-numbers`）运行只在
 summary 标为 targeted，不冒充完整 nightly gate。
+
+## E2E 治理基线（Issue #2491）
+
+`tests/e2e/` 的文件级 disposition、nodeid 级 debt/promotion 状态与互斥 lane
+selection 由 `scripts/e2e/` 的纯 stdlib 工具族治理（与 #2457 的
+`legacy_issue_baseline` 同一“本地与 CI 同一实现”模式），治理数据在 `ci/e2e-*.json`：
+
+- **inventory**（`ci/e2e-inventory.json`）：受管 root 下每个 `.py`（磁盘枚举为准，
+  含 helper/演示脚本）必须有唯一 disposition（`pytest-automated |
+  standalone-automated | manual-demo`）与 home lane；manual 项 `executor=none`
+  不计自动覆盖。`collects` 标志声明该文件当前是否产出 pytest nodeids，
+  收集变化判为 manifest 漂移而非静默吸收。
+- **expected nodeids**（`ci/e2e-expected-nodeids.json`）：由
+  `python scripts/e2e/manifest.py snapshot` 从 `pytest --collect-only -q -o addopts=`
+  派生（无需 server/frontend build；`-o addopts=` 抵消 pytest.ini 的 `-v`，否则
+  输出是收集树无法解析）。**契约**：required unit lane 中的
+  `test_e2e_inventory_manifest.py` / `test_e2e_governance.py` 会实时重收集并
+  比对——`tests/e2e` 的 conftest 若引入重依赖或收集回归，会直接打红 PR lane，
+  这是有意的门，不是误报。
+- **debt / promotion state**（`ci/e2e-state.json` / `ci/e2e-promotion.json`）：
+  按归一化 nodeid/entry 保存，缺失默认 `unclassified + observing`（observation
+  lane 起点）；所有变更必须经 `python scripts/e2e/governance.py` 的写入子命令
+  原子完成（唯一合法写入路径），PR 描述附命令行。
+- **selector**：`python scripts/e2e/selector.py --event {pr,nightly,weekly}`
+  输出 normal/advisory/probe/invalid 四个互斥穷尽集合与 selection.json
+  （`--shadow` 为 P1–P3 只记录模式）。
+- **attempt 证据**：`pytest -p pytest_attempts --e2e-attempts=<path>` 记录每次
+  attempt 的每个 phase（JUnit 只保 final outcome，见
+  `docs/dev-notes/2491-rerunfailures-junit-probe.md`）。
+
+新 E2E 文件合入受管 root 前必须先经 `governance.py set-disposition` 登记，
+否则 inventory completeness 校验（本地与 `tests/unit` 双路径）非零。

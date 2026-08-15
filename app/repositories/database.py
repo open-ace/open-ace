@@ -398,6 +398,17 @@ class Database:
             else:
                 conn.close()
 
+    def _adapt_sql(self, query: str) -> str:
+        """Adapt placeholders for THIS instance's backend.
+
+        The module-level ``adapt_sql`` follows the globally configured
+        DATABASE_URL, which can disagree with an explicitly injected
+        ``db_url`` (e.g. a temp SQLite database on a PostgreSQL-configured
+        dev box). Placeholders must match the connection ``self`` actually
+        opens, not the global config.
+        """
+        return adapt_sql(query) if self._is_postgresql else query
+
     def execute(self, query: str, params: tuple = ()) -> Any:
         """
         Execute a query and return the cursor.
@@ -411,7 +422,7 @@ class Database:
         """
         with self.connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(adapt_sql(query), params)
+            cursor.execute(self._adapt_sql(query), params)
             conn.commit()
             return cursor
 
@@ -431,13 +442,13 @@ class Database:
         """
         with self.connection() as conn:
             # Use RealDictCursor for PostgreSQL
-            if is_postgresql():
+            if self._is_postgresql:
                 from psycopg2.extras import RealDictCursor
 
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
             else:
                 cursor = conn.cursor()
-            cursor.execute(adapt_sql(query), params)
+            cursor.execute(self._adapt_sql(query), params)
             row = cursor.fetchone()
 
             # Commit if requested (needed for INSERT/UPDATE/DELETE with RETURNING)
@@ -465,13 +476,13 @@ class Database:
         """
         with self.connection() as conn:
             # Use RealDictCursor for PostgreSQL
-            if is_postgresql():
+            if self._is_postgresql:
                 from psycopg2.extras import RealDictCursor
 
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
             else:
                 cursor = conn.cursor()
-            cursor.execute(adapt_sql(query), params)
+            cursor.execute(self._adapt_sql(query), params)
             rows = cursor.fetchall()
 
             # Handle both SQLite Row and psycopg2 RealDictRow

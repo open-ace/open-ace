@@ -63,6 +63,12 @@ class DataFetchScheduler:
         self._last_result_summary = None  # Summary of last fetch results for get_status()
         self._initialized = True
         self._implementation = SCHEDULER_IMPLEMENTATION
+        if self._implementation == "apscheduler" and not APSCHEDULER_AVAILABLE:
+            # Normalize to the backend that will actually start: start()
+            # already falls back to threading, but is_running()/get_status()
+            # branch on _implementation and would otherwise report a started
+            # threading scheduler as not running (self._scheduler is None).
+            self._implementation = "threading"
         self._scheduler = None  # APScheduler instance
         logger.info(f"DataFetchScheduler initialized (implementation: {self._implementation})")
 
@@ -133,6 +139,7 @@ class DataFetchScheduler:
 
         except ImportError:
             logger.warning("gevent not available, falling back to threading")
+            self._implementation = "threading"  # keep is_running() consistent
             self._start_threading()
 
     def _start_apscheduler(self):
