@@ -145,94 +145,6 @@
       "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "RuntimeError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestBuildAgentEnv::test_fallback_on_proxy_failure",
-      "outcome": "failure",
-      "summary": "RuntimeError: LLM proxy setup failed; refusing to launch autonomous agent with inherited credentials (set OPENACE_ALLOW_RAW_KEY_FALLBACK=1 only in development)."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestRunAgentTaskSessionReactivation::test_completed_session_reactivated_to_active",
-      "outcome": "failure",
-      "summary": "AssertionError: assert call('sess-co..._tenant=False) == (('sess-compl...': None}), {})"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestRunAgentTaskSessionReactivation::test_error_session_reactivated_to_active",
-      "outcome": "failure",
-      "summary": "AssertionError: assert call('sess-er..._tenant=False) == (('sess-error...': None}), {})"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::TestSingleShotUserIdPropagation::test_single_shot_passes_real_user_id_to_env",
-      "outcome": "failure",
-      "summary": "TypeError: TestSingleShotUserIdPropagation.test_single_shot_passes_real_user_id_to_env.<locals>.fake_build_env() got an unexpected keyword argument 'task_id'"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::test_isolated_wrapper_can_handle_signals_while_waiting_for_agent",
-      "outcome": "failure",
-      "summary": "assert 'trap cleanup_isolated EXIT' in '#!/bin/bash\\n# openace-run-as — cross-user agent launcher for AI autonomous development.\\n#\\n# Problem (Issue #1395): the open-ace service runs as the `openace…"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_cross_user_permissions.py::test_isolated_wrapper_normalizes_recovered_acls_before_git_baseline",
-      "outcome": "failure",
-      "summary": "assert 'signature_registry=\"/run/openace-agent-git-signature-${target_uid}\"' in '#!/bin/bash\\n# openace-run-as — cross-user agent launcher for AI autonomous development.\\n#\\n# Problem (Issue #1395): …"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "AttributeError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_system_event_activity.py::TestSystemEventActivityForwarding::test_api_retry_triggers_activity",
-      "outcome": "failure",
-      "summary": "AttributeError: '_StubProcess' object has no attribute 'poll'"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "AttributeError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_system_event_activity.py::TestSystemEventActivityForwarding::test_assistant_still_triggers_activity",
-      "outcome": "failure",
-      "summary": "AttributeError: '_StubProcess' object has no attribute 'poll'"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "AttributeError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_system_event_activity.py::TestSystemEventActivityForwarding::test_init_triggers_activity",
-      "outcome": "failure",
-      "summary": "AttributeError: '_StubProcess' object has no attribute 'poll'"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "AttributeError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_system_event_activity.py::TestSystemEventActivityForwarding::test_no_subtype_does_not_trigger",
-      "outcome": "failure",
-      "summary": "AttributeError: '_StubProcess' object has no attribute 'poll'"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "AttributeError",
-      "issue_number": "1395",
-      "nodeid": "tests/issues/1395/test_system_event_activity.py::TestSystemEventActivityForwarding::test_thinking_tokens_is_not_forwarded",
-      "outcome": "failure",
-      "summary": "AttributeError: '_StubProcess' object has no attribute 'poll'"
-    },
-    {
       "category": "setup_error",
       "exception_type": "AssertionError",
       "issue_number": "144",
@@ -1243,8 +1155,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-15 prune 20 resolved issue-740 mixed entries: all stale fixtures vs evolved guards. (a) hand-rolled users DDL drifted (schema partial indexes on missing columns) — fixtures now schema-first; (b) Database(bare_path) silently fell back to ~/.open-ace/ace.db — fixtures now use sqlite:/// URLs (also stops cross-DB pollution); (c) stop/pause patch targets renamed (_stop/_pause_running_task); (d) create-workflow tests stub the route-level user_repo singleton + count_active_workflows_by_user and add the now-required branch_strategy=worktree; (e) list tests stub count_workflows (JSON-serializable total); (f) run-agent wrapper tests get the 716-style _trusted_repo_boundary autouse fixture (#2271 guard stubs); review follow-ups: batch6 DATABASE_URL patcher now stopped in finally; batch4 user_repo stubbed so the system_account assertion is environment-independent. Negative control: neutering the fixture re-fails the planning representative. Shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31861753845",
+    "prune_note": "2026-08-15 prune 11 resolved issue-1395 launcher entries: stale expectations vs evolved production. (a) _StubProcess poll() + runner-stub session_manager attrs for the sidebar-session resolution _read_stdout now performs; (b) init test asserts the init activity among calls (session_resolved is a new legitimate event); (c) raw-key fallback is dev-opt-in (OPENACE_ALLOW_RAW_KEY_FALLBACK=1); (d) reactivation assertions gain require_tenant=False; (e) stub lambdas accept **kwargs (task_id); (f) launcher static tests follow the script's evolution (isolation_key registry, on_exit/reclaim EXIT traps, dual signal registrations, explicit post-wait on_exit). Negative control: removing poll() re-fails the init representative. Shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31863197203",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
