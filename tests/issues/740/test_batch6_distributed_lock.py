@@ -292,6 +292,7 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
             self.assertIn("machine admin", data["error"].lower())
         finally:
             db_mod.adapt_sql = orig
+            self._db_env.stop()
             try:
                 os.unlink(db_path)
             except OSError:
@@ -326,6 +327,7 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
             self.assertEqual(resp.status_code, 201)
         finally:
             db_mod.adapt_sql = orig
+            self._db_env.stop()
             try:
                 os.unlink(db_path)
             except OSError:
@@ -365,6 +367,7 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
             self.assertEqual(resp.status_code, 201)
         finally:
             db_mod.adapt_sql = orig
+            self._db_env.stop()
             try:
                 os.unlink(db_path)
             except OSError:
@@ -400,6 +403,7 @@ class TestRemoteMachineAdminValidation(unittest.TestCase):
             self.assertEqual(resp.status_code, 201)
         finally:
             db_mod.adapt_sql = orig
+            self._db_env.stop()
             try:
                 os.unlink(db_path)
             except OSError:

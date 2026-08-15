@@ -145,6 +145,27 @@ class TestGetMilestoneDiff(unittest.TestCase):
 
     def setUp(self):
         self.client, self.db_path, self.orig, self.db_mod = _make_client()
+        # get_milestone_diff resolves the workflow owner's system_account via
+        # the module-level UserRepository (bound at import time to the DEFAULT
+        # database, not the temp DB) — stub it so the system_account assertion
+        # doesn't depend on whatever the ambient environment DB holds.
+        from unittest.mock import MagicMock as _MM
+
+        from app.repositories.user_repo import UserRepository
+
+        self._user_patch = patch.object(
+            UserRepository,
+            "get_user_by_id",
+            lambda self_, user_id: {
+                "id": user_id,
+                "username": "admin",
+                "system_account": "admin",
+                "role": "platform_admin",
+                "tenant_id": None,
+            },
+        )
+        self._user_patch.start()
+        self.addCleanup(self._user_patch.stop)
 
     def tearDown(self):
         self.db_mod.adapt_sql = self.orig
