@@ -12,7 +12,13 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, g, jsonify, request
 
-from app.auth.decorators import admin_required, auth_required, same_tenant_user_required
+from app.auth.decorators import (
+    admin_required,
+    auth_required,
+    enforce_resource_tenant_scope,
+    platform_admin_required,
+    same_tenant_user_required,
+)
 from app.modules.governance.audit_logger import AuditAction, AuditLogger, get_action_categories
 from app.modules.governance.content_filter import ContentFilter
 from app.modules.governance.quota_manager import QuotaManager
@@ -305,6 +311,22 @@ def api_get_quota_alerts():
 def api_acknowledge_alert(alert_id):
     """Acknowledge a quota alert."""
 
+    # quota_alerts has no tenant column, so resolve the owning tenant through
+    # the alert's user before enforcing the boundary. A missing alert or user
+    # resolves to None, which denies a tenant admin (fail closed, and no
+    # cross-tenant existence oracle) and lets a platform admin fall through to
+    # the 404 below.
+    from app.repositories.user_repo import UserRepository
+
+    alert = quota_manager.get_alert(alert_id)
+    target_user = UserRepository().get_user_by_id(alert.user_id) if alert else None
+    denial = enforce_resource_tenant_scope(target_user.get("tenant_id") if target_user else None)
+    if denial is not None:
+        return denial
+
+    if alert is None:
+        return jsonify({"error": "Alert not found"}), 404
+
     user_id = g.user_id
 
     success = quota_manager.acknowledge_alert(alert_id, user_id)
@@ -388,7 +410,7 @@ def api_filter_stats():
 
 
 @governance_bp.route("/content/filter/patterns", methods=["POST"])
-@admin_required
+@platform_admin_required
 def api_add_pattern():
     """Add a custom content filter pattern."""
 
@@ -422,7 +444,7 @@ def api_add_pattern():
 
 
 @governance_bp.route("/content/filter/keywords", methods=["POST"])
-@admin_required
+@platform_admin_required
 def api_add_keyword():
     """Add a custom sensitive keyword."""
 
@@ -464,7 +486,7 @@ def api_get_filter_rules():
 
 
 @governance_bp.route("/filter-rules", methods=["POST"])
-@admin_required
+@platform_admin_required
 def api_create_filter_rule():
     """Create a new content filter rule."""
 
@@ -511,7 +533,7 @@ def api_create_filter_rule():
 
 
 @governance_bp.route("/filter-rules/<int:rule_id>", methods=["PUT"])
-@admin_required
+@platform_admin_required
 def api_update_filter_rule(rule_id):
     """Update a content filter rule."""
 
@@ -550,7 +572,7 @@ def api_update_filter_rule(rule_id):
 
 
 @governance_bp.route("/filter-rules/<int:rule_id>", methods=["DELETE"])
-@admin_required
+@platform_admin_required
 def api_delete_filter_rule(rule_id):
     """Delete a content filter rule."""
 
@@ -594,9 +616,16 @@ def api_get_security_settings():
 
 
 @governance_bp.route("/security-settings", methods=["PUT"])
-@admin_required
+@platform_admin_required
 def api_update_security_settings():
-    """Update security settings."""
+    """Update security settings.
+
+    security_settings has no tenant column -- it is global config (2FA toggle,
+    password policy, login-attempt limit, IP whitelist, audit thresholds), so a
+    write governs every tenant. Same reasoning as the content-filter mutations:
+    a tenant admin must not rewrite platform-wide security posture. Reads
+    (GET /security-settings) stay admin-level.
+    """
 
     data = request.get_json() or {}
 

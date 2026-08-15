@@ -613,6 +613,39 @@ class QuotaManager:
 
         return alerts
 
+    def get_alert(self, alert_id: int) -> QuotaAlert | None:
+        """Fetch a single alert by id.
+
+        ``quota_alerts`` has no ``tenant_id`` column, but ``user_id`` is NOT
+        NULL, so the acknowledge endpoint resolves the owning tenant through
+        that user before its cross-tenant boundary check.
+        """
+        row = self.db.fetch_one(
+            adapt_sql("SELECT * FROM quota_alerts WHERE id = ?"),
+            (alert_id,),
+        )
+        if not row:
+            return None
+        return QuotaAlert(
+            id=row.get("id"),
+            user_id=row.get("user_id", 0),
+            alert_type=row.get("alert_type", "warning"),
+            quota_type=row.get("quota_type", "tokens"),
+            period=row.get("period", "daily"),
+            threshold=row.get("threshold", 0),
+            current_usage=row.get("current_usage", 0),
+            quota_limit=row.get("quota_limit", 0),
+            percentage=row.get("percentage", 0),
+            message=row.get("message", ""),
+            created_at=(
+                parse_db_datetime(row.get("created_at"))
+                or datetime.now(timezone.utc).replace(tzinfo=None)
+            ),
+            acknowledged=bool(row.get("acknowledged", 0)),
+            acknowledged_at=parse_db_datetime(row.get("acknowledged_at")),
+            acknowledged_by=row.get("acknowledged_by"),
+        )
+
     def acknowledge_alert(self, alert_id: int, acknowledged_by: int) -> bool:
         """Acknowledge an alert."""
         try:
