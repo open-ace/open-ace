@@ -102,20 +102,20 @@ def _make_client():
     orig = db_mod.adapt_sql
     db_mod.adapt_sql = lambda sql: sql
 
-    db = db_mod.Database(db_path)
+    db = db_mod.Database(f"sqlite:///{db_path}")
     try:
         with db.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'user', is_active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT)"
-            )
+            from app.repositories.schema_init import load_schema_from_file
+
+            # Let the authoritative schema create users (the hand-rolled DDL
+            # drifted: no deleted_at/system_account — the schema's partial
+            # indexes on those columns then failed).
+            load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
             cursor.execute(
                 "INSERT OR IGNORE INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
                 ("admin", "admin@test.com", "hash123", "admin"),
             )
-            from app.repositories.schema_init import load_schema_from_file
-
-            load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
             conn.commit()
     finally:
         pass
@@ -145,6 +145,27 @@ class TestGetMilestoneDiff(unittest.TestCase):
 
     def setUp(self):
         self.client, self.db_path, self.orig, self.db_mod = _make_client()
+        # get_milestone_diff resolves the workflow owner's system_account via
+        # the module-level UserRepository (bound at import time to the DEFAULT
+        # database, not the temp DB) — stub it so the system_account assertion
+        # doesn't depend on whatever the ambient environment DB holds.
+        from unittest.mock import MagicMock as _MM
+
+        from app.repositories.user_repo import UserRepository
+
+        self._user_patch = patch.object(
+            UserRepository,
+            "get_user_by_id",
+            lambda self_, user_id: {
+                "id": user_id,
+                "username": "admin",
+                "system_account": "admin",
+                "role": "platform_admin",
+                "tenant_id": None,
+            },
+        )
+        self._user_patch.start()
+        self.addCleanup(self._user_patch.stop)
 
     def tearDown(self):
         self.db_mod.adapt_sql = self.orig
@@ -284,7 +305,7 @@ class TestGetMilestoneDiff(unittest.TestCase):
             resp = self.client.get("/api/autonomous/workflows/wf-1/milestones/ms-1/diff")
 
         self.assertEqual(resp.status_code, 200)
-        mock_gh_class.assert_called_once_with("/tmp/worktree")
+        mock_gh_class.assert_called_once_with("/tmp/worktree", system_account="admin")
 
     @patch("app.modules.workspace.autonomous.github_ops.GitHubOps")
     @patch("app.routes.autonomous.auto_repo")
@@ -304,7 +325,7 @@ class TestGetMilestoneDiff(unittest.TestCase):
             resp = self.client.get("/api/autonomous/workflows/wf-1/milestones/ms-1/diff")
 
         self.assertEqual(resp.status_code, 200)
-        mock_gh_class.assert_called_once_with("/tmp/project")
+        mock_gh_class.assert_called_once_with("/tmp/project", system_account="admin")
 
     @patch("app.routes.autonomous.auto_repo")
     def test_diff_single_sha_string(self, mock_repo):
@@ -343,6 +364,7 @@ class TestWorkflowListStatusFilter(unittest.TestCase):
     def test_list_with_status_filter(self, mock_repo):
         """Status filter is passed through to repo."""
         mock_repo.list_workflows.return_value = []
+        mock_repo.count_workflows.return_value = 0
         with _mock_auth():
             resp = self.client.get("/api/autonomous/workflows?status=completed")
         self.assertEqual(resp.status_code, 200)
@@ -352,6 +374,7 @@ class TestWorkflowListStatusFilter(unittest.TestCase):
     def test_list_without_status_filter(self, mock_repo):
         """List all workflows when no status filter provided."""
         mock_repo.list_workflows.return_value = []
+        mock_repo.count_workflows.return_value = 0
         with _mock_auth():
             resp = self.client.get("/api/autonomous/workflows")
         self.assertEqual(resp.status_code, 200)
