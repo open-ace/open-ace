@@ -591,7 +591,38 @@ def _workflow_response(workflow: dict | None) -> dict | None:
     # only provides a sensible default for downstream consumers.
     if normalized.get("content_language") not in ALLOWED_CONTENT_LANGUAGES:
         normalized["content_language"] = DEFAULT_CONTENT_LANGUAGE
+    normalized["acceptance_feedback_prefill"] = _acceptance_feedback_prefill(normalized)
     return normalized
+
+
+def _acceptance_feedback_prefill(workflow: dict) -> str:
+    """Pre-fill text for the resume-with-feedback modal on acceptance pauses.
+
+    Only paused acceptance rows (rejected/indeterminate) carry a prefill — the
+    parse is gated on that so list endpoints never pay for it. Derived via
+    ``feedback_prefill_from_report`` so the issue comment and the prefill
+    share one formatter.
+    """
+    if workflow.get("status") != "paused" or workflow.get("current_phase") != (
+        "acceptance_verification"
+    ):
+        return ""
+    if (workflow.get("verification_status") or "") not in ("rejected", "indeterminate"):
+        return ""
+    raw = workflow.get("verification_report")
+    if not raw:
+        return ""
+    try:
+        report = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(report, dict):
+        return ""
+    from app.modules.workspace.autonomous.phases.acceptance_verification import (
+        feedback_prefill_from_report,
+    )
+
+    return feedback_prefill_from_report(report)
 
 
 def _parse_int_arg(name: str, default: int) -> int:
@@ -1725,6 +1756,10 @@ def resume_with_feedback(workflow_id):
             "current_phase": "wait",
             "status": "waiting",
             "verification_merge_sha": "",
+            # The resume IS the review outcome — the header banner renders
+            # error_message verbatim, so a stale "awaiting review" here keeps
+            # telling the user the workflow needs them after they just acted.
+            "error_message": "",
         },
     )
 
