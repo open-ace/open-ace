@@ -2358,7 +2358,8 @@ $run_user ALL=(root) NOPASSWD: $python_bin $script_path *"
     # `sudo -u <system_account>` 跨用户执行（#1395），无法改走
     # openace-run-as --isolated（reject owner==target / env -i 剥凭据 /
     # credentialless 账户模型）；fs.py/projects.py/autonomous.py 的跨用户
-    # test/ls/stat/mkdir 同理。#2181 曾把这里从 (ALL) 收紧为 (root)，部署后
+    # test/ls/stat 同理（跨用户 mkdir 由 MKDIR_SAFE 承接，Issue #2674）。
+    # #2181 曾把这里从 (ALL) 收紧为 (root)，部署后
     # 所有 system_account≠openace 的工作流在 preparation `git fetch` 处全挂。
     # 仅还 runas 目标；#2181 的 agent CLI 隔离（run-as --isolated）、移除
     # cat/chown/useradd/rm、env_keep 收紧均保留。
@@ -2411,9 +2412,11 @@ ${webui_local_rule}"
 ${utility_rule}"
 
     # 【Issue #2334】添加 GIT_SAFE 和 GH_SAFE 规则（(ALL) runas）
+    # 【Issue #2674】添加 MKDIR_SAFE 跨用户 mkdir 规则（(ALL) runas）
     current_user_rules="${current_user_rules}
 $run_user ALL=(ALL) NOPASSWD: GIT_SAFE
-$run_user ALL=(ALL) NOPASSWD: GH_SAFE"
+$run_user ALL=(ALL) NOPASSWD: GH_SAFE
+$run_user ALL=(ALL) NOPASSWD: MKDIR_SAFE"
 
     # Add security wrapper rules if any
     if [ -n "$security_wrapper_rules" ]; then
@@ -2577,11 +2580,18 @@ Cmnd_Alias GH_SAFE = \\
 
 # 【安全加固 Issue #2334】OPENACE_UTILS 收紧
 # 移除 git/gh 通配（改用 GIT_SAFE/GH_SAFE），消除 runas 漂移
-# 移除 mkdir（改用 openace-mkdir wrapper）
+# 移除 root-runas mkdir（改用 openace-mkdir wrapper）
 # 保留低风险只读命令：test, ls, stat, id, find
 # find 是只读操作，DAC 已保护敏感目录
 # 【Issue #2334】runas 使用 (ALL) 以支持 github_ops 跨用户工具调用
 Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/id *, /usr/bin/find *
+
+# 【Issue #2674】跨用户 mkdir：github_ops.create_verification_worktree_dir 发
+# 'sudo -u <account> mkdir -p -- <path>' / 'mkdir -m 700 -- <path>'（裸 mkdir，
+# 非 openace-mkdir wrapper——wrapper 仅 (root) runas 且产生 root 属主目录，
+# 而 verifier worktree 必须由执行 git 的身份持有）。sudo 按调用方 PATH 解析
+# 裸 mkdir，/usr/bin 与 /bin 两种解析路径都必须匹配。
+Cmnd_Alias MKDIR_SAFE = /usr/bin/mkdir *, /bin/mkdir *
 
 # 【安全加固 Issue #2181】安全 wrapper 规则
 # 以下 wrapper 替代原通配命令，内部验证参数安全性
@@ -2665,6 +2675,19 @@ ${line}"
         if ! grep -q "Cmnd_Alias OPENACE_UTILS" "$sudoers_file" 2>/dev/null || \
            ! grep -E "Cmnd_Alias OPENACE_UTILS.*chown" "$sudoers_file" 2>/dev/null; then
             print_warning "Sudoers missing OPENACE_UTILS Cmnd_Alias or chown command"
+            need_update=true
+        fi
+
+        # 【修复 Issue #2674】Check cross-user mkdir rule (MKDIR_SAFE).
+        # github_ops.create_verification_worktree_dir emits
+        # 'sudo -u <account> mkdir ...' (bare mkdir), which the (root)-runas
+        # openace-mkdir wrapper cannot cover. Without this probe an
+        # incremental upgrade (all earlier checks pass) would keep the old
+        # sudoers and every acceptance verifier checkout dies with
+        # "sudo: a password is required" -> "merged-main checkout failed".
+        if ! grep -q "Cmnd_Alias MKDIR_SAFE" "$sudoers_file" 2>/dev/null || \
+           ! grep -E "^${run_user} ALL=\(ALL\) NOPASSWD: MKDIR_SAFE" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing MKDIR_SAFE cross-user mkdir rule for user '$run_user'"
             need_update=true
         fi
 

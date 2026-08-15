@@ -748,6 +748,130 @@ class TestGithubOpsCommandShapeCoverage:
         )
 
 
+class TestMkdirShapeCoverage:
+    """Issue #2674: cross-user mkdir whitelist must match github_ops shape.
+
+    github_ops.create_verification_worktree_dir emits
+    ``sudo -u <account> mkdir -p -- <path>`` and ``mkdir -m 700 -- <path>``
+    (bare mkdir, NOT the openace-mkdir wrapper: the wrapper is (root)-runas
+    and creates root-owned directories, while the verifier worktree must be
+    owned by the identity that runs git). The #2334 tightening removed mkdir
+    from the sudoers generators in favor of that wrapper, so after prod
+    regenerated sudoers every acceptance verifier checkout died with
+    "sudo: a password is required" -> "merged-main checkout failed" (#2674).
+    These tests lock the MKDIR_SAFE entries that cover the emitted shape in
+    all three generators and fail loudly if github_ops changes its mkdir
+    construction without updating them.
+    """
+
+    # The cross-user mkdir entries (as they appear in the generator sources).
+    # sudo resolves the bare ``mkdir`` argv through the invoking user's PATH,
+    # so both /usr/bin/mkdir and /bin/mkdir resolutions must be whitelisted.
+    MKDIR_ENTRIES = [
+        "/usr/bin/mkdir *",
+        "/bin/mkdir *",
+    ]
+
+    GENERATOR_FILES = [
+        ("scripts/generate-sudoers.sh", GENERATE_SUDOERS_SH),
+        ("scripts/install-central/package-method/install.sh", INSTALL_SH),
+        ("docker-entrypoint.sh", DOCKER_ENTRYPOINT),
+    ]
+
+    @pytest.mark.issue(2674)
+    @pytest.mark.parametrize("entry", MKDIR_ENTRIES)
+    @pytest.mark.parametrize(
+        "label,path",
+        GENERATOR_FILES,
+        ids=[label for label, _ in GENERATOR_FILES],
+    )
+    def test_mkdir_entries_present_in_all_generators(self, entry, label, path):
+        """All three generators must carry both mkdir whitelist entries."""
+        assert entry in _extract_cmnd_alias(path.read_text(), "MKDIR_SAFE"), (
+            f"{label} is missing the MKDIR_SAFE entry {entry!r}; "
+            f"github_ops.create_verification_worktree_dir emits "
+            f"'sudo -u <account> mkdir ...' (bare mkdir, not the (root)-runas "
+            f"openace-mkdir wrapper), so cross-user verifier worktree creation "
+            f"is rejected by sudoers (Issue #2674). Keep the three generators "
+            f"consistent."
+        )
+
+    @pytest.mark.issue(2674)
+    @pytest.mark.parametrize(
+        "label,path",
+        GENERATOR_FILES,
+        ids=[label for label, _ in GENERATOR_FILES],
+    )
+    def test_mkdir_safe_has_all_runas_in_all_generators(self, label, path):
+        """MKDIR_SAFE user rules must use (ALL) runas for cross-user mkdir."""
+        targets = _get_runas_for_alias(path.read_text(), "MKDIR_SAFE")
+        assert targets, (
+            f"No MKDIR_SAFE user-rule found in {label}; cross-user "
+            f"'sudo -u <owner> mkdir' cannot match a (root)-runas rule "
+            f"(Issue #2674)"
+        )
+        assert "ALL" in targets, (
+            f"MKDIR_SAFE runas is {targets!r} in {label}; must be (ALL) for "
+            f"github_ops cross-user mkdir (Issue #2674)"
+        )
+
+    @pytest.mark.issue(2674)
+    def test_generated_sudoers_matches_verifier_mkdir_shapes(self):
+        """Verifier mkdir shapes must fnmatch the generated MKDIR_SAFE entries."""
+        result = subprocess.run(
+            ["bash", str(GENERATE_SUDOERS_SH), "--dry-run", "--output", "/dev/null"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"Generator failed: {result.stderr}"
+        content = result.stdout
+
+        targets = _get_runas_for_alias(content, "MKDIR_SAFE")
+        assert targets and "ALL" in targets, (
+            f"Generated sudoers MKDIR_SAFE runas is {targets!r}; must be (ALL) "
+            f"for github_ops cross-user mkdir (Issue #2674)"
+        )
+
+        entries = [
+            re.sub(r"^\S*/mkdir\s+", "", cmd) for cmd in _extract_cmnd_alias(content, "MKDIR_SAFE")
+        ]
+        real_shapes = [
+            # create_verification_worktree_dir: worktrees root
+            "-p -- /srv/repos/x/.worktrees",
+            # unique verifier child dir
+            "-m 700 -- /srv/repos/x/.worktrees/verify-deadbeef",
+        ]
+        for shape in real_shapes:
+            matching = [e for e in entries if fnmatch.fnmatch(shape, e)]
+            assert matching, (
+                f"create_verification_worktree_dir sudo-path command "
+                f"{shape!r} matches no MKDIR_SAFE entry; cross-user verifier "
+                f"worktree creation would be rejected by sudoers "
+                f"(Issue #2674). MKDIR_SAFE entries: {entries!r}"
+            )
+
+    @pytest.mark.issue(2674)
+    def test_github_ops_mkdir_construction_locked(self):
+        """Drift lock: github_ops must keep the bare cross-user mkdir shape.
+
+        Deliberately brittle source-grep, mirroring the #2635 prefix locks.
+        If github_ops.create_verification_worktree_dir stops emitting
+        ``sudo -u <account> mkdir ...`` (e.g. switches to the openace-mkdir
+        wrapper), the MKDIR_SAFE entries added for #2674 silently stop
+        matching — or the wrapper's (root) runas rejects the call. Fail here
+        with a pointer to the entries.
+        """
+        text = GITHUB_OPS_PY.read_text()
+        assert 'cmd = ["sudo", "-u", account, "mkdir", *args]' in text, (
+            "github_ops.create_verification_worktree_dir no longer emits "
+            "'sudo -u <account> mkdir ...'; the MKDIR_SAFE entries "
+            "'/usr/bin/mkdir *' and '/bin/mkdir *' under (ALL) runas "
+            "(scripts/generate-sudoers.sh, scripts/install-central/"
+            "package-method/install.sh, docker-entrypoint.sh) must be "
+            "updated in lockstep (Issue #2674)"
+        )
+
+
 class TestSudoersDrift:
     """Tests for Docker/Package sudoers drift detection."""
 
