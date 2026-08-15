@@ -324,6 +324,8 @@ def test_agent_environment_binds_python_and_git_guards(monkeypatch, tmp_path):
     assert "SKIP" not in env
 
 
+@pytest.mark.regression
+@pytest.mark.issue(2680)
 def test_agent_env_scrubs_scheduler_mode(monkeypatch, tmp_path):
     """进程拓扑不得泄漏进 agent 子进程（class-2 幽灵暂停，2026-08-15）。
 

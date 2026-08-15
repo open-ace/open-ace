@@ -8,7 +8,11 @@ agent 在 worktree 内跑 pytest 时，fixture 的 create_app({"TESTING": True})
 
 from unittest.mock import patch
 
+import pytest
+
 from app import create_app
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2680)]
 
 
 def test_testing_mode_skips_background_services():
