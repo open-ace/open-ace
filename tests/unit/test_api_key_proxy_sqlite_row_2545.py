@@ -18,6 +18,19 @@ import pytest
 from app.modules.workspace.api_key_proxy import APIKeyProxyService
 
 
+@pytest.fixture(autouse=True)
+def force_sqlite_backend(monkeypatch):
+    """Force the SQLite code path regardless of the dev box's DATABASE_URL.
+
+    These tests exercise sqlite3.Row handling against the service's own
+    temp SQLite database (db_path=...); on a PostgreSQL-configured dev box
+    the service would otherwise silently use the global PG pool and the
+    raw ``?`` placeholders would fail. Same hermeticity pattern as
+    tests/unit/test_run_timeline_repo.py.
+    """
+    monkeypatch.setattr("app.modules.workspace.api_key_proxy.is_postgresql", lambda: False)
+
+
 class TestCollectToolKeySettingsSqliteRow:
     """Tests for _collect_tool_key_settings with sqlite3.Row."""
 
