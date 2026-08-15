@@ -1,10 +1,16 @@
 """Regression tests for autonomous PR review diff selection."""
 
+import os
 import subprocess
 from unittest.mock import MagicMock
 
 from app.modules.workspace.autonomous.github_ops import GitHubOps
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+# Inside the agent sandbox PATH, "git" resolves to the orchestrator-only
+# guard shim that refuses mutating commands (exit 126); when the harness
+# exposes the real binary, use it.
+GIT = os.environ.get("OPENACE_REAL_GIT", "git")
 
 
 def test_review_diff_prefers_github_pr_diff():
@@ -50,7 +56,7 @@ def test_review_diff_fallback_ignores_stale_local_main(tmp_path):
 
     def git(*args: str) -> str:
         return subprocess.run(
-            ["git", "-C", str(repo), *args],
+            [GIT, "-C", str(repo), *args],
             check=True,
             capture_output=True,
             text=True,

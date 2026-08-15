@@ -713,6 +713,11 @@ class GitHubOps:
                 f"--git-dir={self._trusted_git_dir}",
                 f"--work-tree={self._trusted_work_tree or os.path.realpath(self.repo_path)}",
             ]
+        # Inside the agent sandbox PATH, "git" resolves to the orchestrator-
+        # only guard shim; the harness exposes the real binary via
+        # OPENACE_REAL_GIT for code that must run git directly (tests,
+        # tooling). Unset everywhere else, so this defaults to plain "git".
+        git_bin = os.environ.get("OPENACE_REAL_GIT", "git")
         # Trust the canonical repo via per-command ``-c`` (never the global
         # ``safe.directory *`` that used to be written via
         # _ensure_safe_directory). git's dubious-ownership check covers every
@@ -745,7 +750,7 @@ class GitHubOps:
                     "sudo",
                     "-u",
                     account,
-                    "git",
+                    git_bin,
                     *trusted_args,
                     "-c",
                     "core.hooksPath=/dev/null",
@@ -759,7 +764,7 @@ class GitHubOps:
             kwargs.pop("cwd", None)  # Remove cwd to avoid Python permission check
         else:
             cmd = [
-                "git",
+                git_bin,
                 *trusted_args,
                 "-c",
                 "core.hooksPath=/dev/null",
