@@ -25,7 +25,8 @@ if sys.platform == "win32":
 # Tests should run in development mode by default.
 # This MUST be set before importing any app modules.
 # =============================================================================
-if "OPENACE_SECURITY_MODE" not in os.environ:
+current_mode = os.environ.get("OPENACE_SECURITY_MODE", "").strip()
+if not current_mode:
     os.environ["OPENACE_SECURITY_MODE"] = "development"
 
 # Set test encryption keys for development mode

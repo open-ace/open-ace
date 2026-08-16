@@ -51,6 +51,10 @@ def _ctx(workflow: dict) -> WorkflowContext:
 def _deps(*, checks, required=REQUIRED, merge_raises=None):
     host = MagicMock(name="host")
     host.perform_git_cleanup.return_value = ("completed", "")
+    # Issue #2673: the zero-check-runs fallback must not take over the
+    # cycle in these wiring tests (checks are reported non-empty or the
+    # gating is asserted separately).
+    host.zero_check_runs_fallback.return_value = False
     host.validate_pre_merge_change_scope.return_value = ""
     host.sync_failed_pr_with_main.return_value = False
     host.branch_contains_main.return_value = False

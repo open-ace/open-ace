@@ -1018,6 +1018,114 @@ def get_machine(machine_id):
     )
 
 
+@remote_bp.route("/machines/<machine_id>/commands", methods=["GET"])
+@machine_access_required
+def get_machine_commands(machine_id):
+    """
+    Get operational commands for a specific machine.
+
+    Issue #2565: Returns commands for managing the remote agent.
+
+    Returns:
+        JSON with install_command, start_command, stop_command, status_command, uninstall_command.
+
+    Permission:
+        - system_admin: Can view all commands
+        - machine_admin: Can view commands (without registration token)
+        - machine_user: Cannot view sensitive commands
+
+    Note: machine_access_required already verified:
+        - Machine exists (called agent_mgr.get_machine)
+        - User has access (called agent_mgr.get_user_permission)
+    We query again here to ensure we have the latest data for command generation.
+    """
+    agent_mgr = get_remote_agent_manager()
+    machine = agent_mgr.get_machine(machine_id)
+
+    if not machine:
+        return jsonify({"error": "Machine not found"}), 404
+
+    # Get server URL from request or config
+    server_url = request.host_url.rstrip("/")
+
+    # Get OS type from machine record and normalize
+    # Issue #2565: Use explicit matching to avoid false positives
+    os_type = (machine.get("os_type") or "").lower().strip()
+
+    if not os_type:
+        # Default to Linux for empty os_type
+        os_type_normalized = "Linux"
+    elif os_type in ("windows", "win", "win10", "win11", "microsoft windows"):
+        os_type_normalized = "Windows"
+    elif os_type in ("darwin", "macos", "mac os x", "mac os"):
+        os_type_normalized = "Darwin"
+    elif os_type in ("linux", "ubuntu", "centos", "debian", "redhat", "fedora"):
+        os_type_normalized = "Linux"
+    else:
+        # Default to Linux for unknown OS types
+        os_type_normalized = "Linux"
+
+    # Generate commands based on OS type
+    # Issue #2565: Use proper Windows path expansion
+    if os_type_normalized == "Windows":
+        install_dir = "$env:USERPROFILE\\.open-ace-agent"
+        install_command = (
+            f"powershell -Command \"Invoke-WebRequest -Uri '{server_url}/api/remote/agent/install.ps1'"
+            f" -OutFile 'install.ps1'; powershell -ExecutionPolicy Bypass -File install.ps1"
+            f" -ServerUrl '{server_url}' -RegistrationToken <TOKEN>\""
+        )
+        start_command = f"powershell -ExecutionPolicy Bypass -File {install_dir}\\start-agent.ps1"
+        stop_command = (
+            f"powershell -ExecutionPolicy Bypass -File {install_dir}\\start-agent.ps1 -Stop"
+        )
+        status_command = (
+            f"powershell -ExecutionPolicy Bypass -File {install_dir}\\start-agent.ps1 -Status"
+        )
+        uninstall_command = (
+            f"powershell -Command \"Invoke-WebRequest -Uri '{server_url}/api/remote/agent/uninstall.ps1'"
+            f" -OutFile 'uninstall.ps1'; powershell -ExecutionPolicy Bypass -File uninstall.ps1\""
+        )
+    else:
+        # Linux/macOS
+        install_dir = "~/.open-ace-agent"
+        install_command = (
+            f"curl -fsSL {server_url}/api/remote/agent/install.sh | "
+            f"bash -s -- --server {server_url} --token <TOKEN>"
+        )
+        start_command = f"bash {install_dir}/start-agent.sh"
+        stop_command = f"bash {install_dir}/start-agent.sh --stop"
+        status_command = f"bash {install_dir}/start-agent.sh --status"
+        uninstall_command = f"curl -fsSL {server_url}/api/remote/agent/uninstall.sh | bash"
+
+    # Check user permission level
+    user_role = g.user.get("role", "")
+    user_id = g.user.get("id")
+
+    # Determine if user is machine admin or system admin
+    is_system_admin = User.is_admin_role(user_role)
+    is_machine_admin = False
+    if not is_system_admin:
+        user_perm = agent_mgr.get_user_permission(machine_id, user_id)
+        is_machine_admin = user_perm == "admin"
+
+    # Build response
+    response = {
+        "success": True,
+        "os_type": os_type_normalized,
+        "server_url": server_url,
+        "start_command": start_command,
+        "stop_command": stop_command,
+        "status_command": status_command,
+    }
+
+    # Only admins can see install/uninstall commands
+    if is_system_admin or is_machine_admin:
+        response["install_command"] = install_command
+        response["uninstall_command"] = uninstall_command
+
+    return jsonify(response)
+
+
 @remote_bp.route("/machines/<machine_id>", methods=["DELETE"])
 @admin_required
 def deregister_machine(machine_id):
@@ -1118,12 +1226,20 @@ def rotate_machine_token(machine_id):
     Rotate the agent token for a machine. System admin only.
 
     Issue #2180: Validate machine tenant access.
+    Issue #2499: Support immediate and delayed revocation modes.
     Issue #2530: Include token_version and rotated_at in command payload.
 
-    Revokes all existing tokens and issues a new one. If the existing
-    tokens were already revoked (i.e., the machine was previously
-    revoked and is being re-activated), this is logged as an unrevoke.
+    Args:
+        immediate (bool): If True, immediately revoke old token (emergency mode).
+                        If False (default), delay revocation pending agent confirmation.
+
+    Returns:
+        JSON response with new token and rotation details.
     """
+    # Get immediate parameter from request
+    data = request.get_json() or {}
+    immediate = data.get("immediate", False)
+
     # Validate tenant access
     machine, error = _check_machine_tenant_access(machine_id)
     if error:
@@ -1134,20 +1250,25 @@ def rotate_machine_token(machine_id):
     result = agent_mgr.rotate_agent_token(
         machine_id=machine_id,
         rotated_by=g.user["id"],
+        immediate=immediate,
     )
 
     if result is None:
         return jsonify({"error": "Machine not found"}), 404
 
     new_token = result["new_token"]
+    rotation_id = result.get("rotation_id", "")
     token_version = result.get("token_version", 0)
     rotated_at = result.get("rotated_at", "")
+    mode = "immediate" if immediate else "delayed"
 
     # AGENT_TOKEN_ROTATE audit event
     details = {
         "machine_id": machine_id,
         "rotated_by": g.user["id"],
+        "rotation_id": rotation_id,
         "token_version": token_version,
+        "mode": mode,
     }
     if result.get("unrevoked"):
         details["unrevoke"] = True
@@ -1162,33 +1283,49 @@ def rotate_machine_token(machine_id):
         details=details,
     )
 
-    # Push rotate_token command to agent so it updates its local config.
-    # Issue #2530: Include token_version for version-based filtering.
-    # send_command() only enqueues — check if agent is online to determine
-    # whether the new token will be delivered immediately or needs manual update.
-    agent_mgr.send_command(
-        machine_id,
-        {
-            "command": "rotate_token",
-            "new_token": new_token,
-            "token_version": token_version,
-            "rotated_at": rotated_at,
-        },
-    )
-    is_online = agent_mgr.is_connected(machine_id)
-    msg = (
-        "Agent token rotated. The new token has been pushed to the agent."
-        if is_online
-        else "Agent token rotated. Agent is offline — save the new token and"
-        " manually update the agent config."
-    )
+    # Issue #2499: Only push command for delayed mode
+    if not immediate:
+        # Push rotate_token command to agent so it updates its local config.
+        # Issue #2530: Include token_version for version-based filtering.
+        # send_command() only enqueues — check if agent is online to determine
+        # whether the new token will be delivered immediately or needs manual update.
+        agent_mgr.send_command(
+            machine_id,
+            {
+                "command": "rotate_token",
+                "new_token": new_token,
+                "rotation_id": rotation_id,
+                "token_version": token_version,
+                "rotated_at": rotated_at,
+                "timeout": result.get("timeout", 300),
+            },
+        )
+        is_online = agent_mgr.is_connected(machine_id)
+        if is_online:
+            msg = (
+                "Token rotated successfully. The new token has been pushed to the agent. "
+                "The agent will automatically update its configuration."
+            )
+        else:
+            msg = (
+                "Token rotated successfully. The agent is offline — "
+                "save the new token and manually update the agent config."
+            )
+    else:
+        # Immediate mode: token revoked immediately, no command pushed
+        msg = (
+            "Token revoked immediately for security. "
+            "You must manually update the agent configuration with the new token."
+        )
 
     return jsonify(
         {
             "success": True,
             "agent_token": new_token,
+            "rotation_id": rotation_id,
             "token_version": token_version,
             "message": msg,
+            "mode": mode,
         }
     )
 
@@ -2176,6 +2313,49 @@ def agent_message():
         pending = agent_mgr.get_pending_commands(machine_id)
         return jsonify({"success": True, "type": "poll_ack", "pending_commands": pending})
 
+    elif msg_type == "token_rotation_ack":
+        # Issue #2499: Token rotation confirmation from agent
+        rotation_id = data.get("rotation_id")
+        signature = data.get("signature")
+        timestamp = data.get("timestamp")
+        new_token_hash = data.get("new_token_hash", "")[:8]  # For audit only
+
+        if not all([rotation_id, signature, timestamp]):
+            return jsonify({"error": "Missing required fields for token_rotation_ack"}), 400
+
+        # Get the new token from the Authorization header
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return jsonify({"error": "Missing Bearer token"}), 401
+        new_token = auth_header[7:]
+
+        # Confirm the rotation
+        success = agent_mgr.confirm_token_rotation(
+            machine_id=machine_id,
+            rotation_id=rotation_id,
+            signature=signature,
+            timestamp=int(timestamp),
+            new_token=new_token,
+        )
+
+        if success:
+            # Audit log for successful confirmation
+            audit_logger.log_action(
+                AuditAction.AGENT_TOKEN_ROTATE_CONFIRMED,
+                severity="info",
+                resource_type="remote_machine",
+                resource_id=machine_id,
+                details={
+                    "machine_id": machine_id,
+                    "rotation_id": rotation_id,
+                    "new_token_hash": new_token_hash,
+                },
+            )
+            pending = agent_mgr.get_pending_commands(machine_id)
+            return jsonify({"success": True, "pending_commands": pending})
+        else:
+            return jsonify({"error": "Token rotation confirmation failed"}), 400
+
     elif msg_type == "session_output":
         session_id = data.get("session_id")
         output_data = data.get("data", "")
@@ -2766,6 +2946,28 @@ def agent_message():
                 # message_count itself — otherwise remote-synced sessions
                 # never reflect their imported messages (#1128).
                 if synced_message_delta or synced_input_tokens or synced_output_tokens:
+                    # Issue #2576: Sync to daily_usage for dashboard today's usage
+                    # The /api/today endpoint reads from daily_usage table directly.
+                    try:
+                        from app.repositories.usage_repo import UsageRepository
+
+                        usage_repo = UsageRepository()
+                        today_str = time.strftime("%Y-%m-%d")
+                        usage_repo.save_usage(
+                            date=today_str,
+                            tool_name=tool_name,
+                            host_name=safe_machine_id_prefix(machine_id),
+                            tokens_used=synced_input_tokens + synced_output_tokens,
+                            input_tokens=synced_input_tokens,
+                            output_tokens=synced_output_tokens,
+                            cache_tokens=0,
+                            request_count=synced_message_delta,
+                            models_used=[model] if model else None,
+                            tenant_id=session_tenant_id or 1,
+                        )
+                    except Exception as e:
+                        logger.debug("Failed to save daily_usage: %s", e)
+
                     sync_session_mgr.increment_session_usage(
                         session_id,
                         message_delta=synced_message_delta,

@@ -2358,7 +2358,8 @@ $run_user ALL=(root) NOPASSWD: $python_bin $script_path *"
     # `sudo -u <system_account>` 跨用户执行（#1395），无法改走
     # openace-run-as --isolated（reject owner==target / env -i 剥凭据 /
     # credentialless 账户模型）；fs.py/projects.py/autonomous.py 的跨用户
-    # test/ls/stat/mkdir 同理。#2181 曾把这里从 (ALL) 收紧为 (root)，部署后
+    # test/ls/stat 同理（跨用户 mkdir 由 MKDIR_SAFE 承接，Issue #2674）。
+    # #2181 曾把这里从 (ALL) 收紧为 (root)，部署后
     # 所有 system_account≠openace 的工作流在 preparation `git fetch` 处全挂。
     # 仅还 runas 目标；#2181 的 agent CLI 隔离（run-as --isolated）、移除
     # cat/chown/useradd/rm、env_keep 收紧均保留。
@@ -2411,9 +2412,11 @@ ${webui_local_rule}"
 ${utility_rule}"
 
     # 【Issue #2334】添加 GIT_SAFE 和 GH_SAFE 规则（(ALL) runas）
+    # 【Issue #2674】添加 MKDIR_SAFE 跨用户 mkdir 规则（(ALL) runas）
     current_user_rules="${current_user_rules}
 $run_user ALL=(ALL) NOPASSWD: GIT_SAFE
-$run_user ALL=(ALL) NOPASSWD: GH_SAFE"
+$run_user ALL=(ALL) NOPASSWD: GH_SAFE
+$run_user ALL=(ALL) NOPASSWD: MKDIR_SAFE"
 
     # Add security wrapper rules if any
     if [ -n "$security_wrapper_rules" ]; then
@@ -2472,9 +2475,23 @@ Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
     local GH_PATH=$(which gh 2>/dev/null || echo "/usr/bin/gh")
 
     local cmnd_alias_section="# 【安全加固 Issue #2334】安全命令别名定义
-# git精确参数白名单（覆盖100%autonomous工作流）
+# git命令白名单（动词优先条目 + #2635 前缀锚定条目）
+# 【安全边界说明（诚实版）】动词优先白名单只约束裸 'git <verb>'/'gh <verb>' 形态；
+# #2635 前缀锚定条目（-c core.hooksPath=/dev/null * / --git-dir=* / -R * / api *）
+# 在 (ALL) runas 下实际上恢复了接近 #2334 之前的 git/gh 能力。前缀是公开常量，
+# 仅作命令形态兼容锚点，不是安全边界；真正的收紧由后续 hardened wrapper
+# （openace-git/openace-gh，follow-up issue）承接。
 # 【Issue #2334】使用 (ALL) runas 以允许 github_ops 跨用户 git 操作
+# 【Issue #2635】前缀锚定条目：github_ops._run_git 的 sudo 路径在子命令前携带
+# git 全局选项（-c core.hooksPath=/dev/null ... 或 --git-dir=... --work-tree=...），
+# git 语法要求全局选项必须位于子命令之前，因此命令永不以 'git <subcommand>' 开头，
+# 动词优先白名单一条都匹配不上。
+# 注意：前缀锚定条目在 (ALL) runas 下近似恢复旧版 'git *' 能力（非更窄）；
+# 前缀是公开常量 = 形态兼容锚点，非安全边界；真正的收紧由后续
+# hardened wrapper（openace-git）承接（follow-up issue）。
 Cmnd_Alias GIT_SAFE = \\
+    ${GIT_PATH} -c core.hooksPath=/dev/null *, \\
+    ${GIT_PATH} --git-dir=*, \\
     ${GIT_PATH} config --global --add safe.directory *, \\
     ${GIT_PATH} remote get-url origin, \\
     ${GIT_PATH} remote add *, \\
@@ -2516,10 +2533,19 @@ Cmnd_Alias GIT_SAFE = \\
     ${GIT_PATH} commit -m * --no-verify, \\
     ${GIT_PATH} init
 
-# gh精确参数白名单（覆盖100%autonomous工作流）
+# gh命令白名单（动词优先条目 + #2635 前缀锚定条目）
 # Issue #1855: --admin 仅在 OPENACE_ALLOW_ADMIN_MERGE=1 时启用
 # 【Issue #2334】使用 (ALL) runas 以允许 github_ops 跨用户 gh 操作
+# 【Issue #2635】前缀锚定条目：github_ops._run_gh 的 sudo 路径总是在子命令前插入
+# '-R owner/repo'（gh 无 -C，sudo 下靠 -R 定位仓库）；且 gh api 拒绝 -R、以
+# 'gh api repos/...' 裸形态运行。
+# 注意：'gh api *' 允许任意 REST 调用（含 -X DELETE），'-R *' 下的动词同样
+# 不受白名单约束——此两条在 (ALL) runas 下近似恢复旧版 'gh *' 能力（非更窄）；
+# 前缀是公开常量 = 形态兼容锚点，非安全边界；真正的收紧由后续
+# hardened wrapper（openace-gh）承接（follow-up issue）。
 Cmnd_Alias GH_SAFE = \\
+    ${GH_PATH} -R *, \\
+    ${GH_PATH} api *, \\
     ${GH_PATH} repo create *, \\
     ${GH_PATH} repo create * --private, \\
     ${GH_PATH} repo create * --public, \\
@@ -2554,11 +2580,18 @@ Cmnd_Alias GH_SAFE = \\
 
 # 【安全加固 Issue #2334】OPENACE_UTILS 收紧
 # 移除 git/gh 通配（改用 GIT_SAFE/GH_SAFE），消除 runas 漂移
-# 移除 mkdir（改用 openace-mkdir wrapper）
+# 移除 root-runas mkdir（改用 openace-mkdir wrapper）
 # 保留低风险只读命令：test, ls, stat, id, find
 # find 是只读操作，DAC 已保护敏感目录
 # 【Issue #2334】runas 使用 (ALL) 以支持 github_ops 跨用户工具调用
 Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/id *, /usr/bin/find *
+
+# 【Issue #2674】跨用户 mkdir：github_ops.create_verification_worktree_dir 发
+# 'sudo -u <account> mkdir -p -- <path>' / 'mkdir -m 700 -- <path>'（裸 mkdir，
+# 非 openace-mkdir wrapper——wrapper 仅 (root) runas 且产生 root 属主目录，
+# 而 verifier worktree 必须由执行 git 的身份持有）。sudo 按调用方 PATH 解析
+# 裸 mkdir，/usr/bin 与 /bin 两种解析路径都必须匹配。
+Cmnd_Alias MKDIR_SAFE = /usr/bin/mkdir *, /bin/mkdir *
 
 # 【安全加固 Issue #2181】安全 wrapper 规则
 # 以下 wrapper 替代原通配命令，内部验证参数安全性
@@ -2642,6 +2675,19 @@ ${line}"
         if ! grep -q "Cmnd_Alias OPENACE_UTILS" "$sudoers_file" 2>/dev/null || \
            ! grep -E "Cmnd_Alias OPENACE_UTILS.*chown" "$sudoers_file" 2>/dev/null; then
             print_warning "Sudoers missing OPENACE_UTILS Cmnd_Alias or chown command"
+            need_update=true
+        fi
+
+        # 【修复 Issue #2674】Check cross-user mkdir rule (MKDIR_SAFE).
+        # github_ops.create_verification_worktree_dir emits
+        # 'sudo -u <account> mkdir ...' (bare mkdir), which the (root)-runas
+        # openace-mkdir wrapper cannot cover. Without this probe an
+        # incremental upgrade (all earlier checks pass) would keep the old
+        # sudoers and every acceptance verifier checkout dies with
+        # "sudo: a password is required" -> "merged-main checkout failed".
+        if ! grep -q "Cmnd_Alias MKDIR_SAFE" "$sudoers_file" 2>/dev/null || \
+           ! grep -E "^${run_user} ALL=\(ALL\) NOPASSWD: MKDIR_SAFE" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing MKDIR_SAFE cross-user mkdir rule for user '$run_user'"
             need_update=true
         fi
 
@@ -2887,7 +2933,7 @@ configure_scheduler_service() {
     web_unit=$(systemctl show open-ace.service -p FragmentPath --value 2>/dev/null)
     [ -n "$web_unit" ] && [ -f "$web_unit" ] || web_unit="/etc/systemd/system/open-ace.service"
 
-    local cs_user cs_group cs_path cs_python cs_home cs_secret cs_workspace
+    local cs_user cs_group cs_path cs_python cs_home cs_secret cs_workspace cs_security_mode
     cs_user=$(grep '^User=' "$web_unit" | tail -1 | cut -d= -f2)
     cs_group=$(grep '^Group=' "$web_unit" | tail -1 | cut -d= -f2)
     cs_path=$(grep '^WorkingDirectory=' "$web_unit" | tail -1 | cut -d= -f2)
@@ -2897,6 +2943,9 @@ configure_scheduler_service() {
     cs_secret=$(grep '^Environment=SECRET_KEY=' "$web_unit" | tail -1 | cut -d= -f3)
     cs_workspace=$(grep '^Environment=WORKSPACE_BASE_DIR=' "$web_unit" | tail -1 | cut -d= -f3)
     cs_home=$(grep '^Environment=HOME=' "$web_unit" | tail -1 | cut -d= -f3)
+    # Issue #2654: Inherit OPENACE_SECURITY_MODE from the web service unit
+    cs_security_mode=$(grep '^Environment=OPENACE_SECURITY_MODE=' "$web_unit" | tail -1 | cut -d= -f3)
+    [ -n "$cs_security_mode" ] || cs_security_mode="production"
     [ -n "$cs_group" ] || cs_group=$(id -gn "$cs_user" 2>/dev/null || echo "$cs_user")
     [ -n "$cs_home" ] || cs_home=$(getent passwd "$cs_user" | cut -d: -f6)
     [ -n "$cs_workspace" ] || cs_workspace="/home"
@@ -2909,6 +2958,7 @@ configure_scheduler_service() {
         -e "s|__HOME__|$cs_home|g" \
         -e "s|__SECRET_KEY__|$cs_secret|g" \
         -e "s|__WORKSPACE_BASE_DIR__|$cs_workspace|g" \
+        -e "s|__SECURITY_MODE__|$cs_security_mode|g" \
         "$scheduler_template" > "$scheduler_file" || {
         print_warning "Failed to render $scheduler_file; scheduler service not updated"
         return 1
@@ -2935,7 +2985,7 @@ configure_scheduler_service() {
         print_info "Starting openace-scheduler service..."
         systemctl start openace-scheduler.service
     fi
-    sleep 2
+    sleep 3
     if systemctl is-active --quiet openace-scheduler.service; then
         print_success "Scheduler service active (background autonomous schedulers)"
     else
@@ -3007,6 +3057,11 @@ install_systemd_service() {
     local enc_key="${OPENACE_ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
     print_info "Generated OPENACE_ENCRYPTION_KEY for sensitive data encryption"
 
+    # Issue #2654: OPENACE_SECURITY_MODE is required by create_app() in
+    # production-capable paths (systemd, Docker, K8s). Default to production
+    # for systemd deployments; can be overridden via environment variable.
+    local security_mode="${OPENACE_SECURITY_MODE:-production}"
+
     # Create service file from template
     print_info "Creating systemd service file..."
     sed -e "s|__USER__|$user|g" \
@@ -3019,6 +3074,7 @@ install_systemd_service() {
         -e "s|__SECRET_KEY__|$secret_key|g" \
         -e "s|__OPENACE_ENCRYPTION_KEY__|$enc_key|g" \
         -e "s|__WORKSPACE_BASE_DIR__|$WORKSPACE_BASE_DIR|g" \
+        -e "s|__SECURITY_MODE__|$security_mode|g" \
         "$service_template" > "$service_file"
 
     if [ $? -ne 0 ]; then
@@ -3051,7 +3107,7 @@ install_systemd_service() {
     fi
 
     # Check service status
-    sleep 2
+    sleep 3
     if systemctl is-active --quiet open-ace.service; then
         print_success "Systemd service installed and started successfully"
         print_info "Service name: open-ace"
@@ -3127,6 +3183,9 @@ install_systemd_service_remote() {
     local enc_key="${OPENACE_ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
     print_info "Generated OPENACE_ENCRYPTION_KEY for sensitive data encryption"
 
+    # Issue #2654: OPENACE_SECURITY_MODE required by create_app()
+    local security_mode="${OPENACE_SECURITY_MODE:-production}"
+
     # Generate service file content locally using sed
     local service_content=$(sed -e "s|__USER__|$user|g" \
         -e "s|__GROUP__|$group|g" \
@@ -3138,6 +3197,7 @@ install_systemd_service_remote() {
         -e "s|__SECRET_KEY__|$secret_key|g" \
         -e "s|__OPENACE_ENCRYPTION_KEY__|$enc_key|g" \
         -e "s|__WORKSPACE_BASE_DIR__|$WORKSPACE_BASE_DIR|g" \
+        -e "s|__SECURITY_MODE__|$security_mode|g" \
         "$service_template")
 
     # If multi-user workspace mode is enabled, allow sudo (set NoNewPrivileges=false)
@@ -3315,6 +3375,7 @@ detect_and_load_local_upgrade() {
     # Priority 1: From systemd service file (highest priority - matches running service)
     # Use systemctl show to get actual service file path (not hardcoded)
     # Check unit existence (not is-enabled, which fails for disabled services)
+    # Issue #2616: Use systemctl cat to detect unit file existence (not is-active)
     if command -v systemctl &>/dev/null && systemctl cat open-ace.service &>/dev/null 2>&1; then
         local service_file=$(systemctl show open-ace.service -p FragmentPath 2>/dev/null | cut -d= -f2)
         if [ -z "$service_file" ] || [ ! -f "$service_file" ]; then
@@ -3324,7 +3385,8 @@ detect_and_load_local_upgrade() {
         # Use "^WorkingDirectory=" to avoid matching comment lines
         local systemd_path=$(grep "^WorkingDirectory=" "$service_file" 2>/dev/null | cut -d= -f2)
         if [ -n "$systemd_path" ] && [ -d "$systemd_path" ] && [ -f "$systemd_path/server.py" ]; then
-            print_info "Found running systemd service pointing to: $systemd_path"
+            # Issue #2616: Correct misleading log - systemctl cat only proves unit file exists
+            print_info "Found systemd unit file pointing to: $systemd_path"
             if [[ ! " ${candidate_paths[*]} " =~ " ${systemd_path} " ]]; then
                 candidate_paths+=("$systemd_path")
             fi
@@ -3825,6 +3887,89 @@ configure_deploy_remaining() {
     INSTALL_SERVICE="$install_service"
 }
 
+# Stop only the package installer's own non-systemd fallback process.  The PID
+# file is untrusted/stale input: validate the PID, owner, cwd, and command before
+# sending a signal so PID reuse can never terminate an unrelated process.
+stop_legacy_package_server() {
+    local target_path="$1"
+    local deploy_user="$2"
+    local pid_file="$target_path/logs/server.pid"
+
+    [ -f "$pid_file" ] || return 0
+
+    local legacy_pid
+    legacy_pid=$(tr -d '[:space:]' < "$pid_file" 2>/dev/null || true)
+    if ! [[ "$legacy_pid" =~ ^[1-9][0-9]*$ ]]; then
+        print_warning "Removing malformed legacy server PID file"
+        rm -f -- "$pid_file"
+        return 0
+    fi
+
+    if ! kill -0 "$legacy_pid" 2>/dev/null; then
+        print_info "Removing stale legacy server PID file"
+        rm -f -- "$pid_file"
+        return 0
+    fi
+
+    # A stale PID file can occasionally point at the current systemd process.
+    # Let systemd stop its own MainPID instead of signaling it here.
+    local service_pid
+    service_pid=$(systemctl show open-ace.service -p MainPID --value 2>/dev/null || true)
+    if [ "$legacy_pid" = "$service_pid" ] && [ "$service_pid" != "0" ]; then
+        rm -f -- "$pid_file"
+        return 0
+    fi
+
+    local process_user process_cwd process_cmd
+    process_user=$(ps -o user= -p "$legacy_pid" 2>/dev/null | xargs || true)
+    process_cwd=$(readlink -f "/proc/$legacy_pid/cwd" 2>/dev/null || true)
+    process_cmd=$(tr '\0' ' ' < "/proc/$legacy_pid/cmdline" 2>/dev/null || true)
+
+    if [ "$process_user" != "$deploy_user" ] || \
+       [ "$process_cwd" != "$target_path" ] || \
+       ! printf '%s\n' "$process_cmd" | grep -Eq '(^|[[:space:]])server\.py([[:space:]]|$)'; then
+        print_warning "Legacy server PID file does not match the expected Open ACE process; removing it without signaling PID $legacy_pid"
+        rm -f -- "$pid_file"
+        return 0
+    fi
+
+    print_info "Stopping legacy non-systemd Open ACE server (PID: $legacy_pid)..."
+    kill "$legacy_pid" 2>/dev/null || true
+    local waited=0
+    while kill -0 "$legacy_pid" 2>/dev/null && [ "$waited" -lt 10 ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if kill -0 "$legacy_pid" 2>/dev/null; then
+        print_error "Legacy Open ACE server did not stop after ${waited}s"
+        return 1
+    fi
+
+    rm -f -- "$pid_file"
+    print_success "Legacy non-systemd Open ACE server stopped"
+}
+
+# Confirm both that systemd considers the unit active and that its MainPID owns
+# the configured web port.  This avoids treating a short-lived process in an
+# auto-restart loop as a successful upgrade.
+wait_for_openace_service() {
+    local port="${1:-19888}"
+    local timeout="${2:-15}"
+    local waited=0 main_pid
+
+    while [ "$waited" -lt "$timeout" ]; do
+        main_pid=$(systemctl show open-ace.service -p MainPID --value 2>/dev/null || true)
+        if systemctl is-active --quiet open-ace.service 2>/dev/null && \
+           [[ "$main_pid" =~ ^[1-9][0-9]*$ ]] && \
+           ss -ltnp 2>/dev/null | grep -E ":${port}[[:space:]]" | grep -q "pid=${main_pid},"; then
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    return 1
+}
+
 # ============================================================================
 # Local Installation
 # ============================================================================
@@ -3918,12 +4063,13 @@ install_local() {
         # -- Phase 1: Fix missing config in service file (runs always) --
         if [ -n "$service_file" ] && [ -f "$service_file" ]; then
             # Check if systemd service is missing SECRET_KEY (upgrade from older version)
-            local current_secret=$(grep "^Environment=SECRET_KEY=" "$service_file" 2>/dev/null | cut -d'=' -f3)
+            local current_secret=$(sed -n 's/^Environment=SECRET_KEY=//p' "$service_file" 2>/dev/null | tail -1)
             if [ -z "$current_secret" ]; then
                 print_warning "Adding missing SECRET_KEY to systemd service..."
                 local secret_key="${SECRET_KEY:-$(openssl rand -hex 32)}"
                 sed -i "/^Environment=HOME=/a Environment=SECRET_KEY=$secret_key" "$service_file"
                 print_info "Generated SECRET_KEY for Flask encryption"
+                current_secret="$secret_key"
             fi
 
             # Check and fix WORKSPACE_BASE_DIR (Issue #1217, #1308, #2290)
@@ -3954,16 +4100,38 @@ install_local() {
 
             if [ "$has_enc_key_in_service" = "no" ] && [ "$has_secrets_env" != "yes" ]; then
                 print_warning "Adding missing OPENACE_ENCRYPTION_KEY to systemd service..."
-                local enc_key="${OPENACE_ENCRYPTION_KEY:-$(openssl rand -hex 16)}"
+                # Before OPENACE_ENCRYPTION_KEY was introduced, persisted API keys,
+                # SMTP passwords, and SSO secrets were encrypted with SECRET_KEY.
+                # Reusing it here is required for upgrade compatibility. Generating
+                # a new random key would leave every existing ciphertext unreadable.
+                local enc_key="${OPENACE_ENCRYPTION_KEY:-$current_secret}"
                 sed -i "/^Environment=SECRET_KEY=/a Environment=OPENACE_ENCRYPTION_KEY=$enc_key" "$service_file"
-                print_info "Generated OPENACE_ENCRYPTION_KEY for sensitive data encryption (Issue #2359)"
+                print_info "Initialized OPENACE_ENCRYPTION_KEY from the existing encryption secret (Issue #2626)"
+            fi
+
+            # Issue #2654: Inject OPENACE_SECURITY_MODE if missing (PR #2446 follow-up)
+            # create_app() requires this env var in production-capable paths (systemd).
+            # Existing service files created before PR #2446 won't have it.
+            local has_security_mode=$(grep -q "^Environment=OPENACE_SECURITY_MODE=" "$service_file" 2>/dev/null && echo "yes" || echo "no")
+            if [ "$has_security_mode" = "no" ]; then
+                local security_mode="${OPENACE_SECURITY_MODE:-production}"
+                print_warning "Adding missing OPENACE_SECURITY_MODE to systemd service..."
+                sed -i "/^Environment=WORKSPACE_BASE_DIR=/a Environment=OPENACE_SECURITY_MODE=$security_mode" "$service_file"
+                print_info "Set OPENACE_SECURITY_MODE=$security_mode (Issue #2654)"
             fi
         fi
 
         # -- Phase 2: Update service config if user chose to switch --
-        # Issue #2283: use is-active (not is-enabled) so that a
-        # disabled-but-running service still gets restarted after upgrade.
-        if systemctl is-active --quiet open-ace.service 2>/dev/null; then
+        # Issue #2616: Use systemctl cat (unit file exists) instead of is-active
+        # This ensures inactive services are also restarted after upgrade.
+        # restart will start inactive services, so we just need unit file to exist.
+        if [ -n "$service_file" ] && [ -f "$service_file" ]; then
+            # Check if service was inactive (for user information)
+            local was_inactive=false
+            if ! systemctl is-active --quiet open-ace.service 2>/dev/null; then
+                was_inactive=true
+                print_info "Service was inactive, will start via systemd..."
+            fi
             # If user chose to switch service to this installation, update service config via sed
             # (Preserves SECRET_KEY, avoids double restart, avoids overwriting custom modifications)
             if [ "$UPGRADE_SWITCH_SERVICE" = "yes" ]; then
@@ -4002,14 +4170,27 @@ install_local() {
                 print_success "Service configuration updated (SECRET_KEY preserved)"
             fi
 
+            # A previous package install may have used the non-systemd fallback
+            # and left a server.py process outside this unit's cgroup.  A plain
+            # systemctl restart cannot stop that process, so it would retain the
+            # web port and make the upgraded unit restart forever (#2624).
+            if ! stop_legacy_package_server "$target_path" "$DEPLOY_USER"; then
+                print_error "Unable to stop the legacy Open ACE server safely"
+                return 1
+            fi
+
             print_info "Restarting open-ace service..."
             systemctl daemon-reload
-            systemctl restart open-ace.service
-            sleep 2
-            if systemctl is-active --quiet open-ace.service; then
+            if ! systemctl restart open-ace.service; then
+                print_error "Failed to restart open-ace.service"
+                return 1
+            fi
+            if wait_for_openace_service "$SERVICE_PORT" 15; then
                 print_success "Service restarted successfully"
             else
-                print_warning "Service restart failed, check with: systemctl status open-ace"
+                print_error "open-ace.service did not become ready on port ${SERVICE_PORT:-19888}"
+                print_info "Check: systemctl status open-ace && journalctl -u open-ace -n 100"
+                return 1
             fi
             INSTALL_SERVICE="yes"
         fi
@@ -4043,7 +4224,8 @@ install_local() {
             sed -i '/^\[Service\]/a NoNewPrivileges=false' "$autonomous_service_file"
         fi
         systemctl daemon-reload
-        systemctl try-restart open-ace.service || \
+        # Issue #2616: Use restart instead of try-restart to ensure inactive services are started
+        systemctl restart open-ace.service || \
             print_warning "Restart open-ace manually to activate autonomous agent isolation"
     fi
 

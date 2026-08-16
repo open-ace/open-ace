@@ -18,7 +18,11 @@ import re
 
 from flask import Blueprint, jsonify, request
 
-from app.auth.decorators import admin_required
+from app.auth.decorators import (
+    admin_required,
+    enforce_requested_tenant_scope,
+    enforce_resource_tenant_scope,
+)
 from app.modules.policy.cache import invalidate_policy_rule_cache
 
 logger = logging.getLogger(__name__)
@@ -127,6 +131,42 @@ def list_policy_rules():
     return jsonify({"success": True, "rules": [r.to_dict() for r in rules], "total": len(rules)})
 
 
+def _scope_policy_rule_write(rule_key: str, requested_tenant_id: object):
+    """Shared tenant guard for writing a policy rule (create or versioned update).
+
+    Both ``POST /policy/rules`` and ``PUT /policy/rules/<rule_key>`` funnel into
+    ``PolicyRepository.create_rule``, whose supersede UPDATE is keyed on
+    ``rule_key`` **with no tenant filter**. So *both* must:
+
+    1. If the key already has a current version, confirm the caller may overwrite
+       its owner (``enforce_resource_tenant_scope`` -- a global/other-tenant
+       owner is denied for a tenant admin). Otherwise POSTing an existing key is
+       a cross-tenant clobber even though it looks like a "create".
+    2. Confine the new version's own scope (``enforce_requested_tenant_scope`` --
+       a tenant admin cannot author a global or other-tenant rule).
+
+    Keeping this in one place stops create and update from drifting apart;
+    leaving create without step 1 was exactly such a drift. Returns
+    ``(scoped_tenant_id, denial)``; on success set ``fields["tenant_id"]``.
+
+    The owner lookup normalizes ``rule_key`` the SAME way ``create_rule`` will:
+    ``_parse_rule_body`` strips the key before the supersede runs, so a
+    whitespace-padded key (e.g. ``PUT /policy/rules/k1%20``) must strip here too
+    -- otherwise the check looks up ``"k1 "`` (miss), skips, and the supersede
+    still clobbers the trimmed ``"k1"``.
+    """
+    from app.modules.policy.repo import PolicyRepository
+
+    normalized_key = rule_key.strip() if isinstance(rule_key, str) else rule_key
+    if normalized_key:
+        current = PolicyRepository().get_current_rule_by_key(normalized_key)
+        if current is not None:
+            denial = enforce_resource_tenant_scope(current.tenant_id)
+            if denial is not None:
+                return None, denial
+    return enforce_requested_tenant_scope(requested_tenant_id)
+
+
 @policy_bp.route("/policy/rules", methods=["POST"])
 @admin_required
 def create_policy_rule():
@@ -134,9 +174,15 @@ def create_policy_rule():
     from app.modules.policy.repo import PolicyRepository
 
     data = request.get_json(silent=True) or {}
+    scoped_tenant_id, denial = _scope_policy_rule_write(
+        (data.get("rule_key") or "").strip(), data.get("tenant_id")
+    )
+    if denial is not None:
+        return denial
     fields, err = _parse_rule_body(data)
     if err:
         return jsonify({"error": err}), 400
+    fields["tenant_id"] = scoped_tenant_id
     fields["created_by"] = g_user_id()
     rule = PolicyRepository().create_rule(**fields)
     invalidate_policy_rule_cache()
@@ -156,9 +202,16 @@ def update_policy_rule(rule_key: str):
 
     data = request.get_json(silent=True) or {}
     data["rule_key"] = rule_key
+    # Same guard as create: confirm the caller may overwrite the key's current
+    # owner (the supersede is keyed on rule_key alone) and confine the new
+    # version's scope.
+    scoped_tenant_id, denial = _scope_policy_rule_write(rule_key, data.get("tenant_id"))
+    if denial is not None:
+        return denial
     fields, err = _parse_rule_body(data)
     if err:
         return jsonify({"error": err}), 400
+    fields["tenant_id"] = scoped_tenant_id
     fields["created_by"] = g_user_id()
     rule = PolicyRepository().create_rule(**fields)
     invalidate_policy_rule_cache()
@@ -172,10 +225,19 @@ def toggle_policy_rule(rule_id: int):
     """Toggle enabled on the current version of a rule."""
     from app.modules.policy.repo import PolicyRepository
 
+    repo = PolicyRepository()
+    # Resolve the rule's owning tenant before touching it. Passing None for a
+    # missing rule denies a tenant admin (fail closed) and gives no existence
+    # oracle; a platform admin falls through to the same 404 as before.
+    rule = repo.get_rule(rule_id)
+    denial = enforce_resource_tenant_scope(rule.tenant_id if rule else None)
+    if denial is not None:
+        return denial
+
     data = request.get_json(silent=True) or {}
     if "enabled" not in data:
         return jsonify({"error": "enabled is required"}), 400
-    updated = PolicyRepository().set_rule_enabled(rule_id, bool(data["enabled"]))
+    updated = repo.set_rule_enabled(rule_id, bool(data["enabled"]))
     if not updated:
         return jsonify({"error": "Rule not found or not current"}), 404
     invalidate_policy_rule_cache()

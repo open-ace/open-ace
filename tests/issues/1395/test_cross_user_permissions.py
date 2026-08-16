@@ -458,11 +458,16 @@ def test_isolated_wrapper_can_handle_signals_while_waiting_for_agent():
 
     wrapper = Path("scripts/openace-run-as.sh").read_text(encoding="utf-8")
 
-    assert "trap cleanup_isolated EXIT" in wrapper
-    assert "trap 'exit 129' HUP" in wrapper
-    assert "trap 'exit 130' INT" in wrapper
-    assert "trap 'exit 143' TERM" in wrapper
-    assert '"GIT_CONFIG_VALUE_0=$project_dir" "$@" <&0 9>&- &' in wrapper
+    # #2403: the EXIT trap is now `on_exit` (full tree reclaim), with an
+    # earlier-armed 'reclaim_task_tree || true' EXIT trap covering the
+    # pre-child window; HUP/INT/TERM exit-code traps are registered twice
+    # (task setup + child wait).
+    assert "trap on_exit EXIT" in wrapper
+    assert "trap 'reclaim_task_tree || true' EXIT" in wrapper
+    assert wrapper.count("trap 'exit 129' HUP") == 2
+    assert wrapper.count("trap 'exit 130' INT") == 2
+    assert wrapper.count("trap 'exit 143' TERM") == 2
+    assert '"$@" <&0 9>&- &' in wrapper
     assert "agent_child_pid=$!" in wrapper
     assert 'wait "$agent_child_pid"' in wrapper
 
@@ -527,7 +532,9 @@ def test_isolated_wrapper_normalizes_recovered_acls_before_git_baseline():
 
     wrapper = Path("scripts/openace-run-as.sh").read_text(encoding="utf-8")
 
-    signature_registry = 'signature_registry="/run/openace-agent-git-signature-${target_uid}"'
+    # The registry is keyed by the per-attempt isolation key (#2437/#2020:
+    # task-<id> when sharded, uid-<uid> otherwise) — no longer target_uid.
+    signature_registry = 'signature_registry="/run/openace-agent-git-signature-${isolation_key}"'
     recovery = '"$previous_git_acl_snapshot"; then'
     current_baseline = 'git_entry_before="$(git_entry_signature "$project_dir")"'
     current_acl_baseline = 'git_acl_before="$(git_entry_acl_snapshot "$project_dir")"'
@@ -543,7 +550,9 @@ def test_isolated_wrapper_normalizes_recovered_acls_before_git_baseline():
     assert wrapper.index(current_baseline) < wrapper.index(first_acl_grant)
     assert wrapper.index(current_acl_baseline) < wrapper.index(first_acl_grant)
     assert wrapper.index("printf '%s\\n%s\\n%s\\n' \\") < wrapper.index(first_acl_grant)
-    assert wrapper.index("cleanup_isolated\n", wrapper.index('wait "$agent_child_pid"')) < (
+    # Post-wait reclaim: the explicit on_exit call (the EXIT trap is disarmed
+    # on the success path right after it — #2403) precedes final verification.
+    assert wrapper.index("    on_exit\n", wrapper.index('wait "$agent_child_pid"')) < (
         wrapper.index(final_verification)
     )
     assert wrapper.index(final_verification) < wrapper.index(
@@ -911,13 +920,16 @@ class TestBuildAgentEnv:
             "app.modules.workspace.api_key_proxy.get_api_key_proxy_service",
             fake_get_service,
         )
+        # The raw-key fallback is dev-opt-in only (fail closed otherwise):
+        # set the explicit escape hatch this test exercises.
+        monkeypatch.setenv("OPENACE_ALLOW_RAW_KEY_FALLBACK", "1")
         adapter = MagicMock()
         env = agent_runner.AutonomousAgentRunner._build_agent_env(
             adapter, "claude-code", user_id=None, session_id="s", model=""
         )
         # adapter.get_env_vars never called (setup failed before that)
         adapter.get_env_vars.assert_not_called()
-        # env is a plain dict copy of os.environ
+        # env is a scrubbed copy of os.environ (non-LLM credentials removed)
         assert isinstance(env, dict)
 
     # ── Regression (PR #1467 review comment 2) ────────────────────────────
@@ -980,7 +992,7 @@ class TestSingleShotUserIdPropagation:
         runner = self._make_runner()
         captured = {}
 
-        def fake_build_env(adapter, cli_tool, user_id, session_id, model):
+        def fake_build_env(adapter, cli_tool, user_id, session_id, model, **kwargs):
             captured["user_id"] = user_id
             return {"PATH": "/bin"}
 
@@ -993,7 +1005,7 @@ class TestSingleShotUserIdPropagation:
         monkeypatch.setattr(
             "app.modules.workspace.autonomous.agent_runner.AutonomousAgentRunner"
             "._wrap_agent_cmd",
-            staticmethod(lambda cmd, project_path, system_account: (cmd, None)),
+            staticmethod(lambda cmd, project_path, system_account, **kwargs: (cmd, None)),
         )
 
         adapter = MagicMock()
@@ -1191,7 +1203,7 @@ class TestRunAgentTaskSessionReactivation:
         calls = runner.session_manager.update_session_fields.call_args_list
         assert calls[0] == (
             ("sess-completed", {"status": "active", "completed_at": None, "paused_at": None}),
-            {},
+            {"require_tenant": False},
         )
 
     def test_error_session_reactivated_to_active(self, monkeypatch):
@@ -1210,7 +1222,7 @@ class TestRunAgentTaskSessionReactivation:
         calls = runner.session_manager.update_session_fields.call_args_list
         assert calls[0] == (
             ("sess-error", {"status": "active", "completed_at": None, "paused_at": None}),
-            {},
+            {"require_tenant": False},
         )
 
     def test_active_session_no_reactivation_call(self, monkeypatch):

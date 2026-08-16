@@ -202,6 +202,27 @@ describe('i18n', () => {
       });
     });
 
+    // #2634: paused-state distinction (acceptance awaiting vs quota vs manual)
+    // and the resume-with-feedback entry must exist in every language.
+    const pausedStateKeys = [
+      'autoFilterPaused',
+      'autoPauseReasonAcceptance',
+      'autoPauseReasonQuota',
+      'autoPauseReasonManual',
+      'autoPauseAcceptanceStale',
+      'autoBannerAcceptanceAwaiting',
+      'autoBannerQuotaPaused',
+      'autoResumeWithFeedback',
+      'autoResumeWithFeedbackTitle',
+      'autoResumeWithFeedbackHelp',
+    ];
+
+    it.each(languages)('should describe paused states in %s', (lang) => {
+      pausedStateKeys.forEach((key) => {
+        expect(t(key, lang), `${key} missing in ${lang}`).not.toBe(key);
+      });
+    });
+
     // Regression gate: ROI optimization suggestions must exist in ALL four
     // languages. This is exactly the bug class that caused issue #819's
     // partial fix (suggestion keys added only to en/zh, missing ja/ko).

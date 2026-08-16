@@ -591,7 +591,38 @@ def _workflow_response(workflow: dict | None) -> dict | None:
     # only provides a sensible default for downstream consumers.
     if normalized.get("content_language") not in ALLOWED_CONTENT_LANGUAGES:
         normalized["content_language"] = DEFAULT_CONTENT_LANGUAGE
+    normalized["acceptance_feedback_prefill"] = _acceptance_feedback_prefill(normalized)
     return normalized
+
+
+def _acceptance_feedback_prefill(workflow: dict) -> str:
+    """Pre-fill text for the resume-with-feedback modal on acceptance pauses.
+
+    Only paused acceptance rows (rejected/indeterminate) carry a prefill — the
+    parse is gated on that so list endpoints never pay for it. Derived via
+    ``feedback_prefill_from_report`` so the issue comment and the prefill
+    share one formatter.
+    """
+    if workflow.get("status") != "paused" or workflow.get("current_phase") != (
+        "acceptance_verification"
+    ):
+        return ""
+    if (workflow.get("verification_status") or "") not in ("rejected", "indeterminate"):
+        return ""
+    raw = workflow.get("verification_report")
+    if not raw:
+        return ""
+    try:
+        report = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(report, dict):
+        return ""
+    from app.modules.workspace.autonomous.phases.acceptance_verification import (
+        feedback_prefill_from_report,
+    )
+
+    return feedback_prefill_from_report(report)
 
 
 def _parse_int_arg(name: str, default: int) -> int:
@@ -1312,34 +1343,48 @@ def get_timeline(workflow_id):
 @autonomous_bp.route("/workflows/<workflow_id>/verification_override", methods=["POST"])
 @auth_required
 def acceptance_verification_override(workflow_id):
-    """Admin override: confirm an indeterminate acceptance workflow (#2335 S6).
+    """Human override: confirm an acceptance-paused workflow (#2335 S6, #2658).
 
-    A workflow paused at ``acceptance_verification`` with
-    ``verification_status="indeterminate"`` cannot complete on its own (the
-    verifier could not reach a confident verdict and is awaiting evidence that
-    only a human can supply). An admin may inspect the merged code out of band
-    and override the verdict to ``confirmed``: this stamps ``verified_by`` with
-    the human identity, emits an audit event, posts a short report, closes the
-    issue as @open-ace-bot, and completes the workflow (resting at the
+    A workflow paused at ``acceptance_verification`` with a terminal
+    ``verification_status`` of ``"indeterminate"`` (verifier could not reach a
+    verdict) or ``"rejected"`` (verifier rejected, a human disagrees) cannot
+    complete on its own. The workflow owner or an admin may inspect the merged
+    code out of band and override the verdict to ``confirmed``: this stamps
+    ``verified_by`` with the human identity, emits an audit event, posts a
+    report (noting when a rejection was overturned), closes the issue as
+    @open-ace-bot, and completes the workflow (resting at the
     ``acceptance_verification`` phase, consistent with the confirmed terminal
-    default).
-
-    Admin-only — a non-admin (even the workflow owner) cannot override, because
-    the override bypasses the independent verifier and must be attributable to
-    a privileged actor.
+    default). The override bypasses the independent verifier, so it stays
+    attributable: ``verified_by: human-override:<username>``.
     """
-    if not User.is_admin_role(g.user_role):
-        return jsonify({"error": "Admin permission required"}), 403
-
     workflow = _get_repo().get_workflow(workflow_id)
     if not workflow:
         return jsonify({"error": "Workflow not found"}), 404
 
+    if not User.is_admin_role(g.user_role) and workflow.get("user_id") != g.user_id:
+        return jsonify({"error": "Access denied"}), 403
+
     if workflow.get("current_phase") != "acceptance_verification":
         return jsonify({"error": "Workflow is not in the acceptance_verification phase"}), 400
-    if workflow.get("verification_status") != "indeterminate":
+    # Paused-only (#2658 review): resume-with-feedback clears the cached
+    # verification_merge_sha but keeps the prior verification_status until a
+    # new verdict lands, so a mid-verification run (status e.g. "running")
+    # still carries a stale "rejected". Overriding there would race the
+    # verifier's own writes and stamp an unknown merge SHA — require the
+    # paused state the UI already gates on.
+    if workflow.get("status") != "paused":
+        return jsonify({"error": "Workflow is not paused for human review"}), 400
+    prior_status = (workflow.get("verification_status") or "").strip()
+    if prior_status not in ("indeterminate", "rejected"):
         return (
-            jsonify({"error": "Override is only available for indeterminate verification status"}),
+            jsonify(
+                {
+                    "error": (
+                        "Override is only available for indeterminate or rejected "
+                        "verification status"
+                    )
+                }
+            ),
             400,
         )
 
@@ -1388,8 +1433,13 @@ def acceptance_verification_override(workflow_id):
                 owner = user_repo.get_user_by_id(workflow.get("user_id")) or {}
                 system_account = owner.get("system_account")
             gh = GitHubOps(project_path, system_account=system_account)
+            override_title = (
+                "## ✅ Acceptance verified (human override — rejection overturned)"
+                if prior_status == "rejected"
+                else "## ✅ Acceptance verified (human override)"
+            )
             lines = [
-                "## ✅ Acceptance verified (human override)",
+                override_title,
                 f"**Merge SHA:** `{merge_sha}`" if merge_sha else "**Merge SHA:** _unknown_",
                 f"**Verifier:** `{verified_by}`",
             ]
@@ -1692,13 +1742,24 @@ def resume_with_feedback(workflow_id):
     if len(user_feedback) > 5000:
         return jsonify({"error": "user_feedback too long (max 5000 characters)"}), 400
 
-    # Store feedback and set to waiting (scheduler will pick up via _do_wait)
+    # Store feedback and set to waiting (scheduler will pick up via _do_wait).
+    # #2658: clear the cached acceptance merge SHA — the acceptance phase's
+    # idempotency replays a terminal verdict for the same
+    # (merge_sha, snapshot) pair, and nothing else resets it between dev
+    # rounds, so without this the next acceptance run would re-verify the OLD
+    # merge instead of the new one (stale-replay loop for both rejected and
+    # indeterminate resumes).
     _get_repo().update_workflow(
         workflow_id,
         {
             "user_feedback": user_feedback,
             "current_phase": "wait",
             "status": "waiting",
+            "verification_merge_sha": "",
+            # The resume IS the review outcome — the header banner renders
+            # error_message verbatim, so a stale "awaiting review" here keeps
+            # telling the user the workflow needs them after they just acted.
+            "error_message": "",
         },
     )
 

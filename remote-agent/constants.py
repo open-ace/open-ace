@@ -22,6 +22,7 @@ LLM_PROVIDER_ENV_KEYS = frozenset(
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_BASE_URL",
         "ANTHROPIC_TOKEN",
+        "ANTHROPIC_AUTH_TOKEN",
         "GEMINI_API_KEY",
         "GEMINI_BASE_URL",
         "BAILIAN_CODING_PLAN_API_KEY",

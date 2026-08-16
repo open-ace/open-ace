@@ -14,6 +14,7 @@ from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
+from app.repositories.notification_settings_repository import get_notification_settings_repository
 from app.services.feishu_config_service import get_feishu_config_service
 
 logger = logging.getLogger(__name__)
@@ -36,14 +37,23 @@ def check_admin():
 def get_feishu_config():
     """Get Feishu configuration."""
     try:
-        service = get_feishu_config_service()
-        config = service.get_config()
+        config = get_notification_settings_repository().get("feishu")
 
         if not config:
             return jsonify(
                 {"success": True, "data": None, "message": "Feishu configuration not set"}
             )
 
+        config.update(
+            {
+                "org_sync_enabled": config.pop("sync_enabled"),
+                "org_sync_tenant_id": config.pop("target_tenant_id"),
+                "org_sync_interval_minutes": config.pop("interval_minutes"),
+                "org_sync_max_runtime_seconds": config.pop("max_runtime_seconds"),
+                "org_sync_auto_recover": config.pop("auto_recovery"),
+                "app_secret_masked": "****" if config.pop("app_secret_configured", False) else "",
+            }
+        )
         return jsonify({"success": True, "data": config})
     except Exception as e:
         logger.error(f"Error getting Feishu config: {e}")
@@ -62,9 +72,9 @@ def update_feishu_config():
         app_id = data.get("app_id")
         app_secret = data.get("app_secret")
 
-        if not app_id or not app_secret:
+        if not app_id:
             return (
-                jsonify({"success": False, "error": "Missing required fields: app_id, app_secret"}),
+                jsonify({"success": False, "error": "Missing required field: app_id"}),
                 400,
             )
 
@@ -78,17 +88,35 @@ def update_feishu_config():
         # Get current user
         user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
 
-        service = get_feishu_config_service()
-
         try:
-            config = service.save_config(
-                app_id=app_id,
-                app_secret=app_secret,
-                org_sync_enabled=bool(org_sync_enabled),
-                org_sync_tenant_id=int(org_sync_tenant_id) if org_sync_tenant_id else None,
-                org_sync_interval_minutes=int(org_sync_interval_minutes),
-                org_sync_max_runtime_seconds=int(org_sync_max_runtime_seconds),
-                org_sync_auto_recover=bool(org_sync_auto_recover),
+            repo = get_notification_settings_repository()
+            current = repo.get("feishu")
+            if not app_secret and not current:
+                raise ValueError("app_secret is required")
+            config = repo.save(
+                "feishu",
+                {
+                    "app_id": app_id,
+                    **({"app_secret": app_secret} if app_secret is not None else {}),
+                    "sync_enabled": bool(org_sync_enabled),
+                    "target_tenant_id": int(org_sync_tenant_id) if org_sync_tenant_id else None,
+                    "interval_minutes": int(org_sync_interval_minutes),
+                    "max_runtime_seconds": int(org_sync_max_runtime_seconds),
+                    "auto_recovery": bool(org_sync_auto_recover),
+                },
+                user_id,
+            )
+            config.update(
+                {
+                    "org_sync_enabled": config.pop("sync_enabled"),
+                    "org_sync_tenant_id": config.pop("target_tenant_id"),
+                    "org_sync_interval_minutes": config.pop("interval_minutes"),
+                    "org_sync_max_runtime_seconds": config.pop("max_runtime_seconds"),
+                    "org_sync_auto_recover": config.pop("auto_recovery"),
+                    "app_secret_masked": (
+                        "****" if config.pop("app_secret_configured", False) else ""
+                    ),
+                }
             )
 
             logger.info(f"Feishu configuration updated by user {user_id}")
@@ -133,12 +161,12 @@ def test_feishu_connection():
     try:
         data = request.get_json() or {}
 
-        service = get_feishu_config_service()
-
         # Test with provided parameters or saved config
+        saved = get_notification_settings_repository().get("feishu", include_secrets=True) or {}
+        service = get_feishu_config_service()
         result = service.test_connection(
-            app_id=data.get("app_id"),
-            app_secret=data.get("app_secret"),
+            app_id=data.get("app_id") or saved.get("app_id"),
+            app_secret=data.get("app_secret") or saved.get("app_secret"),
         )
 
         if result["success"]:
@@ -156,17 +184,16 @@ def test_feishu_connection():
 def delete_feishu_config():
     """Delete Feishu configuration."""
     try:
-        service = get_feishu_config_service()
-
         # Get config before deleting for audit log
-        config = service.get_config()
+        repo = get_notification_settings_repository()
+        config = repo.get("feishu")
         if not config:
             return (
                 jsonify({"success": False, "error": "No Feishu configuration to delete"}),
                 404,
             )
 
-        success = service.delete_config()
+        success = repo.delete("feishu")
 
         if not success:
             return jsonify({"success": False, "error": "Failed to delete configuration"}), 500

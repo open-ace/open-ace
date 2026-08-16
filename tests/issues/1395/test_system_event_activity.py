@@ -24,12 +24,16 @@ class _FakeStream:
 
 
 class _StubProcess:
-    """Minimal stand-in for subprocess.Popen — only stdout/returncode are read."""
+    """Minimal stand-in for subprocess.Popen — stdout/returncode/poll are read."""
 
     returncode = None  # is_running → True (process not exited)
 
     def __init__(self, stdout):
         self.stdout = stdout
+
+    def poll(self):
+        """Popen.poll() for a never-exited stub."""
+        return None
 
 
 def _make_session(lines):
@@ -50,6 +54,10 @@ def _make_runner():
 
     runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
     runner._activity_callback = MagicMock()
+    # Attributes _read_stdout's sidebar-session resolution touches on the real
+    # runner (built by __init__, absent on a bare __new__ instance).
+    runner.session_manager = None
+    runner.remote_session_manager = None
     return runner
 
 
@@ -95,10 +103,14 @@ class TestSystemEventActivityForwarding:
             ]
         )
         runner._read_stdout(session)
-        runner._activity_callback.assert_called_once_with(
-            "sess-1",
-            {"type": "system", "subtype": "init"},
-        )
+        # init pins the CLI session id, which also emits a session_resolved
+        # activity; assert the init event is forwarded (not the sole call).
+        init_calls = [
+            c
+            for c in runner._activity_callback.call_args_list
+            if c.args[1:2] == ({"type": "system", "subtype": "init"},)
+        ]
+        assert len(init_calls) == 1
 
     def test_no_subtype_does_not_trigger(self):
         """A system event without subtype (e.g. bare 'initialized') must

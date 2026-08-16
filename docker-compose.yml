@@ -44,7 +44,6 @@ services:
       # Multi-user workspace: expose port range for qwen-code-webui instances
       - "${WORKSPACE_PORT_RANGE_START:-3100}-${WORKSPACE_PORT_RANGE_END:-3200}:${WORKSPACE_PORT_RANGE_START:-3100}-${WORKSPACE_PORT_RANGE_END:-3200}"
     environment:
-      - FLASK_ENV=production
       - PYTHONUNBUFFERED=1
       # Secrets: empty by default — docker-entrypoint.sh auto-generates strong
       # random values on first start if unset (see ensure_secret_env). For
@@ -52,11 +51,11 @@ services:
       - SECRET_KEY=${SECRET_KEY:-}
       - OPENACE_ENCRYPTION_KEY=${OPENACE_ENCRYPTION_KEY:-}
       - UPLOAD_AUTH_KEY=${UPLOAD_AUTH_KEY:-}
-      # Security mode (Issue #1893): development | pilot | production
-      # - development: Allow dev password with warnings (default for trial)
-      # - pilot: Allow dev password with strong warnings
-      # - production: Reject dev/default passwords, fail-fast on security issues
-      - OPENACE_SECURITY_MODE=${OPENACE_SECURITY_MODE:-}
+      # Security mode (Issue #2331): Explicit configuration required for production
+      # For one-click local dev: defaults to development
+      # For production: set explicitly in .env: OPENACE_SECURITY_MODE=production
+      # Valid values: production (strict), pilot (trial), development (local dev)
+      - OPENACE_SECURITY_MODE=${OPENACE_SECURITY_MODE:-development}
       # Database (Issue #1893): Development mode uses dev-password-change-in-production.
       # Production mode requires explicit strong password via DB_PASSWORD env var.
       - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-dev-password-change-in-production}@postgres:5432/${DB_NAME:-ace}

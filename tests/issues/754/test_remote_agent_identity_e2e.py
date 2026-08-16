@@ -172,8 +172,10 @@ class TestScenario05_TokenRotation:
         # Old token works
         assert manager.validate_agent_token(old_token, "machine-005") is True
 
-        # Rotate
-        new_result = manager.rotate_agent_token("machine-005", rotated_by=1)
+        # Rotate (immediate/emergency mode: default rotation is delayed since
+        # #2499 — the old token stays valid inside its revoke window, which
+        # would not satisfy "invalidates the old token")
+        new_result = manager.rotate_agent_token("machine-005", rotated_by=1, immediate=True)
         assert new_result is not None
 
         # Old token no longer works

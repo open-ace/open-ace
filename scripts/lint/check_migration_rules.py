@@ -42,7 +42,27 @@ The correct template (see docs/en/DATABASE-CONVENTIONS.md) is::
     else:
         op.create_index(NAME, TABLE, COLS)
 
+  MIG003 — A revision id that has shipped must never disappear. Alembic keys
+    history off the ``revision`` string, not the filename: every deployed
+    database stores it verbatim in ``alembic_version.version_num``. Delete or
+    rewrite an id that is already reachable from the base branch and every
+    database stamped with it dies on the next ``upgrade head`` with
+    ``Can't locate revision identified by '<id>'`` — and stays stuck for every
+    later migration too.
+
+    This is not hypothetical: ``20260731_003_add_proxy_token_terminated_fields``
+    was renumbered to ``20260731_004_...`` so a newer migration could take the
+    003 slot, wedging every database upgraded in that window. The recovery is
+    ``migrations/versions/20260731_003_bridge_renamed_proxy_token_revision.py``.
+
+    Renaming the *file* is fine; only the id matters. If an id genuinely has to
+    stop carrying DDL, keep the node and empty its ``upgrade()`` instead of
+    deleting it.
+
 The check is AST-based (stdlib only — no new dependency) and opens no database.
+MIG003 additionally shells out to ``git`` to read the baseline tree; if git or
+the ref is unavailable it is skipped with a note rather than failing, so the
+check never blocks on a shallow clone or an unfetched remote.
 
 Usage:
     # Check the canonical migrations/versions/ tree
@@ -52,13 +72,19 @@ Usage:
     # the migration-graph CI job)
     python3 scripts/lint/check_migration_rules.py /path/to/migrations/versions
 
+    # Compare released ids against a different baseline (default: origin/main)
+    python3 scripts/lint/check_migration_rules.py --baseline-ref origin/develop
+    python3 scripts/lint/check_migration_rules.py --skip-released-check
+
 Exit code: 1 if any violation is found, 0 otherwise.
 """
 
 from __future__ import annotations
 
 import ast
+import os
 import re
+import subprocess  # nosec: B404 - fixed git argv, no shell
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -294,6 +320,215 @@ def _build_parent_map(tree: ast.Module) -> dict[int, list[ast.AST]]:
     return parents
 
 
+# ---------------------------------------------------------------------------
+# MIG003 — released revision ids must not disappear
+# ---------------------------------------------------------------------------
+
+# Baseline the working tree's revision ids are compared against. A stale
+# baseline only ever knows about *fewer* ids, so it can miss a violation but
+# never invent one.
+DEFAULT_BASELINE_REF = os.environ.get("MIG003_BASELINE_REF", "origin/main")
+
+# Deliberately retired revision ids. Adding one here asserts that no live
+# database is stamped with it. Prefer keeping the node with an empty
+# ``upgrade()`` — that costs nothing and cannot be wrong.
+RETIRED_REVISION_IDS: frozenset[str] = frozenset()
+
+# Whether the last check_released_revision_ids() call actually compared
+# anything. "No violations" and "did not look" are very different outcomes, and
+# the required `lint` lane checks out shallow with no origin/main -- so without
+# this the summary line would report a skip as a clean pass.
+_released_check_ran = False
+
+
+def _revision_id_from_source(source: str, filename: str = "<baseline>") -> str | None:
+    """Extract the module-level ``revision`` id, or None if absent/dynamic.
+
+    Handles both ``revision: str = "..."`` and ``revision = "..."``.
+    """
+    try:
+        tree = ast.parse(source, filename=filename)
+    except SyntaxError:
+        return None
+
+    for node in tree.body:
+        target = None
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            target = node.target.id
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            first = node.targets[0]
+            if isinstance(first, ast.Name):
+                target = first.id
+        if target != "revision":
+            continue
+        value = node.value
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            return value.value
+    return None
+
+
+def _git(args: list[str]) -> str | None:
+    """Run a git command from the project root; None if git/ref is unavailable.
+
+    Every failure mode collapses to None so MIG003 degrades to "skip" rather
+    than crashing a commit. That includes decode errors -- migration files
+    contain non-ASCII, and ``text=True`` decodes with the locale encoding, so a
+    C-locale environment could otherwise raise UnicodeDecodeError out of a lint
+    hook -- and a hung git, which without a timeout would block pre-commit
+    indefinitely.
+    """
+    try:
+        result = subprocess.run(  # nosec: B603 - fixed argv, no shell
+            ["git", "-C", str(PROJECT_ROOT), *args],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            check=True,
+            timeout=30,
+        )
+    except (
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        UnicodeDecodeError,
+        FileNotFoundError,
+        OSError,
+    ):
+        return None
+    return result.stdout
+
+
+def _baseline_commits(ref: str) -> list[str]:
+    """Resolve the commits whose revision ids this tree must still contain.
+
+    Those are the merge bases of ``ref`` and ``HEAD`` -- the points this branch
+    forked from -- NOT the tip of ``ref``. Using the tip makes every branch
+    that simply lags behind main fail: a migration merged to main after the
+    fork is "missing" from the branch, and the obvious way to silence that is
+    to add its id to RETIRED_REVISION_IDS, which is precisely the mistake this
+    rule exists to prevent.
+
+    ALL merge bases, via ``--all``. A criss-cross history has more than one,
+    and plain ``git merge-base`` picks an arbitrary single base: if the id was
+    added on the branch that the chosen base does not descend from, deleting it
+    goes unnoticed. Concretely -- main gains X at B, a side branch forks at C,
+    main merges the side branch, then a feature branch forks from C, merges B
+    (so it has X), and deletes X. The bases are {B, C}; plain merge-base
+    returns C, which never had X, so the deletion passes. Unioning the ids
+    across every base closes that.
+
+    Falls back to ``ref`` itself when there is no common ancestor (unrelated
+    histories, or a synthetic tree with no HEAD) -- the conservative direction.
+
+    Returns an empty list when nothing can be resolved.
+    """
+    all_bases = _git(["merge-base", "--all", ref, "HEAD"])
+    if all_bases and all_bases.strip():
+        return [line.strip() for line in all_bases.splitlines() if line.strip()]
+    return [ref] if _git(["rev-parse", "--verify", f"{ref}^{{commit}}"]) else []
+
+
+def _revision_ids_at_ref(ref: str) -> dict[str, str] | None:
+    """Map revision id -> path for every migration on ``ref``.
+
+    Returns None when the baseline cannot be read (no git, unknown ref,
+    shallow clone), which callers treat as "skip", not "pass".
+    """
+    listing = _git(["ls-tree", "-r", "--name-only", ref, "--", "migrations/versions"])
+    if listing is None:
+        return None
+
+    ids: dict[str, str] = {}
+    for path in listing.splitlines():
+        if not path.endswith(".py") or Path(path).name.startswith("__"):
+            continue
+        blob = _git(["show", f"{ref}:{path}"])
+        if blob is None:
+            continue
+        rev = _revision_id_from_source(blob, path)
+        if rev:
+            ids[rev] = path
+    return ids
+
+
+def check_released_revision_ids(
+    versions_dir: Path, baseline_ref: str = DEFAULT_BASELINE_REF
+) -> list[Violation]:
+    """MIG003: every revision id this branch forked from must still exist.
+
+    The comparison points are the merge bases of ``baseline_ref`` and ``HEAD``
+    rather than the tip of ``baseline_ref`` -- see :func:`_baseline_commits`
+    for why the tip produces false positives on any branch that lags behind,
+    and why all bases are unioned rather than just one.
+    """
+    global _released_check_ran
+    _released_check_ran = False
+
+    commits = _baseline_commits(baseline_ref)
+    if not commits:
+        print(
+            f"MIG003: SKIPPED (cannot resolve a baseline commit for '{baseline_ref}') "
+            "-- released revision ids were NOT checked.",
+            file=sys.stderr,
+        )
+        return []
+
+    baseline: dict[str, str] = {}
+    unreadable = 0
+    for commit in commits:
+        ids = _revision_ids_at_ref(commit)
+        if ids is None:
+            unreadable += 1
+            continue
+        baseline.update(ids)
+
+    if unreadable == len(commits):
+        print(
+            f"MIG003: SKIPPED (cannot read migrations from '{baseline_ref}') "
+            "-- released revision ids were NOT checked.",
+            file=sys.stderr,
+        )
+        return []
+    if not baseline:
+        print(
+            f"MIG003: SKIPPED ('{baseline_ref}' has no migrations to compare) "
+            "-- released revision ids were NOT checked.",
+            file=sys.stderr,
+        )
+        return []
+
+    _released_check_ran = True
+
+    current: set[str] = set()
+    for f in sorted(versions_dir.glob("*.py")):
+        if f.name.startswith("__"):
+            continue
+        try:
+            rev = _revision_id_from_source(f.read_text(encoding="utf-8"), str(f))
+        except OSError:
+            continue
+        if rev:
+            current.add(rev)
+
+    violations: list[Violation] = []
+    for rev, path in sorted(baseline.items()):
+        if rev in current or rev in RETIRED_REVISION_IDS:
+            continue
+        violations.append(
+            Violation(
+                "MIG003",
+                versions_dir,
+                0,
+                f"revision id {rev!r} exists on {baseline_ref} ({path}) but not in this "
+                f"tree. Every database stamped with it will fail 'upgrade head' with "
+                f"\"Can't locate revision identified by '{rev}'\". Restore the id — "
+                f"renaming the file is fine, changing the id is not. If the DDL moved "
+                f"elsewhere, keep the id as a no-op bridge (see "
+                f"migrations/versions/20260731_003_bridge_renamed_proxy_token_revision.py).",
+            )
+        )
+    return violations
+
+
 def check_file(filepath: Path) -> list[Violation]:
     """Run all migration authoring rules on a single file."""
     try:
@@ -319,10 +554,25 @@ def check_file(filepath: Path) -> list[Violation]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = argv if argv is not None else sys.argv[1:]
+    args = list(argv if argv is not None else sys.argv[1:])
 
-    if args:
-        versions_dir = Path(args[0]).resolve()
+    skip_released = False
+    if "--skip-released-check" in args:
+        args.remove("--skip-released-check")
+        skip_released = True
+
+    baseline_ref = DEFAULT_BASELINE_REF
+    if "--baseline-ref" in args:
+        i = args.index("--baseline-ref")
+        if i + 1 >= len(args):
+            print("FAIL: --baseline-ref requires a value", file=sys.stderr)
+            return 2
+        baseline_ref = args[i + 1]
+        del args[i : i + 2]
+
+    positional = [a for a in args if not a.startswith("-")]
+    if positional:
+        versions_dir = Path(positional[0]).resolve()
     else:
         versions_dir = DEFAULT_VERSIONS_DIR
 
@@ -342,6 +592,9 @@ def main(argv: list[str] | None = None) -> int:
     for f in migration_files:
         all_violations.extend(check_file(f))
 
+    if not skip_released:
+        all_violations.extend(check_released_revision_ids(versions_dir, baseline_ref))
+
     for v in all_violations:
         print(v.format(), file=sys.stderr)
 
@@ -356,7 +609,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    print(f"OK: {len(migration_files)} migration file(s) pass MIG001/MIG002.", file=sys.stderr)
+    # Say plainly which rules actually ran. MIG003 skips itself when the git
+    # baseline is unreadable, and claiming it "passed" there is how a check
+    # quietly stops being a check.
+    if skip_released:
+        checked = "MIG001/MIG002 (MIG003 skipped by request)"
+    elif _released_check_ran:
+        checked = "MIG001/MIG002/MIG003"
+    else:
+        checked = "MIG001/MIG002 (MIG003 NOT checked -- no usable git baseline)"
+    print(f"OK: {len(migration_files)} migration file(s) pass {checked}.", file=sys.stderr)
     return 0
 
 

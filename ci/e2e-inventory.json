@@ -1,0 +1,2457 @@
+{
+  "description": "E2E file-level inventory (issue #2491)",
+  "entries": [
+    {
+      "path": "tests/e2e/browser/conftest.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": false,
+      "notes": "shared fixtures/helpers: never collects nodeids itself"
+    },
+    {
+      "path": "tests/e2e/browser/run_regression.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": false,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_helpers.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/browser/test_login.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_analysis_anomaly.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_analysis_conversation_history.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_analysis_messages.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_analysis_roi.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_analysis_roi_i18n.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_analysis_trend.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_governance_audit.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_governance_compliance.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_governance_quota.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_governance_security.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_overview_dashboard.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_settings_sso.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_users_management.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_users_tenants.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_navigation.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_work_prompts.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_work_sessions.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_work_workspace.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/e2e_acceptance_override_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/e2e_anomaly_all_button_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/e2e_anomaly_description_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/e2e_audit_log_default_dates_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/e2e_compliance_report_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/e2e_dashboard_date_range_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/e2e_data_retention_cleanup_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/e2e_data_retention_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/e2e_global_confirm_toast_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/e2e_model_gateway_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/e2e_page_refresh_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/e2e_quota_management_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/e2e_roi_daily_costs_axis_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/e2e_roi_i18n_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/e2e_scope_exceeded_banner_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/e2e_session_messages_pagination_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/e2e_token_trend_all_button_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/e2e_user_segmentation_pie_chart_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/manage/e2e_api_key_cli_settings.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/manage/e2e_audit_thresholds_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/manage/e2e_token_install_command.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/manage/e2e_user_role_options.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/manage/test_audit_log_filter.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/manage/test_manage_api_audit.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/manage/test_manage_comprehensive.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/manage/test_manage_full_audit.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/manage/test_session_id_column.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/performance/benchmark_usage_page.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/performance/test_analytics_pages_performance.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/performance/test_anomaly_performance.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/performance/test_dashboard_load_breakdown.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/performance/test_dashboard_load_performance.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/performance/test_messages_performance.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/performance/test_page_load_performance.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/performance/test_trend_analysis_performance.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/performance/test_work_sessions_list_performance.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_directory_browser.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_permission_panel_style.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_remote_chat_quality.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_remote_default_permission.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_remote_message.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_remote_model_hot_switch.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_remote_model_switch_chat.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_remote_permission.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_remote_reconnect.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_remote_reconnect_ui.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_remote_session_restore.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_remote_session_ui.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_remote_ui_improvements.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_remote_workspace_full.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_remote_workspace_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_remote_workspace_ui.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_run_timeline_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_test_remote_workspace.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/terminal/e2e_quota_recovery.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/terminal/e2e_terminal_quota.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/terminal/e2e_terminal_restore.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/terminal/e2e_terminal_restore_flow.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/terminal/e2e_terminal_restore_full.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/terminal/e2e_terminal_screen_restore.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/conftest.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "shared fixtures/helpers: never collects nodeids itself"
+    },
+    {
+      "path": "tests/e2e/ui/demo_create_project.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_admin_default_mode.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_alert_icon.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_analysis_charts.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_analysis_conversation_history.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_anomaly_layout.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_auto_click.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_auto_fullscreen_on_chat.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_auto_refresh_layout.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_clear_guide.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_click_debug.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_conversation_history_modal.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_create_button_full.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_create_debug.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_create_direct.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_create_flow.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_create_project_button.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_dashboard_charts.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_dashboard_first_load.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_deep_debug.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_fullscreen_modal.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_header_buttons.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_iframe_add_project.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_iframe_debug.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_insights_generate.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_interactive_create.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_language_dropdown.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_manual_create.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_messages_filter_layout.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_messages_page_loading.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_messages_sender_dropdown.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_new_folder_create.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_pm_feature.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/ui/test_project_management_duration.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_project_management_full.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_quota_enter_save.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_quota_token_unit.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_refresh_functionality.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_remote_terminal_relay.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_roi_sessions.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_screenshot.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/ui/test_security_center_tooltip.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_security_page.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_session_detail_timezone.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_session_list_scroll.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_session_search.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_sessions_page.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_tab_close_last.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/ui/test_tab_focus_input.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_tab_keyboard_shortcut.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_tab_notification.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_tab_notification_chat.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_tab_notification_full.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_tab_title_rename.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_tool_accounts.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_user_enter_save.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_user_segmentation_chart.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_work_assist_panel_prompts.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_work_page_loads.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_work_prompts_view_all.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_work_right_panel_tabs.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_work_session_list.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_work_usage_page.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_workspace_fullscreen.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/ui/test_workspace_remote_icon.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/work/e2e_context_command.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/work/e2e_paused_acceptance_ui_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/work/e2e_personal_files_upload_download.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/work/e2e_vscode_websocket.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "initial disposition (issue #2491 P1 draft)"
+    }
+  ],
+  "schema_name": "openace-e2e-inventory",
+  "schema_version": 1
+}

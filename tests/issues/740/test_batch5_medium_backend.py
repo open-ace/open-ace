@@ -165,20 +165,20 @@ class TestSSEAuthRevalidation(unittest.TestCase):
         orig = db_mod.adapt_sql
         db_mod.adapt_sql = lambda sql: sql
 
-        db = db_mod.Database(db_path)
+        db = db_mod.Database(f"sqlite:///{db_path}")
         try:
             with db.get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT DEFAULT 'user', is_active INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT)"
-                )
+                from app.repositories.schema_init import load_schema_from_file
+
+                # Let the authoritative schema create users (the hand-rolled
+                # DDL drifted: no deleted_at/system_account — the schema's
+                # partial indexes on those columns then failed).
+                load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
                 cursor.execute(
                     "INSERT OR IGNORE INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
                     ("admin", "admin@test.com", "hash123", "admin"),
                 )
-                from app.repositories.schema_init import load_schema_from_file
-
-                load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
                 conn.commit()
         finally:
             pass

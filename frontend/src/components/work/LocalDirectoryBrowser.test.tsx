@@ -239,6 +239,64 @@ describe('LocalDirectoryBrowser', () => {
     });
   });
 
+  it('downloads a file when clicking the file list item', async () => {
+    const blob = new Blob(['content'], { type: 'text/plain' });
+    downloadFileMock.mockResolvedValue(blob);
+    browseDirectoryMock.mockResolvedValue(
+      browseResponse({
+        files: [{ name: 'report.txt', path: '/home/alice/report.txt', size: 7, is_readable: true }],
+      })
+    );
+
+    render(
+      <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} enableFileActions />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('report.txt')).toBeInTheDocument();
+    });
+
+    // Click the file list item (not the download button)
+    const fileItem = screen.getByText('report.txt').closest('li');
+    fireEvent.click(fileItem!);
+
+    await waitFor(() => {
+      expect(downloadFileMock).toHaveBeenCalledWith('/home/alice/report.txt');
+    });
+    await waitFor(() => {
+      expect(downloadBlobMock).toHaveBeenCalledWith(blob, 'report.txt');
+    });
+  });
+
+  it('does not trigger download again when clicking file item during download', async () => {
+    downloadFileMock.mockImplementation(() => new Promise((r) => setTimeout(r, 1000)));
+    browseDirectoryMock.mockResolvedValue(
+      browseResponse({
+        files: [{ name: 'slow.txt', path: '/home/alice/slow.txt', size: 7, is_readable: true }],
+      })
+    );
+
+    render(
+      <LocalDirectoryBrowser initialPath="/home/alice" onSelectPath={() => {}} enableFileActions />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('slow.txt')).toBeInTheDocument();
+    });
+
+    const fileItem = screen.getByText('slow.txt').closest('li')!;
+
+    fireEvent.click(fileItem);
+    await waitFor(() => {
+      expect(downloadFileMock).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(fileItem);
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(downloadFileMock).toHaveBeenCalledTimes(1);
+  });
+
   it('hides delete button when directory is not writable', async () => {
     browseDirectoryMock.mockResolvedValue(
       browseResponse({

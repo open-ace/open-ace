@@ -9,6 +9,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import { Badge, Loading, Pagination } from '@/components/common';
+import {
+  getPauseReasonCategory,
+  isStaleAcceptancePause,
+  PAUSE_REASON_CONFIG,
+} from './autonomousWorkflowStatus';
 import { useWorkflows, useDeleteBatch, useDeleteWorkflow } from '@/hooks/useAutonomous';
 import type { AutonomousWorkflow } from '@/api/autonomous';
 import './AutonomousWorkflowList.css';
@@ -74,6 +79,9 @@ const STATUS_FILTER_TABS = [
     key: 'pending,preparing,planning,developing,pr_review,reporting,waiting,merging,verification_pending,paused,planning_timeout',
     labelKey: 'autoFilterActive',
   },
+  // #2634: paused workflows need explicit human review (acceptance-awaiting)
+  // or operator attention (quota/manual) — surface a dedicated filter for them.
+  { key: 'paused', labelKey: 'autoFilterPaused' },
   { key: 'completed', labelKey: 'autoFilterCompleted' },
   { key: 'failed', labelKey: 'autoFilterFailed' },
 ];
@@ -460,6 +468,26 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
     toggleBatch(batchId);
   };
 
+  // #2634: pause-reason summary badges so acceptance-awaiting workflows are
+  // distinguishable from quota/manual pauses at a glance in the list.
+  const renderPauseBadges = (workflow: AutonomousWorkflow) => {
+    const category = getPauseReasonCategory(workflow);
+    if (!category) {
+      return null;
+    }
+    const cfg = PAUSE_REASON_CONFIG[category];
+    return (
+      <>
+        <Badge variant={cfg.variant}>{t(cfg.labelKey, language)}</Badge>
+        {category === 'acceptance_awaiting' && isStaleAcceptancePause(workflow) && (
+          <Badge variant="danger" style={{ fontSize: '0.6rem' }}>
+            {t('autoPauseAcceptanceStale', language)}
+          </Badge>
+        )}
+      </>
+    );
+  };
+
   // Render a single workflow item
   const renderWorkflowItem = (
     workflow: AutonomousWorkflow,
@@ -524,6 +552,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                     <i className={`bi ${statusCfg.icon} me-1`}></i>
                     {t(statusCfg.labelKey, language)}
                   </Badge>
+                  {renderPauseBadges(workflow)}
                   {isForkChild && (
                     <Badge variant="info" style={{ fontSize: '0.6rem' }}>
                       {t('autoForkedFrom', language)}
@@ -552,6 +581,7 @@ export const AutonomousWorkflowList: React.FC<AutonomousWorkflowListProps> = ({
                   <i className={`bi ${statusCfg.icon} me-1`}></i>
                   {t(statusCfg.labelKey, language)}
                 </Badge>
+                {renderPauseBadges(workflow)}
                 {workflow.dev_round > 1 && <Badge variant="light">R{workflow.dev_round}</Badge>}
                 {workflow.batch_order && workflow.batch_total && (
                   <Badge variant="light">

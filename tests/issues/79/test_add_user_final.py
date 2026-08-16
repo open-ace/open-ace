@@ -9,6 +9,7 @@ import os
 import sys
 import time
 
+import pytest
 from playwright.async_api import async_playwright
 
 # 配置
@@ -17,6 +18,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "79")
 
 
+@pytest.mark.asyncio
 async def test_add_user():
     """测试 Add User 对话框的 Save 按钮"""
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)

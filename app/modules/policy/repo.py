@@ -156,6 +156,21 @@ class PolicyRepository:
         row = self.db.fetch_one("SELECT * FROM policy_rules WHERE id = ?", (rule_id,))
         return PolicyRule.from_row(row) if row else None
 
+    def get_current_rule_by_key(self, rule_key: str) -> PolicyRule | None:
+        """The current (is_current) version for a logical rule key, if any.
+
+        ``create_rule`` supersedes *every* ``is_current`` row for a key before
+        inserting the next version, so at most one such row exists per key
+        across all tenants. A tenant-boundary check on ``PUT
+        /policy/rules/<rule_key>`` reads this to learn which tenant currently
+        owns the key before overwriting it.
+        """
+        row = self.db.fetch_one(
+            adapt_sql("SELECT * FROM policy_rules WHERE rule_key = ? AND is_current = ?"),
+            (rule_key, _bool(True)),
+        )
+        return PolicyRule.from_row(row) if row else None
+
     def get_rules_for_evaluation(self) -> list[PolicyRule]:
         """Current + enabled rules, pre-sorted by priority.
 

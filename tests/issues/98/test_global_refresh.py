@@ -10,11 +10,13 @@ Test script for Issue #98: 全局 refresh 和 auto-refresh 功能
 
 import asyncio
 
+import pytest
 from playwright.async_api import async_playwright
 
 BASE_URL = "http://localhost:19888"
 
 
+@pytest.mark.asyncio
 async def test_global_refresh():
     """Test global refresh functionality."""
     async with async_playwright() as p:

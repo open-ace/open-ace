@@ -214,8 +214,7 @@ def _table_has_column(cursor, table_name: str, column_name: str) -> bool:
     """
     if is_postgresql():
         cursor.execute(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = %s AND column_name = %s",
+            "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
             (table_name, column_name),
         )
         return bool(cursor.fetchone())
@@ -371,8 +370,7 @@ def normalize_alert_severity(severity: str) -> str:
     normalized = (severity or "").strip().lower()
     if normalized not in VALID_ALERT_SEVERITIES:
         raise ValueError(
-            f"Invalid alert severity {severity!r}; "
-            f"expected one of {sorted(VALID_ALERT_SEVERITIES)}"
+            f"Invalid alert severity {severity!r}; expected one of {sorted(VALID_ALERT_SEVERITIES)}"
         )
     return normalized
 
@@ -498,6 +496,18 @@ class AlertNotifier:
 
     def _allow_private_webhook_urls(self) -> bool:
         """Whether private/loopback webhook targets are explicitly allowed."""
+        try:
+            from app.repositories.notification_settings_repository import (
+                get_notification_settings_repository,
+            )
+
+            settings = get_notification_settings_repository().get("webhook")
+            if settings is not None:
+                return bool(settings.get("enabled", True)) and bool(
+                    settings.get("allow_private_webhook_urls", False)
+                )
+        except Exception:
+            logger.debug("Central webhook settings unavailable", exc_info=True)
         return bool(get_config_value("alerts", "allow_private_webhook_urls", False))
 
     def _is_disallowed_webhook_ip(self, ip: ipaddress._BaseAddress) -> bool:
@@ -692,7 +702,21 @@ class AlertNotifier:
                 secret = ""
         # (2) Global config secret (shared across all users).
         if not secret:
-            secret = str(get_config_value("alerts", "dingtalk_webhook_secret", "") or "").strip()
+            try:
+                from app.repositories.notification_settings_repository import (
+                    get_notification_settings_repository,
+                )
+
+                stored = get_notification_settings_repository().get(
+                    "dingtalk", include_secrets=True
+                )
+                secret = str((stored or {}).get("fallback_webhook_secret") or "").strip()
+            except Exception:
+                logger.debug("Central DingTalk settings unavailable", exc_info=True)
+            if not secret:
+                secret = str(
+                    get_config_value("alerts", "dingtalk_webhook_secret", "") or ""
+                ).strip()
         # (3) URL query fallback (legacy / one-off delivery).
         sanitized_items: list[tuple[str, str]] = []
         for key, value in query_items:
@@ -720,7 +744,19 @@ class AlertNotifier:
         genuinely from this Open ACE instance. Feishu and DingTalk use their
         own provider-specific signing schemes and are unaffected.
         """
-        secret = str(get_config_value("alerts", "webhook_secret", "") or "").strip()
+        secret = ""
+        try:
+            from app.repositories.notification_settings_repository import (
+                get_notification_settings_repository,
+            )
+
+            stored = get_notification_settings_repository().get("webhook", include_secrets=True)
+            if stored and stored.get("enabled", True):
+                secret = str(stored.get("webhook_secret") or "").strip()
+        except Exception:
+            logger.debug("Central webhook settings unavailable", exc_info=True)
+        if not secret:
+            secret = str(get_config_value("alerts", "webhook_secret", "") or "").strip()
         if not secret:
             return None
         return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
@@ -2211,8 +2247,7 @@ class AlertNotifier:
             cursor = conn.cursor()
             cursor.execute(
                 adapt_sql(
-                    "SELECT dingtalk_webhook_secret FROM notification_preferences "
-                    "WHERE user_id = ?"
+                    "SELECT dingtalk_webhook_secret FROM notification_preferences WHERE user_id = ?"
                 ),
                 (user_id,),
             )

@@ -117,9 +117,9 @@ class TestManagerRecorderWiring:
             "sess-1", "user_message", role="user", content="hello there"
         )
 
-    def test_stop_session_records_completed_status(self, manager, spy_recorder):
+    def test_stop_session_records_stopped_status(self, manager, spy_recorder):
         manager.stop_session("sess-1")
-        spy_recorder.record_run_status.assert_called_once_with("sess-1", "completed")
+        spy_recorder.record_run_status.assert_called_once_with("sess-1", "stopped")
 
     def test_pause_and_resume_record_lifecycle(self, manager, spy_recorder):
         manager.pause_session("sess-1")

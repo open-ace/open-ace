@@ -247,6 +247,13 @@ class _LocalSession:
     # Distinct assistant message_ids counted toward request_count (dedup, since
     # claude emits multiple assistant events per message: thinking then text).
     _counted_message_ids: set = field(default_factory=set)
+    # #2640: final-answer text from the terminal stream-json ``result`` event.
+    # The CLI puts the turn's answer here; assistant stream events can be
+    # dropped near the context limit, so this is kept as a fallback response
+    # source (see _recover_final_response_text). Empty string = not captured.
+    result_text: str = ""
+    # #2640 diagnostics: count of stdout lines that failed JSON parsing.
+    _unparseable_stdout_lines: int = 0
     _paused: threading.Event = field(default_factory=threading.Event)  # set when SIGSTOPed
     # Serializes remote session-id publication/message dispatch with shutdown.
     # Local subprocess sessions do not use it, but keeping it on the tracker
@@ -1441,6 +1448,11 @@ class AutonomousAgentRunner:
         # convergence command. Never let a service-level SKIP leak into a
         # normal autonomous agent and silently suppress repository hooks.
         env.pop("SKIP", None)
+        # Process topology must not leak into agent subprocesses: the agent's
+        # pytest run would start real schedulers inside the test process
+        # (TESTING guard covers create_app; this keeps topology out entirely so
+        # non-TESTING create_app calls are safe too). (class-2, 2026-08-15)
+        env.pop("SCHEDULER_MODE", None)
         env["GH_CONFIG_DIR"] = "/var/empty/openace-autonomous-gh"
         env["GIT_TERMINAL_PROMPT"] = "0"
         env["PATH"] = guard_bin + os.pathsep + env.get("PATH", "")
@@ -1770,6 +1782,146 @@ class AutonomousAgentRunner:
                 requests,
                 cli_session_id[:8],
             )
+
+    def _recover_response_text_from_jsonl(self, session: _LocalSession, cli_session_id: str) -> str:
+        """Return the last visible assistant text from the session JSONL (#2640).
+
+        Uses the same transcript-reading machinery as
+        ``_replay_usage_from_jsonl`` (projects root + owning-user read) but
+        extracts assistant text instead of usage, keeping only records with
+        timestamp >= this run's ``started_at_epoch``. Fail-soft: any error
+        logs a warning and returns "" so a broken fallback can never fail
+        the run itself.
+        """
+        if not cli_session_id or not session.encoded_project_path:
+            return ""
+        try:
+            jsonl_path = (
+                self._claude_projects_root(session.system_account, session.task_id)
+                / session.encoded_project_path
+                / f"{cli_session_id}.jsonl"
+            )
+            content = self._read_text_as_user(jsonl_path, session.system_account)
+        except OSError as exc:
+            logger.warning(
+                "Transcript text fallback could not read JSONL (session=%s): %s",
+                cli_session_id[:8],
+                exc,
+            )
+            return ""
+        last_text = ""
+        try:
+            for line in content.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if not isinstance(rec, dict) or rec.get("type") != "assistant":
+                    continue
+                ts_epoch = _iso_to_epoch(rec.get("timestamp", ""))
+                if ts_epoch is not None and ts_epoch < session.started_at_epoch:
+                    continue
+                msg = rec.get("message")
+                if not isinstance(msg, dict):
+                    continue
+                text = _extract_visible_text(msg.get("content", ""))
+                if text.strip():
+                    last_text = text
+        except Exception as exc:  # fail-soft by contract (#2640)
+            logger.warning(
+                "Transcript text fallback failed (session=%s): %s",
+                cli_session_id[:8],
+                exc,
+            )
+            return ""
+        return last_text.strip()
+
+    def _recover_final_response_text(self, session: _LocalSession, cli_session_id: str) -> None:
+        """Recover response text when assistant stream events were dropped (#2640).
+
+        Large-context (--resume) turns can complete with a terminal ``result``
+        event — usage accounted, exit 0 — while the final assistant stream
+        event never arrives, leaving ``event_log`` without any assistant text.
+        The orchestrator then terminal-fails the phase with "<agent> returned
+        no result" even though the deliverable exists.
+
+        Layered fallback, only when event_log has NO assistant text:
+        1. the ``result`` event's ``result`` text (captured in _read_stdout);
+        2. the last visible assistant message in the transcript JSONL written
+           at/after this run's start.
+
+        On recovery the text is written back into ``session.event_log`` (a
+        synthetic assistant entry) and ``session.assistant_text`` so both
+        ``_build_agent_task_result`` and ``_persist_local_session_messages``
+        see the turn — the DB timeline recovers it too.
+        """
+        if any(
+            event.get("type") == "assistant" and str(event.get("text") or "").strip()
+            for event in session.event_log
+        ):
+            return  # normal path: assistant stream events were captured
+
+        recovered = (session.result_text or "").strip()
+        source = "result_event"
+        if not recovered and cli_session_id:
+            recovered = self._recover_response_text_from_jsonl(session, cli_session_id)
+            source = "transcript_jsonl"
+
+        if not recovered:
+            return
+
+        session.event_log.append(
+            {
+                "type": "assistant",
+                "text": recovered,
+                "message_id": None,
+                "model": None,
+            }
+        )
+        session.assistant_text += recovered
+        logger.info(
+            "Recovered final response text from %s for session %s (%d chars)",
+            source,
+            session.session_id[:8],
+            len(recovered),
+        )
+
+    def _finalize_local_completed_result(
+        self,
+        session: _LocalSession,
+        session_id: str,
+        resolved_session_id: str,
+    ) -> AgentTaskResult:
+        """Build the AgentTaskResult for a completed local run (#2640).
+
+        Runs the response-text recovery first so the returned result AND the
+        session persistence (which consumes result.event_log) both see the
+        recovered turn.
+        """
+        self._recover_final_response_text(session, resolved_session_id or session.cli_session_id)
+        result = _build_agent_task_result(
+            session_id=session_id,
+            tracking_session_id=session_id,
+            source_session_id=resolved_session_id,
+            event_log=session.event_log,
+            fallback_text=session.assistant_text,
+            total_tokens=session.total_tokens,
+            total_input_tokens=session.total_input_tokens,
+            total_output_tokens=session.total_output_tokens,
+            request_count=session.request_count,
+            tool_calls=session.tool_calls,
+            success=session.error is None,
+            error=session.error,
+            error_code=session.error_code,
+        )
+        # #2022 P5: attribute the result (provider/id/generation/state) so the
+        # orchestrator can persist sandbox identity + every evidence path carries it.
+        return self._stamp_sandbox_attribution(
+            result, session.sandbox_handle, session.sandbox_provider
+        )
 
     def _ensure_sidebar_session(self, session: _LocalSession) -> str:
         """Resolve the real sidebar Claude session id for a workflow-owned line."""
@@ -2607,24 +2759,10 @@ class AutonomousAgentRunner:
                 self._sandbox_provider,
             )
 
-        result = _build_agent_task_result(
-            session_id=session_id,
-            tracking_session_id=session_id,
-            source_session_id=resolved_session_id,
-            event_log=session.event_log,
-            fallback_text=session.assistant_text,
-            total_tokens=session.total_tokens,
-            total_input_tokens=session.total_input_tokens,
-            total_output_tokens=session.total_output_tokens,
-            request_count=session.request_count,
-            tool_calls=session.tool_calls,
-            success=session.error is None,
-            error=session.error,
-            error_code=session.error_code,
-        )
-        # #2022 P5: attribute the result (provider/id/generation/state) so the
-        # orchestrator can persist sandbox identity + every evidence path carries it.
-        return self._stamp_sandbox_attribution(result, sandbox_handle, self._sandbox_provider)
+        # #2640: route through the recovery-aware finalizer so a run whose
+        # assistant stream events were dropped (large-context --resume) still
+        # yields its deliverable as response_text and session persistence.
+        return self._finalize_local_completed_result(session, session_id, resolved_session_id)
 
     def _create_workflow_session(
         self,
@@ -4039,6 +4177,15 @@ class AutonomousAgentRunner:
                         # bump (it summarizes the whole --print run).
                         if not session._counted_message_ids and session.request_count == 0:
                             session.request_count += 1
+                        # #2640: the terminal ``result`` event carries the
+                        # CLI's final answer in its ``result`` text field.
+                        # Assistant stream events can be dropped near the
+                        # context limit (large-context --resume turns), so
+                        # capture it as a fallback response source instead of
+                        # discarding it (see _recover_final_response_text).
+                        result_value = parsed.get("result")
+                        if isinstance(result_value, str) and result_value.strip():
+                            session.result_text = result_value
                         error_code, error_message = _extract_cli_result_error(
                             parsed, session.last_stderr
                         )
@@ -4194,7 +4341,22 @@ class AutonomousAgentRunner:
                         self._resolve_sidebar_session(session)
 
                 except (json.JSONDecodeError, ValueError):
-                    pass  # Non-JSON output, skip
+                    # Non-JSON output line. #2640: these were silently
+                    # swallowed, hiding CLI stream-json protocol drift (e.g.
+                    # dropped assistant events near the context limit) from
+                    # diagnosis. Emit a truncated-prefix warning with a
+                    # per-run counter — never the full line.
+                    session._unparseable_stdout_lines += 1
+                    if (
+                        session._unparseable_stdout_lines <= 5
+                        or session._unparseable_stdout_lines % 100 == 0
+                    ):
+                        logger.warning(
+                            "Agent CLI emitted non-JSON stdout line #%d " "(session=%s): %.200s",
+                            session._unparseable_stdout_lines,
+                            session.session_id[:8],
+                            line,
+                        )
 
         except (OSError, ValueError):
             pass

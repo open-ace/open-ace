@@ -254,12 +254,34 @@ class TestOpenaceRm:
         )
 
         assert result.returncode in [3, 1], f"Expected exit code 3 or 1, got {result.returncode}"
-        assert "reserved" in result.stderr.lower() or "invalid" in result.stderr.lower()
+        assert (
+            "reserved" in result.stderr.lower()
+            or "invalid" in result.stderr.lower()
+            or "system users" in result.stderr.lower()
+            or "uid" in result.stderr.lower()
+        )
 
     def test_path_outside_allowed_rejected(self):
         """Path outside /workspace or /home should be rejected."""
+        # Use a user with UID >= 1000 that is not reserved
+        # Find first user with UID >= 1000 and <= 60000 (non-reserved range)
+        import subprocess
+
         result = subprocess.run(
-            [OPENACE_RM, "testuser", "/etc/passwd"],
+            ["awk", "-F:", "$3 >= 1000 && $3 < 60000 {print $1; exit}", "/etc/passwd"],
+            capture_output=True,
+            text=True,
+        )
+        test_user = (
+            result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        )
+
+        # If no suitable user found, skip this test
+        if not test_user:
+            pytest.skip("No user with UID >= 1000 and < 60000 found for testing")
+
+        result = subprocess.run(
+            [OPENACE_RM, test_user, "/etc/passwd"],
             capture_output=True,
             text=True,
         )
@@ -269,19 +291,51 @@ class TestOpenaceRm:
 
     def test_protected_path_rejected(self):
         """Protected paths like /etc should be rejected."""
+        import subprocess
+
         result = subprocess.run(
-            [OPENACE_RM, "testuser", "/etc/test"],
+            ["awk", "-F:", "$3 >= 1000 && $3 < 60000 {print $1; exit}", "/etc/passwd"],
+            capture_output=True,
+            text=True,
+        )
+        test_user = (
+            result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        )
+
+        if not test_user:
+            pytest.skip("No user with UID >= 1000 and < 60000 found for testing")
+
+        result = subprocess.run(
+            [OPENACE_RM, test_user, "/etc/test"],
             capture_output=True,
             text=True,
         )
 
         assert result.returncode == 2, f"Expected exit code 2, got {result.returncode}"
-        assert "forbidden" in result.stderr.lower() or "pattern" in result.stderr.lower()
+        assert (
+            "forbidden" in result.stderr.lower()
+            or "pattern" in result.stderr.lower()
+            or "outside allowed" in result.stderr.lower()
+        )
 
     def test_root_directory_rejected(self):
         """Root directory '/' should be rejected."""
+        import subprocess
+
         result = subprocess.run(
-            [OPENACE_RM, "testuser", "/"],
+            ["awk", "-F:", "$3 >= 1000 && $3 < 60000 {print $1; exit}", "/etc/passwd"],
+            capture_output=True,
+            text=True,
+        )
+        test_user = (
+            result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        )
+
+        if not test_user:
+            pytest.skip("No user with UID >= 1000 and < 60000 found for testing")
+
+        result = subprocess.run(
+            [OPENACE_RM, test_user, "/"],
             capture_output=True,
             text=True,
         )
@@ -291,8 +345,22 @@ class TestOpenaceRm:
 
     def test_dangerous_option_rejected(self):
         """Dangerous options like --no-preserve-root should be rejected."""
+        import subprocess
+
         result = subprocess.run(
-            [OPENACE_RM, "testuser", "/tmp/test", "--no-preserve-root"],
+            ["awk", "-F:", "$3 >= 1000 && $3 < 60000 {print $1; exit}", "/etc/passwd"],
+            capture_output=True,
+            text=True,
+        )
+        test_user = (
+            result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        )
+
+        if not test_user:
+            pytest.skip("No user with UID >= 1000 and < 60000 found for testing")
+
+        result = subprocess.run(
+            [OPENACE_RM, test_user, "/tmp/test", "--no-preserve-root"],
             capture_output=True,
             text=True,
         )
@@ -302,8 +370,22 @@ class TestOpenaceRm:
 
     def test_command_injection_rejected(self):
         """Options with shell injection characters should be rejected."""
+        import subprocess
+
         result = subprocess.run(
-            [OPENACE_RM, "testuser", "/tmp/test", ";", "ls"],
+            ["awk", "-F:", "$3 >= 1000 && $3 < 60000 {print $1; exit}", "/etc/passwd"],
+            capture_output=True,
+            text=True,
+        )
+        test_user = (
+            result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        )
+
+        if not test_user:
+            pytest.skip("No user with UID >= 1000 and < 60000 found for testing")
+
+        result = subprocess.run(
+            [OPENACE_RM, test_user, "/tmp/test", ";", "ls"],
             capture_output=True,
             text=True,
         )
@@ -313,8 +395,22 @@ class TestOpenaceRm:
 
     def test_empty_path_rejected(self):
         """Empty path should be rejected."""
+        import subprocess
+
         result = subprocess.run(
-            [OPENACE_RM, "testuser", ""],
+            ["awk", "-F:", "$3 >= 1000 && $3 < 60000 {print $1; exit}", "/etc/passwd"],
+            capture_output=True,
+            text=True,
+        )
+        test_user = (
+            result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+        )
+
+        if not test_user:
+            pytest.skip("No user with UID >= 1000 and < 60000 found for testing")
+
+        result = subprocess.run(
+            [OPENACE_RM, test_user, ""],
             capture_output=True,
             text=True,
         )

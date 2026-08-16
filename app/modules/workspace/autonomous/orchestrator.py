@@ -60,6 +60,7 @@ from app.modules.workspace.autonomous.constants import (  # noqa: F401
     AUTONOMOUS_CONTEXT,
     AUTONOMOUS_DEV_ALLOWED_TOOLS,
     MERGE_POLICY_PAUSE_REASON_PREFIX,
+    PROTECTED_CI_REPAIR_TEST_FILES,
     READ_ONLY_REVIEW_UNSUPPORTED_TOOLS,
     REVIEW_ALLOWED_TOOLS,
     VERIFICATION_ALLOWED_TOOLS,
@@ -1758,8 +1759,49 @@ CI_POLL_MAX_WAIT = 300  # maximum seconds to wait (5 minutes)
 # the workflow is marked failed for manual intervention.
 TRANSIENT_RETRY_MAX = 6
 
+# Issue #2673: bounded mechanical fallback for a check-gated PR whose head
+# reports ZERO check-runs (GitHub dropped the branch's event delivery).
+# Timing model: the scheduler hot loop is ``self._stop_event.wait(10)`` with
+# no per-phase backoff, so consecutive merge cycles can arrive ~10s apart
+# (especially right after the sync_failed_pr_with_main fresh-push retry). A
+# pure cycle counter would therefore terminally retrigger/escalate a
+# slow-CI-provisioning head within a couple of minutes — a regression vs.
+# the old (recoverable) spin. The PRIMARY gate is thus the WALL-CLOCK
+# observation floor below, persisted per head SHA as ``first_seen_at`` in the
+# tracker milestone; the cycle count is only a secondary debounce on top of
+# it (retrigger requires floor elapsed AND cycles ≥ RETRIGGER_CYCLES).
+ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR = 1200  # seconds (20 minutes)
+ZERO_CHECK_RUNS_RETRIGGER_CYCLES = 2  # secondary signal; floor must ALSO elapse
+# Partial-state cap (#2673 review): after a successful close whose reopen
+# failed, total reopen attempts before the closed-PR state escalates visibly.
+ZERO_CHECK_RUNS_REOPEN_RETRY_MAX = 2
+
 # _TRANSIENT_ORCHESTRATOR_KEYWORDS + _is_transient_git_error moved to
 # constants.py (shared with phases/pr_review.py); re-imported above.
+
+
+def _utcnow() -> datetime:
+    """Patchable UTC clock for the #2673 zero-check-runs state machine.
+
+    Tests freeze this to make the wall-clock observation floor
+    (``ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR``) deterministic.
+    """
+    return datetime.now(timezone.utc)
+
+
+def _parse_iso_utc(value) -> datetime | None:
+    """Best-effort parse of an ISO timestamp from tracker metadata (#2673).
+
+    Naive timestamps are interpreted as UTC; unparsable/missing values
+    return None so callers can fall back to a conservative default.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 # GitHub rejects comment bodies longer than 65536 chars. Agent output (plan /
@@ -2079,6 +2121,78 @@ def _cleanup_backoff_time(attempts: int) -> str:
 
     delay = min(60 * (2 ** max(attempts - 1, 0)), 3600)
     return (datetime.now(timezone.utc) + timedelta(seconds=delay)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+# ── #2699: lazy dependency preparation ──────────────────────────────────────
+# The worktree node_modules shim was reverted (#2694/#2698): it ran via
+# ``sudo -u <owner> bash -c`` which sudoers rejects by design (#2650), so it
+# never worked on multi-user prod, and it hardcoded this repo's frontend/
+# layout. Dependency setup is now the agent's job, in two layers: a proactive
+# prompt rule (check node_modules + lockfile-detected install before running
+# frontend commands) and a failure-signature translation below.
+#
+# The trap these signatures recognize: a clean worktree has no node_modules
+# (gitignored); Node resolution walks up into the project owner's main clone,
+# so vitest LOADS (deps "visible") but vite's cache write into the
+# owner-owned node_modules/.vite-temp is EACCES. To the agent that reads like
+# a permissions bug — it retries around permissions instead of installing.
+_DEPENDENCY_FAILURE_PATTERNS = (
+    re.compile(r"node_modules[/\\]\.vite-temp", re.IGNORECASE),
+    re.compile(r"Cannot find (?:module|package) ['\"]?vitest", re.IGNORECASE),
+    re.compile(r"vitest: command not found", re.IGNORECASE),
+    re.compile(r"EACCES: permission denied[^\n]*node_modules", re.IGNORECASE),
+)
+
+_DEPENDENCY_PREP_RULE = (
+    "5. 环境准备：运行任何前端/JS 测试或构建命令前，先检查 worktree 内是否存在 "
+    "node_modules；不存在且仓库有锁文件（package-lock.json / pnpm-lock.yaml / "
+    "yarn.lock / bun.lockb）时，先在对应目录安装依赖（npm ci / "
+    "pnpm install --frozen-lockfile / yarn install --frozen-lockfile / "
+    "bun install）再运行命令；纯后端任务无需处理，不要安装任何前端依赖。\n"
+)
+
+
+def _dependency_failure_directive(prior_output: str | None) -> str:
+    """#2699 backstop: translate a missing-deps failure into an install directive.
+
+    Returns the directive when ``prior_output`` (the prior round's test
+    report) hits one of :data:`_DEPENDENCY_FAILURE_PATTERNS`, else ``""``.
+    Empty/unparsable input returns ``""`` — the directive is additive and must
+    never fabricate a dependency problem the output does not show.
+    """
+    if not prior_output:
+        return ""
+    if not any(p.search(prior_output) for p in _DEPENDENCY_FAILURE_PATTERNS):
+        return ""
+    return (
+        "## 依赖环境修复指令\n"
+        "上一轮输出命中了依赖缺失特征（node_modules 权限被拒或找不到 vitest）。"
+        "worktree 是干净检出，node_modules 不存在，模块解析向上落到了项目主 clone "
+        "的 node_modules——读得到但写不进，这不是权限配置问题，不要用 sudo/chmod "
+        "绕过。本轮必须：\n"
+        "1. 在 worktree 内按仓库锁文件先安装依赖：package-lock.json → `npm ci`；"
+        "pnpm-lock.yaml → `pnpm install --frozen-lockfile`；yarn.lock → "
+        "`yarn install --frozen-lockfile`；bun.lockb → `bun install`"
+        "（monorepo 在对应子目录执行）；\n"
+        "2. 安装完成后重新执行验证矩阵中的测试命令，并在回复中包含原始输出；\n"
+        "3. 若仓库没有锁文件或不是 JS 项目，则失败另有原因，按原流程排查并在报告中说明。\n\n"
+    )
+
+
+def _head_tail_excerpt(text: str, limit: int = 6000) -> str:
+    """Truncate ``text`` preserving BOTH ends (#2590).
+
+    Test-report tails carry the failure summary (short summary lines, exit
+    status) while the head carries the command/context — a head-only cut
+    discards exactly the part a dev-repair round needs. Split the budget
+    roughly 2:1 head:tail (test output front-loads verbose tracebacks; the
+    actionable summary at the end is usually short).
+    """
+    if len(text) <= limit:
+        return text
+    head = max(limit * 2 // 3, 1)
+    tail = max(limit - head - len("\n…[truncated]…\n"), 1)
+    return f"{text[:head]}\n…[truncated]…\n{text[-tail:]}"
 
 
 try:
@@ -3778,6 +3892,11 @@ class AutonomousOrchestrator:
             "Bandit 由 CI 独立检查。\n"
             "7. 不要执行 git add、git commit 或 git push；编排器会在范围校验通过后统一提交并推送。\n"
             "8. 结束时请明确说明：你复现了哪些完整命令、最终 exit code、修复了什么、还剩什么风险。\n"
+            "9. 以下受保护的安全测试文件是本仓库的安全锁，**禁止删除**；对它们唯一允许的修改是"
+            "**新增更严格的断言**，禁止删除、注释、跳过或放宽任何现有断言：\n"
+            + "".join(f"    - `{path}`\n" for path in PROTECTED_CI_REPAIR_TEST_FILES)
+            + "    编排器在提交前会对上述文件做机械校验（净删除即整轮作废），"
+            "不要试图让安全测试变绿来掩盖真实的安全回归（事故 PR #2665）。\n"
         )
         # Runtime contract is already embedded in ci_repair_context; do not
         # duplicate it in the fresh-session prompt.
@@ -3991,6 +4110,66 @@ class AutonomousOrchestrator:
             logger.warning("pre-commit target collection: working-tree lookup failed: %s", exc)
             working = []
         return sorted({path for path in (*committed, *working) if path})
+
+    @staticmethod
+    def _protected_test_tampering_error(gh: GitHubOps, commit_before: str) -> str:
+        """Mechanical anti-tamper check for protected security tests (#2687).
+
+        Incident PR #2665 / revert PR #2672: the CI-repair agent silenced a red
+        sudoers-hardening lock test by deleting/weakening its assertions — a
+        prompt instruction alone did not stop it, so this check mechanically
+        refuses to push any repair round that deletes or net-shrinks a file in
+        ``PROTECTED_CI_REPAIR_TEST_FILES``. Net-negative line changes
+        (removals > additions) is the conservative proxy for "weakened": a
+        legitimate strengthening is net-additive and always passes.
+
+        ``git diff --numstat <base>`` covers everything between the round
+        boundary and the working tree (committed since ``commit_before`` plus
+        uncommitted edits — the same universe the per-round scope guard
+        counts). Fails closed like the scope guard: if the diff cannot be
+        verified, refuse rather than silently skip.
+
+        Returns "" when the round is clean, else a human-readable rejection
+        reason.
+        """
+        base = commit_before or "HEAD"
+        try:
+            result = gh._run_git(["diff", "--numstat", base])
+        except Exception as exc:
+            return (
+                "protected security test verification could not run "
+                f"(git diff --numstat failed: {exc}); refusing to push"
+            )
+        offenders: list[str] = []
+        for line in (result.stdout or "").splitlines():
+            parts = line.split("\t")
+            if len(parts) < 3:
+                continue
+            added_raw, removed_raw, path = (
+                parts[0].strip(),
+                parts[1].strip(),
+                "\t".join(parts[2:]).strip(),
+            )
+            if path not in PROTECTED_CI_REPAIR_TEST_FILES:
+                continue
+            if added_raw == "-" or removed_raw == "-":
+                offenders.append(f"{path} (rewritten as binary)")
+                continue
+            try:
+                added, removed = int(added_raw), int(removed_raw)
+            except ValueError:
+                offenders.append(f"{path} (unparseable numstat: {line.strip()})")
+                continue
+            if removed > added:
+                label = "deleted" if added == 0 else "net-negative edit"
+                offenders.append(f"{path} ({label}: -{removed}/+{added})")
+        if not offenders:
+            return ""
+        return (
+            "protected security test files cannot be deleted or weakened via "
+            "CI-repair (only additions of stricter assertions are allowed); "
+            f"offenders: {'; '.join(offenders)}"
+        )
 
     @staticmethod
     def _detect_and_push_ci_repair_changes(
@@ -4243,6 +4422,42 @@ class AutonomousOrchestrator:
             logger.warning(pre_commit_error, exc_info=True)
 
         self._accumulate_tokens(repair_result)
+
+        # #2687 anti-tamper guard: mechanically refuse to commit/push a repair
+        # round that deletes or weakens a protected security test. The incident
+        # (PR #2665, reverted in #2672) proved agents will silence the lock
+        # tests that gate them under CI pressure, so this must NOT rely on the
+        # prompt instruction. Rejected rounds discard the tampered edits and
+        # defer with the no-change prefix so the bounded
+        # MAX_CI_REPAIR_NO_CHANGE_RETRIES budget (not ci_repair_attempts) stops
+        # an agent that keeps retrying the same tampering; the failed
+        # milestone's error text feeds the next round's prompt via
+        # _collect_prior_ci_repair_failures so the agent sees why.
+        tamper_error = self._protected_test_tampering_error(gh, commit_before)
+        if tamper_error:
+            try:
+                # Discard everything round-local (working-tree edits AND any
+                # commit the agent made despite the prompt) back to the PR
+                # remote head, mirroring the scope-reject reset.
+                if commit_before:
+                    gh.reset_hard_to(commit_before)
+                else:
+                    gh.reset_hard_to_head()
+            except Exception as exc:
+                logger.warning("Failed to discard tampered CI-repair edits: %s", exc)
+            message = (
+                "CI repair deferred: agent produced no code changes " f"(rejected: {tamper_error})"
+            )
+            self.repo.update_milestone(
+                repair_ms.get("milestone_id", ""),
+                {
+                    "status": "failed",
+                    "session_id": repair_result.session_id,
+                    "error_message": message,
+                },
+            )
+            self._update_workflow({"status": "merging", "error_message": message})
+            return
 
         commit_sha, sha_changed, push_error = self._detect_and_push_ci_repair_changes(
             gh,
@@ -6215,6 +6430,161 @@ class AutonomousOrchestrator:
             logger.debug("structured test verdict computation failed: %s", e)
             return ExecutionVerdict.NOT_RUN, [], f"compute failed: {e}"
 
+    def _carry_forward_prior_test_verdict(
+        self,
+        workflow_id: str,
+        current_milestone_id: str,
+        test_retries: int,
+    ) -> tuple[ExecutionVerdict, str]:
+        """Recompute the prior test milestone's structured verdict (#2590).
+
+        On a test-phase retry the agent session is reused (#2390), so the
+        current milestone has no stamped evidence — the agent saw the full
+        prior context and summarized the old results instead of re-running.
+        The #2390 milestone-scoped filter correctly yields NOT_RUN for the
+        current milestone, but the gate's heuristic fallback then reads the
+        *entire* session text (including the prior round's stale output) and
+        misclassifies the run — promoting a FAILED retry to inconclusive or
+        even pr_review.
+
+        This helper re-reads the prior test milestone's persisted
+        ``test_execution_evidence`` rows and recomputes its run verdict, so the
+        gate can carry that *real* verdict forward instead of trusting stale
+        prose. Only fires on an actual retry (``test_retries > 0``) and only
+        when a prior ``tests_run`` milestone with a decisive verdict exists.
+
+        Returns ``(verdict, reason)``. NOT_RUN means no usable prior verdict;
+        the caller falls through to the unchanged heuristic.
+        """
+        if test_retries <= 0 or not workflow_id or not current_milestone_id:
+            return ExecutionVerdict.NOT_RUN, "carry-forward skipped (no retry / no ids)"
+
+        try:
+            milestones = self.repo.list_milestones(workflow_id, phase="development")
+        except Exception:
+            milestones = []
+
+        # Only ``tests_run`` milestones, excluding the current one, newest-first.
+        test_milestones = [
+            ms
+            for ms in milestones
+            if ms.get("milestone_type") == "tests_run"
+            and (ms.get("milestone_id") or "") != current_milestone_id
+        ]
+        if not test_milestones:
+            return ExecutionVerdict.NOT_RUN, "no prior tests_run milestone"
+
+        # list_milestones returns ``created_at ASC, id ASC``; the prior milestone
+        # for THIS dev round is the one immediately before the current one. Take
+        # the latest prior test milestone (highest id) — a retry within the same
+        # dev round creates a chain of test milestones and the last one holds
+        # the real verdict the agent saw before this retry.
+        try:
+            prior_ms = max(test_milestones, key=lambda m: int(m.get("id") or 0))
+        except (ValueError, TypeError):
+            prior_ms = test_milestones[-1]
+        prior_milestone_id = prior_ms.get("milestone_id") or ""
+        if not prior_milestone_id:
+            return ExecutionVerdict.NOT_RUN, "prior milestone has no id"
+
+        try:
+            from app.modules.workspace.autonomous.command_evidence.test_verdict import (
+                compute_run_verdict,
+            )
+            from app.repositories.test_evidence_repo import TestExecutionEvidenceRepository
+
+            prior_evidences = TestExecutionEvidenceRepository().query_by_milestone(
+                workflow_id, prior_milestone_id
+            )
+            if not prior_evidences:
+                return ExecutionVerdict.NOT_RUN, "prior milestone has no test evidence"
+
+            verdict = compute_run_verdict(prior_evidences)
+            return verdict, f"carried forward from milestone {prior_milestone_id}"
+        except Exception as e:
+            logger.debug("prior verdict carry-forward failed: %s", e)
+            return ExecutionVerdict.NOT_RUN, f"carry-forward failed: {e}"
+
+    def _prior_dependency_failure_directive(self, current_milestone_id: str) -> str:
+        """#2699: missing-deps directive from the PRIOR round's test report.
+
+        Reads the latest prior ``tests_run`` milestone's ``result_summary``
+        (excluding ``current_milestone_id`` — the just-created in_progress
+        milestone for THIS round has an empty summary and must not shadow the
+        prior report; same milestone selection as
+        ``_carry_forward_prior_test_verdict``) and runs the
+        :func:`_dependency_failure_directive` signature match over it. Any
+        lookup error returns ``""`` — the directive is additive.
+        """
+        if not current_milestone_id:
+            return ""
+        try:
+            milestones = self.repo.list_milestones(self._workflow_id, phase="development")
+        except Exception:
+            return ""
+        prior = [
+            ms
+            for ms in milestones
+            if ms.get("milestone_type") == "tests_run"
+            and (ms.get("milestone_id") or "") != current_milestone_id
+            and ms.get("result_summary")
+        ]
+        if not prior:
+            return ""
+        try:
+            latest = max(prior, key=lambda m: int(m.get("id") or 0))
+        except (ValueError, TypeError):
+            latest = prior[-1]
+        return _dependency_failure_directive(latest.get("result_summary") or "")
+
+    def _structured_failure_repair_feedback(
+        self, structured_reason: str, evidences: list, test_summary: str
+    ) -> str:
+        """Build the #2590 dev-repair round's failure context (user_feedback).
+
+        The test retries re-ran the failing tests but never routed the output
+        back into development; this payload does. Composed from the structured
+        per-command verdicts (framework + counts) plus an excerpt of the test
+        agent's report — the structured rows keep counts, not excerpts, so the
+        raw failing output only survives in the report text. Persisted on the
+        workflow as ``user_feedback`` because the dev prompt already surfaces
+        that field (``_get_user_feedback_prompt``) and clears it after the
+        round, so no new plumbing is needed.
+        """
+        lines = [
+            "#2590 测试修复轮：测试重试已耗尽，且结构化证据判定测试命令真实失败"
+            f"（{structured_reason}）。",
+            "请先根据以下失败信息修复测试或修复被测试暴露的产品代码，"
+            "再重新执行验证；不得跳过测试或改写断言来让测试通过。",
+        ]
+        # #2699: a missing-deps signature is not a code defect — hand the dev
+        # round the install directive FIRST so it does not "fix" an EACCES by
+        # editing permissions or skipping the frontend suite.
+        directive = _dependency_failure_directive(test_summary or "")
+        if directive:
+            lines.append("")
+            lines.append(directive.rstrip())
+        failed_lines = []
+        for evidence in evidences or []:
+            if getattr(evidence, "verdict", "") != ExecutionVerdict.FAILED.value:
+                continue
+            counts = f"passed={evidence.passed}, failed={evidence.failed}"
+            if evidence.errors:
+                counts += f", errors={evidence.errors}"
+            failed_lines.append(
+                f"- 失败的测试命令证据（framework={evidence.framework or 'unknown'}，{counts}）"
+            )
+        if failed_lines:
+            lines.extend(failed_lines)
+        else:
+            # Carry-forward (#2590 Option A) leaves the current milestone's
+            # evidence list empty — the verdict came from the prior milestone.
+            lines.append("- （本轮无结构化失败行，失败详情见下方测试报告摘录）")
+        lines.append("")
+        lines.append("### 测试阶段报告摘录（截断至 6000 字符）")
+        lines.append(_head_tail_excerpt(test_summary or "", 6000))
+        return "\n".join(lines)
+
     def _emit_structured_test_fallback(
         self,
         verdict: ExecutionVerdict,
@@ -6684,6 +7054,22 @@ class AutonomousOrchestrator:
         visible = (result.response_text or "").strip()
         return bool(re.match(r"^API Error:\s*400\b", visible, re.IGNORECASE))
 
+    @classmethod
+    def _is_resume_noop_result(cls, result: AgentTaskResult | None) -> bool:
+        """Detect the structural resume-no-op signature (Refs #2570).
+
+        A ``--resume``'d session line whose last turn already ended can
+        synthesize a result-without-turn: the run reports success but
+        produced no measurable output — zero tokens AND empty artifact
+        text. Genuine work always moves at least one of those, so requiring
+        both keeps the retry backstop narrowly scoped.
+        """
+        if not result or not getattr(result, "success", False):
+            return False
+        if int(getattr(result, "total_tokens", 0) or 0) > 0:
+            return False
+        return not cls._artifact_text(result).strip()
+
     def _run_agent_with_context_recovery(
         self,
         wf: dict,
@@ -6700,14 +7086,58 @@ class AutonomousOrchestrator:
         The runner then rebinds the new provider transcript to the SAME tracking
         row. Usage from the rejected attempt is carried into the retry's final
         milestone write; the caller accounts the returned result as usual.
+
+        Resume no-op backstop (Refs #2570): when a NAMED line that actually
+        resumed an existing session returns success-but-empty (see
+        ``_is_resume_noop_result``), retry once with ``force_fresh=True`` on
+        the same tracking line. A fresh run cannot no-op this way and is
+        never retried; genuine failures and overflow/integrity results keep
+        their existing paths. If the retry is also empty, its result is
+        returned as-is so callers still see emptiness and fail closed.
         """
+        # Only a run that actually resumed an established session line can
+        # hit the resume no-op. Resolve that BEFORE the run: afterwards the
+        # line's mapping may have been (re)written by the run itself. Pop the
+        # (rarely passed) force_fresh kwarg so the retry calls below can pass
+        # their own without a duplicate-keyword collision.
+        force_fresh = bool(kwargs.pop("force_fresh", False))
+        resumed = False
+        if not force_fresh and SESSION_LINE_FIELDS.get(session_line):
+            try:
+                _, _, resumed = self._resolve_session_line(wf or self.workflow, session_line)
+            except Exception:
+                # Resolution is read-only; an outage must not block the run.
+                logger.warning(
+                    "Failed to pre-check resume state for session line %s",
+                    session_line,
+                    exc_info=True,
+                )
+                resumed = False
+
         result = self._run_agent(
             wf=wf,
             session_line=session_line,
             milestone_id=milestone_id,
+            force_fresh=force_fresh,
             **kwargs,
         )
         if not self._is_context_overflow(result):
+            if resumed and self._is_resume_noop_result(result):
+                logger.warning(
+                    "Workflow %s: session line %s resumed but returned an empty "
+                    "successful result (resume no-op); retrying once with a "
+                    "fresh provider transcript",
+                    self._workflow_id[:8],
+                    session_line,
+                )
+                self._accumulate_tokens(result)
+                return self._run_agent(
+                    wf=wf,
+                    session_line=session_line,
+                    milestone_id=milestone_id,
+                    force_fresh=True,
+                    **kwargs,
+                )
             return result
 
         field = SESSION_LINE_FIELDS.get(session_line)
@@ -7788,6 +8218,460 @@ class AutonomousOrchestrator:
 
     def resolve_merge_conflicts(self, gh, branch_name, pr_number):
         return self._resolve_merge_conflicts(gh, branch_name, pr_number)
+
+    def zero_check_runs_fallback(self, gh, pr_number, pr_head_sha, base_branch, checks):
+        return self._zero_check_runs_fallback(gh, pr_number, pr_head_sha, base_branch, checks)
+
+    def _zero_check_runs_fallback(
+        self, gh, pr_number: int, pr_head_sha: str, base_branch: str, checks: list
+    ) -> bool:
+        """Issue #2673: bounded mechanical fallback for a zero-check-runs PR.
+
+        A GitHub event-delivery gap leaves a PR's head with ZERO check-runs
+        (no push/synchronize events, so ci.yml never runs): required checks
+        can then never appear, ``mergeStateStatus`` stays BLOCKED, and the
+        merge phase used to retry silently forever with no detection, no
+        fallback and no alert (workflow #2550 / PR #2578 spun 4h+).
+
+        State machine, persisted in a ``pr_zero_check_runs`` milestone (no
+        schema change; ``transient_retry_count`` is unusable because
+        advance() resets it on every clean retry) and keyed on the verified
+        head SHA so a new push starts a fresh observation window:
+
+        - zero-check cycles BEFORE the wall-clock observation floor
+          (``ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR``, measured from the persisted
+          ``first_seen_at``): record the observation, defer (retry). The
+          scheduler hot loop (``_stop_event.wait(10)``) has no per-phase
+          backoff, so cycles alone cannot distinguish a slow-CI-provisioning
+          head from an event-delivery gap — only elapsed time can;
+        - floor elapsed AND ``ZERO_CHECK_RUNS_RETRIGGER_CYCLES`` cycles
+          observed: mechanically retrigger event delivery via PR close+reopen
+          (a CI nudge, not a code/PR-content change), audit it (milestone +
+          event), then wait out a fresh floor so the reopened events can
+          provision CI. If the reopen half fails after a successful close,
+          a ``reopen_pending`` tracker state makes the next cycle RETRY the
+          reopen (bounded by ``ZERO_CHECK_RUNS_REOPEN_RETRY_MAX``) instead of
+          the closed-PR guard permanently skipping while the PR stays closed;
+        - retrigger completed and its own observation floor elapsed with
+          still-zero check-runs: raise a transient-classified
+          ``GitHubOpsError`` ("zero check-runs") so advance()'s existing
+          Layer-2 machinery makes the stall VISIBLE (error_message + bounded
+          retries, then a diagnosable failure) instead of silent spinning,
+          and close the tracker milestone (status failed).
+
+        Returns True when the merge cycle should defer to the next scheduler
+        cycle. Returns False when the fallback does not apply (check-runs
+        present — closes out any open tracker; base branch requires no
+        checks; required set unobservable; PR not open; head SHA missing).
+        """
+        head = (pr_head_sha or "").strip()
+        if checks:
+            # Check-runs exist — delivery is healthy. Close out any tracker
+            # an earlier zero-check episode left open so the timeline shows
+            # the episode ended.
+            self._close_zero_check_runs_tracker()
+            return False
+        if not head:
+            return False
+
+        # Zero check-runs is only an incident when the base branch actually
+        # REQUIRES checks — otherwise it is the normal state of a repo with
+        # no CI gating and the merge must proceed untouched. An unobservable
+        # required set degrades to the legacy behaviour (no fallback) rather
+        # than fabricating an incident (#1989 fail-closed spirit).
+        try:
+            protection = gh.get_branch_protection(base_branch)
+            required_contexts = set(
+                ((protection or {}).get("required_status_checks") or {}).get("contexts") or []
+            )
+        except Exception as exc:  # noqa: BLE001 — degrade, never block the merge
+            logger.warning(
+                "Workflow %s: could not resolve required checks for '%s' "
+                "before the zero-check-runs fallback: %s",
+                self._workflow_id[:8],
+                base_branch,
+                exc,
+            )
+            return False
+        if not required_contexts:
+            return False
+
+        tracker, meta, load_ok = self._load_zero_check_runs_tracker()
+        if not load_ok:
+            # The tracker state is unobservable — recording now would create
+            # a SECOND in_progress tracker while the (unread) first one stays
+            # orphaned in the timeline. Defer without recording; the next
+            # cycle re-reads the tracker.
+            logger.warning(
+                "Workflow %s PR #%s: zero-check-runs tracker unobservable; "
+                "deferring without recording to avoid a duplicate tracker",
+                self._workflow_id[:8],
+                pr_number,
+            )
+            return True
+
+        now = _utcnow()
+        if tracker is not None and meta.get("head_sha") == head:
+            cycles = int(meta.get("cycles") or 0)
+            retriggered = bool(meta.get("retriggered"))
+            reopen_pending = bool(meta.get("reopen_pending"))
+            reopen_attempts = int(meta.get("reopen_attempts") or 0)
+            # A pre-floor tracker (no first_seen_at) restarts the observation
+            # floor from now — never retrigger/escalate EARLY.
+            first_seen = _parse_iso_utc(meta.get("first_seen_at")) or now
+            # A retriggered tracker missing retriggered_at falls back to
+            # first_seen (always earlier) — the conservative direction.
+            retriggered_at = _parse_iso_utc(meta.get("retriggered_at")) or first_seen
+        else:
+            # No tracker, or the head moved (new push): fresh window.
+            cycles = 0
+            retriggered = False
+            reopen_pending = False
+            reopen_attempts = 0
+            first_seen = now
+            retriggered_at = now
+        cycles += 1
+        floor_elapsed = (now - first_seen).total_seconds() >= ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR
+        record = {
+            "head_sha": head,
+            "cycles": cycles,
+            "first_seen_at": first_seen.isoformat(),
+            "retriggered": retriggered,
+            "retriggered_at": retriggered_at.isoformat() if retriggered else "",
+            "reopen_pending": reopen_pending,
+            "reopen_attempts": reopen_attempts,
+        }
+
+        if reopen_pending:
+            # A previous cycle closed the PR but the reopen half failed: the
+            # PR is sitting CLOSED with a half-fired retrigger. Retry the
+            # reopen (bounded) instead of letting the closed-PR guard skip
+            # the retrigger forever (#2673 review: partial state).
+            try:
+                pr_state = str((gh.get_pr(pr_number) or {}).get("state") or "").lower()
+            except GitHubOpsError:
+                logger.warning(
+                    "Workflow %s PR #%s: could not read PR state before the "
+                    "zero-check-runs reopen retry; deferring to next cycle",
+                    self._workflow_id[:8],
+                    pr_number,
+                )
+                return True
+            if pr_state == "open":
+                # Reopened out-of-band (manual, or the earlier failure was
+                # spurious): the retrigger is complete — start its floor.
+                record["reopen_pending"] = False
+                record["retriggered"] = True
+                record["retriggered_at"] = now.isoformat()
+                self._record_zero_check_runs_tracker(tracker, record, pr_number=pr_number)
+                logger.info(
+                    "Workflow %s PR #%s: reopen-pending resolved (PR is open "
+                    "again); zero-check-runs retrigger considered complete",
+                    self._workflow_id[:8],
+                    pr_number,
+                )
+                return True
+            if reopen_attempts >= ZERO_CHECK_RUNS_REOPEN_RETRY_MAX:
+                err = GitHubOpsError(
+                    f"PR #{pr_number} head {head} reports zero check-runs and "
+                    f"stays closed: reopen failed after {reopen_attempts} "
+                    f"attempts — GitHub event delivery gap on this branch; "
+                    f"treating as transient infrastructure"
+                )
+                self._finalize_zero_check_runs_tracker(tracker, "failed", str(err))
+                logger.error(
+                    "Workflow %s PR #%s: zero-check-runs reopen retry "
+                    "exhausted (head=%s, attempts=%d) — escalating as "
+                    "transient infrastructure",
+                    self._workflow_id[:8],
+                    pr_number,
+                    head,
+                    reopen_attempts,
+                )
+                raise err
+            try:
+                gh.reopen_pr(pr_number)
+            except GitHubOpsError as exc:
+                record["reopen_attempts"] = reopen_attempts + 1
+                self._record_zero_check_runs_tracker(
+                    tracker, record, pr_number=pr_number, error_message=str(exc)
+                )
+                logger.warning(
+                    "Workflow %s PR #%s: zero-check-runs reopen retry %d "
+                    "failed (%s); deferring to next cycle",
+                    self._workflow_id[:8],
+                    pr_number,
+                    reopen_attempts + 1,
+                    exc,
+                )
+                return True
+            record["reopen_pending"] = False
+            record["retriggered"] = True
+            record["retriggered_at"] = now.isoformat()
+            record["reopen_attempts"] = reopen_attempts + 1
+            self._record_zero_check_runs_tracker(
+                tracker,
+                record,
+                pr_number=pr_number,
+                summary=(
+                    f"Retriggered CI via PR close+reopen " f"(reopen retry {reopen_attempts + 1})"
+                ),
+            )
+            self._emit(
+                "zero_check_runs_retrigger",
+                {
+                    "pr_number": pr_number,
+                    "head_sha": head,
+                    "cycles": cycles,
+                    "action": "reopen_retry",
+                },
+            )
+            logger.warning(
+                "Workflow %s PR #%s: zero-check-runs reopen retry succeeded "
+                "(head=%s) — event delivery retriggered (issue #2673)",
+                self._workflow_id[:8],
+                pr_number,
+                head,
+            )
+            return True
+
+        if retriggered:
+            if (now - retriggered_at).total_seconds() < ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR:
+                # The retrigger fired but its own observation floor has not
+                # elapsed yet — CI provisioning after the reopened events
+                # takes time. Keep observing, do not escalate.
+                self._record_zero_check_runs_tracker(tracker, record, pr_number=pr_number)
+                logger.info(
+                    "Workflow %s PR #%s: zero check-runs after the retrigger "
+                    "(head=%s, cycle=%d) — within the observation floor, "
+                    "deferring",
+                    self._workflow_id[:8],
+                    pr_number,
+                    head,
+                    cycles,
+                )
+                return True
+            # The close+reopen retrigger fired and its observation floor
+            # elapsed — GitHub still reports zero check-runs for this head.
+            # Escalate as transient infrastructure (keyword-matched in
+            # _TRANSIENT_ORCHESTRATOR_KEYWORDS) so advance() retries with
+            # backoff and finally fails visibly; close the tracker so no
+            # in_progress orphan remains.
+            err = GitHubOpsError(
+                f"PR #{pr_number} head {head} reports zero check-runs after a "
+                f"close+reopen retrigger — GitHub event delivery gap on this "
+                f"branch; treating as transient infrastructure"
+            )
+            self._finalize_zero_check_runs_tracker(tracker, "failed", str(err))
+            logger.error(
+                "Workflow %s PR #%s: zero check-runs persisted past the "
+                "mechanical retrigger (head=%s, cycle=%d) — escalating as "
+                "transient infrastructure",
+                self._workflow_id[:8],
+                pr_number,
+                head,
+                cycles,
+            )
+            raise err
+
+        if floor_elapsed and cycles >= ZERO_CHECK_RUNS_RETRIGGER_CYCLES:
+            # Observation floor elapsed AND enough cycles observed: nudge
+            # event delivery via close+reopen. Only meaningful on an open PR
+            # — a closed one falls through to the legacy merge path (its
+            # rejection handles it).
+            try:
+                pr_state = str((gh.get_pr(pr_number) or {}).get("state") or "").lower()
+            except GitHubOpsError:
+                logger.warning(
+                    "Workflow %s PR #%s: could not read PR state before the "
+                    "zero-check-runs retrigger; deferring to next cycle",
+                    self._workflow_id[:8],
+                    pr_number,
+                )
+                return True
+            if pr_state != "open":
+                logger.info(
+                    "Workflow %s PR #%s is %s; skipping zero-check-runs retrigger",
+                    self._workflow_id[:8],
+                    pr_number,
+                    pr_state or "unknown",
+                )
+                return False
+            gh.close_pr(pr_number)
+            try:
+                gh.reopen_pr(pr_number)
+            except GitHubOpsError as exc:
+                # Partial state: the close succeeded but the reopen failed —
+                # the PR is now CLOSED. Record reopen_pending so the next
+                # cycle retries the reopen instead of the closed-PR guard
+                # permanently skipping the retrigger (#2673 review).
+                record["reopen_pending"] = True
+                record["reopen_attempts"] = 1
+                self._record_zero_check_runs_tracker(
+                    tracker, record, pr_number=pr_number, error_message=str(exc)
+                )
+                logger.warning(
+                    "Workflow %s PR #%s: zero-check-runs retrigger closed the "
+                    "PR but the reopen failed (%s) — reopen_pending recorded, "
+                    "retrying next cycle",
+                    self._workflow_id[:8],
+                    pr_number,
+                    exc,
+                )
+                return True
+            record["retriggered"] = True
+            record["retriggered_at"] = now.isoformat()
+            self._record_zero_check_runs_tracker(
+                tracker,
+                record,
+                pr_number=pr_number,
+                summary=f"Retriggered CI via PR close+reopen (cycle {cycles})",
+            )
+            self._emit(
+                "zero_check_runs_retrigger",
+                {
+                    "pr_number": pr_number,
+                    "head_sha": head,
+                    "cycles": cycles,
+                    "action": "close_reopen",
+                },
+            )
+            logger.warning(
+                "Workflow %s PR #%s: head %s has had zero check-runs for %d "
+                "consecutive cycles past the %ds observation floor — "
+                "mechanically retriggered event delivery via PR close+reopen "
+                "(issue #2673)",
+                self._workflow_id[:8],
+                pr_number,
+                head,
+                cycles,
+                ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR,
+            )
+            return True
+
+        # Below the threshold: this may just be slow CI provisioning right
+        # after the push. Record the observation and defer.
+        self._record_zero_check_runs_tracker(tracker, record, pr_number=pr_number)
+        elapsed_s = int((now - first_seen).total_seconds())
+        logger.info(
+            "Workflow %s PR #%s: head %s reports zero check-runs "
+            "(observation %d cycles, %ds/%ds floor elapsed, issue #2673)",
+            self._workflow_id[:8],
+            pr_number,
+            head,
+            cycles,
+            elapsed_s,
+            ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR,
+        )
+        return True
+
+    def _load_zero_check_runs_tracker(self) -> tuple[dict | None, dict, bool]:
+        """Return (latest open pr_zero_check_runs milestone, parsed metadata,
+        load_ok).
+
+        ``load_ok`` is False when the milestone list itself failed: callers
+        must then NOT record (a create would orphan the unread tracker).
+        """
+        try:
+            milestones = self.repo.list_milestones(
+                self._workflow_id, phase="merge", status="in_progress"
+            )
+        except Exception as exc:  # noqa: BLE001 — degrade, never block the merge
+            logger.warning(
+                "Workflow %s: could not list milestones for the zero-check-runs " "tracker: %s",
+                self._workflow_id[:8],
+                exc,
+            )
+            return None, {}, False
+        for ms in reversed(milestones or []):
+            if ms.get("milestone_type") != "pr_zero_check_runs":
+                continue
+            try:
+                meta = json.loads(ms.get("metadata") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                meta = {}
+            return ms, meta if isinstance(meta, dict) else {}, True
+        return None, {}, True
+
+    def _record_zero_check_runs_tracker(
+        self,
+        tracker: dict | None,
+        record: dict,
+        *,
+        pr_number: int,
+        summary: str = "",
+        error_message: str = "",
+    ) -> None:
+        """Create/update the pr_zero_check_runs milestone (audit + state).
+
+        ``record`` is the full tracker metadata dict (head_sha, cycles,
+        first_seen_at, retriggered, retriggered_at, reopen_pending,
+        reopen_attempts).
+        """
+        metadata = json.dumps(record)
+        dev_round = int((self.workflow or {}).get("dev_round", 1) or 1)
+        if tracker is not None:
+            updates: dict = {"metadata": metadata}
+            if summary:
+                updates["result_summary"] = summary
+            if error_message:
+                updates["error_message"] = error_message
+            self.repo.update_milestone(tracker.get("milestone_id", ""), updates)
+            return
+        kwargs = {
+            "workflow_id": self._workflow_id,
+            "phase": "merge",
+            "milestone_type": "pr_zero_check_runs",
+            "status": "in_progress",
+            "dev_round": dev_round,
+            "github_pr_number": pr_number,
+            "title": f"PR #{pr_number} head reports zero check-runs (issue #2673)",
+            "metadata": metadata,
+        }
+        if summary:
+            kwargs["result_summary"] = summary
+        if error_message:
+            kwargs["error_message"] = error_message
+        ms = self.repo.create_milestone(kwargs)
+        self._emit(
+            "milestone_created",
+            {
+                "milestone_id": (ms or {}).get("milestone_id", ""),
+                "milestone_type": "pr_zero_check_runs",
+                "title": kwargs["title"],
+            },
+        )
+
+    def _finalize_zero_check_runs_tracker(
+        self, tracker: dict | None, status: str, error_message: str = ""
+    ) -> None:
+        """Terminal close of the tracker on the escalation path (#2673).
+
+        Update-only: with no loaded tracker there is nothing to close (the
+        caller defers instead of recording when the load failed).
+        """
+        if tracker is None:
+            return
+        updates = {
+            "status": status,
+            "result_summary": ("Zero-check-runs episode escalated as transient infrastructure"),
+        }
+        if error_message:
+            updates["error_message"] = error_message
+        self.repo.update_milestone(tracker.get("milestone_id", ""), updates)
+
+    def _close_zero_check_runs_tracker(self) -> None:
+        """Complete an open tracker when check-runs appear again (#2673)."""
+        tracker, _meta, load_ok = self._load_zero_check_runs_tracker()
+        if not load_ok or tracker is None:
+            return
+        self.repo.update_milestone(
+            tracker.get("milestone_id", ""),
+            {
+                "status": "completed",
+                "result_summary": "Check-runs appeared; zero-check-runs episode ended",
+            },
+        )
 
     # --- PhaseHost pr_review-phase helpers (#2044 Phase B T11) ---
     # Thin public aliases over the orchestrator-private underscore helpers so
@@ -10074,6 +10958,35 @@ class AutonomousOrchestrator:
             AUTONOMOUS_CONTEXT + "请基于最终方案和本轮实际改动，设计并执行一份定向验证矩阵。"
             "如果有失败，修复问题并重新测试。确保必测项全部通过后再结束。\n\n"
         )
+        # #2663: on a retry, resuming the test session lets the agent cite the
+        # prior round's results ("已在前面回合完成验证") instead of re-running
+        # anything — the evidence gate only recognizes fresh output, so every
+        # retry lands inconclusive until exhaustion. Switch to a FRESH session
+        # (the test prompt is self-contained: plan + changed files + scopes)
+        # and state the retry obligation explicitly. Covers both retry
+        # counters: test_retries (inconclusive/failed/requirer) and
+        # skip_retries (agent reported TEST_STATUS: skipped) — both leave a
+        # prior round in the resumed session that the agent would cite.
+        test_retries_before = int(wf.get("test_retries", 0) or 0)
+        skip_retries_before = int(wf.get("skip_retries", 0) or 0)
+        retry_round = max(test_retries_before, skip_retries_before)
+        test_session_line = "test"
+        if retry_round > 0:
+            test_session_line = "fresh"
+            test_prompt += (
+                "## 重试指令\n"
+                f"这是第 {retry_round} 次重试：上一轮的验证结果未被采信"
+                "（未捕获到可识别的新测试输出，或结果不可用/被跳过）。"
+                "本轮必须：\n"
+                "1. 重新执行验证矩阵中的测试命令，并在回复中包含每条命令的原始输出；\n"
+                "2. 不得引用之前回合的结果作为本轮验证证据；\n"
+                "3. 如果确认测试无法执行，在回复末尾单独一行输出 `TEST_STATUS: skipped` 并说明原因。\n\n"
+            )
+            # #2699 backstop: when the prior round's report hit the missing-deps
+            # signature (EACCES on node_modules/.vite-temp / Cannot find module
+            # vitest), redirect the retry at installing dependencies in the
+            # worktree instead of chasing permissions.
+            test_prompt += self._prior_dependency_failure_directive(test_ms.get("milestone_id", ""))
         if issue_number:
             test_prompt += (
                 f"## 关联 Issue\n"
@@ -10091,16 +11004,17 @@ class AutonomousOrchestrator:
             "2. 必须优先覆盖上面列出的必测方面；只有在发现跨层影响、契约变化、迁移/依赖/CI 改动等证据时，才扩大到更广范围。\n"
             "3. 除非验证矩阵或仓库文档明确要求，否则不要从裸 `python -m pytest`、`pytest tests/`、全仓库扫描式命令开始。\n"
             "4. 具体命令必须优先从 `.github/workflows/`、`package.json`、`frontend/package.json`、`pytest.ini`、`tests/README.md`、`Makefile`、`tox.ini`、`scripts/` 等仓库事实中映射出来，不要凭空假设。\n"
-            "5. 结果汇总时必须交代：验证方面、执行命令、结果、是否已覆盖方案要求；如果某一项不跑，必须说明理由。\n"
-            "6. 如果仓库中完全没有明确约定，再按框架后备顺序尝试：\n"
+            + _DEPENDENCY_PREP_RULE
+            + "6. 结果汇总时必须交代：验证方面、执行命令、结果、是否已覆盖方案要求；如果某一项不跑，必须说明理由。\n"
+            "7. 如果仓库中完全没有明确约定，再按框架后备顺序尝试：\n"
             "   - Python：`python -m pytest` 或 `python3 -m pytest`\n"
             "   - Python 兜底：`python -m unittest discover -s tests`\n"
             "   - 前端项目：`npm test` 或 `npx vitest run`\n"
-            "7. 如果所有测试框架都不可用，至少执行以下验证：\n"
+            "8. 如果所有测试框架都不可用，至少执行以下验证：\n"
             '   - 用 `python -c "import <模块>"` 验证关键模块能正常导入\n'
             "   - 用 `python -m py_compile <文件>` 验证修改的文件没有语法错误\n"
             "   - 手动验证核心功能逻辑\n"
-            "8. 如果测试确实无法运行，在回复末尾单独一行输出 `TEST_STATUS: skipped`\n\n"
+            "9. 如果测试确实无法运行，在回复末尾单独一行输出 `TEST_STATUS: skipped`\n\n"
             "## ⛔ CRITICAL: 测试结果报告格式（强制要求）\n"
             "测试结果报告必须严格遵循以下标准格式之一：\n"
             '- Python pytest: "X passed, Y failed, Z skipped" 或 "X passed in Y.Zs"\n'
@@ -10129,7 +11043,7 @@ class AutonomousOrchestrator:
             remote_machine_id=wf.get("remote_machine_id"),
             permission_mode=wf.get("permission_mode", "auto-edit"),
             allowed_tools=AUTONOMOUS_DEV_ALLOWED_TOOLS.get(wf.get("cli_tool", "claude-code"), []),
-            session_line="test",
+            session_line=test_session_line,
             milestone_id=test_ms.get("milestone_id", ""),
         )
 
@@ -10401,6 +11315,29 @@ class AutonomousOrchestrator:
         structured_verdict, _structured_evidences, structured_reason = (
             self._compute_structured_test_verdict(test_result, framework_type, test_ms)
         )
+        # #2590 Option A: carry forward the prior test milestone's verdict on a
+        # retry. On a test retry the agent session is reused (#2390), so the
+        # current milestone has no stamped evidence and the structured layer
+        # correctly defers NOT_RUN. But the heuristic fallback then reads the
+        # *entire* session text (the prior round's stale output) and
+        # misclassifies the run — promoting a real FAILED to inconclusive or
+        # even pr_review. When this is a retry (test_retries > 0) and the prior
+        # test milestone had a decisive verdict, carry it forward instead of
+        # trusting stale prose. No prior milestone / prior NOT_RUN / not a
+        # retry falls through unchanged.
+        if structured_verdict == ExecutionVerdict.NOT_RUN:
+            _retry_count = int(wf.get("test_retries", 0) or 0)
+            if _retry_count > 0:
+                _prior_verdict, _prior_reason = self._carry_forward_prior_test_verdict(
+                    self._workflow_id,
+                    test_ms.get("milestone_id", ""),
+                    _retry_count,
+                )
+                if _prior_verdict in (ExecutionVerdict.FAILED, ExecutionVerdict.PASSED):
+                    structured_verdict = _prior_verdict
+                    structured_reason = (
+                        f"carried forward from prior test milestone: {_prior_reason}"
+                    )
         # Only PASSED is authoritative (#2376 D2). A structured FAILED used to
         # set this too, which zeroed BOTH test_result_inconclusive and
         # tests_actually_skipped — and since nothing downstream reads
@@ -10578,6 +11515,66 @@ class AutonomousOrchestrator:
             if test_retries <= MAX_TEST_RETRIES:
                 self._update_workflow({"test_retries": test_retries})
                 return
+            # #2590: a decisive structured FAILED at test-retry exhaustion is a
+            # fixable defect, not an evidence gap. The retries (fresh sessions
+            # since #2663) only re-ran the same failing tests — nobody routed
+            # the failure output back into development, so the workflow went
+            # terminal without a single repair attempt. An inconclusive run
+            # keeps the terminal path below (nothing actionable to hand a dev
+            # round); a structured FAILED enters a dev-repair round exactly
+            # like Situation B ([UNFIXABLE]): same dev_retries_on_test_fail
+            # counter and cap, one dev_round bump, and the failing output
+            # persisted as user_feedback so the dev prompt
+            # (_get_user_feedback_prompt) starts from "these tests failed
+            # with this output, fix them" instead of a blank slate.
+            if structured_verdict == ExecutionVerdict.FAILED:
+                dev_retries = int(wf.get("dev_retries_on_test_fail", 0) or 0) + 1
+                if dev_retries <= MAX_DEV_RETRIES_ON_TEST_FAIL:
+                    logger.warning(
+                        "Structured test failures survived %d test retries, starting "
+                        "dev-repair round %d (retry %d/%d)",
+                        MAX_TEST_RETRIES,
+                        dev_round + 1,
+                        dev_retries,
+                        MAX_DEV_RETRIES_ON_TEST_FAIL,
+                    )
+                    prior_feedback = (wf.get("user_feedback") or "").strip()
+                    feedback = self._structured_failure_repair_feedback(
+                        structured_reason, _structured_evidences, test_summary
+                    )
+                    if prior_feedback:
+                        feedback = f"{prior_feedback}\n\n{feedback}"
+                    self._update_workflow(
+                        {
+                            "dev_round": dev_round + 1,
+                            "dev_retries_on_test_fail": dev_retries,
+                            # Fresh test budget for the repaired code: with the
+                            # counter left exhausted, the new round's first
+                            # inconclusive/FAILED would skip test retries
+                            # entirely and burn a dev round on a run the test
+                            # agent could have settled itself. skip_retries
+                            # too: phases/development.py skips the dev agent
+                            # when test_retries > 0 OR skip_retries > 0, so a
+                            # stale skip_retries=1 would burn BOTH repair
+                            # retries without ever invoking the dev agent.
+                            "test_retries": 0,
+                            "skip_retries": 0,
+                            "user_feedback": feedback,
+                        }
+                    )
+                    return
+                self._update_workflow(
+                    {
+                        "status": "failed",
+                        "error_message": (
+                            f"Tests failed: structured evidence reports a failing test "
+                            f"command, and no conclusive passing rerun superseded it "
+                            f"(after {MAX_TEST_RETRIES} test retries and "
+                            f"{MAX_DEV_RETRIES_ON_TEST_FAIL} dev-repair retries)"
+                        ),
+                    }
+                )
+                return
             self._update_workflow({"status": "failed", "error_message": message})
             return
 
@@ -10714,6 +11711,13 @@ class AutonomousOrchestrator:
                     {
                         "dev_round": dev_round + 1,
                         "dev_retries_on_test_fail": dev_retries,
+                        # #2679: phases/development.py skips the dev agent
+                        # whenever test_retries > 0 or skip_retries > 0, so
+                        # stale counters from this round's test/skip retries
+                        # would turn the repair round into a test-only re-run.
+                        # Same reset the #2590 dev-repair branch performs.
+                        "test_retries": 0,
+                        "skip_retries": 0,
                     }
                 )
                 return

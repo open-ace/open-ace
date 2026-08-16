@@ -135,7 +135,7 @@ exclude = '''
 [tool.isort]
 profile = "black"
 line_length = 100
-known_first_party = ["scripts", "shared"]
+known_first_party = ["app", "scripts", "shared"]
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 skip = [".git", ".hg", ".mypy_cache", ".tox", ".venv", "_build", "buck-out", "build", "dist", ".pytest_cache", "__pycache__", "venv", "env"]
 

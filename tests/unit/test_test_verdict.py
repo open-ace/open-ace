@@ -26,6 +26,8 @@ def _te(
     selectors: list[str] | None = None,
     context: str = _CTX,
     framework: str = "python",
+    passed: int | None = None,
+    failed: int | None = None,
 ) -> TestExecutionEvidence:
     """Build a TestExecutionEvidence with an explicit scope for verdict tests."""
     coverage_scope = None
@@ -38,6 +40,8 @@ def _te(
         parser_confidence=confidence,
         selectors=selectors or [],
         coverage_scope=coverage_scope,
+        passed=passed,
+        failed=failed,
     )
 
 
@@ -147,12 +151,111 @@ def test_non_pytest_cross_command_pass_is_undecidable_not_a_failure():
     # flow for every non-pytest runner. Decided non-coverage (both scopes known,
     # pytest) still yields FAILED — see
     # test_targeted_pass_does_not_cover_failed_full_suite_1967.
+    # (Counts made explicit post-#2665: a pass that never parsed any test
+    # output has no test semantics at all — see
+    # test_lint_pass_after_pytest_failure_stays_failed_2665.)
     evidences = [
-        _te("c1", ExecutionVerdict.FAILED.value, framework="javascript"),
-        _te("c2", ExecutionVerdict.PASSED.value, framework="javascript"),
+        _te("c1", ExecutionVerdict.FAILED.value, framework="javascript", passed=2, failed=1),
+        _te("c2", ExecutionVerdict.PASSED.value, framework="javascript", passed=3),
     ]
     assert not _run_failed(evidences, "javascript")
     assert compute_run_verdict(evidences) is ExecutionVerdict.INCONCLUSIVE
+
+
+def _lint_pass(command_id: str, *, parser: str = "pytest") -> TestExecutionEvidence:
+    """A count-less exit-0 lint/format command (pre-commit/black/ruff style).
+
+    In a python-hinted project these route through ``_parse_pytest`` whose
+    exit-0-unparseable arm emits ``parser="pytest"`` with NO counts and NO
+    coverage scope (the ACTUAL prod shape of #2665's evidence rows);
+    ``_parse_generic``'s exit-0 arm is the parser="generic" twin. Lock BOTH
+    shapes — a future "pytest parser ⇒ has test semantics" shortcut must not
+    silently reintroduce the bug.
+    """
+    return TestExecutionEvidence(
+        command_id=command_id,
+        framework="python",
+        verdict=ExecutionVerdict.PASSED.value,
+        parser_confidence=ParserConfidence.MEDIUM.value,
+        parser=parser,
+        selectors=[],
+        coverage_scope=None,
+    )
+
+
+def test_lint_pass_after_pytest_failure_stays_failed_2665():
+    # pre-commit/black/ruff exiting 0 after a DECISIVE pytest failure (3
+    # failed, 24 passed) must not defuse the verdict. Before #2665 the bare
+    # pass's None scope hit the undecidable branch ("uncertain" →
+    # INCONCLUSIVE), so the workflow retried forever instead of entering the
+    # productive tests-failed → dev-fix loop (#2590's workflow, verified
+    # against prod evidence rows). Both lint shapes locked: parser="pytest"
+    # (the real prod shape via _parse_pytest's exit-0 arm) and "generic".
+    for parser in ("pytest", "generic"):
+        evidences = [
+            _te("t1", ExecutionVerdict.PASSED.value, selectors=["tests/x.py::test_a"]),
+            _te("t2", ExecutionVerdict.FAILED.value, selectors=["tests/x.py"]),
+            _lint_pass("lint1", parser=parser),
+        ]
+        assert compute_run_verdict(evidences) is ExecutionVerdict.FAILED, parser
+
+
+def test_rerun_with_truncated_output_after_failure_is_failed_2665():
+    # Documented trade-off: a legitimate fix-then-rerun whose passing rerun is
+    # count-less AND scope-less (truncated output_excerpt ate the only summary
+    # line, or an unmodeled wrapper like `make test`) is now FAILED where it
+    # previously deferred to the heuristic. The evidence is indistinguishable
+    # from a lint command, so decisive beats deferred — the failure routes the
+    # workflow into the dev-fix loop, which re-runs tests anyway.
+    evidences = [
+        _te("t1", ExecutionVerdict.FAILED.value, selectors=["tests/x.py"]),
+        _lint_pass("rerun"),
+    ]
+    assert compute_run_verdict(evidences) is ExecutionVerdict.FAILED
+
+
+def test_counted_pass_after_failure_stays_uncertain_2665():
+    # A pass WITH parsed framework counts (reachable shape: _parse_cargo on a
+    # "test result: ok. 5 passed" rerun) keeps the #2376 PR-2 undecidable
+    # semantics — only count-less/scope-less passes are stripped of coverer
+    # status.
+    counted = TestExecutionEvidence(
+        command_id="g1",
+        framework="rust",
+        verdict=ExecutionVerdict.PASSED.value,
+        parser_confidence=ParserConfidence.HIGH.value,
+        parser="cargo",
+        selectors=[],
+        coverage_scope=None,
+        passed=5,
+    )
+    evidences = [
+        _te("t1", ExecutionVerdict.FAILED.value, selectors=["tests/x.py"]),
+        counted,
+    ]
+    assert compute_run_verdict(evidences) is ExecutionVerdict.INCONCLUSIVE
+
+
+def test_go_vet_pass_after_go_test_failure_does_not_defuse_2665():
+    # Framework parsers' exit-0 arms are NOT test semantics: `go vet` (or
+    # `cargo clippy`) exiting 0 after a go/cargo test failure must not soften
+    # the failure. The failing go evidence is itself count-less (no test
+    # semantics), so the defer survives only between two STRUCTURED pairs —
+    # here the failure is structured (pytest counts) and the vet pass is not.
+    vet_pass = TestExecutionEvidence(
+        command_id="v1",
+        framework="go",
+        verdict=ExecutionVerdict.PASSED.value,
+        parser_confidence=ParserConfidence.MEDIUM.value,
+        parser="go_test",
+        selectors=[],
+        coverage_scope=None,
+    )
+    evidences = [
+        _te("t1", ExecutionVerdict.FAILED.value, selectors=["tests/x.py"]),
+        vet_pass,
+    ]
+    assert compute_run_verdict(evidences) is ExecutionVerdict.FAILED
 
 
 def test_restricted_pass_does_not_cover_earlier_failure():
