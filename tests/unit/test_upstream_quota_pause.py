@@ -216,3 +216,137 @@ def test_postgres_alert_dedup_casts_text_metadata_to_jsonb():
 
     query = cursor.execute.call_args.args[0]
     assert "(metadata::jsonb)->>'quota_type'" in query
+
+
+# --- #2709: GLM 5h usage-window 429 (has reset time -> pause, not retry) ---
+
+GLM_WINDOW_429 = (
+    "API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour. "
+    "Your limit will reset at 2026-08-15 20:59:28][202608151957560f15c8075ec04dd4]"
+)
+
+
+def test_glm_usage_window_429_is_not_transient():
+    result = _result(error=GLM_WINDOW_429)
+
+    assert AutonomousOrchestrator._is_upstream_usage_window_quota(result)
+    assert not AutonomousOrchestrator._should_retry_transient_api_failure(result)
+
+
+def test_glm_usage_window_reset_parses_utc8_as_utc():
+    reset = AutonomousOrchestrator._upstream_usage_window_reset(_result(error=GLM_WINDOW_429))
+
+    assert reset is not None
+    assert reset.utcoffset().total_seconds() == 0
+    assert reset.strftime("%Y-%m-%d %H:%M:%S") == "2026-08-15 12:59:28"
+
+
+def test_glm_usage_window_without_reset_time_is_detected_but_unparseable():
+    result = _result(
+        error="API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour.]"
+    )
+
+    assert AutonomousOrchestrator._upstream_usage_window_reset(result) is None
+    assert AutonomousOrchestrator._is_upstream_usage_window_quota(result)
+    assert not AutonomousOrchestrator._should_retry_transient_api_failure(result)
+
+
+def test_token_bearing_window_text_does_not_match():
+    result = _result(
+        success=True,
+        error=None,
+        total_tokens=120,
+        response_text=(
+            "If you see 'Usage limit reached for 5 hour. Your limit will "
+            "reset at 2026-08-15 20:59:28' in logs, back off."
+        ),
+    )
+
+    assert not AutonomousOrchestrator._is_upstream_usage_window_quota(result)
+
+
+def test_bailian_allocated_quota_is_not_a_usage_window():
+    result = _result()  # 默认 error 即 Bailian 文案
+
+    assert not AutonomousOrchestrator._is_upstream_usage_window_quota(result)
+    assert AutonomousOrchestrator._should_retry_transient_api_failure(result)
+
+
+def test_run_agent_pauses_for_glm_usage_window_with_resume_marker():
+    orchestrator = _orchestrator_for_run(_result(error=GLM_WINDOW_429))
+
+    with pytest.raises(UpstreamQuotaPaused):
+        orchestrator._run_agent(
+            wf={"user_id": 1, "content_language": "en"},
+            session_line="main",
+            milestone_id="milestone-1",
+            workspace_type="remote",
+            project_path="/tmp/worktree",
+            prompt="do work",
+        )
+
+    orchestrator._runner.run_agent_task.assert_called_once()
+    update = next(
+        call.args[1]
+        for call in orchestrator.repo.update_workflow.call_args_list
+        if call.args[1].get("status") == "paused"
+    )
+    assert update["error_message"].startswith("Upstream provider quota exhausted:")
+    assert "resets at 2026-08-15 20:59:28 +0800" in update["error_message"]
+    assert "auto-resume scheduled" in update["error_message"]
+    milestone_update = orchestrator.repo.update_milestone.call_args.args[1]
+    assert milestone_update["status"] == "failed"
+    assert "auto-resume scheduled" in milestone_update["error_message"]
+
+
+def test_run_agent_pauses_glm_window_without_reset_time_as_operator_resume():
+    orchestrator = _orchestrator_for_run(
+        _result(error="API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour.]")
+    )
+
+    with pytest.raises(UpstreamQuotaPaused):
+        orchestrator._run_agent(
+            wf={"user_id": 1, "content_language": "en"},
+            session_line="main",
+            milestone_id="milestone-1",
+            workspace_type="remote",
+            project_path="/tmp/worktree",
+            prompt="do work",
+        )
+
+    update = next(
+        call.args[1]
+        for call in orchestrator.repo.update_workflow.call_args_list
+        if call.args[1].get("status") == "paused"
+    )
+    assert update["error_message"].startswith("Upstream provider quota exhausted:")
+    assert "auto-resume scheduled" not in update["error_message"]
+
+
+def test_verification_agent_re_raise_workflow_pause():
+    # The verifier wrapper must let UpstreamQuotaPaused (a WorkflowPaused)
+    # propagate: swallowing it into infra_error would overwrite the persisted
+    # pause marker with a retry message and strand the auto-resume (#2709).
+    orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orchestrator._workflow_id = "wf-1"
+
+    def _raise(*args, **kwargs):
+        raise UpstreamQuotaPaused("window quota")
+
+    with (
+        patch.object(AutonomousOrchestrator, "workflow", {"cli_tool": "claude-code", "model": ""}),
+        patch.object(AutonomousOrchestrator, "_build_verification_prompt", return_value="verify"),
+        patch.object(AutonomousOrchestrator, "_checkout_merged_main", return_value="/tmp/vw"),
+        patch.object(AutonomousOrchestrator, "_run_agent", side_effect=_raise),
+        patch.object(AutonomousOrchestrator, "_remove_verification_worktree") as cleanup,
+    ):
+        with pytest.raises(UpstreamQuotaPaused):
+            orchestrator._run_verification_agent(
+                snapshot={},
+                merge_sha="abc123",
+                base_sha="def456",
+                issue_number=2709,
+                pr_number=2690,
+            )
+
+    cleanup.assert_called_once()  # finally 仍清理 verifier worktree

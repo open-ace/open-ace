@@ -22,7 +22,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -2055,6 +2055,25 @@ _UPSTREAM_HARD_QUOTA_EXHAUSTED_RE = re.compile(
     r"platform\s+quota\s+exceeded" r"|upstream\s+(?:provider\s+)?quota\s+(?:exceeded|exhausted)",
     re.IGNORECASE,
 )
+
+# Provider usage-window quota (GLM/Zhipu [1308]): a rolling window that
+# rejects with 429 — unlike the hard platform quota it self-resets, so the
+# workflow pauses instead of retrying and auto-resumes at the stated time.
+# Detection only needs the wording; the reset timestamp (when present, in
+# provider-local UTC+8 — verified 2026-08-15 against request-id stamps)
+# additionally enables scheduler auto-resume.
+_UPSTREAM_USAGE_WINDOW_QUOTA_RE = re.compile(
+    r"usage\s+limit\s+reached\s+for\s+\d+\s+hours?\b", re.IGNORECASE
+)
+_UPSTREAM_USAGE_WINDOW_RESET_RE = re.compile(
+    r"your\s+limit\s+will\s+reset\s+at\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})",
+    re.IGNORECASE,
+)
+# Same-named twin lives in app/services/autonomous_scheduler.py (the marker
+# parser applies the same fixed offset). Deliberately not imported across
+# modules to avoid the scheduler↔orchestrator import edge; change both
+# together if the provider ever changes timezone.
+_UPSTREAM_WINDOW_TZINFO = timezone(timedelta(hours=8))
 
 # Context-window / input-length overflow signatures. A PERMANENT client
 # error (NOT transient — must not trigger the transient-retry backoff loop).
@@ -6975,6 +6994,8 @@ class AutonomousOrchestrator:
         """
         if cls._is_upstream_hard_quota_exhausted(result):
             return False
+        if cls._is_upstream_usage_window_quota(result):
+            return False
         if cls._is_transient_api_error(result.error or ""):
             return True
         return (result.total_tokens or 0) == 0 and cls._is_transient_api_error(
@@ -6996,13 +7017,74 @@ class AutonomousOrchestrator:
             _UPSTREAM_HARD_QUOTA_EXHAUSTED_RE.search(result.response_text or "")
         )
 
-    def _pause_for_upstream_quota(self, result: AgentTaskResult, milestone_id: str = "") -> None:
-        """Persist a non-spinning hard-quota pause that an operator may resume."""
-        message = (
-            f"{UPSTREAM_QUOTA_PAUSE_REASON_PREFIX} "
-            "the configured model provider rejected requests; resume after "
-            "provider allocation is restored"
+    @staticmethod
+    def _upstream_window_bodies(result: AgentTaskResult) -> list[str]:
+        """Candidate bodies for usage-window matching, same evidence rules as
+        ``_is_upstream_hard_quota_exhausted``: the error field is authoritative;
+        assistant text only for a zero-token envelope (#1891 false-retry guard).
+        """
+        bodies = [result.error or ""]
+        if (result.total_tokens or 0) == 0:
+            bodies.append(result.response_text or "")
+        return bodies
+
+    @classmethod
+    def _is_upstream_usage_window_quota(cls, result: AgentTaskResult) -> bool:
+        """Whether a provider reports a rolling usage-window quota (GLM 5h).
+
+        Distinct from the hard platform quota: the window resets on its own,
+        so the workflow pauses instead of retrying and auto-resumes at the
+        stated time when one is present. Wording-only matches (no parseable
+        reset time) still pause — operator-resumed, fail-closed, never
+        transient.
+        """
+        return any(
+            _UPSTREAM_USAGE_WINDOW_QUOTA_RE.search(body)
+            for body in cls._upstream_window_bodies(result)
         )
+
+    @classmethod
+    def _upstream_usage_window_reset(cls, result: AgentTaskResult) -> datetime | None:
+        """Parse the reset timestamp of a usage-window 429 into aware UTC.
+
+        Returns None when absent/unparseable — callers then pause without the
+        auto-resume marker (operator resume). Provider times are UTC+8.
+        """
+        for body in cls._upstream_window_bodies(result):
+            match = _UPSTREAM_USAGE_WINDOW_RESET_RE.search(body)
+            if match:
+                try:
+                    naive = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    return None
+                return naive.replace(tzinfo=_UPSTREAM_WINDOW_TZINFO).astimezone(timezone.utc)
+        return None
+
+    def _pause_for_upstream_quota(
+        self,
+        result: AgentTaskResult,
+        milestone_id: str = "",
+        resume_at: datetime | None = None,
+    ) -> None:
+        """Persist a non-spinning hard-quota pause that an operator may resume.
+
+        ``resume_at`` (provider usage-window 429 with a stated reset time)
+        additionally writes the scheduler-parseable auto-resume marker: the
+        timestamp is rendered back in provider-local UTC+8 so the message
+        reads correctly for operators too.
+        """
+        if resume_at is not None:
+            local = resume_at.astimezone(_UPSTREAM_WINDOW_TZINFO).strftime("%Y-%m-%d %H:%M:%S")
+            detail = (
+                "provider usage window exhausted; "
+                f"limit resets at {local} +0800; auto-resume scheduled"
+            )
+        else:
+            detail = (
+                "the configured model provider rejected requests; resume after "
+                "provider allocation is restored"
+            )
+        message = f"{UPSTREAM_QUOTA_PAUSE_REASON_PREFIX} {detail}"
         result.success = False
         result.error_code = "upstream_quota_exhausted"
         result.error = message
@@ -7766,6 +7848,10 @@ class AutonomousOrchestrator:
                 tracking_session_id,
             )
         upstream_hard_quota_exhausted = self._is_upstream_hard_quota_exhausted(result)
+        upstream_window_quota = self._is_upstream_usage_window_quota(result)
+        upstream_window_reset = (
+            self._upstream_usage_window_reset(result) if upstream_window_quota else None
+        )
 
         # Attribute this call's own usage to its milestone (increment, not cumulative).
         self._write_phase_usage(milestone_id, result, retry_usage)
@@ -7777,6 +7863,9 @@ class AutonomousOrchestrator:
                 if field
                 else (result.tracking_session_id or result.session_id or tracking_session_id)
             )
+        if upstream_window_quota:
+            self._pause_for_upstream_quota(result, milestone_id, resume_at=upstream_window_reset)
+            raise UpstreamQuotaPaused(result.error)
         if upstream_hard_quota_exhausted:
             self._pause_for_upstream_quota(result, milestone_id)
             raise UpstreamQuotaPaused(result.error)
@@ -8879,6 +8968,13 @@ class AutonomousOrchestrator:
                 project_path=checkout_path,
                 workflow_id=self._workflow_id,
             )
+        except WorkflowPaused:
+            # The pause is already persisted with its marker (quota window or
+            # hard quota); the generic handler below would swallow it into an
+            # infra_error whose retry patch overwrites error_message and
+            # strands the auto-resume scan (#2709). Propagate to advance()'s
+            # WorkflowPaused handling; the finally below still cleans up.
+            raise
         except Exception:
             logger.exception("acceptance verifier spawn failed for issue %s", issue_number)
             return {

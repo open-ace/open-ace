@@ -16,7 +16,7 @@ import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -156,6 +156,44 @@ def _is_quota_paused(wf: dict) -> bool:
     return wf.get("status") == "paused" and (wf.get("error_message") or "").startswith(
         QUOTA_PAUSE_REASON_PREFIX
     )
+
+
+# Marker written by the orchestrator's usage-window pause (GLM 5h quota,
+# #2709). Both tokens are required so the hard platform-quota pause (no
+# reset time, operator-resumed) can never match. The orchestrator renders
+# the timestamp in provider-local UTC+8; the parser applies the same fixed
+# offset back to UTC.
+_UPSTREAM_WINDOW_RESUME_RE = re.compile(
+    r"resets at (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \+0800[;,]?\s*auto-resume scheduled",
+    re.IGNORECASE,
+)
+# Same-named twin lives in app/modules/workspace/autonomous/orchestrator.py
+# (the pause-message renderer). Deliberately not imported across modules to
+# avoid the scheduler↔orchestrator import edge; change both together if the
+# provider ever changes timezone.
+_UPSTREAM_WINDOW_TZINFO = timezone(timedelta(hours=8))
+# Resume a minute after the stated reset so a boundary-eager window (or
+# small clock skew) does not 429 the first resumed request.
+_UPSTREAM_WINDOW_RESUME_MARGIN = timedelta(seconds=60)
+# The marker's reset time is always in the future when written; a resume
+# "due" less than this after the pause itself means the parse disagrees
+# with reality (wrong timezone assumption). Wait it out instead of
+# hot-looping resume→429→pause at scheduler cadence.
+_UPSTREAM_WINDOW_MIN_PAUSE_AGE = timedelta(minutes=5)
+
+
+def _parse_naive_utc(value: str | None) -> datetime | None:
+    """Parse a 'YYYY-MM-DD HH:MM:SS' string persisted as naive UTC, or None.
+
+    Tolerates missing/malformed values (legacy rows) — callers treat None as
+    'no age information, do not gate on it'.
+    """
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
 
 
 class AutonomousScheduler:
@@ -769,6 +807,62 @@ class AutonomousScheduler:
         except Exception as e:
             logger.error("Failed to persist quota pause for %s: %s", workflow_id[:8], e)
 
+    def _auto_resume_upstream_window_paused(self, repo) -> None:
+        """Resume usage-window (GLM 5h) upstream-quota pauses at the stated reset time.
+
+        Only pauses whose error_message carries both a parseable reset
+        timestamp and the auto-resume marker are resumed; the hard platform
+        quota (no reset time) stays operator-resumed, as do unparseable
+        messages. Fail-closed: query/parse/update errors leave the workflow
+        paused for the next cycle.
+        """
+        from app.modules.workspace.autonomous.orchestrator import UPSTREAM_QUOTA_PAUSE_REASON_PREFIX
+        from app.routes.autonomous import PHASE_TO_STATUS, _emit_event_safe
+
+        try:
+            paused = repo.get_paused_workflows(UPSTREAM_QUOTA_PAUSE_REASON_PREFIX)
+        except Exception as e:
+            logger.error("Failed to query upstream-paused workflows for window resume: %s", e)
+            return
+
+        now = datetime.now(timezone.utc)
+        for wf in paused:
+            match = _UPSTREAM_WINDOW_RESUME_RE.search(wf.get("error_message") or "")
+            if not match:
+                continue
+            try:
+                reset_at = (
+                    datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
+                    .replace(tzinfo=_UPSTREAM_WINDOW_TZINFO)
+                    .astimezone(timezone.utc)
+                )
+            except ValueError:
+                continue
+            if now < reset_at + _UPSTREAM_WINDOW_RESUME_MARGIN:
+                continue
+            paused_at = _parse_naive_utc(wf.get("paused_at"))
+            if paused_at is not None and now - paused_at < _UPSTREAM_WINDOW_MIN_PAUSE_AGE:
+                continue
+
+            status = PHASE_TO_STATUS.get(wf.get("current_phase", "preparation"), "pending")
+            try:
+                repo.update_workflow(
+                    wf["workflow_id"],
+                    {"status": status, "paused_at": None, "error_message": ""},
+                )
+                _emit_event_safe(wf["workflow_id"], "status_change", {"status": status})
+                logger.info(
+                    "Auto-resumed usage-window-paused workflow %s (window reset at %s)",
+                    wf["workflow_id"][:8],
+                    match.group(1),
+                )
+            except Exception as e:
+                logger.error(
+                    "Failed to auto-resume usage-window-paused workflow %s: %s",
+                    wf["workflow_id"][:8],
+                    e,
+                )
+
     def _auto_resume_quota_paused(self, repo) -> None:
         """Resume workflows paused by the quota gate once the owner's quota recovers.
 
@@ -924,6 +1018,9 @@ class AutonomousScheduler:
         # Runs before the active scan so a freshly-resumed workflow can be picked
         # up in the same cycle.
         self._auto_resume_quota_paused(repo)
+        # Resume workflows paused by a provider usage-window 429 (GLM 5h,
+        # carries its own reset time) once that time has passed (#2709).
+        self._auto_resume_upstream_window_paused(repo)
         # Release git-conflict keys held by workflows paused mid-advance, so a
         # forked child sharing the parent's project_path isn't starved (#1002).
         self._reclaim_paused_slots(repo)
