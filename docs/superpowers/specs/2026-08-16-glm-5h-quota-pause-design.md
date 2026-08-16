@@ -17,17 +17,18 @@ Your limit will reset at 2026-08-15 20:59:28][<request-id>]
 
 ### 1. 检测（orchestrator.py）
 
-- 新常量 `_UPSTREAM_USAGE_WINDOW_QUOTA_RE`：匹配 `usage limit reached for <N> hour(s)` 且捕获 `your limit will reset at (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})`。不要求 `[1308]`（措辞即契约），不匹配不带 reset ts 的变体（fail-closed：无恢复时间不自愈）。
+- **两个正则分开**：措辞正则 `_UPSTREAM_USAGE_WINDOW_QUOTA_RE`（`usage limit reached for <N> hour(s)`，管检测——无 ts 变体也命中并暂停）；reset 捕获正则 `_UPSTREAM_USAGE_WINDOW_RESET_RE`（`your limit will reset at (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})`，仅自愈路径用）。不要求 `[1308]`（措辞即契约）。
 - 新函数 `_upstream_usage_window_reset(result) -> datetime | None`：按上述防御取值——`result.error` 权威；`result.response_text` 仅在 `total_tokens==0` 时采信（沿用 `_is_upstream_hard_quota_exhausted` 的防 prose 误伤）。ts 解析为 **UTC+8**（`timezone(timedelta(hours=8))`）转 UTC 返回。
 - `_should_retry_transient_api_failure`：窗口命中 → False（首个 429 即停，不烧 backoff）。
 - run-agent wrapper（现 L7768 处）：检测顺序 窗口 → hard quota；窗口命中调 `_pause_for_upstream_quota(result, milestone_id, resume_at=ts)`。
+- **verifier 防吞**（独立评审发现）：`_run_verification_agent` 的 `except Exception` 会把 `UpstreamQuotaPaused`（`WorkflowPaused` 子类）吞成 infra_error，其 retry patch 覆盖 `error_message` 里的 marker → 自愈在该阶段静默失效。在其前加 `except WorkflowPaused: raise`（finally 仍清理 verifier worktree）。
 
 ### 2. 暂停消息（orchestrator.py）
 
 `_pause_for_upstream_quota(..., resume_at: datetime | None = None)`：
 
 - 消息保持既有前缀 `Upstream provider quota exhausted:`（`routes/autonomous.py::_is_recoverable_system_pause_reason` 继续识别，操作员手动恢复不受影响）。
-- `resume_at` 非空时追加机器可解析标记：`... ; auto-resume at 2026-08-15 20:59:28 +0800`（UTC+8 原文呈现，解析方按 +8 转 UTC）。
+- `resume_at` 非空时追加机器可解析标记：`... ; limit resets at 2026-08-15 20:59:28 +0800; auto-resume scheduled`（UTC+8 原文呈现，解析方按 +8 转 UTC；双 token 都要求命中，既有 hard-quota 消息永不误匹配）。
 - 其余行为不变：milestone failed + workflow paused + `paused_at` + `UpstreamQuotaPaused`。
 
 ### 3. 调度器自愈（autonomous_scheduler.py `_resume_quota_paused_workflows`）
@@ -35,8 +36,8 @@ Your limit will reset at 2026-08-15 20:59:28][<request-id>]
 同函数扩展第二个扫描：`get_paused_workflows(UPSTREAM_QUOTA_PAUSE_REASON_PREFIX)`，对每条：
 
 - `error_message` 解析 `auto-resume at <ts> +0800`；解析不出（含既有 hard-quota 暂停，无该标记）→ **跳过**（fail-closed，操作员兜底）。
-- `datetime.now(timezone.utc) >= resume_at_utc + 60s` 才恢复；恢复动作与既有路径一致（`PHASE_TO_STATUS` 映射 status、清 `paused_at`/`error_message`、emit status_change）。
-- 提前误恢复（时钟偏差/措辞变化）→ agent 再撞 429 → 再暂停（自愈闭环，无热循环：每轮暂停至少隔一个调度周期）。
+- `datetime.now(timezone.utc) >= resume_at_utc + 60s` **且暂停已超 5 分钟**（`paused_at` 下限：marker 的 reset 时间写入时必然在未来，刚暂停就"到期"= 解析与现实不符，等待而非以调度周期频率热循环）才恢复；恢复动作与既有路径一致（`PHASE_TO_STATUS` 映射 status、清 `paused_at`/`error_message`、emit status_change）。
+- 时区假设错误（实际非 +8）的失败模式被 5 分钟下限限制为有界重试（最坏 ~12 次/小时、每次几乎零 token），且方向安全：提前恢复→再 429→再暂停，最终真实窗口重置后收敛。
 
 ### 4. 错误处理汇总
 
