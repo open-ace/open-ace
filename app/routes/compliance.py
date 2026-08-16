@@ -14,6 +14,7 @@ from flask import Blueprint, Response, g, jsonify, request
 from app.auth.decorators import (
     admin_required,
     enforce_requested_tenant_scope,
+    enforce_resource_tenant_scope,
     resolve_tenant_scope,
     same_tenant_user_required,
 )
@@ -178,19 +179,15 @@ def generate_report():
             g.user.get("id"),
             target_tenant_id,
         )
-    # Tenant admin can only generate reports for their own tenant
+    # Tenant admin can only generate reports for their own tenant. Reuse the
+    # shared request-scope guard: it normalizes the body value (a string "1"
+    # must not read as != int 1), denies naming another tenant outright, and
+    # rejects a tenant admin with no tenant -- consistent with the hardened
+    # list/read siblings (get_saved_reports / get_saved_report).
     elif user_role == "tenant_admin":
-        if caller_tenant_id is None:
-            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
-        # Ignore any tenant_id in request body
-        if data.get("tenant_id") is not None and data.get("tenant_id") != caller_tenant_id:
-            logger.warning(
-                "Tenant admin %s attempted to generate report for tenant %s (own tenant: %s)",
-                g.user.get("id"),
-                data.get("tenant_id"),
-                caller_tenant_id,
-            )
-        target_tenant_id = caller_tenant_id
+        target_tenant_id, denial = enforce_requested_tenant_scope(data.get("tenant_id"))
+        if denial is not None:
+            return denial
     # Legacy admin: backward compatibility
     # - With tenant_id: scoped to that tenant (like tenant_admin)
     # - Without tenant_id: global access (like platform_admin)
@@ -330,8 +327,8 @@ def list_saved_reports():
     The query's ``tenant_id`` went straight to the repository, so a tenant
     admin could name another tenant -- or omit it entirely and get every
     tenant's reports. Reading a single report by id
-    (``GET /reports/<report_id>``) still needs a per-resource owner lookup and
-    is tracked in docs/dev-notes/2026-08-14-admin-required-tenant-boundary-audit.md.
+    (``GET /reports/<report_id>``) is confined in :func:`get_saved_report` via
+    a per-resource owner lookup (``enforce_resource_tenant_scope``).
     """
 
     report_type = request.args.get("report_type")
@@ -364,6 +361,13 @@ def get_saved_report(report_id: str):
     """Get a saved report (admin only)."""
 
     report = report_generator.get_saved_report(report_id)
+    # compliance_reports carries a tenant_id; confine the read to the caller's
+    # tenant. A missing report resolves to None, which denies a tenant admin
+    # (no cross-tenant existence oracle) and falls through to the 404 for a
+    # platform admin.
+    denial = enforce_resource_tenant_scope(report.metadata.tenant_id if report else None)
+    if denial is not None:
+        return denial
 
     if not report:
         return jsonify({"error": "Report not found"}), 404

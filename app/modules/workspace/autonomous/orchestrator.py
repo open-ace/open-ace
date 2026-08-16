@@ -2123,6 +2123,62 @@ def _cleanup_backoff_time(attempts: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=delay)).strftime("%Y-%m-%d %H:%M:%S")
 
 
+# ── #2699: lazy dependency preparation ──────────────────────────────────────
+# The worktree node_modules shim was reverted (#2694/#2698): it ran via
+# ``sudo -u <owner> bash -c`` which sudoers rejects by design (#2650), so it
+# never worked on multi-user prod, and it hardcoded this repo's frontend/
+# layout. Dependency setup is now the agent's job, in two layers: a proactive
+# prompt rule (check node_modules + lockfile-detected install before running
+# frontend commands) and a failure-signature translation below.
+#
+# The trap these signatures recognize: a clean worktree has no node_modules
+# (gitignored); Node resolution walks up into the project owner's main clone,
+# so vitest LOADS (deps "visible") but vite's cache write into the
+# owner-owned node_modules/.vite-temp is EACCES. To the agent that reads like
+# a permissions bug — it retries around permissions instead of installing.
+_DEPENDENCY_FAILURE_PATTERNS = (
+    re.compile(r"node_modules[/\\]\.vite-temp", re.IGNORECASE),
+    re.compile(r"Cannot find (?:module|package) ['\"]?vitest", re.IGNORECASE),
+    re.compile(r"vitest: command not found", re.IGNORECASE),
+    re.compile(r"EACCES: permission denied[^\n]*node_modules", re.IGNORECASE),
+)
+
+_DEPENDENCY_PREP_RULE = (
+    "5. 环境准备：运行任何前端/JS 测试或构建命令前，先检查 worktree 内是否存在 "
+    "node_modules；不存在且仓库有锁文件（package-lock.json / pnpm-lock.yaml / "
+    "yarn.lock / bun.lockb）时，先在对应目录安装依赖（npm ci / "
+    "pnpm install --frozen-lockfile / yarn install --frozen-lockfile / "
+    "bun install）再运行命令；纯后端任务无需处理，不要安装任何前端依赖。\n"
+)
+
+
+def _dependency_failure_directive(prior_output: str | None) -> str:
+    """#2699 backstop: translate a missing-deps failure into an install directive.
+
+    Returns the directive when ``prior_output`` (the prior round's test
+    report) hits one of :data:`_DEPENDENCY_FAILURE_PATTERNS`, else ``""``.
+    Empty/unparsable input returns ``""`` — the directive is additive and must
+    never fabricate a dependency problem the output does not show.
+    """
+    if not prior_output:
+        return ""
+    if not any(p.search(prior_output) for p in _DEPENDENCY_FAILURE_PATTERNS):
+        return ""
+    return (
+        "## 依赖环境修复指令\n"
+        "上一轮输出命中了依赖缺失特征（node_modules 权限被拒或找不到 vitest）。"
+        "worktree 是干净检出，node_modules 不存在，模块解析向上落到了项目主 clone "
+        "的 node_modules——读得到但写不进，这不是权限配置问题，不要用 sudo/chmod "
+        "绕过。本轮必须：\n"
+        "1. 在 worktree 内按仓库锁文件先安装依赖：package-lock.json → `npm ci`；"
+        "pnpm-lock.yaml → `pnpm install --frozen-lockfile`；yarn.lock → "
+        "`yarn install --frozen-lockfile`；bun.lockb → `bun install`"
+        "（monorepo 在对应子目录执行）；\n"
+        "2. 安装完成后重新执行验证矩阵中的测试命令，并在回复中包含原始输出；\n"
+        "3. 若仓库没有锁文件或不是 JS 项目，则失败另有原因，按原流程排查并在报告中说明。\n\n"
+    )
+
+
 def _head_tail_excerpt(text: str, limit: int = 6000) -> str:
     """Truncate ``text`` preserving BOTH ends (#2590).
 
@@ -6449,6 +6505,38 @@ class AutonomousOrchestrator:
             logger.debug("prior verdict carry-forward failed: %s", e)
             return ExecutionVerdict.NOT_RUN, f"carry-forward failed: {e}"
 
+    def _prior_dependency_failure_directive(self, current_milestone_id: str) -> str:
+        """#2699: missing-deps directive from the PRIOR round's test report.
+
+        Reads the latest prior ``tests_run`` milestone's ``result_summary``
+        (excluding ``current_milestone_id`` — the just-created in_progress
+        milestone for THIS round has an empty summary and must not shadow the
+        prior report; same milestone selection as
+        ``_carry_forward_prior_test_verdict``) and runs the
+        :func:`_dependency_failure_directive` signature match over it. Any
+        lookup error returns ``""`` — the directive is additive.
+        """
+        if not current_milestone_id:
+            return ""
+        try:
+            milestones = self.repo.list_milestones(self._workflow_id, phase="development")
+        except Exception:
+            return ""
+        prior = [
+            ms
+            for ms in milestones
+            if ms.get("milestone_type") == "tests_run"
+            and (ms.get("milestone_id") or "") != current_milestone_id
+            and ms.get("result_summary")
+        ]
+        if not prior:
+            return ""
+        try:
+            latest = max(prior, key=lambda m: int(m.get("id") or 0))
+        except (ValueError, TypeError):
+            latest = prior[-1]
+        return _dependency_failure_directive(latest.get("result_summary") or "")
+
     def _structured_failure_repair_feedback(
         self, structured_reason: str, evidences: list, test_summary: str
     ) -> str:
@@ -6469,6 +6557,13 @@ class AutonomousOrchestrator:
             "请先根据以下失败信息修复测试或修复被测试暴露的产品代码，"
             "再重新执行验证；不得跳过测试或改写断言来让测试通过。",
         ]
+        # #2699: a missing-deps signature is not a code defect — hand the dev
+        # round the install directive FIRST so it does not "fix" an EACCES by
+        # editing permissions or skipping the frontend suite.
+        directive = _dependency_failure_directive(test_summary or "")
+        if directive:
+            lines.append("")
+            lines.append(directive.rstrip())
         failed_lines = []
         for evidence in evidences or []:
             if getattr(evidence, "verdict", "") != ExecutionVerdict.FAILED.value:
@@ -10887,6 +10982,11 @@ class AutonomousOrchestrator:
                 "2. 不得引用之前回合的结果作为本轮验证证据；\n"
                 "3. 如果确认测试无法执行，在回复末尾单独一行输出 `TEST_STATUS: skipped` 并说明原因。\n\n"
             )
+            # #2699 backstop: when the prior round's report hit the missing-deps
+            # signature (EACCES on node_modules/.vite-temp / Cannot find module
+            # vitest), redirect the retry at installing dependencies in the
+            # worktree instead of chasing permissions.
+            test_prompt += self._prior_dependency_failure_directive(test_ms.get("milestone_id", ""))
         if issue_number:
             test_prompt += (
                 f"## 关联 Issue\n"
@@ -10904,16 +11004,17 @@ class AutonomousOrchestrator:
             "2. 必须优先覆盖上面列出的必测方面；只有在发现跨层影响、契约变化、迁移/依赖/CI 改动等证据时，才扩大到更广范围。\n"
             "3. 除非验证矩阵或仓库文档明确要求，否则不要从裸 `python -m pytest`、`pytest tests/`、全仓库扫描式命令开始。\n"
             "4. 具体命令必须优先从 `.github/workflows/`、`package.json`、`frontend/package.json`、`pytest.ini`、`tests/README.md`、`Makefile`、`tox.ini`、`scripts/` 等仓库事实中映射出来，不要凭空假设。\n"
-            "5. 结果汇总时必须交代：验证方面、执行命令、结果、是否已覆盖方案要求；如果某一项不跑，必须说明理由。\n"
-            "6. 如果仓库中完全没有明确约定，再按框架后备顺序尝试：\n"
+            + _DEPENDENCY_PREP_RULE
+            + "6. 结果汇总时必须交代：验证方面、执行命令、结果、是否已覆盖方案要求；如果某一项不跑，必须说明理由。\n"
+            "7. 如果仓库中完全没有明确约定，再按框架后备顺序尝试：\n"
             "   - Python：`python -m pytest` 或 `python3 -m pytest`\n"
             "   - Python 兜底：`python -m unittest discover -s tests`\n"
             "   - 前端项目：`npm test` 或 `npx vitest run`\n"
-            "7. 如果所有测试框架都不可用，至少执行以下验证：\n"
+            "8. 如果所有测试框架都不可用，至少执行以下验证：\n"
             '   - 用 `python -c "import <模块>"` 验证关键模块能正常导入\n'
             "   - 用 `python -m py_compile <文件>` 验证修改的文件没有语法错误\n"
             "   - 手动验证核心功能逻辑\n"
-            "8. 如果测试确实无法运行，在回复末尾单独一行输出 `TEST_STATUS: skipped`\n\n"
+            "9. 如果测试确实无法运行，在回复末尾单独一行输出 `TEST_STATUS: skipped`\n\n"
             "## ⛔ CRITICAL: 测试结果报告格式（强制要求）\n"
             "测试结果报告必须严格遵循以下标准格式之一：\n"
             '- Python pytest: "X passed, Y failed, Z skipped" 或 "X passed in Y.Zs"\n'
@@ -11610,6 +11711,13 @@ class AutonomousOrchestrator:
                     {
                         "dev_round": dev_round + 1,
                         "dev_retries_on_test_fail": dev_retries,
+                        # #2679: phases/development.py skips the dev agent
+                        # whenever test_retries > 0 or skip_retries > 0, so
+                        # stale counters from this round's test/skip retries
+                        # would turn the repair round into a test-only re-run.
+                        # Same reset the #2590 dev-repair branch performs.
+                        "test_retries": 0,
+                        "skip_retries": 0,
                     }
                 )
                 return

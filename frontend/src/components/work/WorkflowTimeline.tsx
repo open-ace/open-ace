@@ -541,6 +541,13 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   const isActive = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
   const isPaused = workflow.status === 'paused';
   const isWaiting = workflow.current_phase === 'wait';
+  // #2491 UX: the resume-with-feedback already landed — the workflow is queued
+  // to re-enter development on its own. Gated on phase === 'wait' because
+  // user_feedback stays on the row after _do_wait consumes it.
+  const isFeedbackPendingRestart =
+    workflow.status === 'waiting' &&
+    workflow.current_phase === 'wait' &&
+    !!workflow.user_feedback?.trim();
   const allowMilestoneActions =
     isActive || isPaused || isWaiting || workflow.status === 'planning_timeout';
 
@@ -1183,29 +1190,35 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   // action) and quota pauses from generic paused/failed banners.
   const pauseReason = getPauseReasonCategory(workflow);
   const isAcceptanceAwaitingPause = pauseReason === 'acceptance_awaiting';
-  const stateBannerTone = isAcceptanceAwaitingPause
-    ? 'acceptance'
+  const stateBannerTone = isFeedbackPendingRestart
+    ? 'feedback'
+    : isAcceptanceAwaitingPause
+      ? 'acceptance'
+      : workflow.error_message
+        ? 'error'
+        : workflow.status === 'planning_timeout' ||
+            workflow.status === 'paused' ||
+            workflow.status === 'waiting'
+          ? 'warning'
+          : 'info';
+  const stateBannerTitle = isFeedbackPendingRestart
+    ? t('autoBannerFeedbackPending', language)
+    : isAcceptanceAwaitingPause
+      ? t('autoBannerAcceptanceAwaiting', language)
+      : pauseReason === 'quota'
+        ? t('autoBannerQuotaPaused', language)
+        : workflowStatusLabel;
+  const stateBannerMessage = isFeedbackPendingRestart
+    ? workflow.user_feedback
     : workflow.error_message
-      ? 'error'
-      : workflow.status === 'planning_timeout' ||
-          workflow.status === 'paused' ||
-          workflow.status === 'waiting'
-        ? 'warning'
-        : 'info';
-  const stateBannerTitle = isAcceptanceAwaitingPause
-    ? t('autoBannerAcceptanceAwaiting', language)
-    : pauseReason === 'quota'
-      ? t('autoBannerQuotaPaused', language)
-      : workflowStatusLabel;
-  const stateBannerMessage = workflow.error_message
-    ? workflow.error_message
-    : workflow.status === 'planning_timeout'
-      ? t('autoBannerPlanningTimeout', language)
-      : workflow.status === 'paused'
-        ? t('autoBannerPaused', language)
-        : workflow.status === 'waiting'
-          ? t('autoBannerWaiting', language)
-          : '';
+      ? workflow.error_message
+      : workflow.status === 'planning_timeout'
+        ? t('autoBannerPlanningTimeout', language)
+        : workflow.status === 'paused'
+          ? t('autoBannerPaused', language)
+          : workflow.status === 'waiting'
+            ? t('autoBannerWaiting', language)
+            : '';
   const showStateBanner = Boolean(
     workflow.error_message ||
     workflow.status === 'planning_timeout' ||
@@ -2278,7 +2291,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 </Button>
               </>
             )}
-            {!showStateBanner && isWaiting && (
+            {!showStateBanner && isWaiting && !isFeedbackPendingRestart && (
               <Button
                 size="sm"
                 variant="success"
@@ -2425,7 +2438,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               )}
             </div>
             <div className="timeline-state-banner__actions">
-              {isWaiting && (
+              {isWaiting && !isFeedbackPendingRestart && (
                 <Button
                   size="sm"
                   variant="success"
@@ -2440,7 +2453,13 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                 <Button
                   size="sm"
                   variant="warning"
-                  onClick={() => setShowResumeFeedbackModal(true)}
+                  onClick={() => {
+                    // #2491 UX: pre-fill with the verifier's failed-items list
+                    // (server-derived from the verification report) so the user
+                    // can submit it verbatim or lightly edit it.
+                    setResumeFeedback(workflow.acceptance_feedback_prefill ?? '');
+                    setShowResumeFeedbackModal(true);
+                  }}
                   disabled={resumeFeedbackMutation.isPending}
                   title={t('autoResumeWithFeedbackHelp', language)}
                 >
@@ -2642,7 +2661,15 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           <div>
             <div className="mb-3">
               <strong>{t('status', language)}:</strong>{' '}
-              <Badge variant={session.status === 'completed' ? 'success' : 'primary'}>
+              <Badge
+                variant={
+                  session.status === 'completed'
+                    ? 'success'
+                    : session.status === 'stopped'
+                      ? 'warning'
+                      : 'primary'
+                }
+              >
                 {session.status}
               </Badge>
             </div>

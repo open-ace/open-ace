@@ -206,17 +206,17 @@ class TestStatusTransitions:
         assert mock_session.status == "active"
         assert mock_session.paused_at is None
 
-    def test_status_transition_stopped_to_completed(
+    def test_status_transition_stopped_remains_stopped(
         self, remote_session_manager, mock_session_manager, mock_session, mock_agent_manager
     ):
-        """Stopped status should set session to completed and clean up."""
+        """Stopped status should remain as stopped (not converted to completed)."""
         mock_session_manager.get_session.return_value = mock_session
 
         remote_session_manager.process_session_status_update(
             session_id="test-session-123", status="stopped"
         )
 
-        assert mock_session.status == "completed"
+        assert mock_session.status == "stopped"
         assert mock_session.paused_at is None
         mock_agent_manager.unbind_session.assert_called_once_with("test-session-123")
         mock_agent_manager.mark_session_ended.assert_called_once_with("test-session-123")

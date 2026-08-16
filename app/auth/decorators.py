@@ -1627,6 +1627,85 @@ def enforce_requested_tenant_scope(
     return actor_tenant_id, None
 
 
+def _audit_cross_tenant_resource_access(target_tenant_id: int | None) -> None:
+    """Record a platform admin reaching into another tenant's non-user resource.
+
+    The user-targeted counterpart is :func:`_audit_cross_tenant_user_access`;
+    this one takes the resource's owning tenant directly because policy rules,
+    compliance reports and the like are not users. No-op when the resource has
+    no tenant (global), belongs to the actor's own tenant, or the actor id is
+    not resolvable.
+    """
+    if target_tenant_id is None:
+        return
+
+    actor_id = getattr(g, "user_id", None)
+    if not isinstance(actor_id, int):
+        return
+
+    own_tenant_id = _normalize_user_tenant_id((getattr(g, "user", None) or {}).get("tenant_id"))
+    if target_tenant_id == own_tenant_id:
+        return
+
+    _log_cross_tenant_operation(
+        actor_user_id=actor_id,
+        actor_tenant_id=own_tenant_id,
+        target_tenant_id=target_tenant_id,
+        action=f"{request.method} {request.path}",
+    )
+
+
+def enforce_resource_tenant_scope(resource_tenant_id: object) -> tuple[Response, int] | None:
+    """Deny when the current admin may not act on a resource owned by ``resource_tenant_id``.
+
+    For non-user resources reached by their own id (a policy rule by ``rule_id``
+    or ``rule_key``, a compliance report by ``report_id``) whose owning/scope
+    tenant is read from the repository first. Returns ``None`` to proceed,
+    otherwise the error response the caller must return.
+
+    Distinct from :func:`enforce_requested_tenant_scope`. There a ``None``
+    ``tenant_id`` means "no filter requested" and is widened to the caller's own
+    tenant; here a ``None`` means the *resource itself* is global/unscoped, and a
+    tenant-scoped admin must be **denied** rather than silently rescoped --
+    otherwise a tenant admin could edit a rule that governs every tenant (or
+    have a global rule quietly rewritten under its own tenant). This mirrors the
+    tenant half of :func:`enforce_target_user_tenant`, which denies a
+    ``tenant_id IS NULL`` target for the same reason.
+
+    * Platform admin: always allowed; a cross-tenant target is audit-logged.
+    * Tenant-scoped admin: allowed only when ``resource_tenant_id`` equals the
+      caller's tenant. A ``None`` (global) or mismatched tenant is denied.
+
+    There is no vertical (role) check here as there is for users: these
+    resources carry no role, so taking one over grants no account privileges.
+    Callers that cannot resolve the resource should pass ``None`` so a tenant
+    admin is denied (fail closed) and given no existence oracle.
+    """
+    actor_tenant_id, denial = resolve_admin_tenant_scope()
+    if denial is not None:
+        return denial
+
+    target_tenant_id = _normalize_user_tenant_id(resource_tenant_id)
+
+    if actor_tenant_id is None:
+        # Platform admin: permitted, but record the boundary crossing.
+        _audit_cross_tenant_resource_access(target_tenant_id)
+        return None
+
+    if target_tenant_id is None or target_tenant_id != actor_tenant_id:
+        logger.warning(
+            "Cross-tenant resource operation denied: actor=%s actor_tenant=%s "
+            "target_tenant=%s path=%s",
+            getattr(g, "user_id", None),
+            actor_tenant_id,
+            target_tenant_id,
+            request.path,
+        )
+        return jsonify({"error": "Cross-tenant access denied"}), 403
+
+    return None
+
+
 # ── ActorScope and Tenant Authorization (Issue #2327) ─────────────────────
 
 

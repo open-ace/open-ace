@@ -353,6 +353,32 @@ def _failed_items(report: dict) -> list[tuple[str, dict]]:
     return out
 
 
+def feedback_prefill_from_report(report: dict) -> str:
+    """Pre-fill text for the resume-with-feedback modal (#2491 UX).
+
+    Mirrors the "Rejected / missing" bullet section of the issue comment so
+    the user can submit the verifier's failed-items list as feedback verbatim
+    or lightly edit it, instead of copy-pasting from GitHub. Shares
+    ``_failed_items`` with ``_format_report_comment`` so the two never drift.
+    Returns ``""`` when nothing failed.
+    """
+    status = (report.get("status") or "").lower()
+    failed = _failed_items(report)
+    if not failed:
+        return ""
+    label = "Rejected / missing" if status == "rejected" else "Could not verify"
+    lines = [f"{label}:"]
+    for kind, entry in failed:
+        detail = entry.get("rationale") or ""
+        if not detail:
+            ev = entry.get("evidence") or []
+            if ev and isinstance(ev[0], dict):
+                detail = ev[0].get("note", "")
+        tail = f" — {detail}" if detail else ""
+        lines.append(f"- [{kind}] `{entry.get('item')}` ({entry.get('verdict')}){tail}")
+    return "\n".join(lines)
+
+
 def _acceptance_summary(status: str, report: dict) -> str:
     """Human-readable one-line summary for the milestone card.
 
