@@ -32,7 +32,7 @@ class FileChangeRecord:
     session_id: str
     tool_use_id: str
     status: str = "pending"
-    old_path: Optional[str] = None
+    old_path: str | None = None
     source: str = "unknown"
     tool_name: str = "unknown"
 
@@ -62,7 +62,7 @@ class FileChangeParser(ABC):
     @abstractmethod
     def parse(
         self, tool_name: str, tool_input: dict, context: ParserContext
-    ) -> List[FileChangeRecord]:
+    ) -> list[FileChangeRecord]:
         """Parse tool input and generate file change records."""
         pass
 
@@ -75,7 +75,7 @@ class FileChangeParser(ABC):
 class FileChangeParserRegistry:
     """Registry for file change parsers."""
 
-    _parsers: List[FileChangeParser] = []
+    _parsers: list[FileChangeParser] = []
 
     @classmethod
     def register(cls, parser: FileChangeParser) -> None:
@@ -86,7 +86,7 @@ class FileChangeParserRegistry:
     @classmethod
     def parse(
         cls, tool_name: str, tool_input: dict, context: ParserContext
-    ) -> List[FileChangeRecord]:
+    ) -> list[FileChangeRecord]:
         """Parse tool input using all registered parsers."""
         records = []
         for parser in cls._parsers:
@@ -115,7 +115,7 @@ class MkdirParser(FileChangeParser):
 
     def parse(
         self, tool_name: str, tool_input: dict, context: ParserContext
-    ) -> List[FileChangeRecord]:
+    ) -> list[FileChangeRecord]:
         command = tool_input.get("command", "")
         paths = self._extract_paths(command)
 
@@ -145,7 +145,7 @@ class MkdirParser(FileChangeParser):
     def source(self) -> str:
         return "bash_mkdir"
 
-    def _extract_paths(self, command: str) -> List[str]:
+    def _extract_paths(self, command: str) -> list[str]:
         """Extract paths from mkdir command."""
         cmd = command.strip()
         mkdir_match = re.match(r'\bmkdir\b\s*', cmd)
@@ -194,7 +194,7 @@ class MkdirParser(FileChangeParser):
             break
         return paths
 
-    def _resolve_path(self, path: str, project_path: str) -> Optional[str]:
+    def _resolve_path(self, path: str, project_path: str) -> str | None:
         if not path:
             return None
         path = os.path.expandvars(path)
@@ -228,7 +228,7 @@ class RmParser(FileChangeParser):
 
     def parse(
         self, tool_name: str, tool_input: dict, context: ParserContext
-    ) -> List[FileChangeRecord]:
+    ) -> list[FileChangeRecord]:
         command = tool_input.get("command", "")
         paths = self._extract_paths(command)
 
@@ -256,7 +256,7 @@ class RmParser(FileChangeParser):
     def source(self) -> str:
         return "bash_rm"
 
-    def _extract_paths(self, command: str) -> List[str]:
+    def _extract_paths(self, command: str) -> list[str]:
         cmd = command.strip()
         rm_match = re.match(r'\brm\b\s*', cmd)
         if not rm_match:
@@ -296,7 +296,7 @@ class RmParser(FileChangeParser):
             break
         return paths
 
-    def _resolve_path(self, path: str, project_path: str) -> Optional[str]:
+    def _resolve_path(self, path: str, project_path: str) -> str | None:
         if not path:
             return None
         path = os.path.expandvars(path)
@@ -327,7 +327,7 @@ class WriteFileParser(FileChangeParser):
 
     def parse(
         self, tool_name: str, tool_input: dict, context: ParserContext
-    ) -> List[FileChangeRecord]:
+    ) -> list[FileChangeRecord]:
         file_path = tool_input.get("file_path") or tool_input.get("path")
         if not file_path:
             return []
@@ -353,7 +353,7 @@ class WriteFileParser(FileChangeParser):
     def source(self) -> str:
         return "write_file"
 
-    def _resolve_path(self, path: str, project_path: str) -> Optional[str]:
+    def _resolve_path(self, path: str, project_path: str) -> str | None:
         if not path:
             return None
         path = os.path.expandvars(path)
@@ -381,7 +381,7 @@ class EditParser(FileChangeParser):
 
     def parse(
         self, tool_name: str, tool_input: dict, context: ParserContext
-    ) -> List[FileChangeRecord]:
+    ) -> list[FileChangeRecord]:
         file_path = tool_input.get("file_path") or tool_input.get("path")
         if not file_path:
             return []
@@ -407,7 +407,7 @@ class EditParser(FileChangeParser):
     def source(self) -> str:
         return "edit"
 
-    def _resolve_path(self, path: str, project_path: str) -> Optional[str]:
+    def _resolve_path(self, path: str, project_path: str) -> str | None:
         if not path:
             return None
         path = os.path.expandvars(path)
