@@ -3337,13 +3337,13 @@ CREATE INDEX idx_prompt_templates_author ON prompt_templates USING btree (author
 
 CREATE INDEX idx_prompt_templates_category ON prompt_templates USING btree (category);
 
-CREATE UNIQUE INDEX idx_prompt_templates_name ON prompt_templates USING btree (name);
-
-
---
---
-
 CREATE INDEX idx_prompt_templates_public ON prompt_templates USING btree (is_public);
+
+
+--
+--
+
+CREATE UNIQUE INDEX idx_prompt_templates_name ON prompt_templates USING btree (name);
 
 CREATE INDEX idx_proxy_token_jtis_active ON proxy_token_jtis USING btree (revoked_at, consumed_at);
 
