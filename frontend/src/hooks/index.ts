@@ -74,6 +74,7 @@ export { useGlobalFetch } from './useFetch';
 export {
   useMachines,
   useMachineUsers,
+  useMachineSessions,
   useGenerateToken,
   useDeregisterMachine,
   useRotateMachineToken,
