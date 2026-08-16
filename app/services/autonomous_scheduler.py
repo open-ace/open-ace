@@ -966,6 +966,9 @@ class AutonomousScheduler:
             key=lambda wf: (
                 1 if wf.get("status") == "waiting" else 0,
                 wf.get("created_at") or "",
+                # Tiebreak same-created_at batch siblings on batch_order (#2706); NULL→0; workflow_id keeps total order stable.
+                bo if (bo := wf.get("batch_order")) is not None else 0,
+                wf.get("workflow_id") or "",
             )
         )
 
