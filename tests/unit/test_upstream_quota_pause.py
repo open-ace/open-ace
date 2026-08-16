@@ -321,3 +321,36 @@ def test_run_agent_pauses_glm_window_without_reset_time_as_operator_resume():
     )
     assert update["error_message"].startswith("Upstream provider quota exhausted:")
     assert "auto-resume scheduled" not in update["error_message"]
+
+
+def test_verification_agent_re_raise_workflow_pause():
+    # The verifier wrapper must let UpstreamQuotaPaused (a WorkflowPaused)
+    # propagate: swallowing it into infra_error would overwrite the persisted
+    # pause marker with a retry message and strand the auto-resume (#2709).
+    orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orchestrator._workflow_id = "wf-1"
+
+    def _raise(*args, **kwargs):
+        raise UpstreamQuotaPaused("window quota")
+
+    with patch.object(
+        AutonomousOrchestrator, "workflow", {"cli_tool": "claude-code", "model": ""}
+    ), patch.object(
+        AutonomousOrchestrator, "_build_verification_prompt", return_value="verify"
+    ), patch.object(
+        AutonomousOrchestrator, "_checkout_merged_main", return_value="/tmp/vw"
+    ), patch.object(
+        AutonomousOrchestrator, "_run_agent", side_effect=_raise
+    ), patch.object(
+        AutonomousOrchestrator, "_remove_verification_worktree"
+    ) as cleanup:
+        with pytest.raises(UpstreamQuotaPaused):
+            orchestrator._run_verification_agent(
+                snapshot={},
+                merge_sha="abc123",
+                base_sha="def456",
+                issue_number=2709,
+                pr_number=2690,
+            )
+
+    cleanup.assert_called_once()  # finally 仍清理 verifier worktree

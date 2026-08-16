@@ -8969,6 +8969,13 @@ class AutonomousOrchestrator:
                 project_path=checkout_path,
                 workflow_id=self._workflow_id,
             )
+        except WorkflowPaused:
+            # The pause is already persisted with its marker (quota window or
+            # hard quota); the generic handler below would swallow it into an
+            # infra_error whose retry patch overwrites error_message and
+            # strands the auto-resume scan (#2709). Propagate to advance()'s
+            # WorkflowPaused handling; the finally below still cleans up.
+            raise
         except Exception:
             logger.exception("acceptance verifier spawn failed for issue %s", issue_number)
             return {
