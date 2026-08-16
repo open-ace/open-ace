@@ -1102,7 +1102,9 @@ const MachineDetailsDialog: React.FC<MachineDetailsDialogProps> = ({
       )}
 
       {/* Active Sessions - Issue #2580 */}
-      {canManageUsers && <MachineSessionsSection machineId={machine.machine_id} language={language} />}
+      {canManageUsers && (
+        <MachineSessionsSection machineId={machine.machine_id} language={language} />
+      )}
     </Modal>
   );
 };
