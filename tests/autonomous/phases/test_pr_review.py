@@ -26,6 +26,8 @@ from __future__ import annotations
 import threading
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.modules.workspace.autonomous import phases as phases_pkg
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.phase_contract import PhaseResult, WorkflowContext
@@ -279,6 +281,8 @@ def test_ci_pending_after_approved_review_starts_repair_and_retries():
 # ── failure paths → failed ────────────────────────────────────────────────
 
 
+@pytest.mark.regression
+@pytest.mark.issue(2715)
 def test_review_agent_no_result_returns_failed():
     """When BOTH the initial review run and the fresh retry return empty text,
     the phase fails closed: PhaseResult.failed with the no-result message.
@@ -302,6 +306,8 @@ def test_review_agent_no_result_returns_failed():
 # ── review agent empty-result retry ──────────────────────────────────────
 
 
+@pytest.mark.regression
+@pytest.mark.issue(2715)
 def test_review_empty_first_call_retries_fresh_and_succeeds():
     """When the review agent (session_line='review') returns success but EMPTY
     artifact text — a transient resume no-op — handle() retries ONCE with a
@@ -329,6 +335,8 @@ def test_review_empty_first_call_retries_fresh_and_succeeds():
     assert second_kwargs.get("session_line") == "fresh"
 
 
+@pytest.mark.regression
+@pytest.mark.issue(2715)
 def test_review_genuine_failure_does_not_trigger_fresh_retry():
     """A genuine review-agent failure (success=False) takes the existing failure
     path — it must NOT trigger the fresh-retry backstop, which is reserved for a
