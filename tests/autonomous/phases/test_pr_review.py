@@ -15,7 +15,9 @@ Coverage:
 - changes-requested (not approved, under cap) with fix succeeding →
   PhaseResult.retry (scheduler re-enters pr_review for the next round)
 - CI pending after approved review → start_ci_repair_round + PhaseResult.retry
-- failure path: review agent returns no result → PhaseResult.failed
+- review agent success-but-empty → fresh retry; retry non-empty → continues
+- review agent success-but-empty → fresh retry; retry also empty → PhaseResult.failed
+- review agent genuine failure (success=False) → PhaseResult.failed, no retry
 - failure path: read-only tool unsupported → PhaseResult.failed
 """
 
@@ -23,6 +25,8 @@ from __future__ import annotations
 
 import threading
 from unittest.mock import MagicMock
+
+import pytest
 
 from app.modules.workspace.autonomous import phases as phases_pkg
 from app.modules.workspace.autonomous.models import AgentTaskResult
@@ -277,9 +281,12 @@ def test_ci_pending_after_approved_review_starts_repair_and_retries():
 # ── failure paths → failed ────────────────────────────────────────────────
 
 
+@pytest.mark.regression
+@pytest.mark.issue(2715)
 def test_review_agent_no_result_returns_failed():
-    """A review agent that succeeds but returns an empty artifact fails closed:
-    PhaseResult.failed with the no-result message."""
+    """When BOTH the initial review run and the fresh retry return empty text,
+    the phase fails closed: PhaseResult.failed with the no-result message.
+    (Both calls share the same always-empty mock return value.)"""
     gh = _gh()
     empty_result = _agent(text="   \n")
     host = _host(
@@ -294,6 +301,60 @@ def test_review_agent_no_result_returns_failed():
     assert result.outcome == "failed"
     assert result.next_status == "failed"
     assert "no result" in result.structured_error.get("message", "")
+
+
+# ── review agent empty-result retry ──────────────────────────────────────
+
+
+@pytest.mark.regression
+@pytest.mark.issue(2715)
+def test_review_empty_first_call_retries_fresh_and_succeeds():
+    """When the review agent (session_line='review') returns success but EMPTY
+    artifact text — a transient resume no-op — handle() retries ONCE with a
+    fresh session (session_line='fresh'). If the retry returns non-empty text
+    the phase does NOT fail: it continues normally."""
+    gh = _gh()
+    empty_review = _agent(text="")
+    fresh_review = _agent(text="LGTM: all criteria met.\n")
+    summary_result = _agent(text="Summary: changes look good.")
+    host = _host(
+        review_is_approved=True,
+        run_agent_with_context_recovery=MagicMock(
+            side_effect=[empty_review, fresh_review, summary_result]
+        ),
+    )
+    host.artifact_text.side_effect = lambda r: getattr(r, "response_text", "") or ""
+    deps = _deps(host, gh)
+
+    result = pr_review_phase.handle(_ctx(_workflow(current_round=0, max_pr_review_rounds=1)), deps)
+
+    assert result.outcome != "failed", result
+    # Second call must be the fresh retry.
+    assert host.run_agent_with_context_recovery.call_count >= 2
+    second_kwargs = host.run_agent_with_context_recovery.call_args_list[1].kwargs
+    assert second_kwargs.get("session_line") == "fresh"
+
+
+@pytest.mark.regression
+@pytest.mark.issue(2715)
+def test_review_genuine_failure_does_not_trigger_fresh_retry():
+    """A genuine review-agent failure (success=False) takes the existing failure
+    path — it must NOT trigger the fresh-retry backstop, which is reserved for a
+    SUCCEEDED-but-empty run. run_agent is called exactly once."""
+    gh = _gh()
+    failed_review = _agent(text="", success=False)
+    failed_review.error = "agent crashed"
+    host = _host(
+        run_agent_with_context_recovery=MagicMock(return_value=failed_review),
+    )
+    host.artifact_text.side_effect = lambda r: getattr(r, "response_text", "") or ""
+    deps = _deps(host, gh)
+
+    result = pr_review_phase.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "failed"
+    # Exactly one review call — no fresh retry.
+    assert host.run_agent_with_context_recovery.call_count == 1
 
 
 # ── summary agent empty-result retry ─────────────────────────────────────
