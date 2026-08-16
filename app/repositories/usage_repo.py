@@ -1389,23 +1389,57 @@ class UsageRepository:
         start_date: str,
         end_date: str,
     ) -> tuple[int, int]:
-        """Query session_messages for tokens/requests in a date window.
+        """Get session token/request usage for a date window.
 
-        Changed from agent_sessions.created_at to session_messages.timestamp
-        to correctly count messages for long-running sessions like webui:N.
-        See Issue #1974 for details.
+        Uses user_daily_stats (fast path, same source as quota enforcement) so
+        the Work-page display matches what enforcement sees. Falls back to
+        agent_sessions.total_tokens when user_daily_stats has no data for the
+        period (e.g. the aggregator hasn't run yet for today's sessions).
+
+        Never reads daily_messages (#1125: analysis fact tables must not
+        participate in Workspace runtime display).
+
+        Fixes #2705: the previous session_messages SUM under-counted by ~10%
+        because cache and other non-message token costs are not recorded in
+        individual message rows.
+
+        Known trade-off (#1974): both paths attribute session tokens to the
+        session's created_at date, not to individual message timestamps. A
+        session spanning midnight will have all its tokens counted on the
+        creation day in the daily view. This matches enforcement (which has
+        always used created_at attribution) and is the correct behaviour for
+        quota display; per-message timestamp attribution for the trend chart
+        is a separate follow-up concern.
         """
+        # Fast path: user_daily_stats — identical to quota_manager enforcement.
+        try:
+            row = self.db.fetch_one(
+                """
+                SELECT
+                    COALESCE(SUM(tokens), 0) as tokens,
+                    COALESCE(SUM(requests), 0) as requests
+                FROM user_daily_stats
+                WHERE user_id = ? AND date >= ? AND date <= ?
+                """,
+                (user_id, start_date, end_date),
+            )
+            if row and (int(row["tokens"]) > 0 or int(row["requests"]) > 0):
+                return int(row["tokens"]), int(row["requests"])
+        except Exception:
+            pass
+
+        # Fallback: agent_sessions.total_tokens with created_at date attribution.
+        # Matches quota_manager._get_usage_in_range() legacy path.
         session_row = self.db.fetch_one(
             """
             SELECT
-                COALESCE(SUM(sm.tokens_used), 0) as tokens,
-                COUNT(CASE WHEN sm.role = 'assistant' THEN 1 END) as requests
-            FROM session_messages sm
-            JOIN agent_sessions a ON sm.session_id = a.session_id
-            WHERE a.user_id = ?
-              AND a.workspace_type IN ('local', 'remote', 'terminal')
-              AND CAST(sm.timestamp AS DATE) >= ? AND CAST(sm.timestamp AS DATE) <= ?
-        """,
+                COALESCE(SUM(total_tokens), 0) as tokens,
+                COUNT(*) as requests
+            FROM agent_sessions
+            WHERE user_id = ?
+              AND workspace_type IN ('local', 'remote', 'terminal')
+              AND CAST(created_at AS DATE) >= ? AND CAST(created_at AS DATE) <= ?
+            """,
             (user_id, start_date, end_date),
         )
         session_tokens = int(session_row["tokens"]) if session_row else 0
