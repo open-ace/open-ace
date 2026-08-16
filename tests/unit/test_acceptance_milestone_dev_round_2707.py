@@ -1,99 +1,71 @@
 """Regression: acceptance_verification milestone must record the workflow's
 current dev_round, not the DB default (1).
 
-Issue #2707: _create_milestone did not fall back to the workflow's dev_round
-when the caller omitted it.  Acceptance-verification milestones were always
-stored with dev_round=1 regardless of the actual round, breaking per-round
-timeline aggregation on multi-round workflows.
+Issue #2707: _acceptance_milestone omitted dev_round from the returned dict,
+so acceptance milestones in multi-round workflows were always stored with the
+DB default of 1 regardless of the actual round.
 
-Intentional scope expansion: all 14 call sites that omit dev_round (not only
-acceptance_verification but also cleaned_up, branch_created, pr_created-reused,
-etc.) now record and dedup against the current round rather than match-any-round.
-This is more accurate—each round gets its own timeline entries—and is consistent
-with the #2707 regression anchor.  The third test below anchors this behaviour.
+Fix is targeted to the acceptance path only: dev_round is now an explicit
+parameter of _acceptance_milestone and filled from wf["dev_round"] at the
+call site.  _create_milestone itself is unchanged so other callers (cleaned_up,
+branch_created, etc.) keep their existing match-any-round idempotency.
 """
 
-from unittest.mock import MagicMock
+import json
 
 import pytest
 
-from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+from app.modules.workspace.autonomous.phases.acceptance_verification import (
+    _acceptance_milestone,
+)
 
 pytestmark = [pytest.mark.regression, pytest.mark.issue(2707)]
 
-
-def _make_orch(dev_round: int) -> AutonomousOrchestrator:
-    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
-    orch._workflow_id = "wf-2707"
-    orch._emit = lambda *_a, **_k: None
-
-    repo = MagicMock()
-    repo.get_workflow.return_value = {"workflow_id": "wf-2707", "dev_round": dev_round}
-    repo.list_milestones.return_value = []
-    repo.create_milestone.side_effect = lambda data: {"milestone_id": "ms-new", **data}
-    orch.repo = repo
-
-    return orch
+_REPORT = {
+    "merge_sha": "abc123",
+    "status": "confirmed",
+    "scope": [],
+    "gates": [],
+    "verifier": [],
+}
 
 
-def test_create_milestone_defaults_dev_round_from_workflow():
-    """_create_milestone must use the live workflow dev_round when omitted."""
-    orch = _make_orch(dev_round=3)
-
-    ms = orch._create_milestone(
-        phase="acceptance_verification",
-        milestone_type="acceptance_verification",
+def test_acceptance_milestone_includes_dev_round():
+    """The milestone dict must carry the caller-supplied dev_round (#2707)."""
+    ms = _acceptance_milestone(
+        workflow_id="wf-test",
+        dev_round=3,
+        attempt=1,
         status="confirmed",
-        title="Acceptance verification: confirmed",
+        report=_REPORT,
     )
 
-    assert ms["dev_round"] == 3, f"expected dev_round=3, got {ms['dev_round']!r}"
+    assert ms["dev_round"] == 3
 
 
-def test_create_milestone_explicit_dev_round_not_overridden():
-    """An explicit dev_round kwarg must never be replaced by the workflow default."""
-    orch = _make_orch(dev_round=5)
+def test_acceptance_milestone_dev_round_one():
+    """dev_round=1 is stored verbatim, not silently elevated."""
+    ms = _acceptance_milestone(
+        workflow_id="wf-test",
+        dev_round=1,
+        attempt=2,
+        status="rejected",
+        report=_REPORT,
+    )
 
-    ms = orch._create_milestone(
-        phase="merge",
-        milestone_type="merge_completed",
+    assert ms["dev_round"] == 1
+
+
+def test_acceptance_milestone_string_fields_still_valid():
+    """Existing contract: result_summary and metadata must remain strings (#2394)."""
+    ms = _acceptance_milestone(
+        workflow_id="wf-test",
         dev_round=2,
-        status="completed",
-        title="Merge completed",
+        attempt=1,
+        status="confirmed",
+        report=_REPORT,
     )
 
-    assert ms["dev_round"] == 2, f"explicit dev_round=2 was overwritten; got {ms['dev_round']!r}"
-    # No extra DB call when dev_round is already set.
-    orch.repo.get_workflow.assert_not_called()
-
-
-def test_implicit_callers_dedup_per_round():
-    """Round-2 milestones that omit dev_round must not dedup against round-1 rows.
-
-    Anchors the intentional expansion: callers that omit dev_round now get
-    match-current-round idempotency rather than match-any-round.  A round-2
-    cleaned_up milestone must create a new row even when round-1's exists.
-    """
-    orch = _make_orch(dev_round=2)
-    prior = {
-        "milestone_id": "ms-round1",
-        "milestone_type": "cleaned_up",
-        "phase": "completed",
-        "dev_round": 1,
-        "round_number": None,
-        "status": "completed",
-    }
-    orch.repo.list_milestones.side_effect = (
-        lambda wf_id, phase=None, status=None: [prior] if status == "completed" else []
-    )
-
-    ms = orch._create_milestone(
-        phase="completed",
-        milestone_type="cleaned_up",
-        status="completed",
-        title="Cleanup round 2",
-        # dev_round intentionally omitted — must be filled from workflow (round 2)
-    )
-
-    assert ms["dev_round"] == 2
-    orch.repo.create_milestone.assert_called_once()
+    assert isinstance(ms["result_summary"], str)
+    assert isinstance(ms["metadata"], str)
+    assert json.loads(ms["metadata"])["merge_sha"] == "abc123"
