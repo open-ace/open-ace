@@ -9,6 +9,7 @@ import tempfile
 from datetime import datetime, timezone
 
 import pytest
+
 from shared.file_change_parser import (
     FileChangeParserRegistry,
     FileChangeRecord,
@@ -148,9 +149,7 @@ class TestFileChangeParserRegistry:
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
-        records = FileChangeParserRegistry.parse(
-            "Write", {"file_path": "/tmp/test.txt"}, context
-        )
+        records = FileChangeParserRegistry.parse("Write", {"file_path": "/tmp/test.txt"}, context)
 
         assert records == []
 
@@ -170,9 +169,7 @@ class TestFileChangeParserRegistry:
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
-        records = FileChangeParserRegistry.parse(
-            "Bash", {"command": "mkdir test"}, context
-        )
+        records = FileChangeParserRegistry.parse("Bash", {"command": "mkdir test"}, context)
 
         assert records == []
 

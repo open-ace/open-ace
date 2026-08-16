@@ -3780,7 +3780,9 @@ class AutonomousAgentRunner:
                             project_path=getattr(self, "project_path", ""),
                             timestamp=datetime.now(timezone.utc).isoformat(),
                         )
-                        records = FileChangeParserRegistry.parse(tool_name, tool_input, parse_context)
+                        records = FileChangeParserRegistry.parse(
+                            tool_name, tool_input, parse_context
+                        )
                         if records:
                             self.session_manager.append_transcript_message(
                                 session_id=session_id,

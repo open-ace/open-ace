@@ -13,7 +13,7 @@ import logging
 import os
 import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
@@ -111,7 +111,7 @@ class MkdirParser(FileChangeParser):
         if tool_name != "Bash":
             return False
         command = tool_input.get("command", "")
-        return bool(re.search(r'\bmkdir\b', command))
+        return bool(re.search(r"\bmkdir\b", command))
 
     def parse(
         self, tool_name: str, tool_input: dict, context: ParserContext
@@ -148,21 +148,21 @@ class MkdirParser(FileChangeParser):
     def _extract_paths(self, command: str) -> list[str]:
         """Extract paths from mkdir command."""
         cmd = command.strip()
-        mkdir_match = re.match(r'\bmkdir\b\s*', cmd)
+        mkdir_match = re.match(r"\bmkdir\b\s*", cmd)
         if not mkdir_match:
             return []
-        cmd = cmd[mkdir_match.end():]
+        cmd = cmd[mkdir_match.end() :]
 
         while cmd:
-            opt_match = re.match(r'-[a-zA-Z]+\s*', cmd)
+            opt_match = re.match(r"-[a-zA-Z]+\s*", cmd)
             if opt_match:
-                cmd = cmd[opt_match.end():]
+                cmd = cmd[opt_match.end() :]
                 continue
-            long_opt_match = re.match(r'--[a-zA-Z-]+(?:=\S+)?\s*', cmd)
+            long_opt_match = re.match(r"--[a-zA-Z-]+(?:=\S+)?\s*", cmd)
             if long_opt_match:
-                cmd = cmd[long_opt_match.end():]
+                cmd = cmd[long_opt_match.end() :]
                 continue
-            if cmd.startswith('-- '):
+            if cmd.startswith("-- "):
                 cmd = cmd[3:]
                 break
             break
@@ -176,20 +176,20 @@ class MkdirParser(FileChangeParser):
                 match = re.match(r'"([^"]+)"\s*', cmd)
                 if match:
                     paths.append(match.group(1))
-                    cmd = cmd[match.end():]
+                    cmd = cmd[match.end() :]
                     continue
             if cmd.startswith("'"):
                 match = re.match(r"'([^']+)'\s*", cmd)
                 if match:
                     paths.append(match.group(1))
-                    cmd = cmd[match.end():]
+                    cmd = cmd[match.end() :]
                     continue
-            match = re.match(r'([^\s]+)\s*', cmd)
+            match = re.match(r"([^\s]+)\s*", cmd)
             if match:
                 path = match.group(1)
-                if not path.startswith('-'):
+                if not path.startswith("-"):
                     paths.append(path)
-                cmd = cmd[match.end():]
+                cmd = cmd[match.end() :]
                 continue
             break
         return paths
@@ -209,7 +209,7 @@ class MkdirParser(FileChangeParser):
             abs_project = os.path.realpath(project_path)
             if not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project:
                 return False
-            dangerous_chars = ['$', '`', '|', ';', '&', '<', '>', '*']
+            dangerous_chars = ["$", "`", "|", ";", "&", "<", ">", "*"]
             return not any(char in path for char in dangerous_chars)
         except Exception:
             return False
@@ -222,7 +222,7 @@ class RmParser(FileChangeParser):
         if tool_name != "Bash":
             return False
         command = tool_input.get("command", "")
-        return bool(re.search(r'\brm\b', command))
+        return bool(re.search(r"\brm\b", command))
 
     def parse(
         self, tool_name: str, tool_input: dict, context: ParserContext
@@ -256,14 +256,14 @@ class RmParser(FileChangeParser):
 
     def _extract_paths(self, command: str) -> list[str]:
         cmd = command.strip()
-        rm_match = re.match(r'\brm\b\s*', cmd)
+        rm_match = re.match(r"\brm\b\s*", cmd)
         if not rm_match:
             return []
-        cmd = cmd[rm_match.end():]
+        cmd = cmd[rm_match.end() :]
         while cmd:
-            opt_match = re.match(r'-[rfv]+\s*', cmd)
+            opt_match = re.match(r"-[rfv]+\s*", cmd)
             if opt_match:
-                cmd = cmd[opt_match.end():]
+                cmd = cmd[opt_match.end() :]
                 continue
             break
 
@@ -276,20 +276,20 @@ class RmParser(FileChangeParser):
                 match = re.match(r'"([^"]+)"\s*', cmd)
                 if match:
                     paths.append(match.group(1))
-                    cmd = cmd[match.end():]
+                    cmd = cmd[match.end() :]
                     continue
             if cmd.startswith("'"):
                 match = re.match(r"'([^']+)'\s*", cmd)
                 if match:
                     paths.append(match.group(1))
-                    cmd = cmd[match.end():]
+                    cmd = cmd[match.end() :]
                     continue
-            match = re.match(r'([^\s]+)\s*', cmd)
+            match = re.match(r"([^\s]+)\s*", cmd)
             if match:
                 path = match.group(1)
-                if not path.startswith('-'):
+                if not path.startswith("-"):
                     paths.append(path)
-                cmd = cmd[match.end():]
+                cmd = cmd[match.end() :]
                 continue
             break
         return paths
@@ -312,7 +312,7 @@ class RmParser(FileChangeParser):
             return False
 
     def _is_directory_flag(self, command: str) -> bool:
-        return bool(re.search(r'-[rf]+\b', command) or re.search(r'-[a-zA-Z]*r', command))
+        return bool(re.search(r"-[rf]+\b", command) or re.search(r"-[a-zA-Z]*r", command))
 
 
 class WriteFileParser(FileChangeParser):
