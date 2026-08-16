@@ -172,9 +172,7 @@ def test_sync_sentinel_skips_full_review_advances_to_report_when_ci_green():
     host = _host(poll_ci_status=MagicMock(return_value=_PASS_CHECKS))
     deps = _deps(host, gh)
 
-    result = pr_review_phase.handle(
-        _ctx(_workflow(error_message=_SYNC_SENTINEL)), deps
-    )
+    result = pr_review_phase.handle(_ctx(_workflow(error_message=_SYNC_SENTINEL)), deps)
 
     assert result.outcome == "completed"
     assert result.next_phase == "report"
@@ -223,15 +221,13 @@ def test_ci_repoll_before_decision_clears_stale_failures_on_green():
         poll_ci_status=MagicMock(
             side_effect=[
                 [_FAIL_CHECK],  # entry snapshot
-                _PASS_CHECKS,   # re-poll before decision
+                _PASS_CHECKS,  # re-poll before decision
             ]
         ),
     )
     deps = _deps(host, gh)
 
-    result = pr_review_phase.handle(
-        _ctx(_workflow(current_round=0, max_pr_review_rounds=1)), deps
-    )
+    result = pr_review_phase.handle(_ctx(_workflow(current_round=0, max_pr_review_rounds=1)), deps)
 
     assert result.outcome == "completed"
     assert result.next_phase == "report"
@@ -254,9 +250,7 @@ def test_ci_repoll_before_decision_still_triggers_repair_on_persistent_failure()
     )
     deps = _deps(host, gh)
 
-    result = pr_review_phase.handle(
-        _ctx(_workflow(current_round=0, max_pr_review_rounds=1)), deps
-    )
+    result = pr_review_phase.handle(_ctx(_workflow(current_round=0, max_pr_review_rounds=1)), deps)
 
     assert result.outcome == "retry"
     host.start_ci_repair_round.assert_called_once()
