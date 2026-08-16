@@ -210,9 +210,7 @@ class MkdirParser(FileChangeParser):
             if not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project:
                 return False
             dangerous_chars = ['$', '`', '|', ';', '&', '<', '>', '*']
-            if any(char in path for char in dangerous_chars):
-                return False
-            return True
+            return not any(char in path for char in dangerous_chars)
         except Exception:
             return False
 
@@ -309,9 +307,7 @@ class RmParser(FileChangeParser):
         try:
             abs_path = os.path.realpath(path)
             abs_project = os.path.realpath(project_path)
-            if not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project:
-                return False
-            return True
+            return not (not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project)
         except Exception:
             return False
 
@@ -366,9 +362,7 @@ class WriteFileParser(FileChangeParser):
         try:
             abs_path = os.path.realpath(path)
             abs_project = os.path.realpath(project_path)
-            if not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project:
-                return False
-            return True
+            return not (not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project)
         except Exception:
             return False
 
@@ -420,9 +414,7 @@ class EditParser(FileChangeParser):
         try:
             abs_path = os.path.realpath(path)
             abs_project = os.path.realpath(project_path)
-            if not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project:
-                return False
-            return True
+            return not (not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project)
         except Exception:
             return False
 
