@@ -260,3 +260,47 @@ def test_ci_repoll_before_decision_still_triggers_repair_on_persistent_failure()
 
     assert result.outcome == "retry"
     host.start_ci_repair_round.assert_called_once()
+
+
+# ── Widened guard: transient / no-change overwrite also skips review ─────
+
+
+def test_transient_deferred_sentinel_skips_full_review_advances_to_report_when_ci_green():
+    """start_ci_repair_round overwrites error_message with
+    'CI repair deferred: transient API error ...' on 503/429.  The widened
+    guard ('CI repair deferred:' prefix family) must catch this so a transient
+    deferral mid-repair does not spawn a phantom review round (#2711 review
+    comment — important)."""
+    gh = _gh()
+    host = _host(poll_ci_status=MagicMock(return_value=_PASS_CHECKS))
+    deps = _deps(host, gh)
+
+    transient_sentinel = "CI repair deferred: transient API error - 503 upstream"
+    result = pr_review_phase.handle(
+        _ctx(_workflow(error_message=transient_sentinel, current_round=3)), deps
+    )
+
+    assert result.outcome == "completed"
+    assert result.next_phase == "report"
+    host.run_agent_with_context_recovery.assert_not_called()
+
+
+def test_no_change_deferred_sentinel_skips_full_review_triggers_repair_when_ci_failing():
+    """start_ci_repair_round overwrites error_message with
+    'CI repair deferred: agent produced no code changes' on an empty-commit
+    round.  The widened guard must also catch this so no phantom review round
+    fires; the handler delegates to start_ci_repair_round for re-entry
+    (#2711 review comment — important)."""
+    gh = _gh()
+    host = _host(poll_ci_status=MagicMock(return_value=[_FAIL_CHECK]))
+    deps = _deps(host, gh)
+
+    no_change_sentinel = "CI repair deferred: agent produced no code changes"
+    result = pr_review_phase.handle(
+        _ctx(_workflow(error_message=no_change_sentinel, current_round=3)), deps
+    )
+
+    assert result.outcome == "retry"
+    host.start_ci_repair_round.assert_called_once()
+    host.run_agent_with_context_recovery.assert_not_called()
+    assert "current_round" not in result.workflow_patch

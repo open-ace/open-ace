@@ -417,13 +417,13 @@ def handle(ctx, deps) -> PhaseResult:
     if not pr_number:
         pr_number = host.get_workflow_field("github_pr_number")
 
-    # After _start_ci_repair_round synced the branch with main, skip the full
-    # review cycle and only re-check CI (#2711). Without this guard the handler
-    # re-enters as a new review round, bypassing all #2443 convergence guards
-    # and incrementing current_round past max_pr_review_rounds.
-    if (wf.get("error_message") or "").startswith(
-        "CI repair deferred: waiting for CI after main sync"
-    ):
+    # Any "CI repair deferred:" sentinel (sync-wait, transient API error,
+    # no-change) means _start_ci_repair_round already handled this cycle.
+    # Skip the full review and only re-check CI (#2711): without this guard the
+    # handler re-enters as a new review round, bypassing all #2443 convergence
+    # guards.  The whole prefix family is matched so a transient/no-change
+    # deferral mid-repair also skips the phantom review round.
+    if (wf.get("error_message") or "").startswith("CI repair deferred:"):
         fresh_failures: list = []
         if pr_number:
             try:
