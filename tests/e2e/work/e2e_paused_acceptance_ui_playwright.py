@@ -23,6 +23,12 @@ repository, mirroring tests/e2e/e2e_acceptance_override_playwright.py):
   4. Rejected workflow timeline (#2658): the "View acceptance report" button
      opens the generic content viewer with the per-item verdicts and evidence
      refs parsed from the acceptance milestone's metadata JSON.
+  5. Rejected pause (#2491 UX): the resume-with-feedback modal opens
+     PRE-FILLED with the verifier failed-items list (server-derived from the
+     stored verification report; confirmed gates excluded).
+  6. Waiting + user_feedback (#2491 UX): the timeline shows the
+     "Feedback received" restart banner and hides the manual
+     "Complete Development" exit.
 
 Seeding: five workflow rows are inserted via AutonomousWorkflowRepository —
 an acceptance-paused (rejected) workflow paused >3 days ago, a quota-paused
@@ -54,6 +60,11 @@ from playwright.sync_api import expect, sync_playwright
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+# Login identity: CI uses the scripts/init_db.py defaults (admin/admin123);
+# a local dev DB may have rotated the admin password, so allow an override
+# (e.g. a dedicated e2e platform-admin user) without touching CI behavior.
+E2E_USERNAME = os.environ.get("E2E_USERNAME", "admin")
+E2E_PASSWORD = os.environ.get("E2E_PASSWORD", "admin123")
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "tests", "screenshots", "e2e-paused-acceptance-ui")
 
 
@@ -91,7 +102,7 @@ def clear_forced_password_change() -> None:
 
     app = create_app()
     with app.app_context():
-        user = UserRepository().get_user_by_username("admin")
+        user = UserRepository().get_user_by_username(E2E_USERNAME)
         if user:
             UserRepository().set_must_change_password(int(user["id"]), False)
 
@@ -117,7 +128,7 @@ def seed_workflow(
 
     app = create_app()
     repo = AutonomousWorkflowRepository()
-    user = UserRepository().get_user_by_username("admin") or {"id": 1}
+    user = UserRepository().get_user_by_username(E2E_USERNAME) or {"id": 1}
     workflow_id = f"e2e-pause-{uuid.uuid4().hex[:12]}"
     with app.app_context():
         repo.create_workflow(
@@ -213,8 +224,8 @@ def cleanup_previous_runs() -> None:
 def login(page) -> None:
     page.goto(f"{BASE_URL}/login", wait_until="domcontentloaded")
     page.wait_for_selector("#username", state="visible", timeout=15000)
-    page.fill("#username", "admin")
-    page.fill("#password", "admin123")
+    page.fill("#username", E2E_USERNAME)
+    page.fill("#password", E2E_PASSWORD)
     page.click("button[type='submit']")
     page.wait_for_url(lambda url: "/login" not in url, timeout=120000)
 
@@ -402,6 +413,88 @@ def main() -> None:
             expect(viewer.get_by_text("tests/test_login.py:12")).to_be_visible()
             shot(page, "06-report-viewer")
             print("[PASS] acceptance report viewer renders per-item verdicts + evidence")
+
+            # ── 5. Rejected pause: feedback modal prefill (#2491 UX) ──────
+            prefill_id = seed_workflow(
+                title="E2E prefill-acceptance UI #2491",
+                paused_days_ago=0,
+            )
+            import json as _json_dump
+
+            os.environ.setdefault("SCHEDULER_MODE", "web")
+            from app import create_app as _create_app
+
+            _report = {
+                "merge_sha": "abc123def456",
+                "status": "rejected",
+                "verified_by": "glm-5/e2e",
+                "scope": [],
+                "gates": [{"item": "call-chain", "verdict": "confirmed", "evidence": []}],
+                "verifier": [
+                    {
+                        "item": "修复登录失败",
+                        "verdict": "rejected",
+                        "evidence": [],
+                        "rationale": "合并后用例依旧失败",
+                    }
+                ],
+            }
+            _app = _create_app()
+            with _app.app_context():
+                AutonomousWorkflowRepository().update_workflow(
+                    prefill_id,
+                    {"verification_report": _json_dump.dumps(_report, ensure_ascii=False)},
+                )
+            page.goto(
+                f"{BASE_URL}/work/autonomous?workflow={prefill_id}",
+                wait_until="domcontentloaded",
+            )
+            pause(2)
+            page.wait_for_selector(".timeline-state-banner", timeout=30000)
+            page.locator(".timeline-state-banner").get_by_text(
+                "Resume with Feedback", exact=True
+            ).click()
+            pause(0.5)
+            prefill_modal = page.get_by_role("dialog")
+            expect(prefill_modal).to_be_visible()
+            prefill_textarea = prefill_modal.locator("textarea")
+            # Server-derived prefill mirrors the issue comment's failed-items
+            # section: confirmed gates must not leak in.
+            expect(prefill_textarea).to_have_value(
+                "Rejected / missing:\n- [verifier] `修复登录失败` (rejected) — 合并后用例依旧失败"
+            )
+            expect(prefill_modal.get_by_text("Resume with Feedback", exact=True)).to_be_enabled()
+            shot(page, "07-feedback-prefill")
+            print("[PASS] feedback modal pre-fills the verifier failed-items list")
+            prefill_modal.get_by_text("Cancel", exact=True).click()
+            expect(page.get_by_role("dialog")).not_to_be_visible(timeout=10000)
+
+            # ── 6. Waiting+feedback: restart banner, no manual exit ───────
+            waiting_id = seed_workflow(
+                title="E2E feedback-pending UI #2491",
+                status="waiting",
+                current_phase="wait",
+                verification_status="rejected",
+                error_message="",
+                paused_days_ago=0,
+            )
+            with _app.app_context():
+                AutonomousWorkflowRepository().update_workflow(
+                    waiting_id, {"user_feedback": "E2E: wire the missing CI lane"}
+                )
+            page.goto(
+                f"{BASE_URL}/work/autonomous?workflow={waiting_id}",
+                wait_until="domcontentloaded",
+            )
+            pause(2)
+            page.wait_for_selector(".timeline-state-banner--feedback", timeout=30000)
+            expect(
+                page.get_by_text("Feedback received — a new development round will start shortly")
+            ).to_be_visible()
+            # No manual "Complete Development" exit while a restart is queued.
+            expect(page.get_by_text("Complete Development", exact=True)).not_to_be_visible()
+            shot(page, "08-feedback-pending-banner")
+            print("[PASS] waiting+feedback shows restart banner and hides Complete Development")
         finally:
             browser.close()
 

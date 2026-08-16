@@ -11711,6 +11711,13 @@ class AutonomousOrchestrator:
                     {
                         "dev_round": dev_round + 1,
                         "dev_retries_on_test_fail": dev_retries,
+                        # #2679: phases/development.py skips the dev agent
+                        # whenever test_retries > 0 or skip_retries > 0, so
+                        # stale counters from this round's test/skip retries
+                        # would turn the repair round into a test-only re-run.
+                        # Same reset the #2590 dev-repair branch performs.
+                        "test_retries": 0,
+                        "skip_retries": 0,
                     }
                 )
                 return

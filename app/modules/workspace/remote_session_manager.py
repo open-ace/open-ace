@@ -1180,12 +1180,12 @@ class RemoteSessionManager:
 
         mark_session_stopped(session_id)
 
-        # Complete session
-        self._session_manager.complete_session(session_id)
+        # Stop session
+        self._session_manager.stop_session(session_id)
         self._agent_manager.unbind_session(session_id)
 
         logger.info(f"Stopped remote session {session_id}")
-        self._timeline("record_run_status", session_id, "completed")
+        self._timeline("record_run_status", session_id, "stopped")
         return True
 
     def pause_session(self, session_id: str) -> bool:
@@ -1750,7 +1750,7 @@ class RemoteSessionManager:
                 session.paused_at = datetime.now(timezone.utc).replace(tzinfo=None)
         elif status == "stopped":
             # User-initiated stop — finalize the session
-            session.status = "completed"
+            session.status = "stopped"
             session.paused_at = None
             self._agent_manager.unbind_session(session_id)
             self._agent_manager.mark_session_ended(session_id)
@@ -1780,7 +1780,7 @@ class RemoteSessionManager:
 
         # Record terminal lifecycle events (stop / error). The "completed/exited"
         # branch keeps the session active, so only genuine stops/errors are logged.
-        if session.status == "completed":
+        if session.status == "stopped":
             self._timeline("record_run_status", session_id, "stopped")
         elif session.status == "error":
             self._timeline("record_run_status", session_id, "error")

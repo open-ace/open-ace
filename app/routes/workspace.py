@@ -868,7 +868,7 @@ def list_sessions():
         tenant_id = get_current_tenant_id()
 
         # Valid values for status and session_type (whitelist validation)
-        VALID_STATUS_VALUES = {"active", "paused", "completed", "error"}
+        VALID_STATUS_VALUES = {"active", "paused", "completed", "stopped", "error"}
         VALID_SESSION_TYPE_VALUES = {"chat", "agent", "workflow", "terminal"}
 
         # Validate status and session_type parameters

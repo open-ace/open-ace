@@ -419,6 +419,13 @@
   border-left-color: var(--color-danger);
 }
 
+/* Feedback received — the workflow re-enters development on its own (#2491). */
+.timeline-state-banner--feedback {
+  background: color-mix(in srgb, var(--color-success) 10%, var(--bg-primary) 90%);
+  border-color: color-mix(in srgb, var(--color-success) 26%, var(--border-color) 74%);
+  border-left-color: var(--color-success);
+}
+
 .timeline-state-banner--info {
   background: color-mix(in srgb, var(--color-primary) 8%, var(--bg-primary) 92%);
   border-color: color-mix(in srgb, var(--color-primary) 22%, var(--border-color) 78%);

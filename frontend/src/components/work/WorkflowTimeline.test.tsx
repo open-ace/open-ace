@@ -204,6 +204,73 @@ describe('WorkflowTimeline paused-state banner (#2634)', () => {
   });
 });
 
+describe('WorkflowTimeline feedback-pending restart state (#2491 UX)', () => {
+  beforeEach(() => {
+    mockResumeWithFeedbackMutate.mockReset();
+    mockAcceptanceOverrideMutate.mockReset();
+  });
+
+  it('shows the feedback-received banner and hides Complete Development for waiting+feedback rows', () => {
+    const { container } = renderTimeline(
+      pausedWorkflow({
+        status: 'waiting',
+        current_phase: 'wait',
+        user_feedback: 'wire CI lanes before re-verify',
+        error_message: '',
+      })
+    );
+
+    const banner = stateBanner(container);
+    expect(banner.className).toContain('timeline-state-banner--feedback');
+    expect(
+      within(banner).getByText('Feedback received — a new development round will start shortly')
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /complete development/i })).not.toBeInTheDocument();
+  });
+
+  it('keeps Complete Development for waiting rows WITHOUT feedback', () => {
+    renderTimeline(
+      pausedWorkflow({
+        status: 'waiting',
+        current_phase: 'wait',
+        user_feedback: '',
+        error_message: '',
+      })
+    );
+
+    expect(screen.getByRole('button', { name: /complete development/i })).toBeInTheDocument();
+  });
+
+  it('development-phase rows with leftover user_feedback do not show the feedback banner', () => {
+    const { container } = renderTimeline(
+      pausedWorkflow({
+        status: 'developing',
+        current_phase: 'development',
+        user_feedback: 'wire CI lanes',
+        error_message: '',
+      })
+    );
+
+    expect(container.querySelector('.timeline-state-banner--feedback')).toBeNull();
+  });
+
+  it('pre-fills the feedback modal with the verifier failed-items prefill', () => {
+    const prefill =
+      'Rejected / missing:\n- [verifier] `wire CI lanes` (rejected) — no producer job in workflows';
+    renderTimeline(
+      pausedWorkflow({ verification_status: 'rejected', acceptance_feedback_prefill: prefill })
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /new development round/i }));
+
+    const dialog = screen.getByRole('dialog');
+    const textarea = within(dialog).getByRole('textbox');
+    expect(textarea).toHaveValue(prefill);
+    const submit = within(dialog).getByRole('button', { name: /resume with feedback/i });
+    expect(submit).not.toBeDisabled();
+  });
+});
+
 describe('formatAcceptanceReport (#2658)', () => {
   it('renders markdown structure: status heading, meta list, sections, nested evidence', () => {
     const report = {
