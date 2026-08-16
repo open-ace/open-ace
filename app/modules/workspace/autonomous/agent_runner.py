@@ -3767,7 +3767,10 @@ class AutonomousAgentRunner:
 
                     # Parse file changes from tool_use events (Issue #2589)
                     try:
-                        from shared.file_change_parser import FileChangeParserRegistry, ParserContext
+                        from shared.file_change_parser import (
+                            FileChangeParserRegistry,
+                            ParserContext,
+                        )
 
                         tool_name = event.get("tool_name", "unknown")
                         tool_use_id = event.get("tool_use_id", "")
