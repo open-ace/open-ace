@@ -2,6 +2,7 @@
 
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -42,12 +43,17 @@ def test_extract_tokens_keeps_provider_total_and_separates_cache():
 
 
 def test_process_jsonl_file_counts_cache_in_total_without_double_counting_thoughts(tmp_path):
+    # Use current date to ensure data is within the recent 7-day window
+    now = datetime.now(timezone.utc)
+    timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    date_key = now.strftime("%Y-%m-%d")
+
     jsonl = _write_jsonl(
         tmp_path / "sess-qwen.jsonl",
         [
             {
                 "type": "assistant",
-                "timestamp": "2026-07-15T07:00:00Z",
+                "timestamp": timestamp,
                 "model": "qwen-max",
                 "sessionId": "sess-qwen",
                 "uuid": "assistant-1",
@@ -68,12 +74,12 @@ def test_process_jsonl_file_counts_cache_in_total_without_double_counting_though
 
     daily, messages = process_jsonl_file(jsonl, "localhost", "rhuang")
 
-    assert daily["2026-07-15"]["prompt_tokens"] == 200
-    assert daily["2026-07-15"]["candidates_tokens"] == 50
-    assert daily["2026-07-15"]["thoughts_tokens"] == 20
-    assert daily["2026-07-15"]["cached_tokens"] == 800
-    assert daily["2026-07-15"]["total_tokens"] == 1050
-    assert daily["2026-07-15"]["request_count"] == 1
+    assert daily[date_key]["prompt_tokens"] == 200
+    assert daily[date_key]["candidates_tokens"] == 50
+    assert daily[date_key]["thoughts_tokens"] == 20
+    assert daily[date_key]["cached_tokens"] == 800
+    assert daily[date_key]["total_tokens"] == 1050
+    assert daily[date_key]["request_count"] == 1
 
     assert len(messages) == 1
     assert messages[0]["tokens_used"] == 1050
