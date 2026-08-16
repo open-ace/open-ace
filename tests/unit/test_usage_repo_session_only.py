@@ -10,8 +10,9 @@ user_daily_stats has no data for the period. This closes the ~10% gap where
 the previous session_messages SUM missed cache and other non-message token costs.
 """
 
-import pytest
 from unittest.mock import MagicMock, call
+
+import pytest
 
 from app.repositories.usage_repo import UsageRepository
 
@@ -111,7 +112,7 @@ class TestGetSessionOnlyUsage:
         db = MagicMock()
         db.fetch_one.side_effect = [
             {"tokens": 0, "requests": 0},  # user_daily_stats: empty
-            None,                           # agent_sessions: no rows
+            None,  # agent_sessions: no rows
         ]
         repo = _make_repo(db)
 

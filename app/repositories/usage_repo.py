@@ -1402,6 +1402,14 @@ class UsageRepository:
         Fixes #2705: the previous session_messages SUM under-counted by ~10%
         because cache and other non-message token costs are not recorded in
         individual message rows.
+
+        Known trade-off (#1974): both paths attribute session tokens to the
+        session's created_at date, not to individual message timestamps. A
+        session spanning midnight will have all its tokens counted on the
+        creation day in the daily view. This matches enforcement (which has
+        always used created_at attribution) and is the correct behaviour for
+        quota display; per-message timestamp attribution for the trend chart
+        is a separate follow-up concern.
         """
         # Fast path: user_daily_stats — identical to quota_manager enforcement.
         try:
