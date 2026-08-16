@@ -150,6 +150,32 @@ def test_old_gh_omits_flag_on_run_list_fallback():
     assert calls[-1] == ["run", "view", "777", "--log-failed"]
 
 
+def test_modern_gh_keeps_flag_on_run_list_fallback():
+    """Completes the 3-path x 2-version matrix: the run-list fallback keeps
+    the flag on gh >= 2.97 (guards the ANSI-refusal fix, Issue #2708)."""
+    gh = GitHubOps("/tmp/repo")
+    gh._escape_flag_supported = True
+    calls = []
+
+    def fake_run(args, check=True, repo_scoped=True, api_only=False):
+        calls.append(list(args))
+        if args[0] == "run" and args[1] == "list":
+            return _result(stdout=json.dumps([{"databaseId": 777, "name": "lint"}]))
+        return _result(stdout="LINT: failure\nblack...FAILED\n")
+
+    with patch.object(gh, "_run_gh", side_effect=fake_run):
+        excerpt = gh.get_check_failure_excerpt(
+            {
+                "name": "lint",
+                "link": "https://github.com/open-ace/open-ace/runs/999",
+                "head_sha": "a" * 40,
+            }
+        )
+
+    assert "FAILED" in excerpt
+    assert calls[-1] == ["run", "view", "777", "--log-failed", "--allow-escape-sequences"]
+
+
 def test_modern_gh_keeps_flag_on_rest_and_run_view_paths():
     gh = _gh_with_repo()
     gh._escape_flag_supported = True  # probe result for gh >= 2.97

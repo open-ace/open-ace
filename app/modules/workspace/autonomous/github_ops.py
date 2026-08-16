@@ -216,7 +216,7 @@ def _unknown_flag_hint(stderr: str) -> str:
     on deployments running gh < 2.97, and the real cause only shows up in
     a truncated stderr fragment (Issue #2708 / #2482).
     """
-    if "unknown flag" in (stderr or "").lower():
+    if "unknown flag" in stderr.lower():
         return (
             " — likely gh < 2.97 (no --allow-escape-sequences support); "
             "upgrade gh, otherwise every CI log fetch keeps reading as no logs"
@@ -2159,6 +2159,11 @@ class GitHubOps:
             result = self._run_gh(["--version"], check=False, repo_scoped=False)
         except GitHubOpsError:
             return True  # fail open, see _supports_escape_sequences_flag
+        # major.minor only: patch is deliberately ignored — the threshold
+        # (_ESCAPE_FLAG_MIN_GH_VERSION) is minor-level, so a patch bump
+        # (e.g. 2.97.1 vs 2.97.0) must never gate the flag. If a future
+        # threshold needs patch granularity, widen BOTH this regex and the
+        # comparison, not just one.
         m = re.search(r"version\s+(\d+)\.(\d+)", result.stdout or "")
         if not m:
             return True  # fail open, see _supports_escape_sequences_flag
