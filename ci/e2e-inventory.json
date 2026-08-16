@@ -402,6 +402,22 @@
       "notes": "initial disposition (issue #2491 P1 draft)"
     },
     {
+      "path": "tests/e2e/e2e_autonomous_models_error_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2667,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "standalone-style playwright script (issue #2667): run via HEADLESS=true python tests/e2e/e2e_autonomous_models_error_playwright.py; collects no pytest nodeids"
+    },
+    {
       "path": "tests/e2e/e2e_audit_log_default_dates_playwright.py",
       "mode": "pytest-automated",
       "owner": "e2e-governance",
