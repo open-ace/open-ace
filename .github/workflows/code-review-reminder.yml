@@ -52,7 +52,7 @@ jobs:
       - name: Install inspection tools
         if: steps.check-week.outputs.should_create == 'true'
         continue-on-error: true
-        run: pip install --quiet bandit pip-audit psycopg2-binary || true
+        run: pip install --quiet 'bandit[toml]' pip-audit psycopg2-binary || true
 
       - name: Initialize health report
         if: steps.check-week.outputs.should_create == 'true'
@@ -67,19 +67,54 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          echo "<details><summary>🔒 Bandit 安全扫描（HIGH 及以上）</summary>" >> health_report.md
+          echo "<details><summary>🔒 Bandit 安全扫描（Medium 及以上）</summary>" >> health_report.md
           echo "" >> health_report.md
-          bandit -r app scripts -ll -q > /tmp/bandit.txt 2>&1
-          code=$?
-          if [ $code -eq 0 ]; then
-            echo "✅ 未发现 HIGH 及以上安全问题" >> health_report.md
-          else
-            echo "⚠️ 发现安全问题（详见下方）：" >> health_report.md
-            echo "" >> health_report.md
-            echo '```text' >> health_report.md
-            tail -n 60 /tmp/bandit.txt >> health_report.md
-            echo '```' >> health_report.md
-          fi
+          # 与权威 CI 门（scripts/lint/bandit_check.py，required lint job）同配置：
+          # -c pyproject.toml 使 B101/B601 skip 与 exclude_dirs 生效，避免配置漂移假警报。
+          # 明细走定向提取而非全量 cat：Medium+ 全量文本约数百 KB，会超出 issue body
+          # 65536 字符上限导致 issues.create 失败。
+          bandit -r app scripts -c pyproject.toml -ll -q -f json > /tmp/bandit.json 2>/dev/null
+          python3 - <<'PY' >> health_report.md 2>&1
+          import json
+          from collections import Counter
+
+          try:
+              raw = open("/tmp/bandit.json", encoding="utf-8", errors="replace").read()
+              # Bandit >= 1.9 prints a "Working..." progress line before the JSON payload.
+              # No "{" at all means bandit produced no JSON (install/parse failure) —
+              # fall through to the parse-failure branch, never to the clean branch.
+              start = raw.find("{")
+              if start < 0:
+                  raise ValueError("no JSON payload in bandit output")
+              results = json.loads(raw[start:]).get("results", [])
+          except Exception:
+              results = None
+
+          if results is None:
+              print("⚠️ Bandit 输出解析失败，请查看 workflow 日志。")
+          elif not results:
+              print("✅ 未发现 Medium 及以上安全问题")
+          else:
+              high = [r for r in results if r.get("issue_severity") == "HIGH"]
+              by_id = Counter(r.get("test_id", "?") for r in results)
+              print(f"⚠️ 发现 {len(results)} 处 Medium 及以上问题（其中 HIGH: {len(high)}；HIGH 会阻塞 CI lint 门）：")
+              print()
+              print("```text")
+              print("按检查项汇总：")
+              for test_id, n in sorted(by_id.items()):
+                  print(f"  {test_id}: {n}")
+              print()
+              if high:
+                  print("HIGH 明细（前 40 处）：")
+                  for r in high[:40]:
+                      print(f"  {r['filename']}:{r['line_number']} {r['test_id']} {r['issue_text']}")
+                  if len(high) > 40:
+                      print(f"  ...（其余 {len(high) - 40} 处见 /tmp/bandit.json）")
+              else:
+                  print("HIGH 明细：无。Medium 明细请本地运行：")
+                  print("  bandit -r app scripts -c pyproject.toml -ll -q")
+              print("```")
+          PY
           echo "" >> health_report.md
           echo "</details>" >> health_report.md
           echo "" >> health_report.md

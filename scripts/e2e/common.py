@@ -187,7 +187,9 @@ def failure_fingerprint(
     """
     parts = [exception_class or "<none>", normalize_message(message or "")]
     parts.extend(frames or [])
-    return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:16]
+    # Non-security: stable failure fingerprint only, not a security
+    # primitive (#2482).
+    return hashlib.sha1("|".join(parts).encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
 
 
 def contract_key_identity(contract: dict[str, Any]) -> str:
@@ -196,7 +198,9 @@ def contract_key_identity(contract: dict[str, Any]) -> str:
     if not isinstance(fields, dict) or not fields:
         raise GovernanceError("contract artifact has no current contract fields")
     canonical = json.dumps(fields, sort_keys=True)
-    return hashlib.sha1(canonical.encode("utf-8")).hexdigest()[:16]
+    # Non-security: contract-key identity derivation only, not a security
+    # primitive (#2482).
+    return hashlib.sha1(canonical.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
 
 
 def new_id(prefix: str = "entry") -> str:
