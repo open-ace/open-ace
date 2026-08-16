@@ -64,6 +64,16 @@ if not _security_mode:
         print("=" * 60)
         os.environ["OPENACE_SECURITY_MODE"] = "development"
 
+# Issue #2667: non-Docker bootstrap for OPENACE_ENCRYPTION_KEY. docker-
+# entrypoint.sh generates and persists this key so `docker compose up` works
+# zero-config, but `python3 server.py` (and gunicorn on a bare host) had no
+# equivalent — APIKeyProxyService raised RuntimeError at first use while
+# /api/autonomous/models masked it as "no models configured". No-op when the
+# key is already set or the security mode is production.
+from app.utils.security_env import ensure_generated_encryption_key
+
+ensure_generated_encryption_key()
+
 # Create the Flask application using the factory
 from app import create_app
 

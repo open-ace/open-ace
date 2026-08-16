@@ -70,15 +70,29 @@ def run_bandit(targets: list[str]) -> dict[str, Any]:
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
-    # Bandit exits non-zero when issues found, but we need JSON output
-    try:
-        if result.stdout:
-            return json.loads(result.stdout)
-    except json.JSONDecodeError:
-        # If no JSON output, check stderr for errors
-        if result.returncode != 0 and not result.stdout:
-            print(f"::error::Bandit execution failed: {result.stderr}")
+    # Bandit >= 1.9 prints a "Working..." progress line on stdout before the
+    # JSON payload. Skip to the first '{' so the report still parses; before
+    # this, json.loads raised and the gate silently passed with zero findings
+    # while real HIGH issues existed (#2482).
+    stdout = result.stdout or ""
+    json_start = stdout.find("{")
+    payload = stdout[json_start:] if json_start >= 0 else ""
+    if payload:
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            print(f"::error::Bandit output is not valid JSON: {payload[:200]!r}")
             sys.exit(2)
+
+    # Bandit exits non-zero when issues found, but we need JSON output.
+    # No parseable JSON at all (even with empty stderr) means the tool did not
+    # really run — fail closed rather than silently passing the gate (#2482).
+    if result.returncode != 0 and not payload:
+        print(
+            f"::error::Bandit execution failed (rc={result.returncode}): "
+            f"{result.stderr or '<no stderr>'}"
+        )
+        sys.exit(2)
 
     return {"results": [], "errors": []}
 

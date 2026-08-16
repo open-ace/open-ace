@@ -16,6 +16,7 @@ Prerequisites:
 
 import logging
 import os
+import re
 import sqlite3
 import sys
 from typing import Any, Optional
@@ -30,6 +31,29 @@ logger = logging.getLogger(__name__)
 
 # SQLite database path
 SQLITE_PATH = os.path.expanduser("~/.open-ace/ace.db")
+
+# Whitelist for SQL identifiers (table/column names) that get interpolated into
+# statements which cannot use query parameters. See validate_identifier().
+_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def validate_identifier(name: str) -> str:
+    """Validate a SQL identifier before string interpolation.
+
+    SQL identifiers (table/column names) cannot be passed as query parameters,
+    so statements built by this script interpolate them only after they pass
+    this whitelist regex. Every interpolation site annotated with
+    ``# nosec B608`` relies on this check.
+
+    Returns:
+        str: The validated identifier, unchanged.
+
+    Raises:
+        ValueError: If the name is not a plain ASCII SQL identifier.
+    """
+    if not isinstance(name, str) or not _IDENTIFIER_RE.fullmatch(name):
+        raise ValueError(f"Invalid SQL identifier: {name!r}")
+    return name
 
 
 def get_sqlite_connection() -> sqlite3.Connection:
@@ -56,7 +80,8 @@ def get_postgresql_connection():
 
 def get_table_columns(cursor, table_name: str) -> list[str]:
     """Get column names for a table."""
-    cursor.execute(f"PRAGMA table_info({table_name})")
+    validate_identifier(table_name)
+    cursor.execute(f"PRAGMA table_info({table_name})")  # nosec B608 - validated identifier
     return [row["name"] for row in cursor.fetchall()]
 
 
@@ -114,10 +139,13 @@ def migrate_table(
         logger.warning(f"No common columns found for table {table_name}")
         return 0
 
+    validate_identifier(table_name)
+    columns = [validate_identifier(col) for col in columns]
+
     logger.info(f"  {table_name}: Common columns: {', '.join(columns)}")
 
     # Get total count
-    sqlite_cur.execute(f"SELECT COUNT(*) FROM {table_name}")
+    sqlite_cur.execute(f"SELECT COUNT(*) FROM {table_name}")  # nosec B608 - validated identifier
     total_rows = sqlite_cur.fetchone()[0]
 
     if total_rows == 0:
@@ -133,7 +161,8 @@ def migrate_table(
 
     while offset < total_rows:
         sqlite_cur.execute(
-            f"SELECT {cols_str} FROM {table_name} LIMIT {batch_size} OFFSET {offset}"
+            f"SELECT {cols_str} FROM {table_name} LIMIT ? OFFSET ?",  # nosec B608 - validated identifiers
+            (batch_size, offset),
         )
         rows = sqlite_cur.fetchall()
 
@@ -159,7 +188,7 @@ def migrate_table(
 
         # Insert into PostgreSQL using execute_values
         # execute_values uses a single %s placeholder for all values
-        sql = f"INSERT INTO {table_name} ({cols_str}) VALUES %s ON CONFLICT DO NOTHING"
+        sql = f"INSERT INTO {table_name} ({cols_str}) VALUES %s ON CONFLICT DO NOTHING"  # nosec B608 - validated identifiers
 
         try:
             from psycopg2.extras import execute_values
@@ -319,10 +348,14 @@ def verify_migration():
     all_match = True
 
     for table in tables:
+        # Validate outside the try blocks below: the bare excepts there must
+        # not swallow a ValueError raised by identifier validation.
+        validate_identifier(table)
+
         # SQLite count
         sqlite_cur = sqlite_conn.cursor()
         try:
-            sqlite_cur.execute(f"SELECT COUNT(*) FROM {table}")
+            sqlite_cur.execute(f"SELECT COUNT(*) FROM {table}")  # nosec B608 - validated identifier
             sqlite_count = sqlite_cur.fetchone()[0]
         except:
             sqlite_count = "N/A"
@@ -330,7 +363,7 @@ def verify_migration():
         # PostgreSQL count
         pg_cur = pg_conn.cursor()
         try:
-            pg_cur.execute(f"SELECT COUNT(*) FROM {table}")
+            pg_cur.execute(f"SELECT COUNT(*) FROM {table}")  # nosec B608 - validated identifier
             pg_count = pg_cur.fetchone()[0]
         except:
             pg_count = "N/A"
