@@ -1274,6 +1274,21 @@ CREATE SEQUENCE quota_usage_new_id_seq
     CACHE 1;
 
 ALTER SEQUENCE quota_usage_new_id_seq OWNED BY quota_usage.id;
+CREATE TABLE rate_limit_log (
+    id integer NOT NULL,
+    key character varying(255) NOT NULL,
+    timestamp double precision NOT NULL
+);
+
+CREATE SEQUENCE rate_limit_log_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE rate_limit_log_id_seq OWNED BY rate_limit_log.id;
 CREATE TABLE recycle_bin (
     id integer NOT NULL,
     tenant_id integer NOT NULL,
@@ -2451,6 +2466,8 @@ ALTER TABLE ONLY quota_alerts ALTER COLUMN id SET DEFAULT nextval('quota_alerts_
 
 ALTER TABLE ONLY quota_usage ALTER COLUMN id SET DEFAULT nextval('quota_usage_new_id_seq'::regclass);
 
+ALTER TABLE ONLY rate_limit_log ALTER COLUMN id SET DEFAULT nextval('rate_limit_log_id_seq'::regclass);
+
 ALTER TABLE ONLY recycle_bin ALTER COLUMN id SET DEFAULT nextval('recycle_bin_id_seq'::regclass);
 
 ALTER TABLE ONLY registration_tokens ALTER COLUMN id SET DEFAULT nextval('registration_tokens_id_seq'::regclass);
@@ -2712,6 +2729,9 @@ ALTER TABLE ONLY quota_alerts
 ALTER TABLE ONLY quota_usage
     ADD CONSTRAINT quota_usage_new_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY rate_limit_log
+    ADD CONSTRAINT rate_limit_log_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY recycle_bin
     ADD CONSTRAINT recycle_bin_pkey PRIMARY KEY (id);
 
@@ -2966,14 +2986,12 @@ ALTER TABLE ONLY workflow_milestones
 
 CREATE INDEX idx_agent_approvals_run_id ON agent_approvals USING btree (run_id);
 
-
 --
 --
 
 CREATE INDEX idx_agent_approvals_session_id ON agent_approvals USING btree (session_id);
 
 CREATE INDEX idx_agent_approvals_status ON agent_approvals USING btree (status);
-
 
 --
 --
@@ -2982,14 +3000,12 @@ CREATE UNIQUE INDEX idx_agent_runs_session_id ON agent_runs USING btree (session
 
 CREATE INDEX idx_agent_runs_status ON agent_runs USING btree (status);
 
-
 --
 --
 
 CREATE INDEX idx_agent_runs_user_id ON agent_runs USING btree (user_id);
 
 CREATE INDEX idx_agent_sessions_project ON agent_sessions USING btree (project_id);
-
 
 --
 --
@@ -2998,14 +3014,12 @@ CREATE INDEX idx_agent_sessions_remote_machine_id ON agent_sessions USING btree 
 
 CREATE INDEX idx_agent_sessions_session_id ON agent_sessions USING btree (session_id);
 
-
 --
 --
 
 CREATE INDEX idx_agent_sessions_session_type ON agent_sessions USING btree (session_type);
 
 CREATE INDEX idx_agent_sessions_status ON agent_sessions USING btree (status);
-
 
 --
 --
@@ -3014,14 +3028,12 @@ CREATE INDEX idx_agent_sessions_tenant_id ON agent_sessions USING btree (tenant_
 
 CREATE INDEX idx_agent_sessions_tenant_updated ON agent_sessions USING btree (tenant_id, updated_at);
 
-
 --
 --
 
 CREATE INDEX idx_agent_sessions_tenant_user ON agent_sessions USING btree (tenant_id, user_id);
 
 CREATE INDEX idx_agent_sessions_tool_name ON agent_sessions USING btree (tool_name);
-
 
 --
 --
@@ -3030,14 +3042,12 @@ CREATE INDEX idx_agent_sessions_user_id ON agent_sessions USING btree (user_id);
 
 CREATE INDEX idx_agent_tokens_hash ON agent_tokens USING btree (token_hash);
 
-
 --
 --
 
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens USING btree (machine_id);
 
 CREATE INDEX idx_agent_tokens_machine_pending ON agent_tokens USING btree (machine_id, pending_revoke, revoke_after);
-
 
 --
 --
@@ -3046,14 +3056,12 @@ CREATE INDEX idx_agent_tokens_machine_version ON agent_tokens USING btree (machi
 
 CREATE UNIQUE INDEX idx_agent_tokens_one_active_per_machine ON agent_tokens USING btree (machine_id) WHERE ((is_revoked = false) AND (pending_revoke = false));
 
-
 --
 --
 
 CREATE INDEX idx_agent_tokens_pending_revoke_timeout ON agent_tokens USING btree (revoke_after) WHERE ((pending_revoke = true) AND (is_revoked = false));
 
 CREATE INDEX idx_aggregation_history_status ON aggregation_history USING btree (status);
-
 
 --
 --
@@ -3062,14 +3070,12 @@ CREATE INDEX idx_aggregation_history_type_date ON aggregation_history USING btre
 
 CREATE INDEX idx_ai_agent_settings_key ON ai_agent_settings USING btree (setting_key);
 
-
 --
 --
 
 CREATE INDEX idx_alerts_created_at ON alerts USING btree (created_at);
 
 CREATE INDEX idx_alerts_history_sent_at ON alerts_history USING btree (sent_at);
-
 
 --
 --
@@ -3078,14 +3084,12 @@ CREATE INDEX idx_alerts_history_tenant ON alerts_history USING btree (tenant_id)
 
 CREATE INDEX idx_alerts_history_type ON alerts_history USING btree (alert_type);
 
-
 --
 --
 
 CREATE INDEX idx_alerts_read ON alerts USING btree (read);
 
 CREATE INDEX idx_alerts_user_id ON alerts USING btree (user_id);
-
 
 --
 --
@@ -3105,14 +3109,12 @@ CREATE INDEX idx_archive_files_batch ON archive_files USING btree (execution_id,
 
 CREATE INDEX idx_archive_files_checksum ON archive_files USING btree (checksum);
 
-
 --
 --
 
 CREATE INDEX idx_archive_files_expires ON archive_files USING btree (expires_at);
 
 CREATE INDEX idx_archive_files_tenant ON archive_files USING btree (tenant_id);
-
 
 --
 --
@@ -3121,14 +3123,12 @@ CREATE INDEX idx_audit_action ON audit_logs USING btree (action);
 
 CREATE INDEX idx_audit_logs_tenant_id ON audit_logs USING btree (tenant_id);
 
-
 --
 --
 
 CREATE INDEX idx_audit_logs_tenant_timestamp ON audit_logs USING btree (tenant_id, "timestamp");
 
 CREATE INDEX idx_audit_logs_timestamp ON audit_logs USING btree ("timestamp");
-
 
 --
 --
@@ -3137,14 +3137,12 @@ CREATE INDEX idx_audit_resource ON audit_logs USING btree (resource_type, resour
 
 CREATE INDEX idx_audit_severity ON audit_logs USING btree (severity);
 
-
 --
 --
 
 CREATE INDEX idx_audit_tenant_id ON audit_logs USING btree (tenant_id);
 
 CREATE INDEX idx_audit_timestamp ON audit_logs USING btree ("timestamp");
-
 
 --
 --
@@ -3163,14 +3161,12 @@ CREATE INDEX idx_cache_sync_unprocessed ON rule_cache_sync USING btree (processe
 
 CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence USING btree (session_id, command_id);
 
-
 --
 --
 
 CREATE INDEX idx_command_evidence_workflow_milestone ON command_execution_evidence USING btree (workflow_id, milestone_id);
 
 CREATE INDEX idx_consistency_violations_detected ON consistency_violations USING btree (detected_at);
-
 
 --
 --
@@ -3179,14 +3175,12 @@ CREATE INDEX idx_consistency_violations_status ON consistency_violations USING b
 
 CREATE INDEX idx_consistency_violations_tenant ON consistency_violations USING btree (tenant_id);
 
-
 --
 --
 
 CREATE INDEX idx_daily_messages_orphan ON daily_messages USING btree (date) WHERE (tenant_id IS NULL);
 
 CREATE INDEX idx_daily_messages_tenant_date ON daily_messages USING btree (tenant_id, date);
-
 
 --
 --
@@ -3195,14 +3189,12 @@ CREATE INDEX idx_daily_stats_date ON daily_stats USING btree (date);
 
 CREATE INDEX idx_daily_stats_date_tool ON daily_stats USING btree (date, tool_name);
 
-
 --
 --
 
 CREATE INDEX idx_daily_stats_date_tool_host ON daily_stats USING btree (date, tool_name, host_name);
 
 CREATE INDEX idx_daily_stats_host ON daily_stats USING btree (host_name);
-
 
 --
 --
@@ -3211,14 +3203,12 @@ CREATE INDEX idx_daily_stats_orphan ON daily_stats USING btree (date) WHERE (ten
 
 CREATE INDEX idx_daily_stats_project ON daily_stats USING btree (project_id);
 
-
 --
 --
 
 CREATE INDEX idx_daily_stats_sender ON daily_stats USING btree (sender_name);
 
 CREATE INDEX idx_daily_stats_tenant_date ON daily_stats USING btree (tenant_id, date);
-
 
 --
 --
@@ -3227,7 +3217,6 @@ CREATE INDEX idx_daily_stats_tool ON daily_stats USING btree (tool_name);
 
 CREATE INDEX idx_daily_stats_user_id ON daily_stats USING btree (user_id);
 
-
 --
 --
 
@@ -3235,14 +3224,12 @@ CREATE INDEX idx_email_logs_sent_at ON email_notification_logs USING btree (sent
 
 CREATE INDEX idx_email_logs_status ON email_notification_logs USING btree (status);
 
-
 --
 --
 
 CREATE INDEX idx_email_logs_user_id ON email_notification_logs USING btree (user_id);
 
 CREATE INDEX idx_email_logs_user_sent ON email_notification_logs USING btree (user_id, sent_at);
-
 
 --
 --
@@ -3256,14 +3243,12 @@ CREATE INDEX idx_filter_rules_approval_status ON content_filter_rules USING btre
 
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules USING btree (is_enabled);
 
-
 --
 --
 
 CREATE INDEX idx_filter_rules_is_test ON content_filter_rules USING btree (is_test);
 
 CREATE INDEX idx_filter_rules_priority ON content_filter_rules USING btree (priority);
-
 
 --
 --
@@ -3274,14 +3259,12 @@ CREATE INDEX idx_filter_rules_type ON content_filter_rules USING btree (type);
 
 CREATE INDEX idx_hourly_stats_date ON hourly_stats USING btree (date);
 
-
 --
 --
 
 CREATE INDEX idx_hourly_stats_date_hour ON hourly_stats USING btree (date, hour);
 
 CREATE INDEX idx_hourly_stats_hour ON hourly_stats USING btree (hour);
-
 
 --
 --
@@ -3290,14 +3273,12 @@ CREATE INDEX idx_hourly_stats_orphan ON hourly_stats USING btree (date) WHERE (t
 
 CREATE INDEX idx_hourly_stats_tenant_date ON hourly_stats USING btree (tenant_id, date);
 
-
 --
 --
 
 CREATE INDEX idx_insights_reports_user_date ON insights_reports USING btree (user_id, start_date, end_date);
 
 CREATE INDEX idx_knowledge_team ON knowledge_base USING btree (team_id);
-
 
 --
 --
@@ -3306,14 +3287,12 @@ CREATE INDEX idx_legal_holds_active ON legal_holds USING btree (id) WHERE (lifte
 
 CREATE INDEX idx_legal_holds_data_type ON legal_holds USING btree (data_type);
 
-
 --
 --
 
 CREATE INDEX idx_legal_holds_tenant ON legal_holds USING btree (tenant_id);
 
 CREATE INDEX idx_login_attempts_locked_until ON login_attempts USING btree (locked_until);
-
 
 --
 --
@@ -3322,14 +3301,12 @@ CREATE INDEX idx_machine_assignments_user_id ON machine_assignments USING btree 
 
 CREATE INDEX idx_mapping_rules_active ON tool_account_mapping_rules USING btree (is_active, priority);
 
-
 --
 --
 
 CREATE INDEX idx_mapping_rules_user_id ON tool_account_mapping_rules USING btree (user_id);
 
 CREATE INDEX idx_messages_agent_session_id ON daily_messages USING btree (agent_session_id);
-
 
 --
 --
@@ -3338,14 +3315,12 @@ CREATE INDEX idx_messages_agent_session_project ON daily_messages USING btree (a
 
 CREATE INDEX idx_messages_conv_history ON daily_messages USING btree (agent_session_id, conversation_id, feishu_conversation_id, tool_name, host_name, sender_name, date, "timestamp", tokens_used, input_tokens, output_tokens, sender_id);
 
-
 --
 --
 
 CREATE INDEX idx_messages_conversation ON daily_messages USING btree (date, conversation_id, agent_session_id);
 
 CREATE INDEX idx_messages_date_role_sender_prefix ON daily_messages USING btree (date, role, sender_name varchar_pattern_ops);
-
 
 --
 --
@@ -3354,14 +3329,12 @@ CREATE INDEX idx_messages_date_role_timestamp ON daily_messages USING btree (dat
 
 CREATE INDEX idx_messages_date_sender_id ON daily_messages USING btree (date, sender_id);
 
-
 --
 --
 
 CREATE INDEX idx_messages_date_tool_host ON daily_messages USING btree (date, tool_name, host_name);
 
 CREATE INDEX idx_messages_deleted ON daily_messages USING btree (deleted_at);
-
 
 --
 --
@@ -3370,14 +3343,12 @@ CREATE INDEX idx_messages_host_name ON daily_messages USING btree (host_name);
 
 CREATE INDEX idx_messages_project_path ON daily_messages USING btree (project_path);
 
-
 --
 --
 
 CREATE INDEX idx_messages_sender_date_role ON daily_messages USING btree (sender_name, date, role);
 
 CREATE INDEX idx_messages_sender_id ON daily_messages USING btree (sender_id);
-
 
 --
 --
@@ -3386,14 +3357,12 @@ CREATE INDEX idx_messages_sender_name ON daily_messages USING btree (sender_name
 
 CREATE INDEX idx_messages_session_list_covering ON daily_messages USING btree (agent_session_id, tool_name, host_name, sender_name) INCLUDE ("timestamp", tokens_used, input_tokens, output_tokens, sender_id, date) WHERE (agent_session_id IS NOT NULL);
 
-
 --
 --
 
 CREATE INDEX idx_messages_timestamp ON daily_messages USING btree ("timestamp");
 
 CREATE INDEX idx_messages_tool_name ON daily_messages USING btree (tool_name);
-
 
 --
 --
@@ -3402,14 +3371,12 @@ CREATE INDEX idx_messages_usage_trend_covering ON daily_messages USING btree (da
 
 CREATE INDEX idx_messages_user_date_role_covering ON daily_messages USING btree (user_id, date, role) INCLUDE (tokens_used) WHERE ((user_id IS NOT NULL) AND ((role)::text = 'assistant'::text));
 
-
 --
 --
 
 CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones USING btree (workflow_id, phase, status);
 
 CREATE INDEX idx_milestones_workflow_round ON workflow_milestones USING btree (workflow_id, dev_round);
-
 
 --
 --
@@ -3418,14 +3385,12 @@ CREATE INDEX idx_parse_failure_created_at ON parse_failure_records USING btree (
 
 CREATE INDEX idx_parse_failure_session ON parse_failure_records USING btree (session_id);
 
-
 --
 --
 
 CREATE INDEX idx_parse_failure_timestamp ON parse_failure_records USING btree ("timestamp");
 
 CREATE INDEX idx_parse_failure_unresolved ON parse_failure_records USING btree (resolved) WHERE (resolved = false);
-
 
 --
 --
@@ -3434,14 +3399,12 @@ CREATE INDEX idx_policy_decisions_fingerprint ON policy_decisions USING btree (f
 
 CREATE INDEX idx_policy_decisions_request_id ON policy_decisions USING btree (request_id);
 
-
 --
 --
 
 CREATE INDEX idx_policy_decisions_session_id ON policy_decisions USING btree (session_id);
 
 CREATE INDEX idx_policy_rules_current_enabled ON policy_rules USING btree (is_current, enabled);
-
 
 --
 --
@@ -3450,14 +3413,12 @@ CREATE INDEX idx_policy_rules_key_current ON policy_rules USING btree (rule_key,
 
 CREATE INDEX idx_project_categories_sort_order ON project_categories USING btree (sort_order);
 
-
 --
 --
 
 CREATE INDEX idx_projects_created_by ON projects USING btree (created_by);
 
 CREATE INDEX idx_projects_is_active ON projects USING btree (is_active);
-
 
 --
 --
@@ -3466,14 +3427,12 @@ CREATE INDEX idx_projects_path ON projects USING btree (tenant_id, path);
 
 CREATE INDEX idx_projects_tenant_created_by ON projects USING btree (tenant_id, created_by);
 
-
 --
 --
 
 CREATE INDEX idx_prompt_templates_author ON prompt_templates USING btree (author_id);
 
 CREATE INDEX idx_prompt_templates_category ON prompt_templates USING btree (category);
-
 
 --
 --
@@ -3482,14 +3441,12 @@ CREATE INDEX idx_prompt_templates_public ON prompt_templates USING btree (is_pub
 
 CREATE INDEX idx_proxy_token_jtis_active ON proxy_token_jtis USING btree (revoked_at, consumed_at);
 
-
 --
 --
 
 CREATE INDEX idx_proxy_token_jtis_expires ON proxy_token_jtis USING btree (expires_at);
 
 CREATE INDEX idx_proxy_token_jtis_session ON proxy_token_jtis USING btree (session_id);
-
 
 --
 --
@@ -3498,7 +3455,6 @@ CREATE INDEX idx_quota_alerts_created ON quota_alerts USING btree (created_at);
 
 CREATE INDEX idx_quota_alerts_unack ON quota_alerts USING btree (acknowledged, created_at);
 
-
 --
 --
 
@@ -3506,14 +3462,16 @@ CREATE INDEX idx_quota_alerts_user ON quota_alerts USING btree (user_id);
 
 CREATE INDEX idx_quota_usage_date ON quota_usage USING btree (date);
 
-
 --
 --
 
 CREATE INDEX idx_quota_usage_user ON quota_usage USING btree (user_id);
 
-CREATE INDEX idx_recycle_bin_execution ON recycle_bin USING btree (execution_id);
+CREATE INDEX idx_rate_limit_key_timestamp ON rate_limit_log USING btree (key, timestamp);
 
+CREATE INDEX idx_rate_limit_timestamp ON rate_limit_log USING btree (timestamp);
+
+CREATE INDEX idx_recycle_bin_execution ON recycle_bin USING btree (execution_id);
 
 --
 --
@@ -3522,14 +3480,12 @@ CREATE INDEX idx_recycle_bin_expires ON recycle_bin USING btree (expires_at);
 
 CREATE INDEX idx_recycle_bin_tenant ON recycle_bin USING btree (tenant_id);
 
-
 --
 --
 
 CREATE INDEX idx_registration_tokens_hash ON registration_tokens USING btree (token_hash);
 
 CREATE INDEX idx_remote_machines_hostname_tenant ON remote_machines USING btree (hostname, tenant_id);
-
 
 --
 --
@@ -3538,14 +3494,12 @@ CREATE INDEX idx_remote_machines_machine_id ON remote_machines USING btree (mach
 
 CREATE INDEX idx_remote_machines_status ON remote_machines USING btree (status);
 
-
 --
 --
 
 CREATE INDEX idx_remote_runtime_commands_expires ON remote_runtime_commands USING btree (expires_at);
 
 CREATE INDEX idx_remote_runtime_commands_machine_status ON remote_runtime_commands USING btree (machine_id, status, id);
-
 
 --
 --
@@ -3554,14 +3508,12 @@ CREATE INDEX idx_remote_runtime_outputs_expires ON remote_runtime_outputs USING 
 
 CREATE INDEX idx_remote_runtime_outputs_session_index ON remote_runtime_outputs USING btree (session_id, event_index);
 
-
 --
 --
 
 CREATE INDEX idx_retention_evidence_execution ON retention_evidence USING btree (execution_id);
 
 CREATE INDEX idx_retention_evidence_tenant ON retention_evidence USING btree (tenant_id);
-
 
 --
 --
@@ -3570,7 +3522,6 @@ CREATE INDEX idx_retention_evidence_timestamp ON retention_evidence USING btree 
 
 CREATE INDEX idx_retention_executions_execution_id ON retention_executions USING btree (execution_id);
 
-
 --
 --
 
@@ -3578,14 +3529,12 @@ CREATE INDEX idx_retention_executions_lock ON retention_executions USING btree (
 
 CREATE INDEX idx_retention_executions_status ON retention_executions USING btree (status);
 
-
 --
 --
 
 CREATE INDEX idx_retention_executions_tenant ON retention_executions USING btree (tenant_id);
 
 CREATE INDEX idx_retention_policies_data_type ON retention_policies USING btree (data_type);
-
 
 --
 --
@@ -3603,14 +3552,12 @@ CREATE INDEX idx_run_events_created_at ON agent_run_events USING btree (created_
 
 CREATE INDEX idx_run_events_event_type ON agent_run_events USING btree (event_type);
 
-
 --
 --
 
 CREATE INDEX idx_run_events_run_id ON agent_run_events USING btree (run_id);
 
 CREATE INDEX idx_run_events_session_id ON agent_run_events USING btree (session_id, id);
-
 
 --
 --
@@ -3619,14 +3566,12 @@ CREATE INDEX idx_scheduler_leaders_expires ON scheduler_leaders USING btree (exp
 
 CREATE INDEX idx_scheduler_leaders_heartbeat ON scheduler_leaders USING btree (heartbeat_at);
 
-
 --
 --
 
 CREATE INDEX idx_scheduler_runs_job_time ON scheduler_runs USING btree (job_name, started_at DESC);
 
 CREATE INDEX idx_scheduler_runs_status ON scheduler_runs USING btree (status);
-
 
 --
 --
@@ -3635,14 +3580,12 @@ CREATE INDEX idx_security_settings_key ON security_settings USING btree (setting
 
 CREATE INDEX idx_session_messages_external_message_id ON session_messages USING btree (session_id, external_message_id);
 
-
 --
 --
 
 CREATE INDEX idx_session_messages_session_id ON session_messages USING btree (session_id);
 
 CREATE INDEX idx_session_messages_session_timestamp ON session_messages USING btree (session_id, "timestamp", id);
-
 
 --
 --
@@ -3651,14 +3594,12 @@ CREATE INDEX idx_session_messages_source ON session_messages USING btree (sessio
 
 CREATE INDEX idx_session_messages_tenant_session ON session_messages USING btree (tenant_id, session_id);
 
-
 --
 --
 
 CREATE INDEX idx_session_messages_tenant_session_timestamp ON session_messages USING btree (tenant_id, session_id, "timestamp", id);
 
 CREATE INDEX idx_session_stats_session_id ON session_stats USING btree (session_id);
-
 
 --
 --
@@ -3667,14 +3608,12 @@ CREATE INDEX idx_session_stats_tool_host ON session_stats USING btree (tool_name
 
 CREATE INDEX idx_session_stats_updated_at ON session_stats USING btree (updated_at DESC);
 
-
 --
 --
 
 CREATE INDEX idx_sessions_active ON sessions USING btree (is_active, expires_at);
 
 CREATE INDEX idx_sessions_expires ON sessions USING btree (expires_at);
-
 
 --
 --
@@ -3683,14 +3622,12 @@ CREATE INDEX idx_sessions_token ON sessions USING btree (token);
 
 CREATE INDEX idx_sessions_user_id ON sessions USING btree (user_id);
 
-
 --
 --
 
 CREATE INDEX idx_shared_sessions_session ON shared_sessions USING btree (session_id);
 
 CREATE INDEX idx_shared_sessions_target ON shared_sessions USING btree (target_id);
-
 
 --
 --
@@ -3699,14 +3636,12 @@ CREATE INDEX idx_sso_auth_states_expires ON sso_auth_states USING btree (expires
 
 CREATE INDEX idx_sso_identities_provider ON sso_identities USING btree (provider_name, provider_user_id);
 
-
 --
 --
 
 CREATE INDEX idx_sso_identities_user ON sso_identities USING btree (user_id);
 
 CREATE INDEX idx_sso_providers_tenant ON sso_providers USING btree (tenant_id);
-
 
 --
 --
@@ -3715,14 +3650,12 @@ CREATE INDEX idx_sso_sessions_token ON sso_sessions USING btree (session_token);
 
 CREATE INDEX idx_sso_sessions_user ON sso_sessions USING btree (user_id);
 
-
 --
 --
 
 CREATE INDEX idx_sync_events_session_id ON sync_events USING btree (session_id);
 
 CREATE INDEX idx_sync_events_timestamp ON sync_events USING btree ("timestamp");
-
 
 --
 --
@@ -3731,14 +3664,12 @@ CREATE INDEX idx_sync_events_user_id ON sync_events USING btree (user_id);
 
 CREATE INDEX idx_team_members_team ON team_members USING btree (team_id);
 
-
 --
 --
 
 CREATE INDEX idx_team_members_user ON team_members USING btree (user_id);
 
 CREATE INDEX idx_teams_owner ON teams USING btree (owner_id);
-
 
 --
 --
@@ -3747,14 +3678,12 @@ CREATE INDEX idx_teams_sync_source ON teams USING btree ((((settings)::jsonb ->>
 
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations USING btree (status);
 
-
 --
 --
 
 CREATE INDEX idx_tenant_migrations_user ON tenant_migrations USING btree (user_id);
 
 CREATE INDEX idx_tenant_period_history_dates ON tenant_period_history USING btree (period_start, period_end);
-
 
 --
 --
@@ -3763,14 +3692,12 @@ CREATE INDEX idx_tenant_period_history_tenant ON tenant_period_history USING btr
 
 CREATE INDEX idx_tenant_plans_active ON tenant_plans USING btree (is_active);
 
-
 --
 --
 
 CREATE INDEX idx_tenant_plans_slug ON tenant_plans USING btree (slug);
 
 CREATE INDEX idx_tenant_quotas_tenant ON tenant_quotas USING btree (tenant_id);
-
 
 --
 --
@@ -3779,14 +3706,12 @@ CREATE INDEX idx_tenant_settings_tenant ON tenant_settings USING btree (tenant_i
 
 CREATE INDEX idx_tenant_usage_date ON tenant_usage USING btree (date);
 
-
 --
 --
 
 CREATE INDEX idx_tenant_usage_tenant ON tenant_usage USING btree (tenant_id);
 
 CREATE INDEX idx_tenants_billing_cycle ON tenants USING btree (billing_cycle_end);
-
 
 --
 --
@@ -3795,14 +3720,12 @@ CREATE INDEX idx_tenants_deleted ON tenants USING btree (deleted_at);
 
 CREATE INDEX idx_tenants_slug ON tenants USING btree (slug);
 
-
 --
 --
 
 CREATE INDEX idx_tenants_status ON tenants USING btree (status);
 
 CREATE INDEX idx_test_evidence_session_command ON test_execution_evidence USING btree (session_id, command_id);
-
 
 --
 --
@@ -3811,14 +3734,12 @@ CREATE INDEX idx_test_evidence_workflow_milestone ON test_execution_evidence USI
 
 CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts USING btree (tool_account);
 
-
 --
 --
 
 CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts USING btree (user_id);
 
 CREATE INDEX idx_trigger_log_rule_time ON filter_rule_trigger_log USING btree (rule_id, matched_at);
-
 
 --
 --
@@ -3827,7 +3748,6 @@ CREATE INDEX idx_trigger_log_rule_time_action ON filter_rule_trigger_log USING b
 
 CREATE INDEX idx_trigger_log_tenant_time ON filter_rule_trigger_log USING btree (tenant_id, matched_at);
 
-
 --
 --
 
@@ -3835,12 +3755,10 @@ CREATE INDEX idx_trigger_log_time_action ON filter_rule_trigger_log USING btree 
 
 CREATE INDEX idx_trigger_log_user_time ON filter_rule_trigger_log USING btree (user_id, matched_at);
 
-
 --
 --
 
 CREATE INDEX idx_usage_date ON daily_usage USING btree (date);
-
 
 --
 --
@@ -3849,14 +3767,12 @@ CREATE INDEX idx_usage_date_tool_host ON daily_usage USING btree (tenant_id, dat
 
 CREATE INDEX idx_usage_host_name ON daily_usage USING btree (host_name);
 
-
 --
 --
 
 CREATE INDEX idx_usage_report_rate_limits_updated ON usage_report_rate_limits USING btree (updated_at);
 
 CREATE INDEX idx_usage_report_receipts_session ON usage_report_receipts USING btree (session_id, created_at);
-
 
 --
 --
@@ -3865,14 +3781,12 @@ CREATE INDEX idx_usage_summary_host ON usage_summary USING btree (host_name);
 
 CREATE INDEX idx_usage_summary_host_name_valid ON usage_summary USING btree (host_name) WHERE ((host_name IS NOT NULL) AND ((host_name)::text <> ''::text) AND ((host_name)::text !~~ '<%>'::text) AND ((length((host_name)::text) >= 1) AND (length((host_name)::text) <= 253)));
 
-
 --
 --
 
 CREATE INDEX idx_usage_summary_tool ON usage_summary USING btree (tool_name);
 
 CREATE INDEX idx_usage_tenant_date ON daily_usage USING btree (tenant_id, date);
-
 
 --
 --
@@ -3881,14 +3795,12 @@ CREATE INDEX idx_usage_tool_name ON daily_usage USING btree (tool_name);
 
 CREATE INDEX idx_user_daily_stats_date ON user_daily_stats USING btree (date DESC);
 
-
 --
 --
 
 CREATE INDEX idx_user_daily_stats_user_date ON user_daily_stats USING btree (user_id, date DESC);
 
 CREATE INDEX idx_user_projects_project ON user_projects USING btree (project_id);
-
 
 --
 --
@@ -3897,14 +3809,12 @@ CREATE INDEX idx_user_projects_user ON user_projects USING btree (user_id);
 
 CREATE INDEX idx_users_active ON users USING btree (is_active);
 
-
 --
 --
 
 CREATE INDEX idx_users_deleted ON users USING btree (deleted_at);
 
 CREATE INDEX idx_users_email ON users USING btree (email);
-
 
 --
 --
@@ -3913,14 +3823,12 @@ CREATE INDEX idx_users_role ON users USING btree (role);
 
 CREATE INDEX idx_users_system_account ON users USING btree (system_account) WHERE ((deleted_at IS NULL) AND (is_active = true) AND (system_account IS NOT NULL));
 
-
 --
 --
 
 CREATE INDEX idx_users_tenant ON users USING btree (tenant_id);
 
 CREATE INDEX idx_users_username ON users USING btree (username) WHERE ((deleted_at IS NULL) AND (is_active = true));
-
 
 --
 --
@@ -3929,14 +3837,12 @@ CREATE INDEX idx_webhook_deliveries_alert ON webhook_deliveries USING btree (ale
 
 CREATE INDEX idx_webhook_deliveries_status_retry ON webhook_deliveries USING btree (status, next_retry_at);
 
-
 --
 --
 
 CREATE INDEX idx_webhook_deliveries_user ON webhook_deliveries USING btree (user_id);
 
 CREATE INDEX idx_workflows_batch_order ON autonomous_workflows USING btree (batch_id, batch_order);
-
 
 --
 --
@@ -3945,14 +3851,12 @@ CREATE INDEX idx_workflows_parent ON autonomous_workflows USING btree (parent_wo
 
 CREATE INDEX idx_workflows_status_created ON autonomous_workflows USING btree (status, created_at);
 
-
 --
 --
 
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows USING btree (user_id, status);
 
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
-
 
 --
 --
@@ -3961,14 +3865,12 @@ CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions USING b
 
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules USING btree (rule_key, version);
 
-
 --
 --
 
 CREATE UNIQUE INDEX uq_projects_path ON projects USING btree (tenant_id, path) WHERE (is_active IS TRUE);
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects USING btree (user_id, project_id);
-
 
 --
 --

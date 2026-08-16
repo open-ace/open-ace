@@ -864,6 +864,12 @@ CREATE TABLE quota_usage (
     CONSTRAINT chk_quota_usage_tokens_positive CHECK ((tokens_used >= 0))
 );
 
+CREATE TABLE rate_limit_log (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ key VARCHAR(255) NOT NULL,
+ timestamp REAL NOT NULL
+);
+
 CREATE TABLE recycle_bin (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer NOT NULL,
@@ -1919,6 +1925,10 @@ CREATE INDEX idx_quota_alerts_user ON quota_alerts (user_id);
 CREATE INDEX idx_quota_usage_date ON quota_usage (date);
 
 CREATE INDEX idx_quota_usage_user ON quota_usage (user_id);
+
+CREATE INDEX idx_rate_limit_key_timestamp ON rate_limit_log ("key", timestamp);
+
+CREATE INDEX idx_rate_limit_timestamp ON rate_limit_log (timestamp);
 
 CREATE INDEX idx_recycle_bin_execution ON recycle_bin (execution_id);
 
