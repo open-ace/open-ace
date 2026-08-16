@@ -1102,12 +1102,7 @@ const MachineDetailsDialog: React.FC<MachineDetailsDialogProps> = ({
       )}
 
       {/* Active Sessions - Issue #2580 */}
-      {canManageUsers && (
-        <MachineSessionsSection
-          machineId={machine.machine_id}
-          language={language}
-        />
-      )}
+      {canManageUsers && <MachineSessionsSection machineId={machine.machine_id} language={language} />}
     </Modal>
   );
 };
@@ -1119,10 +1114,7 @@ interface MachineSessionsSectionProps {
   language: Language;
 }
 
-const MachineSessionsSection: React.FC<MachineSessionsSectionProps> = ({
-  machineId,
-  language,
-}) => {
+const MachineSessionsSection: React.FC<MachineSessionsSectionProps> = ({ machineId, language }) => {
   const { data, isLoading, refetch } = useMachineSessions(machineId);
   const sessions = data?.sessions ?? [];
 
