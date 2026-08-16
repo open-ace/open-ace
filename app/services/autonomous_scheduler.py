@@ -966,6 +966,13 @@ class AutonomousScheduler:
             key=lambda wf: (
                 1 if wf.get("status") == "waiting" else 0,
                 wf.get("created_at") or "",
+                # Batch siblings share created_at (one INSERT loop), so
+                # batch_order must break the tie or later siblings can be
+                # selected ahead of earlier ones and starve behind conflict
+                # locks (#2706). Non-batch rows (NULL) map to 0; workflow_id
+                # keeps the total order stable regardless.
+                wf.get("batch_order") if wf.get("batch_order") is not None else 0,
+                wf.get("workflow_id") or "",
             )
         )
 
