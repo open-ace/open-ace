@@ -167,6 +167,10 @@ _UPSTREAM_WINDOW_RESUME_RE = re.compile(
     r"resets at (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \+0800[;,]?\s*auto-resume scheduled",
     re.IGNORECASE,
 )
+# Same-named twin lives in app/modules/workspace/autonomous/orchestrator.py
+# (the pause-message renderer). Deliberately not imported across modules to
+# avoid the scheduler↔orchestrator import edge; change both together if the
+# provider ever changes timezone.
 _UPSTREAM_WINDOW_TZINFO = timezone(timedelta(hours=8))
 # Resume a minute after the stated reset so a boundary-eager window (or
 # small clock skew) does not 429 the first resumed request.
@@ -178,7 +182,7 @@ _UPSTREAM_WINDOW_RESUME_MARGIN = timedelta(seconds=60)
 _UPSTREAM_WINDOW_MIN_PAUSE_AGE = timedelta(minutes=5)
 
 
-def _parse_naive_utc(value) -> datetime | None:
+def _parse_naive_utc(value: str | None) -> datetime | None:
     """Parse a 'YYYY-MM-DD HH:MM:SS' string persisted as naive UTC, or None.
 
     Tolerates missing/malformed values (legacy rows) — callers treat None as

@@ -2066,9 +2066,13 @@ _UPSTREAM_USAGE_WINDOW_QUOTA_RE = re.compile(
     r"usage\s+limit\s+reached\s+for\s+\d+\s+hours?\b", re.IGNORECASE
 )
 _UPSTREAM_USAGE_WINDOW_RESET_RE = re.compile(
-    r"your\s+limit\s+will\s+reset\s+at\s+" r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})",
+    r"your\s+limit\s+will\s+reset\s+at\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})",
     re.IGNORECASE,
 )
+# Same-named twin lives in app/services/autonomous_scheduler.py (the marker
+# parser applies the same fixed offset). Deliberately not imported across
+# modules to avoid the scheduler↔orchestrator import edge; change both
+# together if the provider ever changes timezone.
 _UPSTREAM_WINDOW_TZINFO = timezone(timedelta(hours=8))
 
 # Context-window / input-length overflow signatures. A PERMANENT client
