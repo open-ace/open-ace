@@ -89,7 +89,10 @@ jobs:
   lint-autofix:
     name: Lint auto-heal (push formatter fixes back)
     needs: lint
+    # always() is required: without it the default skip-on-failed-dependency
+    # rule skips this job precisely when it should run.
     if: >-
+      always() &&
       needs.lint.result == 'failure' &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository
