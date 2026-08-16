@@ -23,7 +23,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -3764,6 +3764,40 @@ class AutonomousAgentRunner:
                     )
                     if getattr(stored, "_was_inserted", False):
                         persisted_count += 1
+
+                    # Parse file changes from tool_use events (Issue #2589)
+                    try:
+                        from shared.file_change_parser import FileChangeParserRegistry, ParserContext
+
+                        tool_name = event.get("tool_name", "unknown")
+                        tool_use_id = event.get("tool_use_id", "")
+                        parse_context = ParserContext(
+                            session_id=session_id,
+                            tool_use_id=tool_use_id,
+                            project_path=getattr(self, "project_path", ""),
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                        )
+                        records = FileChangeParserRegistry.parse(tool_name, tool_input, parse_context)
+                        if records:
+                            self.session_manager.append_transcript_message(
+                                session_id=session_id,
+                                role="assistant",
+                                content="",
+                                metadata={
+                                    "content_blocks": [
+                                        {
+                                            "type": "file_change",
+                                            "status": "pending",
+                                            "changes": [r.to_dict() for r in records],
+                                        }
+                                    ]
+                                },
+                                milestone_id=milestone_id,
+                                source="file_change_parser",
+                                external_message_id=f"fc:{tool_use_id}",
+                            )
+                    except Exception as e:
+                        logger.warning(f"File change parsing failed: {e}")
             if final_assistant:
                 assistant_content = pick_best_artifact_text(
                     final_assistant.get("text", ""),
