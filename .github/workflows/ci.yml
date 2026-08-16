@@ -122,8 +122,8 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-          cache: pre-commit
-          cache-dependency-path: .pre-commit-config.yaml
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
 
       - name: Install pre-commit
         if: steps.guard.outputs.skip != 'true'
