@@ -218,6 +218,14 @@ def isolated_db(tmp_path):
         # Initialize the test database
         db_module.init_database()
 
+        # Run Alembic migrations to ensure all tables exist
+        from alembic import command
+        from alembic.config import Config
+
+        alembic_config = Config("alembic.ini")
+        alembic_config.set_main_option("sqlalchemy.url", f"sqlite:///{test_config.DB_PATH}")
+        command.upgrade(alembic_config, "head")
+
         # Verify we're using the test database, not production
         assert db_module.DB_PATH == test_config.DB_PATH
         assert not db_module.DB_PATH.endswith(".open-ace/ace.db")

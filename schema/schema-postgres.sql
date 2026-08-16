@@ -640,7 +640,16 @@ CREATE TABLE content_filter_rules (
     is_enabled boolean DEFAULT true,
     description text,
     created_at timestamp without time zone NOT NULL,
-    updated_at timestamp without time zone
+    updated_at timestamp without time zone,
+    is_test boolean DEFAULT false,
+    approval_status character varying(20) DEFAULT 'approved'::character varying,
+    approved_by integer,
+    approved_at timestamp without time zone,
+    created_by integer,
+    priority integer DEFAULT 100,
+    tenant_id integer,
+    valid_from timestamp without time zone,
+    valid_until timestamp without time zone
 );
 
 CREATE SEQUENCE content_filter_rules_id_seq
@@ -819,6 +828,65 @@ CREATE SEQUENCE fencing_token_seq
     NO MAXVALUE
     CACHE 1;
 
+CREATE TABLE filter_rule_approval_log (
+    id integer NOT NULL,
+    rule_id integer NOT NULL,
+    action character varying(20) NOT NULL,
+    actor_user_id integer NOT NULL,
+    actor_username character varying(128),
+    "timestamp" timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    details jsonb,
+    tenant_id integer
+);
+
+CREATE SEQUENCE filter_rule_approval_log_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE filter_rule_approval_log_id_seq OWNED BY filter_rule_approval_log.id;
+CREATE TABLE filter_rule_trigger_log (
+    id integer NOT NULL,
+    rule_id integer NOT NULL,
+    matched_content_hash character varying(64),
+    matched_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    action_taken character varying(20),
+    session_id character varying(128),
+    user_id integer,
+    tenant_id integer
+);
+
+CREATE SEQUENCE filter_rule_trigger_log_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE filter_rule_trigger_log_id_seq OWNED BY filter_rule_trigger_log.id;
+CREATE TABLE filter_rule_versions (
+    id integer NOT NULL,
+    rule_id integer NOT NULL,
+    version_number integer NOT NULL,
+    rule_snapshot jsonb NOT NULL,
+    created_by integer NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    change_reason character varying(500)
+);
+
+CREATE SEQUENCE filter_rule_versions_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE filter_rule_versions_id_seq OWNED BY filter_rule_versions.id;
 CREATE TABLE hourly_stats (
     date character varying(10) NOT NULL,
     hour integer NOT NULL,
@@ -1206,6 +1274,21 @@ CREATE SEQUENCE quota_usage_new_id_seq
     CACHE 1;
 
 ALTER SEQUENCE quota_usage_new_id_seq OWNED BY quota_usage.id;
+CREATE TABLE rate_limit_log (
+    id integer NOT NULL,
+    key character varying(255) NOT NULL,
+    "timestamp" double precision NOT NULL
+);
+
+CREATE SEQUENCE rate_limit_log_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE rate_limit_log_id_seq OWNED BY rate_limit_log.id;
 CREATE TABLE recycle_bin (
     id integer NOT NULL,
     tenant_id integer NOT NULL,
@@ -1445,6 +1528,24 @@ CREATE SEQUENCE role_permissions_id_seq
     CACHE 1;
 
 ALTER SEQUENCE role_permissions_id_seq OWNED BY role_permissions.id;
+CREATE TABLE rule_cache_sync (
+    id integer NOT NULL,
+    rule_id integer NOT NULL,
+    action character varying(20) NOT NULL,
+    tenant_id integer,
+    "timestamp" timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    processed boolean DEFAULT false
+);
+
+CREATE SEQUENCE rule_cache_sync_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE rule_cache_sync_id_seq OWNED BY rule_cache_sync.id;
 CREATE TABLE scheduler_leaders (
     job_name character varying(100) NOT NULL,
     leader_id character varying(255) NOT NULL,
@@ -2333,6 +2434,12 @@ ALTER TABLE ONLY email_notification_logs ALTER COLUMN id SET DEFAULT nextval('em
 
 ALTER TABLE ONLY feishu_settings ALTER COLUMN id SET DEFAULT nextval('feishu_settings_id_seq'::regclass);
 
+ALTER TABLE ONLY filter_rule_approval_log ALTER COLUMN id SET DEFAULT nextval('filter_rule_approval_log_id_seq'::regclass);
+
+ALTER TABLE ONLY filter_rule_trigger_log ALTER COLUMN id SET DEFAULT nextval('filter_rule_trigger_log_id_seq'::regclass);
+
+ALTER TABLE ONLY filter_rule_versions ALTER COLUMN id SET DEFAULT nextval('filter_rule_versions_id_seq'::regclass);
+
 ALTER TABLE ONLY insights_reports ALTER COLUMN id SET DEFAULT nextval('insights_reports_id_seq'::regclass);
 
 ALTER TABLE ONLY knowledge_base ALTER COLUMN id SET DEFAULT nextval('knowledge_base_id_seq'::regclass);
@@ -2359,6 +2466,8 @@ ALTER TABLE ONLY quota_alerts ALTER COLUMN id SET DEFAULT nextval('quota_alerts_
 
 ALTER TABLE ONLY quota_usage ALTER COLUMN id SET DEFAULT nextval('quota_usage_new_id_seq'::regclass);
 
+ALTER TABLE ONLY rate_limit_log ALTER COLUMN id SET DEFAULT nextval('rate_limit_log_id_seq'::regclass);
+
 ALTER TABLE ONLY recycle_bin ALTER COLUMN id SET DEFAULT nextval('recycle_bin_id_seq'::regclass);
 
 ALTER TABLE ONLY registration_tokens ALTER COLUMN id SET DEFAULT nextval('registration_tokens_id_seq'::regclass);
@@ -2378,6 +2487,8 @@ ALTER TABLE ONLY retention_history ALTER COLUMN id SET DEFAULT nextval('retentio
 ALTER TABLE ONLY retention_policies ALTER COLUMN id SET DEFAULT nextval('retention_policies_id_seq'::regclass);
 
 ALTER TABLE ONLY role_permissions ALTER COLUMN id SET DEFAULT nextval('role_permissions_id_seq'::regclass);
+
+ALTER TABLE ONLY rule_cache_sync ALTER COLUMN id SET DEFAULT nextval('rule_cache_sync_id_seq'::regclass);
 
 ALTER TABLE ONLY scheduler_runs ALTER COLUMN id SET DEFAULT nextval('scheduler_runs_id_seq'::regclass);
 
@@ -2549,6 +2660,15 @@ ALTER TABLE ONLY email_notification_logs
 ALTER TABLE ONLY feishu_settings
     ADD CONSTRAINT feishu_settings_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY filter_rule_approval_log
+    ADD CONSTRAINT filter_rule_approval_log_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY filter_rule_trigger_log
+    ADD CONSTRAINT filter_rule_trigger_log_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY filter_rule_versions
+    ADD CONSTRAINT filter_rule_versions_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY insights_reports
     ADD CONSTRAINT insights_reports_pkey PRIMARY KEY (id);
 
@@ -2609,6 +2729,9 @@ ALTER TABLE ONLY quota_alerts
 ALTER TABLE ONLY quota_usage
     ADD CONSTRAINT quota_usage_new_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY rate_limit_log
+    ADD CONSTRAINT rate_limit_log_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY recycle_bin
     ADD CONSTRAINT recycle_bin_pkey PRIMARY KEY (id);
 
@@ -2656,6 +2779,9 @@ ALTER TABLE ONLY role_permissions
 
 ALTER TABLE ONLY role_permissions
     ADD CONSTRAINT role_permissions_role_permission_key UNIQUE (role, permission);
+
+ALTER TABLE ONLY rule_cache_sync
+    ADD CONSTRAINT rule_cache_sync_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY scheduler_leaders
     ADD CONSTRAINT scheduler_leaders_pkey PRIMARY KEY (job_name);
@@ -2788,6 +2914,9 @@ ALTER TABLE ONLY quota_usage
 
 ALTER TABLE ONLY remote_runtime_outputs
     ADD CONSTRAINT uq_remote_runtime_outputs_session_index UNIQUE (session_id, event_index);
+
+ALTER TABLE ONLY filter_rule_versions
+    ADD CONSTRAINT uq_rule_version UNIQUE (rule_id, version_number);
 
 ALTER TABLE ONLY smtp_settings
     ADD CONSTRAINT uq_smtp_settings_single PRIMARY KEY (id);
@@ -2989,6 +3118,14 @@ CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store USING btree (ten
 --
 --
 
+CREATE INDEX idx_approval_log_rule_time ON filter_rule_approval_log USING btree (rule_id, "timestamp");
+
+CREATE INDEX idx_approval_log_tenant_time ON filter_rule_approval_log USING btree (tenant_id, "timestamp");
+
+
+--
+--
+
 CREATE INDEX idx_archive_files_batch ON archive_files USING btree (execution_id, batch_id);
 
 CREATE INDEX idx_archive_files_checksum ON archive_files USING btree (checksum);
@@ -3038,6 +3175,14 @@ CREATE INDEX idx_audit_timestamp ON audit_logs USING btree ("timestamp");
 --
 
 CREATE INDEX idx_audit_user_id ON audit_logs USING btree (user_id);
+
+CREATE INDEX idx_cache_sync_tenant_unprocessed ON rule_cache_sync USING btree (tenant_id, processed, "timestamp");
+
+
+--
+--
+
+CREATE INDEX idx_cache_sync_unprocessed ON rule_cache_sync USING btree (processed, "timestamp");
 
 CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence USING btree (session_id, command_id);
 
@@ -3127,7 +3272,23 @@ CREATE INDEX idx_email_logs_user_sent ON email_notification_logs USING btree (us
 
 CREATE INDEX idx_events_workflow_created ON workflow_events USING btree (workflow_id, created_at);
 
+CREATE INDEX idx_filter_rules_approval_status ON content_filter_rules USING btree (approval_status);
+
+
+--
+--
+
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules USING btree (is_enabled);
+
+CREATE INDEX idx_filter_rules_is_test ON content_filter_rules USING btree (is_test);
+
+
+--
+--
+
+CREATE INDEX idx_filter_rules_priority ON content_filter_rules USING btree (priority);
+
+CREATE INDEX idx_filter_rules_tenant_id ON content_filter_rules USING btree (tenant_id);
 
 
 --
@@ -3375,6 +3536,14 @@ CREATE INDEX idx_quota_usage_date ON quota_usage USING btree (date);
 
 CREATE INDEX idx_quota_usage_user ON quota_usage USING btree (user_id);
 
+CREATE INDEX idx_rate_limit_key_timestamp ON rate_limit_log USING btree (key, "timestamp");
+
+
+--
+--
+
+CREATE INDEX idx_rate_limit_timestamp ON rate_limit_log USING btree ("timestamp");
+
 CREATE INDEX idx_recycle_bin_execution ON recycle_bin USING btree (execution_id);
 
 
@@ -3461,223 +3630,247 @@ CREATE INDEX idx_retention_policies_tenant ON retention_policies USING btree (te
 --
 --
 
+CREATE INDEX idx_rule_versions_rule_version ON filter_rule_versions USING btree (rule_id, version_number);
+
 CREATE INDEX idx_run_events_created_at ON agent_run_events USING btree (created_at);
+
+
+--
+--
 
 CREATE INDEX idx_run_events_event_type ON agent_run_events USING btree (event_type);
 
-
---
---
-
 CREATE INDEX idx_run_events_run_id ON agent_run_events USING btree (run_id);
+
+
+--
+--
 
 CREATE INDEX idx_run_events_session_id ON agent_run_events USING btree (session_id, id);
 
-
---
---
-
 CREATE INDEX idx_scheduler_leaders_expires ON scheduler_leaders USING btree (expires_at);
+
+
+--
+--
 
 CREATE INDEX idx_scheduler_leaders_heartbeat ON scheduler_leaders USING btree (heartbeat_at);
 
-
---
---
-
 CREATE INDEX idx_scheduler_runs_job_time ON scheduler_runs USING btree (job_name, started_at DESC);
+
+
+--
+--
 
 CREATE INDEX idx_scheduler_runs_status ON scheduler_runs USING btree (status);
 
-
---
---
-
 CREATE INDEX idx_security_settings_key ON security_settings USING btree (setting_key);
+
+
+--
+--
 
 CREATE INDEX idx_session_messages_external_message_id ON session_messages USING btree (session_id, external_message_id);
 
-
---
---
-
 CREATE INDEX idx_session_messages_session_id ON session_messages USING btree (session_id);
+
+
+--
+--
 
 CREATE INDEX idx_session_messages_session_timestamp ON session_messages USING btree (session_id, "timestamp", id);
 
-
---
---
-
 CREATE INDEX idx_session_messages_source ON session_messages USING btree (session_id, source);
+
+
+--
+--
 
 CREATE INDEX idx_session_messages_tenant_session ON session_messages USING btree (tenant_id, session_id);
 
-
---
---
-
 CREATE INDEX idx_session_messages_tenant_session_timestamp ON session_messages USING btree (tenant_id, session_id, "timestamp", id);
+
+
+--
+--
 
 CREATE INDEX idx_session_stats_session_id ON session_stats USING btree (session_id);
 
-
---
---
-
 CREATE INDEX idx_session_stats_tool_host ON session_stats USING btree (tool_name, host_name);
+
+
+--
+--
 
 CREATE INDEX idx_session_stats_updated_at ON session_stats USING btree (updated_at DESC);
 
-
---
---
-
 CREATE INDEX idx_sessions_active ON sessions USING btree (is_active, expires_at);
+
+
+--
+--
 
 CREATE INDEX idx_sessions_expires ON sessions USING btree (expires_at);
 
-
---
---
-
 CREATE INDEX idx_sessions_token ON sessions USING btree (token);
+
+
+--
+--
 
 CREATE INDEX idx_sessions_user_id ON sessions USING btree (user_id);
 
-
---
---
-
 CREATE INDEX idx_shared_sessions_session ON shared_sessions USING btree (session_id);
+
+
+--
+--
 
 CREATE INDEX idx_shared_sessions_target ON shared_sessions USING btree (target_id);
 
-
---
---
-
 CREATE INDEX idx_sso_auth_states_expires ON sso_auth_states USING btree (expires_at);
+
+
+--
+--
 
 CREATE INDEX idx_sso_identities_provider ON sso_identities USING btree (provider_name, provider_user_id);
 
-
---
---
-
 CREATE INDEX idx_sso_identities_user ON sso_identities USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_sso_providers_tenant ON sso_providers USING btree (tenant_id);
 
-
---
---
-
 CREATE INDEX idx_sso_sessions_token ON sso_sessions USING btree (session_token);
+
+
+--
+--
 
 CREATE INDEX idx_sso_sessions_user ON sso_sessions USING btree (user_id);
 
-
---
---
-
 CREATE INDEX idx_sync_events_session_id ON sync_events USING btree (session_id);
+
+
+--
+--
 
 CREATE INDEX idx_sync_events_timestamp ON sync_events USING btree ("timestamp");
 
-
---
---
-
 CREATE INDEX idx_sync_events_user_id ON sync_events USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_team_members_team ON team_members USING btree (team_id);
 
-
---
---
-
 CREATE INDEX idx_team_members_user ON team_members USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_teams_owner ON teams USING btree (owner_id);
 
-
---
---
-
 CREATE INDEX idx_teams_sync_source ON teams USING btree ((((settings)::jsonb ->> 'sync_source'::text)));
+
+
+--
+--
 
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations USING btree (status);
 
-
---
---
-
 CREATE INDEX idx_tenant_migrations_user ON tenant_migrations USING btree (user_id);
+
+
+--
+--
 
 CREATE INDEX idx_tenant_period_history_dates ON tenant_period_history USING btree (period_start, period_end);
 
-
---
---
-
 CREATE INDEX idx_tenant_period_history_tenant ON tenant_period_history USING btree (tenant_id);
+
+
+--
+--
 
 CREATE INDEX idx_tenant_plans_active ON tenant_plans USING btree (is_active);
 
-
---
---
-
 CREATE INDEX idx_tenant_plans_slug ON tenant_plans USING btree (slug);
+
+
+--
+--
 
 CREATE INDEX idx_tenant_quotas_tenant ON tenant_quotas USING btree (tenant_id);
 
-
---
---
-
 CREATE INDEX idx_tenant_settings_tenant ON tenant_settings USING btree (tenant_id);
+
+
+--
+--
 
 CREATE INDEX idx_tenant_usage_date ON tenant_usage USING btree (date);
 
-
---
---
-
 CREATE INDEX idx_tenant_usage_tenant ON tenant_usage USING btree (tenant_id);
+
+
+--
+--
 
 CREATE INDEX idx_tenants_billing_cycle ON tenants USING btree (billing_cycle_end);
 
-
---
---
-
 CREATE INDEX idx_tenants_deleted ON tenants USING btree (deleted_at);
+
+
+--
+--
 
 CREATE INDEX idx_tenants_slug ON tenants USING btree (slug);
 
-
---
---
-
 CREATE INDEX idx_tenants_status ON tenants USING btree (status);
+
+
+--
+--
 
 CREATE INDEX idx_test_evidence_session_command ON test_execution_evidence USING btree (session_id, command_id);
 
-
---
---
-
 CREATE INDEX idx_test_evidence_workflow_milestone ON test_execution_evidence USING btree (workflow_id, milestone_id);
+
+
+--
+--
 
 CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts USING btree (tool_account);
 
-
---
---
-
 CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts USING btree (user_id);
+
+
+--
+--
+
+CREATE INDEX idx_trigger_log_rule_time ON filter_rule_trigger_log USING btree (rule_id, matched_at);
+
+CREATE INDEX idx_trigger_log_rule_time_action ON filter_rule_trigger_log USING btree (rule_id, matched_at, action_taken);
+
+
+--
+--
+
+CREATE INDEX idx_trigger_log_tenant_time ON filter_rule_trigger_log USING btree (tenant_id, matched_at);
+
+CREATE INDEX idx_trigger_log_time_action ON filter_rule_trigger_log USING btree (matched_at, action_taken);
+
+
+--
+--
+
+CREATE INDEX idx_trigger_log_user_time ON filter_rule_trigger_log USING btree (user_id, matched_at);
 
 CREATE INDEX idx_usage_date ON daily_usage USING btree (date);
 

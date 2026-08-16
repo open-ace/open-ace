@@ -2552,9 +2552,7 @@ class GitHubOps:
         parts = path.split("/")
         if "__pycache__" in parts:
             return True
-        if parts and parts[0] == ".pytest_cache":
-            return True
-        return False
+        return bool(parts and parts[0] == ".pytest_cache")
 
     def _unstage_test_artifacts(self) -> None:
         """Unstage test-pollution artifacts from the git index.

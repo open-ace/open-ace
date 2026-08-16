@@ -435,7 +435,16 @@ CREATE TABLE content_filter_rules (
  is_enabled INTEGER DEFAULT 1,
  description text,
  created_at TIMESTAMP NOT NULL,
- updated_at TIMESTAMP
+ updated_at TIMESTAMP,
+ is_test INTEGER DEFAULT 0,
+ approval_status TEXT DEFAULT 'approved',
+ approved_by integer,
+ approved_at TIMESTAMP,
+ created_by integer,
+ priority integer DEFAULT 100,
+ tenant_id integer,
+ valid_from TIMESTAMP,
+ valid_until TIMESTAMP
 );
 
 CREATE TABLE daily_messages (
@@ -551,6 +560,38 @@ CREATE TABLE feishu_settings (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT ck_feishu_settings_singleton CHECK ((id = 1))
+);
+
+CREATE TABLE filter_rule_approval_log (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ rule_id integer NOT NULL,
+ action TEXT NOT NULL,
+ actor_user_id integer NOT NULL,
+ actor_username TEXT,
+ "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ details TEXT,
+ tenant_id integer
+);
+
+CREATE TABLE filter_rule_trigger_log (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ rule_id integer NOT NULL,
+ matched_content_hash TEXT,
+ matched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ action_taken TEXT,
+ session_id TEXT,
+ user_id integer,
+ tenant_id integer
+);
+
+CREATE TABLE filter_rule_versions (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ rule_id integer NOT NULL,
+ version_number integer NOT NULL,
+ rule_snapshot TEXT NOT NULL,
+ created_by integer NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ change_reason TEXT
 );
 
 CREATE TABLE hourly_stats (
@@ -823,6 +864,12 @@ CREATE TABLE quota_usage (
     CONSTRAINT chk_quota_usage_tokens_positive CHECK ((tokens_used >= 0))
 );
 
+CREATE TABLE rate_limit_log (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ key TEXT NOT NULL,
+ "timestamp" REAL NOT NULL
+);
+
 CREATE TABLE recycle_bin (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer NOT NULL,
@@ -970,6 +1017,15 @@ CREATE TABLE role_permissions (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  role text NOT NULL,
  permission text NOT NULL
+);
+
+CREATE TABLE rule_cache_sync (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ rule_id integer NOT NULL,
+ action TEXT NOT NULL,
+ tenant_id integer,
+ "timestamp" TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ processed INTEGER DEFAULT 0
 );
 
 CREATE TABLE scheduler_leaders (
@@ -1574,6 +1630,8 @@ CREATE UNIQUE INDEX uq_quota_usage_user_date_period_new ON quota_usage (user_id,
 
 CREATE UNIQUE INDEX uq_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
 
+CREATE UNIQUE INDEX uq_rule_version ON filter_rule_versions (rule_id, version_number);
+
 CREATE UNIQUE INDEX uq_tenant_usage_tenant_date_new ON tenant_usage (tenant_id, date);
 
 CREATE UNIQUE INDEX uq_test_evidence_session_command ON test_execution_evidence (session_id, command_id);
@@ -1658,6 +1716,10 @@ CREATE INDEX idx_annotations_session ON annotations (session_id);
 
 CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store (tenant_id, provider);
 
+CREATE INDEX idx_approval_log_rule_time ON filter_rule_approval_log (rule_id, "timestamp");
+
+CREATE INDEX idx_approval_log_tenant_time ON filter_rule_approval_log (tenant_id, "timestamp");
+
 CREATE INDEX idx_archive_files_batch ON archive_files (execution_id, batch_id);
 
 CREATE INDEX idx_archive_files_checksum ON archive_files (checksum);
@@ -1683,6 +1745,10 @@ CREATE INDEX idx_audit_tenant_id ON audit_logs (tenant_id);
 CREATE INDEX idx_audit_timestamp ON audit_logs ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs (user_id);
+
+CREATE INDEX idx_cache_sync_tenant_unprocessed ON rule_cache_sync (tenant_id, processed, "timestamp");
+
+CREATE INDEX idx_cache_sync_unprocessed ON rule_cache_sync (processed, "timestamp");
 
 CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence (session_id, command_id);
 
@@ -1728,7 +1794,15 @@ CREATE INDEX idx_email_logs_user_sent ON email_notification_logs (user_id, sent_
 
 CREATE INDEX idx_events_workflow_created ON workflow_events (workflow_id, created_at);
 
+CREATE INDEX idx_filter_rules_approval_status ON content_filter_rules (approval_status);
+
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules (is_enabled);
+
+CREATE INDEX idx_filter_rules_is_test ON content_filter_rules (is_test);
+
+CREATE INDEX idx_filter_rules_priority ON content_filter_rules (priority);
+
+CREATE INDEX idx_filter_rules_tenant_id ON content_filter_rules (tenant_id);
 
 CREATE INDEX idx_filter_rules_type ON content_filter_rules (type);
 
@@ -1852,6 +1926,10 @@ CREATE INDEX idx_quota_usage_date ON quota_usage (date);
 
 CREATE INDEX idx_quota_usage_user ON quota_usage (user_id);
 
+CREATE INDEX idx_rate_limit_key_timestamp ON rate_limit_log (key, "timestamp");
+
+CREATE INDEX idx_rate_limit_timestamp ON rate_limit_log ("timestamp");
+
 CREATE INDEX idx_recycle_bin_execution ON recycle_bin (execution_id);
 
 CREATE INDEX idx_recycle_bin_expires ON recycle_bin (expires_at);
@@ -1893,6 +1971,8 @@ CREATE INDEX idx_retention_policies_data_type ON retention_policies (data_type);
 CREATE INDEX idx_retention_policies_enabled ON retention_policies (enabled);
 
 CREATE INDEX idx_retention_policies_tenant ON retention_policies (tenant_id);
+
+CREATE INDEX idx_rule_versions_rule_version ON filter_rule_versions (rule_id, version_number);
 
 CREATE INDEX idx_run_events_created_at ON agent_run_events (created_at);
 
@@ -1997,6 +2077,16 @@ CREATE INDEX idx_test_evidence_workflow_milestone ON test_execution_evidence (wo
 CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts (tool_account);
 
 CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts (user_id);
+
+CREATE INDEX idx_trigger_log_rule_time ON filter_rule_trigger_log (rule_id, matched_at);
+
+CREATE INDEX idx_trigger_log_rule_time_action ON filter_rule_trigger_log (rule_id, matched_at, action_taken);
+
+CREATE INDEX idx_trigger_log_tenant_time ON filter_rule_trigger_log (tenant_id, matched_at);
+
+CREATE INDEX idx_trigger_log_time_action ON filter_rule_trigger_log (matched_at, action_taken);
+
+CREATE INDEX idx_trigger_log_user_time ON filter_rule_trigger_log (user_id, matched_at);
 
 CREATE INDEX idx_usage_date ON daily_usage (date);
 
