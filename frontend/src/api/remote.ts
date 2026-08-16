@@ -38,6 +38,18 @@ export interface MachineAssignment {
   granted_at: string;
 }
 
+export interface MachineSession {
+  session_id: string;
+  user_id: number | null;
+  username: string | null;
+  status: string;
+  project_path: string | null;
+  model: string | null;
+  tool_name: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 export interface ApiKey {
   id: number;
   provider: string;
@@ -291,6 +303,16 @@ export const remoteApi = {
 
   getMachineUsers(machineId: string): Promise<{ success: boolean; users: MachineAssignment[] }> {
     return apiClient.get(`/api/remote/machines/${machineId}/users`);
+  },
+
+  getMachineSessions(
+    machineId: string,
+    params?: { status?: string; limit?: number }
+  ): Promise<{ success: boolean; sessions: MachineSession[] }> {
+    const query: Record<string, string> = {};
+    if (params?.status) query.status = params.status;
+    if (params?.limit !== undefined) query.limit = String(params.limit);
+    return apiClient.get(`/api/remote/machines/${machineId}/sessions`, query);
   },
 
   assignUser(

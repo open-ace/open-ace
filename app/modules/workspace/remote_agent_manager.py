@@ -2982,6 +2982,101 @@ class RemoteAgentManager:
                 logger.error(f"Failed to get machine assignments: {e}")
                 return []
 
+    def get_machine_sessions(
+        self,
+        machine_id: str,
+        status: str = "all",
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Get list of active/paused sessions on a machine.
+
+        Issue #2580: Admin dashboard feature for viewing remote machine sessions.
+
+        Args:
+            machine_id: The machine UUID to query.
+            status: Filter by status - "active", "paused", or "all" (default).
+            limit: Maximum number of sessions to return (default 50, max 200).
+
+        Returns:
+            List of session dicts with: session_id, user_id, username, status,
+            project_path, model, tool_name, created_at, updated_at
+        """
+        # Clamp limit to max 200
+        limit = min(max(1, limit), 200)
+
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+
+            try:
+                # Build status filter
+                if status == "active":
+                    status_clause = "AND s.status = 'active'"
+                elif status == "paused":
+                    status_clause = "AND s.status = 'paused'"
+                else:
+                    # "all" shows active + paused only (not completed/stopped/error)
+                    status_clause = "AND s.status IN ('active', 'paused')"
+
+                cursor.execute(
+                    f"""
+                    SELECT
+                        s.session_id,
+                        s.user_id,
+                        u.username,
+                        s.status,
+                        s.project_path,
+                        s.model,
+                        s.tool_name,
+                        s.created_at,
+                        s.updated_at
+                    FROM agent_sessions s
+                    LEFT JOIN users u ON s.user_id = u.id
+                    WHERE s.remote_machine_id = {_param()}
+                    AND s.workspace_type = 'remote'
+                    {status_clause}
+                    ORDER BY s.updated_at DESC
+                    LIMIT {_param()}
+                """,
+                    (machine_id, limit),
+                )
+
+                rows = cursor.fetchall()
+                result = []
+                for row in rows:
+                    if isinstance(row, dict):
+                        result.append(
+                            {
+                                "session_id": row["session_id"],
+                                "user_id": row["user_id"],
+                                "username": row["username"],
+                                "status": row["status"],
+                                "project_path": row["project_path"],
+                                "model": row["model"],
+                                "tool_name": row["tool_name"],
+                                "created_at": row["created_at"],
+                                "updated_at": row["updated_at"],
+                            }
+                        )
+                    else:
+                        # Tuple format
+                        result.append(
+                            {
+                                "session_id": row[0],
+                                "user_id": row[1],
+                                "username": row[2],
+                                "status": row[3],
+                                "project_path": row[4],
+                                "model": row[5],
+                                "tool_name": row[6],
+                                "created_at": row[7],
+                                "updated_at": row[8],
+                            }
+                        )
+                return result
+            except Exception as e:
+                logger.error(f"Failed to get machine sessions: {e}")
+                return []
+
     def _batch_get_token_status(self, cursor, machine_ids: list[str]) -> dict[str, str]:
         """Batch-query token status for multiple machines.
 
