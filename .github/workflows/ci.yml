@@ -164,12 +164,33 @@ jobs:
             echo "::warning::Branch $BRANCH moved during the heal; skipping re-trigger."
             exit 0
           fi
-          # Always re-trigger: if autofix couldn't resolve everything, the
-          # re-run fails on the real issue at the new head instead of leaving
-          # the PR without any checks on it.
-          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" \
-            --method POST -f "ref=$BRANCH"
-          echo "Re-triggered CI on $BRANCH"
+          NEW_SHA="$(git rev-parse HEAD)"
+          # A GITHUB_TOKEN push parks the pull_request runs for the new head in
+          # action_required (anti-recursion). Approving them replays the normal
+          # PR pipeline at the fixed head; if none show up or approval fails,
+          # fall back to workflow_dispatch.
+          approved=0
+          for attempt in 1 2 3 4 5 6; do
+            sleep 10
+            RUN_IDS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${NEW_SHA}&status=action_required" \
+              --jq '.workflow_runs[].id' 2>/dev/null || true)"
+            if [ -n "$RUN_IDS" ]; then break; fi
+            echo "waiting for parked runs at ${NEW_SHA:0:8} (attempt $attempt)"
+          done
+          for run_id in $RUN_IDS; do
+            if gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/approve" --method POST >/dev/null 2>&1; then
+              approved=$((approved + 1))
+              echo "Approved parked run $run_id"
+            else
+              echo "::warning::Could not approve parked run $run_id"
+            fi
+          done
+          if [ "$approved" -eq 0 ]; then
+            echo "No parked runs approved; falling back to workflow_dispatch."
+            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" \
+              --method POST -f "ref=$BRANCH"
+            echo "Re-triggered CI on $BRANCH via workflow_dispatch"
+          fi
           if [ "$FIX_RC" != "0" ]; then
             echo "::warning::Autofixes applied, but formatters still reported unfixable findings (rc=$FIX_RC)."
           fi
