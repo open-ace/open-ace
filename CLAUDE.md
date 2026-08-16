@@ -27,6 +27,21 @@ other, nothing else referenced them, and they pushed the product README below a
 wall of CI firefighting logs — right as the project received its first external
 visitors. See `docs/dev-notes/README.md`.
 
+## Pushing
+
+Do not call `git push` directly. Use `scripts/push.sh [git-push args]`: it runs
+the exact CI lint command first, folds formatter autofixes into the commit
+being pushed (amending when the commit is not yet on the remote), and aborts
+the push on failures autofix cannot resolve.
+
+Why this rule exists: on 2026-08-15 the same failure hit #2712, #2718 and
+#2719 (#2205 before them) — black/isort autofixes landed in the worktree but
+not in the pushed commit, CI lint went red, and a local `pre-commit run` still
+passed because it checks the worktree, not the commit. When such a push slips
+through anyway, the `lint-autofix` job in `.github/workflows/ci.yml` pushes
+the fixes back and re-triggers CI — but going through `scripts/push.sh` avoids
+the wasted red run.
+
 ## Test placement and CI semantics
 
 - Choose one canonical location by runtime contract: `tests/unit/`,
