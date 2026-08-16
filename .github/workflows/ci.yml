@@ -136,10 +136,10 @@ jobs:
           # Only the hooks that can fix files. The dispatched CI re-run is the
           # authoritative full-suite check; skipping mypy/pydocstyle keeps this
           # job fast and hard to fail for unrelated reasons.
-          set +e
-          pre-commit run black isort ruff trailing-whitespace end-of-file-fixer --all-files
-          rc=$?
-          set -e
+          rc=0
+          for hook in black isort ruff trailing-whitespace end-of-file-fixer; do
+            pre-commit run "$hook" --all-files || rc=1
+          done
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
           if git diff --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -176,8 +176,14 @@ jobs:
 
       - name: Nothing fixable
         if: steps.guard.outputs.skip != 'true' && steps.autofix.outputs.changed == 'false'
+        env:
+          FIX_RC: ${{ steps.autofix.outputs.rc }}
         run: |
-          echo "::warning::Lint failed but formatter autofixes produced no diff — the failure is not auto-fixable. See the lint job log."
+          if [ "$FIX_RC" != "0" ]; then
+            echo "::warning::Formatter hooks ran but produced no diff while reporting findings (rc=$FIX_RC) — not auto-fixable. See the lint job log."
+          else
+            echo "::warning::Lint failed but formatter autofixes produced no diff — the failure is not formatter-related. See the lint job log."
+          fi
 
   test:
     name: test (${{ matrix.python-version }})
