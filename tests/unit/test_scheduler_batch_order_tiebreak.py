@@ -1,13 +1,4 @@
-"""Regression (#2706): scheduler selection must tiebreak on batch_order.
-
-Batch siblings are inserted in one loop, so they share (or nearly share)
-``created_at``. The selection sort keyed only on ``(waiting, created_at)``,
-leaving same-timestamp siblings ordered by whatever the DB returned — a later
-sibling could repeatedly win the batch's single slot and hold the conflict
-lock while the earlier one starved behind it, surfacing as a batch "stuck for
-hours". ``batch_order`` is persisted at insert time
-(autonomous_repo.py) but was never read back here.
-"""
+"""Regression (#2706): tiebreak same-created_at batch siblings on batch_order."""
 
 from unittest.mock import MagicMock, patch
 
@@ -48,10 +39,9 @@ def _run_one_cycle(scheduler, workflows):
     return [call.args[0] for call in advance.call_args_list]
 
 
-def test_same_created_at_batch_siblings_selected_in_batch_order():
-    """With identical created_at, the batch's earlier sibling (batch_order 0)
-    must win the batch's single slot even when the DB returns rows in reverse
-    order — Python's stable sort otherwise preserves the wrong order."""
+def test_same_created_at_batch_siblings_selected_in_batch_order(monkeypatch):
+    """Identical created_at + reverse DB order: batch_order 0 must win the batch's single slot."""
+    monkeypatch.setattr("app.services.autonomous_scheduler.MAX_CONCURRENT_WORKFLOWS", 1)
     scheduler = AutonomousScheduler()
     workflows = [
         _wf("wf-later", "batch-1", 1),
@@ -64,10 +54,7 @@ def test_same_created_at_batch_siblings_selected_in_batch_order():
 
 
 def test_batch_order_tiebreak_honors_waiting_priority_first(monkeypatch):
-    """The waiting-last priority is unchanged: a waiting sibling still sorts
-    behind pending work even with a smaller batch_order. Concurrency is capped
-    to 1 so the single slot deterministically goes to the pending sibling
-    (ThreadPool invocation order is otherwise non-deterministic)."""
+    """Waiting-last priority is unchanged: pending beats waiting regardless of batch_order."""
     monkeypatch.setattr("app.services.autonomous_scheduler.MAX_CONCURRENT_WORKFLOWS", 1)
     scheduler = AutonomousScheduler()
     workflows = [
@@ -81,9 +68,7 @@ def test_batch_order_tiebreak_honors_waiting_priority_first(monkeypatch):
 
 
 def test_null_batch_order_same_created_at_falls_back_to_workflow_id(monkeypatch):
-    """Non-batch rows (batch_order NULL) with identical created_at must order
-    by workflow_id — a stable total order, and no TypeError from comparing
-    None with int."""
+    """NULL batch_order + identical created_at orders by workflow_id: stable total order, no None-vs-int TypeError."""
     monkeypatch.setattr("app.services.autonomous_scheduler.MAX_CONCURRENT_WORKFLOWS", 1)
     scheduler = AutonomousScheduler()
     workflows = [
