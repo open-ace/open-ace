@@ -44,9 +44,11 @@ def test_extract_tokens_keeps_provider_total_and_separates_cache():
 
 def test_process_jsonl_file_counts_cache_in_total_without_double_counting_thoughts(tmp_path):
     # Use current date to ensure data is within the recent 7-day window
+    # parse_timestamp converts UTC to local time, so we need to use local date
     now = datetime.now(timezone.utc)
     timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    date_key = now.strftime("%Y-%m-%d")
+    # Convert to local time for date key to match parse_timestamp behavior
+    date_key = now.replace(tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d")
 
     jsonl = _write_jsonl(
         tmp_path / "sess-qwen.jsonl",
