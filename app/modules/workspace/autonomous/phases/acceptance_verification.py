@@ -519,7 +519,7 @@ def _prior_infra_retry_count(wf: dict, merge_sha: str, snap_hash: str) -> int:
         return 0
 
 
-def _acceptance_milestone(*, workflow_id, attempt, status, report) -> dict:
+def _acceptance_milestone(*, workflow_id, dev_round, attempt, status, report) -> dict:
     """Build the acceptance-verification milestone row.
 
     ``result_summary`` / ``metadata`` are DB columns inserted verbatim by
@@ -532,6 +532,7 @@ def _acceptance_milestone(*, workflow_id, attempt, status, report) -> dict:
     return {
         "workflow_id": workflow_id,
         "phase": "acceptance_verification",
+        "dev_round": dev_round,
         "round_number": attempt,
         "milestone_type": "acceptance_verification",
         "status": status,
@@ -815,6 +816,7 @@ def handle(ctx, deps) -> PhaseResult:
     }
     milestone = _acceptance_milestone(
         workflow_id=wf.get("workflow_id"),
+        dev_round=int(wf.get("dev_round") or 1),
         attempt=common_patch["verification_attempt"],
         status=status,
         report=report,

@@ -28,7 +28,9 @@ def test_acceptance_milestone_fields_are_strings():
         "gates": [],
         "verifier": [{"item": "x"}, {"item": "y"}],
     }
-    ms = _acceptance_milestone(workflow_id="wf-2394", attempt=1, status="confirmed", report=report)
+    ms = _acceptance_milestone(
+        workflow_id="wf-2394", dev_round=1, attempt=1, status="confirmed", report=report
+    )
 
     # Both DB columns must be strings — a dict here crashes create_milestone.
     assert isinstance(ms["result_summary"], str)
