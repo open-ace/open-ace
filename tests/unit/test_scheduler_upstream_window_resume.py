@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 
 from app.services.autonomous_scheduler import AutonomousScheduler
 
-
 UTC8 = timezone(timedelta(hours=8))
 
 PAUSED_WINDOW = {

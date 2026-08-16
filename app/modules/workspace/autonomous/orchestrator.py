@@ -2066,8 +2066,7 @@ _UPSTREAM_USAGE_WINDOW_QUOTA_RE = re.compile(
     r"usage\s+limit\s+reached\s+for\s+\d+\s+hours?\b", re.IGNORECASE
 )
 _UPSTREAM_USAGE_WINDOW_RESET_RE = re.compile(
-    r"your\s+limit\s+will\s+reset\s+at\s+"
-    r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})",
+    r"your\s+limit\s+will\s+reset\s+at\s+" r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})",
     re.IGNORECASE,
 )
 _UPSTREAM_WINDOW_TZINFO = timezone(timedelta(hours=8))
@@ -7071,9 +7070,7 @@ class AutonomousOrchestrator:
         reads correctly for operators too.
         """
         if resume_at is not None:
-            local = resume_at.astimezone(_UPSTREAM_WINDOW_TZINFO).strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
+            local = resume_at.astimezone(_UPSTREAM_WINDOW_TZINFO).strftime("%Y-%m-%d %H:%M:%S")
             detail = (
                 "provider usage window exhausted; "
                 f"limit resets at {local} +0800; auto-resume scheduled"
@@ -7863,9 +7860,7 @@ class AutonomousOrchestrator:
                 else (result.tracking_session_id or result.session_id or tracking_session_id)
             )
         if upstream_window_quota:
-            self._pause_for_upstream_quota(
-                result, milestone_id, resume_at=upstream_window_reset
-            )
+            self._pause_for_upstream_quota(result, milestone_id, resume_at=upstream_window_reset)
             raise UpstreamQuotaPaused(result.error)
         if upstream_hard_quota_exhausted:
             self._pause_for_upstream_quota(result, milestone_id)

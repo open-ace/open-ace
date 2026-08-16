@@ -333,17 +333,13 @@ def test_verification_agent_re_raise_workflow_pause():
     def _raise(*args, **kwargs):
         raise UpstreamQuotaPaused("window quota")
 
-    with patch.object(
-        AutonomousOrchestrator, "workflow", {"cli_tool": "claude-code", "model": ""}
-    ), patch.object(
-        AutonomousOrchestrator, "_build_verification_prompt", return_value="verify"
-    ), patch.object(
-        AutonomousOrchestrator, "_checkout_merged_main", return_value="/tmp/vw"
-    ), patch.object(
-        AutonomousOrchestrator, "_run_agent", side_effect=_raise
-    ), patch.object(
-        AutonomousOrchestrator, "_remove_verification_worktree"
-    ) as cleanup:
+    with (
+        patch.object(AutonomousOrchestrator, "workflow", {"cli_tool": "claude-code", "model": ""}),
+        patch.object(AutonomousOrchestrator, "_build_verification_prompt", return_value="verify"),
+        patch.object(AutonomousOrchestrator, "_checkout_merged_main", return_value="/tmp/vw"),
+        patch.object(AutonomousOrchestrator, "_run_agent", side_effect=_raise),
+        patch.object(AutonomousOrchestrator, "_remove_verification_worktree") as cleanup,
+    ):
         with pytest.raises(UpstreamQuotaPaused):
             orchestrator._run_verification_agent(
                 snapshot={},

@@ -812,17 +812,13 @@ class AutonomousScheduler:
         messages. Fail-closed: query/parse/update errors leave the workflow
         paused for the next cycle.
         """
-        from app.modules.workspace.autonomous.orchestrator import (
-            UPSTREAM_QUOTA_PAUSE_REASON_PREFIX,
-        )
+        from app.modules.workspace.autonomous.orchestrator import UPSTREAM_QUOTA_PAUSE_REASON_PREFIX
         from app.routes.autonomous import PHASE_TO_STATUS, _emit_event_safe
 
         try:
             paused = repo.get_paused_workflows(UPSTREAM_QUOTA_PAUSE_REASON_PREFIX)
         except Exception as e:
-            logger.error(
-                "Failed to query upstream-paused workflows for window resume: %s", e
-            )
+            logger.error("Failed to query upstream-paused workflows for window resume: %s", e)
             return
 
         now = datetime.now(timezone.utc)
