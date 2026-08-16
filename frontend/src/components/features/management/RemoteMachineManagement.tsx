@@ -13,6 +13,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   useMachines,
   useMachineUsers,
+  useMachineSessions,
   useGenerateToken,
   useDeregisterMachine,
   useRotateMachineToken,
@@ -1099,6 +1100,86 @@ const MachineDetailsDialog: React.FC<MachineDetailsDialogProps> = ({
           )}
         </div>
       )}
+
+      {/* Active Sessions - Issue #2580 */}
+      {canManageUsers && <MachineSessionsSection machineId={machine.machine_id} language={language} />}
     </Modal>
+  );
+};
+
+// ==================== Machine Sessions Section ====================
+
+interface MachineSessionsSectionProps {
+  machineId: string;
+  language: Language;
+}
+
+const MachineSessionsSection: React.FC<MachineSessionsSectionProps> = ({
+  machineId,
+  language,
+}) => {
+  const { data, isLoading, refetch } = useMachineSessions(machineId);
+  const sessions = data?.sessions ?? [];
+
+  if (isLoading) {
+    return (
+      <div className="mt-4">
+        <h6 className="mb-2">{t('activeSessions', language) || 'Active Sessions'}</h6>
+        <Loading size="md" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4">
+      <div className="d-flex justify-content-between align-items-center mb-2">
+        <h6 className="mb-0">{t('activeSessions', language) || 'Active Sessions'}</h6>
+        <Button variant="outline-secondary" size="sm" onClick={() => refetch()}>
+          <i className="bi bi-arrow-clockwise me-1" />
+          {t('refresh', language)}
+        </Button>
+      </div>
+
+      {sessions.length === 0 ? (
+        <p className="text-muted">
+          {t('noActiveSessions', language) || 'No active sessions on this machine'}
+        </p>
+      ) : (
+        <div className="table-responsive">
+          <table className="table table-sm table-hover">
+            <thead>
+              <tr>
+                <th>{t('sessionId', language) || 'Session ID'}</th>
+                <th>{t('user', language) || 'User'}</th>
+                <th>{t('status', language)}</th>
+                <th>{t('projectPath', language) || 'Project'}</th>
+                <th>{t('model', language) || 'Model'}</th>
+                <th>{t('lastActivity', language) || 'Last Activity'}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sessions.map((session) => (
+                <tr key={session.session_id}>
+                  <td className="font-monospace">{session.session_id.substring(0, 8)}...</td>
+                  <td>{session.username ?? '-'}</td>
+                  <td>
+                    <Badge variant={session.status === 'active' ? 'success' : 'warning'}>
+                      {session.status}
+                    </Badge>
+                  </td>
+                  <td className="text-truncate" style={{ maxWidth: '150px' }}>
+                    {session.project_path ?? '-'}
+                  </td>
+                  <td>{session.model ?? '-'}</td>
+                  <td>
+                    {session.updated_at ? new Date(session.updated_at).toLocaleString() : '-'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 };

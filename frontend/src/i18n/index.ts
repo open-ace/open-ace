@@ -735,6 +735,8 @@ export const translations: Record<Language, Translations> = {
 
     // Sessions
     activeSessions: 'Active Sessions',
+    noActiveSessions: 'No active sessions on this machine',
+    lastActivity: 'Last Activity',
     noSessionsFound: 'No sessions found with current filters',
     noAgentSessions:
       'No agent sessions found. Sessions are created when using AI tools in Workspace.',
@@ -2714,6 +2716,8 @@ export const translations: Record<Language, Translations> = {
 
     // Sessions
     activeSessions: '活跃会话',
+    noActiveSessions: '该机器上暂无活动会话',
+    lastActivity: '最近活动',
     noSessionsFound: '未找到符合条件的会话',
     noAgentSessions: '暂无 Agent 会话。在 Workspace 中使用 AI 工具时会自动创建会话。',
     allStatus: '所有状态',

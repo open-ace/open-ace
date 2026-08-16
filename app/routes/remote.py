@@ -1395,6 +1395,40 @@ def get_machine_users(machine_id):
     )
 
 
+@remote_bp.route("/machines/<machine_id>/sessions", methods=["GET"])
+@machine_admin_required
+def get_machine_sessions(machine_id):
+    """
+    Get list of active sessions on a machine. System admin or machine admin.
+
+    Issue #2580: Admin dashboard feature for viewing remote machine sessions.
+    """
+    # Validate tenant access
+    machine, error = _check_machine_tenant_access(machine_id)
+    if error:
+        return error
+
+    # Parse query parameters
+    status = request.args.get("status", "all")
+    if status not in ("active", "paused", "all"):
+        status = "all"
+
+    try:
+        limit = int(request.args.get("limit", 50))
+    except (TypeError, ValueError):
+        limit = 50
+
+    agent_mgr = get_remote_agent_manager()
+    sessions = agent_mgr.get_machine_sessions(machine_id, status=status, limit=limit)
+
+    return jsonify(
+        {
+            "success": True,
+            "sessions": sessions,
+        }
+    )
+
+
 # ==================== Session Management (User) ====================
 
 
