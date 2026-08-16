@@ -152,7 +152,8 @@ class UsageDedupCache:
             f"{evidence.output_tokens}|"
             f"{timestamp_bucket}"
         )
-        return hashlib.md5(key_data.encode()).hexdigest()
+        # Non-security: hash is a dedup key, not a security primitive (#2482)
+        return hashlib.md5(key_data.encode(), usedforsecurity=False).hexdigest()
 
     def clear(self) -> None:
         """Clear all entries from cache."""

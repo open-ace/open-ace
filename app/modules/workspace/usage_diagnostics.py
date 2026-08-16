@@ -214,9 +214,9 @@ def increment_metric(metric_name: str, labels: dict[str, str]) -> None:
     if metric_name not in _METRICS:
         return
 
-    # Create a stable key from labels
+    # Create a stable key from labels (non-security: metric label key only)
     label_str = "|".join(f"{k}={v}" for k, v in sorted(labels.items()))
-    label_key = hashlib.md5(label_str.encode()).hexdigest()
+    label_key = hashlib.md5(label_str.encode(), usedforsecurity=False).hexdigest()
 
     if label_key not in _METRICS[metric_name]:
         _METRICS[metric_name][label_key] = 0
