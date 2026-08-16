@@ -270,3 +270,54 @@ def test_bailian_allocated_quota_is_not_a_usage_window():
 
     assert not AutonomousOrchestrator._is_upstream_usage_window_quota(result)
     assert AutonomousOrchestrator._should_retry_transient_api_failure(result)
+
+
+def test_run_agent_pauses_for_glm_usage_window_with_resume_marker():
+    orchestrator = _orchestrator_for_run(_result(error=GLM_WINDOW_429))
+
+    with pytest.raises(UpstreamQuotaPaused):
+        orchestrator._run_agent(
+            wf={"user_id": 1, "content_language": "en"},
+            session_line="main",
+            milestone_id="milestone-1",
+            workspace_type="remote",
+            project_path="/tmp/worktree",
+            prompt="do work",
+        )
+
+    orchestrator._runner.run_agent_task.assert_called_once()
+    update = next(
+        call.args[1]
+        for call in orchestrator.repo.update_workflow.call_args_list
+        if call.args[1].get("status") == "paused"
+    )
+    assert update["error_message"].startswith("Upstream provider quota exhausted:")
+    assert "resets at 2026-08-15 20:59:28 +0800" in update["error_message"]
+    assert "auto-resume scheduled" in update["error_message"]
+    milestone_update = orchestrator.repo.update_milestone.call_args.args[1]
+    assert milestone_update["status"] == "failed"
+    assert "auto-resume scheduled" in milestone_update["error_message"]
+
+
+def test_run_agent_pauses_glm_window_without_reset_time_as_operator_resume():
+    orchestrator = _orchestrator_for_run(
+        _result(error="API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour.]")
+    )
+
+    with pytest.raises(UpstreamQuotaPaused):
+        orchestrator._run_agent(
+            wf={"user_id": 1, "content_language": "en"},
+            session_line="main",
+            milestone_id="milestone-1",
+            workspace_type="remote",
+            project_path="/tmp/worktree",
+            prompt="do work",
+        )
+
+    update = next(
+        call.args[1]
+        for call in orchestrator.repo.update_workflow.call_args_list
+        if call.args[1].get("status") == "paused"
+    )
+    assert update["error_message"].startswith("Upstream provider quota exhausted:")
+    assert "auto-resume scheduled" not in update["error_message"]

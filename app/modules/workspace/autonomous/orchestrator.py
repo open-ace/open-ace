@@ -7057,13 +7057,33 @@ class AutonomousOrchestrator:
                 return naive.replace(tzinfo=_UPSTREAM_WINDOW_TZINFO).astimezone(timezone.utc)
         return None
 
-    def _pause_for_upstream_quota(self, result: AgentTaskResult, milestone_id: str = "") -> None:
-        """Persist a non-spinning hard-quota pause that an operator may resume."""
-        message = (
-            f"{UPSTREAM_QUOTA_PAUSE_REASON_PREFIX} "
-            "the configured model provider rejected requests; resume after "
-            "provider allocation is restored"
-        )
+    def _pause_for_upstream_quota(
+        self,
+        result: AgentTaskResult,
+        milestone_id: str = "",
+        resume_at: datetime | None = None,
+    ) -> None:
+        """Persist a non-spinning hard-quota pause that an operator may resume.
+
+        ``resume_at`` (provider usage-window 429 with a stated reset time)
+        additionally writes the scheduler-parseable auto-resume marker: the
+        timestamp is rendered back in provider-local UTC+8 so the message
+        reads correctly for operators too.
+        """
+        if resume_at is not None:
+            local = resume_at.astimezone(_UPSTREAM_WINDOW_TZINFO).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            detail = (
+                "provider usage window exhausted; "
+                f"limit resets at {local} +0800; auto-resume scheduled"
+            )
+        else:
+            detail = (
+                "the configured model provider rejected requests; resume after "
+                "provider allocation is restored"
+            )
+        message = f"{UPSTREAM_QUOTA_PAUSE_REASON_PREFIX} {detail}"
         result.success = False
         result.error_code = "upstream_quota_exhausted"
         result.error = message
@@ -7827,6 +7847,10 @@ class AutonomousOrchestrator:
                 tracking_session_id,
             )
         upstream_hard_quota_exhausted = self._is_upstream_hard_quota_exhausted(result)
+        upstream_window_quota = self._is_upstream_usage_window_quota(result)
+        upstream_window_reset = (
+            self._upstream_usage_window_reset(result) if upstream_window_quota else None
+        )
 
         # Attribute this call's own usage to its milestone (increment, not cumulative).
         self._write_phase_usage(milestone_id, result, retry_usage)
@@ -7838,6 +7862,11 @@ class AutonomousOrchestrator:
                 if field
                 else (result.tracking_session_id or result.session_id or tracking_session_id)
             )
+        if upstream_window_quota:
+            self._pause_for_upstream_quota(
+                result, milestone_id, resume_at=upstream_window_reset
+            )
+            raise UpstreamQuotaPaused(result.error)
         if upstream_hard_quota_exhausted:
             self._pause_for_upstream_quota(result, milestone_id)
             raise UpstreamQuotaPaused(result.error)
