@@ -964,11 +964,15 @@ class TestGetModels:
         assert resp.status_code == 404
         mock_proxy.get_tool_models.assert_not_called()
 
-    def test_get_models_exception_returns_empty(self, client):
-        """Any unexpected error in the model query is swallowed.
+    def test_get_models_exception_returns_500(self, client):
+        """Issue #2667: unexpected errors surface as 500, never success+empty.
 
-        Only the query/formatting is wrapped — a failure there reasonably
-        degrades to an empty list (the dropdown shows "Default").
+        The pre-#2667 behavior swallowed the exception and returned
+        ``{"success": True, "models": []}``, which the frontend rendered as the
+        misleading "no models configured, add an API key" hint — masking
+        infrastructure failures (e.g. missing OPENACE_ENCRYPTION_KEY raising
+        RuntimeError from the APIKeyProxyService constructor). Failures are
+        now explicit, consistent with /api/api-keys.
         """
         mock_proxy = MagicMock()
         mock_proxy.get_tool_models.side_effect = RuntimeError("boom")
@@ -978,10 +982,10 @@ class TestGetModels:
                 return_value=mock_proxy,
             ):
                 resp = client.get("/api/autonomous/models?tool=claude-code")
-        assert resp.status_code == 200
+        assert resp.status_code == 500
         data = resp.get_json()
-        assert data["success"] is True
-        assert data["models"] == []
+        assert data["success"] is False
+        assert data["error"]
 
     def test_get_models_remote_lookup_failure_not_masked_as_success(self, client):
         """Remote machine-lookup failure must not be masked as success+empty.

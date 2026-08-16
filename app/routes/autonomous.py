@@ -2123,6 +2123,10 @@ def get_available_models():
             for m in pool.get("models", [])
             if isinstance(m, dict)
         ]
+        # ``empty_reason`` is part of the response contract: a 200 response MUST
+        # always carry the key (value may be None when models exist). Absence of
+        # the key is how the frontend distinguishes an infrastructure failure
+        # from a legitimate "no keys configured" empty list. Issue #2667.
         return jsonify(
             {
                 "success": True,
@@ -2130,9 +2134,26 @@ def get_available_models():
                 "empty_reason": pool.get("empty_reason"),
             }
         )
-    except Exception as e:
-        logger.error("Failed to get models: %s", e)
-        return jsonify({"success": True, "models": []})
+    except Exception:
+        # Issue #2667: an infrastructure failure (e.g. APIKeyProxyService
+        # construction raising RuntimeError when OPENACE_ENCRYPTION_KEY is
+        # missing) must NOT be masked as a success with an empty model list —
+        # the frontend would render the misleading "no models configured, add
+        # an API key" hint. Surface it as an error instead, mirroring
+        # /api/api-keys which lets the same construction failure bubble up as
+        # a 500. The ``error`` text reaches the frontend via apiClient's
+        # error-message passthrough, so keep it a generic user-facing string;
+        # details go to the log only.
+        logger.exception("Failed to get models for tool=%s", tool)
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Failed to load models for this tool",
+                }
+            ),
+            500,
+        )
 
 
 # ── Helper ──────────────────────────────────────────────────────────

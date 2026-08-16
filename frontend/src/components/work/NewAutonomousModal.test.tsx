@@ -3,6 +3,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 const mutateAsyncMock = vi.fn();
+// Overridable per-test result of useAvailableModels (reset in beforeEach).
+let modelsQueryResult: any;
 
 vi.mock('@/store', () => ({
   useLanguage: () => 'en',
@@ -29,14 +31,9 @@ vi.mock('@/hooks/useAutonomous', () => ({
     // Mirror the component's modelsEnabled gate: remote mode without a
     // machine should not return models (the query is disabled).
     if (params?.workspace_type === 'remote' && !params?.machine_id) {
-      return { data: undefined, isLoading: false };
+      return { data: undefined, isLoading: false, error: null };
     }
-    return {
-      data: {
-        models: [{ name: 'glm-5' }],
-      },
-      isLoading: false,
-    };
+    return modelsQueryResult;
   },
 }));
 
@@ -121,6 +118,13 @@ describe('NewAutonomousModal', () => {
     vi.clearAllMocks();
     localStorage.clear();
     mutateAsyncMock.mockResolvedValue({ workflow: { id: 'wf-1' } });
+    modelsQueryResult = {
+      data: {
+        models: [{ name: 'glm-5' }],
+      },
+      isLoading: false,
+      error: null,
+    };
   });
 
   /** Select a model from the dropdown. Required since model is now a mandatory field. */
@@ -366,6 +370,53 @@ describe('NewAutonomousModal', () => {
     // Should show the machine hint, NOT the no-models error.
     expect(screen.getByText('autoSelectMachineFirst')).toBeInTheDocument();
     expect(screen.queryByText('autoNoModelsForTool')).not.toBeInTheDocument();
+  });
+
+  describe('models query failure (issue #2667)', () => {
+    it('shows a load-failure error, not the misleading no-models hint', () => {
+      // A 500 from /api/autonomous/models (e.g. missing
+      // OPENACE_ENCRYPTION_KEY on the server) used to render
+      // autoNoModelsForTool, sending the user to Settings for a key that
+      // was actually configured fine.
+      modelsQueryResult = {
+        data: undefined,
+        isLoading: false,
+        error: { message: 'Failed to load models for this tool' },
+      };
+
+      render(<NewAutonomousModal {...defaultProps} />);
+
+      expect(screen.getByTestId('models-load-error')).toBeInTheDocument();
+      expect(screen.getByText(/Failed to load models for this tool/)).toBeInTheDocument();
+      expect(screen.queryByText('autoNoModelsForTool')).not.toBeInTheDocument();
+
+      // The model field stays empty (a model is required), so creating must
+      // stay disabled — same as the legitimate no-models case.
+      const createButton = screen
+        .getAllByTestId('btn-primary')
+        .find((btn) => btn.textContent === 'autoCreateTask');
+      expect(createButton).toBeDefined();
+      expect(createButton).toBeDisabled();
+    });
+
+    it('keeps showing the no-models hint for a legitimate empty list', () => {
+      // Backend answers 200 + empty_reason for "no keys configured" — that
+      // is the case where the Settings hint IS the right guidance.
+      modelsQueryResult = {
+        data: {
+          success: true,
+          models: [],
+          empty_reason: "No active claude-code API keys configured for scope 'local'",
+        },
+        isLoading: false,
+        error: null,
+      };
+
+      render(<NewAutonomousModal {...defaultProps} />);
+
+      expect(screen.getByText('autoNoModelsForTool')).toBeInTheDocument();
+      expect(screen.queryByTestId('models-load-error')).not.toBeInTheDocument();
+    });
   });
 
   it('does not persist path memory in new project mode', async () => {

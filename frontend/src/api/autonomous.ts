@@ -383,7 +383,27 @@ export const autonomousApi = {
     tool?: string;
     workspace_type?: string;
     machine_id?: string;
-  }): Promise<{ success: boolean; models: { name: string }[] }> {
-    return apiClient.get('/api/autonomous/models', params);
+  }): Promise<{
+    success: boolean;
+    models: { name: string }[];
+    // Response contract (Issue #2667): every 200 carries this key (null when
+    // models exist); a failed fetch throws instead, so the modal can tell an
+    // infrastructure error apart from a legitimately empty model list.
+    empty_reason?: string | null;
+  }> {
+    type ModelsResponse = {
+      success: boolean;
+      models: { name: string }[];
+      empty_reason?: string | null;
+      error?: string;
+    };
+    const result = await apiClient.get<ModelsResponse>('/api/autonomous/models', params);
+    // apiClient only throws on non-2xx; a 200 carrying success:false (e.g.
+    // from an older backend) is a failure too and must reach React Query's
+    // error branch, never render as an empty model list. Issue #2667.
+    if (result?.success === false) {
+      throw new Error(result.error ?? 'Failed to load models for this tool');
+    }
+    return result;
   },
 };

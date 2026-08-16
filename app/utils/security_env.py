@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+import secrets
 
 from app.utils.security_mode import (
     SecurityMode,
@@ -22,6 +24,55 @@ from app.utils.security_mode import (
 )
 
 logger = logging.getLogger(__name__)
+
+# The only line format ever written to generated-secrets.env (mirrors the
+# strict parser in docker-entrypoint.sh ensure_secret_env).
+_GENERATED_SECRET_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)='([0-9a-f]+)'$")
+
+
+def _generated_secrets_path() -> str:
+    """Path of the generated-secrets.env persistence file."""
+    config_dir = os.environ.get("OPENACE_CONFIG_DIR") or os.path.expanduser("~/.open-ace")
+    return os.path.join(config_dir, "generated-secrets.env")
+
+
+def _read_persisted_secret(name: str, path: str) -> str | None:
+    """Return the value persisted for ``name``, or None if absent/invalid.
+
+    Only accepts the strict ``NAME='hex'`` format we write ourselves — the
+    file is never evaluated, so anything unexpected is ignored rather than
+    trusted.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for raw in fh:
+                match = _GENERATED_SECRET_LINE_RE.match(raw.strip())
+                if match and match.group(1) == name:
+                    return match.group(2)
+    except OSError:
+        return None
+    return None
+
+
+def _persist_generated_secret(name: str, value: str, path: str) -> None:
+    """Persist ``name='value'`` into the secrets file (idempotent replace).
+
+    Raises OSError to the caller on any filesystem failure.
+    """
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    kept: list[str] = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            kept = [line for line in fh if not line.strip().startswith(f"{name}=")]
+    except OSError:
+        # Missing (or unreadable) file -> start fresh.
+        kept = []
+    kept.append(f"{name}='{value}'\n")
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as fh:
+        fh.writelines(kept)
+    os.chmod(tmp_path, 0o600)
+    os.replace(tmp_path, path)
 
 
 def get_secret_key_for_app(secret_key: str | None = None) -> str:
@@ -131,6 +182,82 @@ def get_encryption_key_material(*, purpose: str) -> str:
     validate_secret_strength(key_env, "OPENACE_ENCRYPTION_KEY", min_length=32)
 
     return key_env
+
+
+def ensure_generated_encryption_key() -> str | None:
+    """Bootstrap OPENACE_ENCRYPTION_KEY for non-Docker local runs (Issue #2667).
+
+    Mirrors ``ensure_secret_env`` in docker-entrypoint.sh for the
+    ``python3 server.py`` path, where no entrypoint runs: previously the key
+    was neither generated nor loaded from generated-secrets.env, leaving
+    APIKeyProxyService unusable at first use while its failures surfaced to
+    users as a misleading "no models configured" hint.
+
+    Semantics (development/pilot only — production must set the key
+    explicitly and still fails inside get_encryption_key_material):
+    - an explicit env value always wins and is never replaced;
+    - otherwise a previously generated key is reloaded from
+      ``$OPENACE_CONFIG_DIR/generated-secrets.env`` (default
+      ``~/.open-ace/generated-secrets.env``) so ciphertext written by an
+      earlier run stays decryptable across restarts;
+    - otherwise a fresh key is generated and persisted with mode 600. If
+      persistence fails the env is left UNSET on purpose: running with an
+      unpersisted key would silently break every subsequent restart, so the
+      misconfiguration must stay loud.
+
+    Returns:
+        The effective OPENACE_ENCRYPTION_KEY value, or None when nothing was
+        done (already set explicitly, production mode, or persistence failed).
+    """
+    existing = os.environ.get("OPENACE_ENCRYPTION_KEY")
+    if existing:
+        # Operator-provided values (even weak ones) are never silently
+        # replaced; strength validation stays with get_encryption_key_material.
+        return existing
+
+    try:
+        mode = get_security_mode()
+    except RuntimeError as exc:
+        # Fail-safe (Issue #2667 M1): detect_security_mode() raises in
+        # production-capable environments (systemd/K8s/FLASK_ENV=production)
+        # when OPENACE_SECURITY_MODE is unset. server.py calls this helper at
+        # module level, BEFORE create_app — re-raising here would move the
+        # crash point (and its message) ahead of create_app's own validation.
+        # Skip generation instead and let create_app fail exactly as it did
+        # before this helper existed.
+        logger.warning(
+            "Skipping OPENACE_ENCRYPTION_KEY bootstrap, security mode could "
+            "not be determined: %s",
+            exc,
+        )
+        return None
+
+    if mode == SecurityMode.PRODUCTION:
+        return None
+
+    path = _generated_secrets_path()
+
+    persisted = _read_persisted_secret("OPENACE_ENCRYPTION_KEY", path)
+    if persisted:
+        os.environ["OPENACE_ENCRYPTION_KEY"] = persisted
+        logger.info("Reloaded OPENACE_ENCRYPTION_KEY from %s", path)
+        return persisted
+
+    generated = secrets.token_hex(16)
+    try:
+        _persist_generated_secret("OPENACE_ENCRYPTION_KEY", generated, path)
+    except OSError as exc:
+        logger.error(
+            "Failed to persist generated OPENACE_ENCRYPTION_KEY to %s: %s. "
+            "Leaving OPENACE_ENCRYPTION_KEY unset — set it explicitly to use "
+            "encrypted-secret features (API keys, SMTP credentials).",
+            path,
+            exc,
+        )
+        return None
+    os.environ["OPENACE_ENCRYPTION_KEY"] = generated
+    logger.info("Generated OPENACE_ENCRYPTION_KEY and persisted it to %s", path)
+    return generated
 
 
 def get_upload_auth_key() -> str | None:
