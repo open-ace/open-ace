@@ -44,7 +44,7 @@ def upgrade():
                 nullable=False,
                 server_default=sa.func.current_timestamp(),
             ),
-            sa.Column("details", JSONB if is_postgres else sa.JSON(), nullable=True),
+            sa.Column("details", JSONB if is_postgres else sa.Text(), nullable=True),
             sa.Column("tenant_id", sa.Integer(), nullable=True),
             sa.PrimaryKeyConstraint("id"),
         )
@@ -168,7 +168,7 @@ def upgrade():
             sa.Column("id", sa.Integer(), nullable=False),
             sa.Column("rule_id", sa.Integer(), nullable=False),
             sa.Column("version_number", sa.Integer(), nullable=False),
-            sa.Column("rule_snapshot", JSONB if is_postgres else sa.JSON(), nullable=False),
+            sa.Column("rule_snapshot", JSONB if is_postgres else sa.Text(), nullable=False),
             sa.Column("created_by", sa.Integer(), nullable=False),
             sa.Column(
                 "created_at",
