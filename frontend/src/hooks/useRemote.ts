@@ -24,6 +24,18 @@ export function useMachineUsers(machineId: string | null) {
   });
 }
 
+export function useMachineSessions(
+  machineId: string | null,
+  options?: { status?: string; limit?: number }
+) {
+  return useQuery({
+    queryKey: ['remote', 'machines', machineId, 'sessions', options],
+    queryFn: () => remoteApi.getMachineSessions(machineId ?? '', options),
+    enabled: !!machineId,
+    refetchInterval: 30000, // 30s refresh to match heartbeat frequency
+  });
+}
+
 export function useGenerateToken() {
   const queryClient = useQueryClient();
 
