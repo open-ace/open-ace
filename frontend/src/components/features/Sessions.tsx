@@ -154,6 +154,7 @@ export const Sessions: React.FC = () => {
       { value: 'active', label: t('statusActive', language) ?? 'Active' },
       { value: 'paused', label: t('statusPaused', language) ?? 'Paused' },
       { value: 'completed', label: t('statusCompleted', language) ?? 'Completed' },
+      { value: 'stopped', label: t('statusStopped', language) ?? 'Stopped' },
       { value: 'error', label: t('statusError', language) ?? 'Error' },
     ],
     [language]
