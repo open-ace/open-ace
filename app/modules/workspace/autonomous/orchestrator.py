@@ -5822,6 +5822,12 @@ class AutonomousOrchestrator:
         ):
             # The push starts a new synthetic-merge CI run. Do not consume a
             # bounded AI repair attempt for stale-tree synchronization.
+            # Signal the pr_review handler to skip a full review next cycle and
+            # only re-poll CI (#2711); without this the handler re-enters as a
+            # new review round, bypassing all #2443 convergence guards.
+            self._update_workflow(
+                {"error_message": "CI repair deferred: waiting for CI after main sync"}
+            )
             return
 
         # After the non-AI main synchronization above, check the attempt limit

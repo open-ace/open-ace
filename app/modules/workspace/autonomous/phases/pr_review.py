@@ -417,6 +417,30 @@ def handle(ctx, deps) -> PhaseResult:
     if not pr_number:
         pr_number = host.get_workflow_field("github_pr_number")
 
+    # After _start_ci_repair_round synced the branch with main, skip the full
+    # review cycle and only re-check CI (#2711). Without this guard the handler
+    # re-enters as a new review round, bypassing all #2443 convergence guards
+    # and incrementing current_round past max_pr_review_rounds.
+    if (wf.get("error_message") or "").startswith(
+        "CI repair deferred: waiting for CI after main sync"
+    ):
+        fresh_failures: list = []
+        if pr_number:
+            try:
+                fresh_checks = host.poll_ci_status(gh, pr_number)
+                fresh_failures = [c for c in fresh_checks if c.get("bucket") == "fail"]
+            except Exception:
+                pass
+        if not fresh_failures:
+            host.emit_phase_change({"phase": "report"})
+            return PhaseResult.completed(
+                next_phase="report",
+                next_status="reporting",
+                workflow_patch={"error_message": ""},
+            )
+        host.start_ci_repair_round(wf, pr_number, fresh_failures)
+        return PhaseResult.retry(workflow_patch={})
+
     # Code review
     review_ms = host.create_milestone_idempotent(
         phase="pr_review",
@@ -770,6 +794,16 @@ def handle(ctx, deps) -> PhaseResult:
                 is_pr=True,
                 context="review-summary",
             )
+
+        # Re-poll CI immediately before the go/no-go decision. The entry
+        # snapshot (captured before review/fix) may predate a fix push made
+        # this cycle, causing a spurious ci_failed_before_report (#2711).
+        if pr_number:
+            try:
+                fresh_checks = host.poll_ci_status(gh, pr_number)
+                ci_failures = [c for c in fresh_checks if c.get("bucket") == "fail"]
+            except Exception:
+                pass  # keep entry snapshot; next cycle sees fresh state
 
         # Check CI status before proceeding to report phase (Issue #1662). If
         # CI failed, enter CI repair loop instead of reporting.
