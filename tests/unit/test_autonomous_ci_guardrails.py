@@ -73,6 +73,9 @@ def test_actions_job_log_prefers_rest_api_without_run_cache():
     gh._repo_host = "github.com"
     gh._owner_repo = "open-ace/open-ace"
     gh._owner_repo_resolved = True
+    # Pin the gh-version probe: this test asserts the modern-gh arg list
+    # (flag present, Issue #2708), so don't let the probe hit fake_run.
+    gh._escape_flag_supported = True
     calls = []
 
     def fake_run(args, check=True, repo_scoped=True):
@@ -108,6 +111,8 @@ def test_actions_job_log_uses_ghes_hostname_without_run_cache():
     gh._repo_host = "gh.example.com"
     gh._owner_repo = "team/project"
     gh._owner_repo_resolved = True
+    # Pin the gh-version probe: modern-gh arg list (flag present, Issue #2708).
+    gh._escape_flag_supported = True
     calls = []
 
     def fake_run(args, check=True, repo_scoped=True):

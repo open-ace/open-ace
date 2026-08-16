@@ -208,6 +208,22 @@ def _extract_failure_lines(lines: list[str], max_lines: int = 80) -> list[str]:
     return result[-max_lines:] if len(result) > max_lines else result
 
 
+def _unknown_flag_hint(stderr: str) -> str:
+    """Warning suffix naming the gh-version symptom behind 'unknown flag'.
+
+    An ``unknown flag`` exit is a gh-version problem, not a missing log.
+    Without this hint every check reads as "no logs", CI-repair exhausts
+    on deployments running gh < 2.97, and the real cause only shows up in
+    a truncated stderr fragment (Issue #2708 / #2482).
+    """
+    if "unknown flag" in stderr.lower():
+        return (
+            " — likely gh < 2.97 (no --allow-escape-sequences support); "
+            "upgrade gh, otherwise every CI log fetch keeps reading as no logs"
+        )
+    return ""
+
+
 class GitHubOpsError(Exception):
     """Error raised when a GitHub operation fails."""
 
@@ -246,6 +262,10 @@ class GitHubOps:
     # original gitdir directly, preventing confused-deputy pushes.
     _trusted_git_contexts: dict[str, dict[str, str]] = {}
 
+    # gh learned --allow-escape-sequences in 2.97; older gh exits
+    # ``unknown flag`` for it, killing both CI-log fetch paths (Issue #2708).
+    _ESCAPE_FLAG_MIN_GH_VERSION = (2, 97)
+
     def __init__(self, repo_path: str, system_account: str | None = None):
         """
         Args:
@@ -277,6 +297,12 @@ class GitHubOps:
         # Tracks whether _resolve_owner_repo has been attempted, so None can
         # distinguish "tried and failed" from "not yet tried".
         self._owner_repo_resolved: bool = False
+        # Cached gh-version probe for --allow-escape-sequences (added in gh
+        # 2.97). None = not probed yet. Issue #2708: passing the flag to an
+        # older gh makes BOTH log-fetch paths exit ``unknown flag``, so every
+        # failure excerpt comes back empty and CI-repair exhausts with
+        # "0/N failed checks have logs".
+        self._escape_flag_supported: bool | None = None
 
     @classmethod
     def register_trusted_git_context(
@@ -2114,6 +2140,39 @@ class GitHubOps:
             excerpt = excerpt[-max_chars:].lstrip()
         return excerpt
 
+    def _supports_escape_sequences_flag(self) -> bool:
+        """Whether the resolved gh accepts --allow-escape-sequences (>= 2.97).
+
+        Probed once per instance via ``gh --version`` (no repo context, no
+        network) and cached. Fails OPEN — an unprobeable/unparseable gh keeps
+        passing the flag, because dropping it on a modern gh re-breaks log
+        fetches with the ANSI-refusal error the flag exists to lift; the
+        ``unknown flag`` symptom is then named explicitly in the fetch
+        warnings via _unknown_flag_hint (Issue #2708).
+        """
+        if self._escape_flag_supported is None:
+            self._escape_flag_supported = self._probe_escape_sequences_flag()
+        return self._escape_flag_supported
+
+    def _probe_escape_sequences_flag(self) -> bool:
+        try:
+            result = self._run_gh(["--version"], check=False, repo_scoped=False)
+        except GitHubOpsError:
+            return True  # fail open, see _supports_escape_sequences_flag
+        # major.minor only: patch is deliberately ignored — the threshold
+        # (_ESCAPE_FLAG_MIN_GH_VERSION) is minor-level, so a patch bump
+        # (e.g. 2.97.1 vs 2.97.0) must never gate the flag. If a future
+        # threshold needs patch granularity, widen BOTH this regex and the
+        # comparison, not just one.
+        m = re.search(r"version\s+(\d+)\.(\d+)", result.stdout or "")
+        if not m:
+            return True  # fail open, see _supports_escape_sequences_flag
+        return (int(m.group(1)), int(m.group(2))) >= self._ESCAPE_FLAG_MIN_GH_VERSION
+
+    def _escape_sequences_flag(self) -> list[str]:
+        """["--allow-escape-sequences"] on gh >= 2.97, [] on older gh."""
+        return ["--allow-escape-sequences"] if self._supports_escape_sequences_flag() else []
+
     def _fetch_log_excerpt_via_run_list(
         self, check: dict, max_lines: int, max_chars: int, *, filter_lines: bool = True
     ) -> str:
@@ -2174,15 +2233,17 @@ class GitHubOps:
             return ""
 
         view_result = self._run_gh(
-            ["run", "view", run_id, "--log-failed", "--allow-escape-sequences"],
+            ["run", "view", run_id, "--log-failed", *self._escape_sequences_flag()],
             check=False,
         )
         if view_result.returncode != 0:
+            stderr_text = (view_result.stderr or view_result.stdout or "").strip()
             logger.warning(
-                "gh run view --log-failed failed for check '%s' (run=%s): %s",
+                "gh run view --log-failed failed for check '%s' (run=%s): %s%s",
                 name,
                 run_id,
-                (view_result.stderr or view_result.stdout or "").strip()[:200],
+                stderr_text[:200],
+                _unknown_flag_hint(stderr_text),
             )
             return ""
         return self._clean_log_to_excerpt(
@@ -2243,7 +2304,9 @@ class GitHubOps:
                 # passed; without it the job-log REST endpoint always fails and
                 # CI repair can never read failure logs. The sequences are
                 # stripped afterward by _clean_log_to_excerpt / _strip_ansi.
-                api_args.append("--allow-escape-sequences")
+                # Version-gated: gh < 2.97 has no such flag and exits
+                # ``unknown flag`` (Issue #2708).
+                api_args += self._escape_sequences_flag()
                 api_result = self._run_gh(api_args, check=False, repo_scoped=False)
                 if api_result.returncode == 0 and (api_result.stdout or "").strip():
                     return self._clean_log_to_excerpt(
@@ -2252,13 +2315,15 @@ class GitHubOps:
                         max_chars,
                         filter_lines=filter_lines,
                     )
+                api_stderr = (api_result.stderr or api_result.stdout or "").strip()
                 logger.warning(
                     "REST job-log fetch failed for check '%s' (run=%s job=%s), "
-                    "falling back to gh run view: %s",
+                    "falling back to gh run view: %s%s",
                     check.get("name") or "unknown",
                     run_id,
                     job_id,
-                    (api_result.stderr or api_result.stdout or "").strip()[:200],
+                    api_stderr[:200],
+                    _unknown_flag_hint(api_stderr),
                 )
 
             result = self._run_gh(
@@ -2269,17 +2334,19 @@ class GitHubOps:
                     "--job",
                     job_id,
                     "--log-failed",
-                    "--allow-escape-sequences",
+                    *self._escape_sequences_flag(),
                 ],
                 check=False,
             )
             if result.returncode != 0:
+                stderr_text = (result.stderr or result.stdout or "").strip()
                 logger.warning(
-                    "Failed to fetch failed log excerpt for check '%s' (run=%s job=%s): %s",
+                    "Failed to fetch failed log excerpt for check '%s' (run=%s job=%s): %s%s",
                     check.get("name") or "unknown",
                     run_id,
                     job_id,
-                    (result.stderr or result.stdout or "").strip()[:200],
+                    stderr_text[:200],
+                    _unknown_flag_hint(stderr_text),
                 )
                 return ""
             return self._clean_log_to_excerpt(
