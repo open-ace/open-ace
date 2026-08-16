@@ -221,9 +221,10 @@ def isolated_db(tmp_path):
         # Run Alembic migrations to ensure all tables exist
         from alembic import command
         from alembic.config import Config
-        alembic_config = Config('alembic.ini')
-        alembic_config.set_main_option('sqlalchemy.url', f'sqlite:///{test_config.DB_PATH}')
-        command.upgrade(alembic_config, 'head')
+
+        alembic_config = Config("alembic.ini")
+        alembic_config.set_main_option("sqlalchemy.url", f"sqlite:///{test_config.DB_PATH}")
+        command.upgrade(alembic_config, "head")
 
         # Verify we're using the test database, not production
         assert db_module.DB_PATH == test_config.DB_PATH

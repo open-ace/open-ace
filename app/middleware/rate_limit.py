@@ -129,9 +129,7 @@ class RedisRateLimiterBackend(RateLimiterBackend):
             error_name = type(e).__name__
             if "noscript" in error_name.lower() or "script" in str(e).lower():
                 # 脚本缓存失败时回退到 EVAL
-                result = self._redis.eval(
-                    _RATE_LIMIT_LUA_SCRIPT, 1, key, max_requests, window, now
-                )
+                result = self._redis.eval(_RATE_LIMIT_LUA_SCRIPT, 1, key, max_requests, window, now)
                 return result == 1
             else:
                 # 其他错误（连接问题等）记录并允许请求通过
@@ -205,9 +203,7 @@ class DatabaseRateLimiterBackend(RateLimiterBackend):
                     return False
 
                 # 3. 记录本次请求
-                insert_sql = adapt_sql(
-                    "INSERT INTO rate_limit_log (key, timestamp) VALUES (?, ?)"
-                )
+                insert_sql = adapt_sql("INSERT INTO rate_limit_log (key, timestamp) VALUES (?, ?)")
                 cursor.execute(insert_sql, (key, now))
                 conn.commit()
 

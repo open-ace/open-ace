@@ -208,7 +208,7 @@ class TestRateLimitDecorator:
 
         # Setup backend first
         backend = InMemoryRateLimiterBackend()
-        limiter = RateLimiter(backend=backend)
+        RateLimiter(backend=backend)
 
         @rate_limit(max_requests=10, window=60)
         def test_endpoint():
@@ -236,7 +236,7 @@ class TestRateLimitDecorator:
 
         # Create limiter with in-memory backend BEFORE decorator is applied
         backend = InMemoryRateLimiterBackend()
-        limiter = RateLimiter(backend=backend)
+        RateLimiter(backend=backend)
 
         @rate_limit(max_requests=2, window=60)
         def test_endpoint():
