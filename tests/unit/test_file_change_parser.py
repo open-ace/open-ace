@@ -9,7 +9,6 @@ import tempfile
 from datetime import datetime, timezone
 
 import pytest
-
 from shared.file_change_parser import (
     FileChangeParserRegistry,
     FileChangeRecord,
