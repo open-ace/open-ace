@@ -5230,6 +5230,11 @@ class AutonomousOrchestrator:
     def _create_milestone(self, **kwargs) -> dict:
         """Create a milestone and emit event. Idempotent — returns existing if found."""
         kwargs.setdefault("workflow_id", self._workflow_id)
+        # Callers that omit dev_round (e.g. acceptance_verification) would otherwise
+        # record dev_round=1 (the DB default), misattributing the milestone to
+        # round 1 in multi-round workflows (#2707).
+        if "dev_round" not in kwargs:
+            kwargs["dev_round"] = int((self.workflow or {}).get("dev_round") or 1)
 
         milestone_type = kwargs.get("milestone_type", "")
         # ci_repair_* milestones are one-per-attempt; a prior cycle's completed
