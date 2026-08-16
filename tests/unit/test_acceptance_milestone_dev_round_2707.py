@@ -15,9 +15,7 @@ import json
 
 import pytest
 
-from app.modules.workspace.autonomous.phases.acceptance_verification import (
-    _acceptance_milestone,
-)
+from app.modules.workspace.autonomous.phases.acceptance_verification import _acceptance_milestone
 
 pytestmark = [pytest.mark.regression, pytest.mark.issue(2707)]
 

@@ -345,5 +345,7 @@ def test_acceptance_milestone_summary_includes_rejected_items():
         "gates": [],
         "verifier": [],
     }
-    ms = _acceptance_milestone(workflow_id="wf", dev_round=1, attempt=1, status="rejected", report=report)
+    ms = _acceptance_milestone(
+        workflow_id="wf", dev_round=1, attempt=1, status="rejected", report=report
+    )
     assert "datetime_utils.py" in ms["result_summary"]
