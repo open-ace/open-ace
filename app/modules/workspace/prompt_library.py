@@ -559,15 +559,13 @@ class PromptLibrary:
             )
         else:
             # Only count public templates
-            cursor.execute(
-                adapt_sql(f"""
+            cursor.execute(adapt_sql(f"""
                     SELECT category, COUNT(*) as count
                     FROM prompt_templates
                     WHERE {adapt_boolean_condition("is_public", True)}
                     GROUP BY category
                     ORDER BY count DESC
-                """)
-            )
+                """))
 
         rows = cursor.fetchall()
         conn.close()
