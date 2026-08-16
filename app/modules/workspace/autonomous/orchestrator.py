@@ -22,7 +22,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -2055,6 +2055,22 @@ _UPSTREAM_HARD_QUOTA_EXHAUSTED_RE = re.compile(
     r"platform\s+quota\s+exceeded" r"|upstream\s+(?:provider\s+)?quota\s+(?:exceeded|exhausted)",
     re.IGNORECASE,
 )
+
+# Provider usage-window quota (GLM/Zhipu [1308]): a rolling window that
+# rejects with 429 — unlike the hard platform quota it self-resets, so the
+# workflow pauses instead of retrying and auto-resumes at the stated time.
+# Detection only needs the wording; the reset timestamp (when present, in
+# provider-local UTC+8 — verified 2026-08-15 against request-id stamps)
+# additionally enables scheduler auto-resume.
+_UPSTREAM_USAGE_WINDOW_QUOTA_RE = re.compile(
+    r"usage\s+limit\s+reached\s+for\s+\d+\s+hours?\b", re.IGNORECASE
+)
+_UPSTREAM_USAGE_WINDOW_RESET_RE = re.compile(
+    r"your\s+limit\s+will\s+reset\s+at\s+"
+    r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})",
+    re.IGNORECASE,
+)
+_UPSTREAM_WINDOW_TZINFO = timezone(timedelta(hours=8))
 
 # Context-window / input-length overflow signatures. A PERMANENT client
 # error (NOT transient — must not trigger the transient-retry backoff loop).
@@ -6975,6 +6991,8 @@ class AutonomousOrchestrator:
         """
         if cls._is_upstream_hard_quota_exhausted(result):
             return False
+        if cls._is_upstream_usage_window_quota(result):
+            return False
         if cls._is_transient_api_error(result.error or ""):
             return True
         return (result.total_tokens or 0) == 0 and cls._is_transient_api_error(
@@ -6995,6 +7013,49 @@ class AutonomousOrchestrator:
         return (result.total_tokens or 0) == 0 and bool(
             _UPSTREAM_HARD_QUOTA_EXHAUSTED_RE.search(result.response_text or "")
         )
+
+    @staticmethod
+    def _upstream_window_bodies(result: AgentTaskResult) -> list[str]:
+        """Candidate bodies for usage-window matching, same evidence rules as
+        ``_is_upstream_hard_quota_exhausted``: the error field is authoritative;
+        assistant text only for a zero-token envelope (#1891 false-retry guard).
+        """
+        bodies = [result.error or ""]
+        if (result.total_tokens or 0) == 0:
+            bodies.append(result.response_text or "")
+        return bodies
+
+    @classmethod
+    def _is_upstream_usage_window_quota(cls, result: AgentTaskResult) -> bool:
+        """Whether a provider reports a rolling usage-window quota (GLM 5h).
+
+        Distinct from the hard platform quota: the window resets on its own,
+        so the workflow pauses instead of retrying and auto-resumes at the
+        stated time when one is present. Wording-only matches (no parseable
+        reset time) still pause — operator-resumed, fail-closed, never
+        transient.
+        """
+        return any(
+            _UPSTREAM_USAGE_WINDOW_QUOTA_RE.search(body)
+            for body in cls._upstream_window_bodies(result)
+        )
+
+    @classmethod
+    def _upstream_usage_window_reset(cls, result: AgentTaskResult) -> datetime | None:
+        """Parse the reset timestamp of a usage-window 429 into aware UTC.
+
+        Returns None when absent/unparseable — callers then pause without the
+        auto-resume marker (operator resume). Provider times are UTC+8.
+        """
+        for body in cls._upstream_window_bodies(result):
+            match = _UPSTREAM_USAGE_WINDOW_RESET_RE.search(body)
+            if match:
+                try:
+                    naive = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    return None
+                return naive.replace(tzinfo=_UPSTREAM_WINDOW_TZINFO).astimezone(timezone.utc)
+        return None
 
     def _pause_for_upstream_quota(self, result: AgentTaskResult, milestone_id: str = "") -> None:
         """Persist a non-spinning hard-quota pause that an operator may resume."""

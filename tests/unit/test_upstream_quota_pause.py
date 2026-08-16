@@ -216,3 +216,57 @@ def test_postgres_alert_dedup_casts_text_metadata_to_jsonb():
 
     query = cursor.execute.call_args.args[0]
     assert "(metadata::jsonb)->>'quota_type'" in query
+
+
+# --- #2709: GLM 5h usage-window 429 (has reset time -> pause, not retry) ---
+
+GLM_WINDOW_429 = (
+    "API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour. "
+    "Your limit will reset at 2026-08-15 20:59:28][202608151957560f15c8075ec04dd4]"
+)
+
+
+def test_glm_usage_window_429_is_not_transient():
+    result = _result(error=GLM_WINDOW_429)
+
+    assert AutonomousOrchestrator._is_upstream_usage_window_quota(result)
+    assert not AutonomousOrchestrator._should_retry_transient_api_failure(result)
+
+
+def test_glm_usage_window_reset_parses_utc8_as_utc():
+    reset = AutonomousOrchestrator._upstream_usage_window_reset(_result(error=GLM_WINDOW_429))
+
+    assert reset is not None
+    assert reset.utcoffset().total_seconds() == 0
+    assert reset.strftime("%Y-%m-%d %H:%M:%S") == "2026-08-15 12:59:28"
+
+
+def test_glm_usage_window_without_reset_time_is_detected_but_unparseable():
+    result = _result(
+        error="API Error: Request rejected (429) · [1308][Usage limit reached for 5 hour.]"
+    )
+
+    assert AutonomousOrchestrator._upstream_usage_window_reset(result) is None
+    assert AutonomousOrchestrator._is_upstream_usage_window_quota(result)
+    assert not AutonomousOrchestrator._should_retry_transient_api_failure(result)
+
+
+def test_token_bearing_window_text_does_not_match():
+    result = _result(
+        success=True,
+        error=None,
+        total_tokens=120,
+        response_text=(
+            "If you see 'Usage limit reached for 5 hour. Your limit will "
+            "reset at 2026-08-15 20:59:28' in logs, back off."
+        ),
+    )
+
+    assert not AutonomousOrchestrator._is_upstream_usage_window_quota(result)
+
+
+def test_bailian_allocated_quota_is_not_a_usage_window():
+    result = _result()  # 默认 error 即 Bailian 文案
+
+    assert not AutonomousOrchestrator._is_upstream_usage_window_quota(result)
+    assert AutonomousOrchestrator._should_retry_transient_api_failure(result)
