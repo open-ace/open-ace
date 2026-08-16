@@ -134,7 +134,7 @@ def open_new_task_modal(page):
     try:
         new_task.wait_for(state="visible", timeout=20000)
         new_task.click()
-    except Exception:
+    except Exception:  # allow-swallow: UI element may not exist
         page.locator("button:has(i.bi-plus-lg)").last.click(timeout=20000)
     page.wait_for_timeout(800)
 
@@ -261,12 +261,12 @@ def run_tests():
             try:
                 step_fn()
                 passed += 1
-            except Exception as e:
+            except Exception as e:  # allow-swallow: collect step errors for summary
                 print(f"  ❌ {name.upper()} FAILED: {e}", flush=True)
                 failed += 1
                 try:
                     shot(page, f"error-{name.lower().replace(' ', '-').replace('→', '-')}")
-                except Exception:
+                except Exception:  # allow-swallow: screenshot failure non-critical
                     pass
 
         browser.close()
