@@ -2167,7 +2167,11 @@ def test_failed_pr_sync_happens_before_ai_attempt_limit():
 
     orch._sync_failed_pr_with_main.assert_called_once_with(gh, "auto-dev/test", 42, "pr-head")
     orch._create_milestone.assert_not_called()
-    orch._update_workflow.assert_not_called()
+    # Sync writes the sentinel so the next pr_review cycle skips a full review
+    # round and only re-polls CI (#2711).
+    orch._update_workflow.assert_called_once_with(
+        {"error_message": "CI repair deferred: waiting for CI after main sync"}
+    )
 
 
 def test_nonstandard_report_with_real_test_evidence_does_not_retry():
