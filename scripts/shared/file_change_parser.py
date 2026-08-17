@@ -442,9 +442,7 @@ __all__ = [
 ]
 
 
-def append_file_change_blocks(
-    blocks: list[dict], context: ParserContext | None = None
-) -> None:
+def append_file_change_blocks(blocks: list[dict], context: ParserContext | None = None) -> None:
     """Append synthetic file_change blocks derived from tool_use blocks.
 
     Args:
