@@ -1323,7 +1323,9 @@ def fetch_and_save(
             if errors:
                 print(f"  Errors for {len(errors)} user(s): {', '.join([u for u, _ in errors])}")
             # Return structured result for caller to detect degraded state
-            print(f"\nFETCH_RESULT: {json.dumps({'status': 'failed' if not denied else 'denied', 'coverage': coverage_data})}")
+            print(
+                f"\nFETCH_RESULT: {json.dumps({'status': 'failed' if not denied else 'denied', 'coverage': coverage_data})}"
+            )
             return False
 
         coverage_data["users_scanned"] = len(accessible)

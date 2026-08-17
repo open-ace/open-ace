@@ -22,15 +22,31 @@ class TestConfigureTranscriptAcl(unittest.TestCase):
 
     def test_acl_function_exists(self):
         """Verify configure_transcript_acl function exists in install.sh."""
-        install_sh = Path(__file__).parent.parent.parent.parent / "scripts" / "install-central" / "package-method" / "install.sh"
+        install_sh = (
+            Path(__file__).parent.parent.parent.parent
+            / "scripts"
+            / "install-central"
+            / "package-method"
+            / "install.sh"
+        )
         self.assertTrue(install_sh.exists(), f"install.sh not found at {install_sh}")
 
         content = install_sh.read_text()
-        self.assertIn("configure_transcript_acl()", content, "configure_transcript_acl function not found in install.sh")
+        self.assertIn(
+            "configure_transcript_acl()",
+            content,
+            "configure_transcript_acl function not found in install.sh",
+        )
 
     def test_acl_function_has_security_checks(self):
         """Verify configure_transcript_acl has symlink escape prevention."""
-        install_sh = Path(__file__).parent.parent.parent.parent / "scripts" / "install-central" / "package-method" / "install.sh"
+        install_sh = (
+            Path(__file__).parent.parent.parent.parent
+            / "scripts"
+            / "install-central"
+            / "package-method"
+            / "install.sh"
+        )
         content = install_sh.read_text()
 
         # Check for symlink escape prevention
@@ -39,18 +55,34 @@ class TestConfigureTranscriptAcl(unittest.TestCase):
 
     def test_acl_function_grants_minimal_permissions(self):
         """Verify ACL grants minimal permissions (r-X on projects, x on home)."""
-        install_sh = Path(__file__).parent.parent.parent.parent / "scripts" / "install-central" / "package-method" / "install.sh"
+        install_sh = (
+            Path(__file__).parent.parent.parent.parent
+            / "scripts"
+            / "install-central"
+            / "package-method"
+            / "install.sh"
+        )
         content = install_sh.read_text()
 
         # Check for execute-only on home directory (traversal)
-        self.assertIn("u:${service_user}:x", content, "Execute-only ACL on home directory not found")
+        self.assertIn(
+            "u:${service_user}:x", content, "Execute-only ACL on home directory not found"
+        )
 
         # Check for read+execute on projects directory
-        self.assertIn("u:${service_user}:r-X", content, "Read+execute ACL on projects directory not found")
+        self.assertIn(
+            "u:${service_user}:r-X", content, "Read+execute ACL on projects directory not found"
+        )
 
     def test_acl_function_sets_default_acl(self):
         """Verify ACL sets default ACL for inheritance."""
-        install_sh = Path(__file__).parent.parent.parent.parent / "scripts" / "install-central" / "package-method" / "install.sh"
+        install_sh = (
+            Path(__file__).parent.parent.parent.parent
+            / "scripts"
+            / "install-central"
+            / "package-method"
+            / "install.sh"
+        )
         content = install_sh.read_text()
 
         # Check for default ACL
@@ -82,17 +114,11 @@ class TestTranscriptAclIntegration(unittest.TestCase):
 
             # Set ACL
             result = subprocess.run(
-                ["setfacl", "-m", "u:root:r-X", str(test_dir)],
-                capture_output=True,
-                text=True
+                ["setfacl", "-m", "u:root:r-X", str(test_dir)], capture_output=True, text=True
             )
 
             # Verify ACL was set
-            result = subprocess.run(
-                ["getfacl", str(test_dir)],
-                capture_output=True,
-                text=True
-            )
+            result = subprocess.run(["getfacl", str(test_dir)], capture_output=True, text=True)
             self.assertIn("user:root:r-x", result.stdout, "ACL not set correctly")
 
 

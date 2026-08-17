@@ -4,16 +4,15 @@ Open ACE - Fetch Routes
 API routes for data fetching operations.
 """
 
+import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import threading
 from datetime import datetime
 from typing import Any
-
-import json
-import re
 
 from flask import Blueprint, jsonify
 
@@ -40,17 +39,17 @@ _fetch_lock = threading.Lock()
 
 def _parse_fetch_result(output: str) -> dict:
     """Parse FETCH_RESULT line from fetch script output.
-    
+
     Issue #2733: Extract structured coverage data so the scheduler
     can detect degraded fetch results.
-    
+
     Args:
         output: The stdout from the fetch script
-        
+
     Returns:
         dict with 'status' and 'coverage' keys, or empty dict if not found
     """
-    match = re.search(r'FETCH_RESULT:\s*(\{.*?\})\s*$', output, re.MULTILINE)
+    match = re.search(r"FETCH_RESULT:\s*(\{.*?\})\s*$", output, re.MULTILINE)
     if match:
         try:
             return json.loads(match.group(1))
