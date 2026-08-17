@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import re
 
+from app.modules.workspace.autonomous.constants import (
+    REVIEW_RESULT_LINE_FULLMATCH_RE,
+    REVIEW_RESULT_LINE_SEARCH_RE,
+)
+
 # Shared artifact-cleaning helpers used by both the autonomous runner and the
 # orchestrator. Workflow timelines / comments should show publishable output,
 # not the agent's process chatter or leaked tool payloads.
@@ -78,6 +83,20 @@ _PROCESS_LINE_RE = re.compile(
     r"(?im)^\s*(The user wants me to|user wants me to|Let me\b|I need to:).*$"
 )
 _REPEATED_HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)\s*$")
+_HEADING_LINE_RE = re.compile(r"^#{1,6}\s", re.MULTILINE)
+_TLDR_BONUS_RE = re.compile(r"TL;DR\*{0,2}\s*:")
+
+
+def _earliest_match(text: str, *patterns: re.Pattern[str]) -> re.Match | None:
+    """First match across patterns (earliest position wins).
+
+    Used for slice-to-structured-start decisions: a contract verdict line that
+    precedes the first markdown heading is itself the structured start, so a
+    short-circuit ``or`` between patterns would slice past it and drop the
+    verdict (workflow 02dae370 failed exactly that way).
+    """
+    matches = [m for m in (p.search(text) for p in patterns) if m]
+    return min(matches, key=lambda m: m.start()) if matches else None
 
 
 def clean_agent_text(text: str) -> str:
@@ -85,7 +104,7 @@ def clean_agent_text(text: str) -> str:
     if not text:
         return text
 
-    match = re.search(r"^#{1,6}\s", text, re.MULTILINE)
+    match = _earliest_match(text, _HEADING_LINE_RE, REVIEW_RESULT_LINE_SEARCH_RE)
     if match:
         text = text[match.start() :]
 
@@ -136,7 +155,7 @@ def _slice_from_structured_start(text: str) -> str:
     if not any(marker in head for marker in _PROCESS_MARKERS):
         return text
 
-    match = _STRUCTURED_LINE_RE.search(text)
+    match = _earliest_match(text, _STRUCTURED_LINE_RE, REVIEW_RESULT_LINE_SEARCH_RE)
     if match and match.start() > 0:
         return text[match.start() :]
     return text
@@ -147,6 +166,10 @@ def _is_process_paragraph(paragraph: str) -> bool:
     if not stripped:
         return False
     if _STRUCTURED_LINE_RE.match(stripped):
+        return False
+    if REVIEW_RESULT_LINE_FULLMATCH_RE.match(stripped):
+        # A machine-contract verdict line is never process chatter — even when
+        # its findings quote chatter ("agent kept saying let me …").
         return False
 
     normalized = re.sub(r"\s+", " ", stripped).lower()
@@ -240,16 +263,19 @@ def score_artifact_text(text: str) -> int:
     if not text:
         return -1
     score = len(text.strip())
-    has_structure = bool(_STRUCTURED_LINE_RE.search(text))
+    has_contract = bool(REVIEW_RESULT_LINE_SEARCH_RE.search(text))
+    has_structure = bool(_STRUCTURED_LINE_RE.search(text)) or has_contract
     if has_structure:
         score += 120
-    if "TL;DR:" in text:
+    if _TLDR_BONUS_RE.search(text):
         score += 40
     if not has_structure:
         paragraph_count = len([p for p in re.split(r"\n\s*\n", text) if p.strip()])
         score -= 80 * max(paragraph_count - 1, 0)
     head = re.sub(r"\s+", " ", text[:240]).lower()
-    score -= 200 * sum(marker in head for marker in _PROCESS_MARKERS)
+    # A text carrying a valid contract verdict line is signal, not chatter:
+    # process markers in its head are quoted findings, not preamble.
+    score -= 0 if has_contract else 200 * sum(marker in head for marker in _PROCESS_MARKERS)
     return score
 
 

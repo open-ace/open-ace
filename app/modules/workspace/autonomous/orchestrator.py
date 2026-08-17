@@ -63,6 +63,9 @@ from app.modules.workspace.autonomous.constants import (  # noqa: F401
     PROTECTED_CI_REPAIR_TEST_FILES,
     READ_ONLY_REVIEW_UNSUPPORTED_TOOLS,
     REVIEW_ALLOWED_TOOLS,
+    REVIEW_RESULT_LINE_FULLMATCH_RE,
+    REVIEW_SEPARATOR_LINE_RE,
+    REVIEW_TLDR_LINE_RE,
     VERIFICATION_ALLOWED_TOOLS,
     _extract_pr_number_from_error,
     _is_transient_git_error,
@@ -1873,8 +1876,9 @@ _TLDR_RE = re.compile(r"TL;DR:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
 
 # _REVIEW_APPROVAL_PHRASES + _review_approval_phrase moved to constants.py
 # (shared with phases/pr_review.py); re-imported above.
-
-_REVIEW_RESULT_LINE_RE = re.compile(r"^REVIEW_RESULT\s*:\s*(\{.*\})$")
+#
+# _REVIEW_RESULT_LINE_RE also lives in constants.py now
+# (REVIEW_RESULT_LINE_FULLMATCH_RE), shared with the artifact-text scorer.
 
 
 def _parse_review_result(review_text: str) -> dict | None:
@@ -1890,14 +1894,25 @@ def _parse_review_result(review_text: str) -> dict | None:
     if not nonempty:
         return None
 
+    # Decorative separator lines (--- / *** / ___) carry no verdict
+    # information; the contract line must be the last non-summary line among
+    # CONTENT lines. Filter them once, in the original index space, so the
+    # candidate selection and the REVIEW_RESULT scan below stay comparable.
+    content_indexes = [
+        index for index in nonempty if not REVIEW_SEPARATOR_LINE_RE.match(lines[index].strip())
+    ]
+    if not content_indexes:
+        return None
+
     # The result must be the final non-summary line.  A single TL;DR line may
-    # follow because build_language_instruction() asks every phase for it.
-    last_index = nonempty[-1]
+    # follow because build_language_instruction() asks every phase for it; the
+    # summary may be bolded (**TL;DR**:) and separated by a decorative line.
+    last_index = content_indexes[-1]
     candidate_index = last_index
-    if re.match(r"^TL;DR\s*:", lines[last_index].strip(), re.IGNORECASE):
-        if len(nonempty) < 2:
+    if REVIEW_TLDR_LINE_RE.match(lines[last_index].strip()):
+        if len(content_indexes) < 2:
             return None
-        candidate_index = nonempty[-2]
+        candidate_index = content_indexes[-2]
 
     result_line_indexes = [
         index
@@ -1927,7 +1942,7 @@ def _parse_review_result(review_text: str) -> dict | None:
     if in_fence:
         return None
 
-    match = _REVIEW_RESULT_LINE_RE.fullmatch(lines[candidate_index].strip())
+    match = REVIEW_RESULT_LINE_FULLMATCH_RE.fullmatch(lines[candidate_index].strip())
     if not match:
         return None
     try:

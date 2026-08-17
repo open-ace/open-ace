@@ -17,6 +17,11 @@ without instantiating ``AutonomousOrchestrator`` (whose ``__init__`` needs a
 workflow id + DB).
 """
 
+from app.modules.workspace.autonomous.artifact_text import (
+    pick_best_artifact_text,
+    sanitize_artifact_text,
+    score_artifact_text,
+)
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
@@ -145,3 +150,77 @@ class TestArtifactStatusTag:
 
     def test_none_result_returns_empty(self):
         assert AutonomousOrchestrator._artifact_status_tag(None, "test_status") == ""
+
+
+MINIMAL_COMPLIANT_REVIEW = (
+    'REVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}\n'
+    "\n---\n\n"
+    "**TL;DR**: 代码审查通过，CI 失败是预先存在的基础设施问题。"
+)
+
+
+class TestMachineContractVerdicts:
+    """The review prompt's machine-readable verdict line is contract output,
+    not process noise. It must survive cleaning, score above the publishable
+    threshold, and reach ``_artifact_text`` — the exact path pr_review uses
+    before declaring "PR review agent returned no result".
+
+    Regression: workflow 02dae370 / PR #2578 (2026-08-16) failed with exactly
+    this minimal compliant shape — the scorer graded it −58 (paragraph
+    penalty, no markdown structure), so the gate returned an empty string."""
+
+    def test_minimal_compliant_review_passes_artifact_gate(self):
+        result = pick_best_artifact_text(MINIMAL_COMPLIANT_REVIEW.strip(), MINIMAL_COMPLIANT_REVIEW)
+
+        assert "REVIEW_RESULT" in result
+
+    def test_minimal_compliant_review_scores_above_threshold(self):
+        assert score_artifact_text(sanitize_artifact_text(MINIMAL_COMPLIANT_REVIEW)) > -1
+
+    def test_artifact_text_extracts_minimal_compliant_verdict(self):
+        result = AgentTaskResult(response_text=MINIMAL_COMPLIANT_REVIEW, success=True)
+
+        extracted = AutonomousOrchestrator._artifact_text(result)
+
+        assert "REVIEW_RESULT" in extracted
+
+    def test_contract_line_survives_despite_later_heading(self):
+        # A process preamble plus a later markdown heading must not slice away
+        # an earlier contract line (both _slice_from_structured_start and
+        # clean_agent_text slice to the first structured line).
+        text = (
+            "Let me check the working directory first.\n\n"
+            'REVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}\n\n'
+            "## Summary\n\nAll acceptance criteria are met."
+        )
+
+        assert "REVIEW_RESULT" in sanitize_artifact_text(text)
+
+    def test_findings_quoting_process_words_survive_end_to_end(self):
+        # Blocking findings that quote agent chatter ("let me … working
+        # directory") land in the scoring head and used to wipe the contract
+        # paragraph (process-paragraph filter) or push the score to −116
+        # (head-marker penalty). The verdict must still reach the gate exit.
+        text = (
+            'REVIEW_RESULT: {"verdict":"REQUEST_CHANGES","blocking_findings":'
+            '["agent kept saying let me check the working directory"]}\n\n'
+            "**TL;DR**: 存在阻塞项。"
+        )
+        result = AgentTaskResult(response_text=text, success=True)
+
+        assert "REVIEW_RESULT" in AutonomousOrchestrator._artifact_text(result)
+
+    def test_pure_process_noise_is_still_rejected(self):
+        noise = (
+            "Let me check the working directory.\n\n"
+            "Hmm, actually I need to think about this more.\n\n"
+            "Wait, let me look at the conversation start again."
+        )
+
+        assert pick_best_artifact_text(noise.strip(), noise) == ""
+
+    def test_sanitize_preserves_contract_and_tldr_lines(self):
+        cleaned = sanitize_artifact_text(MINIMAL_COMPLIANT_REVIEW)
+
+        assert "REVIEW_RESULT" in cleaned
+        assert "TL;DR" in cleaned

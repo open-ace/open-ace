@@ -115,3 +115,60 @@ def test_tldr_is_the_only_allowed_line_after_result():
     )
 
     assert _approved(text)
+
+
+# ── Minimal compliant verdicts: separator lines + bold TL;DR ────────────────
+# The review prompt only constrains the contract line's position ("last
+# non-summary line before the TL;DR"); nothing forbids a decorative ``---``
+# separator or a bolded ``**TL;DR**:`` summary around it. Workflow 02dae370 /
+# PR #2578 (2026-08-16) failed with exactly that minimal compliant shape.
+
+
+def test_minimal_verdict_with_separator_and_bold_tldr_approves():
+    text = (
+        'REVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}\n'
+        "\n---\n\n"
+        "**TL;DR**: 代码审查通过，CI 失败是预先存在的基础设施问题。"
+    )
+
+    assert _approved(text)
+
+
+def test_minimal_verdict_with_separator_and_plain_tldr_approves():
+    text = (
+        'REVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}\n'
+        "\n---\n\n"
+        "TL;DR: approved"
+    )
+
+    assert _approved(text)
+
+
+def test_minimal_verdict_with_bold_tldr_without_separator_approves():
+    text = 'REVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}\n\n**TL;DR**: approved'
+
+    assert _approved(text)
+
+
+def test_request_changes_with_separator_and_bold_tldr_still_rejected():
+    text = (
+        'REVIEW_RESULT: {"verdict":"REQUEST_CHANGES",'
+        '"blocking_findings":["P0 tests missing"]}\n'
+        "\n---\n\n"
+        "**TL;DR**: 存在阻塞项。"
+    )
+
+    assert not _approved(text)
+
+
+def test_separator_lines_do_not_mask_a_second_contract_line():
+    # Canary against index-space mixing when separator lines are skipped: the
+    # candidate must still be the LAST contract line, and multiple contract
+    # lines keep failing closed.
+    text = (
+        'REVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}\n'
+        "\n---\n\n"
+        'REVIEW_RESULT: {"verdict":"REQUEST_CHANGES","blocking_findings":["P0"]}'
+    )
+
+    assert not _approved(text)
