@@ -12,6 +12,9 @@ import threading
 from datetime import datetime
 from typing import Any
 
+import json
+import re
+
 from flask import Blueprint, jsonify
 
 from app.auth.decorators import admin_required, auth_required
@@ -33,6 +36,27 @@ _fetch_status: dict[str, Any] = {
     "error": None,
 }
 _fetch_lock = threading.Lock()
+
+
+def _parse_fetch_result(output: str) -> dict:
+    """Parse FETCH_RESULT line from fetch script output.
+    
+    Issue #2733: Extract structured coverage data so the scheduler
+    can detect degraded fetch results.
+    
+    Args:
+        output: The stdout from the fetch script
+        
+    Returns:
+        dict with 'status' and 'coverage' keys, or empty dict if not found
+    """
+    match = re.search(r'FETCH_RESULT:\s*(\{.*?\})\s*$', output, re.MULTILINE)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
+    return {}
 
 
 def _run_subprocess(cmd, timeout=600, cwd=None):
@@ -124,11 +148,24 @@ def run_fetch_scripts():
                     timeout=600,
                     cwd=project_root,
                 )
-                results["qwen"] = {
+                # Issue #2733: Parse structured coverage data
+                fetch_result = _parse_fetch_result(result.stdout) if result.stdout else {}
+                qwen_result = {
                     "success": result.returncode == 0,
                     "output": result.stdout[-1000:] if result.stdout else "",
                     "error": result.stderr[-500:] if result.stderr else None,
                 }
+                # Include coverage data if available
+                if fetch_result:
+                    qwen_result["coverage"] = fetch_result.get("coverage", {})
+                    qwen_result["status"] = fetch_result.get("status", "unknown")
+                    # Log degraded/failed states
+                    if fetch_result.get("status") in ("degraded", "denied", "failed"):
+                        logger.warning(
+                            f"Qwen fetch {fetch_result['status']}: "
+                            f"users_denied={fetch_result.get('coverage', {}).get('users_denied', [])}"
+                        )
+                results["qwen"] = qwen_result
             except subprocess.TimeoutExpired:
                 results["qwen"] = {"success": False, "error": "Timeout after 10 minutes"}
             except Exception as e:

@@ -2281,6 +2281,143 @@ install_webui_launch_wrapper() {
     return 0
 }
 
+# Configure ACL for workspace users' transcript directories (Issue #2733).
+# Grants the Open ACE service account read access to Qwen transcript directories
+# so the fetch script can import session messages into PostgreSQL.
+#
+# The ACL configuration is:
+#   1. Execute-only (x) on the user's home directory for traversal
+#   2. Read+execute (r-X) on .qwen/projects directory recursively
+#   3. Default ACL so newly created directories/files inherit access
+#
+# This follows the least-privilege principle: only transcript directories are
+# accessible, not the user's entire home directory.
+configure_transcript_acl() {
+    local service_user="$1"  # Open ACE service account (e.g., openace, ivyent)
+    local workspace_users="$2"  # Space-separated list of workspace users
+
+    # Check if setfacl is available
+    if ! command -v setfacl &>/dev/null; then
+        print_warning "setfacl not found, cannot configure transcript ACL"
+        print_info "Install the 'acl' package: apt install acl OR yum install acl"
+        return 1
+    fi
+
+    # Check if running as root
+    if [ "$(id -u)" -ne 0 ]; then
+        print_warning "Root privileges required to configure ACL"
+        return 1
+    fi
+
+    print_header "Configure Transcript ACL"
+
+    local success_count=0
+    local fail_count=0
+    local skipped_count=0
+
+    for ws_user in $workspace_users; do
+        # Skip if user doesn't exist
+        if ! id "$ws_user" &>/dev/null; then
+            print_info "Skipping non-existent user: $ws_user"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+
+        # Determine transcript directory path
+        local ws_home
+        ws_home=$(getent passwd "$ws_user" | cut -d: -f6)
+        if [ -z "$ws_home" ] || [ ! -d "$ws_home" ]; then
+            print_warning "Cannot determine home directory for user: $ws_user"
+            fail_count=$((fail_count + 1))
+            continue
+        fi
+
+        local qwen_projects="$ws_home/.qwen/projects"
+
+        # Check if .qwen/projects exists
+        if [ ! -d "$qwen_projects" ]; then
+            print_info "No .qwen/projects directory for user: $ws_user (skipping ACL)"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+
+        # Validate path to prevent symlink escape attacks
+        # Resolve the real path and verify it's under the allowed transcript root
+        local resolved_path
+        resolved_path=$(readlink -f "$qwen_projects" 2>/dev/null)
+        if [ -z "$resolved_path" ]; then
+            print_warning "Cannot resolve path for $qwen_projects"
+            fail_count=$((fail_count + 1))
+            continue
+        fi
+
+        # Security check: resolved path must be under /home/*/.qwen/projects
+        # This prevents symlink escape attacks
+        case "$resolved_path" in
+            /home/*/.qwen/projects*)
+                : # Valid path
+                ;;
+            *)
+                print_warning "Rejecting path outside allowed transcript root: $resolved_path"
+                fail_count=$((fail_count + 1))
+                continue
+                ;;
+        esac
+
+        # Configure ACL for home directory (execute-only for traversal)
+        # This allows the service account to traverse but not list the home directory
+        if setfacl -m "u:${service_user}:x" "$ws_home" 2>/dev/null; then
+            print_info "Granted traversal ACL on $ws_home for $service_user"
+        else
+            # setfacl may fail if the filesystem doesn't support ACL
+            # This is not fatal - the user may need to enable ACL support
+            print_warning "Failed to set ACL on $ws_home (filesystem may not support ACL)"
+        fi
+
+        # Configure ACL for .qwen/projects directory (read+execute, recursive)
+        # This allows the service account to read transcript files
+        if setfacl -R -m "u:${service_user}:r-X" "$qwen_projects" 2>/dev/null; then
+            print_info "Granted read ACL on $qwen_projects for $service_user"
+        else
+            print_warning "Failed to set ACL on $qwen_projects"
+            fail_count=$((fail_count + 1))
+            continue
+        fi
+
+        # Set default ACL so newly created directories/files inherit access
+        # This ensures new sessions are automatically accessible
+        if setfacl -R -d -m "u:${service_user}:r-X" "$qwen_projects" 2>/dev/null; then
+            print_info "Set default ACL inheritance on $qwen_projects"
+        else
+            print_warning "Failed to set default ACL on $qwen_projects"
+        fi
+
+        success_count=$((success_count + 1))
+        print_success "Configured transcript ACL for user: $ws_user"
+    done
+
+    # Summary
+    echo ""
+    print_info "ACL configuration summary:"
+    echo "  - Successful: $success_count"
+    echo "  - Failed: $fail_count"
+    echo "  - Skipped: $skipped_count"
+
+    if [ "$success_count" -gt 0 ]; then
+        print_success "Transcript ACL configured for $success_count user(s)"
+    fi
+
+    if [ "$fail_count" -gt 0 ]; then
+        print_warning "ACL configuration failed for $fail_count user(s)"
+        print_info "This may indicate:"
+        print_info "  - The filesystem doesn't support ACL (enable with: mount -o remount,acl /home)"
+        print_info "  - Insufficient privileges"
+        return 1
+    fi
+
+    return 0
+}
+
 # Configure sudoers for multi-user workspace mode
 # Uses incremental update: only adds/modifies $run_user's rules, preserves other users' rules
 configure_sudoers() {
@@ -4291,6 +4428,38 @@ install_local() {
         if [ $? -ne 0 ]; then
             print_warning "Sudoers configuration failed, multi-user mode may not work properly"
             print_info "Please manually configure /etc/sudoers.d/open-ace-webui"
+        fi
+
+        # Configure ACL for workspace users' transcript directories (Issue #2733)
+        # This grants the service account read access to .qwen/projects directories
+        # so the fetch script can import session messages into PostgreSQL.
+        # Get list of workspace users from config (users with system_account set)
+        local workspace_user_list=""
+        if [ -f "$config_dir/config.json" ]; then
+            workspace_user_list=$(python3 -c "
+import json
+import sys
+try:
+    with open('$config_dir/config.json') as f:
+        config = json.load(f)
+    users = config.get('workspace', {}).get('users', [])
+    accounts = [u.get('system_account') for u in users if u.get('system_account')]
+    print(' '.join(accounts))
+except Exception as e:
+    print('', file=sys.stderr)
+    sys.exit(0)
+" 2>/dev/null || true)
+        fi
+
+        if [ -n "$workspace_user_list" ]; then
+            configure_transcript_acl "$sudoers_run_user" "$workspace_user_list"
+            if [ $? -ne 0 ]; then
+                print_warning "ACL configuration failed for some users"
+                print_info "The fetch script may not be able to import session messages"
+                print_info "Manual ACL configuration: setfacl -R -m u:${sudoers_run_user}:r-X /home/<USER>/.qwen/projects"
+            fi
+        else
+            print_info "No workspace users configured, skipping ACL setup"
         fi
     fi
 

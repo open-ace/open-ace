@@ -61,19 +61,29 @@ def extract_system_account_from_sender_name(sender_name: str) -> str | None:
     return parts[0]
 
 
-def find_all_qwen_project_dirs() -> list:
+def find_all_qwen_project_dirs() -> dict:
     """
     Find Qwen project directories for all users on the system.
 
     Scans /home/*/.qwen/projects (Linux) or /Users/*/.qwen/projects (macOS)
     Handles PermissionError for directories that cannot be accessed.
 
+    Issue #2733: Return structured coverage data so the scheduler can detect
+    degraded fetch results instead of silently succeeding.
+
     Returns:
-        List of tuples: [(system_account, project_path), ...]
+        dict with keys:
+            - "accessible": List of tuples [(system_account, project_path), ...]
+            - "denied": List of system_accounts that were denied access
+            - "errors": List of (system_account, error_message) tuples
     """
     import platform
 
-    results = []
+    result = {
+        "accessible": [],
+        "denied": [],
+        "errors": [],
+    }
     os_type = platform.system().lower()
 
     # Determine user home directories based on OS
@@ -87,12 +97,12 @@ def find_all_qwen_project_dirs() -> list:
         qwen_projects = home / ".qwen" / "projects"
         if qwen_projects.is_dir():
             user = getpass.getuser()
-            results.append((user, qwen_projects))
-        return results
+            result["accessible"].append((user, qwen_projects))
+        return result
 
     # Scan all user directories
     if not home_base.is_dir():
-        return results
+        return result
 
     for user_dir in home_base.iterdir():
         if not user_dir.is_dir():
@@ -116,13 +126,19 @@ def find_all_qwen_project_dirs() -> list:
                             break
 
                 if has_jsonl:
-                    results.append((system_account, qwen_projects))
+                    result["accessible"].append((system_account, qwen_projects))
         except PermissionError:
-            # Skip directories we cannot access
+            # Record denied users for Issue #2733 observability
+            result["denied"].append(system_account)
             print(f"  Warning: Cannot access {qwen_projects} (permission denied)")
             continue
+        except Exception as e:
+            # Record other errors
+            result["errors"].append((system_account, str(e)))
+            print(f"  Warning: Error accessing {system_account}: {e}")
+            continue
 
-    return results
+    return result
 
 
 # Add shared directory to path
@@ -1280,21 +1296,49 @@ def fetch_and_save(
     all_messages: list[dict[str, Any]] = []
 
     # Multi-user mode: scan all users' qwen directories
+    # Issue #2733: Track coverage data for observability
+    coverage_data = {
+        "users_scanned": 0,
+        "users_denied": [],
+        "users_errors": [],
+        "files_processed": 0,
+        "messages_imported": 0,
+    }
+
     if multi_user_mode:
         print("Multi-user mode: scanning all users' qwen directories...")
-        user_projects = find_all_qwen_project_dirs()
+        scan_result = find_all_qwen_project_dirs()
 
-        if not user_projects:
-            print("No qwen project directories found for any user.")
+        accessible = scan_result.get("accessible", [])
+        denied = scan_result.get("denied", [])
+        errors = scan_result.get("errors", [])
+
+        coverage_data["users_denied"] = denied
+        coverage_data["users_errors"] = [f"{u}: {e}" for u, e in errors]
+
+        if not accessible:
+            print("No accessible qwen project directories found for any user.")
+            if denied:
+                print(f"  Permission denied for {len(denied)} user(s): {', '.join(denied)}")
+            if errors:
+                print(f"  Errors for {len(errors)} user(s): {', '.join([u for u, _ in errors])}")
+            # Return structured result for caller to detect degraded state
+            print(f"\nFETCH_RESULT: {json.dumps({'status': 'failed' if not denied else 'denied', 'coverage': coverage_data})}")
             return False
 
-        print(f"Found {len(user_projects)} users with qwen data:")
-        for system_account, proj_path in user_projects:
+        coverage_data["users_scanned"] = len(accessible)
+        print(f"Found {len(accessible)} users with accessible qwen data:")
+        for system_account, proj_path in accessible:
             print(f"  - {system_account}: {proj_path}")
+
+        if denied:
+            print(f"Permission denied for {len(denied)} user(s): {', '.join(denied)}")
+        if errors:
+            print(f"Errors for {len(errors)} user(s): {', '.join([u for u, _ in errors])}")
 
         # Process each user's projects
         total_files = 0
-        for system_account, user_project_dir in user_projects:
+        for system_account, user_project_dir in accessible:
             print(f"\nProcessing user: {system_account}")
             # Resolve the user_id once per system_account so tenant-scoped
             # queries can attribute these messages (Issue: time-range summary
@@ -1311,6 +1355,8 @@ def fetch_and_save(
                 user_id,
             )
             total_files += files_processed
+
+        coverage_data["files_processed"] = total_files
 
     else:
         # Single-user mode: use current user's qwen directory
@@ -1364,6 +1410,18 @@ def fetch_and_save(
             update_agent_sessions_stats(all_messages)
         except Exception as e:
             print(f"Warning: Failed to update agent session stats: {e}")
+
+    # Issue #2733: Output structured result for observability
+    if multi_user_mode:
+        coverage_data["messages_imported"] = len(all_messages)
+        status = "success"
+        if coverage_data["users_denied"]:
+            status = "degraded"
+        result = {
+            "status": status,
+            "coverage": coverage_data,
+        }
+        print(f"\nFETCH_RESULT: {json.dumps(result)}")
 
     return True
 
