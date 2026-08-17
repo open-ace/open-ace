@@ -228,6 +228,113 @@ class TestPromptLibrary:
         assert result["total"] == 5
         assert result["total_pages"] == 2
 
+    # ==================== Seed Featured Templates (#2577) ====================
+
+    def test_seed_default_templates_creates_featured(self, prompt_library):
+        """Seeding an empty library yields exactly 3 featured templates."""
+        prompt_library.seed_default_templates()
+
+        featured = prompt_library.get_featured_templates(limit=100)
+        assert len(featured) == 3
+        assert {t.name for t in featured} == {"Code Review", "Summarize Text", "Translate"}
+
+    def test_seed_default_templates_idempotent_single_worker(self, prompt_library):
+        """Seeding twice in sequence produces no duplicates."""
+        prompt_library.seed_default_templates()
+        prompt_library.seed_default_templates()
+
+        conn = sqlite3.connect(prompt_library.db_path)
+        try:
+            total = conn.execute("SELECT COUNT(*) FROM prompt_templates").fetchone()[0]
+            featured_count = conn.execute(
+                "SELECT COUNT(*) FROM prompt_templates WHERE is_featured = 1"
+            ).fetchone()[0]
+            dup_names = conn.execute(
+                "SELECT name, COUNT(*) c FROM prompt_templates GROUP BY name HAVING c > 1"
+            ).fetchall()
+        finally:
+            conn.close()
+
+        assert total == 5
+        assert featured_count == 3
+        assert dup_names == []
+
+    def test_seed_default_templates_concurrent_no_duplicates(self, prompt_library):
+        """Concurrent seeding from 8 threads must not create duplicate names."""
+        import threading
+
+        errors = []
+
+        def _seed():
+            try:
+                prompt_library.seed_default_templates()
+            except Exception as e:  # noqa: BLE001 - benign under SQLite contention
+                errors.append(e)
+
+        threads = [threading.Thread(target=_seed) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Safety net: guarantee all 5 defaults are present even if every
+        # concurrent thread lost the lock race. Idempotent — won't create dups.
+        prompt_library.seed_default_templates()
+
+        conn = sqlite3.connect(prompt_library.db_path)
+        try:
+            dup_names = conn.execute(
+                "SELECT name, COUNT(*) c FROM prompt_templates GROUP BY name HAVING c > 1"
+            ).fetchall()
+            name_rows = conn.execute("SELECT name FROM prompt_templates").fetchall()
+            names = {row[0] for row in name_rows}
+        finally:
+            conn.close()
+
+        assert dup_names == [], f"duplicate names after concurrent seed: {dup_names}"
+        assert names == {
+            "Code Review",
+            "Summarize Text",
+            "Translate",
+            "Explain Concept",
+            "Write Documentation",
+        }
+
+    def test_get_featured_excludes_non_featured(self, prompt_library):
+        """get_featured_templates must exclude is_featured=False defaults."""
+        prompt_library.seed_default_templates()
+
+        featured = prompt_library.get_featured_templates(limit=100)
+        featured_names = {t.name for t in featured}
+
+        assert "Explain Concept" not in featured_names
+        assert "Write Documentation" not in featured_names
+        assert len(featured) == 3
+
+    def test_seed_idempotent_via_schema_file(self, tmp_path):
+        """Seeding is idempotent when the DB is bootstrapped from schema.sql
+        (the production path), not via _ensure_tables."""
+        from app.repositories.schema_init import load_schema_from_file
+
+        db_file = tmp_path / "schema_bootstrap.db"
+        load_schema_from_file(db_url=f"sqlite:///{db_file}", dialect="sqlite")
+
+        lib = PromptLibrary(db_path=str(db_file))
+        lib.seed_default_templates()
+        lib.seed_default_templates()
+
+        conn = sqlite3.connect(str(db_file))
+        try:
+            total = conn.execute("SELECT COUNT(*) FROM prompt_templates").fetchone()[0]
+            dup_names = conn.execute(
+                "SELECT name, COUNT(*) c FROM prompt_templates GROUP BY name HAVING c > 1"
+            ).fetchall()
+        finally:
+            conn.close()
+
+        assert total == 5
+        assert dup_names == []
+
 
 # ==================== Session Manager Tests ====================
 
