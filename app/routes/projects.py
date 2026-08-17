@@ -253,9 +253,10 @@ def api_create_project():
         success, error_msg = setup_shared_project_permissions(path)
         if not success:
             logger.error(f"Failed to setup shared permissions: {error_msg}")
-            return jsonify({
-                "error": f"Failed to setup shared project permissions: {error_msg}"
-            }), 500
+            return (
+                jsonify({"error": f"Failed to setup shared project permissions: {error_msg}"}),
+                500,
+            )
 
     # Create project in database
     project_id = project_repo.create_project(
@@ -339,9 +340,7 @@ def api_update_project(project_id):
             success, error_msg = setup_shared_project_permissions(project.path)
             if not success:
                 logger.error(f"Failed to setup shared permissions: {error_msg}")
-                return jsonify({
-                    "error": f"Failed to setup shared permissions: {error_msg}"
-                }), 500
+                return jsonify({"error": f"Failed to setup shared permissions: {error_msg}"}), 500
 
     success = project_repo.update_project(
         project_id=project_id,
@@ -495,16 +494,11 @@ def api_fix_project_permissions(project_id):
 
     # Check if running in Docker multi-user mode
     if not _is_docker_multi_user_mode():
-        return jsonify({
-            "error": "Permission fix is only available in Docker multi-user mode"
-        }), 400
+        return jsonify({"error": "Permission fix is only available in Docker multi-user mode"}), 400
 
     # Fix permissions
     success, error_msg = setup_shared_project_permissions(project.path)
     if success:
-        return jsonify({
-            "success": True,
-            "message": "Permissions fixed successfully"
-        })
+        return jsonify({"success": True, "message": "Permissions fixed successfully"})
     else:
         return jsonify({"error": error_msg}), 500
