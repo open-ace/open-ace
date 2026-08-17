@@ -3,7 +3,7 @@
  *
  * Dual-track routing system:
  * - /work/* - Work mode (WorkLayout with three-column layout) - All users
- * - /manage/* - Manage mode (ManageLayout with sidebar navigation) - Admin only
+ * - /manage/* - Manage mode (ManageLayout with sidebar navigation) - Admin and Manager roles
  * - /login, /logout - Public routes
  *
  * Performance optimizations:
@@ -28,7 +28,7 @@ import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
 import { initializeQueryKeyRegistry } from '@/utils';
-import { isAdmin } from '@/utils/permissions';
+import { canAccessManageMode } from '@/utils/permissions';
 
 // Initialize query key registry on app load
 initializeQueryKeyRegistry();
@@ -390,7 +390,7 @@ const ManageRoutes: React.FC = () => {
 // Main App Content (requires auth)
 const AppContent: React.FC = () => {
   const { user } = useAuth();
-  const userIsAdmin = isAdmin(user);
+  const userCanAccessManage = canAccessManageMode(user);
 
   // Sync app mode with URL on mount
   useEffect(() => {
@@ -413,17 +413,17 @@ const AppContent: React.FC = () => {
         {/* Work Mode Routes - All users */}
         <Route path="/work/*" element={<WorkRoutes />} />
 
-        {/* Manage Mode Routes - Admin only */}
+        {/* Manage Mode Routes - Admin and Manager roles */}
         <Route
           path="/manage/*"
-          element={userIsAdmin ? <ManageRoutes /> : <Navigate to="/work" replace />}
+          element={userCanAccessManage ? <ManageRoutes /> : <Navigate to="/work" replace />}
         />
 
         {/* Legacy Routes - redirect based on user role */}
         <Route
           path="/dashboard"
           element={
-            userIsAdmin ? (
+            userCanAccessManage ? (
               <Navigate to="/manage/dashboard" replace />
             ) : (
               <Navigate to="/work" replace />
@@ -433,7 +433,7 @@ const AppContent: React.FC = () => {
         <Route
           path="/messages"
           element={
-            userIsAdmin ? (
+            userCanAccessManage ? (
               <Navigate to="/manage/messages" replace />
             ) : (
               <Navigate to="/work" replace />
@@ -443,7 +443,7 @@ const AppContent: React.FC = () => {
         <Route
           path="/analysis"
           element={
-            userIsAdmin ? (
+            userCanAccessManage ? (
               <Navigate to="/manage/analysis" replace />
             ) : (
               <Navigate to="/work" replace />
@@ -453,13 +453,17 @@ const AppContent: React.FC = () => {
         <Route
           path="/management"
           element={
-            userIsAdmin ? <Navigate to="/manage/users" replace /> : <Navigate to="/work" replace />
+            userCanAccessManage ? (
+              <Navigate to="/manage/users" replace />
+            ) : (
+              <Navigate to="/work" replace />
+            )
           }
         />
         <Route
           path="/security"
           element={
-            userIsAdmin ? (
+            userCanAccessManage ? (
               <Navigate to="/manage/security" replace />
             ) : (
               <Navigate to="/work" replace />
@@ -473,11 +477,11 @@ const AppContent: React.FC = () => {
         {/* Report - Keep as standalone for now */}
         <Route path="/report" element={<LegacyAppContent />} />
 
-        {/* Default redirect - Admin goes to manage mode, others go to work mode */}
+        {/* Default redirect - Admin/Manager goes to manage mode, others go to work mode */}
         <Route
           path="/"
           element={
-            userIsAdmin ? (
+            userCanAccessManage ? (
               <Navigate to="/manage/dashboard" replace />
             ) : (
               <Navigate to="/work" replace />
@@ -487,7 +491,7 @@ const AppContent: React.FC = () => {
         <Route
           path="*"
           element={
-            userIsAdmin ? (
+            userCanAccessManage ? (
               <Navigate to="/manage/dashboard" replace />
             ) : (
               <Navigate to="/work" replace />

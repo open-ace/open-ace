@@ -10,6 +10,12 @@ import type { User } from '@/types';
 export const ADMIN_ROLES = ['admin', 'platform_admin', 'tenant_admin'] as const;
 
 /**
+ * Roles that can access Manage Mode (admin pages)
+ * Includes admin roles and manager role (who has view/export permissions but not management permissions)
+ */
+export const MANAGE_MODE_ROLES = ['admin', 'platform_admin', 'tenant_admin', 'manager'] as const;
+
+/**
  * Check if a role string represents an admin role
  * @param role - Role string to check
  * @returns true if the role is an admin role
@@ -26,6 +32,17 @@ export function isAdminRole(role: string | null | undefined): boolean {
  */
 export function isAdmin(user: User | null | undefined): boolean {
   return isAdminRole(user?.role);
+}
+
+/**
+ * Check if user can access Manage Mode
+ * Admin roles and manager role can access Manage Mode.
+ * Manager can only access non-admin-only pages (dashboard, analysis, messages, audit, projects).
+ * @param user - Current user
+ * @returns true if user can access Manage Mode
+ */
+export function canAccessManageMode(user: User | null | undefined): boolean {
+  return MANAGE_MODE_ROLES.includes(user?.role as any);
 }
 
 /**
