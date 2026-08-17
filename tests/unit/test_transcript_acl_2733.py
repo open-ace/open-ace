@@ -56,7 +56,7 @@ class TestConfigureTranscriptAcl(unittest.TestCase):
     def test_acl_function_grants_minimal_permissions(self):
         """Verify ACL grants minimal permissions (r-X on projects, x on home)."""
         install_sh = (
-            Path(__file__).parent.parent.parent.parent
+            Path(__file__).parent.parent.parent
             / "scripts"
             / "install-central"
             / "package-method"
@@ -77,7 +77,7 @@ class TestConfigureTranscriptAcl(unittest.TestCase):
     def test_acl_function_sets_default_acl(self):
         """Verify ACL sets default ACL for inheritance."""
         install_sh = (
-            Path(__file__).parent.parent.parent.parent
+            Path(__file__).parent.parent.parent
             / "scripts"
             / "install-central"
             / "package-method"
@@ -141,7 +141,7 @@ class TestFetchQwenObservability(unittest.TestCase):
         """Verify FETCH_RESULT JSON output format."""
         import json
 
-        fetch_qwen = Path(__file__).parent.parent.parent.parent / "scripts" / "fetch_qwen.py"
+        fetch_qwen = Path(__file__).parent.parent.parent / "scripts" / "fetch_qwen.py"
         content = fetch_qwen.read_text()
 
         # Check for FETCH_RESULT output
