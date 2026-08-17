@@ -37,7 +37,7 @@ _fetch_status: dict[str, Any] = {
 _fetch_lock = threading.Lock()
 
 
-def _parse_fetch_result(output: str) -> dict:
+def _parse_fetch_result(output: str) -> dict[str, Any]:
     """Parse FETCH_RESULT line from fetch script output.
 
     Issue #2733: Extract structured coverage data so the scheduler
@@ -52,7 +52,8 @@ def _parse_fetch_result(output: str) -> dict:
     match = re.search(r"FETCH_RESULT:\s*(\{.*?\})\s*$", output, re.MULTILINE)
     if match:
         try:
-            return json.loads(match.group(1))
+            result: dict[str, Any] = json.loads(match.group(1))
+            return result
         except json.JSONDecodeError:
             pass
     return {}
