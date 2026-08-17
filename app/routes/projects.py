@@ -26,7 +26,7 @@ from app.models.user import User
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.user_repo import UserRepository
 from app.utils.request_context import get_current_tenant_id
-from app.utils.workspace import setup_shared_project_permissions, _is_docker_multi_user_mode
+from app.utils.workspace import _is_docker_multi_user_mode, setup_shared_project_permissions
 
 logger = logging.getLogger(__name__)
 
