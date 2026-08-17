@@ -212,6 +212,19 @@ _REVIEW_APPROVAL_PHRASES = {
     "ko": "코드 리뷰 통과",
 }
 
+# Machine-readable PR-review verdict contract (the review prompt in
+# phases/pr_review.py asks for a single-line JSON as the last non-summary line
+# before the TL;DR). These patterns are shared by the orchestrator's parser
+# and the artifact-text scorer/cleaners — keep them in sync with the prompt.
+# Exact-line form (fullmatch on one stripped line; group 1 = the JSON blob).
+REVIEW_RESULT_LINE_FULLMATCH_RE = re.compile(r"^REVIEW_RESULT\s*:\s*(\{.*\})$")
+# Multi-line text form (search across a whole artifact).
+REVIEW_RESULT_LINE_SEARCH_RE = re.compile(r"(?m)^REVIEW_RESULT\s*:\s*\{.*\}\s*$")
+# Summary line that may follow the verdict line — bold markers tolerated.
+REVIEW_TLDR_LINE_RE = re.compile(r"^\*{0,2}TL;DR\*{0,2}\s*:", re.IGNORECASE)
+# Decorative separators carry no verdict information. Match a STRIPPED line.
+REVIEW_SEPARATOR_LINE_RE = re.compile(r"^(?:-{3,}|\*{3,}|_{3,})$")
+
 
 def _review_approval_phrase(content_language: str | None) -> str:
     """Approval marker for PR review in the given content language."""
