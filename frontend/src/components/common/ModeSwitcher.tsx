@@ -1,7 +1,8 @@
 /**
  * ModeSwitcher Component - Switch between Work and Manage modes
  *
- * Note: Only visible for admin users. Non-admin users are restricted to Work mode.
+ * Note: Only visible for admin and manager users.
+ * Non-admin/non-manager users are restricted to Work mode.
  */
 
 import React from 'react';
@@ -12,7 +13,7 @@ import { useAppStore } from '@/store';
 import { useAuth } from '@/hooks';
 import { t } from '@/i18n';
 import type { AppMode } from '@/types';
-import { isAdmin } from '@/utils/permissions';
+import { canAccessManageMode } from '@/utils/permissions';
 
 interface ModeSwitcherProps {
   className?: string;
@@ -23,10 +24,10 @@ export const ModeSwitcher: React.FC<ModeSwitcherProps> = ({ className }) => {
   const language = useLanguage();
   const { user } = useAuth();
 
-  const userIsAdmin = isAdmin(user);
+  const userCanAccessManage = canAccessManageMode(user);
 
-  // Don't render for non-admin users
-  if (!userIsAdmin) {
+  // Don't render for users who can't access manage mode
+  if (!userCanAccessManage) {
     return null;
   }
 

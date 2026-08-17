@@ -1834,6 +1834,8 @@ CREATE INDEX idx_prompt_templates_author ON prompt_templates (author_id);
 
 CREATE INDEX idx_prompt_templates_category ON prompt_templates (category);
 
+CREATE UNIQUE INDEX idx_prompt_templates_name ON prompt_templates (name);
+
 CREATE INDEX idx_prompt_templates_public ON prompt_templates (is_public);
 
 CREATE INDEX idx_proxy_token_jtis_active ON proxy_token_jtis (revoked_at, consumed_at);
