@@ -21,7 +21,6 @@ from flask import Flask
 
 from app.modules.workspace.session_manager import AgentSession
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

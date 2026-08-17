@@ -294,10 +294,13 @@ class TestXSessionIdHeaderOverride:
         )
         mock_get_proxy.return_value = mock_proxy
 
-        # User has an active session, but header specifies a different one
-        active_session = _mock_session("uuid-session-123")
+        # Mock session manager for ownership validation (Issue #2727)
+        # Header session must match token user_id and tenant_id
+        header_session = _mock_session("header-session-456")
+        header_session.user_id = 1  # Match token user_id
+        header_session.tenant_id = 1  # Match token tenant_id
         mock_sm = MagicMock()
-        mock_sm.get_active_sessions.return_value = [active_session]
+        mock_sm.get_session.return_value = header_session
         mock_session_mgr.return_value = mock_sm
 
         mock_quota_cls.return_value = _make_quota_ok()
@@ -313,8 +316,8 @@ class TestXSessionIdHeaderOverride:
             },
         )
         assert resp.status_code == 200
-        # Active session lookup should not be called when header is present
-        mock_sm.get_active_sessions.assert_not_called()
+        # get_session should be called for ownership validation (may be called multiple times)
+        assert mock_sm.get_session.called
 
 
 # ===================================================================

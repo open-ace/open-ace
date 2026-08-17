@@ -133,9 +133,7 @@ class TestXSessionIdHeaderFormat:
         # Mock session manager for ownership validation
         mock_sm_instance = MagicMock()
         mock_sm.return_value = mock_sm_instance
-        mock_sm_instance.get_session.return_value = _make_session(
-            session_id="abc123-def456-ghi789"
-        )
+        mock_sm_instance.get_session.return_value = _make_session(session_id="abc123-def456-ghi789")
 
         client = workspace_app.test_client()
         resp = client.post(
@@ -192,9 +190,7 @@ class TestXSessionIdHeaderFormat:
 
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
-    def test_invalid_chars_returns_400(
-        self, mock_get_proxy, mock_quota_cls, workspace_app
-    ):
+    def test_invalid_chars_returns_400(self, mock_get_proxy, mock_quota_cls, workspace_app):
         """Invalid characters should return 400 (Issue #2727: no silent fallback)."""
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token(session_id="webui:1")
@@ -218,9 +214,7 @@ class TestXSessionIdHeaderFormat:
 
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
-    def test_too_long_returns_400(
-        self, mock_get_proxy, mock_quota_cls, workspace_app
-    ):
+    def test_too_long_returns_400(self, mock_get_proxy, mock_quota_cls, workspace_app):
         """Session ID longer than 100 chars should return 400 (Issue #2727)."""
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token(session_id="webui:1")
@@ -356,7 +350,12 @@ class TestListSessionsFilterWebui:
         mock_sm.return_value = mock_sm_instance
         mock_sm_instance.list_sessions.return_value = [
             {"session_id": "conv-abc", "title": "Conversation 1", "user_id": 1, "status": "active"},
-            {"session_id": "conv-def", "title": "Conversation 2", "user_id": 1, "status": "completed"},
+            {
+                "session_id": "conv-def",
+                "title": "Conversation 2",
+                "user_id": 1,
+                "status": "completed",
+            },
         ]
 
         client = workspace_app.test_client()
