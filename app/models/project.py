@@ -7,6 +7,7 @@ Data models for project management and statistics.
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from app.utils.datetime_utils import ensure_utc_suffix
 from app.utils.helpers import parse_db_datetime
 
 
@@ -34,8 +35,8 @@ class Project:
             "name": self.name,
             "description": self.description,
             "created_by": self.created_by,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": ensure_utc_suffix(self.created_at),
+            "updated_at": ensure_utc_suffix(self.updated_at),
             "is_active": self.is_active,
             "is_shared": self.is_shared,
         }
@@ -92,8 +93,8 @@ class UserProject:
             "user_id": self.user_id,
             "project_id": self.project_id,
             "username": self.username,
-            "first_access_at": (self.first_access_at.isoformat() if self.first_access_at else None),
-            "last_access_at": (self.last_access_at.isoformat() if self.last_access_at else None),
+            "first_access_at": ensure_utc_suffix(self.first_access_at),
+            "last_access_at": ensure_utc_suffix(self.last_access_at),
             "total_sessions": self.total_sessions,
             "total_tokens": self.total_tokens,
             "total_requests": self.total_requests,
@@ -153,8 +154,8 @@ class ProjectStats:
             "total_requests": self.total_requests,
             "total_duration_seconds": self.total_duration_seconds,
             "total_duration_hours": self.get_duration_hours(),
-            "first_access": self.first_access.isoformat() if self.first_access else None,
-            "last_access": self.last_access.isoformat() if self.last_access else None,
+            "first_access": ensure_utc_suffix(self.first_access),
+            "last_access": ensure_utc_suffix(self.last_access),
             "user_stats": [u.to_dict() for u in self.user_stats],
         }
 
