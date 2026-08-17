@@ -1027,6 +1027,24 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ] || [ "$CONFIG_MULTI_USER" = "true" 
     # is not running as root with the explicit opt-in (see top-of-file guard).
     require_root_for_multi_user
 
+    # Issue #2730: Create shared project group
+    # All users are added to this group for shared project file system access
+    SHARED_GROUP="openace-shared"
+    if ! getent group "$SHARED_GROUP" > /dev/null 2>&1; then
+        groupadd -f "$SHARED_GROUP"
+        echo "  Created shared project group: $SHARED_GROUP"
+    else
+        echo "  Shared project group already exists: $SHARED_GROUP"
+    fi
+
+    # Add existing users in /home to the shared group
+    for user_dir in /home/*/; do
+        username=$(basename "$user_dir")
+        if id "$username" &>/dev/null; then
+            usermod -aG "$SHARED_GROUP" "$username" 2>/dev/null || true
+        fi
+    done
+
     # Ensure workspace base directory exists
     WORKSPACE_DIR="${WORKSPACE_BASE_DIR:-/workspace}"
     mkdir -p "$WORKSPACE_DIR"
