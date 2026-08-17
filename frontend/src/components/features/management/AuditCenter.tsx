@@ -942,7 +942,9 @@ export const AuditCenter: React.FC = () => {
                       .map((anomaly, index) => (
                         <tr
                           key={anomaly.anomaly_id ?? `${anomaly.anomaly_type}-${index}`}
-                          className={anomaly.status === 'processed' ? 'opacity-50' : ''}
+                          className={cn({
+                            'anomaly-row-processed': anomaly.status === 'processed',
+                          })}
                         >
                           <td>
                             <span className="badge bg-secondary">{anomaly.anomaly_type}</span>
