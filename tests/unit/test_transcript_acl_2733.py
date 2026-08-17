@@ -23,7 +23,7 @@ class TestConfigureTranscriptAcl(unittest.TestCase):
     def test_acl_function_exists(self):
         """Verify configure_transcript_acl function exists in install.sh."""
         install_sh = (
-            Path(__file__).parent.parent.parent.parent
+            Path(__file__).parent.parent.parent
             / "scripts"
             / "install-central"
             / "package-method"
@@ -41,7 +41,7 @@ class TestConfigureTranscriptAcl(unittest.TestCase):
     def test_acl_function_has_security_checks(self):
         """Verify configure_transcript_acl has symlink escape prevention."""
         install_sh = (
-            Path(__file__).parent.parent.parent.parent
+            Path(__file__).parent.parent.parent
             / "scripts"
             / "install-central"
             / "package-method"
