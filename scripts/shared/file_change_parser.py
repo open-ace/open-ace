@@ -442,8 +442,22 @@ __all__ = [
 ]
 
 
-def append_file_change_blocks(blocks: list[dict], context: ParserContext) -> None:
-    """Append synthetic file_change blocks derived from tool_use blocks."""
+def append_file_change_blocks(
+    blocks: list[dict], context: ParserContext | None = None
+) -> None:
+    """Append synthetic file_change blocks derived from tool_use blocks.
+
+    Args:
+        blocks: List of content blocks to augment (modified in place).
+        context: Optional parser context. If None, no file_change blocks are appended.
+
+    Note:
+        Context is optional for backward compatibility with callers that don't have
+        session/project information available.
+    """
+    if context is None:
+        return
+
     for block in blocks:
         if block.get("type") != "tool_use":
             continue
