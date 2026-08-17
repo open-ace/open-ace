@@ -15,3 +15,1668 @@ from app.utils.hostname_validator import get_hostname_filter_sql, is_valid_hostn
 from app.utils.tool_names import normalize_tool_name
 
 logger = logging.getLogger(__name__)
+
+
+# Cache for JSON parsing to avoid repeated parsing of same strings
+@lru_cache(maxsize=256)
+def _parse_json_cached(json_str: str | None) -> list[str] | None:
+    """
+    Parse JSON string with caching for performance.
+
+    Args:
+        json_str: JSON string to parse.
+
+    Returns:
+        Parsed list or None.
+    """
+    if json_str is None:
+        return None
+    try:
+        return cast("list[str]", json.loads(json_str))
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+class UsageRepository:
+    """Repository for usage data operations."""
+
+    def __init__(self, db: Database | None = None):
+        """
+        Initialize repository.
+
+        Args:
+            db: Optional Database instance for dependency injection.
+        """
+        self.db = db or Database()
+
+    @staticmethod
+    def _normalize_tenant_id(value: object) -> int | None:
+        """Normalize a tenant identifier to a positive integer."""
+        if value in (None, "", 0, "0"):
+            return None
+        try:
+            tenant_id = int(cast("Any", value))
+        except (TypeError, ValueError):
+            return None
+        return tenant_id if tenant_id > 0 else None
+
+    @staticmethod
+    def _tenant_user_condition(column_ref: str) -> str:
+        """Return a tenant-scope predicate for a user_id column."""
+        return f"{column_ref} IN (SELECT id FROM users WHERE tenant_id = ?)"
+
+    def save_usage(
+        self,
+        date: str,
+        tool_name: str,
+        tokens_used: int,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_tokens: int = 0,
+        request_count: int = 0,
+        models_used: list[str] | None = None,
+        host_name: str = "localhost",
+        tenant_id: int | None = None,
+    ) -> bool:
+        """
+        Save or update usage data for a specific date and tool.
+
+        Args:
+            date: Date string (YYYY-MM-DD).
+            tool_name: Name of the tool.
+            tokens_used: Total tokens used.
+            input_tokens: Input tokens.
+            output_tokens: Output tokens.
+            cache_tokens: Cache tokens.
+            request_count: Number of requests.
+            models_used: List of models used.
+            host_name: Host name.
+
+        Returns:
+            bool: True if successful.
+        """
+        # Normalize at the write boundary so variants (qwen-code/QWEN/...) can
+        # never re-enter daily_usage and split the ROI cost-breakdown pie.
+        tool_name = normalize_tool_name(tool_name)
+        models_json = json.dumps(models_used) if models_used else None
+        effective_tenant_id = self._normalize_tenant_id(tenant_id) or 1
+
+        with self.db.connection() as conn:
+            cursor = conn.cursor()
+            # Use different syntax for SQLite and PostgreSQL
+
+            if is_postgresql():
+                cursor.execute(
+                    """
+                    INSERT INTO daily_usage
+                    (date, tool_name, host_name, tokens_used, input_tokens,
+                     output_tokens, cache_tokens, request_count, models_used, tenant_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (tenant_id, date, tool_name, host_name) DO UPDATE SET
+                        tokens_used = EXCLUDED.tokens_used,
+                        input_tokens = EXCLUDED.input_tokens,
+                        output_tokens = EXCLUDED.output_tokens,
+                        cache_tokens = EXCLUDED.cache_tokens,
+                        request_count = EXCLUDED.request_count,
+                        models_used = EXCLUDED.models_used
+                """,
+                    (
+                        date,
+                        tool_name,
+                        host_name,
+                        tokens_used,
+                        input_tokens,
+                        output_tokens,
+                        cache_tokens,
+                        request_count,
+                        models_json,
+                        effective_tenant_id,
+                    ),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO daily_usage
+                    (date, tool_name, host_name, tokens_used, input_tokens,
+                     output_tokens, cache_tokens, request_count, models_used, tenant_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        date,
+                        tool_name,
+                        host_name,
+                        tokens_used,
+                        input_tokens,
+                        output_tokens,
+                        cache_tokens,
+                        request_count,
+                        models_json,
+                        effective_tenant_id,
+                    ),
+                )
+            conn.commit()
+
+        logger.debug(f"Saved usage: {date} - {tool_name} - {host_name}")
+        return True
+
+    def get_usage_rows_by_date(
+        self,
+        date: str,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get raw usage rows from daily_usage for a specific date.
+
+        Queries daily_usage directly (few rows) instead of JOIN with
+        daily_messages to avoid request_count multiplication.
+
+        Args:
+            date: Date string (YYYY-MM-DD).
+            tool_name: Optional tool name filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[Dict]: Raw rows from daily_usage with token and host/model details.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        conditions = ["date = ?"]
+        params: list = [date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
+        if tool_name:
+            conditions.append("tool_name = ?")
+            params.append(tool_name)
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        where_clause = " AND ".join(conditions)
+        query = f"""
+            SELECT
+                tool_name,
+                host_name,
+                tokens_used,
+                input_tokens,
+                output_tokens,
+                cache_tokens,
+                request_count,
+                models_used
+            FROM daily_usage
+            WHERE {where_clause}
+        """
+        return self.db.fetch_all(query, tuple(params))
+
+    def get_usage_by_date(
+        self,
+        date: str,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> dict:
+        """
+        Get aggregated usage for a specific date.
+
+        Args:
+            date: Date string (YYYY-MM-DD).
+            tool_name: Optional tool name filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            Dict: Aggregated usage for the date.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        conditions = ["date = ?"]
+        params: list[Any] = [date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
+
+        if tool_name:
+            conditions.append("tool_name = ?")
+            params.append(tool_name)
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        where_clause = " AND ".join(conditions)
+        query = f"""
+            SELECT
+                SUM(tokens_used) as tokens_used,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens,
+                COUNT(*) as request_count
+            FROM daily_messages
+            WHERE {where_clause}
+        """
+        result = self.db.fetch_one(query, tuple(params))
+
+        if not result:
+            return {
+                "date": date,
+                "tokens_used": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "request_count": 0,
+            }
+
+        return {
+            "date": date,
+            "tokens_used": int(result.get("tokens_used", 0) or 0),
+            "input_tokens": int(result.get("input_tokens", 0) or 0),
+            "output_tokens": int(result.get("output_tokens", 0) or 0),
+            "request_count": int(result.get("request_count", 0) or 0),
+        }
+
+    def get_usage_by_tool(
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get usage data aggregated by tool for a date range.
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[Dict]: Usage data aggregated by tool.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        conditions = ["date >= ?", "date <= ?"]
+        params: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        query = f"""
+            SELECT
+                tool_name,
+                SUM(tokens_used) as tokens_used,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens,
+                SUM(cache_tokens) as cache_tokens,
+                SUM(request_count) as request_count
+            FROM daily_usage
+            WHERE {" AND ".join(conditions)}
+            GROUP BY tool_name
+            ORDER BY tokens_used DESC
+        """
+        rows = self.db.fetch_all(query, tuple(params))
+
+        results = []
+        for row in rows:
+            tool = normalize_tool_name(row["tool_name"])
+            # Find existing entry for this tool
+            existing = next((r for r in results if r["tool_name"] == tool), None)
+            if existing:
+                existing["tokens_used"] += int(row["tokens_used"] or 0)
+                existing["input_tokens"] += int(row["input_tokens"] or 0)
+                existing["output_tokens"] += int(row["output_tokens"] or 0)
+                existing["cache_tokens"] += int(row["cache_tokens"] or 0)
+                existing["request_count"] += int(row["request_count"] or 0)
+            else:
+                results.append(
+                    {
+                        "tool_name": tool,
+                        "tokens_used": int(row["tokens_used"] or 0),
+                        "input_tokens": int(row["input_tokens"] or 0),
+                        "output_tokens": int(row["output_tokens"] or 0),
+                        "cache_tokens": int(row["cache_tokens"] or 0),
+                        "request_count": int(row["request_count"] or 0),
+                    }
+                )
+
+        return results
+
+    def get_daily_range(
+        self,
+        start_date: str,
+        end_date: str,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get daily usage data for a date range.
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            tool_name: Optional tool name filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[Dict]: Daily usage data.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        conditions = ["date >= ?", "date <= ?"]
+        params: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
+
+        if tool_name:
+            conditions.append("tool_name = ?")
+            params.append(tool_name)
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        query = f"""
+            SELECT
+                date,
+                tool_name,
+                SUM(tokens_used) as tokens_used,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens,
+                COUNT(*) as request_count
+            FROM daily_messages
+            WHERE {" AND ".join(conditions)}
+            GROUP BY date, tool_name
+            ORDER BY date DESC
+        """
+        rows = self.db.fetch_all(query, tuple(params))
+
+        results = []
+        for row in rows:
+            date_val = row["date"]
+            if hasattr(date_val, "strftime"):
+                date_str = date_val.strftime("%Y-%m-%d")
+            else:
+                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+            results.append(
+                {
+                    "date": date_str,
+                    "tool_name": normalize_tool_name(row["tool_name"]),
+                    "tokens_used": int(row["tokens_used"] or 0),
+                    "input_tokens": int(row["input_tokens"] or 0),
+                    "output_tokens": int(row["output_tokens"] or 0),
+                    "request_count": int(row["request_count"] or 0),
+                }
+            )
+
+        return results
+
+    def get_summary_by_tool(
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get summarized usage data by tool for a date range.
+
+        Combines data from daily_usage and daily_messages to provide
+        comprehensive tool usage statistics.
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[Dict]: Summarized tool usage data.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        conditions_usage = ["date >= ?", "date <= ?"]
+        params_usage: list[Any] = [start_date, end_date]
+        conditions_messages = ["date >= ?", "date <= ?"]
+        params_messages: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions_usage.append("tenant_id = ?")
+            params_usage.append(normalized_tenant_id)
+            conditions_messages.append(self._tenant_user_condition("user_id"))
+            params_messages.append(normalized_tenant_id)
+
+        if host_name:
+            conditions_usage.append("host_name = ?")
+            params_usage.append(host_name)
+            conditions_messages.append("host_name = ?")
+            params_messages.append(host_name)
+
+        # Get token data from daily_usage (accurate per-tool token counts)
+        usage_query = f"""
+            SELECT
+                tool_name,
+                SUM(tokens_used) as tokens_used,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens,
+                SUM(cache_tokens) as cache_tokens,
+                SUM(request_count) as request_count
+            FROM daily_usage
+            WHERE {" AND ".join(conditions_usage)}
+            GROUP BY tool_name
+        """
+        usage_rows = self.db.fetch_all(usage_query, tuple(params_usage))
+
+        # Get unique user count from daily_messages
+        messages_query = f"""
+            SELECT
+                tool_name,
+                COUNT(DISTINCT COALESCE(user_id, sender_name)) as unique_users
+            FROM daily_messages
+            WHERE {" AND ".join(conditions_messages)}
+            GROUP BY tool_name
+        """
+        messages_rows = self.db.fetch_all(messages_query, tuple(params_messages))
+
+        # Build unique users lookup
+        unique_users_by_tool: dict[str, int] = {}
+        for row in messages_rows:
+            tool = normalize_tool_name(row["tool_name"])
+            unique_users_by_tool[tool] = unique_users_by_tool.get(tool, 0) + int(
+                row["unique_users"] or 0
+            )
+
+        # Combine results
+        results_dict: dict[str, dict] = {}
+        for row in usage_rows:
+            tool = normalize_tool_name(row["tool_name"])
+            if tool in results_dict:
+                results_dict[tool]["tokens_used"] += int(row["tokens_used"] or 0)
+                results_dict[tool]["input_tokens"] += int(row["input_tokens"] or 0)
+                results_dict[tool]["output_tokens"] += int(row["output_tokens"] or 0)
+                results_dict[tool]["cache_tokens"] += int(row["cache_tokens"] or 0)
+                results_dict[tool]["request_count"] += int(row["request_count"] or 0)
+            else:
+                results_dict[tool] = {
+                    "tool_name": tool,
+                    "tokens_used": int(row["tokens_used"] or 0),
+                    "input_tokens": int(row["input_tokens"] or 0),
+                    "output_tokens": int(row["output_tokens"] or 0),
+                    "cache_tokens": int(row["cache_tokens"] or 0),
+                    "request_count": int(row["request_count"] or 0),
+                    "unique_users": unique_users_by_tool.get(tool, 0),
+                }
+
+        # Sort by tokens_used descending
+        results = sorted(results_dict.values(), key=lambda x: x["tokens_used"], reverse=True)
+        return list(results)
+
+    def get_all_tools(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[str]:
+        """
+        Get list of all tools that have been used.
+
+        Args:
+            start_date: Optional start date filter (YYYY-MM-DD).
+            end_date: Optional end date filter (YYYY-MM-DD).
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[str]: List of tool names.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        conditions: list[str] = []
+        params: list[Any] = []
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
+
+        if start_date:
+            conditions.append("date >= ?")
+            params.append(start_date)
+
+        if end_date:
+            conditions.append("date <= ?")
+            params.append(end_date)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        query = f"""
+            SELECT DISTINCT tool_name
+            FROM daily_usage
+            {where_clause}
+            ORDER BY tool_name
+        """
+        rows = self.db.fetch_all(query, tuple(params))
+        return [normalize_tool_name(row["tool_name"]) for row in rows]
+
+    def get_all_hosts(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[str]:
+        """
+        Get list of all hosts that have been used.
+
+        Args:
+            start_date: Optional start date filter (YYYY-MM-DD).
+            end_date: Optional end date filter (YYYY-MM-DD).
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[str]: List of host names.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        conditions: list[str] = []
+        params: list[Any] = []
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
+
+        if start_date:
+            conditions.append("date >= ?")
+            params.append(start_date)
+
+        if end_date:
+            conditions.append("date <= ?")
+            params.append(end_date)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        query = f"""
+            SELECT DISTINCT host_name
+            FROM daily_usage
+            {where_clause}
+            ORDER BY host_name
+        """
+        rows = self.db.fetch_all(query, tuple(params))
+        valid_hosts = []
+        for row in rows:
+            host = row.get("host_name", "")
+            if host and is_valid_hostname(host):
+                valid_hosts.append(host)
+        return valid_hosts
+
+    def get_daily_aggregated(
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get usage data aggregated by date for trend charts.
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[Dict]: List of aggregated usage records by date.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        conditions = ["date >= ?", "date <= ?"]
+        params: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        query = f"""
+            SELECT
+                date,
+                SUM(tokens_used) as tokens,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens,
+                COUNT(*) as requests
+            FROM daily_messages
+            WHERE {" AND ".join(conditions)}
+            GROUP BY date
+            ORDER BY date ASC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        # Ensure all values are integers
+        results = []
+        for row in rows:
+            results.append(
+                {
+                    "date": row["date"],
+                    "tokens": int(row["tokens"] or 0),
+                    "input_tokens": int(row["input_tokens"] or 0),
+                    "output_tokens": int(row["output_tokens"] or 0),
+                    "requests": int(row["requests"] or 0),
+                }
+            )
+
+        return results
+
+    def get_daily_by_tool(
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get daily usage data aggregated by tool and date.
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[Dict]: List of daily usage records by tool.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        conditions = ["date >= ?", "date <= ?"]
+        params: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        query = f"""
+            SELECT
+                date,
+                tool_name,
+                SUM(tokens_used) as tokens,
+                COUNT(*) as requests
+            FROM daily_messages
+            WHERE {" AND ".join(conditions)}
+            GROUP BY date, tool_name
+            ORDER BY date ASC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        results: dict[tuple, dict] = {}
+        for row in rows:
+            date_val = row["date"]
+            if hasattr(date_val, "strftime"):
+                date_str = date_val.strftime("%Y-%m-%d")
+            else:
+                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+            tool = normalize_tool_name(row["tool_name"])
+            key = (date_str, tool)
+            if key in results:
+                results[key]["tokens"] += int(row["tokens"] or 0)
+                results[key]["requests"] += int(row["requests"] or 0)
+            else:
+                results[key] = {
+                    "date": date_str,
+                    "tool": tool,
+                    "tokens": int(row["tokens"] or 0),
+                    "requests": int(row["requests"] or 0),
+                }
+
+        return list(results.values())
+
+    def get_request_count_total(
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> int:
+        """
+        Get total request count from daily_usage table.
+
+        Request count represents the number of API calls to LLM providers,
+        which is different from message count (each message in conversation).
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            int: Total request count.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        conditions = ["date >= ?", "date <= ?"]
+        params: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        query = f"""
+            SELECT SUM(request_count) as total_requests
+            FROM daily_usage
+            WHERE {" AND ".join(conditions)}
+        """
+
+        result = self.db.fetch_one(query, tuple(params))
+        return int(result.get("total_requests", 0) or 0) if result else 0
+
+    def get_request_trend_data(
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get request count trend data aggregated by date.
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[Dict]: List of request counts by date.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        conditions = ["date >= ?", "date <= ?"]
+        params: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        query = f"""
+            SELECT
+                date,
+                SUM(request_count) as requests
+            FROM daily_usage
+            WHERE {" AND ".join(conditions)}
+            GROUP BY date
+            ORDER BY date ASC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        results = []
+        for row in rows:
+            date_val = row["date"]
+            if hasattr(date_val, "strftime"):
+                date_str = date_val.strftime("%Y-%m-%d")
+            else:
+                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+            results.append(
+                {
+                    "date": date_str,
+                    "requests": int(row["requests"] or 0),
+                }
+            )
+
+        return results
+
+    def get_request_trend_by_tool(
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get request count trend data aggregated by date and tool.
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[Dict]: List of request counts by date and tool.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        conditions = ["date >= ?", "date <= ?"]
+        params: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(normalized_tenant_id)
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        query = f"""
+            SELECT
+                date,
+                tool_name,
+                SUM(request_count) as requests
+            FROM daily_usage
+            WHERE {" AND ".join(conditions)}
+            GROUP BY date, tool_name
+            ORDER BY date ASC, tool_name ASC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        results: dict[tuple, dict] = {}
+        for row in rows:
+            # Convert date to YYYY-MM-DD format if it's a datetime object
+            date_val = row["date"]
+            if hasattr(date_val, "strftime"):
+                date_str = date_val.strftime("%Y-%m-%d")
+            else:
+                # Parse HTTP date format if needed
+                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+            tool = normalize_tool_name(row["tool_name"])
+            key = (date_str, tool)
+            if key in results:
+                results[key]["requests"] += int(row["requests"] or 0)
+            else:
+                results[key] = {
+                    "date": date_str,
+                    "tool": tool,
+                    "requests": int(row["requests"] or 0),
+                }
+
+        return list(results.values())
+
+    def get_today_request_stats(
+        self, host_name: str | None = None, tenant_id: int | None = None
+    ) -> dict:
+        """
+        Get today's request statistics.
+
+        Args:
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            Dict: Today's request stats with total and by-tool breakdown.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+            Issue #2752: Changed to query daily_messages (role='assistant') instead of
+            daily_usage so that total and per-tool counts use the same counting unit
+            as get_request_stats_by_user(), preventing dashboard inconsistency.
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        conditions = ["date = ?", "role = ?"]
+        params: list[Any] = [today, "assistant"]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            # Mirror the tenant filter used in get_request_stats_by_user so the
+            # totals and per-user rows always derive from the same row set.
+            conditions.append(
+                f"({self._tenant_user_condition('user_id')} "
+                f"OR (user_id IS NULL AND EXISTS ("
+                f"SELECT 1 FROM users u WHERE u.tenant_id = ? "
+                f"AND (sender_name LIKE (u.system_account || '-%%') "
+                f"OR sender_name = u.username))))"
+            )
+            params.extend([normalized_tenant_id, normalized_tenant_id])
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        where_clause = " AND ".join(conditions)
+
+        # Get total - count assistant messages (one per API response) for the day
+        total_query = f"""
+            SELECT COUNT(*) as total_requests
+            FROM daily_messages
+            WHERE {where_clause}
+        """
+        total_result = self.db.fetch_one(total_query, tuple(params))
+        total_requests = int(total_result.get("total_requests", 0) or 0) if total_result else 0
+
+        # Get by tool using the same counting unit
+        by_tool_query = f"""
+            SELECT
+                tool_name,
+                COUNT(*) as requests
+            FROM daily_messages
+            WHERE {where_clause}
+            GROUP BY tool_name
+            ORDER BY requests DESC
+        """
+        by_tool_rows = self.db.fetch_all(by_tool_query, tuple(params))
+
+        by_tool: dict[str, int] = {}
+        for row in by_tool_rows:
+            tool = normalize_tool_name(row["tool_name"])
+            by_tool[tool] = by_tool.get(tool, 0) + int(row["requests"] or 0)
+
+        return {
+            "date": today,
+            "total_requests": total_requests,
+            "by_tool": by_tool,
+        }
+
+    def get_request_stats_by_user(
+        self,
+        date: str | None = None,
+        host_name: str | None = None,
+        user_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get request statistics grouped by user (sender_name).
+
+        This queries daily_messages table to get request counts per user.
+        A request is counted when role = 'assistant' (API response).
+
+        This method merges users by user_id when available, fixing Issue #626
+        where the same user appears multiple times with different sender_name
+        formats.
+
+        Args:
+            date: Optional date filter (YYYY-MM-DD). If None, uses today.
+            host_name: Optional host name filter.
+            user_name: Optional user name filter (matches sender_name prefix).
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[Dict]: Request stats by user with unified username.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        from app.repositories.database import is_postgresql
+
+        if date is None:
+            date = datetime.now().strftime("%Y-%m-%d")
+
+        conditions = ["dm.date = ?", "dm.role = ?"]
+        params: list[Any] = [date, "assistant"]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            # Issue #2077: Add NULL user_id fallback via sender_name matching.
+            # When user_id is NULL (e.g., from save_messages_batch which doesn't write user_id),
+            # fall back to matching sender_name against the tenant's users' system_account.
+            # sender_name format: {system_account}-{hostname}-{tool}
+            conditions.append(
+                f"({self._tenant_user_condition('dm.user_id')} "
+                f"OR (dm.user_id IS NULL AND EXISTS ("
+                f"SELECT 1 FROM users u WHERE u.tenant_id = ? "
+                f"AND (dm.sender_name LIKE (u.system_account || '-%%') "
+                f"OR dm.sender_name = u.username))))"
+            )
+            params.extend([normalized_tenant_id, normalized_tenant_id])
+
+        if host_name:
+            conditions.append("dm.host_name = ?")
+            params.append(host_name)
+
+        if user_name:
+            # sender_name format is: {username}-{hostname}-{tool}
+            # Use LIKE to match username prefix
+            conditions.append("dm.sender_name LIKE ? ESCAPE '\\'")
+            params.append(f"{escape_like(user_name)}%")
+
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+
+        if is_postgresql():
+            # PostgreSQL: use LEFT JOIN for user_id resolution
+            query = f"""
+                SELECT
+                    COALESCE(dm.user_id,
+                        (SELECT u.id FROM users u
+                         WHERE dm.sender_name LIKE (u.system_account || '-%%')
+                            OR dm.sender_name = u.username
+                         LIMIT 1), -1) as resolved_user_id,
+                    COALESCE(u.username,
+                        CASE WHEN dm.sender_name LIKE '%%-%%-%%'
+                             THEN SUBSTRING(dm.sender_name FROM '^[^-]+')
+                             ELSE dm.sender_name END) as unified_username,
+                    dm.tool_name,
+                    COUNT(*) as requests,
+                    SUM(dm.tokens_used) as tokens
+                FROM daily_messages dm
+                LEFT JOIN users u ON dm.user_id = u.id
+                    OR dm.sender_name LIKE (u.system_account || '-%%')
+                    OR dm.sender_name = u.username
+                {where_clause}
+                GROUP BY resolved_user_id, unified_username, dm.tool_name
+                ORDER BY requests DESC
+            """
+        else:
+            # SQLite: use LEFT JOIN for user_id resolution
+            query = f"""
+                SELECT
+                    COALESCE(dm.user_id,
+                        (SELECT u.id FROM users u
+                         WHERE dm.sender_name LIKE (u.system_account || '-%%')
+                            OR dm.sender_name = u.username
+                         LIMIT 1), -1) as resolved_user_id,
+                    COALESCE(u.username,
+                        CASE WHEN dm.sender_name LIKE '%%-%%-%%'
+                             THEN SUBSTR(dm.sender_name, 1, INSTR(dm.sender_name, '-') - 1)
+                             ELSE dm.sender_name END) as unified_username,
+                    dm.tool_name,
+                    COUNT(*) as requests,
+                    SUM(dm.tokens_used) as tokens
+                FROM daily_messages dm
+                LEFT JOIN users u ON dm.user_id = u.id
+                    OR dm.sender_name LIKE (u.system_account || '-%%')
+                    OR dm.sender_name = u.username
+                {where_clause}
+                GROUP BY resolved_user_id, unified_username, dm.tool_name
+                ORDER BY requests DESC
+            """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        results = []
+        for row in rows:
+            username = row.get("unified_username") or row.get("sender_name") or "unknown"
+
+            # Skip unidentifiable users, only return valid user data
+            # This fixes Issue #811 where "unknown" user appears in stats
+            if username == "unknown":
+                continue
+
+            results.append(
+                {
+                    "user": username,
+                    "user_id": row.get("resolved_user_id", -1),
+                    "tool": normalize_tool_name(row["tool_name"]),
+                    "requests": int(row["requests"] or 0),
+                    "tokens": int(row["tokens"] or 0),
+                }
+            )
+
+        return results
+
+    def get_user_request_trend(
+        self,
+        user_name: str,
+        start_date: str,
+        end_date: str,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get request trend for a specific user.
+
+        Uses pre-aggregated user_daily_stats table for fast queries.
+        Falls back to daily_messages if user_daily_stats is not available.
+
+        Args:
+            user_name: User name (matches sender_name prefix).
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            host_name: Optional host name filter (not used with user_daily_stats).
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[Dict]: Request trend by date for the user.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        # First, try to get user_id from username
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is None:
+            user = self.db.fetch_one(
+                "SELECT id FROM users WHERE username = ? OR system_account = ?",
+                (user_name, user_name),
+            )
+        else:
+            user = self.db.fetch_one(
+                "SELECT id FROM users WHERE (username = ? OR system_account = ?) AND tenant_id = ?",
+                (user_name, user_name, normalized_tenant_id),
+            )
+
+        if user:
+            user_id = user["id"]
+            # Try to use pre-aggregated user_daily_stats table (much faster)
+            try:
+                rows = self.db.fetch_all(
+                    """
+                    SELECT date, requests, tokens
+                    FROM user_daily_stats
+                    WHERE user_id = ? AND date >= ? AND date <= ?
+                    ORDER BY date ASC
+                    """,
+                    (user_id, start_date, end_date),
+                )
+
+                if rows:
+                    results = []
+                    for row in rows:
+                        date_val = row["date"]
+                        if hasattr(date_val, "strftime"):
+                            date_str = date_val.strftime("%Y-%m-%d")
+                        else:
+                            date_str = str(date_val)
+                        results.append(
+                            {
+                                "date": date_str,
+                                "requests": int(row["requests"] or 0),
+                                "tokens": int(row["tokens"] or 0),
+                            }
+                        )
+                    return results
+
+            except Exception:
+                # Fall back to daily_messages if user_daily_stats is not available
+                pass
+
+        # Fallback: query daily_messages directly (slower but works for all cases)
+        # sender_name format is: {username}-{hostname}-{tool}
+        # Use LIKE to match username prefix
+        conditions = ["date >= ?", "date <= ?", "role = ?", "sender_name LIKE ? ESCAPE '\\'"]
+        params: list[Any] = [start_date, end_date, "assistant", f"{escape_like(user_name)}%"]
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        query = f"""
+            SELECT
+                date,
+                COUNT(*) as requests,
+                SUM(tokens_used) as tokens
+            FROM daily_messages
+            WHERE {" AND ".join(conditions)}
+            GROUP BY date
+            ORDER BY date ASC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        results = []
+        for row in rows:
+            # Convert date to YYYY-MM-DD format if it's a datetime object
+            date_val = row["date"]
+            if hasattr(date_val, "strftime"):
+                date_str = date_val.strftime("%Y-%m-%d")
+            else:
+                # Parse HTTP date format if needed
+                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+            results.append(
+                {
+                    "date": date_str,
+                    "requests": int(row["requests"] or 0),
+                    "tokens": int(row["tokens"] or 0),
+                }
+            )
+
+        return results
+
+    def get_user_request_trend_by_user_id(
+        self,
+        user_id: int,
+        start_date: str,
+        end_date: str,
+    ) -> list[dict]:
+        """
+        Get request trend for a specific user by user_id.
+
+        Args:
+            user_id: User ID.
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+
+        Returns:
+            List[Dict]: Request trend by date for the user.
+        """
+        # Try pre-aggregated table first
+        try:
+            rows = self.db.fetch_all(
+                """
+                SELECT date, requests, tokens
+                FROM user_daily_stats
+                WHERE user_id = ? AND date >= ? AND date <= ?
+                ORDER BY date ASC
+                """,
+                (user_id, start_date, end_date),
+            )
+            if rows:
+                results = []
+                for row in rows:
+                    date_val = row["date"]
+                    if hasattr(date_val, "strftime"):
+                        date_str = date_val.strftime("%Y-%m-%d")
+                    else:
+                        date_str = str(date_val)
+                    results.append(
+                        {
+                            "date": date_str,
+                            "requests": int(row["requests"] or 0),
+                            "tokens": int(row["tokens"] or 0),
+                        }
+                    )
+                return results
+        except Exception:
+            pass
+
+        # Fallback to daily_messages
+        rows = self.db.fetch_all(
+            """
+            SELECT date, COUNT(*) as requests, SUM(tokens_used) as tokens
+            FROM daily_messages
+            WHERE user_id = ? AND date >= ? AND date <= ? AND role = 'assistant'
+            GROUP BY date
+            ORDER BY date ASC
+            """,
+            (user_id, start_date, end_date),
+        )
+
+        results = []
+        for row in rows:
+            date_val = row["date"]
+            if hasattr(date_val, "strftime"):
+                date_str = date_val.strftime("%Y-%m-%d")
+            else:
+                date_str = str(date_val)
+            results.append(
+                {
+                    "date": date_str,
+                    "requests": int(row["requests"] or 0),
+                    "tokens": int(row["tokens"] or 0),
+                }
+            )
+        return results
+
+    def get_monthly_request_stats_by_user(
+        self,
+        year: int,
+        month: int,
+        host_name: str | None = None,
+        user_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get monthly request statistics grouped by user.
+
+        Args:
+            year: Year.
+            month: Month (1-12).
+            host_name: Optional host name filter.
+            user_name: Optional user name filter (matches sender_name prefix).
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[Dict]: Monthly request stats by user.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        start_date = f"{year}-{month:02d}-01"
+        if month == 12:
+            end_date = f"{year + 1}-01-01"
+        else:
+            end_date = f"{year}-{month + 1:02d}-01"
+
+        conditions = ["date >= ?", "date < ?", "role = ?"]
+        params: list[Any] = [start_date, end_date, "assistant"]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
+
+        if host_name:
+            conditions.append("host_name = ?")
+            params.append(host_name)
+
+        if user_name:
+            # sender_name format is: {username}-{hostname}-{tool}
+            # Use LIKE to match username prefix
+            conditions.append("sender_name LIKE ? ESCAPE '\\'")
+            params.append(f"{escape_like(user_name)}%")
+
+        query = f"""
+            SELECT
+                sender_name,
+                COUNT(*) as requests,
+                SUM(tokens_used) as tokens
+            FROM daily_messages
+            WHERE {" AND ".join(conditions)}
+            GROUP BY sender_name
+            ORDER BY requests DESC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        results = []
+        for row in rows:
+            sender_name = row["sender_name"] or "unknown"
+            results.append(
+                {
+                    "user": sender_name,
+                    "requests": int(row["requests"] or 0),
+                    "tokens": int(row["tokens"] or 0),
+                }
+            )
+
+        return results
+
+    def get_combined_usage(
+        self,
+        date: str,
+        tool_name: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get combined usage data for a specific date.
+
+        Joins daily_usage and daily_messages to provide comprehensive
+        usage statistics including request counts and token details.
+
+        Args:
+            date: Date string (YYYY-MM-DD).
+            tool_name: Optional tool name filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
+
+        Returns:
+            List[Dict]: Combined usage data.
+
+        Note:
+            Issue #1852: Added tenant_id parameter for tenant filtering.
+        """
+        conditions_usage = ["date = ?"]
+        params_usage: list[Any] = [date]
+        conditions_messages = ["date = ?", "role = 'assistant'"]
+        params_messages: list[Any] = [date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions_usage.append("tenant_id = ?")
+            params_usage.append(normalized_tenant_id)
+            conditions_messages.append(self._tenant_user_condition("user_id"))
+            params_messages.append(normalized_tenant_id)
+
+        if tool_name:
+            conditions_usage.append("tool_name = ?")
+            params_usage.append(tool_name)
+            conditions_messages.append("tool_name = ?")
+            params_messages.append(tool_name)
+
+        if host_name:
+            conditions_usage.append("host_name = ?")
+            params_usage.append(host_name)
+            conditions_messages.append("host_name = ?")
+            params_messages.append(host_name)
+
+        # Get aggregated usage from daily_usage
+        usage_query = f"""
+            SELECT
+                tool_name,
+                host_name,
+                SUM(tokens_used) as tokens_used,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens,
+                SUM(cache_tokens) as cache_tokens,
+                SUM(request_count) as request_count,
+                MAX(models_used) as models_used
+            FROM daily_usage
+            WHERE {" AND ".join(conditions_usage)}
+            GROUP BY tool_name, host_name
+        """
+        usage_rows = self.db.fetch_all(usage_query, tuple(params_usage))
+
+        # Get message count from daily_messages for cross-reference
+        messages_query = f"""
+            SELECT
+                tool_name,
+                host_name,
+                COUNT(*) as message_count
+            FROM daily_messages
+            WHERE {" AND ".join(conditions_messages)}
+            GROUP BY tool_name, host_name
+        """
+        messages_rows = self.db.fetch_all(messages_query, tuple(params_messages))
+
+        # Build message count lookup
+        message_counts: dict[tuple, int] = {}
+        for row in messages_rows:
+            key = (normalize_tool_name(row["tool_name"]), row.get("host_name", ""))
+            message_counts[key] = message_counts.get(key, 0) + int(row["message_count"] or 0)
+
+        results = []
+        for row in usage_rows:
+            tool = normalize_tool_name(row["tool_name"])
+            host = row.get("host_name", "")
+            models_used = _parse_json_cached(row.get("models_used"))
+
+            results.append(
+                {
+                    "tool_name": tool,
+                    "host_name": host,
+                    "tokens_used": int(row["tokens_used"] or 0),
+                    "input_tokens": int(row["input_tokens"] or 0),
+                    "output_tokens": int(row["output_tokens"] or 0),
+                    "cache_tokens": int(row["cache_tokens"] or 0),
+                    "request_count": int(row["request_count"] or 0),
+                    "message_count": message_counts.get((tool, host), 0),
+                    "models_used": models_used or [],
+                }
+            )
+
+        return results
+
+    def _session_usage(
+        self,
+        session_id: str,
+        tool_name: str | None = None,
+    ) -> dict:
+        """
+        Get usage for a specific session.
+
+        Args:
+            session_id: Session ID.
+            tool_name: Optional tool name filter.
+
+        Returns:
+            Dict: Session usage data.
+        """
+        conditions = ["session_id = ?"]
+        params: list[Any] = [session_id]
+
+        if tool_name:
+            conditions.append("tool_name = ?")
+            params.append(tool_name)
+
+        query = f"""
+            SELECT
+                SUM(tokens_used) as tokens_used,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens,
+                COUNT(*) as request_count
+            FROM daily_messages
+            WHERE {" AND ".join(conditions)}
+        """
+        result = self.db.fetch_one(query, tuple(params))
+
+        if not result:
+            return {
+                "tokens_used": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "request_count": 0,
+            }
+
+        return {
+            "tokens_used": int(result.get("tokens_used", 0) or 0),
+            "input_tokens": int(result.get("input_tokens", 0) or 0),
+            "output_tokens": int(result.get("output_tokens", 0) or 0),
+            "request_count": int(result.get("request_count", 0) or 0),
+        }
+
+    def get_session_only_usage(
+        self,
+        session_id: str,
+        tool_name: str | None = None,
+    ) -> dict:
+        """
+        Get usage for a specific session (public interface).
+
+        Args:
+            session_id: Session ID.
+            tool_name: Optional tool name filter.
+
+        Returns:
+            Dict: Session usage data.
+        """
+        return self._session_usage(session_id, tool_name)
+
+    def get_user_daily_detail(
+        self,
+        start_date: str,
+        end_date: str,
+        user_id: int | None = None,
+        user_name: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get detailed daily usage per user for a date range.
+
+        Args:
+            start_date: Start date string (YYYY-MM-DD).
+            end_date: End date string (YYYY-MM-DD).
+            user_id: Optional user ID filter.
+            user_name: Optional user name filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter.
+
+        Returns:
+            List[Dict]: Detailed daily usage per user.
+        """
+        conditions = ["date >= ?", "date <= ?"]
+        params: list[Any] = [start_date, end_date]
+        normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+        if normalized_tenant_id is not None:
+            conditions.append(self._tenant_user_condition("user_id"))
+            params.append(normalized_tenant_id)
+
+        if user_id is not None:
+            conditions.append("user_id = ?")
+            params.append(user_id)
+
+        if user_name:
+            conditions.append("sender_name LIKE ? ESCAPE '\\'")
+            params.append(f"{escape_like(user_name)}%")
+
+        if host_name:
+            hostname_filter = get_hostname_filter_sql(host_name, "host_name")
+            if hostname_filter:
+                conditions.append(hostname_filter)
+            else:
+                conditions.append("host_name = ?")
+                params.append(host_name)
+
+        query = f"""
+            SELECT
+                date,
+                user_id,
+                sender_name,
+                tool_name,
+                host_name,
+                SUM(tokens_used) as tokens_used,
+                SUM(input_tokens) as input_tokens,
+                SUM(output_tokens) as output_tokens,
+                COUNT(*) as request_count
+            FROM daily_messages
+            WHERE {" AND ".join(conditions)}
+            GROUP BY date, user_id, sender_name, tool_name, host_name
+            ORDER BY date DESC, tokens_used DESC
+        """
+
+        rows = self.db.fetch_all(query, tuple(params))
+
+        results = []
+        for row in rows:
+            date_val = row["date"]
+            if hasattr(date_val, "strftime"):
+                date_str = date_val.strftime("%Y-%m-%d")
+            else:
+                date_str = str(date_val).split()[0] if " " in str(date_val) else str(date_val)
+            results.append(
+                {
+                    "date": date_str,
+                    "user_id": row.get("user_id"),
+                    "sender_name": row.get("sender_name"),
+                    "tool_name": normalize_tool_name(row["tool_name"]),
+                    "host_name": row.get("host_name"),
+                    "tokens_used": int(row["tokens_used"] or 0),
+                    "input_tokens": int(row["input_tokens"] or 0),
+                    "output_tokens": int(row["output_tokens"] or 0),
+                    "request_count": int(row["request_count"] or 0),
+                }
+            )
+
+        results.sort(key=lambda x: str(x["date"]), reverse=True)
+        return results
