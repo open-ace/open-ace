@@ -493,7 +493,7 @@ def create_app(config=None):
 
         get_prompt_library().seed_default_templates()
     except Exception as e:
-        logger.warning("Failed to seed default prompt templates: %s", e) (fix: rebase onto latest main, rename migration to 20260814_004 (#2577))
+        logger.warning("Failed to seed default prompt templates: %s", e)
 
     # Pre-check encryption key registry (Issue #1820, #2186)
     try:
