@@ -91,7 +91,7 @@ class TestProject:
         assert d["name"] == "ProjA"
         assert d["description"] is None
         assert d["created_by"] == 1
-        assert d["created_at"] == "2025-03-01T12:00:00"
+        assert d["created_at"] == "2025-03-01T12:00:00Z"
         assert d["updated_at"] is None
         assert d["is_active"] is True
         assert d["is_shared"] is False
@@ -229,7 +229,7 @@ class TestUserProject:
         assert d["id"] == 2
         assert d["user_id"] == 3
         assert d["project_id"] == 7
-        assert d["first_access_at"] == "2025-05-10T08:30:00"
+        assert d["first_access_at"] == "2025-05-10T08:30:00Z"
         assert d["last_access_at"] is None
         assert d["total_sessions"] == 5
         assert d["total_tokens"] == 1000
@@ -326,7 +326,7 @@ class TestProjectStats:
         assert d["project_name"] == "C"
         assert d["total_users"] == 3
         assert d["total_duration_hours"] == 3.0
-        assert d["first_access"] == "2025-03-20T14:00:00"
+        assert d["first_access"] == "2025-03-20T14:00:00Z"
         assert d["last_access"] is None
         assert len(d["user_stats"]) == 1
 
