@@ -471,7 +471,7 @@ def create_app(config=None):
         ensure_all_tables()
         logger.info(f"Development schema bootstrap completed (mode={env_mode})")
 
-# Deliberately AFTER the schema check above, which is the first thing that
+    # Deliberately AFTER the schema check above, which is the first thing that
     # talks to the database. This query is only a diagnostic, and placing it
     # earlier would make a startup diagnostic the first blocking call -- on an
     # unreachable host (firewall DROP, no connect_timeout configured) it would
@@ -697,9 +697,9 @@ def create_app(config=None):
 
                 if not is_test_context():
                     checks["security_mode"]["status"] = "not_explicit"
-                    checks["security_mode"]["reason"] = (
-                        f"Security mode must be explicitly set (current source: {source.value})"
-                    )
+                    checks["security_mode"][
+                        "reason"
+                    ] = f"Security mode must be explicitly set (current source: {source.value})"
                     status_code = 503
 
             # Check for pilot metadata in production mode
