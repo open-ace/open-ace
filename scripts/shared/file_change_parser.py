@@ -486,6 +486,9 @@ def append_file_change_blocks(
 
 def extract_file_changes(tool_use_block: dict, context: ParserContext) -> list[dict] | None:
     """Extract file change records from a tool_use block."""
+    if not tool_use_block:
+        return None
+
     if tool_use_block.get("type") != "tool_use":
         return None
 
