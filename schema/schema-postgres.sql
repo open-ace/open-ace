@@ -3329,6 +3329,8 @@ CREATE INDEX idx_projects_path ON projects USING btree (tenant_id, path);
 
 CREATE INDEX idx_projects_tenant_created_by ON projects USING btree (tenant_id, created_by);
 
+--
+--
 
 CREATE INDEX idx_prompt_templates_author ON prompt_templates USING btree (author_id);
 
