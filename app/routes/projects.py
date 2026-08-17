@@ -26,6 +26,7 @@ from app.models.user import User
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.user_repo import UserRepository
 from app.utils.request_context import get_current_tenant_id
+from app.utils.workspace import _is_docker_multi_user_mode, setup_shared_project_permissions
 
 logger = logging.getLogger(__name__)
 
@@ -247,6 +248,16 @@ def api_create_project():
             logger.error(f"Error creating directory: {e}")
             return jsonify({"error": "Failed to create directory"}), 500
 
+    # Issue #2730: Set shared project permissions for Docker multi-user mode
+    if is_shared and _is_docker_multi_user_mode():
+        success, error_msg = setup_shared_project_permissions(path)
+        if not success:
+            logger.error(f"Failed to setup shared permissions: {error_msg}")
+            return (
+                jsonify({"error": f"Failed to setup shared project permissions: {error_msg}"}),
+                500,
+            )
+
     # Create project in database
     project_id = project_repo.create_project(
         path=path,
@@ -322,6 +333,14 @@ def api_update_project(project_id):
     name = data.get("name")
     description = data.get("description")
     is_shared = data.get("is_shared")
+
+    # Issue #2730: Set permissions when is_shared changes from False to True
+    if is_shared is True and not project.is_shared:
+        if _is_docker_multi_user_mode():
+            success, error_msg = setup_shared_project_permissions(project.path)
+            if not success:
+                logger.error(f"Failed to setup shared permissions: {error_msg}")
+                return jsonify({"error": f"Failed to setup shared permissions: {error_msg}"}), 500
 
     success = project_repo.update_project(
         project_id=project_id,
@@ -446,3 +465,40 @@ def api_get_project_users(project_id):
             "users": result,
         }
     )
+
+
+@projects_bp.route("/projects/<int:project_id>/fix-permissions", methods=["POST"])
+def api_fix_project_permissions(project_id):
+    """Fix shared project directory permissions.
+
+    Issue #2730: Allows manually fixing permissions for shared projects
+    where the file system permissions may have drifted from the database state.
+
+    Returns:
+        JSON response with success status or error message.
+    """
+    tenant_id = get_current_tenant_id()
+    project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    # Only shared projects can have permissions fixed
+    if not project.is_shared:
+        return jsonify({"error": "Project is not shared"}), 400
+
+    # Permission check: only creator or admin can fix permissions
+    user_id = g.user_id
+    user_role = g.user.get("role")
+    if project.created_by != user_id and not User.is_admin_role(user_role):
+        return jsonify({"error": "Only project creator or admin can fix permissions"}), 403
+
+    # Check if running in Docker multi-user mode
+    if not _is_docker_multi_user_mode():
+        return jsonify({"error": "Permission fix is only available in Docker multi-user mode"}), 400
+
+    # Fix permissions
+    success, error_msg = setup_shared_project_permissions(project.path)
+    if success:
+        return jsonify({"success": True, "message": "Permissions fixed successfully"})
+    else:
+        return jsonify({"error": error_msg}), 500

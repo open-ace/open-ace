@@ -23,7 +23,14 @@ __all__ = [
     "run_as_root_if_needed",
     "ensure_system_user",
     "ensure_user_workspace",
+    "SHARED_GROUP_NAME",
+    "ensure_shared_group",
+    "add_user_to_shared_group",
+    "setup_shared_project_permissions",
 ]
+
+# Shared project group name (Issue #2730)
+SHARED_GROUP_NAME = "openace-shared"
 
 # Wrapper script paths (Issue #1855 + #2181)
 OPENACE_USERADD_WRAPPER = "/usr/local/bin/openace-useradd"
@@ -155,6 +162,12 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
         logger.info(f"System user {system_account} already exists")
         # Still ensure workspace directories exist
         _ensure_workspace_dirs(system_account, base_dir)
+
+        # Issue #2730: Ensure user is in shared group for shared project access
+        if _is_docker_multi_user_mode():
+            if not add_user_to_shared_group(system_account):
+                logger.warning(f"Failed to add {system_account} to shared group")
+
         return True
 
     # 创建用户（通过 wrapper 或 sudo）
@@ -183,6 +196,12 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
 
     logger.info(f"System user {system_account} created successfully")
     _ensure_workspace_dirs(system_account, base_dir)
+
+    # Issue #2730: Add user to shared group for shared project access
+    if _is_docker_multi_user_mode():
+        if not add_user_to_shared_group(system_account):
+            logger.warning(f"Failed to add {system_account} to shared group")
+
     return True
 
 
@@ -274,3 +293,137 @@ def ensure_user_workspace(system_account: str) -> bool:
                 return False
 
         return True
+
+
+# ============================================================================
+# Shared Project Permission Management (Issue #2730)
+# ============================================================================
+
+
+def ensure_shared_group() -> bool:
+    """Ensure the shared project group exists.
+
+    Creates the 'openace-shared' group if it doesn't exist.
+    Uses 'groupadd -f' to be idempotent and avoid race conditions.
+
+    Returns:
+        True if group exists or was created successfully.
+    """
+    if not _is_docker_multi_user_mode():
+        return True  # Skip in non-Docker mode
+
+    result = subprocess.run(
+        ["groupadd", "-f", SHARED_GROUP_NAME],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.error(f"Failed to create shared group: {result.stderr}")
+        return False
+
+    logger.info(f"Shared group '{SHARED_GROUP_NAME}' ensured")
+    return True
+
+
+def add_user_to_shared_group(system_account: str) -> bool:
+    """Add a user to the shared project group.
+
+    Uses 'usermod -aG' which is idempotent (safe to call multiple times).
+
+    Args:
+        system_account: Username to add to the shared group.
+
+    Returns:
+        True if user was added or already in group.
+    """
+    if not _is_docker_multi_user_mode():
+        return True  # Skip in non-Docker mode
+
+    result = subprocess.run(
+        ["usermod", "-aG", SHARED_GROUP_NAME, system_account],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.warning(f"Failed to add {system_account} to shared group: {result.stderr}")
+        return False
+
+    logger.info(f"User '{system_account}' added to shared group")
+    return True
+
+
+def setup_shared_project_permissions(path: str) -> tuple[bool, str]:
+    """Set up shared project directory permissions.
+
+    Configures a directory for shared project access:
+    1. Ensures shared group exists
+    2. Sets group ownership to openace-shared
+    3. Sets permissions to 2775 (setgid + group rwx)
+    4. Recursively fixes existing subdirectories and files
+
+    Args:
+        path: Absolute path to the project directory.
+
+    Returns:
+        Tuple of (success, error_message). error_message is empty on success.
+    """
+    if not _is_docker_multi_user_mode():
+        return (True, "")  # Skip in non-Docker mode
+
+    if not path:
+        return (False, "Path is required")
+
+    if not os.path.isabs(path):
+        return (False, f"Path must be absolute: {path}")
+
+    if not os.path.exists(path):
+        return (False, f"Path does not exist: {path}")
+
+    if not os.path.isdir(path):
+        return (False, f"Path is not a directory: {path}")
+
+    try:
+        # 1. Ensure shared group exists
+        if not ensure_shared_group():
+            return (False, "Failed to create shared group")
+
+        # 2. Set group ownership
+        result = subprocess.run(
+            ["chown", f":{SHARED_GROUP_NAME}", path],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return (False, f"chown failed: {result.stderr}")
+
+        # 3. Set permissions (setgid + 2775)
+        result = subprocess.run(
+            ["chmod", "2775", path],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return (False, f"chmod failed: {result.stderr}")
+
+        # 4. Recursively fix existing subdirectories and files
+        # Use find to set permissions on existing content
+        subprocess.run(
+            ["find", path, "-type", "d", "-exec", "chmod", "2775", "{}", ";"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        subprocess.run(
+            ["find", path, "-type", "f", "-exec", "chmod", "664", "{}", ";"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        logger.info(f"Shared project permissions set for: {path}")
+        return (True, "")
+
+    except subprocess.TimeoutExpired:
+        return (False, "Permission setup timed out")
+    except Exception as e:
+        return (False, str(e))
