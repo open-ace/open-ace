@@ -1072,7 +1072,9 @@ def handle_llm_proxy_request(
     user_id = int(token_payload["user_id"])
     tenant_id = int(token_payload["tenant_id"])
     provider = str(token_payload["provider"])
-    # Allow X-Session-Id header to override token session_id for WebUI conversations
+    token_session_id = str(token_payload["session_id"])
+
+    # Issue #2727: X-Session-Id header with ownership validation
     request_session_id = request.headers.get("X-Session-Id")
     if request_session_id:
         # Validate header format: alphanumeric, hyphens, underscores, colons only
@@ -1080,20 +1082,132 @@ def handle_llm_proxy_request(
         if len(request_session_id) > 100 or not all(
             c.isalnum() or c in "-_:" for c in request_session_id
         ):
+            # Issue #2727: Format error returns 400, no silent fallback
             logger.warning(
-                "Invalid X-Session-Id header format, falling back to token: %s",
+                "X-Session-Id header format invalid: %s",
                 request_session_id[:50],
             )
-            session_id = str(token_payload["session_id"])
-        else:
+            return (
+                jsonify(
+                    {
+                        "error": {
+                            "message": "Invalid X-Session-Id header format",
+                            "type": "invalid_header",
+                        }
+                    }
+                ),
+                400,
+            )
+
+        # Issue #2727: Ownership validation - verify session belongs to token user
+        try:
+            from app.modules.workspace.session_manager import get_session_manager
+
+            sm = get_session_manager()
+            session = sm.get_session(request_session_id, tenant_id=tenant_id)
+
+            if not session:
+                logger.warning(
+                    "X-Session-Id ownership validation failed: session not found "
+                    "(session_id=%s, user_id=%s, tenant_id=%s)",
+                    request_session_id[:8],
+                    user_id,
+                    tenant_id,
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": "Session not found",
+                                "type": "session_not_found",
+                            }
+                        }
+                    ),
+                    404,
+                )
+
+            if session.user_id != user_id:
+                logger.warning(
+                    "X-Session-Id ownership validation failed: user_id mismatch "
+                    "(session_id=%s, session_user_id=%s, token_user_id=%s, tenant_id=%s)",
+                    request_session_id[:8],
+                    session.user_id,
+                    user_id,
+                    tenant_id,
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": "Session not found",
+                                "type": "session_not_found",
+                            }
+                        }
+                    ),
+                    404,
+                )
+
+            if session.tenant_id != tenant_id:
+                logger.warning(
+                    "X-Session-Id ownership validation failed: tenant_id mismatch "
+                    "(session_id=%s, user_id=%s, session_tenant_id=%s, token_tenant_id=%s)",
+                    request_session_id[:8],
+                    user_id,
+                    session.tenant_id,
+                    tenant_id,
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": "Session not found",
+                                "type": "session_not_found",
+                            }
+                        }
+                    ),
+                    404,
+                )
+
+            # All validations passed - use the header session
             session_id = request_session_id
-            logger.debug("Using X-Session-Id header: %s", session_id)
+            logger.debug(
+                "X-Session-Id ownership validation passed "
+                "(session_id=%s, user_id=%s, tenant_id=%s)",
+                session_id[:8],
+                user_id,
+                tenant_id,
+            )
+        except Exception as e:
+            logger.error(
+                "X-Session-Id ownership validation error: %s (session_id=%s, user_id=%s)",
+                e,
+                request_session_id[:8],
+                user_id,
+            )
+            return (
+                jsonify(
+                    {
+                        "error": {
+                            "message": "Session validation error",
+                            "type": "validation_error",
+                        }
+                    }
+                ),
+                500,
+            )
     else:
-        session_id = str(token_payload["session_id"])
+        session_id = token_session_id
 
         # Issue #2464: If using webui aggregate session, check for user's active session
         # When user creates a session via /work, route WebUI messages to that session
         if session_id.startswith("webui:"):
+            # Issue #2727: Log WARNING for webui:* fallback behavior
+            logger.warning(
+                "Using webui aggregate session without X-Session-Id header, "
+                "fallback to user's active session (user_id=%s, tenant_id=%s)",
+                user_id,
+                tenant_id,
+            )
             try:
                 from app.modules.workspace.session_manager import get_session_manager
 
