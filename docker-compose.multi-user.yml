@@ -40,12 +40,22 @@ services:
       # Security mode - recommend production for actual deployments
       - OPENACE_SECURITY_MODE=${OPENACE_SECURITY_MODE:-production}
 
-    # Note: Config directory changes to /root/.open-ace when running as root
-    # If you need persistent config, add:
-    # volumes:
-    #   - config-data-root:/root/.open-ace
+    # Issue #2729: Share /home directory with scheduler for Qwen session collection
+    # Users' .qwen/projects directories are stored under /home/<username>/
+    volumes:
+      - home-data:/home
 
-# Optional: Add named volume for root config if needed
-# volumes:
-#   config-data-root:
-#     driver: local
+  # Issue #2729: Scheduler service for multi-user mode
+  # Needs access to /home to collect Qwen sessions from users' .qwen/projects
+  scheduler:
+    extends:
+      file: docker-compose.yml
+      service: scheduler
+    volumes:
+      - home-data:/home
+
+# Issue #2729: Named volume for multi-user home directories
+# Shared between open-ace and scheduler containers for session collection
+volumes:
+  home-data:
+    driver: local
