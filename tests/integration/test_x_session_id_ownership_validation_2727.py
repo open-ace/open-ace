@@ -21,6 +21,13 @@ from flask import Flask
 
 from app.modules.workspace.session_manager import AgentSession
 
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.security,
+    pytest.mark.regression,
+    pytest.mark.issue(2727),
+]
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
