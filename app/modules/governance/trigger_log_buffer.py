@@ -10,7 +10,7 @@ import logging
 import threading
 import time
 from datetime import datetime, timezone
-from queue import Queue
+from queue import Empty, Queue
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -117,7 +117,7 @@ class TriggerLogBuffer:
         while not self._buffer.empty() and len(batch) < self.batch_size:
             try:
                 batch.append(self._buffer.get_nowait())
-            except:
+            except Empty:
                 break
 
         if not batch:
@@ -136,7 +136,7 @@ class TriggerLogBuffer:
             for entry in batch:
                 try:
                     self._buffer.put_nowait(entry)
-                except:
+                except Exception:
                     pass  # 缓冲区已满，丢弃
 
     def _write_to_database(self, batch: list[dict[str, Any]]):

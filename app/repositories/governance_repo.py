@@ -83,6 +83,8 @@ class GovernanceRepository:
         action: str = "warn",
         description: str | None = None,
         is_enabled: bool = True,
+        created_by: int | None = None,
+        approval_status: str = "approved",
     ) -> int | None:
         """
         Create a new filter rule.
@@ -94,6 +96,8 @@ class GovernanceRepository:
             action: Action to take (warn, block, redact).
             description: Optional description.
             is_enabled: Whether rule is enabled.
+            created_by: User ID who created the rule.
+            approval_status: Approval status (pending, approved, rejected).
 
         Returns:
             Optional[int]: Rule ID if successful.
@@ -106,8 +110,8 @@ class GovernanceRepository:
                 result = self.db.fetch_one(
                     """
                     INSERT INTO content_filter_rules
-                    (pattern, type, severity, action, is_enabled, description, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (pattern, type, severity, action, is_enabled, description, created_at, created_by, approval_status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                 """,
                     (
@@ -118,6 +122,8 @@ class GovernanceRepository:
                         is_enabled,
                         description,
                         datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                        created_by,
+                        approval_status,
                     ),
                     commit=True,
                 )
@@ -128,8 +134,8 @@ class GovernanceRepository:
                 cursor = self.db.execute(
                     """
                     INSERT INTO content_filter_rules
-                    (pattern, type, severity, action, is_enabled, description, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (pattern, type, severity, action, is_enabled, description, created_at, created_by, approval_status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         pattern,
@@ -139,6 +145,8 @@ class GovernanceRepository:
                         is_enabled_val,
                         description,
                         datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                        created_by,
+                        approval_status,
                     ),
                 )
                 return cast("int | None", cursor.lastrowid)

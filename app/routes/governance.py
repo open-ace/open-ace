@@ -19,6 +19,8 @@ from app.auth.decorators import (
     platform_admin_required,
     same_tenant_user_required,
 )
+from app.middleware.rate_limit import rate_limit
+from app.middleware.rule_permission_check import can_delete_rule, can_edit_rule
 from app.modules.governance.audit_logger import AuditAction, AuditLogger, get_action_categories
 from app.modules.governance.content_filter import ContentFilter
 from app.modules.governance.quota_manager import QuotaManager
@@ -487,6 +489,7 @@ def api_get_filter_rules():
 
 @governance_bp.route("/filter-rules", methods=["POST"])
 @platform_admin_required
+@rate_limit(key="create_filter_rule", max_requests=10, window=60)
 def api_create_filter_rule():
     """Create a new content filter rule."""
 
@@ -508,6 +511,8 @@ def api_create_filter_rule():
         action=action,
         description=description,
         is_enabled=is_enabled,
+        created_by=g.user_id,  # 添加创建人字段
+        approval_status="approved",  # 平台管理员创建的规则直接审批通过
     )
 
     if rule_id:
@@ -534,8 +539,19 @@ def api_create_filter_rule():
 
 @governance_bp.route("/filter-rules/<int:rule_id>", methods=["PUT"])
 @platform_admin_required
+@rate_limit(key="update_filter_rule", max_requests=20, window=60)
 def api_update_filter_rule(rule_id):
     """Update a content filter rule."""
+
+    # 获取规则详情以检查权限
+    rule = governance_repo.get_filter_rule(rule_id)
+    if not rule:
+        return jsonify({"error": "Filter rule not found"}), 404
+
+    # 检查编辑权限
+    can_edit, error_msg = can_edit_rule(rule)
+    if not can_edit:
+        return jsonify({"error": error_msg}), 403
 
     data = request.get_json() or {}
 
@@ -573,8 +589,19 @@ def api_update_filter_rule(rule_id):
 
 @governance_bp.route("/filter-rules/<int:rule_id>", methods=["DELETE"])
 @platform_admin_required
+@rate_limit(key="delete_filter_rule", max_requests=10, window=60)
 def api_delete_filter_rule(rule_id):
     """Delete a content filter rule."""
+
+    # 获取规则详情以检查权限
+    rule = governance_repo.get_filter_rule(rule_id)
+    if not rule:
+        return jsonify({"error": "Filter rule not found"}), 404
+
+    # 检查删除权限
+    can_delete, error_msg = can_delete_rule(rule)
+    if not can_delete:
+        return jsonify({"error": error_msg}), 403
 
     success = governance_repo.delete_filter_rule(rule_id)
 

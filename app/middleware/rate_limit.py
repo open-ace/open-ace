@@ -185,18 +185,18 @@ class DatabaseRateLimiterBackend(RateLimiterBackend):
                 if hasattr(conn, "execute"):
                     conn.execute("BEGIN IMMEDIATE")
 
-                # 1. 定期清理过期记录（减少高频 DELETE）
-                if now - self._last_cleanup > self._cleanup_interval:
-                    delete_all_sql = adapt_sql("DELETE FROM rate_limit_log WHERE timestamp < ?")
-                    cursor.execute(delete_all_sql, (cutoff,))
-                    self._last_cleanup = now
-
-                # 2. 统计当前窗口内的请求数
+                # 1. 统计当前窗口内的请求数
                 count_sql = adapt_sql(
                     "SELECT COUNT(*) FROM rate_limit_log WHERE key = ? AND timestamp > ?"
                 )
                 cursor.execute(count_sql, (key, cutoff))
                 count = cursor.fetchone()[0]
+
+                # 2. 定期清理过期记录（在计数后、插入前清理，确保原子性）
+                if now - self._last_cleanup > self._cleanup_interval:
+                    delete_all_sql = adapt_sql("DELETE FROM rate_limit_log WHERE timestamp < ?")
+                    cursor.execute(delete_all_sql, (cutoff,))
+                    self._last_cleanup = now
 
                 if count >= max_requests:
                     conn.commit()
