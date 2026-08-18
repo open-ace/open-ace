@@ -23,6 +23,7 @@ import {
   useToast,
   ToastHost,
   ConfirmHost,
+  FeatureRouteGuard,
 } from '@/components/common';
 import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
@@ -201,6 +202,7 @@ const FeatureFlagsLoader: React.FC<{ children: React.ReactNode }> = ({ children 
   const setModelGatewayEnabled = useAppStore((state) => state.setModelGatewayEnabled);
   const setRunTimelineEnabled = useAppStore((state) => state.setRunTimelineEnabled);
   const setConfigLoaded = useAppStore((state) => state.setConfigLoaded);
+  const [loadError, setLoadError] = React.useState<boolean>(false);
 
   useEffect(() => {
     // Only load once
@@ -213,8 +215,10 @@ const FeatureFlagsLoader: React.FC<{ children: React.ReactNode }> = ({ children 
         setModelGatewayEnabled(flags.model_gateway);
         setRunTimelineEnabled(flags.run_timeline);
         setConfigLoaded(true);
+        setLoadError(false);
       } catch (error) {
         console.error('Failed to load feature flags:', error);
+        setLoadError(true);
         // Mark as loaded even on error to avoid infinite loading
         setConfigLoaded(true);
       }
@@ -233,7 +237,21 @@ const FeatureFlagsLoader: React.FC<{ children: React.ReactNode }> = ({ children 
     return <LoadingOverlay text={t('loading', useAppStore.getState().language)} />;
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {loadError && (
+        <div
+          className="alert alert-warning alert-dismissible fade show m-3"
+          role="alert"
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999 }}
+        >
+          <i className="bi bi-exclamation-triangle-fill me-2" />
+          Feature flags failed to load. Some features may be unavailable.
+        </div>
+      )}
+      {children}
+    </>
+  );
 };
 
 // Legacy App Content (for backward compatibility with old routes)
@@ -374,17 +392,23 @@ const WorkRoutes: React.FC = () => {
 // Policy Route Guard - waits for config and checks feature flag
 const PolicyRouteGuard: React.FC = () => {
   const policyEnabled = useAppStore((state) => state.policyEnabled);
-  const configLoaded = useAppStore((state) => state.configLoaded);
 
-  if (!configLoaded) {
-    return <PageLoader />;
-  }
+  return (
+    <FeatureRouteGuard enabled={policyEnabled} redirectPath="/manage/dashboard">
+      <PolicyRulesManagement />
+    </FeatureRouteGuard>
+  );
+};
 
-  if (!policyEnabled) {
-    return <Navigate to="/manage/dashboard" replace />;
-  }
+// Model Gateway Route Guard - waits for config and checks feature flag
+const ModelGatewayRouteGuard: React.FC = () => {
+  const modelGatewayEnabled = useAppStore((state) => state.modelGatewayEnabled);
 
-  return <PolicyRulesManagement />;
+  return (
+    <FeatureRouteGuard enabled={modelGatewayEnabled} redirectPath="/manage/dashboard">
+      <ModelGatewayConfig />
+    </FeatureRouteGuard>
+  );
 };
 
 const ManageRoutes: React.FC = () => {
@@ -435,7 +459,7 @@ const ManageRoutes: React.FC = () => {
               />
             }
           />
-          <Route path="settings/model-gateway" element={<ModelGatewayConfig />} />
+          <Route path="settings/model-gateway" element={<ModelGatewayRouteGuard />} />
           <Route
             path="settings/feishu"
             element={

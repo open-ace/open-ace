@@ -22,7 +22,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, useLocation, Link } from 'react-router-dom';
 import { cn } from '@/utils';
-import { useLanguage, useSidebarCollapsed, usePolicyEnabled } from '@/store';
+import { useLanguage, useSidebarCollapsed, usePolicyEnabled, useModelGatewayEnabled } from '@/store';
 import { useAppStore } from '@/store';
 import { useAuth } from '@/hooks';
 import { t } from '@/i18n';
@@ -201,6 +201,7 @@ const navSections: NavSection[] = [
         icon: 'bi-shuffle',
         path: '/manage/settings/model-gateway',
         adminOnly: true,
+        featureFlag: 'model_gateway',
       },
     ],
   },
@@ -219,6 +220,7 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
   const collapsed = useSidebarCollapsed();
   const { user } = useAuth();
   const policyEnabled = usePolicyEnabled();
+  const modelGatewayEnabled = useModelGatewayEnabled();
 
   // Initialize collapse state from localStorage or default to only active section expanded
   const getInitialCollapseState = useCallback(() => {
@@ -385,7 +387,9 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
                 >
                   {section.items.map((item) => {
                     const isAdminCheck = item.adminOnly && !isAdmin(user);
-                    const isFeatureDisabled = item.featureFlag === 'policy' && !policyEnabled;
+                    const isFeatureDisabled =
+                      (item.featureFlag === 'policy' && !policyEnabled) ||
+                      (item.featureFlag === 'model_gateway' && !modelGatewayEnabled);
                     // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
                     const isDisabled = isAdminCheck || isFeatureDisabled;
                     return (
