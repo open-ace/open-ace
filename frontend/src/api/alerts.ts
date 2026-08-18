@@ -101,7 +101,7 @@ export const alertsApi = {
     if (params?.limit) queryParams.limit = String(params.limit);
 
     // Admin API returns Alert[] directly (array), need to wrap it
-    const response = await apiClient.get<Alert[]>('/api/governance/quota/alerts', queryParams);
+    const response = await apiClient.get<Alert[]>('/api/quota/alerts', queryParams);
     // Calculate unread count from the array
     const unread_count = response.filter((a) => !a.read).length;
     return { alerts: response, unread_count };

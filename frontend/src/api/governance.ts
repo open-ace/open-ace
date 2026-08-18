@@ -104,7 +104,7 @@ export const governanceApi = {
   },
 
   async exportAuditLogs(format: 'json' | 'csv' = 'json'): Promise<Blob> {
-    const response = await fetch(`/api/governance/audit-logs/export?format=${format}`);
+    const response = await fetch(`/api/audit/logs/export?format=${format}`);
     return response.blob();
   },
 
@@ -129,7 +129,7 @@ export const governanceApi = {
   },
 
   async checkContent(content: string): Promise<FilterCheckResult> {
-    return apiClient.post<FilterCheckResult>('/api/governance/content/check', { content });
+    return apiClient.post<FilterCheckResult>('/api/content/check', { content });
   },
 
   // Security Settings
