@@ -6,10 +6,14 @@ Business logic for multi-tenant management.
 Issue #2179: 租户管理员权限模型
 - Service 层必须验证 actor 权限
 - 涉及租户修改、删除、暂停、配额和设置的写操作必须接收或验证 actor scope
+
+Issue #2790: 租户设置修改审计日志
+- update_settings 返回 UpdateSettingsResult 包含 diff 信息
 """
 
 import logging
 import re
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -19,6 +23,52 @@ from app.repositories.tenant_repo import TenantRepository
 from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
+
+
+# Issue #2790: 租户设置修改审计日志 - 允许修改的字段白名单
+ALLOWED_SETTINGS_FIELDS = {
+    "allowed_tools",
+    "content_filter_enabled",
+    "audit_log_enabled",
+    "audit_log_retention_days",
+    "data_retention_days",
+    "sso_enabled",
+    "sso_provider",
+    "auto_provision_users",
+    "custom_branding",
+    "branding_name",
+    "branding_logo_url",
+    "roi_assumptions",
+    "block_sensitive_keyword",
+    "sensitive_keyword_match_mode",
+}
+
+
+@dataclass
+class UpdateSettingsResult:
+    """Issue #2790: 租户设置修改结果，包含 diff 信息用于审计。
+
+    Attributes:
+        success: 是否成功
+        tenant_id: 目标租户 ID
+        changed_fields: 变更的字段列表
+        old_values: 变更前的值（脱敏后）
+        new_values: 变更后的值（脱敏后）
+        error: 错误消息（失败时）
+        error_type: 错误类型（'permission', 'validation', 'not_found', 'unknown'）
+    """
+
+    success: bool
+    tenant_id: int
+    changed_fields: list[str] = field(default_factory=list)
+    old_values: dict[str, Any] = field(default_factory=dict)
+    new_values: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    error_type: str | None = None
+
+    def __bool__(self) -> bool:
+        """支持 `if result:` 语法，兼容现有代码。"""
+        return self.success
 
 
 class TenantService:
@@ -258,11 +308,12 @@ class TenantService:
 
     def update_settings(
         self, tenant_id: int, settings_updates: dict[str, Any], actor: ActorContext | None = None
-    ) -> bool:
+    ) -> UpdateSettingsResult:
         """
         Update tenant settings.
 
         Issue #2179: tenant_admin 可修改自己租户，platform_admin 可修改任意租户
+        Issue #2790: 返回 UpdateSettingsResult 包含 diff 信息用于审计
 
         Args:
             tenant_id: Tenant ID.
@@ -270,18 +321,48 @@ class TenantService:
             actor: 操作者上下文（必须有权访问该租户）
 
         Returns:
-            bool: True if successful.
-
-        Raises:
-            PermissionError: 权限不足
+            UpdateSettingsResult: 包含成功状态、diff 信息和错误信息
         """
         # 权限验证
         if actor and not actor.can_access_tenant(tenant_id):
-            raise PermissionError(f"用户 {actor.user_id} 无权修改租户 {tenant_id} 的设置")
+            return UpdateSettingsResult(
+                success=False,
+                tenant_id=tenant_id,
+                error=f"用户 {actor.user_id} 无权修改租户 {tenant_id} 的设置",
+                error_type="permission",
+            )
 
         tenant = self.get_tenant(tenant_id)
         if not tenant:
-            return False
+            return UpdateSettingsResult(
+                success=False,
+                tenant_id=tenant_id,
+                error="Tenant not found",
+                error_type="not_found",
+            )
+
+        # Issue #2790: 字段白名单过滤
+        filtered_updates = {
+            k: v for k, v in settings_updates.items() if k in ALLOWED_SETTINGS_FIELDS
+        }
+        if not filtered_updates:
+            return UpdateSettingsResult(
+                success=False,
+                tenant_id=tenant_id,
+                error="No valid fields to update",
+                error_type="validation",
+            )
+
+        # Issue #2790: 验证 sensitive_keyword_match_mode 枚举值
+        if "sensitive_keyword_match_mode" in filtered_updates:
+            mode = filtered_updates["sensitive_keyword_match_mode"]
+            if mode not in ("word_boundary", "substring"):
+                return UpdateSettingsResult(
+                    success=False,
+                    tenant_id=tenant_id,
+                    error=f"Invalid value for sensitive_keyword_match_mode: {mode}",
+                    error_type="validation",
+                )
 
         # Detect concurrent updates (5-second window)
         last_update = getattr(tenant, "_last_settings_update", None)
@@ -293,16 +374,82 @@ class TenantService:
 
         tenant._last_settings_update = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        current_settings = tenant.settings.to_dict()
-        current_settings.update(settings_updates)
+        # Issue #2790: 计算字段级 diff
+        old_settings = tenant.settings.to_dict()
+        changed_fields = []
+        old_values = {}
+        new_values = {}
+
+        for key, new_value in filtered_updates.items():
+            old_value = old_settings.get(key)
+            if old_value != new_value:
+                changed_fields.append(key)
+                old_values[key] = self._sanitize_value_for_audit(key, old_value)
+                new_values[key] = self._sanitize_value_for_audit(key, new_value)
+
+        # 如果没有实际变更，返回成功但不记录审计
+        if not changed_fields:
+            return UpdateSettingsResult(
+                success=True,
+                tenant_id=tenant_id,
+                changed_fields=[],
+                old_values={},
+                new_values={},
+            )
+
+        # 持久化更新
+        current_settings = old_settings.copy()
+        current_settings.update(filtered_updates)
 
         result = self.tenant_repo.update(tenant_id, {"settings": current_settings})
 
         # Clear ROI cache if roi_assumptions was updated
-        if result and "roi_assumptions" in settings_updates:
+        if result and "roi_assumptions" in filtered_updates:
             self._clear_roi_cache_for_tenant(tenant_id)
 
-        return result
+        if result:
+            return UpdateSettingsResult(
+                success=True,
+                tenant_id=tenant_id,
+                changed_fields=changed_fields,
+                old_values=old_values,
+                new_values=new_values,
+            )
+        else:
+            return UpdateSettingsResult(
+                success=False,
+                tenant_id=tenant_id,
+                error="Failed to update tenant settings",
+                error_type="unknown",
+            )
+
+    def _sanitize_value_for_audit(self, key: str, value: Any) -> Any:
+        """Issue #2790: 审计记录值脱敏。
+
+        Args:
+            key: 字段名
+            value: 原始值
+
+        Returns:
+            脱敏后的值
+        """
+        if value is None:
+            return None
+
+        # branding_logo_url: 截断至 200 字符
+        if key == "branding_logo_url" and isinstance(value, str):
+            if len(value) > 200:
+                return value[:200]
+
+        # roi_assumptions: 仅记录变更键名
+        if key == "roi_assumptions" and isinstance(value, dict):
+            return {"changed_keys": list(value.keys())}
+
+        # allowed_tools: 记录长度
+        if key == "allowed_tools" and isinstance(value, list):
+            return {"total": len(value), "tools": value}
+
+        return value
 
     def _clear_roi_cache_for_tenant(self, tenant_id: int) -> None:
         """Clear ROI cache entries for a specific tenant.

@@ -5,13 +5,16 @@ API endpoints for multi-tenant management.
 
 Issue #2179: 租户管理员权限模型
 - 路由层传入 ActorContext 到 Service 层
+
+Issue #2790: 租户设置修改审计日志
+- update_tenant_settings 记录 SYSTEM_CONFIG_CHANGE 审计
 """
 
 import logging
-from typing import cast
+from typing import Any, cast
 
 import bcrypt
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import (
     auth_required,
@@ -19,6 +22,7 @@ from app.auth.decorators import (
     same_tenant_or_platform_admin,
 )
 from app.core.actor_context import ActorContext
+from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import get_security_settings_cached
 from app.services.tenant_service import TenantService
@@ -32,11 +36,84 @@ tenant_bp = Blueprint("tenant", __name__, url_prefix="/api/tenants")
 # Services
 tenant_service = TenantService()
 user_repo = UserRepository()
+audit_logger = AuditLogger()
 
 
 def _hash_password(password: str) -> str:
     """Hash a password using bcrypt."""
     return cast("str", bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode())
+
+
+def _get_client_info() -> dict[str, str | None]:
+    """Issue #2790: 获取客户端信息用于审计。"""
+    return {
+        "ip_address": request.remote_addr,
+        "user_agent": request.headers.get("User-Agent"),
+    }
+
+
+def _log_tenant_settings_audit(
+    actor: ActorContext,
+    tenant_id: int,
+    changed_fields: list[str],
+    old_values: dict,
+    new_values: dict,
+    success: bool = True,
+    error: str | None = None,
+    error_type: str | None = None,
+) -> None:
+    """Issue #2790: 租户设置修改审计日志封装。
+
+    Args:
+        actor: 操作者上下文
+        tenant_id: 目标租户 ID
+        changed_fields: 变更的字段列表
+        old_values: 变更前的值（脱敏后）
+        new_values: 变更后的值（脱敏后）
+        success: 是否成功
+        error: 错误消息
+        error_type: 错误类型
+    """
+    client_info = _get_client_info()
+    username = None
+    if hasattr(g, "user") and isinstance(g.user, dict):
+        username = g.user.get("username")
+
+    # 审计详情
+    details: dict[str, Any] = {
+        "action": "update",
+        "actor_scope": actor.role,
+    }
+    if changed_fields:
+        details["changed_fields"] = changed_fields
+    if old_values:
+        details["old_values"] = old_values
+    if new_values:
+        details["new_values"] = new_values
+    if error:
+        details["error"] = error
+    if error_type:
+        details["error_type"] = error_type
+
+    try:
+        audit_logger.log_action(
+            action=AuditAction.SYSTEM_CONFIG_CHANGE,
+            user_id=actor.user_id,
+            username=username,
+            resource_type="tenant_settings",
+            resource_id=str(tenant_id),
+            tenant_id=tenant_id,  # Issue #2790: 使用目标租户 ID，便于按租户过滤
+            details=details,
+            success=success,
+            error_message=error if not success else None,
+            **client_info,
+        )
+    except Exception as e:
+        # Issue #2790: 审计写入失败不阻塞业务，记录错误日志
+        logger.error(
+            f"审计日志写入失败 (tenant_settings): tenant_id={tenant_id}, error={e}",
+            exc_info=True,
+        )
 
 
 @tenant_bp.route("", methods=["GET"])
@@ -298,6 +375,7 @@ def update_tenant_settings(tenant_id: int):
     """Update tenant settings (same tenant or platform admin).
 
     Issue #2179: Tenant admins can modify their own tenant's settings.
+    Issue #2790: 记录审计日志。
     """
 
     # Issue #2179: 创建 ActorContext 传入 Service 层
@@ -311,15 +389,31 @@ def update_tenant_settings(tenant_id: int):
     if not data:
         return jsonify({"error": "Request body required"}), 400
 
-    try:
-        success = tenant_service.update_settings(
-            tenant_id, data, actor=actor
-        )  # Issue #2179: 传入 actor
-    except PermissionError as e:
-        return jsonify({"error": str(e)}), 403
+    # Issue #2790: Service 层返回 UpdateSettingsResult
+    result = tenant_service.update_settings(tenant_id, data, actor=actor)
 
-    if not success:
-        return jsonify({"error": "Failed to update tenant settings"}), 500
+    # Issue #2790: 记录审计日志
+    _log_tenant_settings_audit(
+        actor=actor,
+        tenant_id=tenant_id,
+        changed_fields=result.changed_fields,
+        old_values=result.old_values,
+        new_values=result.new_values,
+        success=result.success,
+        error=result.error,
+        error_type=result.error_type,
+    )
+
+    # 处理失败情况
+    if not result.success:
+        if result.error_type == "permission":
+            return jsonify({"error": result.error}), 403
+        elif result.error_type == "not_found":
+            return jsonify({"error": result.error}), 404
+        elif result.error_type == "validation":
+            return jsonify({"error": result.error}), 400
+        else:
+            return jsonify({"error": result.error or "Failed to update tenant settings"}), 500
 
     # Invalidate tenant config cache for sensitive keyword settings
     try:

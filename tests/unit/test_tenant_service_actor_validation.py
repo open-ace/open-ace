@@ -34,7 +34,9 @@ class TestTenantServiceActorValidation:
 
         with pytest.raises(PermissionError) as exc_info:
             service.update_tenant(
-                tenant_id=999, updates={"name": "Hacked"}, actor=actor  # Different tenant
+                tenant_id=999,
+                updates={"name": "Hacked"},
+                actor=actor,  # Different tenant
             )
 
         assert "无权修改租户" in str(exc_info.value)
@@ -123,7 +125,9 @@ class TestTenantServiceActorValidation:
         # Should not raise PermissionError
         try:
             result = service.update_tenant(
-                tenant_id=1, updates={"name": "Updated"}, actor=actor  # Own tenant
+                tenant_id=1,
+                updates={"name": "Updated"},
+                actor=actor,  # Own tenant
             )
             # Result will be False because tenant doesn't exist, but no PermissionError
             assert result is False or result is True  # Just checking no exception
@@ -131,20 +135,26 @@ class TestTenantServiceActorValidation:
             pytest.fail("tenant_admin should be able to update own tenant")
 
     def test_update_settings_validates_tenant_access(self):
-        """Test that update_settings validates actor can access tenant."""
+        """Test that update_settings validates actor can access tenant.
+
+        Issue #2790: update_settings returns UpdateSettingsResult instead of raising.
+        """
         service = TenantService()
 
         # tenant_admin trying to update settings for different tenant
         actor = ActorContext(user_id=2, role="tenant_admin", tenant_id=1)
 
-        with pytest.raises(PermissionError) as exc_info:
-            service.update_settings(
-                tenant_id=999,  # Different tenant
-                settings_updates={"content_filter_enabled": True},
-                actor=actor,
-            )
+        # Issue #2790: update_settings now returns UpdateSettingsResult
+        result = service.update_settings(
+            tenant_id=999,  # Different tenant
+            settings_updates={"content_filter_enabled": True},
+            actor=actor,
+        )
 
-        assert "无权修改租户" in str(exc_info.value)
+        # Should return failure result, not raise exception
+        assert result.success is False
+        assert result.error_type == "permission"
+        assert "无权" in result.error
 
     def test_none_actor_bypasses_validation(self):
         """Test that None actor bypasses validation (backward compatibility)."""
