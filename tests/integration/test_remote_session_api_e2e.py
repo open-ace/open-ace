@@ -51,6 +51,8 @@ def sqlite_sm(tmp_path, monkeypatch):
 def manager(sqlite_sm):
     RemoteSessionManager._assistant_text_buffer.clear()
     RemoteSessionManager._content_blocks_buffer.clear()
+    mock_content_filter = MagicMock()
+    mock_content_filter.check_content.return_value = MagicMock(passed=True)
     with (
         patch(
             "app.modules.workspace.remote_session_manager.get_remote_agent_manager",
@@ -72,6 +74,10 @@ def manager(sqlite_sm):
         patch(
             "app.modules.workspace.remote_session_manager.MessageRepository",
             return_value=MagicMock(),
+        ),
+        patch(
+            "app.modules.governance.content_filter_singleton.get_content_filter",
+            return_value=mock_content_filter,
         ),
     ):
         mgr = RemoteSessionManager()

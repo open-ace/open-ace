@@ -13,7 +13,6 @@
 
 import logging
 import threading
-from typing import Optional
 
 from app.modules.governance.content_filter import ContentFilter
 from app.repositories.governance_repo import GovernanceRepository
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # 单例实例和锁
 _lock = threading.Lock()
-_instance: Optional[ContentFilter] = None
+_instance: ContentFilter | None = None
 
 
 def get_content_filter() -> ContentFilter:
