@@ -44,6 +44,7 @@ class TestAuditActionsSynchronization:
             "SMTP Configuration": 2,  # SMTP_CONFIG_SAVE, SMTP_CONFIG_DELETE
             "Feishu Configuration": 2,  # FEISHU_CONFIG_SAVE, FEISHU_CONFIG_DELETE
             "Notification Integration": 4,  # WEBHOOK/DINGTALK save and delete
+            "Tool Account Mapping": 4,  # TOOL_ACCOUNT_MAPPING CREATE, UPDATE, DELETE, BATCH
         }
 
         total_expected = sum(expected_categories.values())
