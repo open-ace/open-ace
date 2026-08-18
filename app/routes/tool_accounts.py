@@ -7,6 +7,9 @@ Issue #2759: Authorization fix for tool account management interfaces.
 - All endpoints require admin role
 - tenant_admin can only operate on users in their tenant
 - platform_admin has global access with cross-tenant audit logging
+
+Issue #2761: Extended with mapping source/status support, conflict tracking,
+and predeclared account management.
 """
 
 import logging
@@ -260,6 +263,9 @@ def create_tool_account():
     Issue #2759: Authorization for creation.
     - tenant_admin: validate target user belongs to their tenant
     - platform_admin: no validation
+
+    Issue #2761: Added is_predeclared parameter for predeclaring accounts.
+    Response now includes mapping_source, mapping_status, and warnings.
     """
     data = request.get_json()
 
@@ -271,6 +277,11 @@ def create_tool_account():
 
     if not user_id or not tool_account:
         return jsonify({"error": "user_id and tool_account are required"}), 400
+
+    # Validate tool_account format
+    tool_account = tool_account.strip()
+    if not tool_account:
+        return jsonify({"error": "tool_account cannot be empty or whitespace"}), 400
 
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
@@ -302,16 +313,36 @@ def create_tool_account():
             400,
         )
 
+    # Determine mapping source and status
+    is_predeclared = data.get("is_predeclared", False)
+    if is_predeclared:
+        mapping_source = "predeclared"
+        mapping_status = "pending"
+    else:
+        mapping_source = "manual"
+        mapping_status = "active"
+
+    # Get current user as creator
+    created_by = None
+    if hasattr(g, "user") and g.user:
+        created_by = g.user.get("id")
+
     mapping = tool_account_repo.create(
         user_id=user_id,
         tool_account=tool_account,
         tool_type=data.get("tool_type"),
         description=data.get("description"),
+        mapping_source=mapping_source,
+        mapping_status=mapping_status,
+        created_by=created_by,
+        tenant_id=user.tenant_id,
     )
 
     if mapping:
-        # Update daily_messages user_id
-        updated_count = tool_account_repo.update_daily_messages_user_id(tool_account, user_id)
+        # Update daily_messages user_id (only for active mappings)
+        updated_count = 0
+        if mapping_status == "active":
+            updated_count = tool_account_repo.update_daily_messages_user_id(tool_account, user_id)
 
         # Audit logging
         _log_tool_account_action(
@@ -323,7 +354,21 @@ def create_tool_account():
             tenant_id=target_user.get("tenant_id") if target_user else None,
         )
 
-        return jsonify({"mapping": mapping.to_dict(), "updated_messages": updated_count})
+        response = {
+            "mapping": mapping.to_dict(),
+            "updated_messages": updated_count,
+            "mapping_source": mapping_source,
+            "mapping_status": mapping_status,
+            "warnings": [],
+        }
+
+        # Add warning for predeclared accounts
+        if is_predeclared:
+            response["warnings"].append(
+                "This is a predeclared account. It will become active when matching data is detected."
+            )
+
+        return jsonify(response)
 
     return jsonify({"error": "Failed to create mapping"}), 500
 
@@ -496,6 +541,12 @@ def batch_create_user_tool_accounts(user_id: int):
             failed.append({"tool_account": None, "error": "tool_account is required"})
             continue
 
+        # Validate tool_account format
+        tool_account_name = tool_account_name.strip()
+        if not tool_account_name:
+            failed.append({"tool_account": None, "error": "tool_account cannot be empty"})
+            continue
+
         # Check if already mapped
         existing = tool_account_repo.get_by_tool_account(tool_account_name)
         if existing:
@@ -508,17 +559,36 @@ def batch_create_user_tool_accounts(user_id: int):
             )
             continue
 
+        # Determine mapping source and status
+        is_predeclared = account.get("is_predeclared", False)
+        if is_predeclared:
+            mapping_source = "predeclared"
+            mapping_status = "pending"
+        else:
+            mapping_source = "manual"
+            mapping_status = "active"
+
+        # Get current user as creator
+        created_by = None
+        if hasattr(g, "user") and g.user:
+            created_by = g.user.get("id")
+
         # Create mapping
         mapping = tool_account_repo.create(
             user_id=user_id,
             tool_account=tool_account_name,
             tool_type=account.get("tool_type"),
             description=account.get("description"),
+            mapping_source=mapping_source,
+            mapping_status=mapping_status,
+            created_by=created_by,
+            tenant_id=target_user.tenant_id if target_user else None,
         )
 
         if mapping:
-            # Update daily_messages
-            tool_account_repo.update_daily_messages_user_id(tool_account_name, user_id)
+            # Update daily_messages (only for active mappings)
+            if mapping_status == "active":
+                tool_account_repo.update_daily_messages_user_id(tool_account_name, user_id)
             created.append(mapping.to_dict())
         else:
             failed.append({"tool_account": tool_account_name, "error": "Failed to create"})
@@ -546,3 +616,230 @@ def batch_create_user_tool_accounts(user_id: int):
             "failed": failed,
         }
     )
+
+
+# =============================================================================
+# Issue #2761: New endpoints for conflict and status management
+# =============================================================================
+
+
+@tool_accounts_bp.route("/tool-accounts/conflicts", methods=["GET"])
+def get_conflicts():
+    """Get all unresolved conflict mappings.
+
+    Issue #2761: Returns mappings with conflict status for admin review.
+    """
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
+
+    if user_role == "tenant_admin":
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+
+    # Get current user's tenant
+    tenant_id = None
+    if user_role == "tenant_admin":
+        tenant_id = user_tenant_id
+
+    conflicts = tool_account_repo.get_by_status("conflict_type", tenant_id)
+    conflicts.extend(tool_account_repo.get_by_status("conflict_owner", tenant_id))
+    conflicts.extend(tool_account_repo.get_by_status("conflict_tenant", tenant_id))
+
+    result = []
+    for mapping in conflicts:
+        data = mapping.to_dict()
+        if mapping.tool_type:
+            data["tool_type_display"] = get_tool_type_display(mapping.tool_type)
+        result.append(data)
+
+    return jsonify(result)
+
+
+@tool_accounts_bp.route("/tool-accounts/pending", methods=["GET"])
+def get_pending_mappings():
+    """Get all pending (predeclared) mappings.
+
+    Issue #2761: Returns mappings waiting for data to activate.
+    """
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
+
+    if user_role == "tenant_admin":
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+
+    tenant_id = None
+    if user_role == "tenant_admin":
+        tenant_id = user_tenant_id
+
+    pending = tool_account_repo.get_by_status("pending", tenant_id)
+
+    result = []
+    for mapping in pending:
+        data = mapping.to_dict()
+        if mapping.tool_type:
+            data["tool_type_display"] = get_tool_type_display(mapping.tool_type)
+        result.append(data)
+
+    return jsonify(result)
+
+
+@tool_accounts_bp.route("/tool-accounts/stale", methods=["GET"])
+def get_stale_mappings():
+    """Get all stale mappings.
+
+    Issue #2761: Returns mappings with no recent activity.
+    """
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
+
+    if user_role == "tenant_admin":
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+
+    tenant_id = None
+    if user_role == "tenant_admin":
+        tenant_id = user_tenant_id
+
+    stale = tool_account_repo.get_by_status("stale", tenant_id)
+
+    result = []
+    for mapping in stale:
+        data = mapping.to_dict()
+        if mapping.tool_type:
+            data["tool_type_display"] = get_tool_type_display(mapping.tool_type)
+        result.append(data)
+
+    return jsonify(result)
+
+
+@tool_accounts_bp.route("/tool-accounts/<int:id>/resolve-conflict", methods=["POST"])
+def resolve_conflict(id: int):
+    """Resolve a conflict mapping.
+
+    Issue #2761: Admin can confirm or reject a conflict mapping.
+    Issue #2759: Tenant isolation for conflict resolution.
+
+    Request body:
+    {
+        "action": "confirm" | "reject",
+        "new_status": "active" | "pending"
+    }
+    """
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
+
+    # Get mapping
+    mapping = tool_account_repo.get_by_id(id)
+    if not mapping:
+        return jsonify({"error": "Mapping not found"}), 404
+
+    # Check if mapping is in conflict state
+    if not mapping.mapping_status or not mapping.mapping_status.startswith("conflict"):
+        return jsonify({"error": "Mapping is not in conflict state"}), 400
+
+    # Tenant isolation for tenant_admin
+    if user_role == "tenant_admin":
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+
+        # Get the owner user to check tenant
+        owner_user = user_repo.get_user_by_id(mapping.user_id)
+        if not owner_user or owner_user.tenant_id != user_tenant_id:
+            return jsonify({"error": "Mapping not found"}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    action = data.get("action")
+    if action not in ("confirm", "reject"):
+        return jsonify({"error": "action must be 'confirm' or 'reject'"}), 400
+
+    if action == "confirm":
+        new_status = data.get("new_status", "active")
+        if new_status not in ("active", "pending"):
+            return jsonify({"error": "new_status must be 'active' or 'pending'"}), 400
+    else:
+        # Reject: delete the mapping
+        success = tool_account_repo.delete(id)
+        if success:
+            return jsonify(
+                {"status": "rejected", "message": "Conflict mapping rejected and deleted"}
+            )
+        return jsonify({"error": "Failed to delete mapping"}), 500
+
+    # Update status with optimistic lock
+    updated = tool_account_repo.update_status_with_version(id, new_status, mapping.version)
+
+    if updated:
+        return jsonify(
+            {
+                "status": "resolved",
+                "mapping": updated.to_dict(),
+                "new_status": new_status,
+            }
+        )
+
+    return jsonify({"error": "Failed to resolve conflict - version mismatch"}), 409
+
+
+@tool_accounts_bp.route("/tool-accounts/<int:id>/touch-activity", methods=["POST"])
+def touch_mapping_activity(id: int):
+    """Update last_activity_at timestamp.
+
+    Issue #2761: Called when account is seen in incoming data.
+    """
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
+
+    mapping = tool_account_repo.get_by_id(id)
+    if not mapping:
+        return jsonify({"error": "Mapping not found"}), 404
+
+    # Tenant isolation for tenant_admin
+    if user_role == "tenant_admin":
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+
+        # Get the owner user to check tenant
+        owner_user = user_repo.get_user_by_id(mapping.user_id)
+        if not owner_user or owner_user.tenant_id != user_tenant_id:
+            return jsonify({"error": "Mapping not found"}), 404
+
+    success = tool_account_repo.touch_activity(id)
+
+    if success:
+        return jsonify({"status": "success"})
+
+    return jsonify({"error": "Failed to update activity"}), 500
+
+
+@tool_accounts_bp.route("/tool-accounts/status-summary", methods=["GET"])
+def get_status_summary():
+    """Get summary counts by mapping status.
+
+    Issue #2761: Dashboard endpoint for monitoring mapping health.
+    Issue #2759: Tenant isolation for tenant_admin.
+    """
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
+
+    if user_role == "tenant_admin":
+        if user_tenant_id is None:
+            return jsonify({"error": "Tenant admin must have tenant_id"}), 403
+
+    tenant_id = None
+    if user_role == "tenant_admin":
+        tenant_id = user_tenant_id
+
+    summary = {
+        "pending": len(tool_account_repo.get_by_status("pending", tenant_id)),
+        "active": len(tool_account_repo.get_by_status("active", tenant_id)),
+        "stale": len(tool_account_repo.get_by_status("stale", tenant_id)),
+        "conflict_type": len(tool_account_repo.get_by_status("conflict_type", tenant_id)),
+        "conflict_owner": len(tool_account_repo.get_by_status("conflict_owner", tenant_id)),
+        "conflict_tenant": len(tool_account_repo.get_by_status("conflict_tenant", tenant_id)),
+    }
+
+    return jsonify(summary)

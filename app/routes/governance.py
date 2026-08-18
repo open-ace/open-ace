@@ -20,7 +20,10 @@ from app.auth.decorators import (
     same_tenant_user_required,
 )
 from app.modules.governance.audit_logger import AuditAction, AuditLogger, get_action_categories
-from app.modules.governance.content_filter import ContentFilter
+from app.modules.governance.content_filter_singleton import (
+    get_content_filter,
+    invalidate_content_filter_cache,
+)
 from app.modules.governance.quota_manager import QuotaManager
 from app.repositories.governance_repo import GovernanceRepository
 from app.utils.request_context import get_current_tenant_id
@@ -29,7 +32,6 @@ governance_bp = Blueprint("governance", __name__)
 audit_logger = AuditLogger()
 quota_manager = QuotaManager()
 governance_repo = GovernanceRepository()
-content_filter = ContentFilter(governance_repo=governance_repo)
 logger = logging.getLogger(__name__)
 
 
@@ -301,7 +303,22 @@ def api_get_quota_alerts():
     unacknowledged_only = request.args.get("unacknowledged_only", default=False, type=bool)
     limit = request.args.get("limit", default=100, type=int)
 
-    alerts = quota_manager.get_all_alerts(unacknowledged_only=unacknowledged_only, limit=limit)
+    # Get current user's tenant ID for tenant filtering
+    tenant_id = get_current_tenant_id()
+
+    # Tenant Admin: only query alerts for users in the same tenant
+    # Platform Admin: tenant_id = None, query all alerts
+    if tenant_id is not None:
+        alerts = quota_manager.get_alerts_by_tenant(
+            tenant_id=tenant_id,
+            unacknowledged_only=unacknowledged_only,
+            limit=limit,
+        )
+    else:
+        alerts = quota_manager.get_all_alerts(
+            unacknowledged_only=unacknowledged_only,
+            limit=limit,
+        )
 
     return jsonify([a.to_dict() for a in alerts])
 
@@ -379,7 +396,7 @@ def api_check_content():
         except Exception as e:
             logger.warning(f"Failed to fetch tenant config for tenant {tenant_id}: {e}")
 
-    result = content_filter.check_content(content, tenant_config=tenant_config)
+    result = get_content_filter().check_content(content, tenant_config=tenant_config)
 
     # Log if blocked
     if not result.passed:
@@ -404,7 +421,7 @@ def api_check_content():
 def api_filter_stats():
     """Get content filter statistics."""
 
-    stats = content_filter.get_stats()
+    stats = get_content_filter().get_stats()
 
     return jsonify(stats)
 
@@ -423,7 +440,7 @@ def api_add_pattern():
         return jsonify({"error": "Name and pattern are required"}), 400
 
     try:
-        content_filter.add_custom_pattern(name, pattern, risk)
+        get_content_filter().add_custom_pattern(name, pattern, risk)
 
         # Log the action
         client_info = get_client_info()
@@ -454,7 +471,7 @@ def api_add_keyword():
     if not keyword:
         return jsonify({"error": "Keyword is required"}), 400
 
-    content_filter.add_custom_keyword(keyword)
+    get_content_filter().add_custom_keyword(keyword)
 
     # Log the action
     client_info = get_client_info()
@@ -512,7 +529,7 @@ def api_create_filter_rule():
 
     if rule_id:
         # Invalidate content filter cache
-        content_filter.invalidate_cache()
+        invalidate_content_filter_cache()
 
         # Log the action
         client_info = get_client_info()
@@ -551,7 +568,7 @@ def api_update_filter_rule(rule_id):
 
     if success:
         # Invalidate content filter cache
-        content_filter.invalidate_cache()
+        invalidate_content_filter_cache()
 
         # Log the action
         client_info = get_client_info()
@@ -580,7 +597,7 @@ def api_delete_filter_rule(rule_id):
 
     if success:
         # Invalidate content filter cache
-        content_filter.invalidate_cache()
+        invalidate_content_filter_cache()
 
         # Log the action
         client_info = get_client_info()

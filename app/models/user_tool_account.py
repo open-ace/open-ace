@@ -3,10 +3,36 @@ Open ACE - User Tool Account Model
 
 Model for mapping users to their tool accounts (sender_name in different tools).
 Supports multi-source accounts: Slack, Feishu, DingTalk, Qwen, Claude, Openclaw, etc.
+
+Issue #2761: Added mapping_source and mapping_status to distinguish discovered
+accounts from predeclared ones, with conflict tracking and backfill logging.
 """
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
+
+
+class MappingSource(str, Enum):
+    """Origin of the tool account mapping."""
+
+    MANUAL = "manual"  # Manually created by admin
+    AUTO = "auto"  # Auto-mapped by system
+    PREDECLARED = "predeclared"  # Pre-configured before data arrival
+    IMPORT = "import"  # Imported from external system
+    DISCOVERED = "discovered"  # Discovered from daily_messages
+    LEGACY_PREDECLARED = "legacy_predeclared"  # Historical predeclared mapping
+
+
+class MappingStatus(str, Enum):
+    """Status of the tool account mapping."""
+
+    PENDING = "pending"  # Predeclared, waiting for data
+    ACTIVE = "active"  # Active with data
+    STALE = "stale"  # Long time without data
+    CONFLICT_TYPE = "conflict_type"  # Tool type mismatch
+    CONFLICT_OWNER = "conflict_owner"  # Ownership conflict
+    CONFLICT_TENANT = "conflict_tenant"  # Tenant conflict
 
 
 @dataclass
@@ -21,6 +47,18 @@ class UserToolAccount:
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
+    # Issue #2761: New fields for source tracking and status management
+    mapping_source: str | None = None  # manual, auto, predeclared, import, discovered
+    mapping_status: str | None = (
+        None  # pending, active, stale, conflict_type, conflict_owner, conflict_tenant
+    )
+    discovered_at: datetime | None = None  # First discovery timestamp
+    last_activity_at: datetime | None = None  # Last activity timestamp
+    observed_message_count: int = 0  # Number of observed messages
+    created_by: int | None = None  # User who created this mapping
+    tenant_id: int | None = None  # Tenant ID (denormalized for query performance)
+    version: int = 1  # Optimistic lock version number
+
     def to_dict(self) -> dict:
         """Convert to dictionary."""
         return {
@@ -31,6 +69,16 @@ class UserToolAccount:
             "description": self.description,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "mapping_source": self.mapping_source,
+            "mapping_status": self.mapping_status,
+            "discovered_at": self.discovered_at.isoformat() if self.discovered_at else None,
+            "last_activity_at": (
+                self.last_activity_at.isoformat() if self.last_activity_at else None
+            ),
+            "observed_message_count": self.observed_message_count,
+            "created_by": self.created_by,
+            "tenant_id": self.tenant_id,
+            "version": self.version,
         }
 
 

@@ -283,9 +283,64 @@ class SchedulerWorker:
         except Exception as e:
             logger.warning(f"Failed to start metrics server: {e}")
 
+    def _sync_system_users(self) -> None:
+        """同步数据库中的系统用户到容器。
+
+        Issue #2742: 在 Docker 多用户模式下，scheduler 容器需要拥有与
+        open-ace 容器相同的系统用户，才能通过 sudo -u <account> 执行命令。
+
+        每个容器有独立的 /etc/passwd，数据库中创建的系统用户不会自动同步。
+        此函数在 scheduler 启动时查询数据库中所有有 system_account 的用户，
+        并调用 ensure_system_user() 确保它们存在于当前容器中。
+        """
+        try:
+            from app.utils.workspace import _is_docker_multi_user_mode, ensure_system_user
+
+            # 只在 Docker 多用户模式下执行同步
+            if not _is_docker_multi_user_mode():
+                logger.info("Not in Docker multi-user mode, skipping system user sync")
+                return
+
+            logger.info("Syncing system users for Docker multi-user mode...")
+
+            # 查询所有有 system_account 的用户
+            if not self._db:
+                logger.warning("Database not initialized, cannot sync system users")
+                return
+
+            users = self._db.fetch_all(
+                "SELECT DISTINCT system_account FROM users WHERE system_account IS NOT NULL AND system_account != ''"
+            )
+
+            if not users:
+                logger.info("No system_account users found in database")
+                return
+
+            sync_count = 0
+            for user in users:
+                system_account = user.get("system_account")
+                if system_account:
+                    try:
+                        if ensure_system_user(system_account):
+                            sync_count += 1
+                            logger.info(f"System user synced: {system_account}")
+                        else:
+                            logger.warning(f"Failed to sync system user: {system_account}")
+                    except Exception as e:
+                        logger.error(f"Error syncing system user {system_account}: {e}")
+
+            logger.info(f"System user sync complete: {sync_count} users processed")
+
+        except Exception as e:
+            # 同步失败不应阻止 scheduler 启动，但需要记录错误
+            logger.error(f"Failed to sync system users: {e}")
+
     def _start_schedulers(self) -> None:
         """Start all background schedulers."""
         logger.info("Starting background schedulers...")
+
+        # Issue #2742: 同步系统用户到容器（必须在 scheduler 启动前执行）
+        self._sync_system_users()
 
         # Import scheduler modules
         # Note: These will use leader election internally (Issue #2187)

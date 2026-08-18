@@ -41,6 +41,9 @@ EXPECTED_TABLES = [
     "autonomous_workflows",
     "projects",
     "tenants",
+    # Issue #2770: Tables with critical columns for delayed token revocation
+    "agent_tokens",
+    "remote_machines",
 ]
 
 # Expected columns for critical tables
@@ -68,6 +71,22 @@ EXPECTED_COLUMNS = {
         "content_blocks",
         "milestone_id",
     ],
+    # Issue #2770: Critical columns for delayed token revocation
+    # These may be missing if migration 20260811_001 was skipped
+    "agent_tokens": [
+        "id",
+        "machine_id",
+        "is_revoked",
+        "pending_revoke",
+        "revoke_after",
+        "rotation_id",
+        "token_version",
+    ],
+    "remote_machines": [
+        "id",
+        "agent_version",
+        "token_revoke_timeout",
+    ],
 }
 
 # Critical indexes to verify
@@ -75,6 +94,12 @@ EXPECTED_INDEXES = {
     "agent_sessions": [
         "idx_agent_sessions_tenant_user",
         "idx_agent_sessions_tenant_updated",
+    ],
+    # Issue #2770: Critical indexes for delayed token revocation
+    "agent_tokens": [
+        "idx_agent_tokens_one_active_per_machine",
+        "idx_agent_tokens_pending_revoke_timeout",
+        "idx_agent_tokens_machine_pending",
     ],
 }
 
