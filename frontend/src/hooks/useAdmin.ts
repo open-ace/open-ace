@@ -301,16 +301,14 @@ export function useTogglePolicyRule() {
       // Optimistically update to the new value
       queryClient.setQueryData<PolicyRule[]>(['admin', 'policy-rules', false], (old) => {
         if (!old) return [];
-        return old.map((rule) =>
-          rule.id === ruleId ? { ...rule, enabled } : rule
-        );
+        return old.map((rule) => (rule.id === ruleId ? { ...rule, enabled } : rule));
       });
 
       // Return a context object with the snapshot
       return { previousRules };
     },
     // If mutation fails, roll back to the snapshot
-    onError: (err, variables, context) => {
+    onError: (_err, _variables, context) => {
       if (context?.previousRules) {
         queryClient.setQueryData(['admin', 'policy-rules', false], context.previousRules);
       }

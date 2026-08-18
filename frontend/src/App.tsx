@@ -221,7 +221,13 @@ const FeatureFlagsLoader: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     loadFlags();
-  }, [configLoaded, setPolicyEnabled, setModelGatewayEnabled, setRunTimelineEnabled, setConfigLoaded]);
+  }, [
+    configLoaded,
+    setPolicyEnabled,
+    setModelGatewayEnabled,
+    setRunTimelineEnabled,
+    setConfigLoaded,
+  ]);
 
   if (!configLoaded) {
     return <LoadingOverlay text={t('loading', useAppStore.getState().language)} />;

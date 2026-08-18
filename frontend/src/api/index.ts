@@ -164,6 +164,9 @@ export type { ModelGatewayConfig, ModelGatewayTestResult } from './modelGateway'
 // system settings
 export { systemApi } from './system';
 export type { SystemSettings } from './system';
+// feature flags
+export { featureFlagsApi } from './featureFlags';
+export type { FeatureFlags } from './featureFlags';
 // policy
 export { policyApi, PolicyDisabledError } from './policy';
 export type {
