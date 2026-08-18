@@ -5009,9 +5009,39 @@ do_fresh_install() {
                 fi
                 print_info "Running database migrations..."
                 if [ "$EUID" -eq 0 ] && [ -n "$install_user" ] && [ "$install_user" != "root" ]; then
-                    su - "$install_user" -c "cd '$target_path' && python3 -m alembic upgrade head" && print_success "Database upgraded to latest version" || print_warning "alembic upgrade failed"
+                    if su - "$install_user" -c "cd '$target_path' && python3 -m alembic upgrade head"; then
+                        print_success "Database upgraded to latest version"
+                    else
+                        print_error "Database migration failed. Installation aborted."
+                        exit 1
+                    fi
+                    # Issue #2770: Verify physical schema after migration
+                    print_info "Verifying database schema integrity..."
+                    if su - "$install_user" -c "cd '$target_path' && python3 scripts/verify_schema_integrity.py"; then
+                        print_success "Schema integrity verified"
+                    else
+                        print_error "Schema integrity check failed. Installation aborted."
+                        exit 1
+                    fi
                 else
-                    python3 -m alembic upgrade head && print_success "Database upgraded to latest version" || print_warning "alembic upgrade failed"
+                    cd "$target_path"
+                    if python3 -m alembic upgrade head; then
+                        print_success "Database upgraded to latest version"
+                    else
+                        print_error "Database migration failed. Installation aborted."
+                        cd - > /dev/null
+                        exit 1
+                    fi
+                    # Issue #2770: Verify physical schema after migration
+                    print_info "Verifying database schema integrity..."
+                    if python3 scripts/verify_schema_integrity.py; then
+                        print_success "Schema integrity verified"
+                    else
+                        print_error "Schema integrity check failed. Installation aborted."
+                        cd - > /dev/null
+                        exit 1
+                    fi
+                    cd - > /dev/null
                 fi
             else
                 # Fresh database: execute schema + stamp
@@ -5446,14 +5476,38 @@ with open('$config_dir/config.json', 'w') as f:
             if su - "$install_user" -c "cd '$target_path' && python3 -m alembic upgrade head"; then
                 print_success "Database migrations applied"
             else
-                print_warning "Database migration failed. You may need to run 'alembic upgrade head' manually."
+                print_error "Database migration failed. Service will not be restarted."
+                print_info "Manual recovery: fix migration issues and re-run upgrade."
+                exit 1
+            fi
+            # Issue #2770: Verify physical schema after migration
+            print_info "Verifying database schema integrity..."
+            if su - "$install_user" -c "cd '$target_path' && python3 scripts/verify_schema_integrity.py"; then
+                print_success "Schema integrity verified"
+            else
+                print_error "Schema integrity check failed. Service will not be restarted."
+                print_info "Manual recovery: run 'python3 scripts/verify_schema_integrity.py' to diagnose."
+                exit 1
             fi
         else
             cd "$target_path"
             if python3 -m alembic upgrade head; then
                 print_success "Database migrations applied"
             else
-                print_warning "Database migration failed. You may need to run 'alembic upgrade head' manually."
+                print_error "Database migration failed. Service will not be restarted."
+                print_info "Manual recovery: fix migration issues and re-run upgrade."
+                cd - > /dev/null
+                exit 1
+            fi
+            # Issue #2770: Verify physical schema after migration
+            print_info "Verifying database schema integrity..."
+            if python3 scripts/verify_schema_integrity.py; then
+                print_success "Schema integrity verified"
+            else
+                print_error "Schema integrity check failed. Service will not be restarted."
+                print_info "Manual recovery: run 'python3 scripts/verify_schema_integrity.py' to diagnose."
+                cd - > /dev/null
+                exit 1
             fi
             cd - > /dev/null
         fi
@@ -5656,7 +5710,20 @@ print(f\"db_pass='{pw}'\")
                         exit 1
                     fi
                     echo 'Running database migrations...'
-                    python3 -m alembic upgrade head || echo 'ERROR: alembic upgrade failed'
+                    if python3 -m alembic upgrade head; then
+                        echo 'Database migrations applied'
+                        # Issue #2770: Verify physical schema after migration
+                        echo 'Verifying database schema integrity...'
+                        if python3 scripts/verify_schema_integrity.py; then
+                            echo 'Schema integrity verified'
+                        else
+                            echo 'ERROR: Schema integrity check failed.'
+                            exit 1
+                        fi
+                    else
+                        echo 'ERROR: alembic upgrade failed'
+                        exit 1
+                    fi
                 else
                     echo 'Executing full schema for fresh database...'
                     if PGPASSWORD=\"\$db_pass\" psql -h \"\$db_host\" -p \"\$db_port\" -U \"\$db_user\" -d \"\$db_name\" -f \"\$schema_file\"; then
@@ -5880,8 +5947,19 @@ do_upgrade_remote() {
         if [ -f 'alembic.ini' ] && [ -d 'migrations' ]; then
             if python3 -m alembic upgrade head; then
                 echo 'Database migrations applied'
+                # Issue #2770: Verify physical schema after migration
+                echo 'Verifying database schema integrity...'
+                if python3 scripts/verify_schema_integrity.py; then
+                    echo 'Schema integrity verified'
+                else
+                    echo 'ERROR: Schema integrity check failed. Service will not be restarted.'
+                    echo 'Manual recovery: run python3 scripts/verify_schema_integrity.py to diagnose.'
+                    exit 1
+                fi
             else
-                echo 'Warning: Database migration failed. You may need to run alembic upgrade head manually.'
+                echo 'ERROR: Database migration failed. Service will not be restarted.'
+                echo 'Manual recovery: fix migration issues and re-run upgrade.'
+                exit 1
             fi
         else
             echo 'Warning: Alembic not found, skipping database migrations'

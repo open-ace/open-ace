@@ -47,10 +47,19 @@ services:
 
   # Issue #2729: Scheduler service for multi-user mode
   # Needs access to /home to collect Qwen sessions from users' .qwen/projects
+  # Issue #2742: Must run as root to sync system users
   scheduler:
     extends:
       file: docker-compose.yml
       service: scheduler
+    user: "0"
+    environment:
+      # Multi-user workspace mode (required)
+      - WORKSPACE_MULTI_USER_MODE=true
+      # Explicit root opt-in (Issue #1893)
+      - OPENACE_ALLOW_ROOT_MULTI_USER=1
+      # Security mode - recommend production for actual deployments
+      - OPENACE_SECURITY_MODE=${OPENACE_SECURITY_MODE:-production}
     volumes:
       - home-data:/home
 
