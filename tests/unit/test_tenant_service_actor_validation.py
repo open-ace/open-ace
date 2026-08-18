@@ -34,7 +34,9 @@ class TestTenantServiceActorValidation:
 
         with pytest.raises(PermissionError) as exc_info:
             service.update_tenant(
-                tenant_id=999, updates={"name": "Hacked"}, actor=actor  # Different tenant
+                tenant_id=999,
+                updates={"name": "Hacked"},
+                actor=actor,  # Different tenant
             )
 
         assert "无权修改租户" in str(exc_info.value)
@@ -123,7 +125,9 @@ class TestTenantServiceActorValidation:
         # Should not raise PermissionError
         try:
             result = service.update_tenant(
-                tenant_id=1, updates={"name": "Updated"}, actor=actor  # Own tenant
+                tenant_id=1,
+                updates={"name": "Updated"},
+                actor=actor,  # Own tenant
             )
             # Result will be False because tenant doesn't exist, but no PermissionError
             assert result is False or result is True  # Just checking no exception

@@ -11,7 +11,7 @@ Issue #2790: 租户设置修改审计日志
 """
 
 import logging
-from typing import cast
+from typing import Any, cast
 
 import bcrypt
 from flask import Blueprint, g, jsonify, request
@@ -80,7 +80,7 @@ def _log_tenant_settings_audit(
         username = g.user.get("username")
 
     # 审计详情
-    details = {
+    details: dict[str, Any] = {
         "action": "update",
         "actor_scope": actor.role,
     }
