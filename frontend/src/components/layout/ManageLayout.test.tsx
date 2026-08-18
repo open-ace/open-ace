@@ -3,10 +3,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@/test/utils';
+import { render, screen, waitFor } from '@/test/utils';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { useAuth } from '@/hooks';
 import { useAppStore } from '@/store';
+import { ManageLayout } from './ManageLayout';
 
 // Mock the hooks module
 vi.mock('@/hooks', async (importOriginal) => {
@@ -24,6 +25,9 @@ describe('ManageLayout', () => {
     useAppStore.setState({
       modelGatewayEnabled: false,
       policyEnabled: false,
+      user: null,
+      isAuthenticated: false,
+      authLoading: false,
     });
   });
 
@@ -37,9 +41,7 @@ describe('ManageLayout', () => {
         user: { id: '1', username: 'admin', role: 'admin', must_change_password: false },
         isLoading: false,
         isAuthenticated: true,
-      });
-
-      const { ManageLayout } = await import('./ManageLayout');
+      } as any);
 
       render(
         <MemoryRouter initialEntries={['/manage/dashboard']}>
@@ -62,9 +64,7 @@ describe('ManageLayout', () => {
         user: { id: '1', username: 'admin', role: 'admin', must_change_password: false },
         isLoading: false,
         isAuthenticated: true,
-      });
-
-      const { ManageLayout } = await import('./ManageLayout');
+      } as any);
 
       render(
         <MemoryRouter initialEntries={['/manage/dashboard']}>
@@ -84,14 +84,23 @@ describe('ManageLayout', () => {
     });
 
     it('should show model-gateway navigation item when modelGatewayEnabled is true', async () => {
-      useAppStore.setState({ modelGatewayEnabled: true });
-      vi.mocked(useAuth).mockReturnValue({
-        user: { id: '1', username: 'admin', role: 'admin', must_change_password: false },
-        isLoading: false,
+      const adminUser = { id: '1', username: 'admin', role: 'admin', must_change_password: false };
+
+      // Set feature flag and user in store BEFORE rendering
+      useAppStore.setState({
+        modelGatewayEnabled: true,
+        policyEnabled: true,
+        user: adminUser,
         isAuthenticated: true,
+        authLoading: false,
       });
 
-      const { ManageLayout } = await import('./ManageLayout');
+      // Mock useAuth to return admin user
+      vi.mocked(useAuth).mockReturnValue({
+        user: adminUser,
+        isLoading: false,
+        isAuthenticated: true,
+      } as any);
 
       render(
         <MemoryRouter initialEntries={['/manage/dashboard']}>
@@ -104,15 +113,9 @@ describe('ManageLayout', () => {
       );
 
       // Model Gateway navigation item should be visible and enabled for admin users when feature is enabled
-      const modelGatewayLink = screen.queryByRole('link', { name: /model.gateway/i });
-      // If the link is found, verify it's not disabled
-      if (modelGatewayLink) {
-        // Check that it does NOT have the disabled class
-        expect(modelGatewayLink.className).not.toMatch(/disabled/);
-      } else {
-        // If not found, that's also acceptable (could be filtered out entirely)
-        // This test focuses on verifying the link is NOT disabled when it exists
-      }
+      const modelGatewayLink = screen.getByRole('link', { name: /model.gateway/i });
+      // Check that it does NOT have the disabled class
+      expect(modelGatewayLink.className).not.toMatch(/disabled/);
     });
   });
 
@@ -123,9 +126,7 @@ describe('ManageLayout', () => {
         user: { id: '1', username: 'user', role: 'user', must_change_password: false },
         isLoading: false,
         isAuthenticated: true,
-      });
-
-      const { ManageLayout } = await import('./ManageLayout');
+      } as any);
 
       render(
         <MemoryRouter initialEntries={['/manage/dashboard']}>
