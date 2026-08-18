@@ -236,7 +236,7 @@ export const roiApi = {
     start_date?: string;
     end_date?: string;
     user_id?: number;
-    tool_name?: string;  // Optional tool name filter (must match cache key)
+    tool_name?: string; // Optional tool name filter (must match cache key)
   }): Promise<DailyCost[]> {
     const queryParams: Record<string, string> = {};
     if (params?.start_date) queryParams.start_date = params.start_date;
