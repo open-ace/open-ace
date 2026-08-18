@@ -8,9 +8,12 @@ on:
   # Re-triggered by the Lint Heal workflow (.github/workflows/lint-heal.yml)
   # when approving the parked runs for a healed head was not possible
   # (GITHUB_TOKEN pushes fire no CI events; dispatch does). healed_sha marks a
-  # dispatch as heal-originated so the PR Gate context it stamps cannot be
-  # re-created by a manual dispatch (required checks resolve to the latest
-  # run with that name on the head SHA).
+  # dispatch as heal-originated: PR Gate stamps only for PR runs or dispatches
+  # carrying it, so a routine manual dispatch (empty input) cannot re-stamp a
+  # green gate over a red run. The field is an origin breadcrumb, not an
+  # attestation — it is not checked against the run's head SHA, so a
+  # collaborator dispatching with an arbitrary value still re-stamps; that is
+  # the same trust level as their ordinary push rights, not a new capability.
   workflow_dispatch:
     inputs:
       healed_sha:

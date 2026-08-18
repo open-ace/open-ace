@@ -10,15 +10,17 @@ name: Lint Heal
 # workflow_run puts the heal in its own group and fires after the failed run
 # completes.
 #
-# NOTE: workflow_run executes the copy of this file on the default branch, so
-# changes here take effect after merge; use the workflow_dispatch input below
-# to exercise a heal manually in the meantime.
+# NOTE: both workflow_run and workflow_dispatch resolve this file from the
+# DEFAULT branch, so the heal is inert until this merges — no pre-merge
+# trigger exists, and pre-merge validation is limited to what can be checked
+# statically (YAML/shell validity) plus the push.sh unit tests. The first
+# live heal runs after merge.
 
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-  # Manual escape hatch / validation route: heal a specific head SHA.
+  # Post-merge escape hatch: manually heal a specific head SHA.
   workflow_dispatch:
     inputs:
       head_sha:
@@ -66,19 +68,30 @@ jobs:
               exit 0
             fi
           fi
-          # Resolve the PR carrying this head SHA. Filtering on .head.sha both
-          # picks the right PR and skips merged/superseded associations.
+          # Resolve the OPEN PR associated with this head SHA. The SHA is
+          # interpolated into the jq program (gh api has no --arg for jq
+          # variables); it is hex-only straight from the event context, so
+          # interpolation cannot break the filter. NOT filtered on .head.sha:
+          # an association survives the branch moving, and the tip check
+          # below must stay reachable for exactly that case.
           pr="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/pulls" \
-            --jq '[.[] | select(.head.sha == $sha)][0]' --arg sha "$HEAD_SHA" || true)"
+            --jq "[.[] | select(.state == \"open\")][0]" || true)"
           pr_number="$(echo "$pr" | jq -r '.number // empty')"
           if [ -z "$pr_number" ]; then
-            echo "No open PR carries head ${HEAD_SHA:0:8}; nothing to heal."
+            echo "No open PR is associated with head ${HEAD_SHA:0:8}; nothing to heal."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Same-repo branches only: the heal pushes with this repo's
+          # GITHUB_TOKEN, which cannot reach a fork's branch anyway.
+          if [ "$(echo "$pr" | jq -r '.head.repo.full_name')" != "$GITHUB_REPOSITORY" ]; then
+            echo "PR #${pr_number} head lives in a fork; only same-repo branches are healed."
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           tip="$(echo "$pr" | jq -r '.head.sha')"
           if [ "$tip" != "$HEAD_SHA" ]; then
-            echo "Branch moved (${tip:0:8} is the new tip); the newer push's own CI takes over."
+            echo "Branch moved (${tip:0:8} is the tip); the newer push's own CI takes over."
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -95,16 +108,69 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha || inputs.head_sha }}
           submodules: false
 
+      # This step ALWAYS runs and always emits skip=true/false: a step that
+      # GitHub skips emits no outputs, so gating later steps on this output
+      # would silently re-enable them when an earlier guard skipped.
       - name: Loop guard — do not heal twice in a row
         id: loopguard
-        if: steps.guard.outputs.skip != 'true'
+        env:
+          GUARD_SKIP: ${{ steps.guard.outputs.skip }}
         run: |
+          if [ "$GUARD_SKIP" = "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [[ "$(git log -1 --pretty=%s)" == "style: auto-format"* ]]; then
             echo "Head commit is already an auto-format fix; the remaining lint failure is not formatter-fixable."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Pin hook config to the base branch
+        if: steps.loopguard.outputs.skip != 'true'
+        id: pin
+        env:
+          BASE_REF: ${{ steps.guard.outputs.base_ref }}
+        run: |
+          # This job holds contents:write + actions:write while running
+          # formatter tooling. Pinning .pre-commit-config.yaml from the base
+          # branch constrains the remote hooks (black/isort/ruff/mypy/...) to
+          # revs the default branch already trusts. Trade-off: a PR that
+          # bumps a formatter version may not be healed by the old one — the
+          # re-triggered CI (which uses the PR's config) stays authoritative.
+          #
+          # `git checkout <tree-ish> -- <path>` also writes the INDEX; the
+          # push step unstages it again so the heal commit ships only the
+          # autofixes and never reverts the PR's own config change.
+          git fetch --depth=1 origin "$BASE_REF"
+          git checkout FETCH_HEAD -- .pre-commit-config.yaml
+          # Local hooks' entry scripts come from the PR checkout, so they must
+          # not execute under this job's write tokens (the re-triggered CI
+          # runs them authoritatively with read-only permissions). Derive
+          # their ids from the PINNED config at runtime — a hardcoded list
+          # would silently drift when the config changes. Fail closed: no
+          # derivation, no heal (the PR stays red for the orchestrator's
+          # CI-repair round instead of running PR code with write scope).
+          # Uses the runner's system python3 (pre-setup-python) so PyYAML
+          # comes from the runner image.
+          skip_list="$(python3 - <<'PY'
+          import sys
+          import yaml
+
+          cfg = yaml.safe_load(open(".pre-commit-config.yaml"))
+          ids = [
+              hook["id"]
+              for repo in cfg.get("repos", [])
+              if repo.get("repo") == "local"
+              for hook in repo.get("hooks", [])
+          ]
+          if not ids:
+              sys.exit("no local hooks found in pinned config — parse assumptions stale")
+          print(",".join([*ids, "no-commit-to-branch"]))
+          PY
+          )"
+          echo "skip_list=$skip_list" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         if: steps.loopguard.outputs.skip != 'true'
@@ -118,27 +184,16 @@ jobs:
         if: steps.loopguard.outputs.skip != 'true'
         run: pip install -c requirements-ci.lock pre-commit
 
-      - name: Pin hook config to the base branch
-        if: steps.loopguard.outputs.skip != 'true'
-        env:
-          BASE_REF: ${{ steps.guard.outputs.base_ref }}
-        run: |
-          # This job holds contents:write + actions:write while running
-          # formatter tooling; .pre-commit-config.yaml comes from the PR
-          # branch, so an arbitrary rev/repo could run with write scope.
-          # Checking out the base branch's config pins the toolchain the
-          # default branch already trusts. Trade-off: a PR that bumps a
-          # formatter version may not be healed by the old one — the
-          # re-triggered CI (which uses the PR's config) stays authoritative.
-          git fetch --depth=1 origin "$BASE_REF"
-          git checkout FETCH_HEAD -- .pre-commit-config.yaml
-
       - name: Apply formatter autofixes to a fixpoint
         if: steps.loopguard.outputs.skip != 'true'
         id: autofix
+        env:
+          SKIP_LIST: ${{ steps.pin.outputs.skip_list }}
         run: |
-          # Single source of truth: the exact CI lint command (whole suite,
-          # same SKIP list). No hardcoded fixing-hook list to drift when
+          # Single source of truth: the exact CI lint command (whole suite
+          # minus the base-pinned skip list — local hooks + no-commit-to-
+          # branch; bandit-check is local, so it is skipped automatically).
+          # No hardcoded fixing-hook list to drift when
           # .pre-commit-config.yaml changes.
           #
           # Loop until the tree stops changing: a single pass can leave a
@@ -146,14 +201,15 @@ jobs:
           # reformat), and the re-triggered CI lint would fail on it — the
           # burned round this workflow exists to prevent. Same doctrine as
           # the orchestrator's CI-repair rule #5: keep the modifications and
-          # repeat the full command.
+          # repeat the full command. The settling pass doubles as the
+          # verification run, so nothing is re-executed just to re-derive rc.
           final_rc=1
           settled=0
           changed=0
           for pass_no in 1 2 3; do
             echo "==> autofix pass $pass_no"
             rc=0
-            SKIP=bandit-check,no-commit-to-branch pre-commit run --all-files || rc=1
+            SKIP="$SKIP_LIST" pre-commit run --all-files || rc=1
             final_rc=$rc
             if git diff --quiet; then
               settled=1
@@ -182,6 +238,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Unstage the pinned config (see pin step): the heal commit must
+          # ship only the autofixes, never a revert of the PR's own config.
+          git reset -q -- .pre-commit-config.yaml
           git commit -m "style: auto-format (pre-commit autofixes for #${PR_NUMBER})"
           # Plain non-force push: if the branch moved meanwhile, this fails and
           # the newer push's own CI run takes over.
@@ -217,8 +276,12 @@ jobs:
               gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" --method POST >/dev/null 2>&1 || true
             done
             echo "No parked runs approved; cancelling leftovers and dispatching CI with healed_sha."
+            # The dispatch endpoint reads inputs from the "inputs" object —
+            # healed_sha as a top-level field is silently dropped.
             gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" \
-              --method POST -f "ref=$BRANCH" -f "healed_sha=$NEW_SHA"
+              --method POST --input - <<EOF
+          {"ref": "${BRANCH}", "inputs": {"healed_sha": "${NEW_SHA}"}}
+          EOF
             echo "Re-triggered CI on $BRANCH via workflow_dispatch (healed_sha=$NEW_SHA)"
           fi
           if [ "$FIX_RC" != "0" ]; then

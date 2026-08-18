@@ -217,7 +217,9 @@ class TestPushScript:
 
     def test_refuses_to_amend_published_commit(self, tmp_path):
         """HEAD pushed without -u (upstream unset, remote branch contains
-        it): folding must refuse to amend the published commit."""
+        it): the fold would have to amend the published commit — refused
+        BEFORE lint runs, so nothing is left staged and a re-run after the
+        user commits on top is not blocked by the dirty-tree guard."""
         work, origin = _make_repo(tmp_path, push_topic=True, set_upstream=False, extra_commit=False)
         env, state = _make_stub(tmp_path, ["1 fix", "0 "])
         before_tip = _local_tip(work)
@@ -226,7 +228,11 @@ class TestPushScript:
 
         assert result.returncode == 1
         assert "refusing to amend a published commit" in result.stderr
+        assert _calls(state) == 0, "lint ran although the refusal is pre-lint"
         assert _local_tip(work) == before_tip, "published commit was rewritten"
+        assert not _git(
+            work, "status", "--porcelain"
+        ).stdout.strip(), "refusal must not leave anything staged or dirty"
 
     def test_refuses_to_run_on_main(self, tmp_path):
         work, origin = _make_repo(tmp_path)
