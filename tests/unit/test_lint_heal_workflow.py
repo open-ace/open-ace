@@ -23,7 +23,6 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-heal.yml"
-PRE_COMMIT_CONFIG = REPO_ROOT / ".pre-commit-config.yaml"
 
 pytestmark = [pytest.mark.regression, pytest.mark.issue(2721)]
 
@@ -55,19 +54,28 @@ def _run_snippet(snippet: str, cwd: Path):
 class TestHealSkipDerivation:
     def test_snippet_covers_every_local_hook(self):
         """The workflow's own snippet, run against the real config, returns
-        exactly all repo:local hook ids plus no-commit-to-branch."""
+        the exact skip list.
+
+        Literal, not re-derived: an oracle that reuses the snippet's own
+        "repo == local" rule would shrink in lockstep with a config
+        restructure (nested block, anchor, new stanza key) and pass while
+        the skip list silently narrows — the threat this module exists for.
+        With a literal list, shrinking it becomes a deliberate edit that
+        fails this test."""
         result = _run_snippet(_derivation_snippet(), REPO_ROOT)
         assert result.returncode == 0, result.stderr
-
-        config = yaml.safe_load(PRE_COMMIT_CONFIG.read_text())
-        expected = [
-            hook["id"]
-            for repo in config["repos"]
-            if repo.get("repo") == "local"
-            for hook in repo["hooks"]
+        assert result.stdout.strip().split(",") == [
+            "check-schema-sync",
+            "check-migration-heads",
+            "check-migration-rules",
+            "validate-schema",
+            "sql-compat-check",
+            "api-security-scan",
+            "table-boundary-check",
+            "bandit-check",
+            "check-root-docs",
+            "no-commit-to-branch",
         ]
-        assert expected, "fixture repo has no local hooks — test premise stale"
-        assert result.stdout.strip().split(",") == [*expected, "no-commit-to-branch"]
 
     def test_snippet_fails_closed_without_local_hooks(self, tmp_path):
         """A config without local hooks must exit non-zero (the heal refuses

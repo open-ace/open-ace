@@ -62,8 +62,14 @@ jobs:
             # test-only failures don't spin a formatter pass for nothing.
             # --paginate: a run with more jobs than the unpaginated first page
             # would otherwise make "absent" out of a very-much-present lint.
-            lint_state="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs" \
-              --jq '.jobs[] | select(.name == "lint") | .conclusion' || true)"
+            # A failed read is its own case: conflating it with absence would
+            # send someone hunting for a ci.yml rename that never happened.
+            if ! lint_state="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs" \
+              --jq '.jobs[] | select(.name == "lint") | .conclusion')"; then
+              echo "::warning::Could not read jobs for run ${RUN_ID}; skipping this heal."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             # Absent ≠ passing: a renamed or removed lint job in ci.yml would
             # otherwise turn every heal into a silent permanent no-op that
             # reads like a normal skip. Warn so the drift is visible.
@@ -222,6 +228,15 @@ jobs:
           # the orchestrator's CI-repair rule #5: keep the modifications and
           # repeat the full command. The settling pass doubles as the
           # verification run, so nothing is re-executed just to re-derive rc.
+          # SKIP="" means "skip nothing" in pre-commit, so an empty list
+          # here would run every local hook — PR-branch scripts under this
+          # job's write tokens. The derive step fails closed; this consumer
+          # must too (a renamed step id or dropped env would otherwise
+          # silently resolve to '').
+          if [ -z "$SKIP_LIST" ]; then
+            echo "::error::Local-hook skip list is empty — refusing to run PR-branch hooks under this job's write tokens."
+            exit 1
+          fi
           final_rc=1
           settled=0
           changed=0
@@ -247,6 +262,7 @@ jobs:
       - name: Push fixes and re-trigger CI
         if: >-
           steps.guard.outputs.skip != 'true' &&
+          steps.loopguard.outputs.skip != 'true' &&
           steps.autofix.outputs.changed == '1' &&
           steps.autofix.outputs.settled == '1'
         env:
@@ -296,11 +312,14 @@ jobs:
             done
             echo "No parked runs approved; cancelling leftovers and dispatching CI with healed_sha."
             # The dispatch endpoint reads inputs from the "inputs" object —
-            # healed_sha as a top-level field is silently dropped.
-            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" \
-              --method POST --input - <<EOF
-          {"ref": "${BRANCH}", "inputs": {"healed_sha": "${NEW_SHA}"}}
-          EOF
+            # healed_sha as a top-level field is silently dropped. jq builds
+            # the body so a branch name containing quotes cannot break the
+            # JSON (the heal is already pushed at this point; a parse failure
+            # would leave the branch healed with CI never re-triggered).
+            jq -n --arg ref "$BRANCH" --arg sha "$NEW_SHA" \
+              '{ref: $ref, inputs: {healed_sha: $sha}}' \
+              | gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" \
+                --method POST --input -
             echo "Re-triggered CI on $BRANCH via workflow_dispatch (healed_sha=$NEW_SHA)"
           fi
           if [ "$FIX_RC" != "0" ]; then
@@ -310,6 +329,7 @@ jobs:
       - name: Nothing fixable
         if: >-
           steps.guard.outputs.skip != 'true' &&
+          steps.loopguard.outputs.skip != 'true' &&
           steps.autofix.outputs.changed == '0' &&
           steps.autofix.outputs.settled == '1'
         env:
