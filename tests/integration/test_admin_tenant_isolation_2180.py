@@ -384,3 +384,200 @@ class TestPlatformAdminAudit:
         assert record["tenant_id"] == 1
         # Target tenant must be captured in details for cross-tenant operations.
         assert record["details"]["target_tenant_id"] == 2
+
+
+class TestTenantAdminResourceBoundary:
+    """Tests for Tenant Admin resource access boundaries.
+
+    Issue #2783: Verifies that tenant admin cannot access other tenant's resources
+    through API endpoints like user list, audit logs, and projects.
+    """
+
+    # Test constants
+    TENANT_A = 1
+    TENANT_B = 2
+
+    TENANT_A_ADMIN = {
+        "id": 11,
+        "username": "a-admin",
+        "role": "tenant_admin",
+        "tenant_id": TENANT_A,
+        "must_change_password": False,
+        "email": "a-admin@example.com",
+    }
+
+    def _run_admin_request(self, actor, method, path, *, json_body=None):
+        """Run request to admin blueprint as ``actor``.
+
+        Uses a minimal Flask app registering only the admin blueprint.
+        Returns the response object.
+        """
+        from app.routes.admin import admin_bp
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.register_blueprint(admin_bp, url_prefix="/api")
+
+        # Mock TenantService to avoid database dependency
+        # Use SimpleNamespace instead of MagicMock for JSON-serializable tenant objects
+        from types import SimpleNamespace
+
+        mock_tenant_service_instance = MagicMock()
+        mock_tenant_service_instance.list_tenants.return_value = [
+            SimpleNamespace(id=self.TENANT_A, name="Tenant A", quota=SimpleNamespace(max_users=10))
+        ]
+
+        # Mock user repo with dynamic filtering based on tenant_id
+        def mock_get_all_users(tenant_id=None, **kwargs):
+            all_users = [
+                {"id": 1, "username": "user1", "tenant_id": self.TENANT_A, "email": "user1@a.com"},
+                {"id": 2, "username": "user2", "tenant_id": self.TENANT_B, "email": "user2@b.com"},
+            ]
+            if tenant_id is not None:
+                return [u for u in all_users if u["tenant_id"] == tenant_id]
+            return all_users
+
+        with (
+            patch("app.auth.decorators._load_user_from_token", return_value=actor),
+            patch("app.routes.admin.user_repo") as mock_user_repo,
+            patch("app.services.tenant_service.TenantService", return_value=mock_tenant_service_instance),
+        ):
+            # Configure mock to use dynamic filtering
+            mock_user_repo.get_all_users.side_effect = mock_get_all_users
+
+            client = app.test_client()
+            response = client.open(
+                path,
+                method=method,
+                json=json_body,
+                headers={"Authorization": "Bearer test-token"},
+            )
+        return response
+
+    def test_tenant_admin_cannot_list_users_from_other_tenant(self):
+        """
+        Tenant admin should only see users from their own tenant.
+
+        Issue #2783: GET /api/admin/users with tenant_id query param must
+        reject requests for other tenant's users.
+        """
+        response = self._run_admin_request(
+            actor=self.TENANT_A_ADMIN,
+            method="GET",
+            path="/api/admin/users",
+        )
+        # Should succeed (200) but only return Tenant A users
+        assert response.status_code == 200
+        data = response.get_json()
+        # Verify response structure
+        assert isinstance(data, list)
+        # All users should belong to Tenant A
+        for user in data:
+            assert user.get("tenant_id") == self.TENANT_A, (
+                f"User {user.get('id')} from tenant {user.get('tenant_id')} leaked to Tenant A admin"
+            )
+
+    def test_tenant_admin_cannot_list_users_with_other_tenant_filter(self):
+        """
+        Tenant admin cannot explicitly request other tenant's user list.
+
+        Issue #2783: GET /api/admin/users?tenant_id=<other> must return 403.
+        """
+        response = self._run_admin_request(
+            actor=self.TENANT_A_ADMIN,
+            method="GET",
+            path=f"/api/admin/users?tenant_id={self.TENANT_B}",
+        )
+        # Should be denied (403) because tenant_id filter doesn't match actor's tenant
+        assert response.status_code == 403, (
+            f"Expected 403 for cross-tenant user list request, got {response.status_code}"
+        )
+
+    def _run_governance_request(self, actor, method, path, *, json_body=None):
+        """Run request to governance blueprint as ``actor``.
+
+        Uses a minimal Flask app registering only the governance blueprint.
+        Returns the response object.
+        """
+        from app.routes.governance import governance_bp
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+        app.register_blueprint(governance_bp, url_prefix="/api")
+
+        # Mock audit logger to return cross-tenant logs
+        mock_log_a = MagicMock()
+        mock_log_a.to_dict.return_value = {
+            "id": 1,
+            "action": "user_login",
+            "tenant_id": self.TENANT_A,
+            "username": "user_a",
+        }
+        mock_log_b = MagicMock()
+        mock_log_b.to_dict.return_value = {
+            "id": 2,
+            "action": "user_login",
+            "tenant_id": self.TENANT_B,
+            "username": "user_b",
+        }
+
+        with (
+            patch("app.auth.decorators._load_user_from_token", return_value=actor),
+            patch("app.routes.governance.audit_logger") as mock_audit_logger,
+            patch("app.utils.request_context.get_current_tenant_id", return_value=actor.get("tenant_id")),
+        ):
+            # Mock audit logger to return multi-tenant logs
+            mock_audit_logger.query.return_value = [mock_log_a]
+            mock_audit_logger.count.return_value = 1
+
+            client = app.test_client()
+            response = client.open(
+                path,
+                method=method,
+                json=json_body,
+                headers={"Authorization": "Bearer test-token"},
+            )
+        return response, mock_audit_logger
+
+    def test_tenant_admin_can_only_see_own_tenant_audit_logs(self):
+        """
+        Tenant admin should only see audit logs from their own tenant.
+
+        Issue #2783: GET /api/audit/logs must filter by tenant_id from auth context.
+        """
+        response, mock_audit_logger = self._run_governance_request(
+            actor=self.TENANT_A_ADMIN,
+            method="GET",
+            path="/api/audit/logs",
+        )
+        # Should succeed (200)
+        assert response.status_code == 200
+        # Verify audit_logger.query was called with tenant_id filter
+        mock_audit_logger.query.assert_called_once()
+        call_kwargs = mock_audit_logger.query.call_args[1]
+        # tenant_id parameter should match actor's tenant
+        assert call_kwargs.get("tenant_id") == self.TENANT_A, (
+            f"Expected tenant_id={self.TENANT_A} in query call, got {call_kwargs.get('tenant_id')}"
+        )
+        # Verify response only contains Tenant A logs
+        data = response.get_json()
+        logs = data.get("logs", [])
+        for log in logs:
+            assert log.get("tenant_id") == self.TENANT_A, (
+                f"Log from tenant {log.get('tenant_id')} leaked to Tenant A admin"
+            )
+
+
+# Apply pytest markers to new test class
+pytestmark_t1 = [
+    pytest.mark.integration,
+    pytest.mark.security,
+    pytest.mark.regression,
+    pytest.mark.issue(2783),
+]
+
+# Apply markers to all methods in TestTenantAdminResourceBoundary
+for attr_name in dir(TestTenantAdminResourceBoundary):
+    if attr_name.startswith("test_"):
+        method = getattr(TestTenantAdminResourceBoundary, attr_name)
+        setattr(method, "pytestmark", pytestmark_t1)

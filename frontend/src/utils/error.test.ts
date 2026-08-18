@@ -128,6 +128,18 @@ describe('Error Handling Utilities', () => {
       expect(isUnauthorizedError({ status: 200 })).toBe(false);
       expect(isUnauthorizedError({ status: 403 })).toBe(false);
     });
+
+    // Issue #2783: Boundary test - missing status field
+    it('should return false when status field is missing', () => {
+      expect(isUnauthorizedError({ message: 'Unauthorized' })).toBe(false);
+      expect(isUnauthorizedError({})).toBe(false);
+    });
+
+    // Issue #2783: Boundary test - status as string type
+    it('should return false when status is string type', () => {
+      expect(isUnauthorizedError({ status: '401' })).toBe(false);
+      expect(isUnauthorizedError({ status: 'unauthorized' })).toBe(false);
+    });
   });
 
   describe('isForbiddenError', () => {
@@ -138,6 +150,18 @@ describe('Error Handling Utilities', () => {
     it('should return false for other status codes', () => {
       expect(isForbiddenError({ status: 200 })).toBe(false);
       expect(isForbiddenError({ status: 401 })).toBe(false);
+    });
+
+    // Issue #2783: Boundary test - missing status field
+    it('should return false when status field is missing', () => {
+      expect(isForbiddenError({ message: 'Forbidden' })).toBe(false);
+      expect(isForbiddenError({})).toBe(false);
+    });
+
+    // Issue #2783: Boundary test - status as string type
+    it('should return false when status is string type', () => {
+      expect(isForbiddenError({ status: '403' })).toBe(false);
+      expect(isForbiddenError({ status: 'forbidden' })).toBe(false);
     });
   });
 
