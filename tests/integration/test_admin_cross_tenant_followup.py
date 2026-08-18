@@ -197,7 +197,7 @@ def _governance_request(
         patch("app.auth.decorators._load_user_from_token", return_value=actor),
         patch("app.routes.governance.quota_manager", quota_mgr or MagicMock()),
         patch("app.routes.governance.governance_repo", gov_repo),
-        patch("app.routes.governance.content_filter", content_filter),
+        patch("app.modules.governance.content_filter_singleton.get_content_filter", return_value=content_filter),
         patch("app.routes.governance.audit_logger"),
         patch(
             "app.repositories.user_repo.UserRepository", return_value=user_repo or _FakeUserRepo()
