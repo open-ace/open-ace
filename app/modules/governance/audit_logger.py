@@ -123,6 +123,12 @@ class AuditAction(Enum):
     ADMIN_CROSS_TENANT_ACCESS = "admin_cross_tenant_access"
     ADMIN_GLOBAL_SESSION_LIST = "admin_global_session_list"
 
+    # Tool account mapping actions (Issue #2759)
+    TOOL_ACCOUNT_MAPPING_CREATE = "tool_account_mapping_create"
+    TOOL_ACCOUNT_MAPPING_UPDATE = "tool_account_mapping_update"
+    TOOL_ACCOUNT_MAPPING_DELETE = "tool_account_mapping_delete"
+    TOOL_ACCOUNT_MAPPING_BATCH = "tool_account_mapping_batch"
+
 
 class AuditSeverity(Enum):
     """Severity levels for audit events."""
@@ -1131,6 +1137,33 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "dingtalk_config_delete",
                     "label": "DingTalk Config Delete",
                     "i18n_key": "actionDingtalkConfigDelete",
+                },
+            ],
+        },
+        "tool_account_mapping": {
+            "label": "Tool Account Mapping",
+            "i18n_key": "categoryToolAccountMapping",
+            "resource_types": ["tool_account_mapping"],
+            "actions": [
+                {
+                    "value": "tool_account_mapping_create",
+                    "label": "Tool Account Mapping Create",
+                    "i18n_key": "actionToolAccountMappingCreate",
+                },
+                {
+                    "value": "tool_account_mapping_update",
+                    "label": "Tool Account Mapping Update",
+                    "i18n_key": "actionToolAccountMappingUpdate",
+                },
+                {
+                    "value": "tool_account_mapping_delete",
+                    "label": "Tool Account Mapping Delete",
+                    "i18n_key": "actionToolAccountMappingDelete",
+                },
+                {
+                    "value": "tool_account_mapping_batch",
+                    "label": "Tool Account Mapping Batch",
+                    "i18n_key": "actionToolAccountMappingBatch",
                 },
             ],
         },
