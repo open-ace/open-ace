@@ -49,6 +49,11 @@ def sqlite_sm(tmp_path, monkeypatch):
 
 @pytest.fixture
 def manager(sqlite_sm):
+    # Reset ContentFilter singleton before mock to ensure clean state
+    from app.modules.governance.content_filter_singleton import _reset_content_filter
+
+    _reset_content_filter()
+
     RemoteSessionManager._assistant_text_buffer.clear()
     RemoteSessionManager._content_blocks_buffer.clear()
     mock_content_filter = MagicMock()

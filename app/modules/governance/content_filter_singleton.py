@@ -52,3 +52,14 @@ def invalidate_content_filter_cache() -> None:
         if _instance is not None:
             _instance.invalidate_cache()
             logger.debug("ContentFilter singleton cache invalidated")
+
+
+def _reset_content_filter() -> None:
+    """重置 ContentFilter 单例实例（仅用于测试）。
+
+    清除单例实例，下次调用 get_content_filter 时会创建新实例。
+    """
+    global _instance
+    with _lock:
+        _instance = None
+        logger.debug("ContentFilter singleton instance reset")
