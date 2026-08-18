@@ -551,6 +551,124 @@ GET /api/messages/count
 
 ---
 
+## 使用情况 API (`/api/usage`)
+
+### 今日请求统计
+
+```
+GET /api/usage/request/today
+```
+
+获取今日请求统计数据，包含总数和按工具维度的细分。
+
+**响应示例：**
+```json
+{
+  "date": "2026-08-19",
+  "total_requests": 150,
+  "by_tool": {
+    "claude": 100,
+    "codex": 30,
+    "qwen": 20
+  },
+  "_meta": {
+    "definition": "AI assistant response count (role='assistant')",
+    "source": "daily_messages table",
+    "note": "Counts completed user-to-AI interactions",
+    "status": "planned"
+  }
+}
+```
+
+**注意**：`_meta` 字段为计划字段，当前实现暂未返回。
+
+**字段说明：**
+- `date`: 统计日期（YYYY-MM-DD）
+- `total_requests`: 今日请求总数
+- `by_tool`: 按工具维度的请求统计
+- `_meta`: 统计口径元数据（计划字段）
+
+**统计口径说明：**
+- 定义：AI assistant response message count（`role='assistant'`）
+- 数据源：`daily_messages` 表
+- 变更历史：从 Issue #2752 开始统一使用 `daily_messages` 作为数据源
+
+---
+
+### 请求趋势
+
+```
+GET /api/usage/request/trend
+```
+
+获取请求趋势数据，按日期聚合。
+
+**查询参数：**
+- `start` - 开始日期（默认：30天前）
+- `end` - 结束日期（默认：今天）
+- `host` - 按主机名筛选
+
+---
+
+### 按工具统计请求
+
+```
+GET /api/usage/request/by-tool
+```
+
+获取按工具维度的请求统计。
+
+**查询参数：**
+- `start` - 开始日期（默认：30天前）
+- `end` - 结束日期（默认：今天）
+- `host` - 按主机名筛选
+
+---
+
+### 按用户统计请求
+
+```
+GET /api/usage/request/by-user
+```
+
+获取按用户维度的请求统计。
+
+**查询参数：**
+- `date` - 指定日期（默认：今天）
+- `host` - 按主机名筛选
+
+---
+
+### 用户请求趋势
+
+```
+GET /api/usage/request/user/<user_name>/trend
+```
+
+获取指定用户的请求趋势。
+
+**查询参数：**
+- `start` - 开始日期（默认：30天前）
+- `end` - 结束日期（默认：今天）
+- `host` - 按主机名筛选
+
+---
+
+### 月度请求统计
+
+```
+GET /api/usage/request/monthly
+```
+
+获取月度请求统计，按用户聚合。
+
+**查询参数：**
+- `year` - 年份（默认：当前年份）
+- `month` - 月份（默认：当前月份）
+- `host` - 按主机名筛选
+
+---
+
 ## 分析 API (`/api/analysis`)
 
 ### 批量分析
