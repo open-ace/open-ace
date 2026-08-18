@@ -391,9 +391,7 @@ def api_data_status():
             if is_postgresql():
                 # PostgreSQL: query latest timestamp from daily_messages table
                 try:
-                    result = db.fetch_one(
-                        'SELECT MAX("timestamp") as latest FROM daily_messages'
-                    )
+                    result = db.fetch_one('SELECT MAX("timestamp") as latest FROM daily_messages')
                     if result and result.get("latest"):
                         last_update = result["latest"].isoformat()
                 except Exception as e:
