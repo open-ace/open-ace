@@ -297,7 +297,6 @@ def api_check_quota():
 @admin_required
 def api_get_quota_alerts():
     """Get quota alerts."""
-    from app.repositories.user_repo import UserRepository
 
     unacknowledged_only = request.args.get("unacknowledged_only", default=False, type=bool)
     limit = request.args.get("limit", default=100, type=int)
