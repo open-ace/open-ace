@@ -25,6 +25,10 @@ of silently shipping an unpatched bundle.
 import sys
 
 BUNDLE = "/usr/lib/node_modules/qwen-code-webui/dist/static/assets/index-DO2hmkKX.js"
+INDEX_HTML = "/usr/lib/node_modules/qwen-code-webui/dist/static/index.html"
+
+# Cache-bust version for the bundle URL (increment when patch changes)
+CACHE_BUST = "v=local-perm-20260818"
 
 # Exact minified fragments for processStreamLine function (verified against qwen-code-webui@0.2.40).
 # Original: only handles claude_json, error, aborted
@@ -94,7 +98,43 @@ def main() -> int:
     print(
         "[patch-qwen-webui-local-permission] patched processStreamLine with control_request handling OK"
     )
-    return 0
+
+    # Cache-bust the bundle URL in index.html
+    index_ok = True
+    try:
+        with open(INDEX_HTML, encoding="utf-8") as f:
+            html = f.read()
+        basename = BUNDLE.rsplit("/", 1)[-1]
+        script_src = f'src="/assets/{basename}"'
+        busted_src = f'src="/assets/{basename}?{CACHE_BUST}"'
+        if busted_src in html:
+            print("[patch-qwen-webui-local-permission] index.html cache-bust already applied")
+        elif script_src in html:
+            html = html.replace(script_src, busted_src)
+            with open(INDEX_HTML, "w", encoding="utf-8") as f:
+                f.write(html)
+            print("[patch-qwen-webui-local-permission] index.html cache-bust applied")
+        else:
+            # Check for older cache-bust version
+            old_bust_pattern = f'src="/assets/{basename}?v=local-perm-'
+            idx = html.find(old_bust_pattern)
+            if idx >= 0:
+                end = html.find('"', idx)
+                html = html[:idx] + busted_src + html[end:]
+                with open(INDEX_HTML, "w", encoding="utf-8") as f:
+                    f.write(html)
+                print("[patch-qwen-webui-local-permission] index.html cache-bust bumped")
+            else:
+                print(
+                    f"[patch-qwen-webui-local-permission] script src {script_src!r} not found in index.html",
+                    file=sys.stderr,
+                )
+                index_ok = False
+    except OSError as exc:
+        print(f"[patch-qwen-webui-local-permission] cannot patch index.html: {exc}", file=sys.stderr)
+        index_ok = False
+
+    return 0 if index_ok else 1
 
 
 if __name__ == "__main__":
