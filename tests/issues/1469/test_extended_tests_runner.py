@@ -142,7 +142,7 @@ def test_frontend_build_check_fails_fast_when_dist_is_missing(tmp_path, monkeypa
     monkeypatch.setattr(run_extended_tests, "PROJECT_ROOT", tmp_path)
 
     with pytest.raises(RuntimeError, match="Frontend build is missing"):
-        run_extended_tests.ensure_frontend_built("critical")
+        run_extended_tests.ensure_frontend_built(True)
 
 
 def _write_q(tmp_path, obj):
@@ -207,6 +207,35 @@ def test_selection_json_uses_exact_targets_and_skips_standalone_for_pytest(tmp_p
 
     assert "tests/e2e/browser/test_login.py::test_login_page_loads" in cmd
     assert "standalone::tests/e2e/e2e_autonomous_models_error_playwright.py" not in cmd
+
+
+def test_execution_needs_server_uses_selected_item_capabilities(tmp_path, monkeypatch):
+    selection = tmp_path / "selection.json"
+    selection.write_text(
+        __import__("json").dumps(
+            {
+                "normal": ["standalone::tests/e2e/custom_standalone.py"],
+                "advisory": [],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    args = run_extended_tests.parse_args(
+        ["--category", "e2e", "--selection-json", str(selection), "--dry-run"]
+    )
+    monkeypatch.setattr(
+        run_extended_tests,
+        "inventory_entries_by_path",
+        lambda: {"tests/e2e/custom_standalone.py": {"capabilities": ["browser"]}},
+    )
+
+    assert (
+        run_extended_tests.execution_needs_server(
+            args, ["standalone::tests/e2e/custom_standalone.py"]
+        )
+        is False
+    )
 
 
 def test_cli_entrypoint_writes_envelope_with_selection_json(tmp_path):
@@ -280,6 +309,7 @@ def test_write_run_envelope_summarizes_attempts(tmp_path, monkeypatch):
         env={"HOME": str(tmp_path), "PLAYWRIGHT_BROWSERS_PATH": "/pw"},
         cmd=["pytest", "tests/e2e/browser/test_login.py"],
         selected_targets=["tests/e2e/browser/test_login.py"],
+        needs_server=True,
         server_handle=None,
         return_code=1,
         started_at="2026-08-18T01:00:00Z",
@@ -318,6 +348,7 @@ def test_write_run_envelope_includes_standalone_outcomes(tmp_path, monkeypatch):
         env={"HOME": str(tmp_path), "PLAYWRIGHT_BROWSERS_PATH": "/pw"},
         cmd=["pytest", "tests/e2e/browser/test_login.py"],
         selected_targets=["standalone::tests/e2e/e2e_autonomous_models_error_playwright.py"],
+        needs_server=False,
         server_handle=None,
         return_code=0,
         started_at="2026-08-18T01:00:00Z",
@@ -337,6 +368,7 @@ def test_write_run_envelope_includes_standalone_outcomes(tmp_path, monkeypatch):
     assert payload["outcomes"][0]["nodeid"] == (
         "standalone::tests/e2e/e2e_autonomous_models_error_playwright.py"
     )
+    assert payload["server"]["readiness_achieved"] is None
 
 
 def test_quarantine_loader_bad_schema_fails_closed(tmp_path):

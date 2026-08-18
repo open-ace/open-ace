@@ -146,6 +146,39 @@ def category_needs_server(category: str) -> bool:
     return category in SERVER_CATEGORIES
 
 
+def inventory_entries_by_path() -> dict[str, dict[str, object]]:
+    inventory_path = PROJECT_ROOT / "ci" / "e2e-inventory.json"
+    if not inventory_path.exists():
+        return {}
+    payload = json.loads(inventory_path.read_text(encoding="utf-8"))
+    entries = payload.get("entries") or []
+    return {
+        str(entry.get("path")): entry
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("path")
+    }
+
+
+def target_requires_server(target: str, inventory_by_path: dict[str, dict[str, object]]) -> bool:
+    if target.startswith("standalone::"):
+        path = _standalone_script_path(target)
+    else:
+        path = target_path(target)
+    entry = inventory_by_path.get(path)
+    if not entry:
+        return False
+    return "server" in (entry.get("capabilities") or [])
+
+
+def execution_needs_server(args: argparse.Namespace, targets: list[str]) -> bool:
+    if not args.selection_json:
+        return category_needs_server(args.category)
+    inventory_by_path = inventory_entries_by_path()
+    if not inventory_by_path:
+        return category_needs_server(args.category)
+    return any(target_requires_server(target, inventory_by_path) for target in targets)
+
+
 def parse_issue_numbers(args: argparse.Namespace) -> list[str]:
     numbers: list[str] = []
     numbers.extend(args.issues)
@@ -423,8 +456,8 @@ def frontend_dist_index() -> Path:
     return PROJECT_ROOT / "static" / "js" / "dist" / "index.html"
 
 
-def ensure_frontend_built(category: str) -> None:
-    if not category_needs_server(category):
+def ensure_frontend_built(needs_server: bool) -> None:
+    if not needs_server:
         return
     if frontend_dist_index().exists():
         return
@@ -549,10 +582,12 @@ def configure_server_address(env: dict[str, str], base_url: str) -> None:
     config_path.write_text(json.dumps(config, indent=2) + "\n")
 
 
-def start_server_if_needed(args: argparse.Namespace, env: dict[str, str]) -> ServerHandle | None:
-    if not category_needs_server(args.category) or args.server == "skip":
+def start_server_if_needed(
+    args: argparse.Namespace, env: dict[str, str], needs_server: bool
+) -> ServerHandle | None:
+    if not needs_server or args.server == "skip":
         return None
-    ensure_frontend_built(args.category)
+    ensure_frontend_built(needs_server)
     if is_healthy(args.base_url):
         print(f"Reusing healthy Open ACE server at {args.base_url}")
         return None
@@ -801,6 +836,7 @@ def _write_run_envelope(
     env: dict[str, str],
     cmd: list[str],
     selected_targets: list[str],
+    needs_server: bool,
     server_handle: ServerHandle | None,
     return_code: int,
     started_at: str,
@@ -819,7 +855,7 @@ def _write_run_envelope(
     server_ready = None
     server_log = None
     exit_info = {"code": None, "abnormal": False}
-    if category_needs_server(args.category):
+    if needs_server:
         server_ready = server_handle is not None or is_healthy(args.base_url)
     if server_handle is not None:
         server_log = str(server_handle.log_path)
@@ -887,15 +923,17 @@ def main(argv: list[str] | None = None) -> int:
     return_code = 1
     error_message: str | None = None
     started_at = _utc_now()
+    needs_server = category_needs_server(args.category)
 
     try:
         selected_targets = resolved_targets(args)
+        needs_server = execution_needs_server(args, selected_targets)
         cmd = build_pytest_command(args)
         print("Pytest command:")
         print(" ".join(cmd))
         if args.dry_run:
             return 0
-        server_handle = start_server_if_needed(args, env)
+        server_handle = start_server_if_needed(args, env, needs_server)
         return_code = 0
         if cmd:
             return_code = subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=False).returncode
@@ -920,6 +958,7 @@ def main(argv: list[str] | None = None) -> int:
             env=env,
             cmd=cmd,
             selected_targets=selected_targets,
+            needs_server=needs_server,
             server_handle=server_handle,
             return_code=return_code,
             started_at=started_at,

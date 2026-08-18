@@ -400,6 +400,7 @@ def compare_selection_run(
         seen_counts[nodeid] = seen_counts.get(nodeid, 0) + 1
     duplicates = sorted(nodeid for nodeid, count in seen_counts.items() if count > 1)
     if duplicates:
+        diff["duplicates"] = duplicates
         for nodeid in duplicates:
             diff["invalid"][nodeid] = f"duplicate observed results ({seen_counts[nodeid]})"
         diff["verdict_exit_code"] = 1

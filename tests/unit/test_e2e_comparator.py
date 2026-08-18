@@ -411,4 +411,5 @@ class TestComparatorCli:
         )
 
         assert diff["verdict_exit_code"] == 1
+        assert diff["duplicates"] == ["a"]
         assert diff["invalid"]["a"] == "duplicate observed results (2)"
