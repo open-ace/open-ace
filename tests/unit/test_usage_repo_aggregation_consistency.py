@@ -221,18 +221,25 @@ class TestUsageRepoAggregationConsistency:
             assert tool_name == normalize_tool_name(tool_name)
 
     def test_tool_name_normalization_in_aggregation(self, tmp_db):
-        """Test that tool name variants are correctly normalized and merged."""
+        """Test that tool name variants are correctly normalized and merged.
+
+        Verifies that known aliases are merged into canonical names:
+        - "qwen-code" and "qwen-code-cli" → "qwen"
+        - Case variations (e.g., "QWEN") → "qwen"
+        """
         today = datetime.now().strftime("%Y-%m-%d")
 
-        # Insert messages with tool name variants
-        # According to normalize_tool_name, these should all map to 'qwen'
-        # - "qwen-code" is an alias for "qwen"
-        # - "QWEN" (uppercase) normalizes to "qwen" (lowercase)
-        # - "qwen-code-cli" is another alias for "qwen"
+        # Verify normalization assumptions before using variants
+        # These are the actual aliases from app/utils/tool_names.py
+        assert normalize_tool_name("qwen-code") == "qwen"
+        assert normalize_tool_name("qwen-code-cli") == "qwen"
+        assert normalize_tool_name("QWEN") == "qwen"
+
+        # Insert messages with tool name variants (known aliases)
         tool_variants = [
-            ("qwen-code", 10),
-            ("QWEN", 5),
-            ("qwen-code-cli", 3),
+            ("qwen-code", 10),  # Alias for "qwen"
+            ("QWEN", 5),  # Case variation
+            ("qwen-code-cli", 3),  # Another alias for "qwen"
         ]
 
         for tool_name, count in tool_variants:
@@ -257,30 +264,31 @@ class TestUsageRepoAggregationConsistency:
         assert stats["total_requests"] == 18
 
     def test_user_stats_sum_equals_total(self, tmp_db):
-        """Test that sum of user requests equals total_requests."""
+        """Test that sum of user requests equals total_requests.
+
+        This test verifies the core aggregation consistency:
+        sum(by_user.requests) == total_requests
+
+        Issue #2774 requirement: verify user statistics consistency.
+        """
         today = datetime.now().strftime("%Y-%m-%d")
 
-        # Create test users
-        tmp_db.execute(
-            """
+        # Create test users with correct system_account matching sender_name format
+        # sender_name format: {system_account}-{hostname}-{tool}
+        tmp_db.execute("""
             INSERT INTO users (id, username, system_account, tenant_id)
             VALUES (1, 'alice', 'alice-host', 1)
-            """
-        )
-        tmp_db.execute(
-            """
+            """)
+        tmp_db.execute("""
             INSERT INTO users (id, username, system_account, tenant_id)
             VALUES (2, 'bob', 'bob-host', 1)
-            """
-        )
+            """)
 
         # Create tenant
-        tmp_db.execute(
-            """
+        tmp_db.execute("""
             INSERT INTO tenants (id, name, slug, quota)
             VALUES (1, 'Test Tenant', 'test-tenant', '{}')
-            """
-        )
+            """)
 
         # Insert messages for alice (4 messages)
         for i in range(4):
@@ -314,14 +322,29 @@ class TestUsageRepoAggregationConsistency:
         # Verify user stats are returned
         assert len(user_stats) > 0
 
-        # Sum user requests
-        total_from_users = sum(user["requests"] for user in user_stats)
+        # Aggregate requests by user (since get_request_stats_by_user returns per-user-per-tool)
+        # Note: get_request_stats_by_user returns one row per user per tool
+        user_total_requests = {}
+        for stat in user_stats:
+            user = stat["user"]
+            requests = stat["requests"]
+            user_total_requests[user] = user_total_requests.get(user, 0) + requests
 
-        # Note: The sum may not equal total_requests exactly due to the complex JOIN logic
-        # and potential filtering of 'unknown' users. We verify that both are reasonable.
-        assert total_from_users > 0
-        assert today_stats["total_requests"] > 0
+        # Sum all user requests
+        total_from_users = sum(user_total_requests.values())
+
+        # CORE ASSERTION: Verify aggregation consistency (Issue #2774 requirement)
+        # All assistant messages should be accounted for in user statistics
+        assert total_from_users == today_stats["total_requests"], (
+            f"User stats sum ({total_from_users}) != total requests ({today_stats['total_requests']}), "
+            f"users: {user_total_requests}"
+        )
 
         # Verify specific users are present
-        usernames = [stat["user"] for stat in user_stats]
-        assert "alice" in usernames or "bob" in usernames
+        usernames = list(user_total_requests.keys())
+        assert "alice" in usernames
+        assert "bob" in usernames
+
+        # Verify individual user counts are correct
+        assert user_total_requests["alice"] == 4
+        assert user_total_requests["bob"] == 2
