@@ -131,7 +131,9 @@ def main() -> int:
                 )
                 index_ok = False
     except OSError as exc:
-        print(f"[patch-qwen-webui-local-permission] cannot patch index.html: {exc}", file=sys.stderr)
+        print(
+            f"[patch-qwen-webui-local-permission] cannot patch index.html: {exc}", file=sys.stderr
+        )
         index_ok = False
 
     return 0 if index_ok else 1
