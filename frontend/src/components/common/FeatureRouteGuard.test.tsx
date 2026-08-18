@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@/test/utils';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { FeatureRouteGuard } from './FeatureRouteGuard';
-import { useAppStore } from '@/store';
+import { useAppStore, AppState } from '@/store';
 
 // Mock the useAppStore hook and selectors
 vi.mock('@/store', async (importOriginal) => {
@@ -15,6 +15,11 @@ vi.mock('@/store', async (importOriginal) => {
     ...actual,
     useAppStore: vi.fn(),
   };
+});
+
+// Helper to create mock store state
+const createMockStoreState = (configLoaded: boolean): Partial<AppState> => ({
+  configLoaded,
 });
 
 describe('FeatureRouteGuard', () => {
@@ -26,9 +31,9 @@ describe('FeatureRouteGuard', () => {
     it('should show loading state when configLoaded is false', () => {
       vi.mocked(useAppStore).mockImplementation((selector) => {
         if (typeof selector === 'function') {
-          return selector({ configLoaded: false } as any);
+          return selector(createMockStoreState(false) as AppState);
         }
-        return { configLoaded: false } as any;
+        return createMockStoreState(false) as AppState;
       });
 
       render(
@@ -47,9 +52,9 @@ describe('FeatureRouteGuard', () => {
     it('should render children when feature is enabled', () => {
       vi.mocked(useAppStore).mockImplementation((selector) => {
         if (typeof selector === 'function') {
-          return selector({ configLoaded: true } as any);
+          return selector(createMockStoreState(true) as AppState);
         }
-        return { configLoaded: true } as any;
+        return createMockStoreState(true) as AppState;
       });
 
       render(
@@ -66,9 +71,9 @@ describe('FeatureRouteGuard', () => {
     it('should redirect when feature is disabled', async () => {
       vi.mocked(useAppStore).mockImplementation((selector) => {
         if (typeof selector === 'function') {
-          return selector({ configLoaded: true } as any);
+          return selector(createMockStoreState(true) as AppState);
         }
-        return { configLoaded: true } as any;
+        return createMockStoreState(true) as AppState;
       });
 
       render(
@@ -99,9 +104,9 @@ describe('FeatureRouteGuard', () => {
     it('should handle browser back button correctly', async () => {
       vi.mocked(useAppStore).mockImplementation((selector) => {
         if (typeof selector === 'function') {
-          return selector({ configLoaded: true } as any);
+          return selector(createMockStoreState(true) as AppState);
         }
-        return { configLoaded: true } as any;
+        return createMockStoreState(true) as AppState;
       });
 
       render(

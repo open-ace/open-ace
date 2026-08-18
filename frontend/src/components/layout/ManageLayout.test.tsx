@@ -3,9 +3,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@/test/utils';
+import { render, screen } from '@/test/utils';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
-import { useAuth } from '@/hooks';
+import { useAuth, AuthResult } from '@/hooks';
 import { useAppStore } from '@/store';
 import { ManageLayout } from './ManageLayout';
 
@@ -16,6 +16,15 @@ vi.mock('@/hooks', async (importOriginal) => {
     ...actual,
     useAuth: vi.fn(),
   };
+});
+
+// Helper to create mock auth result
+const createMockAuthResult = (
+  user: { id: string; username: string; role: string; must_change_password: boolean } | null
+): AuthResult => ({
+  user,
+  isLoading: false,
+  isAuthenticated: !!user,
 });
 
 describe('ManageLayout', () => {
@@ -37,11 +46,14 @@ describe('ManageLayout', () => {
 
   describe('navigation rendering', () => {
     it('should render dashboard navigation item', async () => {
-      vi.mocked(useAuth).mockReturnValue({
-        user: { id: '1', username: 'admin', role: 'admin', must_change_password: false },
-        isLoading: false,
-        isAuthenticated: true,
-      } as any);
+      vi.mocked(useAuth).mockReturnValue(
+        createMockAuthResult({
+          id: '1',
+          username: 'admin',
+          role: 'admin',
+          must_change_password: false,
+        })
+      );
 
       render(
         <MemoryRouter initialEntries={['/manage/dashboard']}>
@@ -60,11 +72,14 @@ describe('ManageLayout', () => {
   describe('feature flag filtering', () => {
     it('should hide model-gateway navigation item when modelGatewayEnabled is false', async () => {
       useAppStore.setState({ modelGatewayEnabled: false });
-      vi.mocked(useAuth).mockReturnValue({
-        user: { id: '1', username: 'admin', role: 'admin', must_change_password: false },
-        isLoading: false,
-        isAuthenticated: true,
-      } as any);
+      vi.mocked(useAuth).mockReturnValue(
+        createMockAuthResult({
+          id: '1',
+          username: 'admin',
+          role: 'admin',
+          must_change_password: false,
+        })
+      );
 
       render(
         <MemoryRouter initialEntries={['/manage/dashboard']}>
@@ -96,11 +111,7 @@ describe('ManageLayout', () => {
       });
 
       // Mock useAuth to return admin user
-      vi.mocked(useAuth).mockReturnValue({
-        user: adminUser,
-        isLoading: false,
-        isAuthenticated: true,
-      } as any);
+      vi.mocked(useAuth).mockReturnValue(createMockAuthResult(adminUser));
 
       render(
         <MemoryRouter initialEntries={['/manage/dashboard']}>
@@ -122,11 +133,14 @@ describe('ManageLayout', () => {
   describe('admin filtering', () => {
     it('should disable admin-only items for non-admin users', async () => {
       useAppStore.setState({ modelGatewayEnabled: false });
-      vi.mocked(useAuth).mockReturnValue({
-        user: { id: '1', username: 'user', role: 'user', must_change_password: false },
-        isLoading: false,
-        isAuthenticated: true,
-      } as any);
+      vi.mocked(useAuth).mockReturnValue(
+        createMockAuthResult({
+          id: '1',
+          username: 'user',
+          role: 'user',
+          must_change_password: false,
+        })
+      );
 
       render(
         <MemoryRouter initialEntries={['/manage/dashboard']}>
