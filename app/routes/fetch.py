@@ -401,15 +401,20 @@ def api_data_status():
                 last_update = datetime.fromtimestamp(os.path.getmtime(DB_PATH)).isoformat()
 
         # Get data counts
-        from app.repositories.message_repo import MessageRepository
-        from app.repositories.usage_repo import UsageRepository
+        tools = []
+        hosts = []
+        senders = []
 
-        usage_repo = UsageRepository()
-        message_repo = MessageRepository()
+        if db_exists:
+            from app.repositories.message_repo import MessageRepository
+            from app.repositories.usage_repo import UsageRepository
 
-        tools = usage_repo.get_all_tools()
-        hosts = usage_repo.get_all_hosts()
-        senders = message_repo.get_all_senders()
+            usage_repo = UsageRepository()
+            message_repo = MessageRepository()
+
+            tools = usage_repo.get_all_tools()
+            hosts = usage_repo.get_all_hosts()
+            senders = message_repo.get_all_senders()
 
         # Get date range
         today = get_today()
