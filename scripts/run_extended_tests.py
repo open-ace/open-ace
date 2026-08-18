@@ -826,9 +826,7 @@ def _write_run_envelope(
         exit_code = server_handle.process.poll()
         exit_info["code"] = exit_code
         exit_info["abnormal"] = (
-            exit_code is not None
-            and not server_handle.stopped_by_runner
-            and exit_code != 0
+            exit_code is not None and not server_handle.stopped_by_runner and exit_code != 0
         )
     attempts_records = _load_attempt_records(args.e2e_attempts) if args.e2e_attempts else []
     server_evidence = {
@@ -870,7 +868,9 @@ def _write_run_envelope(
         "server": server_evidence,
         "outcomes": outcomes,
     }
-    envelope_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    envelope_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

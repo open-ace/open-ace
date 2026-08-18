@@ -416,9 +416,9 @@ def compare_selection_run(
         diff["invalid"]["__closure__"] = "; ".join(selection["closure_errors"])
         diff["verdict_exit_code"] = 1
     if selection.get("invalid"):
-        diff["invalid"]["__selection__"] = (
-            f"{len(selection['invalid'])} invalid item(s) selected before execution"
-        )
+        diff["invalid"][
+            "__selection__"
+        ] = f"{len(selection['invalid'])} invalid item(s) selected before execution"
         diff["verdict_exit_code"] = 1
     return diff, budget_errors
 
@@ -427,7 +427,9 @@ def run_cli(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    compare = sub.add_parser("compare", help="compare one full-E2E envelope against the nightly selection")
+    compare = sub.add_parser(
+        "compare", help="compare one full-E2E envelope against the nightly selection"
+    )
     compare.add_argument("--selection", type=Path, required=True)
     compare.add_argument("--envelope", type=Path, required=True)
     compare.add_argument("--state", type=Path, default=DEFAULT_STATE)
@@ -455,7 +457,9 @@ def run_cli(argv: list[str] | None = None) -> int:
         "governance_report": governance_report,
     }
     args.json_output.parent.mkdir(parents=True, exist_ok=True)
-    args.json_output.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    args.json_output.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     args.markdown_output.write_text(
         _render_markdown(selection, envelope, diff, budget_errors, governance_report) + "\n",
         encoding="utf-8",

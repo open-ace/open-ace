@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -372,6 +373,51 @@ class TestWriter:
         state = common.load_artifact(state_path, "openace-e2e-state")
         assert state["entries"]["tests/e2e/x.py::passing"]["debt"] == "stable-pass"
         assert state["entries"]["tests/e2e/x.py::failing"]["debt"] == "deterministic-known-fail"
+
+    def test_classify_cli_entrypoint_runs_as_script(self, tmp_path):
+        run_files = []
+        for idx in range(3):
+            path = tmp_path / f"run{idx}.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "commit_sha": "s",
+                        "contract_key": "k",
+                        "outcomes": [
+                            {
+                                "nodeid": "tests/e2e/x.py::passing",
+                                "first_attempt_outcome": "pass",
+                                "category": "assertion_failure",
+                                "fingerprint": None,
+                            }
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            run_files.append(str(path))
+        state_path = tmp_path / "state.json"
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "scripts/e2e/governance.py",
+                "classify",
+                "--runs",
+                *run_files,
+                "--state",
+                str(state_path),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert completed.returncode == 0, completed.stderr
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+        assert payload["entries"]["tests/e2e/x.py::passing"]["debt"] == "stable-pass"
 
     def test_remove_deletes_from_both_artifacts(self, tmp_path):
         state_path = tmp_path / "state.json"

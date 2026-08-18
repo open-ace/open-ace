@@ -438,7 +438,10 @@ def cmd_classify(args: argparse.Namespace) -> int:
     Refuses (infra count must be 0) when any run carries an
     infrastructure_error classification - infra is never legalized as debt.
     """
-    from .comparator import classify_three_way
+    try:
+        from .comparator import classify_three_way
+    except ImportError:  # pragma: no cover - exercised via CLI
+        from comparator import classify_three_way  # type: ignore[no-redef]
 
     runs = [json.loads(Path(p).read_text(encoding="utf-8")) for p in args.runs]
     errors = validate_reference_runs(runs)
