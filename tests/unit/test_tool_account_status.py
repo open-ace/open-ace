@@ -109,7 +109,7 @@ class TestGetByStatus:
             }
         ]
 
-        with patch("app.repositories.user_tool_account_repo.is_postgresql", return_value=False):
+        with patch("app.repositories.database.is_postgresql", return_value=False):
             result = self.repo.get_by_status("pending")
 
         assert len(result) == 1
@@ -126,7 +126,7 @@ class TestGetByStatus:
         """Test get_by_status with tenant filter."""
         self.db.fetch_all.return_value = []
 
-        with patch("app.repositories.user_tool_account_repo.is_postgresql", return_value=False):
+        with patch("app.repositories.database.is_postgresql", return_value=False):
             result = self.repo.get_by_status("pending", tenant_id=1)
 
         assert result == []
@@ -173,7 +173,7 @@ class TestGetPendingForActivation:
             }
         ]
 
-        with patch("app.repositories.user_tool_account_repo.is_postgresql", return_value=False):
+        with patch("app.repositories.database.is_postgresql", return_value=False):
             result = self.repo.get_pending_for_activation(["alice-macbook-qwen"])
 
         assert len(result) == 1
@@ -192,7 +192,7 @@ class TestGetPendingForActivation:
         """Test with multiple sender_names."""
         self.db.fetch_all.return_value = []
 
-        with patch("app.repositories.user_tool_account_repo.is_postgresql", return_value=False):
+        with patch("app.repositories.database.is_postgresql", return_value=False):
             result = self.repo.get_pending_for_activation(["sender1", "sender2"])
 
         assert result == []
@@ -200,7 +200,9 @@ class TestGetPendingForActivation:
         # Verify query uses IN clause
         call_args = self.db.fetch_all.call_args
         query = call_args[0][0]
-        assert "IN (?,?,)" in query.replace("?, ?", "?,?")
+        # Normalize query by removing extra spaces
+        normalized_query = query.replace("?, ?", "?,?")
+        assert "IN (?,?)" in normalized_query
 
 
 class TestUpdateStatusWithVersion:
@@ -230,7 +232,7 @@ class TestUpdateStatusWithVersion:
             "version": 2,
         }
 
-        with patch("app.repositories.user_tool_account_repo.is_postgresql", return_value=False):
+        with patch("app.repositories.database.is_postgresql", return_value=False):
             result = self.repo.update_status_with_version(1, "active", expected_version=1)
 
         assert result is not None
@@ -240,7 +242,7 @@ class TestUpdateStatusWithVersion:
         """Test status update fails when version doesn't match."""
         self.db.fetch_one.return_value = None  # No row returned due to version mismatch
 
-        with patch("app.repositories.user_tool_account_repo.is_postgresql", return_value=False):
+        with patch("app.repositories.database.is_postgresql", return_value=False):
             result = self.repo.update_status_with_version(1, "active", expected_version=999)
 
         assert result is None
@@ -273,7 +275,7 @@ class TestActivateMapping:
             "version": 2,
         }
 
-        with patch("app.repositories.user_tool_account_repo.is_postgresql", return_value=False):
+        with patch("app.repositories.database.is_postgresql", return_value=False):
             result = self.repo.activate_mapping(1, expected_version=1)
 
         assert result is not None
@@ -353,7 +355,7 @@ class TestCreateOrIgnore:
             "version": 1,
         }
 
-        with patch("app.repositories.user_tool_account_repo.is_postgresql", return_value=False):
+        with patch("app.repositories.database.is_postgresql", return_value=False):
             result = self.repo.create_or_ignore(
                 user_id=1,
                 tool_account="test-account",
@@ -372,7 +374,7 @@ class TestCreateOrIgnore:
         self.db.execute.side_effect = Exception("UNIQUE constraint failed")
         self.db.fetch_one.return_value = None
 
-        with patch("app.repositories.user_tool_account_repo.is_postgresql", return_value=False):
+        with patch("app.repositories.database.is_postgresql", return_value=False):
             result = self.repo.create_or_ignore(
                 user_id=1,
                 tool_account="existing-account",
