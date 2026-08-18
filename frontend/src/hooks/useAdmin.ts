@@ -3,7 +3,7 @@
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminApi, governanceApi, complianceApi, tenantApi } from '@/api';
+import { adminApi, governanceApi, complianceApi, tenantApi, policyApi } from '@/api';
 import {
   aiAgentSettingsApi,
   type AiAgentSettings,
@@ -17,6 +17,7 @@ import type {
   CreateFilterRuleRequest,
   SecuritySettings,
   AuditThresholds,
+  CreatePolicyRuleRequest,
 } from '@/api';
 
 // User Management Hooks
@@ -248,5 +249,56 @@ export function useValidateGithubToken() {
   return useMutation({
     mutationFn: (payload: TokenValidationRequest) =>
       aiAgentSettingsApi.validateGithubToken(payload),
+  });
+}
+
+// Policy Rules Hooks
+export function usePolicyRules(includeDisabled: boolean = false) {
+  return useQuery({
+    queryKey: ['admin', 'policy-rules', includeDisabled],
+    queryFn: () => policyApi.getRules(includeDisabled),
+  });
+}
+
+export function useCreatePolicyRule() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: CreatePolicyRuleRequest) => policyApi.createRule(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'policy-rules'] });
+    },
+  });
+}
+
+export function useUpdatePolicyRule() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ ruleKey, data }: { ruleKey: string; data: CreatePolicyRuleRequest }) =>
+      policyApi.updateRule(ruleKey, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'policy-rules'] });
+    },
+  });
+}
+
+export function useTogglePolicyRule() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ ruleId, enabled }: { ruleId: number; enabled: boolean }) =>
+      policyApi.toggleRule(ruleId, enabled),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'policy-rules'] });
+    },
+  });
+}
+
+export function usePolicyDecisions(sessionId: string | null, limit: number = 100) {
+  return useQuery({
+    queryKey: ['admin', 'policy-decisions', sessionId, limit],
+    queryFn: () => policyApi.getDecisions(sessionId!, limit),
+    enabled: !!sessionId,
   });
 }

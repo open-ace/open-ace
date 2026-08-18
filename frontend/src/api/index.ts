@@ -164,3 +164,14 @@ export type { ModelGatewayConfig, ModelGatewayTestResult } from './modelGateway'
 // system settings
 export { systemApi } from './system';
 export type { SystemSettings } from './system';
+// policy
+export { policyApi, PolicyDisabledError } from './policy';
+export type {
+  PolicyType,
+  PatternType,
+  PolicyEffect,
+  DecisionType,
+  PolicyRule,
+  PolicyDecision,
+  CreatePolicyRuleRequest,
+} from './policy';

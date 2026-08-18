@@ -154,6 +154,11 @@ const ForceChangePasswordModal = lazy(() =>
     default: m.ForceChangePasswordModal,
   }))
 );
+const PolicyRulesManagement = lazy(() =>
+  import('@/components/features/management/PolicyRulesManagement').then((m) => ({
+    default: m.PolicyRulesManagement,
+  }))
+);
 
 // Page loading fallback with skeleton
 const PageLoader: React.FC = () => {
@@ -321,6 +326,23 @@ const WorkRoutes: React.FC = () => {
 };
 
 // Manage Mode Routes
+
+// Policy Route Guard - waits for config and checks feature flag
+const PolicyRouteGuard: React.FC = () => {
+  const policyEnabled = useAppStore((state) => state.policyEnabled);
+  const configLoaded = useAppStore((state) => state.configLoaded);
+
+  if (!configLoaded) {
+    return <PageLoader />;
+  }
+
+  if (!policyEnabled) {
+    return <Navigate to="/manage/dashboard" replace />;
+  }
+
+  return <PolicyRulesManagement />;
+};
+
 const ManageRoutes: React.FC = () => {
   return (
     <ManageLayout>
@@ -343,6 +365,7 @@ const ManageRoutes: React.FC = () => {
           <Route path="quota" element={<QuotaAlerts />} />
           <Route path="compliance" element={<ComplianceMgmt />} />
           <Route path="security" element={<SecurityCenter />} />
+          <Route path="policy/rules" element={<PolicyRouteGuard />} />
 
           {/* Users */}
           <Route path="users" element={<UserManagement />} />
