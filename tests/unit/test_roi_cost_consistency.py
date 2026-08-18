@@ -102,9 +102,9 @@ class TestROICostConsistency:
             # total = 2.5
             expected_total = 1.0 + 1.5
 
-            assert abs(roi_metrics.total_cost - expected_total) < 0.01, (
-                f"ROI total_cost {roi_metrics.total_cost} != expected {expected_total}"
-            )
+            assert (
+                abs(roi_metrics.total_cost - expected_total) < 0.01
+            ), f"ROI total_cost {roi_metrics.total_cost} != expected {expected_total}"
 
     def test_daily_costs_uses_actual_model_pricing(self):
         """Verify: get_daily_costs uses actual model pricing, not default.
@@ -230,9 +230,9 @@ class TestROICostConsistency:
         expected_cost = 0.025
 
         assert len(daily_costs) == 1
-        assert abs(daily_costs[0]["total_cost"] - expected_cost) < 0.001, (
-            f"Fallback cost {daily_costs[0]['total_cost']} != expected {expected_cost}"
-        )
+        assert (
+            abs(daily_costs[0]["total_cost"] - expected_cost) < 0.001
+        ), f"Fallback cost {daily_costs[0]['total_cost']} != expected {expected_cost}"
 
 
 class TestCostOptimizerPricing:
