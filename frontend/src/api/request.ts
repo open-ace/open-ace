@@ -5,10 +5,22 @@
 import { apiClient } from './client';
 
 // Types
+/**
+ * Metadata for request statistics API responses
+ * Issue #2773: Added _meta field to document statistics definition
+ */
+export interface RequestStatsMeta {
+  definition: string;
+  source: string;
+  note: string;
+  status: string;
+}
+
 export interface RequestTodayStats {
   date: string;
   total_requests: number;
   by_tool: Record<string, number>;
+  _meta?: RequestStatsMeta; // Optional field for backward compatibility
 }
 
 export interface RequestTrendData {
