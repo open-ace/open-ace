@@ -159,24 +159,30 @@ def inventory_entries_by_path() -> dict[str, dict[str, object]]:
     }
 
 
-def target_requires_server(target: str, inventory_by_path: dict[str, dict[str, object]]) -> bool:
+def target_requires_server(
+    target: str, inventory_by_path: dict[str, dict[str, object]]
+) -> bool | None:
     if target.startswith("standalone::"):
         path = _standalone_script_path(target)
     else:
         path = target_path(target)
     entry = inventory_by_path.get(path)
     if not entry:
-        return False
+        return None
     return "server" in (entry.get("capabilities") or [])
 
 
 def execution_needs_server(args: argparse.Namespace, targets: list[str]) -> bool:
+    default_needs_server = category_needs_server(args.category)
     if not args.selection_json:
-        return category_needs_server(args.category)
+        return default_needs_server
     inventory_by_path = inventory_entries_by_path()
     if not inventory_by_path:
-        return category_needs_server(args.category)
-    return any(target_requires_server(target, inventory_by_path) for target in targets)
+        return default_needs_server
+    resolved = [target_requires_server(target, inventory_by_path) for target in targets]
+    if any(value is None for value in resolved):
+        return default_needs_server
+    return any(bool(value) for value in resolved)
 
 
 def parse_issue_numbers(args: argparse.Namespace) -> list[str]:

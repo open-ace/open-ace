@@ -238,6 +238,31 @@ def test_execution_needs_server_uses_selected_item_capabilities(tmp_path, monkey
     )
 
 
+def test_execution_needs_server_falls_back_to_category_for_unknown_targets(tmp_path, monkeypatch):
+    selection = tmp_path / "selection.json"
+    selection.write_text(
+        __import__("json").dumps(
+            {
+                "normal": ["tests/e2e/browser/test_login.py::test_login_page_loads"],
+                "advisory": [],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    args = run_extended_tests.parse_args(
+        ["--category", "e2e", "--selection-json", str(selection), "--dry-run"]
+    )
+    monkeypatch.setattr(run_extended_tests, "inventory_entries_by_path", lambda: {})
+
+    assert (
+        run_extended_tests.execution_needs_server(
+            args, ["tests/e2e/browser/test_login.py::test_login_page_loads"]
+        )
+        is True
+    )
+
+
 def test_cli_entrypoint_writes_envelope_with_selection_json(tmp_path):
     selection = tmp_path / "selection.json"
     selection.write_text(
