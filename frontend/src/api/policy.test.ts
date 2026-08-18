@@ -87,7 +87,12 @@ describe('policyApi', () => {
       });
 
       await expect(
-        policyApi.createRule({ rule_key: 'test', name: 'Test', policy_type: 'model', effect: 'allow' })
+        policyApi.createRule({
+          rule_key: 'test',
+          name: 'Test',
+          policy_type: 'model',
+          effect: 'allow',
+        })
       ).rejects.toThrow(PolicyDisabledError);
     });
   });
@@ -155,9 +160,7 @@ describe('policyApi', () => {
 
   describe('getDecisions', () => {
     it('should fetch decisions by session ID', async () => {
-      const mockDecisions = [
-        { id: 1, decision_id: 'd1', decision: 'allow' },
-      ];
+      const mockDecisions = [{ id: 1, decision_id: 'd1', decision: 'allow' }];
 
       vi.mocked(apiClient.get).mockResolvedValueOnce({
         success: true,
@@ -174,11 +177,17 @@ describe('policyApi', () => {
     });
 
     it('should clamp limit to valid range', async () => {
-      vi.mocked(apiClient.get).mockResolvedValueOnce({
-        success: true,
-        decisions: [],
-        total: 0,
-      });
+      vi.mocked(apiClient.get)
+        .mockResolvedValueOnce({
+          success: true,
+          decisions: [],
+          total: 0,
+        })
+        .mockResolvedValueOnce({
+          success: true,
+          decisions: [],
+          total: 0,
+        });
 
       await policyApi.getDecisions('session-123', 5000);
       expect(apiClient.get).toHaveBeenCalledWith('/api/policy/decisions', {

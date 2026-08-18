@@ -386,6 +386,7 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
                   {section.items.map((item) => {
                     const isAdminCheck = item.adminOnly && !isAdmin(user);
                     const isFeatureDisabled = item.featureFlag === 'policy' && !policyEnabled;
+                    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
                     const isDisabled = isAdminCheck || isFeatureDisabled;
                     return (
                       <li key={item.id}>

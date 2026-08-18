@@ -201,10 +201,7 @@ export const policyApi = {
     if (includeDisabled) {
       params.include_disabled = 'true';
     }
-    const response = await apiClient.get<PolicyRulesListResponse>(
-      '/api/policy/rules',
-      params
-    );
+    const response = await apiClient.get<PolicyRulesListResponse>('/api/policy/rules', params);
     checkDisabled(response);
     return response.rules ?? [];
   },
@@ -262,10 +259,7 @@ export const policyApi = {
       session_id: sessionId,
       limit: String(Math.min(Math.max(limit, 1), 1000)),
     };
-    const response = await apiClient.get<PolicyDecisionsResponse>(
-      '/api/policy/decisions',
-      params
-    );
+    const response = await apiClient.get<PolicyDecisionsResponse>('/api/policy/decisions', params);
     checkDisabled(response);
     return response.decisions ?? [];
   },

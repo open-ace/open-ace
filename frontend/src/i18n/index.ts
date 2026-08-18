@@ -378,7 +378,6 @@ export const translations: Record<Language, Translations> = {
     approvalTtl: 'Approval TTL (seconds)',
     policyScope: 'Scope',
     policyDecisions: 'Policy Decisions',
-    sessionId: 'Session ID',
     policyVersionedEditHint: 'Editing creates a new version',
     policyRulesDisabled: 'Policy feature is disabled',
     policyCurrentVersion: 'current',
@@ -1670,7 +1669,6 @@ export const translations: Record<Language, Translations> = {
 
     // Advanced Settings
     advancedSettings: 'Advanced Settings',
-    priority: 'Priority',
     priorityHelp: 'Higher = preferred. Default: 0',
     weight: 'Weight',
     weightHelp: 'For weighted random within same priority. Default: 100',
@@ -2435,7 +2433,6 @@ export const translations: Record<Language, Translations> = {
     approvalTtl: '审批有效期（秒）',
     policyScope: '作用范围',
     policyDecisions: '策略决策',
-    sessionId: '会话 ID',
     policyVersionedEditHint: '编辑将创建新版本',
     policyRulesDisabled: 'Policy 功能已禁用',
     policyCurrentVersion: '当前版本',
@@ -3689,7 +3686,6 @@ export const translations: Record<Language, Translations> = {
 
     // 高级设置
     advancedSettings: '高级设置',
-    priority: '优先级',
     priorityHelp: '数值越高优先级越高。默认：0',
     weight: '权重',
     weightHelp: '用于同优先级内的加权随机。默认：100',
@@ -4590,7 +4586,6 @@ export const translations: Record<Language, Translations> = {
     approvalTtl: '承認TTL（秒）',
     policyScope: 'スコープ',
     policyDecisions: 'ポリシー決定',
-    sessionId: 'セッションID',
     policyVersionedEditHint: '編集により新バージョンが作成されます',
     policyRulesDisabled: 'ポリシー機能は無効です',
     policyCurrentVersion: '現在',
@@ -5913,7 +5908,6 @@ export const translations: Record<Language, Translations> = {
 
     // Advanced Settings
     advancedSettings: '詳細設定',
-    priority: '優先度',
     priorityHelp: '高いほど優先されます。デフォルト：0',
     weight: '重み',
     weightHelp: '同じ優先度内での加重ランダム用。デフォルト：100',
@@ -6479,7 +6473,6 @@ export const translations: Record<Language, Translations> = {
     approvalTtl: '승인 TTL (초)',
     policyScope: '범위',
     policyDecisions: '정책 결정',
-    sessionId: '세션 ID',
     policyVersionedEditHint: '편집하면 새 버전이 생성됩니다',
     policyRulesDisabled: '정책 기능이 비활성화되었습니다',
     policyCurrentVersion: '현재',
@@ -7798,7 +7791,6 @@ export const translations: Record<Language, Translations> = {
 
     // Advanced Settings
     advancedSettings: '고급 설정',
-    priority: '우선순위',
     priorityHelp: '높을수록 우선합니다. 기본값: 0',
     weight: '가중치',
     weightHelp: '동일 우선순위 내에서 가중 랜덤용. 기본값: 100',

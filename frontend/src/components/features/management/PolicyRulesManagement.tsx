@@ -11,7 +11,7 @@
  * All operations require admin role and policy.enabled=true.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { cn, createMatcherConfig } from '@/utils';
 import {
   usePolicyRules,
@@ -24,7 +24,6 @@ import {
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
-  Card,
   Button,
   Modal,
   TextInput,
@@ -42,7 +41,6 @@ import type {
   PolicyType,
   PolicyEffect,
   PatternType,
-  PolicyDisabledError,
 } from '@/api';
 
 // Translation key mappings for policy types
@@ -59,12 +57,6 @@ const EFFECT_LABEL_KEYS: Record<string, string> = {
   allow: 'effectAllow',
   deny: 'effectDeny',
   require_approval: 'effectRequireApproval',
-};
-
-// Translation key mappings for pattern types
-const PATTERN_TYPE_LABEL_KEYS: Record<string, string> = {
-  glob: 'patternTypeGlob',
-  regex: 'patternTypeRegex',
 };
 
 type TabType = 'rules' | 'decisions';
@@ -115,8 +107,6 @@ export const PolicyRulesManagement: React.FC = () => {
   // Translation helper functions
   const getPolicyTypeLabel = (type: string) => t(POLICY_TYPE_LABEL_KEYS[type] || type, language);
   const getEffectLabel = (effect: string) => t(EFFECT_LABEL_KEYS[effect] || effect, language);
-  const getPatternTypeLabel = (patternType: string) =>
-    t(PATTERN_TYPE_LABEL_KEYS[patternType] || patternType, language);
 
   // --- Page Refresh Control ---
   const pageRefresh = usePageRefresh({
@@ -128,7 +118,7 @@ export const PolicyRulesManagement: React.FC = () => {
 
   // --- Rules State ---
   const {
-    data: rulesResponse,
+    data: rules,
     isLoading: rulesLoading,
     isError: rulesError,
     error: rulesErrorMsg,
@@ -138,9 +128,8 @@ export const PolicyRulesManagement: React.FC = () => {
   const updateRule = useUpdatePolicyRule();
   const toggleRule = useTogglePolicyRule();
 
-  // Extract rules array from response (handle disabled state)
-  const rules = rulesResponse?.data ?? [];
-  const isDisabled = rulesResponse?.error?.name === 'PolicyDisabledError';
+  // Check for disabled state (PolicyDisabledError)
+  const isDisabled = rulesError && rulesErrorMsg?.name === 'PolicyDisabledError';
 
   // --- Decisions State ---
   const [sessionIdInput, setSessionIdInput] = useState('');
@@ -175,20 +164,20 @@ export const PolicyRulesManagement: React.FC = () => {
       policy_type: rule.policy_type as PolicyType,
       effect: rule.effect as PolicyEffect,
       pattern_type: rule.pattern_type as PatternType,
-      pattern: rule.pattern || '',
-      value_list: rule.value_list || [],
-      tool_name: rule.tool_name || '',
-      action: rule.action || '',
+      pattern: rule.pattern ?? '',
+      value_list: rule.value_list ?? [],
+      tool_name: rule.tool_name ?? '',
+      action: rule.action ?? '',
       tenant_id: rule.tenant_id,
-      project_path: rule.project_path || '',
-      machine_id: rule.machine_id || '',
+      project_path: rule.project_path ?? '',
+      machine_id: rule.machine_id ?? '',
       user_id: rule.user_id,
-      team_id: rule.team_id || '',
+      team_id: rule.team_id ?? '',
       priority: rule.priority,
       is_default: rule.is_default,
       enabled: rule.enabled,
       approval_ttl_seconds: rule.approval_ttl_seconds,
-      description: rule.description || '',
+      description: rule.description ?? '',
     });
     setFormErrors({});
     setShowRuleModal(true);
@@ -274,7 +263,8 @@ export const PolicyRulesManagement: React.FC = () => {
   const handleToggleEnabled = async (rule: PolicyRule) => {
     const action = !rule.enabled ? 'enable' : 'disable';
     const confirmed = await confirm({
-      message: action === 'enable' ? t('confirmEnableRule', language) : t('confirmDisableRule', language),
+      message:
+        action === 'enable' ? t('confirmEnableRule', language) : t('confirmDisableRule', language),
       variant: rule.enabled ? 'warning' : 'primary',
     });
     if (!confirmed) return;
@@ -336,7 +326,7 @@ export const PolicyRulesManagement: React.FC = () => {
         <EmptyState
           icon="bi-shield-check"
           title={t('noPolicyRules', language)}
-          subtitle={t('noPolicyRulesHelp', language)}
+          description={t('noPolicyRulesHelp', language)}
         />
       );
     }
@@ -414,9 +404,7 @@ export const PolicyRulesManagement: React.FC = () => {
           isOpen={showRuleModal}
           onClose={handleCloseRuleModal}
           title={
-            editingRule
-              ? t('editPolicyRuleVersioned', language)
-              : t('createPolicyRule', language)
+            editingRule ? t('editPolicyRuleVersioned', language) : t('createPolicyRule', language)
           }
           size="lg"
           footer={
@@ -449,9 +437,9 @@ export const PolicyRulesManagement: React.FC = () => {
             )}
 
             {/* API Error display */}
-            {(createRule.error || updateRule.error) && (
+            {(createRule.error ?? updateRule.error) && (
               <div className="alert alert-danger mb-3">
-                {(createRule.error as Error)?.message || (updateRule.error as Error)?.message}
+                {(createRule.error as Error)?.message ?? (updateRule.error as Error)?.message}
               </div>
             )}
 
@@ -512,9 +500,7 @@ export const PolicyRulesManagement: React.FC = () => {
                     })
                   }
                 />
-                {formErrors.effect && (
-                  <small className="text-danger">{formErrors.effect}</small>
-                )}
+                {formErrors.effect && <small className="text-danger">{formErrors.effect}</small>}
               </div>
 
               {/* Pattern Type */}
@@ -536,13 +522,11 @@ export const PolicyRulesManagement: React.FC = () => {
               <div className="col-md-6">
                 <label className="form-label">{t('pattern', language)}</label>
                 <TextInput
-                  value={formData.pattern || ''}
+                  value={formData.pattern ?? ''}
                   onChange={(value: string) => setFormData({ ...formData, pattern: value })}
                   placeholder={formData.pattern_type === 'regex' ? 'e.g., ^gpt-4.*' : 'e.g., gpt-*'}
                 />
-                {formErrors.pattern && (
-                  <small className="text-danger">{formErrors.pattern}</small>
-                )}
+                {formErrors.pattern && <small className="text-danger">{formErrors.pattern}</small>}
                 {formData.pattern_type === 'regex' && (
                   <small className="text-muted">{t('regexPatternHelp', language)}</small>
                 )}
@@ -554,7 +538,7 @@ export const PolicyRulesManagement: React.FC = () => {
                   <div className="col-md-6">
                     <label className="form-label">{t('toolName', language)} *</label>
                     <TextInput
-                      value={formData.tool_name || ''}
+                      value={formData.tool_name ?? ''}
                       onChange={(value: string) => setFormData({ ...formData, tool_name: value })}
                       placeholder="e.g., bash"
                     />
@@ -565,7 +549,7 @@ export const PolicyRulesManagement: React.FC = () => {
                   <div className="col-md-6">
                     <label className="form-label">{t('action', language)} *</label>
                     <TextInput
-                      value={formData.action || ''}
+                      value={formData.action ?? ''}
                       onChange={(value: string) => setFormData({ ...formData, action: value })}
                       placeholder="e.g., run"
                     />
@@ -581,9 +565,9 @@ export const PolicyRulesManagement: React.FC = () => {
                 <label className="form-label">{t('priority', language)}</label>
                 <TextInput
                   type="number"
-                  value={String(formData.priority || 100)}
+                  value={String(formData.priority ?? 100)}
                   onChange={(value: string) =>
-                    setFormData({ ...formData, priority: parseInt(value) || 100 })
+                    setFormData({ ...formData, priority: parseInt(value) ?? 100 })
                   }
                 />
               </div>
@@ -593,7 +577,7 @@ export const PolicyRulesManagement: React.FC = () => {
                 <label className="form-label">{t('approvalTtl', language)}</label>
                 <TextInput
                   type="number"
-                  value={formData.approval_ttl_seconds?.toString() || ''}
+                  value={formData.approval_ttl_seconds?.toString() ?? ''}
                   onChange={(value: string) =>
                     setFormData({
                       ...formData,
@@ -608,7 +592,7 @@ export const PolicyRulesManagement: React.FC = () => {
               <div className="col-12">
                 <label className="form-label">{t('description', language)}</label>
                 <TextInput
-                  value={formData.description || ''}
+                  value={formData.description ?? ''}
                   onChange={(value: string) => setFormData({ ...formData, description: value })}
                   placeholder="Optional description"
                 />
@@ -677,13 +661,11 @@ export const PolicyRulesManagement: React.FC = () => {
           <EmptyState
             icon="bi-search"
             title={t('policyDecisions', language)}
-            subtitle={t('enterSessionId', language)}
+            description={t('enterSessionId', language)}
           />
         )}
 
-        {sessionIdSearch && decisionsLoading && (
-          <Loading size="lg" text={t('loading', language)} />
-        )}
+        {sessionIdSearch && decisionsLoading && <Loading size="lg" text={t('loading', language)} />}
 
         {sessionIdSearch && decisionsError && (
           <Error
@@ -712,14 +694,22 @@ export const PolicyRulesManagement: React.FC = () => {
                       <code>{decision.decision_id}</code>
                     </td>
                     <td>
-                      <Badge variant={decision.decision === 'allow' ? 'success' : decision.decision === 'deny' ? 'danger' : 'warning'}>
+                      <Badge
+                        variant={
+                          decision.decision === 'allow'
+                            ? 'success'
+                            : decision.decision === 'deny'
+                              ? 'danger'
+                              : 'warning'
+                        }
+                      >
                         {decision.decision}
                       </Badge>
                     </td>
-                    <td>{decision.tool_name || '-'}</td>
-                    <td>{decision.action || '-'}</td>
-                    <td>{decision.reason || '-'}</td>
-                    <td>{decision.created_at || '-'}</td>
+                    <td>{decision.tool_name ?? '-'}</td>
+                    <td>{decision.action ?? '-'}</td>
+                    <td>{decision.reason ?? '-'}</td>
+                    <td>{decision.created_at ?? '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -728,10 +718,7 @@ export const PolicyRulesManagement: React.FC = () => {
         )}
 
         {sessionIdSearch && decisions && decisions.length === 0 && (
-          <EmptyState
-            icon="bi-clipboard-x"
-            title={t('noDataAvailable', language)}
-          />
+          <EmptyState icon="bi-clipboard-x" title={t('noDataAvailable', language)} />
         )}
       </>
     );
