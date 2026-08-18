@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, cast
 
+from app.modules.analytics.roi_calculator import ROICalculator
 from app.repositories.database import Database
 from app.utils.cache import cached
 
@@ -124,24 +125,10 @@ class UsagePattern:
 class CostOptimizer:
     """Cost optimization analyzer for AI usage."""
 
-    # Model pricing (per 1K tokens)
-    MODEL_PRICING = {
-        "claude-3-opus": {"input": 0.015, "output": 0.075},
-        "claude-3-sonnet": {"input": 0.003, "output": 0.015},
-        "claude-3-haiku": {"input": 0.00025, "output": 0.00125},
-        "claude-3-5-sonnet": {"input": 0.003, "output": 0.015},
-        "claude-3-5-haiku": {"input": 0.001, "output": 0.005},
-        "qwen-max": {"input": 0.02, "output": 0.06},
-        "qwen-plus": {"input": 0.004, "output": 0.012},
-        "qwen-turbo": {"input": 0.002, "output": 0.006},
-        "gpt-4": {"input": 0.03, "output": 0.06},
-        "gpt-4-turbo": {"input": 0.01, "output": 0.03},
-        "gpt-4o": {"input": 0.005, "output": 0.015},
-        "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
-        "gpt-3.5-turbo": {"input": 0.0005, "output": 0.0015},
-    }
+    # Class-level singleton: reuse ROICalculator pricing logic
+    _pricing_calculator: ROICalculator | None = None
 
-    # Model hierarchy (expensive to cheap)
+    # Model hierarchy (expensive to cheap) - used for model switch suggestions
     MODEL_HIERARCHY = {
         "claude": [
             "claude-3-opus",
@@ -158,6 +145,13 @@ class CostOptimizer:
     SHORT_REQUEST_THRESHOLD = 500  # tokens
     HIGH_COST_USER_THRESHOLD = 100.0  # USD
     LOW_USAGE_THRESHOLD = 0.2  # 20% of average
+
+    @classmethod
+    def _get_pricing_calculator(cls) -> ROICalculator:
+        """Get or create the shared ROICalculator instance for unified pricing."""
+        if cls._pricing_calculator is None:
+            cls._pricing_calculator = ROICalculator()
+        return cls._pricing_calculator
 
     def __init__(self, db: Database | None = None):
         """
@@ -507,9 +501,11 @@ class CostOptimizer:
         return None
 
     def _calculate_cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
-        """Calculate cost for token usage."""
-        pricing = self.MODEL_PRICING.get(model, {"input": 0.01, "output": 0.03})
-        return input_tokens / 1000 * pricing["input"] + output_tokens / 1000 * pricing["output"]
+        """Calculate cost for token usage using unified pricing."""
+        pricing = self._get_pricing_calculator().get_model_pricing(model)
+        return (
+            input_tokens / 1000 * pricing.input_price + output_tokens / 1000 * pricing.output_price
+        )
 
     def _calculate_model_savings(
         self, current_model: str, cheaper_model: str, input_tokens: int, output_tokens: int
