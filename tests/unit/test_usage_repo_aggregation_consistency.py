@@ -217,7 +217,7 @@ class TestUsageRepoAggregationConsistency:
         assert stats["by_tool"]["qwen"] == 1
 
         # Verify tool names are normalized
-        for tool_name in stats["by_tool"].keys():
+        for tool_name in stats["by_tool"]:
             assert tool_name == normalize_tool_name(tool_name)
 
     def test_tool_name_normalization_in_aggregation(self, tmp_db):
