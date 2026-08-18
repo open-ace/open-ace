@@ -32,6 +32,8 @@ RECOMMENDED_INDEXES = {
         # New composite indexes for better coverage
         ("idx_messages_conversation", ["date", "conversation_id", "agent_session_id"]),
         ("idx_messages_date_sender_id", ["date", "sender_id"]),
+        # Index for request counting by date, role, and tool (Issue #2752)
+        ("idx_messages_date_role_tool", ["date", "role", "tool_name"]),
     ],
     "users": [
         ("idx_users_username", ["username"]),
