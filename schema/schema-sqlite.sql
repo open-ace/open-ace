@@ -363,6 +363,17 @@ CREATE TABLE autonomous_workflows (
  merge_fail_dev_rounds integer DEFAULT 0
 );
 
+CREATE TABLE backfill_logs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ mapping_id integer NOT NULL,
+ backfilled_count integer NOT NULL,
+ first_date TEXT,
+ last_date TEXT,
+ started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ completed_at TIMESTAMP,
+ status TEXT DEFAULT 'completed'
+);
+
 CREATE TABLE command_execution_evidence (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  command_id text NOT NULL,
@@ -627,6 +638,18 @@ CREATE TABLE machine_assignments (
  permission text DEFAULT 'user',
  granted_by integer,
  granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE mapping_migration_status (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ migration_name TEXT NOT NULL,
+ status TEXT DEFAULT 'pending',
+ last_processed_id integer,
+ total_count integer,
+ processed_count integer DEFAULT 0,
+ started_at TIMESTAMP,
+ completed_at TIMESTAMP,
+ error_message text
 );
 
 CREATE TABLE model_gateway_config (
@@ -1291,6 +1314,19 @@ CREATE TABLE test_execution_evidence (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE tool_account_conflicts (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ mapping_id integer NOT NULL,
+ conflict_type TEXT NOT NULL,
+ expected_value text,
+ actual_value text,
+ detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ resolved_at TIMESTAMP,
+ resolved_by integer,
+ resolution_action TEXT,
+ details text
+);
+
 CREATE TABLE tool_account_mapping_rules (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
@@ -1390,42 +1426,6 @@ CREATE TABLE user_tool_accounts (
  created_by integer,
  tenant_id integer,
  version integer
-);
-
-CREATE TABLE backfill_logs (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- mapping_id integer NOT NULL,
- backfilled_count integer NOT NULL,
- first_date TEXT,
- last_date TEXT,
- started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- completed_at TIMESTAMP,
- status TEXT DEFAULT 'completed'
-);
-
-CREATE TABLE mapping_migration_status (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- migration_name TEXT NOT NULL,
- status TEXT DEFAULT 'pending',
- last_processed_id integer,
- total_count integer,
- processed_count integer DEFAULT 0,
- started_at TIMESTAMP,
- completed_at TIMESTAMP,
- error_message TEXT
-);
-
-CREATE TABLE tool_account_conflicts (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- mapping_id integer NOT NULL,
- conflict_type TEXT NOT NULL,
- expected_value TEXT,
- actual_value TEXT,
- detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- resolved_at TIMESTAMP,
- resolved_by integer,
- resolution_action TEXT,
- details TEXT
 );
 
 CREATE TABLE users (
@@ -1728,6 +1728,8 @@ CREATE INDEX idx_audit_timestamp ON audit_logs ("timestamp");
 
 CREATE INDEX idx_audit_user_id ON audit_logs (user_id);
 
+CREATE INDEX idx_bl_mapping ON backfill_logs (mapping_id);
+
 CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence (session_id, command_id);
 
 CREATE INDEX idx_command_evidence_workflow_milestone ON command_execution_evidence (workflow_id, milestone_id);
@@ -2000,6 +2002,10 @@ CREATE INDEX idx_sync_events_timestamp ON sync_events ("timestamp");
 
 CREATE INDEX idx_sync_events_user_id ON sync_events (user_id);
 
+CREATE INDEX idx_tac_mapping ON tool_account_conflicts (mapping_id);
+
+CREATE INDEX idx_tac_unresolved ON tool_account_conflicts (detected_at) WHERE (resolved_at IS NULL);
+
 CREATE INDEX idx_team_members_team ON team_members (team_id);
 
 CREATE INDEX idx_team_members_user ON team_members (user_id);
@@ -2044,16 +2050,6 @@ CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts (tool_account)
 
 CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts (user_id);
 
-CREATE INDEX idx_uta_last_activity ON user_tool_accounts (last_activity_at) WHERE mapping_status = 'active';
-
-CREATE INDEX idx_uta_status_account ON user_tool_accounts (mapping_status, tool_account);
-
-CREATE INDEX idx_bl_mapping ON backfill_logs (mapping_id);
-
-CREATE INDEX idx_tac_mapping ON tool_account_conflicts (mapping_id);
-
-CREATE INDEX idx_tac_unresolved ON tool_account_conflicts (detected_at) WHERE resolved_at IS NULL;
-
 CREATE INDEX idx_usage_date ON daily_usage (date);
 
 CREATE INDEX idx_usage_date_tool_host ON daily_usage (tenant_id, date, tool_name, host_name);
@@ -2095,6 +2091,10 @@ CREATE INDEX idx_users_system_account ON users (system_account) WHERE ((deleted_
 CREATE INDEX idx_users_tenant ON users (tenant_id);
 
 CREATE INDEX idx_users_username ON users (username) WHERE ((deleted_at IS NULL) AND (is_active = true));
+
+CREATE INDEX idx_uta_last_activity ON user_tool_accounts (last_activity_at) WHERE ((mapping_status) = 'active');
+
+CREATE INDEX idx_uta_status_account ON user_tool_accounts (mapping_status, tool_account);
 
 CREATE INDEX idx_webhook_deliveries_alert ON webhook_deliveries (alert_id);
 

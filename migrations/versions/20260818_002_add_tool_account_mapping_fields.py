@@ -152,11 +152,18 @@ def upgrade() -> None:
         op.create_table(
             "tool_account_conflicts",
             sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
-            sa.Column("mapping_id", sa.Integer, sa.ForeignKey("user_tool_accounts.id"), nullable=False),
+            sa.Column(
+                "mapping_id", sa.Integer, sa.ForeignKey("user_tool_accounts.id"), nullable=False
+            ),
             sa.Column("conflict_type", sa.String(20), nullable=False),
             sa.Column("expected_value", sa.Text, nullable=True),
             sa.Column("actual_value", sa.Text, nullable=True),
-            sa.Column("detected_at", sa.TIMESTAMP, nullable=True, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column(
+                "detected_at",
+                sa.TIMESTAMP,
+                nullable=True,
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+            ),
             sa.Column("resolved_at", sa.TIMESTAMP, nullable=True),
             sa.Column("resolved_by", sa.Integer, sa.ForeignKey("users.id"), nullable=True),
             sa.Column("resolution_action", sa.String(20), nullable=True),
@@ -196,11 +203,18 @@ def upgrade() -> None:
         op.create_table(
             "backfill_logs",
             sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
-            sa.Column("mapping_id", sa.Integer, sa.ForeignKey("user_tool_accounts.id"), nullable=False),
+            sa.Column(
+                "mapping_id", sa.Integer, sa.ForeignKey("user_tool_accounts.id"), nullable=False
+            ),
             sa.Column("backfilled_count", sa.Integer, nullable=False),
             sa.Column("first_date", sa.Date, nullable=True),
             sa.Column("last_date", sa.Date, nullable=True),
-            sa.Column("started_at", sa.TIMESTAMP, nullable=True, server_default=sa.text("CURRENT_TIMESTAMP")),
+            sa.Column(
+                "started_at",
+                sa.TIMESTAMP,
+                nullable=True,
+                server_default=sa.text("CURRENT_TIMESTAMP"),
+            ),
             sa.Column("completed_at", sa.TIMESTAMP, nullable=True),
             sa.Column("status", sa.String(20), nullable=True, server_default="completed"),
         )
@@ -224,7 +238,7 @@ def upgrade() -> None:
             sa.Column("status", sa.String(20), nullable=True, server_default="pending"),
             sa.Column("last_processed_id", sa.Integer, nullable=True),
             sa.Column("total_count", sa.Integer, nullable=True),
-            sa.Column("processed_count", sa.Integer, nullable=True, default=0),
+            sa.Column("processed_count", sa.Integer, nullable=True, server_default="0"),
             sa.Column("started_at", sa.TIMESTAMP, nullable=True),
             sa.Column("completed_at", sa.TIMESTAMP, nullable=True),
             sa.Column("error_message", sa.Text, nullable=True),
@@ -297,7 +311,11 @@ def downgrade() -> None:
         log.info("Dropping idx_uta_last_activity index")
         if _is_postgresql():
             with op.get_context().autocommit_block():
-                op.drop_index("idx_uta_last_activity", table_name="user_tool_accounts", postgresql_concurrently=True)
+                op.drop_index(
+                    "idx_uta_last_activity",
+                    table_name="user_tool_accounts",
+                    postgresql_concurrently=True,
+                )
         else:
             op.drop_index("idx_uta_last_activity", table_name="user_tool_accounts")
 
@@ -307,8 +325,16 @@ def downgrade() -> None:
 
     # Drop columns
     uta_columns = {col["name"] for col in inspector.get_columns("user_tool_accounts")}
-    columns_to_drop = ["version", "tenant_id", "created_by", "observed_message_count",
-                       "last_activity_at", "discovered_at", "mapping_status", "mapping_source"]
+    columns_to_drop = [
+        "version",
+        "tenant_id",
+        "created_by",
+        "observed_message_count",
+        "last_activity_at",
+        "discovered_at",
+        "mapping_status",
+        "mapping_source",
+    ]
 
     if _is_postgresql():
         for col_name in columns_to_drop:
