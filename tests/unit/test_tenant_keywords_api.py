@@ -180,9 +180,7 @@ class TestTenantKeywordsApiCRUD:
 
         assert response.status_code == 404
 
-    def test_put_keyword_missing_is_enabled_returns_400(
-        self, admin_client, mock_governance_repo
-    ):
+    def test_put_keyword_missing_is_enabled_returns_400(self, admin_client, mock_governance_repo):
         """Should return 400 when is_enabled not provided."""
         response = admin_client.put(
             "/api/tenants/1/sensitive-keywords/1",

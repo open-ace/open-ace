@@ -74,9 +74,7 @@ class TestTenantKeywordsIntegration:
         )
 
         # Should match the persisted keyword
-        tenant_matches = [
-            r for r in result.matched_rules if r.get("source") == "tenant"
-        ]
+        tenant_matches = [r for r in result.matched_rules if r.get("source") == "tenant"]
         assert len(tenant_matches) > 0
 
 

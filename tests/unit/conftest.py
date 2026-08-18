@@ -37,9 +37,7 @@ def admin_client(app):
         "tenant_id": None,  # Platform admin
     }
 
-    with patch(
-        "app.auth.decorators._load_user_from_token", return_value=admin_user
-    ):
+    with patch("app.auth.decorators._load_user_from_token", return_value=admin_user):
         with app.app_context():
             client = app.test_client()
             client.set_cookie("session_token", "test-admin-token")

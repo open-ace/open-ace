@@ -1794,6 +1794,13 @@ CREATE SEQUENCE teams_id_seq
     CACHE 1;
 
 ALTER SEQUENCE teams_id_seq OWNED BY teams.id;
+CREATE TABLE tenant_keywords_version (
+    tenant_id integer NOT NULL,
+    version bigint DEFAULT 1 NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    PRIMARY KEY (tenant_id)
+);
+
 CREATE TABLE tenant_migrations (
     id integer NOT NULL,
     user_id integer NOT NULL,
@@ -1925,6 +1932,30 @@ CREATE SEQUENCE tenant_settings_id_seq
     CACHE 1;
 
 ALTER SEQUENCE tenant_settings_id_seq OWNED BY tenant_settings.id;
+CREATE TABLE tenant_sensitive_keywords (
+    id integer NOT NULL,
+    tenant_id integer NOT NULL,
+    keyword text NOT NULL,
+    normalized_keyword text NOT NULL,
+    is_enabled boolean DEFAULT true NOT NULL,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp without time zone,
+    CONSTRAINT uq_tenant_keyword UNIQUE (tenant_id, normalized_keyword)
+);
+
+CREATE SEQUENCE tenant_sensitive_keywords_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE tenant_sensitive_keywords_id_seq OWNED BY tenant_sensitive_keywords.id;
+
+ALTER TABLE ONLY tenant_sensitive_keywords ALTER COLUMN id SET DEFAULT nextval('tenant_sensitive_keywords_id_seq'::regclass);
+
 CREATE TABLE tenant_usage (
     id integer NOT NULL,
     tenant_id integer NOT NULL,
@@ -2806,6 +2837,9 @@ ALTER TABLE ONLY teams
 ALTER TABLE ONLY teams
     ADD CONSTRAINT teams_team_id_key UNIQUE (team_id);
 
+ALTER TABLE ONLY tenant_keywords_version
+    ADD CONSTRAINT tenant_keywords_version_pkey PRIMARY KEY (tenant_id);
+
 ALTER TABLE ONLY tenant_migrations
     ADD CONSTRAINT tenant_migrations_pkey PRIMARY KEY (id);
 
@@ -2832,6 +2866,9 @@ ALTER TABLE ONLY tenant_settings
 
 ALTER TABLE ONLY tenant_settings
     ADD CONSTRAINT tenant_settings_tenant_id_key UNIQUE (tenant_id);
+
+ALTER TABLE ONLY tenant_sensitive_keywords
+    ADD CONSTRAINT tenant_sensitive_keywords_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY tenant_usage
     ADD CONSTRAINT tenant_usage_new_pkey PRIMARY KEY (id);
@@ -3709,6 +3746,10 @@ CREATE INDEX idx_teams_owner ON teams USING btree (owner_id);
 
 CREATE INDEX idx_teams_sync_source ON teams USING btree ((((settings)::jsonb ->> 'sync_source'::text)));
 
+CREATE INDEX idx_tenant_keywords_enabled ON tenant_sensitive_keywords USING btree (tenant_id, is_enabled) WHERE (is_enabled = true);
+
+CREATE INDEX idx_tenant_keywords_tenant ON tenant_sensitive_keywords USING btree (tenant_id);
+
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations USING btree (status);
 
 
@@ -4018,6 +4059,9 @@ ALTER TABLE ONLY sso_providers
 ALTER TABLE ONLY sso_sessions
     ADD CONSTRAINT sso_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
 
+ALTER TABLE ONLY tenant_keywords_version
+    ADD CONSTRAINT tenant_keywords_version_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
 ALTER TABLE ONLY tenant_migrations
     ADD CONSTRAINT tenant_migrations_migrated_by_fkey FOREIGN KEY (migrated_by) REFERENCES users(id);
 
@@ -4032,6 +4076,12 @@ ALTER TABLE ONLY tenant_quotas
 
 ALTER TABLE ONLY tenant_settings
     ADD CONSTRAINT tenant_settings_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY tenant_sensitive_keywords
+    ADD CONSTRAINT tenant_sensitive_keywords_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE ONLY tenant_sensitive_keywords
+    ADD CONSTRAINT tenant_sensitive_keywords_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY tenant_usage
     ADD CONSTRAINT tenant_usage_new_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;

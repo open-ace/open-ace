@@ -626,7 +626,13 @@ class TestTenantSensitiveKeywords:
         # Second call: after insert, fetch the new record
         self.db.fetch_one.side_effect = [
             None,  # First call: keyword doesn't exist
-            {"id": 1, "tenant_id": 1, "keyword": "SecretKey", "normalized_keyword": "secretkey", "is_enabled": 1},  # Second call: fetch new record
+            {
+                "id": 1,
+                "tenant_id": 1,
+                "keyword": "SecretKey",
+                "normalized_keyword": "secretkey",
+                "is_enabled": 1,
+            },  # Second call: fetch new record
         ]
         mock_cursor = MagicMock()
         mock_cursor.lastrowid = 1
@@ -664,7 +670,13 @@ class TestTenantSensitiveKeywords:
         """Should normalize keyword to lowercase for uniqueness check."""
         self.db.fetch_one.side_effect = [
             None,  # Keyword doesn't exist
-            {"id": 1, "tenant_id": 1, "keyword": "SECRETKEY", "normalized_keyword": "secretkey", "is_enabled": 1},
+            {
+                "id": 1,
+                "tenant_id": 1,
+                "keyword": "SECRETKEY",
+                "normalized_keyword": "secretkey",
+                "is_enabled": 1,
+            },
         ]
         mock_cursor = MagicMock()
         mock_cursor.lastrowid = 1
@@ -681,17 +693,13 @@ class TestTenantSensitiveKeywords:
 
     def test_create_tenant_keyword_empty_fails(self):
         """Should fail when keyword is empty."""
-        record, is_new = self.repo.create_tenant_keyword(
-            tenant_id=1, keyword="", created_by=100
-        )
+        record, is_new = self.repo.create_tenant_keyword(tenant_id=1, keyword="", created_by=100)
         assert record is None
         assert is_new is False
 
     def test_create_tenant_keyword_whitespace_only_fails(self):
         """Should fail when keyword is whitespace only."""
-        record, is_new = self.repo.create_tenant_keyword(
-            tenant_id=1, keyword="   ", created_by=100
-        )
+        record, is_new = self.repo.create_tenant_keyword(tenant_id=1, keyword="   ", created_by=100)
         assert record is None
         assert is_new is False
 
@@ -705,9 +713,7 @@ class TestTenantSensitiveKeywords:
         mock_cursor.rowcount = 1
         self.db.execute.return_value = mock_cursor
 
-        result = self.repo.update_tenant_keyword(
-            tenant_id=1, keyword_id=1, is_enabled=False
-        )
+        result = self.repo.update_tenant_keyword(tenant_id=1, keyword_id=1, is_enabled=False)
         assert result is True
 
     def test_update_tenant_keyword_no_is_enabled(self):
@@ -721,9 +727,7 @@ class TestTenantSensitiveKeywords:
         mock_cursor.rowcount = 0
         self.db.execute.return_value = mock_cursor
 
-        result = self.repo.update_tenant_keyword(
-            tenant_id=1, keyword_id=999, is_enabled=False
-        )
+        result = self.repo.update_tenant_keyword(tenant_id=1, keyword_id=999, is_enabled=False)
         assert result is False
 
     # -------------------------------------------------------------------------

@@ -468,9 +468,7 @@ class GovernanceRepository:
         """
         from app.repositories.database import adapt_sql
 
-        query = adapt_sql(
-            "SELECT * FROM tenant_sensitive_keywords WHERE tenant_id = ? AND id = ?"
-        )
+        query = adapt_sql("SELECT * FROM tenant_sensitive_keywords WHERE tenant_id = ? AND id = ?")
         keyword = self.db.fetch_one(query, (tenant_id, keyword_id))
 
         if keyword:
@@ -617,9 +615,7 @@ class GovernanceRepository:
         """
         from app.repositories.database import adapt_sql
 
-        query = adapt_sql(
-            "DELETE FROM tenant_sensitive_keywords WHERE tenant_id = ? AND id = ?"
-        )
+        query = adapt_sql("DELETE FROM tenant_sensitive_keywords WHERE tenant_id = ? AND id = ?")
 
         try:
             cursor = self.db.execute(query, (tenant_id, keyword_id))
@@ -667,9 +663,7 @@ class GovernanceRepository:
         """
         from app.repositories.database import adapt_sql
 
-        query = adapt_sql(
-            "SELECT version FROM tenant_keywords_version WHERE tenant_id = ?"
-        )
+        query = adapt_sql("SELECT version FROM tenant_keywords_version WHERE tenant_id = ?")
 
         try:
             result = self.db.fetch_one(query, (tenant_id,))
@@ -691,7 +685,7 @@ class GovernanceRepository:
         Returns:
             bool: True if successful.
         """
-        from app.repositories.database import adapt_sql, is_postgresql
+        from app.repositories.database import is_postgresql
 
         try:
             if is_postgresql():

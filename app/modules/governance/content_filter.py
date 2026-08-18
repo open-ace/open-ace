@@ -403,7 +403,9 @@ class ContentFilter:
     # Tenant Keywords Cache (Issue #2789)
     # =========================================================================
 
-    def _get_tenant_id(self, tenant_config: dict[str, Any] | None, context: dict[str, Any] | None) -> int | None:
+    def _get_tenant_id(
+        self, tenant_config: dict[str, Any] | None, context: dict[str, Any] | None
+    ) -> int | None:
         """
         Get tenant_id from various sources.
 

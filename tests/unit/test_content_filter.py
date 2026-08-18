@@ -698,7 +698,9 @@ class TestTenantKeywordsCache:
         keywords = ["公司机密", "secret"]
 
         result = cf._check_tenant_keywords(
-            content="This is 公司机密 information", tenant_keywords=keywords, match_mode="word_boundary"
+            content="This is 公司机密 information",
+            tenant_keywords=keywords,
+            match_mode="word_boundary",
         )
 
         assert "公司机密" in result

@@ -1176,6 +1176,13 @@ CREATE TABLE teams (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE tenant_keywords_version (
+ tenant_id INTEGER PRIMARY KEY AUTOINCREMENT,
+ version INTEGER DEFAULT 1 NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ PRIMARY KEY (tenant_id)
+);
+
 CREATE TABLE tenant_migrations (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
@@ -1248,15 +1255,16 @@ CREATE TABLE tenant_settings (
  sensitive_keyword_match_mode TEXT DEFAULT 'word_boundary'
 );
 
-CREATE TABLE tenant_usage (
+CREATE TABLE tenant_sensitive_keywords (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer NOT NULL,
- date TEXT NOT NULL,
- tokens_used integer DEFAULT 0,
- requests_made integer DEFAULT 0,
- active_users integer DEFAULT 0,
- new_users integer DEFAULT 0,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ keyword text NOT NULL,
+ normalized_keyword text NOT NULL,
+ is_enabled INTEGER DEFAULT 1 NOT NULL,
+ created_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP,
+    UNIQUE (tenant_id, normalized_keyword)
 );
 
 CREATE TABLE tenants (
@@ -2013,6 +2021,10 @@ CREATE INDEX idx_team_members_user ON team_members (user_id);
 CREATE INDEX idx_teams_owner ON teams (owner_id);
 
 CREATE INDEX idx_teams_sync_source ON teams (json_extract(settings, '$.sync_source'));
+
+CREATE INDEX idx_tenant_keywords_enabled ON tenant_sensitive_keywords (tenant_id, is_enabled) WHERE (is_enabled = true);
+
+CREATE INDEX idx_tenant_keywords_tenant ON tenant_sensitive_keywords (tenant_id);
 
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations (status);
 
