@@ -1171,6 +1171,7 @@ class ROICalculator:
         start_date: str,
         end_date: str,
         user_id: int | None = None,
+        tool_name: str | None = None,
         tenant_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """
@@ -1180,12 +1181,15 @@ class ROICalculator:
             start_date: Start date.
             end_date: End date.
             user_id: Optional user ID filter.
+            tool_name: Optional tool name filter.
             tenant_id: Optional tenant scope (caller's tenant).
 
         Returns:
             List of daily cost dictionaries.
         """
         normalized_tenant_id = _normalize_tenant_id(tenant_id)
+
+        # Base query for daily aggregation
         query = """
             SELECT date,
                    SUM(input_tokens) as input_tokens,
@@ -1203,26 +1207,54 @@ class ROICalculator:
             query += " AND user_id = ?"
             params.append(user_id)
 
+        if tool_name:
+            query += " AND tool_name = ?"
+            params.append(tool_name)
+
         query += " GROUP BY date ORDER BY date"
 
         rows = self.db.fetch_all(query, params)
+
+        # Query daily model usage for actual model pricing
+        model_query = """
+            SELECT date, models_used as model,
+                   SUM(input_tokens) as input_tokens,
+                   SUM(output_tokens) as output_tokens
+            FROM daily_usage
+            WHERE date >= ? AND date <= ?
+        """
+        model_params: list[Any] = [start_date, end_date]
+
+        if normalized_tenant_id is not None:
+            model_query += " AND tenant_id = ?"
+            model_params.append(normalized_tenant_id)
+
+        if user_id:
+            model_query += " AND user_id = ?"
+            model_params.append(user_id)
+
+        if tool_name:
+            model_query += " AND tool_name = ?"
+            model_params.append(tool_name)
+
+        model_query += " GROUP BY date, models_used"
+
+        model_rows = self.db.fetch_all(model_query, model_params)
+
+        # Group model data by date
+        model_data_by_date: dict[str, list[dict]] = {}
+        for row in model_rows:
+            date_val = row.get("date")
+            if date_val:
+                date_str = date_val.strftime("%Y-%m-%d") if hasattr(date_val, "strftime") else str(date_val)
+                model_data_by_date.setdefault(date_str, []).append(row)
 
         daily_costs = []
         for row in rows:
             input_tokens = row.get("input_tokens") or 0
             output_tokens = row.get("output_tokens") or 0
 
-            # Use default pricing for daily aggregation
-            input_cost, output_cost, total_cost = self.calculate_cost(
-                input_tokens, output_tokens, "default"
-            )
-
-            # Normalize date to YYYY-MM-DD. On PostgreSQL the `date` column
-            # comes back as a datetime.date object, which Flask's default JSON
-            # provider would otherwise serialize as an RFC822 HTTP-date (e.g.
-            # "Mon, 01 Jun 2026 00:00:00 GMT") and leak onto the chart axis.
-            # On SQLite it is already a clean YYYY-MM-DD string. Mirrors the
-            # idiom used by usage_repo.get_request_trend / get_request_trend_by_tool.
+            # Normalize date to YYYY-MM-DD
             date_val = row.get("date")
             if date_val is None:
                 date_str = None
@@ -1231,13 +1263,38 @@ class ROICalculator:
             else:
                 date_str = str(date_val)
 
+            # Calculate cost using actual model pricing
+            total_input_cost = 0.0
+            total_output_cost = 0.0
+            total_cost = 0.0
+
+            model_rows_for_date = model_data_by_date.get(date_str or "", [])
+            if model_rows_for_date:
+                for model_row in model_rows_for_date:
+                    model = model_row.get("model") or "default"
+                    m_input = model_row.get("input_tokens") or 0
+                    m_output = model_row.get("output_tokens") or 0
+                    input_cost, output_cost, cost = self.calculate_cost(m_input, m_output, model)
+                    total_input_cost += input_cost
+                    total_output_cost += output_cost
+                    total_cost += cost
+            else:
+                # Fallback to default pricing with warning log
+                logger.warning(
+                    "get_daily_costs: no model data for date=%s, falling back to default pricing",
+                    date_str
+                )
+                total_input_cost, total_output_cost, total_cost = self.calculate_cost(
+                    input_tokens, output_tokens, "default"
+                )
+
             daily_costs.append(
                 {
                     "date": date_str,
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
-                    "input_cost": round(input_cost, 4),
-                    "output_cost": round(output_cost, 4),
+                    "input_cost": round(total_input_cost, 4),
+                    "output_cost": round(total_output_cost, 4),
                     "total_cost": round(total_cost, 4),
                 }
             )
