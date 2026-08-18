@@ -29,6 +29,7 @@ import { useAppStore } from '@/store';
 import { t } from '@/i18n';
 import { initializeQueryKeyRegistry } from '@/utils';
 import { canAccessManageMode } from '@/utils/permissions';
+import { featureFlagsApi } from '@/api';
 
 // Initialize query key registry on app load
 initializeQueryKeyRegistry();
@@ -154,6 +155,11 @@ const ForceChangePasswordModal = lazy(() =>
     default: m.ForceChangePasswordModal,
   }))
 );
+const PolicyRulesManagement = lazy(() =>
+  import('@/components/features/management/PolicyRulesManagement').then((m) => ({
+    default: m.PolicyRulesManagement,
+  }))
+);
 
 // Page loading fallback with skeleton
 const PageLoader: React.FC = () => {
@@ -182,6 +188,49 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  return <>{children}</>;
+};
+
+// Feature Flags Loader - Loads feature flags on app start
+// This ensures flags are available before any route renders
+const FeatureFlagsLoader: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const configLoaded = useAppStore((state) => state.configLoaded);
+  const setPolicyEnabled = useAppStore((state) => state.setPolicyEnabled);
+  const setModelGatewayEnabled = useAppStore((state) => state.setModelGatewayEnabled);
+  const setRunTimelineEnabled = useAppStore((state) => state.setRunTimelineEnabled);
+  const setConfigLoaded = useAppStore((state) => state.setConfigLoaded);
+
+  useEffect(() => {
+    // Only load once
+    if (configLoaded) return;
+
+    const loadFlags = async () => {
+      try {
+        const flags = await featureFlagsApi.getFlags();
+        setPolicyEnabled(flags.policy);
+        setModelGatewayEnabled(flags.model_gateway);
+        setRunTimelineEnabled(flags.run_timeline);
+        setConfigLoaded(true);
+      } catch (error) {
+        console.error('Failed to load feature flags:', error);
+        // Mark as loaded even on error to avoid infinite loading
+        setConfigLoaded(true);
+      }
+    };
+
+    loadFlags();
+  }, [
+    configLoaded,
+    setPolicyEnabled,
+    setModelGatewayEnabled,
+    setRunTimelineEnabled,
+    setConfigLoaded,
+  ]);
+
+  if (!configLoaded) {
+    return <LoadingOverlay text={t('loading', useAppStore.getState().language)} />;
   }
 
   return <>{children}</>;
@@ -321,6 +370,23 @@ const WorkRoutes: React.FC = () => {
 };
 
 // Manage Mode Routes
+
+// Policy Route Guard - waits for config and checks feature flag
+const PolicyRouteGuard: React.FC = () => {
+  const policyEnabled = useAppStore((state) => state.policyEnabled);
+  const configLoaded = useAppStore((state) => state.configLoaded);
+
+  if (!configLoaded) {
+    return <PageLoader />;
+  }
+
+  if (!policyEnabled) {
+    return <Navigate to="/manage/dashboard" replace />;
+  }
+
+  return <PolicyRulesManagement />;
+};
+
 const ManageRoutes: React.FC = () => {
   return (
     <ManageLayout>
@@ -343,6 +409,7 @@ const ManageRoutes: React.FC = () => {
           <Route path="quota" element={<QuotaAlerts />} />
           <Route path="compliance" element={<ComplianceMgmt />} />
           <Route path="security" element={<SecurityCenter />} />
+          <Route path="policy/rules" element={<PolicyRouteGuard />} />
 
           {/* Users */}
           <Route path="users" element={<UserManagement />} />
@@ -528,7 +595,9 @@ export const App: React.FC = () => {
           path="/*"
           element={
             <ProtectedRoute>
-              <AppContent />
+              <FeatureFlagsLoader>
+                <AppContent />
+              </FeatureFlagsLoader>
             </ProtectedRoute>
           }
         />
