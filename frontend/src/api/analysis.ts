@@ -140,7 +140,7 @@ export interface BatchAnalysisResponse {
 // Forecast response type
 export interface ForecastAvailableTrue {
   forecast_available: true;
-  method: "moving_average";
+  method: 'moving_average';
   period_days: number;
   daily_forecast: { tokens: number; requests: number };
   total_forecast: { tokens: number; requests: number };

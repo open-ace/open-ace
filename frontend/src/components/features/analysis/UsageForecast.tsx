@@ -17,14 +17,7 @@ import React, { useState, useMemo } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
-import {
-  Card,
-  StatCard,
-  Error,
-  EmptyState,
-  LineChart,
-  Loading,
-} from '@/components/common';
+import { Card, StatCard, Error, EmptyState, LineChart, Loading } from '@/components/common';
 import { formatTokens } from '@/utils';
 import { useUsageForecast, useDailyHourlyUsage } from '@/hooks';
 
@@ -126,11 +119,7 @@ export const UsageForecast: React.FC = () => {
 
   // Forecast API error
   if (forecastError) {
-    return (
-      <Error
-        message={forecastErrorMsg?.message ?? t('error', language)}
-      />
-    );
+    return <Error message={forecastErrorMsg?.message ?? t('error', language)} />;
   }
 
   // Forecast not available
@@ -248,9 +237,7 @@ export const UsageForecast: React.FC = () => {
             <div className="mb-3">
               <strong>{t('movingAverage', language)}</strong>
             </div>
-            <p className="text-muted mb-0">
-              {t('forecastExplanation', language)}
-            </p>
+            <p className="text-muted mb-0">{t('forecastExplanation', language)}</p>
           </Card>
         </div>
       </div>
