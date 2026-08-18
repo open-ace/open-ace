@@ -889,7 +889,6 @@ class QuotaManager:
 
         return alerts
 
-
     def get_alerts_by_tenant(
         self, tenant_id: int, unacknowledged_only: bool = False, limit: int = 100
     ) -> list[QuotaAlert]:
