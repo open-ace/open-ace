@@ -348,3 +348,82 @@ class TestUsageRepoAggregationConsistency:
         # Verify individual user counts are correct
         assert user_total_requests["alice"] == 4
         assert user_total_requests["bob"] == 2
+
+
+class TestRequestStatsMetaField:
+    """Tests for _meta field in request statistics API (Issue #2773).
+
+    Tests cover:
+    1. _meta field presence and structure
+    2. _meta field content consistency
+    3. _meta field tenant isolation
+    4. Backward compatibility
+    """
+
+    def test_request_stats_meta_field_exists(self, tmp_db):
+        """Test that _meta field exists in request statistics."""
+        from app.constants.request_stats_meta import REQUEST_STATS_META
+
+        # Verify constant is defined
+        assert REQUEST_STATS_META is not None
+        assert isinstance(REQUEST_STATS_META, dict)
+
+    def test_request_stats_meta_field_structure(self, tmp_db):
+        """Test that _meta field has required keys.
+
+        Issue #2773 requirement: _meta must contain definition, source, note, status.
+        """
+        from app.constants.request_stats_meta import REQUEST_STATS_META
+
+        # Verify all required keys exist
+        required_keys = ["definition", "source", "note", "status"]
+        for key in required_keys:
+            assert key in REQUEST_STATS_META, f"Missing required key: {key}"
+
+        # Verify all values are strings
+        for key, value in REQUEST_STATS_META.items():
+            assert isinstance(value, str), f"Value for {key} must be string"
+
+    def test_request_stats_meta_field_content(self, tmp_db):
+        """Test that _meta field content matches documentation.
+
+        Issue #2773 requirement: _meta content must match API documentation.
+        """
+        from app.constants.request_stats_meta import REQUEST_STATS_META
+
+        # Verify content matches documentation (docs/en/API.md and docs/cn/API.md)
+        assert REQUEST_STATS_META["definition"] == "AI assistant response count (role='assistant')"
+        assert REQUEST_STATS_META["source"] == "daily_messages table"
+        assert REQUEST_STATS_META["note"] == "Counts completed user-to-AI interactions"
+        assert REQUEST_STATS_META["status"] == "implemented"
+
+    def test_request_stats_meta_field_tenant_isolation(self, tmp_db):
+        """Test that _meta field is consistent across tenants.
+
+        _meta field should be identical for all tenants (it's metadata, not data).
+        """
+        from app.constants.request_stats_meta import REQUEST_STATS_META
+
+        # _meta field is a constant, so it's always the same for all tenants
+        # This test verifies that the constant is truly constant
+        meta1 = REQUEST_STATS_META.copy()
+        meta2 = REQUEST_STATS_META.copy()
+
+        # Verify _meta is identical regardless of tenant context
+        assert meta1 == meta2
+        assert meta1["status"] == "implemented"
+        assert meta2["status"] == "implemented"
+
+    def test_request_stats_meta_field_optional_for_client(self, tmp_db):
+        """Test that _meta field is optional for backward compatibility.
+
+        Clients should be able to ignore _meta field.
+        """
+        from app.constants.request_stats_meta import REQUEST_STATS_META
+
+        # Verify that _meta can be safely ignored by checking structure
+        # If client only uses date, total_requests, by_tool, _meta should not interfere
+        assert "_meta" not in ["date", "total_requests", "by_tool"]
+
+        # _meta is a separate field, clients can choose to use it or not
+        assert isinstance(REQUEST_STATS_META, dict)

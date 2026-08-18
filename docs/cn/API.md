@@ -575,18 +575,20 @@ GET /api/usage/request/today
     "definition": "AI assistant response count (role='assistant')",
     "source": "daily_messages table",
     "note": "Counts completed user-to-AI interactions",
-    "status": "planned"
+    "status": "implemented"
   }
 }
 ```
-
-**注意**：`_meta` 字段为计划字段，当前实现暂未返回。
 
 **字段说明：**
 - `date`: 统计日期（YYYY-MM-DD）
 - `total_requests`: 今日请求总数
 - `by_tool`: 按工具维度的请求统计
-- `_meta`: 统计口径元数据（计划字段）
+- `_meta`: 统计口径元数据
+  - `definition`: 统计定义
+  - `source`: 数据源表
+  - `note`: 统计含义
+  - `status`: 实现状态（"implemented"）
 
 **统计口径说明：**
 - 定义：AI assistant response message count（`role='assistant'`）

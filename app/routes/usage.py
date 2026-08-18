@@ -189,12 +189,20 @@ def api_trend():
 
 @usage_bp.route("/request/today")
 def api_request_today():
-    """Get today's request statistics with total and by-tool breakdown."""
+    """Get today's request statistics with total and by-tool breakdown.
+
+    Issue #2773: Added _meta field to document statistics definition.
+    """
+    from app.constants.request_stats_meta import REQUEST_STATS_META
     from app.repositories.usage_repo import UsageRepository
 
     host = request.args.get("host")
     usage_repo = UsageRepository()
     stats = usage_repo.get_today_request_stats(host_name=host, tenant_id=get_current_tenant_id())
+
+    # Add metadata field to document statistics definition (Issue #2773)
+    stats["_meta"] = REQUEST_STATS_META
+
     return jsonify(stats)
 
 

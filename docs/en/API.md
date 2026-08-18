@@ -575,18 +575,20 @@ Get today's request statistics with total count and breakdown by tool.
     "definition": "AI assistant response count (role='assistant')",
     "source": "daily_messages table",
     "note": "Counts completed user-to-AI interactions",
-    "status": "planned"
+    "status": "implemented"
   }
 }
 ```
-
-**Note**: The `_meta` field is a planned field and is not currently returned by the implementation.
 
 **Field Descriptions:**
 - `date`: Statistics date (YYYY-MM-DD)
 - `total_requests`: Total requests today
 - `by_tool`: Request statistics by tool dimension
-- `_meta`: Statistics metadata (planned field)
+- `_meta`: Statistics metadata
+  - `definition`: Statistical definition
+  - `source`: Data source table
+  - `note`: Statistical meaning
+  - `status`: Implementation status ("implemented")
 
 **Statistics Definition:**
 - Definition: AI assistant response message count (`role='assistant'`)
