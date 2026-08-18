@@ -1,0 +1,343 @@
+name: Lint Heal
+
+# Auto-heal CI lint failures: when a same-repo PR's CI run fails on lint,
+# run the fixing hooks on the exact head SHA that failed, push a
+# "style: auto-format" commit back, and re-trigger CI.
+#
+# This lives OUTSIDE the CI workflow on purpose: the re-triggered
+# pull_request run shares CI's concurrency group (ci-CI-refs/pull/N/merge,
+# cancel-in-progress: true), which would cancel the heal's own run mid-loop.
+# workflow_run puts the heal in its own group and fires after the failed run
+# completes.
+#
+# NOTE: both workflow_run and workflow_dispatch resolve this file from the
+# DEFAULT branch, so the heal is inert until this merges — no pre-merge
+# trigger exists, and pre-merge validation is limited to what can be checked
+# statically (YAML/shell validity) plus the push.sh unit tests. The first
+# live heal runs after merge.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  # Post-merge escape hatch: manually heal a specific head SHA.
+  workflow_dispatch:
+    inputs:
+      head_sha:
+        description: 'Head SHA to heal (must be the current tip of its PR branch)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: lint-heal-${{ github.event.workflow_run.head_sha || inputs.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  heal:
+    name: Push formatter fixes back
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'failure' &&
+        github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.head_repository.full_name == github.repository
+      )
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Guard — lint failed, head is still the PR tip
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || inputs.head_sha }}
+        run: |
+          set -eu
+          if [ -n "$RUN_ID" ]; then
+            # The overall run failed; confirm it failed on lint specifically so
+            # test-only failures don't spin a formatter pass for nothing.
+            # --paginate: a run with more jobs than the unpaginated first page
+            # would otherwise make "absent" out of a very-much-present lint.
+            # A failed read is its own case: conflating it with absence would
+            # send someone hunting for a ci.yml rename that never happened.
+            if ! lint_state="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs" \
+              --jq '.jobs[] | select(.name == "lint") | .conclusion')"; then
+              echo "::warning::Could not read jobs for run ${RUN_ID}; skipping this heal."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            # Absent ≠ passing: a renamed or removed lint job in ci.yml would
+            # otherwise turn every heal into a silent permanent no-op that
+            # reads like a normal skip. Warn so the drift is visible.
+            if [ -z "$lint_state" ]; then
+              echo "::warning::No job named 'lint' in run ${RUN_ID} — the heal's job-name coupling to ci.yml has drifted."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [ "$lint_state" != "failure" ]; then
+              echo "CI did not fail on lint (lint=${lint_state}); nothing to heal."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          # Resolve the OPEN PRs associated with this head SHA. gh api --jq
+          # takes no --arg, so only the state filter runs there; the
+          # head.sha preference below runs in a separate jq call, which does.
+          prs="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/pulls" \
+            --jq "[.[] | select(.state == \"open\")]" || true)"
+          # Prefer the PR this SHA actually heads — a commit can be
+          # associated with several open PRs via stacked branches, and an
+          # arbitrary pick would report "branch moved" and silently drop the
+          # real target's heal. Fall back to any association so the
+          # branch-moved check below stays reachable and reports itself.
+          pr="$(printf '%s' "$prs" | jq --arg sha "$HEAD_SHA" \
+            'map(select(.head.sha == $sha))[0] // .[0] // empty')"
+          pr_number="$(printf '%s' "$pr" | jq -r '.number // empty')"
+          if [ -z "$pr_number" ]; then
+            echo "No open PR is associated with head ${HEAD_SHA:0:8}; nothing to heal."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Same-repo branches only: the heal pushes with this repo's
+          # GITHUB_TOKEN, which cannot reach a fork's branch anyway.
+          if [ "$(printf '%s' "$pr" | jq -r '.head.repo.full_name')" != "$GITHUB_REPOSITORY" ]; then
+            echo "PR #${pr_number} head lives in a fork; only same-repo branches are healed."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tip="$(printf '%s' "$pr" | jq -r '.head.sha')"
+          if [ "$tip" != "$HEAD_SHA" ]; then
+            echo "Branch moved (${tip:0:8} is the tip); the newer push's own CI takes over."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+          echo "branch=$(printf '%s' "$pr" | jq -r '.head.ref')" >> "$GITHUB_OUTPUT"
+          echo "base_ref=$(printf '%s' "$pr" | jq -r '.base.ref')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v6
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          # The exact SHA lint failed on — NOT the branch tip, which may have
+          # moved while this job was queued (healing a never-linted commit
+          # would race its own CI run).
+          ref: ${{ github.event.workflow_run.head_sha || inputs.head_sha }}
+          submodules: false
+
+      # This step ALWAYS runs and always emits skip=true/false: a step that
+      # GitHub skips emits no outputs, so gating later steps on this output
+      # would silently re-enable them when an earlier guard skipped.
+      - name: Loop guard — do not heal twice in a row
+        id: loopguard
+        env:
+          GUARD_SKIP: ${{ steps.guard.outputs.skip }}
+        run: |
+          if [ "$GUARD_SKIP" = "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$(git log -1 --pretty=%s)" == "style: auto-format"* ]]; then
+            echo "Head commit is already an auto-format fix; the remaining lint failure is not formatter-fixable."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pin hook config to the base branch
+        if: steps.loopguard.outputs.skip != 'true'
+        env:
+          BASE_REF: ${{ steps.guard.outputs.base_ref }}
+        run: |
+          # This job holds contents:write + actions:write while running
+          # formatter tooling. Pinning .pre-commit-config.yaml from the base
+          # branch constrains the remote hooks (black/isort/ruff/mypy/...) to
+          # revs the default branch already trusts. Trade-off: a PR that
+          # bumps a formatter version may not be healed by the old one — the
+          # re-triggered CI (which uses the PR's config) stays authoritative.
+          #
+          # `git checkout <tree-ish> -- <path>` also writes the INDEX; the
+          # push step unstages it again so the heal commit ships only the
+          # autofixes and never reverts the PR's own config change.
+          git fetch --depth=1 origin "$BASE_REF"
+          git checkout FETCH_HEAD -- .pre-commit-config.yaml
+
+      - name: Set up Python
+        if: steps.loopguard.outputs.skip != 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+
+      - name: Install pre-commit
+        if: steps.loopguard.outputs.skip != 'true'
+        run: pip install -c requirements-ci.lock pre-commit
+
+      - name: Derive local-hook skip list
+        if: steps.loopguard.outputs.skip != 'true'
+        id: derive
+        run: |
+          # Local hooks' entry scripts come from the PR checkout, so they must
+          # not execute under this job's write tokens (the re-triggered CI
+          # runs them authoritatively with read-only permissions). Derive
+          # their ids from the PINNED config at runtime — a hardcoded list
+          # would silently drift when the config changes. Fail closed: no
+          # derivation, no heal (the PR stays red for the orchestrator's
+          # CI-repair round instead of running PR code with write scope).
+          # Runs after `Install pre-commit`: PyYAML is guaranteed there as a
+          # declared pre-commit dependency (pyyaml>=5.1), not borrowed from
+          # the runner image's system interpreter.
+          skip_list="$(python3 - <<'PY'
+          import sys
+          import yaml
+
+          cfg = yaml.safe_load(open(".pre-commit-config.yaml"))
+          ids = [
+              hook["id"]
+              for repo in cfg.get("repos", [])
+              if repo.get("repo") == "local"
+              for hook in repo.get("hooks", [])
+          ]
+          if not ids:
+              sys.exit("no local hooks found in pinned config — parse assumptions stale")
+          print(",".join([*ids, "no-commit-to-branch"]))
+          PY
+          )"
+          echo "skip_list=$skip_list" >> "$GITHUB_OUTPUT"
+
+      - name: Apply formatter autofixes to a fixpoint
+        if: steps.loopguard.outputs.skip != 'true'
+        id: autofix
+        env:
+          SKIP_LIST: ${{ steps.derive.outputs.skip_list }}
+        run: |
+          # Single source of truth: the exact CI lint command (whole suite
+          # minus the base-pinned skip list — local hooks + no-commit-to-
+          # branch; bandit-check is local, so it is skipped automatically).
+          # No hardcoded fixing-hook list to drift when
+          # .pre-commit-config.yaml changes.
+          #
+          # Loop until the tree stops changing: a single pass can leave a
+          # non-fixpoint (ruff --fix output that black then wants to
+          # reformat), and the re-triggered CI lint would fail on it — the
+          # burned round this workflow exists to prevent. Same doctrine as
+          # the orchestrator's CI-repair rule #5: keep the modifications and
+          # repeat the full command. The settling pass doubles as the
+          # verification run, so nothing is re-executed just to re-derive rc.
+          # SKIP="" means "skip nothing" in pre-commit, so an empty list
+          # here would run every local hook — PR-branch scripts under this
+          # job's write tokens. The derive step fails closed; this consumer
+          # must too (a renamed step id or dropped env would otherwise
+          # silently resolve to '').
+          if [ -z "$SKIP_LIST" ]; then
+            echo "::error::Local-hook skip list is empty — refusing to run PR-branch hooks under this job's write tokens."
+            exit 1
+          fi
+          final_rc=1
+          settled=0
+          changed=0
+          for pass_no in 1 2 3; do
+            echo "==> autofix pass $pass_no"
+            rc=0
+            SKIP="$SKIP_LIST" pre-commit run --all-files || rc=1
+            final_rc=$rc
+            if git diff --quiet; then
+              settled=1
+              break
+            fi
+            changed=1
+            git add -u
+          done
+          echo "rc=$final_rc" >> "$GITHUB_OUTPUT"
+          echo "settled=$settled" >> "$GITHUB_OUTPUT"
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          if [ "$settled" -ne 1 ]; then
+            echo "::warning::Hooks still modified files after 3 passes (fixer oscillation) — not pushing an unstable tree."
+          fi
+
+      - name: Push fixes and re-trigger CI
+        if: >-
+          steps.guard.outputs.skip != 'true' &&
+          steps.loopguard.outputs.skip != 'true' &&
+          steps.autofix.outputs.changed == '1' &&
+          steps.autofix.outputs.settled == '1'
+        env:
+          BRANCH: ${{ steps.guard.outputs.branch }}
+          PR_NUMBER: ${{ steps.guard.outputs.pr_number }}
+          FIX_RC: ${{ steps.autofix.outputs.rc }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Unstage the pinned config (see pin step): the heal commit must
+          # ship only the autofixes, never a revert of the PR's own config.
+          git reset -q -- .pre-commit-config.yaml
+          git commit -m "style: auto-format (pre-commit autofixes for #${PR_NUMBER})"
+          # Plain non-force push: if the branch moved meanwhile, this fails and
+          # the newer push's own CI run takes over.
+          if ! git push origin "HEAD:$BRANCH"; then
+            echo "::warning::Branch $BRANCH moved during the heal; skipping re-trigger."
+            exit 0
+          fi
+          NEW_SHA="$(git rev-parse HEAD)"
+          # A GITHUB_TOKEN push parks the pull_request runs for the new head in
+          # action_required (anti-recursion). Approving them replays the normal
+          # PR pipeline at the fixed head.
+          approved=0
+          RUN_IDS=""
+          for attempt in 1 2 3 4 5 6; do
+            sleep 10
+            RUN_IDS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${NEW_SHA}&status=action_required" \
+              --jq '.workflow_runs[].id' 2>/dev/null || true)"
+            if [ -n "$RUN_IDS" ]; then break; fi
+            echo "waiting for parked runs at ${NEW_SHA:0:8} (attempt $attempt)"
+          done
+          for run_id in $RUN_IDS; do
+            if gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/approve" --method POST >/dev/null 2>&1; then
+              approved=$((approved + 1))
+              echo "Approved parked run $run_id"
+            else
+              echo "::warning::Could not approve parked run $run_id"
+            fi
+          done
+          if [ "$approved" -eq 0 ]; then
+            # Dangling action_required runs would sit on the PR head forever;
+            # cancel what could not be approved before dispatching a replacement.
+            for run_id in $RUN_IDS; do
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" --method POST >/dev/null 2>&1 || true
+            done
+            echo "No parked runs approved; cancelling leftovers and dispatching CI with healed_sha."
+            # The dispatch endpoint reads inputs from the "inputs" object —
+            # healed_sha as a top-level field is silently dropped. jq builds
+            # the body so a branch name containing quotes cannot break the
+            # JSON (the heal is already pushed at this point; a parse failure
+            # would leave the branch healed with CI never re-triggered).
+            jq -n --arg ref "$BRANCH" --arg sha "$NEW_SHA" \
+              '{ref: $ref, inputs: {healed_sha: $sha}}' \
+              | gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" \
+                --method POST --input -
+            echo "Re-triggered CI on $BRANCH via workflow_dispatch (healed_sha=$NEW_SHA)"
+          fi
+          if [ "$FIX_RC" != "0" ]; then
+            echo "::warning::Tree settled but hooks still report unfixable findings (rc=$FIX_RC) — the re-triggered lint is expected to stay red; see the lint job log."
+          fi
+
+      - name: Nothing fixable
+        if: >-
+          steps.guard.outputs.skip != 'true' &&
+          steps.loopguard.outputs.skip != 'true' &&
+          steps.autofix.outputs.changed == '0' &&
+          steps.autofix.outputs.settled == '1'
+        env:
+          FIX_RC: ${{ steps.autofix.outputs.rc }}
+          SKIP_LIST: ${{ steps.derive.outputs.skip_list }}
+        run: |
+          if [ "$FIX_RC" != "0" ]; then
+            echo "::warning::Full-suite autofix pass produced no diff while reporting findings (rc=$FIX_RC) — not auto-fixable. See the lint job log."
+          else
+            echo "::warning::Nothing to fix here: lint's failure is in a hook this job deliberately skips (${SKIP_LIST}) or in a step outside pre-commit. See the lint job log."
+          fi
