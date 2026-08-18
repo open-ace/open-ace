@@ -551,6 +551,124 @@ Get count of messages with filters.
 
 ---
 
+## Request Statistics API (`/api/usage/request`)
+
+### Today's Request Statistics
+
+```
+GET /api/usage/request/today
+```
+
+Get today's request statistics with total count and breakdown by tool.
+
+**Response Example:**
+```json
+{
+  "date": "2026-08-19",
+  "total_requests": 150,
+  "by_tool": {
+    "claude": 100,
+    "codex": 30,
+    "qwen": 20
+  },
+  "_meta": {
+    "definition": "AI assistant response count (role='assistant')",
+    "source": "daily_messages table",
+    "note": "Counts completed user-to-AI interactions",
+    "status": "planned"
+  }
+}
+```
+
+**Note**: The `_meta` field is a planned field and is not currently returned by the implementation.
+
+**Field Descriptions:**
+- `date`: Statistics date (YYYY-MM-DD)
+- `total_requests`: Total requests today
+- `by_tool`: Request statistics by tool dimension
+- `_meta`: Statistics metadata (planned field)
+
+**Statistics Definition:**
+- Definition: AI assistant response message count (`role='assistant'`)
+- Data Source: `daily_messages` table
+- Change History: Unified to use `daily_messages` as data source starting from Issue #2752
+
+---
+
+### Request Trend
+
+```
+GET /api/usage/request/trend
+```
+
+Get request trend data aggregated by date.
+
+**Query Parameters:**
+- `start` - Start date (default: 30 days ago)
+- `end` - End date (default: today)
+- `host` - Filter by host name
+
+---
+
+### Request Statistics by Tool
+
+```
+GET /api/usage/request/by-tool
+```
+
+Get request statistics grouped by tool.
+
+**Query Parameters:**
+- `start` - Start date (default: 30 days ago)
+- `end` - End date (default: today)
+- `host` - Filter by host name
+
+---
+
+### Request Statistics by User
+
+```
+GET /api/usage/request/by-user
+```
+
+Get request statistics grouped by user.
+
+**Query Parameters:**
+- `date` - Specific date (default: today)
+- `host` - Filter by host name
+
+---
+
+### User Request Trend
+
+```
+GET /api/usage/request/user/<user_name>/trend
+```
+
+Get request trend for a specific user.
+
+**Query Parameters:**
+- `start` - Start date (default: 30 days ago)
+- `end` - End date (default: today)
+- `host` - Filter by host name
+
+---
+
+### Monthly Request Statistics
+
+```
+GET /api/usage/request/monthly
+```
+
+Get monthly request statistics aggregated by user.
+
+**Query Parameters:**
+- `year` - Year (default: current year)
+- `month` - Month (default: current month)
+- `host` - Filter by host name
+
+---
+
 ## Analysis API (`/api/analysis`)
 
 ### Batch Analysis
