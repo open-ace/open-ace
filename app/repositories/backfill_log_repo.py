@@ -7,7 +7,6 @@ Issue #2761: Tracks message backfill operations when mappings are activated.
 """
 
 import logging
-from datetime import datetime
 
 from app.models.tool_account_conflict import BackfillLog
 from app.repositories.database import Database

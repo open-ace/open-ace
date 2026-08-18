@@ -514,52 +514,51 @@ class UserToolAccountRepository:
         """
         from app.repositories.database import is_postgresql
 
-        if tenant_id is not None:
-            query = """
-                SELECT * FROM user_tool_accounts
-                WHERE mapping_status = 'active'
-                  AND tenant_id = ?
-                  AND (
-                      last_activity_at IS NULL
-                      OR last_activity_at < CURRENT_TIMESTAMP - INTERVAL '%s days'
-                  )
-            """
-            params = (tenant_id, stale_days)
-        else:
-            query = """
-                SELECT * FROM user_tool_accounts
-                WHERE mapping_status = 'active'
-                  AND (
-                      last_activity_at IS NULL
-                      OR last_activity_at < datetime('now', ?)
-                  )
-            """
-            params = (f"-{stale_days} days",)
-
         if is_postgresql():
-            query = query.replace("?", "%s")
-            # SQLite syntax doesn't work for PostgreSQL
             if tenant_id is not None:
-                query = f"""
+                query = """
                     SELECT * FROM user_tool_accounts
                     WHERE mapping_status = 'active'
                       AND tenant_id = %s
                       AND (
                           last_activity_at IS NULL
-                          OR last_activity_at < CURRENT_TIMESTAMP - INTERVAL '{stale_days} days'
+                          OR last_activity_at < CURRENT_TIMESTAMP - INTERVAL '%s days'
                       )
                 """
-                params = (tenant_id,)
+                params = (tenant_id, stale_days)
             else:
-                query = f"""
+                query = """
                     SELECT * FROM user_tool_accounts
                     WHERE mapping_status = 'active'
                       AND (
                           last_activity_at IS NULL
-                          OR last_activity_at < CURRENT_TIMESTAMP - INTERVAL '{stale_days} days'
+                          OR last_activity_at < CURRENT_TIMESTAMP - INTERVAL '%s days'
                       )
                 """
-                params = ()
+                params = (stale_days,)
+        else:
+            # SQLite
+            if tenant_id is not None:
+                query = """
+                    SELECT * FROM user_tool_accounts
+                    WHERE mapping_status = 'active'
+                      AND tenant_id = ?
+                      AND (
+                          last_activity_at IS NULL
+                          OR last_activity_at < datetime('now', ?)
+                      )
+                """
+                params = (tenant_id, f"-{stale_days} days")
+            else:
+                query = """
+                    SELECT * FROM user_tool_accounts
+                    WHERE mapping_status = 'active'
+                      AND (
+                          last_activity_at IS NULL
+                          OR last_activity_at < datetime('now', ?)
+                      )
+                """
+                params = (f"-{stale_days} days",)
 
         rows = self.db.fetch_all(query, params)
         return [self._row_to_model(row) for row in rows]
@@ -599,6 +598,8 @@ class UserToolAccountRepository:
             row = self.db.fetch_one(query, params, commit=True)
         else:
             # SQLite: Try to create, ignore if conflict
+            import sqlite3
+
             try:
                 query = """
                     INSERT INTO user_tool_accounts
@@ -610,7 +611,16 @@ class UserToolAccountRepository:
                 row = self.db.fetch_one(
                     "SELECT * FROM user_tool_accounts WHERE tool_account = ?", (tool_account,)
                 )
-            except Exception:
+            except sqlite3.IntegrityError:
+                # Unique constraint violation - mapping already exists
                 row = None
+            except Exception as e:
+                # Check if this is a constraint error by message (for test mocks)
+                error_msg = str(e)
+                if "UNIQUE constraint" in error_msg or "constraint" in error_msg.lower():
+                    row = None
+                else:
+                    logger.error(f"Unexpected error creating mapping: {e}")
+                    raise
 
         return self._row_to_model(row) if row else None

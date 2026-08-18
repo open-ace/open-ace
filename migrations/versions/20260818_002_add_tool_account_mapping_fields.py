@@ -33,7 +33,7 @@ from alembic import op
 log = logging.getLogger(__name__)
 
 revision: str = "20260818_002_add_tool_account_mapping_fields"
-down_revision: str | None = "20260818_001_repair_pending_revoke_drift"
+down_revision: str | None = "20260818_001"
 branch_labels: str | None = None
 depends_on: str | None = None
 
@@ -307,9 +307,18 @@ def downgrade() -> None:
 
     # Drop columns
     uta_columns = {col["name"] for col in inspector.get_columns("user_tool_accounts")}
+    columns_to_drop = ["version", "tenant_id", "created_by", "observed_message_count",
+                       "last_activity_at", "discovered_at", "mapping_status", "mapping_source"]
 
-    for col_name in ["version", "tenant_id", "created_by", "observed_message_count",
-                     "last_activity_at", "discovered_at", "mapping_status", "mapping_source"]:
-        if col_name in uta_columns:
-            log.info(f"Dropping {col_name} column from user_tool_accounts")
-            op.drop_column("user_tool_accounts", col_name)
+    if _is_postgresql():
+        for col_name in columns_to_drop:
+            if col_name in uta_columns:
+                log.info(f"Dropping {col_name} column from user_tool_accounts")
+                op.drop_column("user_tool_accounts", col_name)
+    else:
+        # SQLite requires batch_alter_table for DROP COLUMN
+        with op.batch_alter_table("user_tool_accounts") as batch_op:
+            for col_name in columns_to_drop:
+                if col_name in uta_columns:
+                    log.info(f"Dropping {col_name} column from user_tool_accounts")
+                    batch_op.drop_column(col_name)
