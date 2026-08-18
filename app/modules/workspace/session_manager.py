@@ -27,21 +27,8 @@ logger = logging.getLogger(__name__)
 # Using a non-int sentinel avoids any collision with a real tenant id.
 GLOBAL_TENANT_SENTINEL = "GLOBAL_TENANT"
 
-# Shared ContentFilter instance for performance (uses cached rules)
-_content_filter_instance = None
-
-
-def _get_content_filter():
-    """Get or create shared ContentFilter instance."""
-    global _content_filter_instance
-    if _content_filter_instance is None:
-        from app.modules.governance.content_filter import ContentFilter
-        from app.repositories.governance_repo import GovernanceRepository
-
-        governance_repo = GovernanceRepository()
-        _content_filter_instance = ContentFilter(governance_repo=governance_repo)
-    return _content_filter_instance
-
+# Import ContentFilter singleton (Issue #2768)
+from app.modules.governance.content_filter_singleton import get_content_filter
 
 # Import shared cache function
 from app.modules.workspace.tenant_config_cache import (
@@ -1629,7 +1616,7 @@ class SessionManager:
             try:
                 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 
-                content_filter = _get_content_filter()
+                content_filter = get_content_filter()
 
                 # Get user_id and username from session for audit logging
                 cursor.execute(
