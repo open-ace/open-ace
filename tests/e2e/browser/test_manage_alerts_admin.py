@@ -8,6 +8,13 @@ Test scenarios:
 1. Platform Admin can view all tenants' quota alerts
 2. Tenant Admin can only view own tenant's quota alerts
 3. Alert acknowledge permission isolation (UI feedback)
+
+LIMITATION: Current E2E test environment uses fixed admin user credentials.
+Both test_platform_admin_can_view_all_tenant_alerts and
+test_tenant_admin_limited_alerts_view use the same admin user login.
+The role differentiation is enforced by backend API, not frontend login.
+These tests validate UI rendering and navigation for admin users,
+while backend permission enforcement is verified by integration tests.
 """
 
 import os

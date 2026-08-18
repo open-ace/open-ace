@@ -393,6 +393,13 @@ class TestTenantAdminResourceBoundary:
     through API endpoints like user list, audit logs, and projects.
     """
 
+    pytestmark = [
+        pytest.mark.integration,
+        pytest.mark.security,
+        pytest.mark.regression,
+        pytest.mark.issue(2783),
+    ]
+
     # Test constants
     TENANT_A = 1
     TENANT_B = 2
@@ -410,7 +417,7 @@ class TestTenantAdminResourceBoundary:
         """Run request to admin blueprint as ``actor``.
 
         Uses a minimal Flask app registering only the admin blueprint.
-        Returns the response object.
+        Returns the (response, mock_user_repo) tuple.
         """
         from app.routes.admin import admin_bp
 
@@ -440,7 +447,10 @@ class TestTenantAdminResourceBoundary:
         with (
             patch("app.auth.decorators._load_user_from_token", return_value=actor),
             patch("app.routes.admin.user_repo") as mock_user_repo,
-            patch("app.services.tenant_service.TenantService", return_value=mock_tenant_service_instance),
+            patch(
+                "app.services.tenant_service.TenantService",
+                return_value=mock_tenant_service_instance,
+            ),
         ):
             # Configure mock to use dynamic filtering
             mock_user_repo.get_all_users.side_effect = mock_get_all_users
@@ -452,7 +462,7 @@ class TestTenantAdminResourceBoundary:
                 json=json_body,
                 headers={"Authorization": "Bearer test-token"},
             )
-        return response
+        return response, mock_user_repo
 
     def test_tenant_admin_cannot_list_users_from_other_tenant(self):
         """
@@ -461,7 +471,7 @@ class TestTenantAdminResourceBoundary:
         Issue #2783: GET /api/admin/users with tenant_id query param must
         reject requests for other tenant's users.
         """
-        response = self._run_admin_request(
+        response, mock_user_repo = self._run_admin_request(
             actor=self.TENANT_A_ADMIN,
             method="GET",
             path="/api/admin/users",
@@ -471,11 +481,20 @@ class TestTenantAdminResourceBoundary:
         data = response.get_json()
         # Verify response structure
         assert isinstance(data, list)
+
+        # Verify user_repo.get_all_users was called with correct tenant_id
+        mock_user_repo.get_all_users.assert_called_once()
+        call_kwargs = mock_user_repo.get_all_users.call_args[1]
+        assert call_kwargs.get("tenant_id") == self.TENANT_A, (
+            f"Expected get_all_users called with tenant_id={self.TENANT_A}, "
+            f"got {call_kwargs.get('tenant_id')}"
+        )
+
         # All users should belong to Tenant A
         for user in data:
-            assert user.get("tenant_id") == self.TENANT_A, (
-                f"User {user.get('id')} from tenant {user.get('tenant_id')} leaked to Tenant A admin"
-            )
+            assert (
+                user.get("tenant_id") == self.TENANT_A
+            ), f"User {user.get('id')} from tenant {user.get('tenant_id')} leaked to Tenant A admin"
 
     def test_tenant_admin_cannot_list_users_with_other_tenant_filter(self):
         """
@@ -483,15 +502,15 @@ class TestTenantAdminResourceBoundary:
 
         Issue #2783: GET /api/admin/users?tenant_id=<other> must return 403.
         """
-        response = self._run_admin_request(
+        response, _ = self._run_admin_request(
             actor=self.TENANT_A_ADMIN,
             method="GET",
             path=f"/api/admin/users?tenant_id={self.TENANT_B}",
         )
         # Should be denied (403) because tenant_id filter doesn't match actor's tenant
-        assert response.status_code == 403, (
-            f"Expected 403 for cross-tenant user list request, got {response.status_code}"
-        )
+        assert (
+            response.status_code == 403
+        ), f"Expected 403 for cross-tenant user list request, got {response.status_code}"
 
     def _run_governance_request(self, actor, method, path, *, json_body=None):
         """Run request to governance blueprint as ``actor``.
@@ -524,7 +543,10 @@ class TestTenantAdminResourceBoundary:
         with (
             patch("app.auth.decorators._load_user_from_token", return_value=actor),
             patch("app.routes.governance.audit_logger") as mock_audit_logger,
-            patch("app.utils.request_context.get_current_tenant_id", return_value=actor.get("tenant_id")),
+            patch(
+                "app.utils.request_context.get_current_tenant_id",
+                return_value=actor.get("tenant_id"),
+            ),
         ):
             # Mock audit logger to return multi-tenant logs
             mock_audit_logger.query.return_value = [mock_log_a]
@@ -556,28 +578,13 @@ class TestTenantAdminResourceBoundary:
         mock_audit_logger.query.assert_called_once()
         call_kwargs = mock_audit_logger.query.call_args[1]
         # tenant_id parameter should match actor's tenant
-        assert call_kwargs.get("tenant_id") == self.TENANT_A, (
-            f"Expected tenant_id={self.TENANT_A} in query call, got {call_kwargs.get('tenant_id')}"
-        )
+        assert (
+            call_kwargs.get("tenant_id") == self.TENANT_A
+        ), f"Expected tenant_id={self.TENANT_A} in query call, got {call_kwargs.get('tenant_id')}"
         # Verify response only contains Tenant A logs
         data = response.get_json()
         logs = data.get("logs", [])
         for log in logs:
-            assert log.get("tenant_id") == self.TENANT_A, (
-                f"Log from tenant {log.get('tenant_id')} leaked to Tenant A admin"
-            )
-
-
-# Apply pytest markers to new test class
-pytestmark_t1 = [
-    pytest.mark.integration,
-    pytest.mark.security,
-    pytest.mark.regression,
-    pytest.mark.issue(2783),
-]
-
-# Apply markers to all methods in TestTenantAdminResourceBoundary
-for attr_name in dir(TestTenantAdminResourceBoundary):
-    if attr_name.startswith("test_"):
-        method = getattr(TestTenantAdminResourceBoundary, attr_name)
-        setattr(method, "pytestmark", pytestmark_t1)
+            assert (
+                log.get("tenant_id") == self.TENANT_A
+            ), f"Log from tenant {log.get('tenant_id')} leaked to Tenant A admin"
