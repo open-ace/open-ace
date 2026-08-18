@@ -1246,7 +1246,11 @@ class ROICalculator:
         for row in model_rows:
             date_val = row.get("date")
             if date_val:
-                date_str = date_val.strftime("%Y-%m-%d") if hasattr(date_val, "strftime") else str(date_val)
+                date_str = (
+                    date_val.strftime("%Y-%m-%d")
+                    if hasattr(date_val, "strftime")
+                    else str(date_val)
+                )
                 model_data_by_date.setdefault(date_str, []).append(row)
 
         daily_costs = []
@@ -1282,7 +1286,7 @@ class ROICalculator:
                 # Fallback to default pricing with warning log
                 logger.warning(
                     "get_daily_costs: no model data for date=%s, falling back to default pricing",
-                    date_str
+                    date_str,
                 )
                 total_input_cost, total_output_cost, total_cost = self.calculate_cost(
                     input_tokens, output_tokens, "default"

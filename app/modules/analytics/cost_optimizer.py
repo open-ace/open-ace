@@ -504,8 +504,7 @@ class CostOptimizer:
         """Calculate cost for token usage using unified pricing."""
         pricing = self._get_pricing_calculator().get_model_pricing(model)
         return (
-            input_tokens / 1000 * pricing.input_price
-            + output_tokens / 1000 * pricing.output_price
+            input_tokens / 1000 * pricing.input_price + output_tokens / 1000 * pricing.output_price
         )
 
     def _calculate_model_savings(
