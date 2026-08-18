@@ -112,38 +112,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Drop the objects this repair re-applied (mirrors 20260811_001 downgrade)."""
+    """No-op by design.
 
-    bind = op.get_bind()
-    dialect = bind.dialect.name
-    inspector = sa.inspect(bind)
-
-    if dialect == "postgresql":
-        op.execute("DROP INDEX IF EXISTS idx_agent_tokens_one_active_per_machine")
-        op.execute("DROP INDEX IF EXISTS idx_agent_tokens_pending_revoke_timeout")
-        op.execute("DROP INDEX IF EXISTS idx_agent_tokens_machine_pending")
-    else:
-        existing_indexes = [idx["name"] for idx in inspector.get_indexes("agent_tokens")]
-        for name in (
-            "idx_agent_tokens_one_active_per_machine",
-            "idx_agent_tokens_pending_revoke_timeout",
-            "idx_agent_tokens_machine_pending",
-        ):
-            if name in existing_indexes:
-                op.drop_index(name, table_name="agent_tokens")
-
-    agent_tokens_columns = [col["name"] for col in inspector.get_columns("agent_tokens")]
-    drop_columns = [
-        col
-        for col in ("rotation_id", "revoke_after", "pending_revoke")
-        if col in agent_tokens_columns
-    ]
-    if drop_columns:
-        with op.batch_alter_table("agent_tokens", schema=None) as batch_op:
-            for col in drop_columns:
-                batch_op.drop_column(col)
-
-    remote_machines_columns = [col["name"] for col in inspector.get_columns("remote_machines")]
-    if "token_revoke_timeout" in remote_machines_columns:
-        with op.batch_alter_table("remote_machines", schema=None) as batch_op:
-            batch_op.drop_column("token_revoke_timeout")
+    The objects this repair re-applies are owned by 20260811_001: its own
+    (unguarded) downgrade drops them when the chain passes through it.
+    Dropping them here as well would make any downgrade past 20260811_001
+    fail with "no such index" (its drops are not existence-guarded), so the
+    repair has no inverse of its own — see the symmetry round-trip test in
+    tests/unit/test_alembic_sqlite_upgrade.py.
+    """
