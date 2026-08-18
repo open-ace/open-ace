@@ -101,8 +101,9 @@ class UserToolAccountRepository:
                       SELECT 1 FROM users u
                       WHERE u.tenant_id = ?
                         AND (
-                            dm.sender_name LIKE (u.system_account || '-%%')
+                            (u.system_account IS NOT NULL AND dm.sender_name LIKE (u.system_account || '-%%'))
                             OR dm.sender_name = u.username
+                            OR (u.system_account IS NULL AND dm.sender_name LIKE (u.username || '-%%'))
                         )
                   )
                 GROUP BY dm.sender_name
