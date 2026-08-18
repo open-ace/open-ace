@@ -76,7 +76,7 @@ def manager(sqlite_sm):
             return_value=MagicMock(),
         ),
         patch(
-            "app.modules.governance.content_filter_singleton.get_content_filter",
+            "app.modules.workspace.session_manager.get_content_filter",
             return_value=mock_content_filter,
         ),
     ):
