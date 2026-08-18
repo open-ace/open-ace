@@ -1,3 +1,6 @@
+import subprocess
+import sys
+
 import pytest
 
 from scripts import run_extended_tests
@@ -180,6 +183,68 @@ def test_e2e_attempts_enable_attempt_plugin():
     assert "--e2e-attempts=test-results/full-e2e-attempts.jsonl" in cmd
 
 
+def test_selection_json_uses_exact_targets_and_skips_standalone_for_pytest(tmp_path):
+    selection = tmp_path / "selection.json"
+    selection.write_text(
+        __import__("json").dumps(
+            {
+                "normal": ["tests/e2e/browser/test_login.py::test_login_page_loads"],
+                "advisory": ["standalone::tests/e2e/e2e_autonomous_models_error_playwright.py"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    args = run_extended_tests.parse_args(
+        ["--category", "e2e", "--selection-json", str(selection), "--dry-run"]
+    )
+
+    assert run_extended_tests.resolved_targets(args) == [
+        "tests/e2e/browser/test_login.py::test_login_page_loads",
+        "standalone::tests/e2e/e2e_autonomous_models_error_playwright.py",
+    ]
+    cmd = run_extended_tests.build_pytest_command(args)
+
+    assert "tests/e2e/browser/test_login.py::test_login_page_loads" in cmd
+    assert "standalone::tests/e2e/e2e_autonomous_models_error_playwright.py" not in cmd
+
+
+def test_cli_entrypoint_writes_envelope_with_selection_json(tmp_path):
+    selection = tmp_path / "selection.json"
+    selection.write_text(
+        __import__("json").dumps(
+            {"normal": ["tests/e2e/browser/test_login.py::test_login_page_loads"], "advisory": []}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    envelope = tmp_path / "envelope.json"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/run_extended_tests.py",
+            "--category",
+            "e2e",
+            "--selection-json",
+            str(selection),
+            "--dry-run",
+            "--envelope-json",
+            str(envelope),
+        ],
+        cwd=run_extended_tests.PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "ModuleNotFoundError" not in completed.stderr
+    payload = __import__("json").loads(envelope.read_text(encoding="utf-8"))
+    assert payload["selected_targets"] == ["tests/e2e/browser/test_login.py::test_login_page_loads"]
+    assert payload["pytest_command"][0] == sys.executable
+
+
 def test_write_run_envelope_summarizes_attempts(tmp_path, monkeypatch):
     attempts = tmp_path / "attempts.jsonl"
     attempts.write_text(
@@ -219,6 +284,7 @@ def test_write_run_envelope_summarizes_attempts(tmp_path, monkeypatch):
         return_code=1,
         started_at="2026-08-18T01:00:00Z",
         completed_at="2026-08-18T01:02:30Z",
+        standalone_outcomes=None,
     )
 
     payload = __import__("json").loads(envelope.read_text(encoding="utf-8"))
@@ -237,6 +303,40 @@ def test_write_run_envelope_summarizes_attempts(tmp_path, monkeypatch):
     assert failed["category"] == "assertion_failure"
     assert failed["final_outcome"] == "fail"
     assert failed["fingerprint"]
+
+
+def test_write_run_envelope_includes_standalone_outcomes(tmp_path, monkeypatch):
+    envelope = tmp_path / "envelope.json"
+    args = run_extended_tests.parse_args(["--category", "e2e", "--envelope-json", str(envelope)])
+    monkeypatch.setattr(run_extended_tests, "_current_head_sha", lambda: "deadbeef")
+    monkeypatch.setattr(run_extended_tests, "_current_contract_key", lambda: "contract-v1")
+    monkeypatch.setattr(run_extended_tests, "is_healthy", lambda _base_url: True)
+
+    run_extended_tests._write_run_envelope(
+        str(envelope),
+        args=args,
+        env={"HOME": str(tmp_path), "PLAYWRIGHT_BROWSERS_PATH": "/pw"},
+        cmd=["pytest", "tests/e2e/browser/test_login.py"],
+        selected_targets=["standalone::tests/e2e/e2e_autonomous_models_error_playwright.py"],
+        server_handle=None,
+        return_code=0,
+        started_at="2026-08-18T01:00:00Z",
+        completed_at="2026-08-18T01:00:05Z",
+        standalone_outcomes=[
+            {
+                "nodeid": "standalone::tests/e2e/e2e_autonomous_models_error_playwright.py",
+                "attempts": 1,
+                "first_attempt_outcome": "pass",
+                "final_outcome": "pass",
+                "duration_seconds": 4.0,
+            }
+        ],
+    )
+
+    payload = __import__("json").loads(envelope.read_text(encoding="utf-8"))
+    assert payload["outcomes"][0]["nodeid"] == (
+        "standalone::tests/e2e/e2e_autonomous_models_error_playwright.py"
+    )
 
 
 def test_quarantine_loader_bad_schema_fails_closed(tmp_path):

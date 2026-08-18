@@ -29,6 +29,8 @@ from typing import TextIO
 from urllib.parse import urlsplit, urlunsplit
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 DEFAULT_BASE_URL = "http://localhost:19888"
 SERVER_CATEGORIES = {
     "all",
@@ -104,6 +106,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=0, help="Per-test timeout in seconds.")
     parser.add_argument("--maxfail", type=int, default=0, help="Stop after this many failures.")
     parser.add_argument("--junitxml", default="", help="Write a pytest JUnit XML report.")
+    parser.add_argument(
+        "--selection-json",
+        default="",
+        help="Run the exact ids from a selector selection.json instead of a category tree.",
+    )
     parser.add_argument(
         "--e2e-attempts",
         default="",
@@ -184,9 +191,20 @@ def select_targets(args: argparse.Namespace) -> list[str]:
     return existing
 
 
+def load_selection_targets(path: str) -> list[str]:
+    selection_path = Path(path)
+    payload = json.loads(selection_path.read_text(encoding="utf-8"))
+    targets = list(payload.get("normal") or []) + list(payload.get("advisory") or [])
+    if not targets:
+        raise ValueError(f"No executable targets found in selection: {selection_path}")
+    return [str(target) for target in targets]
+
+
 def discover_test_files(targets: list[str]) -> list[str]:
     files: list[Path] = []
     for target in targets:
+        if target.startswith("standalone::"):
+            continue
         path = PROJECT_ROOT / target_path(target)
         if path.is_file():
             files.append(path)
@@ -198,8 +216,25 @@ def discover_test_files(targets: list[str]) -> list[str]:
 
 
 def resolved_targets(args: argparse.Namespace) -> list[str]:
+    if args.selection_json:
+        selected = load_selection_targets(args.selection_json)
+        standalone = [item for item in selected if item.startswith("standalone::")]
+        pytest_targets = [item for item in selected if not item.startswith("standalone::")]
+        if standalone and args.split_total > 1:
+            raise ValueError("--selection-json with standalone targets cannot be sharded")
+        if args.split_total == 1:
+            return pytest_targets + standalone
+        return apply_split(pytest_targets, args.split_total, args.split_group)
     targets = select_targets(args)
     return apply_split(targets, args.split_total, args.split_group)
+
+
+def standalone_targets(targets: list[str]) -> list[str]:
+    return [target for target in targets if target.startswith("standalone::")]
+
+
+def pytest_targets(targets: list[str]) -> list[str]:
+    return [target for target in targets if not target.startswith("standalone::")]
 
 
 def apply_split(targets: list[str], split_total: int, split_group: int) -> list[str]:
@@ -286,11 +321,11 @@ def check_baseline(category: str, file_count: int, split_total: int = 1) -> bool
 
 
 def print_collection_manifest(files: list[str]) -> None:
-    """Print collection manifest with file list and count (Issue #2189)."""
+    """Print the exact execution manifest (files, nodeids, or standalone ids)."""
     print("\n=== Test Collection Manifest ===")
-    print(f"Total files: {len(files)}")
+    print(f"Total targets: {len(files)}")
     if files:
-        print("\nCollected files:")
+        print("\nCollected targets:")
         for file in files:
             print(f"  - {file}")
     print("=" * 40 + "\n")
@@ -340,18 +375,22 @@ def _quarantine_nodeids(path=None) -> list[str]:
 
 def build_pytest_command(args: argparse.Namespace) -> list[str]:
     targets = resolved_targets(args)
+    pytest_only = pytest_targets(targets)
 
     # Issue #2189: Print the file manifest. Item collection is separately gated
     # by pytest itself; a targeted issue run must not be compared with the full
     # legacy-suite baseline.
     print_collection_manifest(targets)
+    if not pytest_only:
+        return []
     targeted_issue_run = args.category == "issues" and bool(parse_issue_numbers(args))
+    file_count = len(discover_test_files(pytest_only)) if args.selection_json else len(pytest_only)
     if not targeted_issue_run and not check_baseline(
-        args.category, len(targets), split_total=args.split_total
+        args.category, file_count, split_total=args.split_total
     ):
         raise ValueError(f"Test file count below baseline threshold for category: {args.category}")
 
-    cmd = [sys.executable, "-m", "pytest", *targets, "-m", "not postgres"]
+    cmd = [sys.executable, "-m", "pytest", *pytest_only, "-m", "not postgres"]
     # Continue past per-file collection errors so every collectable nodeid gets a
     # terminal result; otherwise one bad file aborts the shard and leaves the
     # rest result-less, which the #2457 failure-baseline completeness gate would
@@ -690,6 +729,71 @@ def _summarize_attempt_records(
     return outcomes
 
 
+def _standalone_script_path(item_id: str) -> str:
+    _, _, path = item_id.partition("::")
+    if not path:
+        raise ValueError(f"Invalid standalone target id: {item_id}")
+    return path
+
+
+def _run_standalone_targets(
+    target_ids: list[str],
+    *,
+    env: dict[str, str],
+    timeout_seconds: int,
+) -> list[dict[str, object]]:
+    from scripts.e2e.common import failure_fingerprint
+
+    results: list[dict[str, object]] = []
+    for item_id in target_ids:
+        script_path = _standalone_script_path(item_id)
+        started = time.time()
+        try:
+            completed = subprocess.run(
+                [sys.executable, script_path],
+                cwd=PROJECT_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout_seconds,
+            )
+            duration = round(time.time() - started, 3)
+            passed = completed.returncode == 0
+            result: dict[str, object] = {
+                "nodeid": item_id,
+                "attempts": 1,
+                "first_attempt_outcome": "pass" if passed else "fail",
+                "final_outcome": "pass" if passed else "fail",
+                "duration_seconds": duration,
+            }
+            if not passed:
+                message = f"{script_path} exited with code {completed.returncode}"
+                result["category"] = "test_body_exception"
+                result["fingerprint"] = failure_fingerprint("StandaloneExitError", message)
+                result["exception_class"] = "StandaloneExitError"
+                result["message"] = message
+                result["return_code"] = completed.returncode
+            results.append(result)
+        except subprocess.TimeoutExpired:
+            duration = round(time.time() - started, 3)
+            message = f"{script_path} timed out after {timeout_seconds}s"
+            results.append(
+                {
+                    "nodeid": item_id,
+                    "attempts": 1,
+                    "first_attempt_outcome": "fail",
+                    "final_outcome": "fail",
+                    "duration_seconds": duration,
+                    "category": "timeout",
+                    "fingerprint": failure_fingerprint("TimeoutExpired", message),
+                    "exception_class": "TimeoutExpired",
+                    "message": message,
+                }
+            )
+    return results
+
+
 def _write_run_envelope(
     path: str,
     *,
@@ -701,6 +805,7 @@ def _write_run_envelope(
     return_code: int,
     started_at: str,
     completed_at: str,
+    standalone_outcomes: list[dict[str, object]] | None = None,
     error_message: str | None = None,
 ) -> None:
     if not path:
@@ -735,6 +840,9 @@ def _write_run_envelope(
         "log_path": server_log,
     }
     outcomes = _summarize_attempt_records(attempts_records, server_evidence)
+    if standalone_outcomes:
+        outcomes.extend(standalone_outcomes)
+        outcomes.sort(key=lambda item: str(item.get("nodeid", "")))
     payload = {
         "schema_name": "openace-e2e-run-envelope",
         "schema_version": 1,
@@ -775,6 +883,7 @@ def main(argv: list[str] | None = None) -> int:
     server_handle: ServerHandle | None = None
     selected_targets: list[str] = []
     cmd: list[str] = []
+    standalone_outcomes: list[dict[str, object]] = []
     return_code = 1
     error_message: str | None = None
     started_at = _utc_now()
@@ -787,7 +896,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.dry_run:
             return 0
         server_handle = start_server_if_needed(args, env)
-        return_code = subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=False).returncode
+        return_code = 0
+        if cmd:
+            return_code = subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=False).returncode
+        standalone_selected = standalone_targets(selected_targets)
+        if standalone_selected:
+            standalone_outcomes = _run_standalone_targets(
+                standalone_selected,
+                env=env,
+                timeout_seconds=args.timeout or 240,
+            )
+            if any(item.get("final_outcome") != "pass" for item in standalone_outcomes):
+                return_code = return_code or 1
         return return_code
     except Exception as exc:
         error_message = str(exc)
@@ -804,6 +924,7 @@ def main(argv: list[str] | None = None) -> int:
             return_code=return_code,
             started_at=started_at,
             completed_at=completed_at,
+            standalone_outcomes=standalone_outcomes,
             error_message=error_message,
         )
         stop_server(server_handle)

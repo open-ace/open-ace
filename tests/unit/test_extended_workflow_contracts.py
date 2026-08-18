@@ -114,10 +114,13 @@ def test_issue_dispatch_keeps_fail_closed_baseline_comparator():
 
 def test_full_e2e_governance_job_wraps_full_e2e_and_feeds_nightly_gate():
     jobs = _workflow()["jobs"]
+    full_e2e = jobs["full-e2e"]
     governance = jobs["full-e2e-governance"]
 
     assert governance["needs"] == ["full-e2e"]
     assert "needs.full-e2e.result != 'skipped'" in governance["if"]
+    run_step = next(step for step in full_e2e["steps"] if step.get("name") == "Run full E2E tests")
+    assert "--selection-json test-results/full-e2e-selection.json" in run_step["run"]
     compare_step = next(
         step
         for step in governance["steps"]

@@ -395,3 +395,20 @@ class TestComparatorCli:
         markdown = markdown_output.read_text(encoding="utf-8")
         assert "Full E2E Governance" in markdown
         assert "nightly lane is not closed" in markdown
+
+    def test_compare_selection_run_flags_duplicate_outcomes(self):
+        diff, _ = comparator.compare_selection_run(
+            {"normal": ["a"], "advisory": []},
+            {
+                "job_conclusion": "success",
+                "duration_minutes": 1,
+                "outcomes": [
+                    {"nodeid": "a", "final_outcome": "pass", "duration_seconds": 1},
+                    {"nodeid": "a", "final_outcome": "pass", "duration_seconds": 1},
+                ],
+            },
+            {},
+        )
+
+        assert diff["verdict_exit_code"] == 1
+        assert diff["invalid"]["a"] == "duplicate observed results (2)"

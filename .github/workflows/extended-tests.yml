@@ -199,10 +199,12 @@ jobs:
           # Issue #2189: Validate collection before running
           python scripts/run_extended_tests.py \
             --category e2e \
-            --dry-run 2>&1 | grep -E "Collected|Total files" || true
+            --selection-json test-results/full-e2e-selection.json \
+            --dry-run 2>&1 | grep -E "Collected|Total targets" || true
 
           python scripts/run_extended_tests.py \
             --category e2e \
+            --selection-json test-results/full-e2e-selection.json \
             --isolated-home \
             --reruns 1 \
             --timeout 240 \

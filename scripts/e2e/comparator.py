@@ -385,7 +385,8 @@ def compare_selection_run(
         from governance import check_budgets  # type: ignore[no-redef]
 
     expected_ids = sorted((selection.get("normal") or []) + (selection.get("advisory") or []))
-    observed = {entry["nodeid"]: entry for entry in envelope.get("outcomes") or [] if entry.get("nodeid")}
+    raw_outcomes = [entry for entry in envelope.get("outcomes") or [] if entry.get("nodeid")]
+    observed = {entry["nodeid"]: entry for entry in raw_outcomes}
     diff = compare_run(
         expected_ids,
         observed,
@@ -393,9 +394,18 @@ def compare_selection_run(
         job_conclusion=envelope.get("job_conclusion"),
         envelope_present=True,
     )
+    seen_counts: dict[str, int] = {}
+    for entry in raw_outcomes:
+        nodeid = str(entry["nodeid"])
+        seen_counts[nodeid] = seen_counts.get(nodeid, 0) + 1
+    duplicates = sorted(nodeid for nodeid, count in seen_counts.items() if count > 1)
+    if duplicates:
+        for nodeid in duplicates:
+            diff["invalid"][nodeid] = f"duplicate observed results ({seen_counts[nodeid]})"
+        diff["verdict_exit_code"] = 1
     per_item = {
         item["nodeid"]: float(item.get("duration_seconds") or 0)
-        for item in envelope.get("outcomes") or []
+        for item in raw_outcomes
         if item.get("nodeid")
     }
     budget_errors = check_budgets("nightly", float(envelope.get("duration_minutes") or 0), per_item)
