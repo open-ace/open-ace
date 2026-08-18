@@ -75,7 +75,11 @@ class TestHealSkipDerivation:
             "bandit-check",
             "check-root-docs",
             "no-commit-to-branch",
-        ]
+        ], (
+            "a new repo:local hook must be added to this list — the heal must "
+            "skip every local hook, whose entry scripts come from the PR "
+            "branch (see .github/workflows/lint-heal.yml)"
+        )
 
     def test_snippet_fails_closed_without_local_hooks(self, tmp_path):
         """A config without local hooks must exit non-zero (the heal refuses
@@ -90,3 +94,23 @@ class TestHealSkipDerivation:
         result = _run_snippet(_derivation_snippet(), tmp_path)
         assert result.returncode != 0
         assert "parse assumptions stale" in result.stderr
+
+    def test_skip_list_is_wired_into_the_autofix_step(self):
+        """The derive step's output must actually reach the SKIP consumer.
+
+        The workflow guards an empty SKIP_LIST at runtime, but that error
+        surfaces only in a workflow_run job with no PR check. A renamed step
+        id or a dropped env would otherwise regress silently; here it fails
+        on the PR that breaks it."""
+        workflow = yaml.safe_load(WORKFLOW.read_text())
+        steps = workflow["jobs"]["heal"]["steps"]
+        ids = {step.get("id") for step in steps}
+        assert "derive" in ids, "the skip-list derivation step lost its `id: derive`"
+
+        autofix = next(step for step in steps if step.get("id") == "autofix")
+        assert autofix["env"]["SKIP_LIST"] == "${{ steps.derive.outputs.skip_list }}", (
+            "autofix must consume the derived skip list — an unset SKIP_LIST "
+            "resolves to '' and pre-commit then skips nothing, running every "
+            "PR-branch local hook under the job's write tokens"
+        )
+        assert 'SKIP="$SKIP_LIST"' in autofix["run"]
