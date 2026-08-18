@@ -45,6 +45,11 @@ export {
   useAiAgentSettings,
   useUpdateAiAgentSettings,
   useValidateGithubToken,
+  usePolicyRules,
+  useCreatePolicyRule,
+  useUpdatePolicyRule,
+  useTogglePolicyRule,
+  usePolicyDecisions,
 } from './useAdmin';
 export { useMyUsage } from './useReport';
 export {

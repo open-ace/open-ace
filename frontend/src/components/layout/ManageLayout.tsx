@@ -22,7 +22,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, useLocation, Link } from 'react-router-dom';
 import { cn } from '@/utils';
-import { useLanguage, useSidebarCollapsed } from '@/store';
+import { useLanguage, useSidebarCollapsed, usePolicyEnabled } from '@/store';
 import { useAppStore } from '@/store';
 import { useAuth } from '@/hooks';
 import { t } from '@/i18n';
@@ -36,6 +36,7 @@ interface NavItem {
   icon: string;
   path: string;
   adminOnly?: boolean;
+  featureFlag?: 'policy' | 'model_gateway' | 'run_timeline' | 'autonomous';
 }
 
 interface NavSection {
@@ -113,6 +114,14 @@ const navSections: NavSection[] = [
         icon: 'bi-shield',
         path: '/manage/security',
         adminOnly: true,
+      },
+      {
+        id: 'policy-rules',
+        label: 'policyRules',
+        icon: 'bi-shield-check',
+        path: '/manage/policy/rules',
+        adminOnly: true,
+        featureFlag: 'policy',
       },
     ],
   },
@@ -216,6 +225,7 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
   const location = useLocation();
   const collapsed = useSidebarCollapsed();
   const { user } = useAuth();
+  const policyEnabled = usePolicyEnabled();
 
   // Initialize collapse state from localStorage or default to only active section expanded
   const getInitialCollapseState = useCallback(() => {
@@ -381,7 +391,10 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
                   )}
                 >
                   {section.items.map((item) => {
-                    const isDisabled = item.adminOnly && !isAdmin(user);
+                    const isAdminCheck = item.adminOnly && !isAdmin(user);
+                    const isFeatureDisabled = item.featureFlag === 'policy' && !policyEnabled;
+                    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
+                    const isDisabled = isAdminCheck || isFeatureDisabled;
                     return (
                       <li key={item.id}>
                         <Link
