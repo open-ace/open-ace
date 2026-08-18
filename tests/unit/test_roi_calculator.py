@@ -839,6 +839,8 @@ class TestCalculatorWithAssumptionSource:
 
         assert roi is not None
         assert roi.assumption_source == "tenant_config"
+
+
 """ROI cost consistency tests.
 
 These tests verify that the three cost calculation paths produce
