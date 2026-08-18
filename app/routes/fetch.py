@@ -366,13 +366,41 @@ def api_fetch_remote():
 def api_data_status():
     """Get data status information."""
     try:
-        # Check database exists
-        db_exists = os.path.exists(DB_PATH)
+        from app.repositories.database import Database, is_postgresql
+
+        db = Database()
+
+        # Check database exists - different logic for PostgreSQL vs SQLite
+        if is_postgresql():
+            # PostgreSQL: test connection availability
+            try:
+                with db.connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT 1")
+                db_exists = True
+            except Exception as e:
+                logger.warning(f"PostgreSQL connection test failed: {e}")
+                db_exists = False
+        else:
+            # SQLite: check file existence
+            db_exists = os.path.exists(DB_PATH)
 
         # Get last update time
         last_update = None
         if db_exists:
-            last_update = datetime.fromtimestamp(os.path.getmtime(DB_PATH)).isoformat()
+            if is_postgresql():
+                # PostgreSQL: query latest timestamp from daily_messages table
+                try:
+                    result = db.fetch_one(
+                        'SELECT MAX("timestamp") as latest FROM daily_messages'
+                    )
+                    if result and result.get("latest"):
+                        last_update = result["latest"].isoformat()
+                except Exception as e:
+                    logger.warning(f"Failed to query last_update: {e}")
+            else:
+                # SQLite: use file modification time
+                last_update = datetime.fromtimestamp(os.path.getmtime(DB_PATH)).isoformat()
 
         # Get data counts
         from app.repositories.message_repo import MessageRepository
