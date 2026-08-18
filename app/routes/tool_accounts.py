@@ -381,18 +381,22 @@ def resolve_conflict(id: int):
         # Reject: delete the mapping
         success = tool_account_repo.delete(id)
         if success:
-            return jsonify({"status": "rejected", "message": "Conflict mapping rejected and deleted"})
+            return jsonify(
+                {"status": "rejected", "message": "Conflict mapping rejected and deleted"}
+            )
         return jsonify({"error": "Failed to delete mapping"}), 500
 
     # Update status with optimistic lock
     updated = tool_account_repo.update_status_with_version(id, new_status, mapping.version)
 
     if updated:
-        return jsonify({
-            "status": "resolved",
-            "mapping": updated.to_dict(),
-            "new_status": new_status,
-        })
+        return jsonify(
+            {
+                "status": "resolved",
+                "mapping": updated.to_dict(),
+                "new_status": new_status,
+            }
+        )
 
     return jsonify({"error": "Failed to resolve conflict - version mismatch"}), 409
 

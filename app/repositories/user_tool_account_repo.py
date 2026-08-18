@@ -168,7 +168,16 @@ class UserToolAccountRepository:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
             """
 
-        params = (user_id, tool_account, tool_type, description, mapping_source, mapping_status, created_by, tenant_id)
+        params = (
+            user_id,
+            tool_account,
+            tool_type,
+            description,
+            mapping_source,
+            mapping_status,
+            created_by,
+            tenant_id,
+        )
 
         try:
             if is_postgresql():
@@ -320,9 +329,7 @@ class UserToolAccountRepository:
     # Issue #2761: New methods for mapping source/status support
     # =========================================================================
 
-    def get_by_status(
-        self, status: str, tenant_id: int | None = None
-    ) -> list[UserToolAccount]:
+    def get_by_status(self, status: str, tenant_id: int | None = None) -> list[UserToolAccount]:
         """Get mappings by status.
 
         Issue #2761: Query mappings by mapping_status, optionally filtered by tenant.
@@ -594,7 +601,16 @@ class UserToolAccountRepository:
                 ON CONFLICT (tool_account) DO NOTHING
                 RETURNING *
             """
-            params = (user_id, tool_account, tool_type, description, mapping_source, mapping_status, created_by, tenant_id)
+            params = (
+                user_id,
+                tool_account,
+                tool_type,
+                description,
+                mapping_source,
+                mapping_status,
+                created_by,
+                tenant_id,
+            )
             row = self.db.fetch_one(query, params, commit=True)
         else:
             # SQLite: Try to create, ignore if conflict
@@ -606,7 +622,16 @@ class UserToolAccountRepository:
                         (user_id, tool_account, tool_type, description, mapping_source, mapping_status, created_by, tenant_id, version)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
                 """
-                params = (user_id, tool_account, tool_type, description, mapping_source, mapping_status, created_by, tenant_id)
+                params = (
+                    user_id,
+                    tool_account,
+                    tool_type,
+                    description,
+                    mapping_source,
+                    mapping_status,
+                    created_by,
+                    tenant_id,
+                )
                 self.db.execute(query, params)
                 row = self.db.fetch_one(
                     "SELECT * FROM user_tool_accounts WHERE tool_account = ?", (tool_account,)

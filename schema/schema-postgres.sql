@@ -172,6 +172,28 @@ CREATE SEQUENCE agent_tokens_id_seq
     CACHE 1;
 
 ALTER SEQUENCE agent_tokens_id_seq OWNED BY agent_tokens.id;
+
+CREATE TABLE backfill_logs (
+    id integer NOT NULL,
+    mapping_id integer NOT NULL,
+    backfilled_count integer NOT NULL,
+    first_date date,
+    last_date date,
+    started_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    completed_at timestamp without time zone,
+    status character varying(20) DEFAULT 'completed'::character varying
+);
+
+CREATE SEQUENCE backfill_logs_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE backfill_logs_id_seq OWNED BY backfill_logs.id;
+
 CREATE TABLE aggregation_history (
     id integer NOT NULL,
     type character varying(50) NOT NULL,
@@ -912,6 +934,28 @@ CREATE TABLE login_attempts (
     attempt_count integer DEFAULT 0 NOT NULL,
     locked_until timestamp without time zone
 );
+
+CREATE TABLE mapping_migration_status (
+    id integer NOT NULL,
+    migration_name character varying(100) NOT NULL,
+    status character varying(20) DEFAULT 'pending'::character varying,
+    last_processed_id integer,
+    total_count integer,
+    processed_count integer DEFAULT 0,
+    started_at timestamp without time zone,
+    completed_at timestamp without time zone,
+    error_message text
+);
+
+CREATE SEQUENCE mapping_migration_status_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE mapping_migration_status_id_seq OWNED BY mapping_migration_status.id;
 
 CREATE TABLE machine_assignments (
     id integer NOT NULL,
@@ -1904,6 +1948,30 @@ CREATE SEQUENCE tenant_usage_new_id_seq
     CACHE 1;
 
 ALTER SEQUENCE tenant_usage_new_id_seq OWNED BY tenant_usage.id;
+
+CREATE TABLE tool_account_conflicts (
+    id integer NOT NULL,
+    mapping_id integer NOT NULL,
+    conflict_type character varying(20) NOT NULL,
+    expected_value text,
+    actual_value text,
+    detected_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    resolved_at timestamp without time zone,
+    resolved_by integer,
+    resolution_action character varying(20),
+    details text
+);
+
+CREATE SEQUENCE tool_account_conflicts_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE tool_account_conflicts_id_seq OWNED BY tool_account_conflicts.id;
+
 CREATE TABLE tenants (
     id integer NOT NULL,
     name text NOT NULL,
@@ -2113,7 +2181,15 @@ CREATE TABLE user_tool_accounts (
     tool_type character varying(50),
     description character varying(255),
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    mapping_source character varying(20),
+    mapping_status character varying(20),
+    discovered_at timestamp without time zone,
+    last_activity_at timestamp without time zone,
+    observed_message_count integer,
+    created_by integer,
+    tenant_id integer,
+    version integer
 );
 
 CREATE SEQUENCE user_tool_accounts_id_seq
@@ -3681,9 +3757,19 @@ CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts USING btree (t
 
 CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts USING btree (user_id);
 
+CREATE INDEX idx_uta_last_activity ON user_tool_accounts USING btree (last_activity_at) WHERE (mapping_status = 'active'::text);
+
+CREATE INDEX idx_uta_status_account ON user_tool_accounts USING btree (mapping_status, tool_account);
+
 
 --
 --
+
+CREATE INDEX idx_bl_mapping ON backfill_logs USING btree (mapping_id);
+
+CREATE INDEX idx_tac_mapping ON tool_account_conflicts USING btree (mapping_id);
+
+CREATE INDEX idx_tac_unresolved ON tool_account_conflicts USING btree (detected_at) WHERE (resolved_at IS NULL);
 
 CREATE INDEX idx_usage_date ON daily_usage USING btree (date);
 

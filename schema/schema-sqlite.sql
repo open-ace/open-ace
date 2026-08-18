@@ -1381,7 +1381,51 @@ CREATE TABLE user_tool_accounts (
  tool_type TEXT,
  description TEXT,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ mapping_source TEXT,
+ mapping_status TEXT,
+ discovered_at TIMESTAMP,
+ last_activity_at TIMESTAMP,
+ observed_message_count integer,
+ created_by integer,
+ tenant_id integer,
+ version integer
+);
+
+CREATE TABLE backfill_logs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ mapping_id integer NOT NULL,
+ backfilled_count integer NOT NULL,
+ first_date TEXT,
+ last_date TEXT,
+ started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ completed_at TIMESTAMP,
+ status TEXT DEFAULT 'completed'
+);
+
+CREATE TABLE mapping_migration_status (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ migration_name TEXT NOT NULL,
+ status TEXT DEFAULT 'pending',
+ last_processed_id integer,
+ total_count integer,
+ processed_count integer DEFAULT 0,
+ started_at TIMESTAMP,
+ completed_at TIMESTAMP,
+ error_message TEXT
+);
+
+CREATE TABLE tool_account_conflicts (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ mapping_id integer NOT NULL,
+ conflict_type TEXT NOT NULL,
+ expected_value TEXT,
+ actual_value TEXT,
+ detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ resolved_at TIMESTAMP,
+ resolved_by integer,
+ resolution_action TEXT,
+ details TEXT
 );
 
 CREATE TABLE users (
@@ -1999,6 +2043,16 @@ CREATE INDEX idx_test_evidence_workflow_milestone ON test_execution_evidence (wo
 CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts (tool_account);
 
 CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts (user_id);
+
+CREATE INDEX idx_uta_last_activity ON user_tool_accounts (last_activity_at) WHERE mapping_status = 'active';
+
+CREATE INDEX idx_uta_status_account ON user_tool_accounts (mapping_status, tool_account);
+
+CREATE INDEX idx_bl_mapping ON backfill_logs (mapping_id);
+
+CREATE INDEX idx_tac_mapping ON tool_account_conflicts (mapping_id);
+
+CREATE INDEX idx_tac_unresolved ON tool_account_conflicts (detected_at) WHERE resolved_at IS NULL;
 
 CREATE INDEX idx_usage_date ON daily_usage (date);
 

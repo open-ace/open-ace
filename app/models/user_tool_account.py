@@ -49,7 +49,9 @@ class UserToolAccount:
 
     # Issue #2761: New fields for source tracking and status management
     mapping_source: str | None = None  # manual, auto, predeclared, import, discovered
-    mapping_status: str | None = None  # pending, active, stale, conflict_type, conflict_owner, conflict_tenant
+    mapping_status: str | None = (
+        None  # pending, active, stale, conflict_type, conflict_owner, conflict_tenant
+    )
     discovered_at: datetime | None = None  # First discovery timestamp
     last_activity_at: datetime | None = None  # Last activity timestamp
     observed_message_count: int = 0  # Number of observed messages
@@ -70,7 +72,9 @@ class UserToolAccount:
             "mapping_source": self.mapping_source,
             "mapping_status": self.mapping_status,
             "discovered_at": self.discovered_at.isoformat() if self.discovered_at else None,
-            "last_activity_at": self.last_activity_at.isoformat() if self.last_activity_at else None,
+            "last_activity_at": (
+                self.last_activity_at.isoformat() if self.last_activity_at else None
+            ),
             "observed_message_count": self.observed_message_count,
             "created_by": self.created_by,
             "tenant_id": self.tenant_id,
