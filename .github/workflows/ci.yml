@@ -5,9 +5,18 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
-  # Re-triggered by the lint-autofix job after it pushes formatter fixes back
-  # to a PR branch (GITHUB_TOKEN pushes fire no CI events; dispatch does).
+  # Re-triggered by the Lint Heal workflow (.github/workflows/lint-heal.yml)
+  # when approving the parked runs for a healed head was not possible
+  # (GITHUB_TOKEN pushes fire no CI events; dispatch does). healed_sha marks a
+  # dispatch as heal-originated so the PR Gate context it stamps cannot be
+  # re-created by a manual dispatch (required checks resolve to the latest
+  # run with that name on the head SHA).
   workflow_dispatch:
+    inputs:
+      healed_sha:
+        description: 'Head SHA of a Lint Heal push (set automatically; manual dispatches must leave it empty)'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -85,126 +94,6 @@ jobs:
           # Bandit has its own baseline-aware step above.
           SKIP: bandit-check,no-commit-to-branch
         run: pre-commit run --all-files
-
-  lint-autofix:
-    name: Lint auto-heal (push formatter fixes back)
-    needs: lint
-    # always() is required: without it the default skip-on-failed-dependency
-    # rule skips this job precisely when it should run.
-    if: >-
-      always() &&
-      needs.lint.result == 'failure' &&
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: write
-      actions: write
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.head_ref }}
-          submodules: false
-
-      - name: Loop guard — do not heal twice in a row
-        id: guard
-        run: |
-          if [[ "$(git log -1 --pretty=%s)" == "style: auto-format"* ]]; then
-            echo "Head commit is already an auto-format fix; the remaining lint failure is not formatter-fixable."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Set up Python
-        if: steps.guard.outputs.skip != 'true'
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-          cache: pip
-          cache-dependency-path: requirements-ci.lock
-
-      - name: Install pre-commit
-        if: steps.guard.outputs.skip != 'true'
-        run: pip install -c requirements-ci.lock pre-commit
-
-      - name: Apply formatter autofixes
-        if: steps.guard.outputs.skip != 'true'
-        id: autofix
-        run: |
-          # Only the hooks that can fix files. The dispatched CI re-run is the
-          # authoritative full-suite check; skipping mypy/pydocstyle keeps this
-          # job fast and hard to fail for unrelated reasons.
-          rc=0
-          for hook in black isort ruff trailing-whitespace end-of-file-fixer; do
-            pre-commit run "$hook" --all-files || rc=1
-          done
-          echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          if git diff --quiet; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Push fixes and re-trigger CI
-        if: steps.guard.outputs.skip != 'true' && steps.autofix.outputs.changed == 'true'
-        env:
-          BRANCH: ${{ github.head_ref }}
-          GH_TOKEN: ${{ github.token }}
-          FIX_RC: ${{ steps.autofix.outputs.rc }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -u
-          git commit -m "style: auto-format (pre-commit autofixes for #${{ github.event.pull_request.number }})"
-          # Plain non-force push: if the branch moved meanwhile, this fails and
-          # the newer push's own CI run takes over.
-          if ! git push origin "HEAD:$BRANCH"; then
-            echo "::warning::Branch $BRANCH moved during the heal; skipping re-trigger."
-            exit 0
-          fi
-          NEW_SHA="$(git rev-parse HEAD)"
-          # A GITHUB_TOKEN push parks the pull_request runs for the new head in
-          # action_required (anti-recursion). Approving them replays the normal
-          # PR pipeline at the fixed head; if none show up or approval fails,
-          # fall back to workflow_dispatch.
-          approved=0
-          for attempt in 1 2 3 4 5 6; do
-            sleep 10
-            RUN_IDS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${NEW_SHA}&status=action_required" \
-              --jq '.workflow_runs[].id' 2>/dev/null || true)"
-            if [ -n "$RUN_IDS" ]; then break; fi
-            echo "waiting for parked runs at ${NEW_SHA:0:8} (attempt $attempt)"
-          done
-          for run_id in $RUN_IDS; do
-            if gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/approve" --method POST >/dev/null 2>&1; then
-              approved=$((approved + 1))
-              echo "Approved parked run $run_id"
-            else
-              echo "::warning::Could not approve parked run $run_id"
-            fi
-          done
-          if [ "$approved" -eq 0 ]; then
-            echo "No parked runs approved; falling back to workflow_dispatch."
-            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" \
-              --method POST -f "ref=$BRANCH"
-            echo "Re-triggered CI on $BRANCH via workflow_dispatch"
-          fi
-          if [ "$FIX_RC" != "0" ]; then
-            echo "::warning::Autofixes applied, but formatters still reported unfixable findings (rc=$FIX_RC)."
-          fi
-
-      - name: Nothing fixable
-        if: steps.guard.outputs.skip != 'true' && steps.autofix.outputs.changed == 'false'
-        env:
-          FIX_RC: ${{ steps.autofix.outputs.rc }}
-        run: |
-          if [ "$FIX_RC" != "0" ]; then
-            echo "::warning::Formatter hooks ran but produced no diff while reporting findings (rc=$FIX_RC) — not auto-fixable. See the lint job log."
-          else
-            echo "::warning::Lint failed but formatter autofixes produced no diff — the failure is not formatter-related. See the lint job log."
-          fi
 
   test:
     name: test (${{ matrix.python-version }})
@@ -450,10 +339,18 @@ jobs:
 
   pr-gate:
     name: PR Gate
-    # Also on workflow_dispatch: the lint-autofix re-trigger runs on
-    # workflow_dispatch, and its checks become the PR head's latest set —
-    # without this, a required PR Gate context would never appear on it.
-    if: always() && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+    # On workflow_dispatch ONLY when the Lint Heal workflow dispatched it
+    # (healed_sha set): a heal-originated re-run is the sole run at the healed
+    # SHA, so its PR Gate is the legitimate latest context. A manual dispatch
+    # without healed_sha runs the jobs but stamps no PR Gate — otherwise any
+    # collaborator could re-stamp a green gate over a red pull_request run at
+    # the same ref.
+    if: >-
+      always() &&
+      (
+        github.event_name == 'pull_request' ||
+        (github.event_name == 'workflow_dispatch' && inputs.healed_sha != '')
+      )
     needs: [changes, lint, test, frontend, build, postgres-test, security-gate]
     runs-on: ubuntu-24.04
     steps:
