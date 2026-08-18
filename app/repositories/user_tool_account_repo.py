@@ -64,10 +64,18 @@ class UserToolAccountRepository:
         the lexicographically largest source when two rows share the same date.
 
         Issue #2180: If tenant_id is provided, only return unmapped accounts
-        for users in that tenant (via JOIN with users table).
+        for users in that tenant.
+
+        Issue #2760: Use system_account for matching instead of username.
+        Use the verified pattern from usage_repo.py to ensure:
+        - Correct identity field (system_account instead of username)
+        - PostgreSQL compatibility (double %% for LIKE patterns)
+        - Rules are not filtered before matching
+        - NULL system_account fallback to username
         """
         if tenant_id is not None:
-            # Filter by tenant through users table
+            # Issue #2760: Tenant query using verified pattern from usage_repo.py
+            # Use EXISTS subquery with system_account matching and username fallback
             query = """
                 SELECT dm.sender_name,
                        COUNT(*) as message_count,
@@ -83,24 +91,32 @@ class UserToolAccountRepository:
                            LIMIT 1
                        ) AS message_source
                 FROM daily_messages dm
-                JOIN users u ON dm.sender_name LIKE u.username || '%'
-                WHERE u.tenant_id = ?
-                  AND dm.sender_name IS NOT NULL
+                WHERE dm.sender_name IS NOT NULL
                   AND dm.sender_name != ''
                   AND NOT EXISTS (
                       SELECT 1 FROM user_tool_accounts uta
                       WHERE uta.tool_account = dm.sender_name
                   )
                   AND NOT EXISTS (
-                      SELECT 1 FROM users u2
-                      WHERE u2.username = dm.sender_name
+                      SELECT 1 FROM users u
+                      WHERE u.username = dm.sender_name
+                  )
+                  AND EXISTS (
+                      SELECT 1 FROM users u
+                      WHERE u.tenant_id = ?
+                        AND (
+                            (u.system_account IS NOT NULL AND dm.sender_name LIKE (u.system_account || '-%%'))
+                            OR dm.sender_name = u.username
+                            OR (u.system_account IS NULL AND dm.sender_name LIKE (u.username || '-%%'))
+                        )
                   )
                 GROUP BY dm.sender_name
                 ORDER BY message_count DESC
+                LIMIT 1000
             """
             return self.db.fetch_all(query, (tenant_id,))
         else:
-            # Original query without tenant filter
+            # Platform admin global query (original logic with LIMIT added)
             query = """
                 SELECT dm.sender_name,
                        COUNT(*) as message_count,
@@ -128,6 +144,7 @@ class UserToolAccountRepository:
                   )
                 GROUP BY dm.sender_name
                 ORDER BY message_count DESC
+                LIMIT 1000
             """
             return self.db.fetch_all(query)
 
