@@ -15,7 +15,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { cn } from '@/utils';
-import { useLanguage, useTheme } from '@/store';
+import { useLanguage } from '@/store';
 import { t } from '@/i18n';
 import {
   Card,
@@ -38,8 +38,6 @@ function confidenceToPercentage(confidence: number): number {
 
 export const UsageForecast: React.FC = () => {
   const language = useLanguage();
-  const theme = useTheme();
-  const isDark = theme === 'dark';
 
   // Day selector state (7/14/30)
   const [forecastDays, setForecastDays] = useState<7 | 14 | 30>(7);
@@ -75,8 +73,8 @@ export const UsageForecast: React.FC = () => {
   const forecastAvailable = forecastData?.forecast_available === true;
 
   // Chart colors
-  const historicalColor = isDark ? 'rgba(13, 110, 253, 1)' : 'rgba(13, 110, 253, 1)';
-  const forecastColor = isDark ? 'rgba(25, 135, 84, 1)' : 'rgba(25, 135, 84, 1)';
+  const historicalColor = 'rgba(13, 110, 253, 1)';
+  const forecastColor = 'rgba(25, 135, 84, 1)';
 
   // Prepare chart data: historical + forecast
   const chartData = useMemo(() => {
