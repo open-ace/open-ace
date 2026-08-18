@@ -24,11 +24,11 @@
 #   - Fixing hooks are re-run after each fold until the tree settles
 #     (a `ruff --fix` can leave code black wants to reformat; same doctrine
 #     as orchestrator CI-repair rule #5: repeat the full command to exit 0).
-#   - Fixes are amended into HEAD when HEAD is not on the remote; if HEAD is
-#     already the remote tip, a "style: apply pre-commit autofixes" commit is
-#     appended instead. A HEAD that already sits on any remote branch is
-#     refused up front — published commits are never rewritten, and the
-#     refusal happens before lint so nothing is left staged.
+#   - Fixes are amended into HEAD. A HEAD equal to the remote tip never
+#     reaches a fold (its empty branch delta exits above), and a HEAD that
+#     already sits on any remote branch is refused up front — published
+#     commits are never rewritten, and the refusal happens before lint so
+#     nothing is left staged.
 #   - Failures autofix cannot resolve (mypy, pydocstyle, ...) abort the push;
 #     any applied fixes are kept in HEAD.
 #   - pre-commit missing on PATH degrades to a loud warning plus the push:
@@ -95,11 +95,12 @@ fi
 # have to amend it. Refusing HERE — before anything runs — keeps the worktree
 # untouched; refusing after `git add -u` would leave the autofixes staged,
 # and the dirty-tree guard would then block the re-run this message suggests.
-# (A branch with no commits of its own never reaches this point: its empty
-# delta exited above.)
+# A HEAD equal to the upstream tip never reaches this point either: its empty
+# branch delta exited above, which is also why fold_changes can amend
+# unconditionally.
 HEAD_SHA="$(git rev-parse HEAD)"
 REMOTE_CONTAINING="$(git branch -r --contains "$HEAD_SHA")"
-if [ -n "$REMOTE_CONTAINING" ] && [ "$HEAD_SHA" != "$(git rev-parse --quiet --verify '@{u}' 2>/dev/null || true)" ]; then
+if [ -n "$REMOTE_CONTAINING" ]; then
     echo "scripts/push.sh: HEAD is already on: $(echo "$REMOTE_CONTAINING" | tr -d ' ' | paste -sd, -)" >&2
     echo "scripts/push.sh: refusing to amend a published commit —" >&2
     echo "scripts/push.sh: make your own commit on top (or git pull --rebase), then re-run." >&2
@@ -108,18 +109,11 @@ fi
 
 fold_changes() {
     git add -u
-    local HEAD_SHA UPSTREAM_SHA
-    HEAD_SHA="$(git rev-parse HEAD)"
-    UPSTREAM_SHA="$(git rev-parse --quiet --verify '@{u}' 2>/dev/null || true)"
-    if [ -n "$UPSTREAM_SHA" ] && [ "$HEAD_SHA" = "$UPSTREAM_SHA" ]; then
-        # HEAD is already the remote branch tip; appending is the only non-force option.
-        git commit -m "style: apply pre-commit autofixes"
-    else
-        # HEAD exists only locally — the published-commit check above refused
-        # everything already on a remote, and the first fold's amend keeps
-        # HEAD off the remote by construction.
-        git commit --amend --no-edit
-    fi
+    # HEAD exists only locally at this point: the published-commit check
+    # above refused everything already on a remote, an empty delta exits
+    # before any fold, and each amend keeps HEAD off the remote by
+    # construction.
+    git commit --amend --no-edit
     echo "scripts/push.sh: folded autofixes into $(git rev-parse --short HEAD)"
 }
 
