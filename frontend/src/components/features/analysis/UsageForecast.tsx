@@ -16,7 +16,7 @@
 import React, { useState, useMemo } from 'react';
 import { cn } from '@/utils';
 import { useLanguage, useTheme } from '@/store';
-import { t, type Language } from '@/i18n';
+import { t } from '@/i18n';
 import {
   Card,
   StatCard,
