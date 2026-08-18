@@ -1251,6 +1251,24 @@ export const translations: Record<Language, Translations> = {
     commonOperations: 'Common Operations',
     selectUserToViewProfile: 'Select a user to view their behavior profile',
 
+    // Forecast
+    usageForecast: 'Usage Forecast',
+    forecastDays: 'Forecast Days',
+    forecastAvailable: 'Forecast Available',
+    confidence: 'Confidence',
+    insufficientHistoricalData: 'Insufficient historical data to generate forecast',
+    forecastMethod: 'Forecast Method',
+    movingAverage: 'Moving Average',
+    forecastTotalTokens: 'Forecast Total Tokens',
+    forecastTotalRequests: 'Forecast Total Requests',
+    forecastDailyAvg: 'Daily Average Forecast',
+    confidenceScore: 'Confidence Score',
+    forecastExplanation:
+      'Forecast is calculated using moving average based on the past 7 days of historical data',
+    historicalData: 'Historical Data',
+    predictedData: 'Predicted Data',
+    historicalDataUnavailable: 'Historical data unavailable, showing forecast only',
+
     // ROI Analysis
     totalCost: 'Total Cost',
     totalSavings: 'Total Savings',
@@ -3220,6 +3238,23 @@ export const translations: Record<Language, Translations> = {
     commonOperations: '常用操作',
     selectUserToViewProfile: '选择用户查看行为画像',
 
+    // Forecast
+    usageForecast: '使用预测',
+    forecastDays: '预测天数',
+    forecastAvailable: '预测可用',
+    confidence: '置信度',
+    insufficientHistoricalData: '历史数据不足，无法生成预测',
+    forecastMethod: '预测方法',
+    movingAverage: '移动平均',
+    forecastTotalTokens: '预测总 Token',
+    forecastTotalRequests: '预测总请求数',
+    forecastDailyAvg: '日均预测',
+    confidenceScore: '置信度得分',
+    forecastExplanation: '预测基于过去7天的历史数据使用移动平均方法计算',
+    historicalData: '历史数据',
+    predictedData: '预测数据',
+    historicalDataUnavailable: '历史数据不可用，仅显示预测数据',
+
     // ROI Analysis
     totalCost: '总成本',
     totalSavings: '总节省',
@@ -5071,6 +5106,23 @@ export const translations: Record<Language, Translations> = {
     requests: 'リクエスト',
     requestsMessages: 'リクエスト / メッセージ',
 
+    // Forecast
+    usageForecast: '使用予測',
+    forecastDays: '予測日数',
+    forecastAvailable: '予測利用可能',
+    confidence: '信頼度',
+    insufficientHistoricalData: '履歴データが不足しているため、予測を生成できません',
+    forecastMethod: '予測方法',
+    movingAverage: '移動平均',
+    forecastTotalTokens: '予測総トークン数',
+    forecastTotalRequests: '予測総リクエスト数',
+    forecastDailyAvg: '日平均予測',
+    confidenceScore: '信頼度スコア',
+    forecastExplanation: '過去7日間の履歴データに基づいて移動平均で予測を計算しています',
+    historicalData: '履歴データ',
+    predictedData: '予測データ',
+    historicalDataUnavailable: '履歴データが利用できません。予測データのみを表示しています',
+
     // ROI Analysis
     roiAnalysis: 'ROI 分析',
     roi: 'ROI',
@@ -6898,6 +6950,23 @@ export const translations: Record<Language, Translations> = {
     // Request labels
     requests: '요청',
     requestsMessages: '요청 / 메시지',
+
+    // Forecast
+    usageForecast: '사용 예측',
+    forecastDays: '예측 일수',
+    forecastAvailable: '예측 가능',
+    confidence: '신뢰도',
+    insufficientHistoricalData: '과거 데이터가 부족하여 예측을 생성할 수 없습니다',
+    forecastMethod: '예측 방법',
+    movingAverage: '이동 평균',
+    forecastTotalTokens: '예측 총 토큰',
+    forecastTotalRequests: '예측 총 요청',
+    forecastDailyAvg: '일일 평균 예측',
+    confidenceScore: '신뢰도 점수',
+    forecastExplanation: '지난 7일간의 과거 데이터를 기반으로 이동 평균으로 예측을 계산합니다',
+    historicalData: '과거 데이터',
+    predictedData: '예측 데이터',
+    historicalDataUnavailable: '과거 데이터를 사용할 수 없습니다. 예측 데이터만 표시합니다',
 
     // ROI Analysis
     roiAnalysis: 'ROI 분석',
