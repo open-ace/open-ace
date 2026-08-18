@@ -253,7 +253,11 @@ def test_execution_needs_server_falls_back_to_category_for_unknown_targets(tmp_p
     args = run_extended_tests.parse_args(
         ["--category", "e2e", "--selection-json", str(selection), "--dry-run"]
     )
-    monkeypatch.setattr(run_extended_tests, "inventory_entries_by_path", lambda: {})
+    monkeypatch.setattr(
+        run_extended_tests,
+        "inventory_entries_by_path",
+        lambda: {"tests/e2e/unrelated.py": {"capabilities": ["browser"]}},
+    )
 
     assert (
         run_extended_tests.execution_needs_server(
