@@ -1169,6 +1169,7 @@ export const translations: Record<Language, Translations> = {
     gatewayEnabledNoConfig: 'Gateway routing enabled but not configured',
     gatewayEnableInstructions:
       'Set model_gateway.enabled=true in config.json to activate gateway routing.',
+    featureFlagsLoadError: 'Feature flags failed to load. Some features may be unavailable.',
     notVerified: 'Not Verified',
     emailStatistics: 'Email Statistics',
     totalEmails: 'Total Emails',
@@ -3200,6 +3201,7 @@ export const translations: Record<Language, Translations> = {
     gatewayDisabled: '网关路由未启用',
     gatewayEnabledNoConfig: '网关路由已启用但未配置地址',
     gatewayEnableInstructions: '在 config.json 中设置 model_gateway.enabled=true 以激活网关路由。',
+    featureFlagsLoadError: '功能标志加载失败。部分功能可能不可用。',
     notVerified: '未验证',
     emailStatistics: '邮件统计',
     totalEmails: '邮件总数',
@@ -4203,6 +4205,8 @@ export const translations: Record<Language, Translations> = {
     gatewayEnabledNoConfig: 'ゲートウェイルーティングが有効ですが未設定',
     gatewayEnableInstructions:
       'ゲートウェイルーティングを有効化するには config.json で model_gateway.enabled=true を設定してください。',
+    featureFlagsLoadError:
+      '機能フラグの読み込みに失敗しました。一部の機能が利用できない可能性があります。',
     error: 'エラー',
     retry: '再試行',
     refresh: '更新',
@@ -6092,6 +6096,7 @@ export const translations: Record<Language, Translations> = {
     gatewayEnabledNoConfig: '게이트웨이 라우팅이 활성화되었지만 구성되지 않음',
     gatewayEnableInstructions:
       '게이트웨이 라우팅을 활성화하려면 config.json에서 model_gateway.enabled=true를 설정하세요.',
+    featureFlagsLoadError: '기능 플래그를 로드하지 못했습니다. 일부 기능을 사용할 수 없습니다.',
     error: '오류',
     retry: '재시도',
     refresh: '새로고침',

@@ -104,7 +104,7 @@ describe('FeatureRouteGuard', () => {
         return { configLoaded: true } as any;
       });
 
-      const { router } = render(
+      render(
         <MemoryRouter initialEntries={['/protected', '/manage/dashboard']}>
           <Routes>
             <Route

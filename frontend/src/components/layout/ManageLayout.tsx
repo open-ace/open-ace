@@ -22,7 +22,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, useLocation, Link } from 'react-router-dom';
 import { cn } from '@/utils';
-import { useLanguage, useSidebarCollapsed, usePolicyEnabled, useModelGatewayEnabled } from '@/store';
+import {
+  useLanguage,
+  useSidebarCollapsed,
+  usePolicyEnabled,
+  useModelGatewayEnabled,
+} from '@/store';
 import { useAppStore } from '@/store';
 import { useAuth } from '@/hooks';
 import { t } from '@/i18n';

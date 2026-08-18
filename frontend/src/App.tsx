@@ -246,7 +246,13 @@ const FeatureFlagsLoader: React.FC<{ children: React.ReactNode }> = ({ children 
           style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999 }}
         >
           <i className="bi bi-exclamation-triangle-fill me-2" />
-          Feature flags failed to load. Some features may be unavailable.
+          {t('featureFlagsLoadError', useAppStore.getState().language)}
+          <button
+            type="button"
+            className="btn-close"
+            onClick={() => setLoadError(false)}
+            aria-label="Close"
+          />
         </div>
       )}
       {children}

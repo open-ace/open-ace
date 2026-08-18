@@ -6,18 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen } from '@/test/utils';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { useAuth } from '@/hooks';
-
-// Track the modelGatewayEnabled value for mocking
-let mockModelGatewayEnabled = false;
-
-// Mock the store module with controllable values
-vi.mock('@/store', () => ({
-  useAppStore: vi.fn(),
-  useLanguage: () => 'en',
-  useSidebarCollapsed: () => false,
-  usePolicyEnabled: () => false,
-  useModelGatewayEnabled: () => mockModelGatewayEnabled,
-}));
+import { useAppStore } from '@/store';
 
 // Mock the hooks module
 vi.mock('@/hooks', async (importOriginal) => {
@@ -31,11 +20,14 @@ vi.mock('@/hooks', async (importOriginal) => {
 describe('ManageLayout', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockModelGatewayEnabled = false;
+    // Reset store state
+    useAppStore.setState({
+      modelGatewayEnabled: false,
+      policyEnabled: false,
+    });
   });
 
   afterEach(() => {
-    mockModelGatewayEnabled = false;
     vi.resetModules();
   });
 
@@ -65,7 +57,7 @@ describe('ManageLayout', () => {
 
   describe('feature flag filtering', () => {
     it('should hide model-gateway navigation item when modelGatewayEnabled is false', async () => {
-      mockModelGatewayEnabled = false;
+      useAppStore.setState({ modelGatewayEnabled: false });
       vi.mocked(useAuth).mockReturnValue({
         user: { id: '1', username: 'admin', role: 'admin', must_change_password: false },
         isLoading: false,
@@ -92,7 +84,7 @@ describe('ManageLayout', () => {
     });
 
     it('should show model-gateway navigation item when modelGatewayEnabled is true', async () => {
-      mockModelGatewayEnabled = true;
+      useAppStore.setState({ modelGatewayEnabled: true });
       vi.mocked(useAuth).mockReturnValue({
         user: { id: '1', username: 'admin', role: 'admin', must_change_password: false },
         isLoading: false,
@@ -126,7 +118,7 @@ describe('ManageLayout', () => {
 
   describe('admin filtering', () => {
     it('should disable admin-only items for non-admin users', async () => {
-      mockModelGatewayEnabled = false;
+      useAppStore.setState({ modelGatewayEnabled: false });
       vi.mocked(useAuth).mockReturnValue({
         user: { id: '1', username: 'user', role: 'user', must_change_password: false },
         isLoading: false,
