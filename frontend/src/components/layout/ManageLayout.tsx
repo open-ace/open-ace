@@ -79,6 +79,13 @@ const navSections: NavSection[] = [
       },
       { id: 'roi', label: 'roiAnalysis', icon: 'bi-currency-dollar', path: '/manage/analysis/roi' },
       {
+        id: 'forecast',
+        label: 'usageForecast',
+        icon: 'bi-graph-up-arrow',
+        path: '/manage/analysis/forecast',
+        adminOnly: true,
+      },
+      {
         id: 'conversation-history',
         label: 'conversationHistory',
         icon: 'bi-chat-square-text',

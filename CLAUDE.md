@@ -27,6 +27,30 @@ other, nothing else referenced them, and they pushed the product README below a
 wall of CI firefighting logs — right as the project received its first external
 visitors. See `docs/dev-notes/README.md`.
 
+## Pushing
+
+In interactive sessions (human contributors and Claude Code), do not call
+`git push` directly. Use `scripts/push.sh [git-push args]`: it runs the CI
+lint scoped to the branch's changed files first, refuses to run over
+uncommitted unrelated work, folds formatter autofixes into the commit being
+pushed (amending when the commit is not yet on the remote), and aborts the
+push on failures autofix cannot resolve.
+
+This rule is for interactive sessions ONLY. Autonomous worktree agents must
+not run `scripts/push.sh` (or any git add/commit/push): the orchestrator
+commits and pushes after scope validation (its constraint #7), and the script
+would bypass `_validate_autonomous_change_scope` and the stale-lease-safe
+`github_ops.git_push`. The orchestrator's CI-repair prompt states the same
+rule from the agent side.
+
+Why this rule exists: on 2026-08-15 the same failure hit #2712, #2718 and
+#2719 (#2205 before them) — black/isort autofixes landed in the worktree but
+not in the pushed commit, CI lint went red, and a local `pre-commit run` still
+passed because it checks the worktree, not the commit. When such a push slips
+through anyway, the `Lint Heal` workflow (`.github/workflows/lint-heal.yml`)
+pushes the fixes back and re-triggers CI — but going through
+`scripts/push.sh` avoids the wasted red run.
+
 ## Test placement and CI semantics
 
 - Choose one canonical location by runtime contract: `tests/unit/`,

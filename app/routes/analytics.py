@@ -66,7 +66,7 @@ def api_usage_report():
     return jsonify(report.to_dict())
 
 
-@analytics_bp.route("/analytics/forecast", methods=["GET"])
+@analytics_bp.route("/analysis/forecast", methods=["GET"])
 @admin_required
 def api_usage_forecast():
     """Get usage forecast."""

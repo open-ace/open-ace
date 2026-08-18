@@ -5,6 +5,21 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  # Re-triggered by the Lint Heal workflow (.github/workflows/lint-heal.yml)
+  # when approving the parked runs for a healed head was not possible
+  # (GITHUB_TOKEN pushes fire no CI events; dispatch does). healed_sha marks a
+  # dispatch as heal-originated: PR Gate stamps only for PR runs or dispatches
+  # carrying it, so a routine manual dispatch (empty input) cannot re-stamp a
+  # green gate over a red run. The field is an origin breadcrumb, not an
+  # attestation — it is not checked against the run's head SHA, so a
+  # collaborator dispatching with an arbitrary value still re-stamps; that is
+  # the same trust level as their ordinary push rights, not a new capability.
+  workflow_dispatch:
+    inputs:
+      healed_sha:
+        description: 'Head SHA of a Lint Heal push (set automatically; manual dispatches must leave it empty)'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -38,7 +53,7 @@ jobs:
       - name: Select suites from changed paths
         id: select
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || 'origin/main' }}
         run: python scripts/ci.py detect --base "$BASE_SHA" --github-output
 
       - name: Publish selection summary
@@ -327,7 +342,18 @@ jobs:
 
   pr-gate:
     name: PR Gate
-    if: always() && github.event_name == 'pull_request'
+    # On workflow_dispatch ONLY when the Lint Heal workflow dispatched it
+    # (healed_sha set): a heal-originated re-run is the sole run at the healed
+    # SHA, so its PR Gate is the legitimate latest context. A manual dispatch
+    # without healed_sha runs the jobs but stamps no PR Gate — otherwise any
+    # collaborator could re-stamp a green gate over a red pull_request run at
+    # the same ref.
+    if: >-
+      always() &&
+      (
+        github.event_name == 'pull_request' ||
+        (github.event_name == 'workflow_dispatch' && inputs.healed_sha != '')
+      )
     needs: [changes, lint, test, frontend, build, postgres-test, security-gate]
     runs-on: ubuntu-24.04
     steps:
