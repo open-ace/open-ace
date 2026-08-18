@@ -139,7 +139,7 @@ class TestRoiAssumptionRoutes:
                 resp = client.get(
                     "/api/roi/daily-costs",
                     headers={"Authorization": "Bearer t"},
-                    query_string={"tool_name": "claude-code"}
+                    query_string={"tool_name": "claude-code"},
                 )
 
         assert resp.status_code == 200

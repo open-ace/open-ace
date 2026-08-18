@@ -324,7 +324,7 @@ def get_daily_costs():
             end_date=end_date,
             user_id=user_id,
             tool_name=tool_name,
-            tenant_id=_caller_tenant_id()
+            tenant_id=_caller_tenant_id(),
         )
 
         return jsonify({"success": True, "data": daily_costs})
