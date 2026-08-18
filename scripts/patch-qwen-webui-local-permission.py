@@ -68,7 +68,10 @@ def main() -> int:
         )
         # Already patched (NEW_PROCESS present) counts as success; drift fails.
         if "else if(r.type===`control_request`" in data:
-            print("[patch-qwen-webui-local-permission] bundle already patched, skipping", file=sys.stderr)
+            print(
+                "[patch-qwen-webui-local-permission] bundle already patched, skipping",
+                file=sys.stderr,
+            )
             return 0
         return 1
 
@@ -88,7 +91,9 @@ def main() -> int:
         print(f"[patch-qwen-webui-local-permission] cannot write bundle: {exc}", file=sys.stderr)
         return 1
 
-    print("[patch-qwen-webui-local-permission] patched processStreamLine with control_request handling OK")
+    print(
+        "[patch-qwen-webui-local-permission] patched processStreamLine with control_request handling OK"
+    )
     return 0
 
 
