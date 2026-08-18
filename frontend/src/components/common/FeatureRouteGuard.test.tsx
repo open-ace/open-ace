@@ -8,10 +8,14 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { FeatureRouteGuard } from './FeatureRouteGuard';
 import { useAppStore } from '@/store';
 
-// Mock the useAppStore hook
-vi.mock('@/store', () => ({
-  useAppStore: vi.fn(),
-}));
+// Mock the useAppStore hook and selectors
+vi.mock('@/store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/store')>();
+  return {
+    ...actual,
+    useAppStore: vi.fn(),
+  };
+});
 
 describe('FeatureRouteGuard', () => {
   beforeEach(() => {
