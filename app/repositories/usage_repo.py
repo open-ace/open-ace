@@ -883,6 +883,10 @@ class UsageRepository:
         """
         Get today's request statistics.
 
+        A "request" is defined as an AI assistant response message (role='assistant'),
+        representing a completed user-to-AI interaction. This aligns with
+        get_request_stats_by_user() for data consistency.
+
         Args:
             host_name: Optional host name filter.
             tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
@@ -892,26 +896,30 @@ class UsageRepository:
 
         Note:
             Issue #1852: Added tenant_id parameter for tenant filtering.
+            Issue #2752: Changed data source from daily_usage to daily_messages for
+                         consistency with get_request_stats_by_user().
         """
         today = datetime.now().strftime("%Y-%m-%d")
 
-        conditions = ["date = ?"]
-        params: list[Any] = [today]
+        conditions = ["dm.date = ?", "dm.role = ?"]
+        params: list[Any] = [today, "assistant"]
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if normalized_tenant_id is not None:
-            conditions.append("tenant_id = ?")
+            conditions.append(self._tenant_user_condition("dm.user_id"))
             params.append(normalized_tenant_id)
 
         if host_name:
-            conditions.append("host_name = ?")
+            conditions.append("dm.host_name = ?")
             params.append(host_name)
 
-        # Get total
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+
+        # Get total requests
         total_query = f"""
-            SELECT SUM(request_count) as total_requests
-            FROM daily_usage
-            WHERE {" AND ".join(conditions)}
+            SELECT COUNT(*) as total_requests
+            FROM daily_messages dm
+            {where_clause}
         """
         total_result = self.db.fetch_one(total_query, tuple(params))
         total_requests = int(total_result.get("total_requests", 0) or 0) if total_result else 0
@@ -919,11 +927,11 @@ class UsageRepository:
         # Get by tool
         by_tool_query = f"""
             SELECT
-                tool_name,
-                SUM(request_count) as requests
-            FROM daily_usage
-            WHERE {" AND ".join(conditions)}
-            GROUP BY tool_name
+                dm.tool_name,
+                COUNT(*) as requests
+            FROM daily_messages dm
+            {where_clause}
+            GROUP BY dm.tool_name
             ORDER BY requests DESC
         """
         by_tool_rows = self.db.fetch_all(by_tool_query, tuple(params))
