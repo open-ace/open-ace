@@ -466,6 +466,7 @@ class ContentFilter:
                 # TTL valid, check version
                 cached_version = self._tenant_keywords_version.get(tenant_id)
                 db_version = self.governance_repo.get_tenant_keywords_version(tenant_id)
+                # If db_version is None (no version record), force reload to ensure consistency
                 if cached_version is not None and cached_version == db_version:
                     return self._tenant_keywords_cache.get(tenant_id, [])
 

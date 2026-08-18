@@ -706,15 +706,16 @@ class GovernanceRepository:
                     (tenant_id,),
                 )
             else:
+                # SQLite: Use INSERT OR REPLACE with subquery for version increment
+                # SQLite doesn't support ON CONFLICT DO UPDATE syntax
                 self.db.execute(
-                    adapt_sql("""
-                    INSERT INTO tenant_keywords_version (tenant_id, version, updated_at)
-                    VALUES (?, 1, CURRENT_TIMESTAMP)
-                    ON CONFLICT (tenant_id) DO UPDATE SET
-                        version = tenant_keywords_version.version + 1,
-                        updated_at = CURRENT_TIMESTAMP
-                """),
-                    (tenant_id,),
+                    """
+                    INSERT OR REPLACE INTO tenant_keywords_version (tenant_id, version, updated_at)
+                    VALUES (?,
+                        COALESCE((SELECT version FROM tenant_keywords_version WHERE tenant_id = ?), 0) + 1,
+                        CURRENT_TIMESTAMP)
+                """,
+                    (tenant_id, tenant_id),
                 )
 
             return True
