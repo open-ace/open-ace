@@ -18,6 +18,7 @@ import type {
   SecuritySettings,
   AuditThresholds,
   CreatePolicyRuleRequest,
+  PolicyRule,
 } from '@/api';
 
 // User Management Hooks
@@ -289,7 +290,33 @@ export function useTogglePolicyRule() {
   return useMutation({
     mutationFn: ({ ruleId, enabled }: { ruleId: number; enabled: boolean }) =>
       policyApi.toggleRule(ruleId, enabled),
-    onSuccess: () => {
+    // Optimistic update: immediately update the rule in cache
+    onMutate: async ({ ruleId, enabled }) => {
+      // Cancel any outgoing refetches to avoid overwriting our optimistic update
+      await queryClient.cancelQueries({ queryKey: ['admin', 'policy-rules'] });
+
+      // Snapshot the previous value
+      const previousRules = queryClient.getQueryData(['admin', 'policy-rules', false]);
+
+      // Optimistically update to the new value
+      queryClient.setQueryData<PolicyRule[]>(['admin', 'policy-rules', false], (old) => {
+        if (!old) return [];
+        return old.map((rule) =>
+          rule.id === ruleId ? { ...rule, enabled } : rule
+        );
+      });
+
+      // Return a context object with the snapshot
+      return { previousRules };
+    },
+    // If mutation fails, roll back to the snapshot
+    onError: (err, variables, context) => {
+      if (context?.previousRules) {
+        queryClient.setQueryData(['admin', 'policy-rules', false], context.previousRules);
+      }
+    },
+    // Always refetch after error or success
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'policy-rules'] });
     },
   });
