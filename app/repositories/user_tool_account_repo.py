@@ -2,12 +2,16 @@
 Open ACE - User Tool Account Repository
 
 Repository for user_tool_accounts table operations.
+
+Issue #2761: Extended with mapping source/status support, conflict detection,
+and batch operations for pending account activation.
 """
 
 import logging
+from datetime import datetime
 from typing import Any
 
-from app.models.user_tool_account import UserToolAccount
+from app.models.user_tool_account import MappingSource, MappingStatus, UserToolAccount
 from app.repositories.database import Database
 
 logger = logging.getLogger(__name__)
@@ -150,23 +154,47 @@ class UserToolAccountRepository:
         tool_account: str,
         tool_type: str | None = None,
         description: str | None = None,
+        mapping_source: str | None = None,
+        mapping_status: str | None = None,
+        created_by: int | None = None,
+        tenant_id: int | None = None,
     ) -> UserToolAccount | None:
-        """Create a new tool account mapping."""
+        """Create a new tool account mapping.
+
+        Issue #2761: Added mapping_source, mapping_status, created_by, tenant_id parameters.
+        """
         from app.repositories.database import is_postgresql
+
+        # Set defaults
+        if mapping_source is None:
+            mapping_source = MappingSource.MANUAL.value
+        if mapping_status is None:
+            mapping_status = MappingStatus.ACTIVE.value
 
         if is_postgresql():
             query = """
-                INSERT INTO user_tool_accounts (user_id, tool_account, tool_type, description)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO user_tool_accounts
+                    (user_id, tool_account, tool_type, description, mapping_source, mapping_status, created_by, tenant_id, version)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1)
                 RETURNING *
             """
         else:
             query = """
-                INSERT INTO user_tool_accounts (user_id, tool_account, tool_type, description)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO user_tool_accounts
+                    (user_id, tool_account, tool_type, description, mapping_source, mapping_status, created_by, tenant_id, version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
             """
 
-        params = (user_id, tool_account, tool_type, description)
+        params = (
+            user_id,
+            tool_account,
+            tool_type,
+            description,
+            mapping_source,
+            mapping_status,
+            created_by,
+            tenant_id,
+        )
 
         try:
             if is_postgresql():
@@ -250,7 +278,10 @@ class UserToolAccountRepository:
         return self._row_to_model(row) if row else None
 
     def _row_to_model(self, row: dict) -> UserToolAccount:
-        """Convert database row to model."""
+        """Convert database row to model.
+
+        Issue #2761: Updated to include new mapping source/status fields.
+        """
         return UserToolAccount(
             id=int(row.get("id", 0)),
             user_id=int(row.get("user_id", 0)),
@@ -259,6 +290,15 @@ class UserToolAccountRepository:
             description=row.get("description"),
             created_at=row.get("created_at"),
             updated_at=row.get("updated_at"),
+            # Issue #2761: New fields
+            mapping_source=row.get("mapping_source"),
+            mapping_status=row.get("mapping_status"),
+            discovered_at=row.get("discovered_at"),
+            last_activity_at=row.get("last_activity_at"),
+            observed_message_count=int(row.get("observed_message_count", 0) or 0),
+            created_by=row.get("created_by"),
+            tenant_id=row.get("tenant_id"),
+            version=int(row.get("version", 1) or 1),
         )
 
     def update_daily_messages_user_id(self, tool_account: str, user_id: int) -> int:
@@ -301,3 +341,328 @@ class UserToolAccountRepository:
                 self.update_daily_messages_user_id(mapping.tool_account, user_id)
                 results.append(mapping)
         return results
+
+    # =========================================================================
+    # Issue #2761: New methods for mapping source/status support
+    # =========================================================================
+
+    def get_by_status(self, status: str, tenant_id: int | None = None) -> list[UserToolAccount]:
+        """Get mappings by status.
+
+        Issue #2761: Query mappings by mapping_status, optionally filtered by tenant.
+        """
+        from app.repositories.database import is_postgresql
+
+        if tenant_id is not None:
+            query = """
+                SELECT * FROM user_tool_accounts
+                WHERE mapping_status = ? AND tenant_id = ?
+                ORDER BY created_at DESC
+            """
+            params = (status, tenant_id)
+        else:
+            query = """
+                SELECT * FROM user_tool_accounts
+                WHERE mapping_status = ?
+                ORDER BY created_at DESC
+            """
+            params = (status,)
+
+        if is_postgresql():
+            query = query.replace("?", "%s")
+
+        rows = self.db.fetch_all(query, params)
+        return [self._row_to_model(row) for row in rows]
+
+    def get_pending_for_activation(
+        self, sender_names: list[str], tenant_id: int | None = None
+    ) -> list[UserToolAccount]:
+        """Batch query pending mappings for activation.
+
+        Issue #2761: Used by data fetch scheduler to activate predeclared accounts
+        when matching sender_name is found in incoming messages.
+        """
+        from app.repositories.database import is_postgresql
+
+        if not sender_names:
+            return []
+
+        # Use parameterized IN clause
+        placeholders = ",".join(["?" for _ in sender_names])
+
+        if tenant_id is not None:
+            query = f"""
+                SELECT * FROM user_tool_accounts
+                WHERE tool_account IN ({placeholders})
+                  AND mapping_status = 'pending'
+                  AND tenant_id = ?
+            """
+            params = tuple(sender_names) + (tenant_id,)
+        else:
+            query = f"""
+                SELECT * FROM user_tool_accounts
+                WHERE tool_account IN ({placeholders})
+                  AND mapping_status = 'pending'
+            """
+            params = tuple(sender_names)
+
+        if is_postgresql():
+            query = query.replace("?", "%s")
+
+        rows = self.db.fetch_all(query, params)
+        return [self._row_to_model(row) for row in rows]
+
+    def update_status_with_version(
+        self, id: int, new_status: str, expected_version: int
+    ) -> UserToolAccount | None:
+        """Update mapping status with optimistic lock check.
+
+        Issue #2761: Atomic status update using version number.
+        Returns None if version mismatch (optimistic lock failure).
+        """
+        from app.repositories.database import is_postgresql
+
+        if is_postgresql():
+            query = """
+                UPDATE user_tool_accounts
+                SET mapping_status = %s,
+                    version = version + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND version = %s
+                RETURNING *
+            """
+            params = (new_status, id, expected_version)
+            row = self.db.fetch_one(query, params, commit=True)
+        else:
+            query = """
+                UPDATE user_tool_accounts
+                SET mapping_status = ?,
+                    version = version + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND version = ?
+            """
+            params = (new_status, id, expected_version)
+            self.db.execute(query, params)
+            row = self.db.fetch_one("SELECT * FROM user_tool_accounts WHERE id = ?", (id,))
+
+        return self._row_to_model(row) if row else None
+
+    def activate_mapping(
+        self,
+        id: int,
+        expected_version: int,
+        discovered_at: datetime | None = None,
+    ) -> UserToolAccount | None:
+        """Activate a pending mapping.
+
+        Issue #2761: Atomically change status from pending to active.
+        Sets discovered_at if provided.
+        """
+        from app.repositories.database import is_postgresql
+
+        discovered_at_val = discovered_at or datetime.now()
+
+        if is_postgresql():
+            query = """
+                UPDATE user_tool_accounts
+                SET mapping_status = 'active',
+                    mapping_source = COALESCE(mapping_source, 'discovered'),
+                    discovered_at = %s,
+                    last_activity_at = %s,
+                    version = version + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND version = %s AND mapping_status = 'pending'
+                RETURNING *
+            """
+            params = (discovered_at_val, discovered_at_val, id, expected_version)
+            row = self.db.fetch_one(query, params, commit=True)
+        else:
+            query = """
+                UPDATE user_tool_accounts
+                SET mapping_status = 'active',
+                    mapping_source = COALESCE(mapping_source, 'discovered'),
+                    discovered_at = ?,
+                    last_activity_at = ?,
+                    version = version + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND version = ? AND mapping_status = 'pending'
+            """
+            params = (discovered_at_val, discovered_at_val, id, expected_version)
+            self.db.execute(query, params)
+            row = self.db.fetch_one("SELECT * FROM user_tool_accounts WHERE id = ?", (id,))
+
+        return self._row_to_model(row) if row else None
+
+    def touch_activity(self, id: int) -> bool:
+        """Update last_activity_at timestamp.
+
+        Issue #2761: Called when a mapping's account is seen in incoming data.
+        """
+        query = """
+            UPDATE user_tool_accounts
+            SET last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """
+        try:
+            self.db.execute(query, (id,))
+            return True
+        except Exception as e:
+            logger.error(f"Error touching activity for mapping {id}: {e}")
+            return False
+
+    def increment_message_count(self, id: int, count: int) -> bool:
+        """Increment observed_message_count.
+
+        Issue #2761: Track number of messages seen for this account.
+        """
+        query = """
+            UPDATE user_tool_accounts
+            SET observed_message_count = observed_message_count + ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """
+        try:
+            self.db.execute(query, (count, id))
+            return True
+        except Exception as e:
+            logger.error(f"Error incrementing message count for mapping {id}: {e}")
+            return False
+
+    def get_stale_mappings(
+        self, stale_days: int, tenant_id: int | None = None
+    ) -> list[UserToolAccount]:
+        """Get active mappings that haven't had activity for stale_days.
+
+        Issue #2761: Used by stale detection scheduler.
+        """
+        from app.repositories.database import is_postgresql
+
+        if is_postgresql():
+            if tenant_id is not None:
+                query = """
+                    SELECT * FROM user_tool_accounts
+                    WHERE mapping_status = 'active'
+                      AND tenant_id = %s
+                      AND (
+                          last_activity_at IS NULL
+                          OR last_activity_at < CURRENT_TIMESTAMP - INTERVAL '%s days'
+                      )
+                """
+                params = (tenant_id, stale_days)
+            else:
+                query = """
+                    SELECT * FROM user_tool_accounts
+                    WHERE mapping_status = 'active'
+                      AND (
+                          last_activity_at IS NULL
+                          OR last_activity_at < CURRENT_TIMESTAMP - INTERVAL '%s days'
+                      )
+                """
+                params = (stale_days,)
+        else:
+            # SQLite
+            if tenant_id is not None:
+                query = """
+                    SELECT * FROM user_tool_accounts
+                    WHERE mapping_status = 'active'
+                      AND tenant_id = ?
+                      AND (
+                          last_activity_at IS NULL
+                          OR last_activity_at < datetime('now', ?)
+                      )
+                """
+                params = (tenant_id, f"-{stale_days} days")
+            else:
+                query = """
+                    SELECT * FROM user_tool_accounts
+                    WHERE mapping_status = 'active'
+                      AND (
+                          last_activity_at IS NULL
+                          OR last_activity_at < datetime('now', ?)
+                      )
+                """
+                params = (f"-{stale_days} days",)
+
+        rows = self.db.fetch_all(query, params)
+        return [self._row_to_model(row) for row in rows]
+
+    def create_or_ignore(
+        self,
+        user_id: int,
+        tool_account: str,
+        tool_type: str | None = None,
+        description: str | None = None,
+        mapping_source: str | None = None,
+        mapping_status: str | None = None,
+        created_by: int | None = None,
+        tenant_id: int | None = None,
+    ) -> UserToolAccount | None:
+        """Create mapping with ON CONFLICT DO NOTHING.
+
+        Issue #2761: Used for atomic creation to prevent duplicate accounts.
+        Returns None if conflict (already exists).
+        """
+        from app.repositories.database import is_postgresql
+
+        if mapping_source is None:
+            mapping_source = MappingSource.MANUAL.value
+        if mapping_status is None:
+            mapping_status = MappingStatus.ACTIVE.value
+
+        if is_postgresql():
+            query = """
+                INSERT INTO user_tool_accounts
+                    (user_id, tool_account, tool_type, description, mapping_source, mapping_status, created_by, tenant_id, version)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1)
+                ON CONFLICT (tool_account) DO NOTHING
+                RETURNING *
+            """
+            params = (
+                user_id,
+                tool_account,
+                tool_type,
+                description,
+                mapping_source,
+                mapping_status,
+                created_by,
+                tenant_id,
+            )
+            row = self.db.fetch_one(query, params, commit=True)
+        else:
+            # SQLite: Try to create, ignore if conflict
+            import sqlite3
+
+            try:
+                query = """
+                    INSERT INTO user_tool_accounts
+                        (user_id, tool_account, tool_type, description, mapping_source, mapping_status, created_by, tenant_id, version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                """
+                params = (
+                    user_id,
+                    tool_account,
+                    tool_type,
+                    description,
+                    mapping_source,
+                    mapping_status,
+                    created_by,
+                    tenant_id,
+                )
+                self.db.execute(query, params)
+                row = self.db.fetch_one(
+                    "SELECT * FROM user_tool_accounts WHERE tool_account = ?", (tool_account,)
+                )
+            except sqlite3.IntegrityError:
+                # Unique constraint violation - mapping already exists
+                row = None
+            except Exception as e:
+                # Check if this is a constraint error by message (for test mocks)
+                error_msg = str(e)
+                if "UNIQUE constraint" in error_msg or "constraint" in error_msg.lower():
+                    row = None
+                else:
+                    logger.error(f"Unexpected error creating mapping: {e}")
+                    raise
+
+        return self._row_to_model(row) if row else None
