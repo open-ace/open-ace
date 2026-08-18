@@ -128,6 +128,16 @@ describe('Error Handling Utilities', () => {
       expect(isUnauthorizedError({ status: 200 })).toBe(false);
       expect(isUnauthorizedError({ status: 403 })).toBe(false);
     });
+
+    it('should return false when status field is missing (Issue #2783 boundary)', () => {
+      expect(isUnauthorizedError({ message: 'Unauthorized' })).toBe(false);
+      expect(isUnauthorizedError({})).toBe(false);
+    });
+
+    it('should return false when status is string type (Issue #2783 boundary)', () => {
+      expect(isUnauthorizedError({ status: '401' })).toBe(false);
+      expect(isUnauthorizedError({ status: 'unauthorized' })).toBe(false);
+    });
   });
 
   describe('isForbiddenError', () => {
@@ -138,6 +148,16 @@ describe('Error Handling Utilities', () => {
     it('should return false for other status codes', () => {
       expect(isForbiddenError({ status: 200 })).toBe(false);
       expect(isForbiddenError({ status: 401 })).toBe(false);
+    });
+
+    it('should return false when status field is missing (Issue #2783 boundary)', () => {
+      expect(isForbiddenError({ message: 'Forbidden' })).toBe(false);
+      expect(isForbiddenError({})).toBe(false);
+    });
+
+    it('should return false when status is string type (Issue #2783 boundary)', () => {
+      expect(isForbiddenError({ status: '403' })).toBe(false);
+      expect(isForbiddenError({ status: 'forbidden' })).toBe(false);
     });
   });
 

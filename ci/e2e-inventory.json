@@ -194,6 +194,22 @@
       "notes": "initial disposition (issue #2491 P1 draft)"
     },
     {
+      "path": "tests/e2e/browser/test_manage_alerts_admin.py",
+      "mode": "pytest-automated",
+      "owner": "issue-2783",
+      "issue": 2783,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "Admin alerts view with tenant isolation tests (issue #2783)"
+    },
+    {
       "path": "tests/e2e/browser/test_manage_governance_quota.py",
       "mode": "pytest-automated",
       "owner": "e2e-governance",
