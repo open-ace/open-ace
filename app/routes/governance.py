@@ -297,11 +297,27 @@ def api_check_quota():
 @admin_required
 def api_get_quota_alerts():
     """Get quota alerts."""
+    from app.repositories.user_repo import UserRepository
 
     unacknowledged_only = request.args.get("unacknowledged_only", default=False, type=bool)
     limit = request.args.get("limit", default=100, type=int)
 
-    alerts = quota_manager.get_all_alerts(unacknowledged_only=unacknowledged_only, limit=limit)
+    # Get current user's tenant ID for tenant filtering
+    tenant_id = get_current_tenant_id()
+
+    # Tenant Admin: only query alerts for users in the same tenant
+    # Platform Admin: tenant_id = None, query all alerts
+    if tenant_id is not None:
+        alerts = quota_manager.get_alerts_by_tenant(
+            tenant_id=tenant_id,
+            unacknowledged_only=unacknowledged_only,
+            limit=limit,
+        )
+    else:
+        alerts = quota_manager.get_all_alerts(
+            unacknowledged_only=unacknowledged_only,
+            limit=limit,
+        )
 
     return jsonify([a.to_dict() for a in alerts])
 

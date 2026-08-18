@@ -889,6 +889,69 @@ class QuotaManager:
 
         return alerts
 
+
+    def get_alerts_by_tenant(
+        self, tenant_id: int, unacknowledged_only: bool = False, limit: int = 100
+    ) -> list[QuotaAlert]:
+        """Get quota alerts for a specific tenant.
+
+        Args:
+            tenant_id: The tenant ID to filter alerts by.
+            unacknowledged_only: If True, only return unacknowledged alerts.
+            limit: Maximum number of alerts to return.
+
+        Returns:
+            List of QuotaAlert objects for users in the specified tenant.
+        """
+        if unacknowledged_only:
+            rows = self.db.fetch_all(
+                adapt_sql(f"""
+                SELECT qa.* FROM quota_alerts qa
+                JOIN users u ON qa.user_id = u.id
+                WHERE u.tenant_id = ? AND {adapt_boolean_condition("qa.acknowledged", False)}
+                ORDER BY qa.created_at DESC
+                LIMIT ?
+            """),
+                (tenant_id, limit),
+            )
+        else:
+            rows = self.db.fetch_all(
+                """
+                SELECT qa.* FROM quota_alerts qa
+                JOIN users u ON qa.user_id = u.id
+                WHERE u.tenant_id = ?
+                ORDER BY qa.created_at DESC
+                LIMIT ?
+            """,
+                (tenant_id, limit),
+            )
+
+        alerts = []
+        for row in rows:
+            alerts.append(
+                QuotaAlert(
+                    id=row.get("id"),
+                    user_id=row.get("user_id", 0),
+                    alert_type=row.get("alert_type", "warning"),
+                    quota_type=row.get("quota_type", "tokens"),
+                    period=row.get("period", "daily"),
+                    threshold=row.get("threshold", 0),
+                    current_usage=row.get("current_usage", 0),
+                    quota_limit=row.get("quota_limit", 0),
+                    percentage=row.get("percentage", 0),
+                    message=row.get("message", ""),
+                    created_at=(
+                        parse_db_datetime(row.get("created_at"))
+                        or datetime.now(timezone.utc).replace(tzinfo=None)
+                    ),
+                    acknowledged=bool(row.get("acknowledged", 0)),
+                    acknowledged_at=parse_db_datetime(row.get("acknowledged_at")),
+                    acknowledged_by=row.get("acknowledged_by"),
+                )
+            )
+
+        return alerts
+
     def cleanup_old_alerts(self, days: int = 30) -> int:
         """Delete old acknowledged alerts."""
         cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)

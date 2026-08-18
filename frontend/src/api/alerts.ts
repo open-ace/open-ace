@@ -92,6 +92,23 @@ export const alertsApi = {
     await apiClient.put<{ success: boolean }>('/api/alerts/preferences', prefs);
   },
 
+  async getAdminQuotaAlerts(params?: {
+    unacknowledged_only?: boolean;
+    limit?: number;
+  }): Promise<AlertListResponse> {
+    const queryParams: Record<string, string> = {};
+    if (params?.unacknowledged_only) queryParams.unacknowledged_only = 'true';
+    if (params?.limit) queryParams.limit = String(params.limit);
+
+    // Admin API returns Alert[] directly (array), need to wrap it
+    const response = await apiClient.get<Alert[]>(
+      '/api/governance/quota/alerts',
+      queryParams
+    );
+    // Calculate unread count from the array
+    const unread_count = response.filter(a => !a.read).length;
+    return { alerts: response, unread_count };
+  },
   async createTestAlert(data: {
     type?: string;
     severity?: string;
