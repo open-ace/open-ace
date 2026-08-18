@@ -704,7 +704,6 @@ class GovernanceRepository:
                         updated_at = CURRENT_TIMESTAMP
                 """,
                     (tenant_id,),
-                    commit=True,
                 )
             else:
                 self.db.execute(
@@ -716,7 +715,6 @@ class GovernanceRepository:
                         updated_at = CURRENT_TIMESTAMP
                 """),
                     (tenant_id,),
-                    commit=True,
                 )
 
             return True
