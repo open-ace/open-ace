@@ -637,3 +637,172 @@ class TestPiiFalsePositiveSuppression:
         cf = ContentFilter(config={"redact_pii": True})
         result = cf.check_content("Call +86 138 0013 8000 now")
         assert any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+
+class TestTenantKeywordsCache:
+    """Tests for tenant keywords cache functionality (Issue #2789)."""
+
+    def test_get_tenant_id_from_tenant_config(self):
+        """Should extract tenant_id from tenant_config."""
+        cf = ContentFilter()
+        tenant_id = cf._get_tenant_id({"tenant_id": 123}, None)
+        assert tenant_id == 123
+
+    def test_get_tenant_id_from_context(self):
+        """Should extract tenant_id from context."""
+        cf = ContentFilter()
+        tenant_id = cf._get_tenant_id(None, {"tenant_id": 456})
+        assert tenant_id == 456
+
+    def test_get_tenant_id_tenant_config_priority(self):
+        """Should prefer tenant_config over context."""
+        cf = ContentFilter()
+        tenant_id = cf._get_tenant_id({"tenant_id": 123}, {"tenant_id": 456})
+        assert tenant_id == 123
+
+    def test_get_tenant_id_returns_none_when_not_available(self):
+        """Should return None when tenant_id not available."""
+        cf = ContentFilter()
+        tenant_id = cf._get_tenant_id(None, None)
+        assert tenant_id is None
+
+    def test_invalidate_tenant_keywords_cache(self):
+        """Should clear cache for specific tenant."""
+        cf = ContentFilter()
+        # Populate cache
+        cf._tenant_keywords_cache[1] = ["secret"]
+        cf._tenant_keywords_version[1] = 1
+        cf._tenant_keywords_cache_time[1] = 100.0
+
+        # Invalidate
+        cf.invalidate_tenant_keywords_cache(1)
+
+        assert 1 not in cf._tenant_keywords_cache
+        assert 1 not in cf._tenant_keywords_version
+        assert 1 not in cf._tenant_keywords_cache_time
+
+    def test_invalidate_tenant_keywords_cache_other_tenant_unchanged(self):
+        """Should not affect other tenant's cache."""
+        cf = ContentFilter()
+        cf._tenant_keywords_cache[1] = ["secret1"]
+        cf._tenant_keywords_cache[2] = ["secret2"]
+
+        cf.invalidate_tenant_keywords_cache(1)
+
+        assert 1 not in cf._tenant_keywords_cache
+        assert cf._tenant_keywords_cache[2] == ["secret2"]
+
+    def test_check_tenant_keywords_word_boundary(self):
+        """Should detect tenant keywords with word boundary matching."""
+        cf = ContentFilter()
+        keywords = ["公司机密", "secret"]
+
+        result = cf._check_tenant_keywords(
+            content="This is 公司机密 information", tenant_keywords=keywords, match_mode="word_boundary"
+        )
+
+        assert "公司机密" in result
+
+    def test_check_tenant_keywords_substring(self):
+        """Should detect tenant keywords with substring matching."""
+        cf = ContentFilter()
+        keywords = ["公司机密"]
+
+        result = cf._check_tenant_keywords(
+            content="This is 公司机密文件", tenant_keywords=keywords, match_mode="substring"
+        )
+
+        assert "公司机密" in result
+
+    def test_check_tenant_keywords_empty_list(self):
+        """Should return empty set when no tenant keywords."""
+        cf = ContentFilter()
+        result = cf._check_tenant_keywords(
+            content="secret password", tenant_keywords=[], match_mode="word_boundary"
+        )
+        assert result == set()
+
+    def test_check_content_without_tenant_id_uses_builtin_only(self):
+        """Should only use builtin keywords when no tenant_id."""
+        cf = ContentFilter()
+        result = cf.check_content("This is password info")
+
+        # Should match builtin "password"
+        assert any(
+            r["type"] == "sensitive_keyword" and r["source"] == "builtin"
+            for r in result.matched_rules
+        )
+
+    def test_check_content_with_tenant_id_loads_tenant_keywords(self):
+        """Should load tenant keywords when tenant_id is provided."""
+        mock_repo = MagicMock()
+        mock_repo.get_enabled_tenant_keywords.return_value = ["公司机密"]
+        mock_repo.get_tenant_keywords_version.return_value = 1
+
+        cf = ContentFilter(governance_repo=mock_repo)
+
+        result = cf.check_content(
+            content="This is 公司机密",
+            tenant_config={"tenant_id": 1},
+        )
+
+        # Should match tenant keyword
+        tenant_keyword_matches = [
+            r
+            for r in result.matched_rules
+            if r.get("type") == "sensitive_keyword" and r.get("source") == "tenant"
+        ]
+        assert len(tenant_keyword_matches) > 0
+
+
+class TestTenantKeywordsCacheTTL:
+    """Tests for tenant keywords cache TTL (Issue #2789)."""
+
+    def test_cache_ttl_initialization(self):
+        """Should initialize cache TTL from config."""
+        cf = ContentFilter(config={"tenant_keywords_cache_ttl": 600})
+        assert cf._tenant_keywords_cache_ttl == 600
+
+    def test_cache_ttl_default(self):
+        """Should use default TTL of 300 seconds."""
+        cf = ContentFilter()
+        assert cf._tenant_keywords_cache_ttl == 300
+
+
+class TestNoTenantUserBehavior:
+    """Tests for no-tenant user behavior (Issue #2789)."""
+
+    def test_no_tenant_user_uses_builtin_keywords_only(self):
+        """When tenant_id is None, should only use builtin keywords."""
+        cf = ContentFilter()
+
+        # Simulate no tenant context
+        result = cf.check_content(
+            content="This is password info",
+            tenant_config=None,
+            context=None,
+        )
+
+        # Should only match builtin keywords
+        keyword_matches = [r for r in result.matched_rules if r.get("type") == "sensitive_keyword"]
+        builtin_matches = [r for r in keyword_matches if r.get("source") == "builtin"]
+        tenant_matches = [r for r in keyword_matches if r.get("source") == "tenant"]
+
+        assert len(builtin_matches) > 0
+        assert len(tenant_matches) == 0
+
+    def test_tenant_config_without_tenant_id(self):
+        """Should handle tenant_config without tenant_id field."""
+        cf = ContentFilter()
+
+        result = cf.check_content(
+            content="This is password",
+            tenant_config={
+                "block_sensitive_keyword": False,
+                "sensitive_keyword_match_mode": "word_boundary",
+            },
+        )
+
+        # Should use builtin keywords only
+        keyword_matches = [r for r in result.matched_rules if r.get("type") == "sensitive_keyword"]
+        assert all(r.get("source") == "builtin" for r in keyword_matches)

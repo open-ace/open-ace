@@ -63,3 +63,34 @@ def _reset_content_filter() -> None:
     with _lock:
         _instance = None
         logger.debug("ContentFilter singleton instance reset")
+
+
+def invalidate_tenant_keywords_cache(tenant_id: int) -> None:
+    """使指定租户的关键词缓存失效。
+
+    Issue #2789: 由租户关键词 CRUD API 调用，确保同一进程内的
+    租户关键词缓存立即失效。
+
+    Args:
+        tenant_id: 要失效缓存的租户 ID。
+    """
+    global _instance
+    with _lock:
+        if _instance is not None:
+            _instance.invalidate_tenant_keywords_cache(tenant_id)
+            logger.debug(f"Tenant {tenant_id} keywords cache invalidated")
+
+
+def get_tenant_keywords_version(tenant_id: int) -> int | None:
+    """获取租户关键词的当前版本号。
+
+    Issue #2789: 用于缓存一致性检查。
+
+    Args:
+        tenant_id: 租户 ID。
+
+    Returns:
+        当前版本号，如果租户没有版本记录则返回 None。
+    """
+    governance_repo = GovernanceRepository()
+    return governance_repo.get_tenant_keywords_version(tenant_id)

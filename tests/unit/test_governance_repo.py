@@ -548,3 +548,252 @@ class TestPasswordPolicy:
             "password_require_special",
         }
         assert set(result.keys()) == expected_keys
+
+
+class TestTenantSensitiveKeywords:
+    """Tests for tenant sensitive keywords CRUD (Issue #2789)."""
+
+    def setup_method(self):
+        self.db = MagicMock()
+        self.db.is_postgresql = False
+        self.repo = GovernanceRepository(db=self.db)
+
+    # -------------------------------------------------------------------------
+    # get_tenant_keywords
+    # -------------------------------------------------------------------------
+
+    def test_get_tenant_keywords_returns_list(self):
+        """Should return list of keywords for a tenant."""
+        self.db.fetch_all.return_value = [
+            {"id": 1, "tenant_id": 1, "keyword": "secret", "is_enabled": 1},
+            {"id": 2, "tenant_id": 1, "keyword": "password", "is_enabled": 0},
+        ]
+        result = self.repo.get_tenant_keywords(tenant_id=1)
+        assert len(result) == 2
+        assert result[0]["is_enabled"] is True
+        assert result[1]["is_enabled"] is False
+
+    def test_get_tenant_keywords_empty(self):
+        """Should return empty list when no keywords."""
+        self.db.fetch_all.return_value = []
+        result = self.repo.get_tenant_keywords(tenant_id=1)
+        assert result == []
+
+    def test_get_tenant_keywords_with_is_enabled_filter(self):
+        """Should filter by is_enabled when provided."""
+        self.db.fetch_all.return_value = [
+            {"id": 1, "tenant_id": 1, "keyword": "secret", "is_enabled": 1},
+        ]
+        result = self.repo.get_tenant_keywords(tenant_id=1, is_enabled=True)
+        assert len(result) == 1
+
+    def test_get_tenant_keywords_count(self):
+        """Should return count of keywords."""
+        self.db.fetch_one.return_value = {"count": 5}
+        result = self.repo.get_tenant_keywords_count(tenant_id=1)
+        assert result == 5
+
+    # -------------------------------------------------------------------------
+    # get_tenant_keyword
+    # -------------------------------------------------------------------------
+
+    def test_get_tenant_keyword_found(self):
+        """Should return keyword when found."""
+        self.db.fetch_one.return_value = {
+            "id": 1,
+            "tenant_id": 1,
+            "keyword": "secret",
+            "is_enabled": 1,
+        }
+        result = self.repo.get_tenant_keyword(tenant_id=1, keyword_id=1)
+        assert result is not None
+        assert result["id"] == 1
+        assert result["is_enabled"] is True
+
+    def test_get_tenant_keyword_not_found(self):
+        """Should return None when keyword not found."""
+        self.db.fetch_one.return_value = None
+        result = self.repo.get_tenant_keyword(tenant_id=1, keyword_id=999)
+        assert result is None
+
+    # -------------------------------------------------------------------------
+    # create_tenant_keyword
+    # -------------------------------------------------------------------------
+
+    def test_create_tenant_keyword_new(self):
+        """Should create new keyword and return is_new=True."""
+        # First call: check if exists - returns None
+        # Second call: after insert, fetch the new record
+        self.db.fetch_one.side_effect = [
+            None,  # First call: keyword doesn't exist
+            {"id": 1, "tenant_id": 1, "keyword": "SecretKey", "normalized_keyword": "secretkey", "is_enabled": 1},  # Second call: fetch new record
+        ]
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 1
+        self.db.execute.return_value = mock_cursor
+
+        with patch("app.repositories.database.is_postgresql", return_value=False):
+            record, is_new = self.repo.create_tenant_keyword(
+                tenant_id=1, keyword="SecretKey", created_by=100
+            )
+
+        assert is_new is True
+        assert record is not None
+        assert record["id"] == 1
+
+    def test_create_tenant_keyword_existing(self):
+        """Should return existing keyword and is_new=False when duplicate."""
+        # Existing keyword found
+        self.db.fetch_one.return_value = {
+            "id": 1,
+            "tenant_id": 1,
+            "keyword": "SecretKey",
+            "normalized_keyword": "secretkey",
+            "is_enabled": 1,
+        }
+
+        record, is_new = self.repo.create_tenant_keyword(
+            tenant_id=1, keyword="SecretKey", created_by=100
+        )
+
+        assert is_new is False
+        assert record["id"] == 1
+        assert record["keyword"] == "SecretKey"
+
+    def test_create_tenant_keyword_normalizes_to_lowercase(self):
+        """Should normalize keyword to lowercase for uniqueness check."""
+        self.db.fetch_one.side_effect = [
+            None,  # Keyword doesn't exist
+            {"id": 1, "tenant_id": 1, "keyword": "SECRETKEY", "normalized_keyword": "secretkey", "is_enabled": 1},
+        ]
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 1
+        self.db.execute.return_value = mock_cursor
+
+        with patch("app.repositories.database.is_postgresql", return_value=False):
+            record, is_new = self.repo.create_tenant_keyword(
+                tenant_id=1, keyword="SECRETKEY", created_by=100
+            )
+
+        assert is_new is True
+        # Verify that the fetch was called for existence check
+        self.db.fetch_one.assert_called()
+
+    def test_create_tenant_keyword_empty_fails(self):
+        """Should fail when keyword is empty."""
+        record, is_new = self.repo.create_tenant_keyword(
+            tenant_id=1, keyword="", created_by=100
+        )
+        assert record is None
+        assert is_new is False
+
+    def test_create_tenant_keyword_whitespace_only_fails(self):
+        """Should fail when keyword is whitespace only."""
+        record, is_new = self.repo.create_tenant_keyword(
+            tenant_id=1, keyword="   ", created_by=100
+        )
+        assert record is None
+        assert is_new is False
+
+    # -------------------------------------------------------------------------
+    # update_tenant_keyword
+    # -------------------------------------------------------------------------
+
+    def test_update_tenant_keyword_success(self):
+        """Should update keyword is_enabled status."""
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 1
+        self.db.execute.return_value = mock_cursor
+
+        result = self.repo.update_tenant_keyword(
+            tenant_id=1, keyword_id=1, is_enabled=False
+        )
+        assert result is True
+
+    def test_update_tenant_keyword_no_is_enabled(self):
+        """Should return False when is_enabled not provided."""
+        result = self.repo.update_tenant_keyword(tenant_id=1, keyword_id=1)
+        assert result is False
+
+    def test_update_tenant_keyword_not_found(self):
+        """Should return False when keyword not found."""
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 0
+        self.db.execute.return_value = mock_cursor
+
+        result = self.repo.update_tenant_keyword(
+            tenant_id=1, keyword_id=999, is_enabled=False
+        )
+        assert result is False
+
+    # -------------------------------------------------------------------------
+    # delete_tenant_keyword
+    # -------------------------------------------------------------------------
+
+    def test_delete_tenant_keyword_success(self):
+        """Should delete keyword successfully."""
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 1
+        self.db.execute.return_value = mock_cursor
+
+        result = self.repo.delete_tenant_keyword(tenant_id=1, keyword_id=1)
+        assert result is True
+
+    def test_delete_tenant_keyword_not_found(self):
+        """Should return False when keyword not found."""
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 0
+        self.db.execute.return_value = mock_cursor
+
+        result = self.repo.delete_tenant_keyword(tenant_id=1, keyword_id=999)
+        assert result is False
+
+    # -------------------------------------------------------------------------
+    # get_enabled_tenant_keywords
+    # -------------------------------------------------------------------------
+
+    def test_get_enabled_tenant_keywords(self):
+        """Should return list of enabled keywords."""
+        self.db.fetch_all.return_value = [
+            {"keyword": "secret1"},
+            {"keyword": "secret2"},
+        ]
+        result = self.repo.get_enabled_tenant_keywords(tenant_id=1)
+        assert result == ["secret1", "secret2"]
+
+    def test_get_enabled_tenant_keywords_empty(self):
+        """Should return empty list when no keywords."""
+        self.db.fetch_all.return_value = []
+        result = self.repo.get_enabled_tenant_keywords(tenant_id=1)
+        assert result == []
+
+    # -------------------------------------------------------------------------
+    # tenant_keywords_version
+    # -------------------------------------------------------------------------
+
+    def test_get_tenant_keywords_version_exists(self):
+        """Should return version when record exists."""
+        self.db.fetch_one.return_value = {"version": 5}
+        result = self.repo.get_tenant_keywords_version(tenant_id=1)
+        assert result == 5
+
+    def test_get_tenant_keywords_version_not_exists(self):
+        """Should return None when no version record."""
+        self.db.fetch_one.return_value = None
+        result = self.repo.get_tenant_keywords_version(tenant_id=1)
+        assert result is None
+
+    def test_increment_tenant_keywords_version_creates(self):
+        """Should create version record with version=1 when not exists."""
+        mock_cursor = MagicMock()
+        self.db.execute.return_value = mock_cursor
+
+        with patch("app.repositories.database.is_postgresql", return_value=False):
+            result = self.repo.increment_tenant_keywords_version(tenant_id=1)
+        assert result is True
+
+    def test_increment_tenant_keywords_version_exception(self):
+        """Should return False on database error."""
+        self.db.execute.side_effect = Exception("DB error")
+        result = self.repo.increment_tenant_keywords_version(tenant_id=1)
+        assert result is False

@@ -8,6 +8,7 @@ Detects and filters sensitive information, PII, and prohibited content.
 import logging
 import re
 import threading
+import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -173,6 +174,14 @@ class ContentFilter:
         self._cache_hits: int = 0
         self._cache_misses: int = 0
         self._max_compiled_cache_size: int = self.config.get("max_compiled_cache_size", 100)
+
+        # Tenant keywords cache (Issue #2789)
+        self._tenant_keywords_cache: dict[int, list[str]] = {}
+        self._tenant_keywords_version: dict[int, int] = {}
+        self._tenant_keywords_cache_time: dict[int, float] = {}
+        self._tenant_keywords_cache_ttl: int = self.config.get(
+            "tenant_keywords_cache_ttl", 300
+        )  # 5 minutes
 
         # Compile patterns
         self.patterns = dict(self.DEFAULT_PII_PATTERNS)
@@ -390,6 +399,106 @@ class ContentFilter:
         """
         self.invalidate_cache()
 
+    # =========================================================================
+    # Tenant Keywords Cache (Issue #2789)
+    # =========================================================================
+
+    def _get_tenant_id(self, tenant_config: dict[str, Any] | None, context: dict[str, Any] | None) -> int | None:
+        """
+        Get tenant_id from various sources.
+
+        Priority:
+        1. tenant_config.get("tenant_id") - explicitly passed
+        2. context.get("tenant_id") - compatibility with old callers
+        3. Flask g.tenant_id - request context
+
+        Args:
+            tenant_config: Tenant configuration dictionary.
+            context: Context dictionary.
+
+        Returns:
+            Tenant ID or None if not available.
+        """
+        # 1. From tenant_config (explicitly passed)
+        if tenant_config and isinstance(tenant_config, dict):
+            tenant_id = tenant_config.get("tenant_id")
+            if tenant_id is not None:
+                return int(tenant_id)
+
+        # 2. From context (compatibility)
+        if context and isinstance(context, dict):
+            tenant_id = context.get("tenant_id")
+            if tenant_id is not None:
+                return int(tenant_id)
+
+        # 3. From Flask g (request context)
+        try:
+            from flask import g
+
+            tenant_id = getattr(g, "tenant_id", None)
+            if tenant_id is not None:
+                return int(tenant_id)
+        except (ImportError, RuntimeError):
+            # RuntimeError: not in request context (e.g., background task)
+            pass
+
+        return None
+
+    def _load_tenant_keywords(self, tenant_id: int) -> list[str]:
+        """
+        Load tenant keywords with version-based cache.
+
+        Args:
+            tenant_id: Tenant ID.
+
+        Returns:
+            List of tenant keywords.
+        """
+        if self.governance_repo is None:
+            return []
+
+        current_time = time.time()
+
+        # Check cache validity (TTL + version)
+        with self._cache_lock:
+            cached_time = self._tenant_keywords_cache_time.get(tenant_id, 0)
+            if current_time - cached_time < self._tenant_keywords_cache_ttl:
+                # TTL valid, check version
+                cached_version = self._tenant_keywords_version.get(tenant_id)
+                db_version = self.governance_repo.get_tenant_keywords_version(tenant_id)
+                if cached_version is not None and cached_version == db_version:
+                    return self._tenant_keywords_cache.get(tenant_id, [])
+
+        # Cache invalid, load from DB
+        try:
+            keywords = self.governance_repo.get_enabled_tenant_keywords(tenant_id)
+            db_version = self.governance_repo.get_tenant_keywords_version(tenant_id)
+
+            with self._cache_lock:
+                self._tenant_keywords_cache[tenant_id] = keywords
+                self._tenant_keywords_version[tenant_id] = db_version or 1
+                self._tenant_keywords_cache_time[tenant_id] = current_time
+
+            return keywords
+        except Exception as e:
+            logger.error(f"Error loading tenant keywords for tenant {tenant_id}: {e}")
+            return []
+
+    def invalidate_tenant_keywords_cache(self, tenant_id: int) -> None:
+        """
+        Invalidate tenant keywords cache.
+
+        Call this after CRUD operations on tenant keywords.
+
+        Args:
+            tenant_id: Tenant ID to invalidate cache for.
+        """
+        with self._cache_lock:
+            self._tenant_keywords_cache.pop(tenant_id, None)
+            self._tenant_keywords_version.pop(tenant_id, None)
+            self._tenant_keywords_cache_time.pop(tenant_id, None)
+        logger.debug(f"Tenant {tenant_id} keywords cache invalidated")
+
     @staticmethod
     def _luhn_check(value: str) -> bool:
         """Luhn checksum — True if *value* is a plausible credit-card number.
@@ -593,6 +702,39 @@ class ContentFilter:
                 if overall_action not in ["block", "warn"]:
                     overall_action = "warn"
 
+        # Issue #2789: Check tenant-specific keywords
+        tenant_id = self._get_tenant_id(tenant_config, context)
+        if tenant_id:
+            tenant_keywords = self._load_tenant_keywords(tenant_id)
+            if tenant_keywords:
+                tenant_keyword_matches = self._check_tenant_keywords(
+                    content, tenant_keywords, match_mode=sensitive_keyword_match_mode
+                )
+                if tenant_keyword_matches:
+                    matched_rules.append(
+                        {
+                            "type": "sensitive_keyword",
+                            "count": len(tenant_keyword_matches),
+                            "risk": "medium",
+                            "keywords": list(tenant_keyword_matches),
+                            "source": "tenant",
+                            "tenant_id": tenant_id,
+                            "match_mode": sensitive_keyword_match_mode,
+                        }
+                    )
+
+                    # Update overall_risk
+                    if overall_risk not in ["critical", "high"]:
+                        overall_risk = "medium"
+
+                    # Determine action based on tenant config
+                    if block_sensitive_keyword:
+                        if overall_action not in ["block"]:
+                            overall_action = "block"
+                    else:
+                        if overall_action not in ["block", "warn"]:
+                            overall_action = "warn"
+
         # Determine passed based on action
         passed = overall_action != "block"
 
@@ -649,6 +791,42 @@ class ContentFilter:
             content_lower = content.lower()
             for keyword in self.keywords:
                 if keyword.lower() in content_lower:
+                    found.add(keyword)
+
+        return found
+
+    def _check_tenant_keywords(
+        self, content: str, tenant_keywords: list[str], match_mode: str = "word_boundary"
+    ) -> set[str]:
+        """
+        Check for tenant-specific keywords.
+
+        Issue #2789: Similar to _check_keywords but for tenant-specific keywords
+        that are loaded from database and cached.
+
+        Args:
+            content: Text content to check.
+            tenant_keywords: List of tenant keywords to check.
+            match_mode: Matching mode - 'word_boundary' or 'substring'.
+
+        Returns:
+            Set of matched keywords.
+        """
+        found = set()
+
+        for keyword in tenant_keywords:
+            keyword_lower = keyword.lower().strip()
+            if not keyword_lower:
+                continue
+
+            if match_mode == "word_boundary":
+                # Build and compile pattern for this keyword
+                pattern = self._build_keyword_pattern(keyword_lower)
+                if pattern.search(content):
+                    found.add(keyword)
+            else:
+                # Substring matching
+                if keyword_lower in content.lower():
                     found.add(keyword)
 
         return found
