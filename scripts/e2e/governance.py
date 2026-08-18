@@ -524,6 +524,7 @@ def main(argv: list[str] | None = None) -> int:
     val.add_argument("--state", type=Path, default=DEFAULT_STATE)
     val.add_argument("--promotion", type=Path, default=DEFAULT_PROMOTION)
     val.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    val.add_argument("--json-output", type=Path, default=None)
     val.set_defaults(func=lambda a: _run_validate(a))
 
     sd = sub.add_parser("set-disposition", help="set a file's inventory disposition")
@@ -590,6 +591,9 @@ def _run_validate(args: argparse.Namespace) -> int:
         promotion_path=args.promotion,
         manifest_path=args.manifest,
     )
+    if args.json_output:
+        args.json_output.parent.mkdir(parents=True, exist_ok=True)
+        args.json_output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
     for line in errors:
         print(f"ERROR: {line}", file=sys.stderr)

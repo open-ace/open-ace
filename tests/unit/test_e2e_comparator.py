@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -325,3 +326,72 @@ class TestFingerprintNormalization:
             "/runner/xyz/tests/e2e/ui/test_a.py::t[12345678-1234-1234-1234-123456789012]"
         )
         assert n == "tests/e2e/ui/test_a.py::t[<uuid>]"
+
+
+class TestComparatorCli:
+    def test_compare_cli_writes_artifacts_and_fails_closed_on_budget_and_selection_errors(
+        self, tmp_path
+    ):
+        selection = {
+            "event": "nightly",
+            "normal": ["tests/e2e/browser/test_login.py::test_ok"],
+            "advisory": [],
+            "invalid": {"tests/e2e/browser/test_bad.py::test_bad": ["missing metadata"]},
+            "closure_errors": ["nightly lane is not closed"],
+            "counts": {"normal": 1, "advisory": 0, "invalid": 1},
+        }
+        envelope = {
+            "schema_name": common.RUN_ENVELOPE_SCHEMA_NAME,
+            "schema_version": 1,
+            "job_conclusion": "success",
+            "duration_minutes": 130,
+            "server": {"readiness_achieved": True, "exit": {"abnormal": False, "code": 0}},
+            "outcomes": [
+                {
+                    "nodeid": "tests/e2e/browser/test_login.py::test_ok",
+                    "final_outcome": "pass",
+                    "duration_seconds": 10,
+                    "attempts": 1,
+                }
+            ],
+        }
+        state = {"schema_name": "openace-e2e-state", "schema_version": 1, "entries": {}}
+        governance_report = {"counts": {"inventory": 153}}
+        selection_path = tmp_path / "selection.json"
+        envelope_path = tmp_path / "envelope.json"
+        state_path = tmp_path / "state.json"
+        governance_path = tmp_path / "governance.json"
+        json_output = tmp_path / "out" / "diff.json"
+        markdown_output = tmp_path / "out" / "summary.md"
+        selection_path.write_text(json.dumps(selection) + "\n", encoding="utf-8")
+        envelope_path.write_text(json.dumps(envelope) + "\n", encoding="utf-8")
+        state_path.write_text(json.dumps(state) + "\n", encoding="utf-8")
+        governance_path.write_text(json.dumps(governance_report) + "\n", encoding="utf-8")
+
+        exit_code = comparator.run_cli(
+            [
+                "compare",
+                "--selection",
+                str(selection_path),
+                "--envelope",
+                str(envelope_path),
+                "--state",
+                str(state_path),
+                "--json-output",
+                str(json_output),
+                "--markdown-output",
+                str(markdown_output),
+                "--governance-report",
+                str(governance_path),
+            ]
+        )
+
+        assert exit_code == 1
+        payload = json.loads(json_output.read_text(encoding="utf-8"))
+        assert payload["schema_name"] == common.COMPARE_RESULT_SCHEMA_NAME
+        assert "__budget__" in payload["diff"]["invalid"]
+        assert "__closure__" in payload["diff"]["invalid"]
+        assert "__selection__" in payload["diff"]["invalid"]
+        markdown = markdown_output.read_text(encoding="utf-8")
+        assert "Full E2E Governance" in markdown
+        assert "nightly lane is not closed" in markdown

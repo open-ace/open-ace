@@ -12,6 +12,7 @@
     "critical-e2e",
     "default-collection",
     "dependency-audit",
+    "e2e-governance",
     "frontend",
     "issue-collection",
     "legacy-pr",
@@ -39,6 +40,18 @@
           "working_directory": "frontend",
           "command": ["bash", "../scripts/ci/npm_audit_with_whitelist.sh"]
         }
+      ]
+    },
+    "e2e-governance": {
+      "description": "Validate E2E governance artifacts, ledgers, and lane closures",
+      "timeout_seconds": 180,
+      "commands": [
+        ["{python}", "scripts/e2e/inventory.py", "validate"],
+        ["{python}", "scripts/e2e/manifest.py", "validate"],
+        ["{python}", "scripts/e2e/governance.py", "validate"],
+        ["{python}", "scripts/e2e/selector.py", "--event", "pr"],
+        ["{python}", "scripts/e2e/selector.py", "--event", "nightly"],
+        ["{python}", "scripts/e2e/selector.py", "--event", "weekly"]
       ]
     },
     "python-core": {

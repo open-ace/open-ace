@@ -22,6 +22,7 @@ jobs:
       critical_e2e: ${{ steps.select.outputs.critical_e2e }}
       default_collection: ${{ steps.select.outputs.default_collection }}
       dependency_audit: ${{ steps.select.outputs.dependency_audit }}
+      e2e_governance: ${{ steps.select.outputs.e2e_governance }}
       frontend: ${{ steps.select.outputs.frontend }}
       issue_collection: ${{ steps.select.outputs.issue_collection }}
       legacy_pr: ${{ steps.select.outputs.legacy_pr }}
@@ -140,6 +141,10 @@ jobs:
       - name: Validate legacy issue collection baseline
         if: matrix.suite == 'python-core' && needs.changes.outputs.issue_collection == 'true'
         run: python scripts/ci.py run issue-collection
+
+      - name: Validate E2E governance artifacts
+        if: matrix.suite == 'python-core' && needs.changes.outputs.e2e_governance == 'true'
+        run: python scripts/ci.py run e2e-governance
 
       - name: Run promoted legacy regressions
         if: matrix.suite == 'python-core' && needs.changes.outputs.legacy_pr == 'true'

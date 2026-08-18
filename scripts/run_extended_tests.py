@@ -23,6 +23,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TextIO
 from urllib.parse import urlsplit, urlunsplit
@@ -67,6 +68,7 @@ class ServerHandle:
     process: subprocess.Popen
     log_file: TextIO
     log_path: Path
+    stopped_by_runner: bool = False
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -102,6 +104,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=0, help="Per-test timeout in seconds.")
     parser.add_argument("--maxfail", type=int, default=0, help="Stop after this many failures.")
     parser.add_argument("--junitxml", default="", help="Write a pytest JUnit XML report.")
+    parser.add_argument(
+        "--e2e-attempts",
+        default="",
+        help="Append authoritative per-attempt JSONL records to this path.",
+    )
+    parser.add_argument(
+        "--envelope-json",
+        default="",
+        help="Write a machine-readable run envelope to this path.",
+    )
     parser.add_argument("--extra-pytest-arg", action="append", default=[], help="Extra pytest arg.")
     parser.add_argument(
         "--server",
@@ -183,6 +195,11 @@ def discover_test_files(targets: list[str]) -> list[str]:
         files.extend(path.rglob("e2e_*.py"))
     unique = sorted({file.relative_to(PROJECT_ROOT).as_posix() for file in files})
     return unique
+
+
+def resolved_targets(args: argparse.Namespace) -> list[str]:
+    targets = select_targets(args)
+    return apply_split(targets, args.split_total, args.split_group)
 
 
 def apply_split(targets: list[str], split_total: int, split_group: int) -> list[str]:
@@ -322,8 +339,7 @@ def _quarantine_nodeids(path=None) -> list[str]:
 
 
 def build_pytest_command(args: argparse.Namespace) -> list[str]:
-    targets = select_targets(args)
-    targets = apply_split(targets, args.split_total, args.split_group)
+    targets = resolved_targets(args)
 
     # Issue #2189: Print the file manifest. Item collection is separately gated
     # by pytest itself; a targeted issue run must not be compared with the full
@@ -358,6 +374,8 @@ def build_pytest_command(args: argparse.Namespace) -> list[str]:
         cmd.append(f"--maxfail={args.maxfail}")
     if args.junitxml:
         cmd.append(f"--junitxml={args.junitxml}")
+    if args.e2e_attempts:
+        cmd.extend(["-p", "scripts.e2e.pytest_attempts", f"--e2e-attempts={args.e2e_attempts}"])
     cmd.extend(args.extra_pytest_arg)
     return cmd
 
@@ -555,6 +573,7 @@ def stop_server(handle: ServerHandle | None) -> None:
         return
     proc = handle.process
     if proc.poll() is None:
+        handle.stopped_by_runner = True
         proc.send_signal(signal.SIGTERM)
         try:
             proc.wait(timeout=15)
@@ -562,6 +581,188 @@ def stop_server(handle: ServerHandle | None) -> None:
             proc.kill()
             proc.wait(timeout=5)
     handle.log_file.close()
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _current_head_sha() -> str | None:
+    for value in (os.environ.get("GITHUB_SHA"), os.environ.get("COMMIT_SHA")):
+        if value:
+            return value
+    proc = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode == 0:
+        return proc.stdout.strip() or None
+    return None
+
+
+def _current_contract_key() -> str | None:
+    try:
+        from scripts.e2e.common import CONTRACT_SCHEMA_NAME, contract_key_identity, load_artifact
+
+        contract = load_artifact(PROJECT_ROOT / "ci" / "e2e-contract.json", CONTRACT_SCHEMA_NAME)
+        return contract_key_identity(contract)
+    except Exception:
+        return None
+
+
+def _load_attempt_records(path: str) -> list[dict[str, object]]:
+    attempts_path = Path(path)
+    if not attempts_path.exists():
+        return []
+    records: list[dict[str, object]] = []
+    for line in attempts_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        records.append(json.loads(line))
+    return records
+
+
+def _canonical_outcome(report_outcome: str) -> str:
+    if report_outcome == "passed":
+        return "pass"
+    if report_outcome == "skipped":
+        return "skip"
+    return "fail"
+
+
+def _summarize_attempt_records(
+    records: list[dict[str, object]], server_evidence: dict[str, object]
+) -> list[dict[str, object]]:
+    from scripts.e2e.comparator import classify_failure, fingerprint_failure
+
+    by_node: dict[str, list[dict[str, object]]] = {}
+    for record in records:
+        nodeid = str(record.get("nodeid", "")).strip()
+        if not nodeid:
+            continue
+        by_node.setdefault(nodeid, []).append(record)
+
+    outcomes: list[dict[str, object]] = []
+    for nodeid in sorted(by_node):
+        node_records = by_node[nodeid]
+        attempts = sorted({int(record.get("attempt", 1)) for record in node_records})
+        final = node_records[-1]
+        call_records = [record for record in node_records if record.get("phase") == "call"]
+        decision = call_records[-1] if call_records else final
+        first_attempt_records = [
+            record for record in node_records if int(record.get("attempt", 1)) == attempts[0]
+        ]
+        first_passed = all(record.get("outcome") == "passed" for record in first_attempt_records)
+        final_outcome = _canonical_outcome(str(decision.get("outcome", "failed")))
+        total_duration = round(
+            sum(float(record.get("duration_seconds") or 0.0) for record in node_records), 3
+        )
+        summary: dict[str, object] = {
+            "nodeid": nodeid,
+            "attempts": len(attempts),
+            "first_attempt_outcome": "pass" if first_passed else "fail",
+            "final_outcome": final_outcome,
+            "duration_seconds": total_duration,
+        }
+        if final_outcome == "fail":
+            failed_records = [
+                record
+                for record in node_records
+                if record.get("outcome") not in ("passed", "rerun")
+            ]
+            failed = failed_records[-1] if failed_records else decision
+            failure = {
+                "phase": failed.get("phase", "call"),
+                "exception_class": failed.get("exception_class"),
+                "message": failed.get("message"),
+                "timeout": "timeout"
+                in f"{failed.get('exception_class', '')} {failed.get('message', '')}".lower(),
+            }
+            summary["category"] = classify_failure(failure, server_evidence)
+            summary["fingerprint"] = fingerprint_failure(failure)
+            summary["exception_class"] = failed.get("exception_class")
+            summary["message"] = failed.get("message")
+        outcomes.append(summary)
+    return outcomes
+
+
+def _write_run_envelope(
+    path: str,
+    *,
+    args: argparse.Namespace,
+    env: dict[str, str],
+    cmd: list[str],
+    selected_targets: list[str],
+    server_handle: ServerHandle | None,
+    return_code: int,
+    started_at: str,
+    completed_at: str,
+    error_message: str | None = None,
+) -> None:
+    if not path:
+        return
+
+    envelope_path = Path(path)
+    envelope_path.parent.mkdir(parents=True, exist_ok=True)
+    started_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    completed_dt = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+    duration_seconds = max(0.0, (completed_dt - started_dt).total_seconds())
+    server_ready = None
+    server_log = None
+    exit_info = {"code": None, "abnormal": False}
+    if category_needs_server(args.category):
+        server_ready = server_handle is not None or is_healthy(args.base_url)
+    if server_handle is not None:
+        server_log = str(server_handle.log_path)
+        exit_code = server_handle.process.poll()
+        exit_info["code"] = exit_code
+        exit_info["abnormal"] = (
+            exit_code is not None
+            and not server_handle.stopped_by_runner
+            and exit_code != 0
+        )
+    attempts_records = _load_attempt_records(args.e2e_attempts) if args.e2e_attempts else []
+    server_evidence = {
+        "readiness_achieved": server_ready,
+        "exit": exit_info,
+        "environment_missing": False,
+        "liveness_failures": [],
+        "base_url": args.base_url,
+        "log_path": server_log,
+    }
+    outcomes = _summarize_attempt_records(attempts_records, server_evidence)
+    payload = {
+        "schema_name": "openace-e2e-run-envelope",
+        "schema_version": 1,
+        "category": args.category,
+        "base_url": args.base_url,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "duration_seconds": round(duration_seconds, 3),
+        "duration_minutes": round(duration_seconds / 60.0, 3),
+        "commit_sha": _current_head_sha(),
+        "contract_key": _current_contract_key(),
+        "job_conclusion": "success" if return_code == 0 else "failure",
+        "return_code": return_code,
+        "error": error_message,
+        "python": f"{sys.version_info.major}.{sys.version_info.minor}",
+        "playwright_browsers_path": env.get("PLAYWRIGHT_BROWSERS_PATH"),
+        "isolated_home": env.get("HOME"),
+        "selected_targets": selected_targets,
+        "pytest_command": cmd,
+        "artifacts": {
+            "junitxml": args.junitxml or None,
+            "attempts_jsonl": args.e2e_attempts or None,
+            "server_log": server_log,
+        },
+        "server": server_evidence,
+        "outcomes": outcomes,
+    }
+    envelope_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -572,16 +773,39 @@ def main(argv: list[str] | None = None) -> int:
         args.base_url = isolated_base_url(args.base_url)
     env["BASE_URL"] = args.base_url
     server_handle: ServerHandle | None = None
+    selected_targets: list[str] = []
+    cmd: list[str] = []
+    return_code = 1
+    error_message: str | None = None
+    started_at = _utc_now()
 
     try:
+        selected_targets = resolved_targets(args)
         cmd = build_pytest_command(args)
         print("Pytest command:")
         print(" ".join(cmd))
         if args.dry_run:
             return 0
         server_handle = start_server_if_needed(args, env)
-        return subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=False).returncode
+        return_code = subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=False).returncode
+        return return_code
+    except Exception as exc:
+        error_message = str(exc)
+        raise
     finally:
+        completed_at = _utc_now()
+        _write_run_envelope(
+            args.envelope_json,
+            args=args,
+            env=env,
+            cmd=cmd,
+            selected_targets=selected_targets,
+            server_handle=server_handle,
+            return_code=return_code,
+            started_at=started_at,
+            completed_at=completed_at,
+            error_message=error_message,
+        )
         stop_server(server_handle)
         if test_home is not None:
             test_home.cleanup()

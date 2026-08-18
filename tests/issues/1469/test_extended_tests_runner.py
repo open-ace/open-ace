@@ -162,6 +162,83 @@ def test_quarantine_loader_corrupt_fails_closed(tmp_path):
         run_extended_tests._quarantine_nodeids(path=p)
 
 
+def test_e2e_attempts_enable_attempt_plugin():
+    args = run_extended_tests.parse_args(
+        [
+            "--category",
+            "critical",
+            "--dry-run",
+            "--e2e-attempts",
+            "test-results/full-e2e-attempts.jsonl",
+        ]
+    )
+
+    cmd = run_extended_tests.build_pytest_command(args)
+
+    assert "-p" in cmd
+    assert "scripts.e2e.pytest_attempts" in cmd
+    assert "--e2e-attempts=test-results/full-e2e-attempts.jsonl" in cmd
+
+
+def test_write_run_envelope_summarizes_attempts(tmp_path, monkeypatch):
+    attempts = tmp_path / "attempts.jsonl"
+    attempts.write_text(
+        "\n".join(
+            [
+                '{"nodeid":"tests/e2e/browser/test_login.py::test_ok","attempt":1,"phase":"call","outcome":"passed","duration_seconds":1.25}',
+                '{"nodeid":"tests/e2e/browser/test_navigation.py::test_fail","attempt":1,"phase":"call","outcome":"failed","duration_seconds":2.5,"exception_class":"AssertionError","message":"boom"}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    envelope = tmp_path / "envelope.json"
+    args = run_extended_tests.parse_args(
+        [
+            "--category",
+            "e2e",
+            "--junitxml",
+            "test-results/full-e2e.xml",
+            "--e2e-attempts",
+            str(attempts),
+            "--envelope-json",
+            str(envelope),
+        ]
+    )
+    monkeypatch.setattr(run_extended_tests, "_current_head_sha", lambda: "deadbeef")
+    monkeypatch.setattr(run_extended_tests, "_current_contract_key", lambda: "contract-v1")
+    monkeypatch.setattr(run_extended_tests, "is_healthy", lambda _base_url: True)
+
+    run_extended_tests._write_run_envelope(
+        str(envelope),
+        args=args,
+        env={"HOME": str(tmp_path), "PLAYWRIGHT_BROWSERS_PATH": "/pw"},
+        cmd=["pytest", "tests/e2e/browser/test_login.py"],
+        selected_targets=["tests/e2e/browser/test_login.py"],
+        server_handle=None,
+        return_code=1,
+        started_at="2026-08-18T01:00:00Z",
+        completed_at="2026-08-18T01:02:30Z",
+    )
+
+    payload = __import__("json").loads(envelope.read_text(encoding="utf-8"))
+    assert payload["schema_name"] == "openace-e2e-run-envelope"
+    assert payload["commit_sha"] == "deadbeef"
+    assert payload["contract_key"] == "contract-v1"
+    assert payload["duration_minutes"] == 2.5
+    assert payload["job_conclusion"] == "failure"
+    assert payload["artifacts"]["attempts_jsonl"] == str(attempts)
+    assert payload["server"]["readiness_achieved"] is True
+    assert [item["nodeid"] for item in payload["outcomes"]] == [
+        "tests/e2e/browser/test_login.py::test_ok",
+        "tests/e2e/browser/test_navigation.py::test_fail",
+    ]
+    failed = payload["outcomes"][1]
+    assert failed["category"] == "assertion_failure"
+    assert failed["final_outcome"] == "fail"
+    assert failed["fingerprint"]
+
+
 def test_quarantine_loader_bad_schema_fails_closed(tmp_path):
     p = _write_q(tmp_path, {"version": 1, "schema": "wrong", "entries": []})
     with pytest.raises(SystemExit):

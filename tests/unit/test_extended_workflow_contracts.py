@@ -112,6 +112,28 @@ def test_issue_dispatch_keeps_fail_closed_baseline_comparator():
     assert '[ "$LEGACY_RESULT" != success ]' in publish_step["run"]
 
 
+def test_full_e2e_governance_job_wraps_full_e2e_and_feeds_nightly_gate():
+    jobs = _workflow()["jobs"]
+    governance = jobs["full-e2e-governance"]
+
+    assert governance["needs"] == ["full-e2e"]
+    assert "needs.full-e2e.result != 'skipped'" in governance["if"]
+    compare_step = next(
+        step
+        for step in governance["steps"]
+        if step.get("name") == "Compare nightly selection against observed outcomes"
+    )
+    assert "--selection artifacts/test-results/full-e2e-selection.json" in compare_step["run"]
+    assert "--envelope artifacts/test-results/full-e2e-envelope.json" in compare_step["run"]
+
+    nightly = jobs["nightly-summary"]
+    assert "full-e2e-governance" in nightly["needs"]
+    publish_step = next(
+        step for step in nightly["steps"] if step["name"] == "Publish nightly result"
+    )
+    assert publish_step["env"]["E2E_RESULT"] == "${{ needs.full-e2e-governance.result }}"
+
+
 @pytest.mark.parametrize("failed_lane", [None, "python", "e2e", "legacy"])
 def test_nightly_gate_returns_nonzero_for_every_failed_lane(tmp_path, failed_lane):
     jobs = _workflow()["jobs"]
