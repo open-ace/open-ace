@@ -342,7 +342,9 @@ class TenantService:
             )
 
         # Issue #2790: 字段白名单过滤
-        filtered_updates = {k: v for k, v in settings_updates.items() if k in ALLOWED_SETTINGS_FIELDS}
+        filtered_updates = {
+            k: v for k, v in settings_updates.items() if k in ALLOWED_SETTINGS_FIELDS
+        }
         if not filtered_updates:
             return UpdateSettingsResult(
                 success=False,

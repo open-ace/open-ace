@@ -44,11 +44,11 @@ def _hash_password(password: str) -> str:
     return cast("str", bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode())
 
 
-def _get_client_info() -> dict[str, str]:
+def _get_client_info() -> dict[str, str | None]:
     """Issue #2790: 获取客户端信息用于审计。"""
     return {
-        "ip_address": request.remote_addr or "",
-        "user_agent": request.headers.get("User-Agent", ""),
+        "ip_address": request.remote_addr,
+        "user_agent": request.headers.get("User-Agent"),
     }
 
 
