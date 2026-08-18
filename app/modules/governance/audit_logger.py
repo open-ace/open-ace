@@ -895,6 +895,7 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                 "filter_rule",
                 "security_settings",
                 "ai_agent_settings",
+                "tenant_settings",
             ],
             "actions": [
                 {

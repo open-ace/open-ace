@@ -167,11 +167,14 @@ class TestTenantService:
         svc, mock_repo, _ = self._make_service()
         mock_tenant = MagicMock()
         mock_tenant._last_settings_update = None
-        mock_tenant.settings.to_dict.return_value = {"theme": "light"}
+        # Issue #2790: 使用有效字段，TenantSettings 定义的字段
+        mock_tenant.settings.to_dict.return_value = {"content_filter_enabled": True}
         mock_repo.get_by_id.return_value = mock_tenant
         mock_repo.update.return_value = True
-        result = svc.update_settings(1, {"theme": "dark"})
-        assert result is True
+        result = svc.update_settings(1, {"content_filter_enabled": False})
+        # Issue #2790: 现在返回 UpdateSettingsResult
+        assert result.success is True
+        assert bool(result) is True  # __bool__ 兼容
 
     def test_increment_user_count(self):
         svc, mock_repo, _ = self._make_service()
