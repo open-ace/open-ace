@@ -10,6 +10,7 @@ export { Error, EmptyState } from './Error';
 export { Select, createOptions } from './Select';
 export { SearchableSelect } from './SearchableSelect';
 export { Pagination } from './Pagination';
+export { FeatureRouteGuard } from './FeatureRouteGuard';
 
 // New Phase 5 components
 export { Modal, ConfirmModal } from './Modal';
