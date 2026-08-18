@@ -11,6 +11,22 @@ pytestmark = [pytest.mark.regression, pytest.mark.issue(2706)]
 CREATED_AT = "2026-08-15 12:00:00"
 
 
+@pytest.fixture(autouse=True)
+def _cap_one_concurrent_workflow(monkeypatch):
+    """Pin the EFFECTIVE concurrency cap to 1.
+
+    Slot selection consults ``get_max_concurrent_workflows()``, which resolves
+    OPENACE_LAUNCHER_CONF env -> /etc/openace -> ~/.open-ace/agent-launcher.conf;
+    a user-level conf (agent_max_concurrent_workflows=3) overrides the module
+    constant, so patching ``MAX_CONCURRENT_WORKFLOWS`` is environment-dependent
+    — these tests were born red on any dev machine holding such a conf while CI
+    (clean HOME) stayed green. Patching the resolver pins the cap regardless of
+    host config. Same pattern as
+    tests/issues/2295/test_scheduler_per_user_concurrency.py.
+    """
+    monkeypatch.setattr("app.services.autonomous_scheduler.get_max_concurrent_workflows", lambda: 1)
+
+
 def _wf(workflow_id, batch_id, batch_order, **overrides):
     base = {
         "workflow_id": workflow_id,
@@ -39,9 +55,8 @@ def _run_one_cycle(scheduler, workflows):
     return [call.args[0] for call in advance.call_args_list]
 
 
-def test_same_created_at_batch_siblings_selected_in_batch_order(monkeypatch):
+def test_same_created_at_batch_siblings_selected_in_batch_order():
     """Identical created_at + reverse DB order: batch_order 0 must win the batch's single slot."""
-    monkeypatch.setattr("app.services.autonomous_scheduler.MAX_CONCURRENT_WORKFLOWS", 1)
     scheduler = AutonomousScheduler()
     workflows = [
         _wf("wf-later", "batch-1", 1),
@@ -53,9 +68,8 @@ def test_same_created_at_batch_siblings_selected_in_batch_order(monkeypatch):
     assert selected == ["wf-earlier"]
 
 
-def test_batch_order_tiebreak_honors_waiting_priority_first(monkeypatch):
+def test_batch_order_tiebreak_honors_waiting_priority_first():
     """Waiting-last priority is unchanged: pending beats waiting regardless of batch_order."""
-    monkeypatch.setattr("app.services.autonomous_scheduler.MAX_CONCURRENT_WORKFLOWS", 1)
     scheduler = AutonomousScheduler()
     workflows = [
         _wf("wf-waiting", "batch-1", 0, status="waiting"),
@@ -67,9 +81,8 @@ def test_batch_order_tiebreak_honors_waiting_priority_first(monkeypatch):
     assert selected == ["wf-pending"]
 
 
-def test_null_batch_order_same_created_at_falls_back_to_workflow_id(monkeypatch):
+def test_null_batch_order_same_created_at_falls_back_to_workflow_id():
     """NULL batch_order + identical created_at orders by workflow_id: stable total order, no None-vs-int TypeError."""
-    monkeypatch.setattr("app.services.autonomous_scheduler.MAX_CONCURRENT_WORKFLOWS", 1)
     scheduler = AutonomousScheduler()
     workflows = [
         _wf("wf-b", "", None),
