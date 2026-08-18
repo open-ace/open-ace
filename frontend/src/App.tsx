@@ -68,6 +68,11 @@ const AnomalyDetection = lazy(() =>
 const ROIAnalysis = lazy(() =>
   import('@/components/features/analysis/ROIAnalysis').then((m) => ({ default: m.ROIAnalysis }))
 );
+const UsageForecast = lazy(() =>
+  import('@/components/features/analysis/UsageForecast').then((m) => ({
+    default: m.UsageForecast,
+  }))
+);
 const ConversationHistory = lazy(() =>
   import('@/components/features/ConversationHistory').then((m) => ({
     default: m.ConversationHistory,
@@ -401,6 +406,7 @@ const ManageRoutes: React.FC = () => {
           <Route path="analysis/request-dashboard" element={<RequestDashboard />} />
           <Route path="analysis/anomaly" element={<AnomalyDetection />} />
           <Route path="analysis/roi" element={<ROIAnalysis />} />
+          <Route path="analysis/forecast" element={<UsageForecast />} />
           <Route path="analysis/conversation-history" element={<ConversationHistory />} />
           <Route path="messages" element={<Messages />} />
 

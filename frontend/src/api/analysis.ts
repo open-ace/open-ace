@@ -137,6 +137,24 @@ export interface BatchAnalysisResponse {
   data_range?: DataRange;
 }
 
+// Forecast response type
+export interface ForecastAvailableTrue {
+  forecast_available: true;
+  method: 'moving_average';
+  period_days: number;
+  daily_forecast: { tokens: number; requests: number };
+  total_forecast: { tokens: number; requests: number };
+  forecast_dates: string[];
+  confidence: number; // Decimal, e.g., 0.7 for 70%
+}
+
+export interface ForecastAvailableFalse {
+  forecast_available: false;
+  reason: string;
+}
+
+export type ForecastResponse = ForecastAvailableTrue | ForecastAvailableFalse;
+
 // API
 export const analysisApi = {
   /**
@@ -301,5 +319,25 @@ export const analysisApi = {
     if (severity) params.severity = severity;
 
     return apiClient.get<AnomalyTrendResponse>('/api/analysis/anomaly-trend', params);
+  },
+
+  /**
+   * Get usage forecast for the next N days.
+   * @param days Number of days to forecast (1-90, default: 7)
+   */
+  async getForecast(days: number = 7): Promise<ForecastResponse> {
+    // Validate days parameter: 1-90, default 7
+    let validatedDays = days;
+    if (typeof days !== 'number' || isNaN(days)) {
+      validatedDays = 7;
+    } else {
+      validatedDays = Math.floor(days); // Round down
+      if (validatedDays <= 0) validatedDays = 1;
+      if (validatedDays > 90) validatedDays = 90;
+    }
+
+    return apiClient.get<ForecastResponse>('/api/analysis/forecast', {
+      days: String(validatedDays),
+    });
   },
 };

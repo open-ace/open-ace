@@ -130,3 +130,16 @@ export function useDataRange(enabled: boolean = true) {
     enabled,
   });
 }
+
+/**
+ * Hook for usage forecast.
+ * Fetches forecast data for the next N days.
+ * @param days Number of days to forecast (1-90, default: 7)
+ */
+export function useUsageForecast(days: number = 7) {
+  return useQuery({
+    queryKey: ['analysis', 'forecast', days],
+    queryFn: () => analysisApi.getForecast(days),
+    staleTime: 60 * 1000, // 1 minute
+  });
+}

@@ -65,6 +65,7 @@ export {
   useAnomalyDetection,
   useAnomalyTrend,
   useDataRange,
+  useUsageForecast,
 } from './useAnalysis';
 export {
   useSessions,
