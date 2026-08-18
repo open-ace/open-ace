@@ -11,7 +11,8 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/utils';
 import { useQuotaUsage, useQuotaStats, useUpdateQuota, usePageRefresh } from '@/hooks';
-import { useLanguage } from '@/store';
+import { useLanguage, useUser } from '@/store';
+import { isAdmin } from '@/utils/permissions';
 import { t, type Language } from '@/i18n';
 import {
   Card,
@@ -63,6 +64,7 @@ type TabType = 'quota' | 'alerts';
 
 export const QuotaAlerts: React.FC = () => {
   const language = useLanguage();
+  const user = useUser();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<TabType>('quota');
 
@@ -120,20 +122,29 @@ export const QuotaAlerts: React.FC = () => {
     setAlertsLoading(true);
     setAlertsError(null);
     try {
-      const result = await alertsApi.getAlerts({
-        type: typeFilter || undefined,
-        severity: severityFilter || undefined,
-        unread_only: readFilter === 'unread',
-      });
-      setAlerts(result.alerts);
-      setUnreadCount(result.unread_count);
+      // Use admin API for quota alerts when user is admin
+      if (isAdmin(user) && typeFilter === 'quota') {
+        const result = await alertsApi.getAdminQuotaAlerts({
+          limit: 100,
+        });
+        setAlerts(result.alerts);
+        setUnreadCount(result.unread_count);
+      } else {
+        const result = await alertsApi.getAlerts({
+          type: typeFilter || undefined,
+          severity: severityFilter || undefined,
+          unread_only: readFilter === 'unread',
+        });
+        setAlerts(result.alerts);
+        setUnreadCount(result.unread_count);
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? (err as Error).message : 'Failed to fetch alerts';
       setAlertsError(errorMessage);
     } finally {
       setAlertsLoading(false);
     }
-  }, [typeFilter, severityFilter, readFilter]);
+  }, [typeFilter, severityFilter, readFilter, user]);
 
   // Fetch alerts on component mount
   useEffect(() => {
