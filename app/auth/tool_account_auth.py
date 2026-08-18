@@ -10,8 +10,6 @@ Issue #2759: Centralized authorization for tool account management interfaces.
 import logging
 from typing import Any
 
-from flask import g
-
 from app.auth.permissions import is_platform_level_role
 from app.repositories.user_repo import UserRepository
 from app.repositories.user_tool_account_repo import UserToolAccountRepository

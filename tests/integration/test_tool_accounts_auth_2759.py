@@ -113,9 +113,7 @@ class TestGetMappingAndValidateTenant:
         """Nonexistent mapping should return (None, None, None)."""
         with patch("app.auth.tool_account_auth.tool_account_repo") as mock_repo:
             mock_repo.get_by_id.return_value = None
-            mapping, user, error = get_mapping_and_validate_tenant(
-                mapping_id=999, tenant_id=1
-            )
+            mapping, user, error = get_mapping_and_validate_tenant(mapping_id=999, tenant_id=1)
             assert mapping is None
             assert user is None
             assert error is None
@@ -135,9 +133,7 @@ class TestGetMappingAndValidateTenant:
                     "role": "user",
                 }
 
-                mapping, user, error = get_mapping_and_validate_tenant(
-                    mapping_id=1, tenant_id=None
-                )
+                mapping, user, error = get_mapping_and_validate_tenant(mapping_id=1, tenant_id=None)
                 assert mapping is not None
                 assert error is None
 
@@ -156,9 +152,7 @@ class TestGetMappingAndValidateTenant:
                     "role": "user",
                 }
 
-                mapping, user, error = get_mapping_and_validate_tenant(
-                    mapping_id=1, tenant_id=1
-                )
+                mapping, user, error = get_mapping_and_validate_tenant(mapping_id=1, tenant_id=1)
                 assert mapping is None
                 assert error == "Cross-tenant access denied"
 
@@ -177,9 +171,7 @@ class TestGetMappingAndValidateTenant:
                     "role": "platform_admin",
                 }
 
-                mapping, user, error = get_mapping_and_validate_tenant(
-                    mapping_id=1, tenant_id=1
-                )
+                mapping, user, error = get_mapping_and_validate_tenant(mapping_id=1, tenant_id=1)
                 assert mapping is None
                 assert error == "Cannot modify platform-level account mapping"
 
@@ -195,9 +187,7 @@ class TestValidateTargetUserForWrite:
                 "tenant_id": 1,
                 "role": "user",
             }
-            user, error = validate_target_user_for_write(
-                target_user_id=2, actor_tenant_id=None
-            )
+            user, error = validate_target_user_for_write(target_user_id=2, actor_tenant_id=None)
             assert user is not None
             assert error is None
 
@@ -205,9 +195,7 @@ class TestValidateTargetUserForWrite:
         """Nonexistent user should return error."""
         with patch("app.auth.tool_account_auth.user_repo") as mock_repo:
             mock_repo.get_user_by_id.return_value = None
-            user, error = validate_target_user_for_write(
-                target_user_id=999, actor_tenant_id=1
-            )
+            user, error = validate_target_user_for_write(target_user_id=999, actor_tenant_id=1)
             assert user is None
             assert error == "User not found"
 
@@ -219,9 +207,7 @@ class TestValidateTargetUserForWrite:
                 "tenant_id": 2,
                 "role": "user",
             }
-            user, error = validate_target_user_for_write(
-                target_user_id=2, actor_tenant_id=1
-            )
+            user, error = validate_target_user_for_write(target_user_id=2, actor_tenant_id=1)
             assert user is None
             assert error == "Cannot create mapping for user in different tenant"
 
@@ -233,9 +219,7 @@ class TestValidateTargetUserForWrite:
                 "tenant_id": 1,
                 "role": "platform_admin",
             }
-            user, error = validate_target_user_for_write(
-                target_user_id=2, actor_tenant_id=1
-            )
+            user, error = validate_target_user_for_write(target_user_id=2, actor_tenant_id=1)
             assert user is None
             assert error == "Cannot create mapping for platform-level account"
 
@@ -294,9 +278,7 @@ class TestToolAccountsAPIAuthorization:
             app.register_blueprint(tool_accounts_bp)
 
             client = app.test_client()
-            response = client.get(
-                "/tool-accounts", headers={"Authorization": "Bearer token"}
-            )
+            response = client.get("/tool-accounts", headers={"Authorization": "Bearer token"})
             assert response.status_code == 403
 
     def test_user_denied_access_to_list(self):
@@ -317,9 +299,7 @@ class TestToolAccountsAPIAuthorization:
             app.register_blueprint(tool_accounts_bp)
 
             client = app.test_client()
-            response = client.get(
-                "/tool-accounts", headers={"Authorization": "Bearer token"}
-            )
+            response = client.get("/tool-accounts", headers={"Authorization": "Bearer token"})
             assert response.status_code == 403
 
     def test_tenant_admin_list_filters_by_tenant(self):
@@ -343,9 +323,7 @@ class TestToolAccountsAPIAuthorization:
 
         with patch("app.auth.decorators._load_user_from_token", return_value=user):
             with patch("app.auth.tool_account_auth.user_repo") as mock_auth_user_repo:
-                mock_auth_user_repo.get_all_users.return_value = [
-                    {"id": 1, "tenant_id": 1}
-                ]
+                mock_auth_user_repo.get_all_users.return_value = [{"id": 1, "tenant_id": 1}]
 
                 from app.routes.tool_accounts import tool_accounts_bp
 
@@ -394,9 +372,7 @@ class TestToolTypesEndpoint:
             app.register_blueprint(tool_accounts_bp)
 
             client = app.test_client()
-            response = client.get(
-                "/tool-types", headers={"Authorization": "Bearer token"}
-            )
+            response = client.get("/tool-types", headers={"Authorization": "Bearer token"})
             assert response.status_code == 403
 
     def test_tool_types_accessible_to_admin(self):
@@ -417,9 +393,7 @@ class TestToolTypesEndpoint:
             app.register_blueprint(tool_accounts_bp)
 
             client = app.test_client()
-            response = client.get(
-                "/tool-types", headers={"Authorization": "Bearer token"}
-            )
+            response = client.get("/tool-types", headers={"Authorization": "Bearer token"})
             assert response.status_code == 200
 
 

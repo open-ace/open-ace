@@ -13,13 +13,11 @@ and predeclared account management.
 """
 
 import logging
-import uuid
 from typing import Any
 
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required
-from app.auth.permissions import is_platform_admin_role
 from app.auth.tool_account_auth import (
     get_mapping_and_validate_tenant,
     get_tenant_scoped_user_ids,
@@ -335,7 +333,7 @@ def create_tool_account():
         mapping_source=mapping_source,
         mapping_status=mapping_status,
         created_by=created_by,
-        tenant_id=user.tenant_id,
+        tenant_id=target_user.get("tenant_id") if target_user else None,
     )
 
     if mapping:
