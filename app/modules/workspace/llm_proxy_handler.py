@@ -1263,7 +1263,7 @@ def handle_llm_proxy_request(
                         }
                     }
                 ),
-                429,
+                403,  # Issue #2734: Use 403 to match WebUI frontend expectation
             )
     except Exception as exc:
         logger.error("Quota check failed, denying request for safety: %s", exc)
@@ -1684,7 +1684,7 @@ def handle_llm_proxy_request(
                                 }
                             }
                         ),
-                        429,
+                        403,  # Issue #2734: Use 403 to match WebUI frontend expectation
                     )
 
                 # A 400 "Model not available for this API key" means the
