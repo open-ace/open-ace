@@ -56,6 +56,11 @@ def sqlite_sm(tmp_path, monkeypatch):
     monkeypatch.setattr(db_mod, "is_postgresql", lambda: False)
     monkeypatch.setattr(sm_mod, "is_postgresql", lambda: False)
 
+    # Reset ContentFilter singleton before mock to ensure clean state
+    from app.modules.governance.content_filter_singleton import _reset_content_filter
+
+    _reset_content_filter()
+
     # Mock content filter to avoid database access for tenant config
     from unittest.mock import MagicMock
 
@@ -63,7 +68,7 @@ def sqlite_sm(tmp_path, monkeypatch):
     mock_filter.check_content.return_value = MagicMock(
         action="allow", risk_level="low", matched_rules=[]
     )
-    monkeypatch.setattr(sm_mod, "_get_content_filter", lambda: mock_filter)
+    monkeypatch.setattr(sm_mod, "get_content_filter", lambda: mock_filter)
 
     # Mock tenant config cache to avoid PostgreSQL access in tests
     monkeypatch.setattr(

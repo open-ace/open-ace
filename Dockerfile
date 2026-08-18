@@ -203,6 +203,13 @@ RUN python3 /app/scripts/patch-qwen-webui-navparams.py
 # causing code-server to fail with "Unable to resolve resource".
 # Script is version-pinned and fails the build on drift.
 RUN python3 /app/scripts/patch-qwen-webui-vscode-folder.py
+#
+# Patch qwen-code-webui local mode permission confirmation dialog (Issue #2593):
+# the processStreamLine function does not handle CLI's `control_request` messages,
+# so local mode permission dialogs never appear. This adds handling to convert
+# control_request to permission_request format.
+# Script is version-pinned and fails the build on drift.
+RUN python3 /app/scripts/patch-qwen-webui-local-permission.py
 
 # Copy and set up entrypoint script
 # Use python to convert Windows line endings (CRLF) to Unix (LF) and remove BOM - Issue #1988
