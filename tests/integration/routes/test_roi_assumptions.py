@@ -128,3 +128,21 @@ class TestRoiAssumptionRoutes:
 
         assert resp.status_code == 400
         assert "hourly_labor_cost" in resp.get_json()["error"]
+
+    def test_daily_costs_passes_tool_name_to_calculator(self, client):
+        """Verify tool_name parameter is forwarded to calculator."""
+        fake_calc = MagicMock()
+        fake_calc.get_daily_costs.return_value = []
+
+        with patch("app.auth.decorators._authenticate", return_value=(True, MOCK_ADMIN_SESSION)):
+            with patch("app.routes.roi.ROICalculator", return_value=fake_calc):
+                resp = client.get(
+                    "/api/roi/daily-costs",
+                    headers={"Authorization": "Bearer t"},
+                    query_string={"tool_name": "claude-code"}
+                )
+
+        assert resp.status_code == 200
+        # Verify tool_name is passed to the method (using keyword args)
+        kwargs = fake_calc.get_daily_costs.call_args.kwargs
+        assert kwargs.get("tool_name") == "claude-code"

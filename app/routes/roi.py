@@ -310,6 +310,7 @@ def get_daily_costs():
         start_date = request.args.get("start_date")
         end_date = request.args.get("end_date")
         user_id = request.args.get("user_id", type=int)
+        tool_name = request.args.get("tool_name")
 
         if not start_date or not end_date:
             end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
@@ -319,7 +320,11 @@ def get_daily_costs():
 
         calculator = ROICalculator()
         daily_costs = calculator.get_daily_costs(
-            start_date, end_date, user_id, tenant_id=_caller_tenant_id()
+            start_date=start_date,
+            end_date=end_date,
+            user_id=user_id,
+            tool_name=tool_name,
+            tenant_id=_caller_tenant_id()
         )
 
         return jsonify({"success": True, "data": daily_costs})

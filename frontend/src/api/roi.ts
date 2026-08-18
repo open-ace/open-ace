@@ -236,11 +236,13 @@ export const roiApi = {
     start_date?: string;
     end_date?: string;
     user_id?: number;
+    tool_name?: string;  // Optional tool name filter (must match cache key)
   }): Promise<DailyCost[]> {
     const queryParams: Record<string, string> = {};
     if (params?.start_date) queryParams.start_date = params.start_date;
     if (params?.end_date) queryParams.end_date = params.end_date;
     if (params?.user_id) queryParams.user_id = String(params.user_id);
+    if (params?.tool_name) queryParams.tool_name = params.tool_name;
 
     const response = await apiClient.get<{ success: boolean; data: DailyCost[] }>(
       '/api/roi/daily-costs',
