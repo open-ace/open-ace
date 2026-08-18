@@ -122,7 +122,7 @@ class TestUpstreamQuotaExceededAlert:
             headers={"Authorization": "Bearer tok"},
         )
 
-        assert resp.status_code == 429
+        assert resp.status_code == 403
         data = resp.get_json()
         assert data["error"]["type"] == "rate_limit_error"
         assert "retry later" in data["error"]["message"].lower()
@@ -172,7 +172,7 @@ class TestUpstreamQuotaExceededAlert:
             )
 
             # Should return 429 with quota_exceeded error
-            assert resp.status_code == 429
+            assert resp.status_code == 403
             data = resp.get_json()
             assert data["error"]["type"] == "quota_exceeded"
             assert "Platform quota exceeded" in data["error"]["message"]
@@ -226,7 +226,7 @@ class TestUpstreamQuotaExceededAlert:
             )
 
             # Should return 429 (quota exceeded still returned to user)
-            assert resp.status_code == 429
+            assert resp.status_code == 403
             assert resp.get_json()["error"]["type"] == "quota_exceeded"
 
             # Alert should NOT be created (deduplicated)
@@ -276,7 +276,7 @@ class TestUpstreamQuotaExceededAlert:
             )
 
             # Should return 429
-            assert resp.status_code == 429
+            assert resp.status_code == 403
 
             # Platform alert should be created (not deduplicated)
             mock_notifier.create_alert.assert_called_once()

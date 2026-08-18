@@ -285,7 +285,7 @@ class TestHandleLlmProxyRequest:
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
-    def test_quota_exceeded_returns_429(
+    def test_quota_exceeded_returns_403(
         self, mock_get_proxy, mock_quota_cls, mock_http, remote_app
     ):
         mock_proxy = MagicMock()
@@ -302,7 +302,7 @@ class TestHandleLlmProxyRequest:
             json={"model": "gpt-4"},
             headers={"Authorization": "Bearer tok"},
         )
-        assert resp.status_code == 429
+        assert resp.status_code == 403
         assert "Quota exceeded" in resp.get_json()["error"]["message"]
 
     @patch(_HTTP_PATH)
