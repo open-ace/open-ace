@@ -34,6 +34,23 @@ class AutoMappingResult:
 
 
 @dataclass
+class AutoMappingStats:
+    """Detailed statistics for auto-mapping operation.
+
+    Issue #2760: Extend result model to distinguish zero-result reasons.
+    """
+
+    discovered_count: int  # Total accounts discovered from daily_messages
+    already_mapped_count: int  # Accounts that already have mapping
+    candidate_count: int  # Unmapped candidates before rules
+    mapped_count: int  # Successfully mapped in this run
+    unmatched_count: int  # No rule matched
+    excluded_count: int  # Filtered by tenant/restrictions
+    exclusion_reasons: dict[str, int]  # Breakdown by reason
+    mappings: list[dict]  # Successful mappings
+
+
+@dataclass
 class GenerateDefaultRulesResult:
     """Result of generating default mapping rules for a user."""
 
@@ -297,6 +314,86 @@ class ToolAccountAutoMappingService:
                 still_unmapped.append(account)
 
         return results, still_unmapped
+
+    def run_auto_mapping_with_stats(
+        self, dry_run: bool = False, tenant_id: int | None = None
+    ) -> AutoMappingStats:
+        """
+        Run auto-mapping with detailed statistics.
+
+        Issue #2760: Extend result model to distinguish zero-result reasons.
+
+        Returns detailed stats including:
+        - discovered_count: Total accounts from daily_messages
+        - already_mapped_count: Already have mapping
+        - candidate_count: Unmapped before rules
+        - mapped_count: Successfully mapped
+        - unmatched_count: No rule matched
+        - excluded_count: Filtered by tenant
+        - exclusion_reasons: Breakdown by reason
+        """
+        # Clear cache to ensure fresh user data
+        self._users_cache = None
+
+        # Get all unique sender_names from daily_messages
+        discovered_query = """
+            SELECT DISTINCT sender_name FROM daily_messages
+            WHERE sender_name IS NOT NULL AND sender_name != ''
+        """
+        discovered_rows = self.db.fetch_all(discovered_query)
+        discovered_count = len(discovered_rows)
+
+        # Count already mapped
+        mapped_query = "SELECT COUNT(*) as cnt FROM user_tool_accounts"
+        mapped_row = self.db.fetch_one(mapped_query)
+        already_mapped_count = mapped_row["cnt"] if mapped_row else 0
+
+        # Get unmapped candidates (already filtered by tenant in the query)
+        unmapped = self.get_unmapped_accounts(tenant_id=tenant_id)
+        candidate_count = len(unmapped)
+
+        # Track exclusion reasons
+        exclusion_reasons: dict[str, int] = {}
+
+        # If tenant_id, estimate how many were excluded by tenant filter
+        if tenant_id is not None:
+            # Get all unmapped without tenant filter
+            all_unmapped = self.get_unmapped_accounts(tenant_id=None)
+            excluded_by_tenant = len(all_unmapped) - candidate_count
+            if excluded_by_tenant > 0:
+                exclusion_reasons["tenant_filter"] = excluded_by_tenant
+
+        results = []
+        unmatched_count = 0
+
+        for account in unmapped:
+            tool_account = account.get("sender_name", "")
+            tool_type = self._infer_tool_type(tool_account)
+
+            result = self.auto_map_account(tool_account, tool_type, tenant_id=tenant_id)
+
+            if result:
+                if not dry_run:
+                    mapping_id = self.apply_mapping(result)
+                    result.created_mapping_id = mapping_id
+                    logger.info(
+                        f"Auto-mapped {tool_account} to user {result.username} "
+                        f"via {result.matched_by}"
+                    )
+                results.append(result)
+            else:
+                unmatched_count += 1
+
+        return AutoMappingStats(
+            discovered_count=discovered_count,
+            already_mapped_count=already_mapped_count,
+            candidate_count=candidate_count,
+            mapped_count=len(results),
+            unmatched_count=unmatched_count,
+            excluded_count=sum(exclusion_reasons.values()),
+            exclusion_reasons=exclusion_reasons,
+            mappings=[r.__dict__ for r in results],
+        )
 
     def _infer_tool_type(self, tool_account: str) -> str | None:
         """Infer tool type from tool_account suffix."""
