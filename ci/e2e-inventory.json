@@ -674,35 +674,35 @@
     },
     {
       "path": "tests/e2e/manage/e2e_api_key_cli_settings.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "e2e-governance",
       "issue": 2491,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "initial disposition (issue #2491 P1 draft)"
+      "collects": false,
+      "notes": "legacy playwright script with a complete __main__ flow; execute as standalone automation in nightly governance"
     },
     {
       "path": "tests/e2e/manage/e2e_audit_thresholds_playwright.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "e2e-governance",
       "issue": 2491,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "initial disposition (issue #2491 P1 draft)"
+      "collects": false,
+      "notes": "legacy playwright script with a complete __main__ flow; execute as standalone automation in nightly governance"
     },
     {
       "path": "tests/e2e/manage/e2e_token_install_command.py",
