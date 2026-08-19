@@ -1269,7 +1269,7 @@ CREATE TABLE tenant_sensitive_keywords (
 CREATE TABLE tenant_usage (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer NOT NULL,
- date date NOT NULL,
+ date TEXT NOT NULL,
  tokens_used integer DEFAULT 0,
  requests_made integer DEFAULT 0,
  active_users integer DEFAULT 0,
