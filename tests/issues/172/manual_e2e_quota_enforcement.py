@@ -2,6 +2,16 @@
 """
 Open ACE - Quota Enforcement E2E Test (#172)
 
+⚠️ MANUAL DIAGNOSTIC SCRIPT — NOT COLLECTED BY PYTEST (#2457).
+
+This file targets a *deployed* environment: it queries the production
+PostgreSQL database via psql (hardcoded DSN), greps /home/openace/... and
+reads journalctl service logs — none of which exist in a lane/CI checkout.
+It previously lived at e2e_quota_enforcement.py and was mis-collected by
+pytest (its step functions take plain token args pytest read as missing
+fixtures). It is kept for manual runs against the deployed environment
+only, under a name outside the test_*/e2e_* discovery patterns.
+
 Tests the complete quota enforcement system after fixing:
 - Fix 1: LLM proxy fail-closed
 - Fix 2: QuotaManager uses user_daily_stats
@@ -10,9 +20,9 @@ Tests the complete quota enforcement system after fixing:
 - Fix 5: Independent enforcement scheduler
 - Fix 6: Monthly quota checking
 
-Run:
-  HEADLESS=true  python tests/172/e2e_quota_enforcement.py
-  HEADLESS=false python tests/172/e2e_quota_enforcement.py
+Run (against the deployed environment):
+  HEADLESS=true  python tests/issues/172/manual_e2e_quota_enforcement.py
+  HEADLESS=false python tests/issues/172/manual_e2e_quota_enforcement.py
 """
 
 import os
