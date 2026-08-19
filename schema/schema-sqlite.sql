@@ -1245,7 +1245,9 @@ CREATE TABLE tenant_settings (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  block_sensitive_keyword INTEGER DEFAULT 0,
- sensitive_keyword_match_mode TEXT DEFAULT 'word_boundary'
+ sensitive_keyword_match_mode TEXT DEFAULT 'word_boundary',
+ allowed_tools TEXT DEFAULT '["claude", "qwen", "openclaw", "codex", "zcode"]',
+ roi_assumptions TEXT DEFAULT NULL
 );
 
 CREATE TABLE tenant_usage (

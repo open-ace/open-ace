@@ -24,7 +24,7 @@ from alembic import op
 log = logging.getLogger(__name__)
 
 revision: str = "20260819_001_add_tenant_settings_json_fields"
-down_revision: str | None = "20260818_002"
+down_revision: str | None = "20260818_002_add_tool_account_mapping_fields"
 branch_labels: str | None = None
 depends_on: str | None = None
 
