@@ -15,6 +15,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2747)]
+
 from app.modules.governance.audit_logger import (
     _AUDIT_DETAILS_DENYLIST,
     AuditAction,
