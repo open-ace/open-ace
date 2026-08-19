@@ -10,17 +10,40 @@ pytestmark = pytest.mark.postgres
 from app.repositories.user_tool_account_repo import UserToolAccountRepository
 
 
-def _insert_user(pg_db, username="testuser", email=None):
-    """Insert a user and return the id."""
+def _insert_user(pg_db, username="testuser", email=None, system_account=None, tenant_id=None):
+    """Insert a user and return the id.
+
+    Issue #2760: Added system_account and tenant_id parameters.
+    """
     if email is None:
         email = f"{username}@example.com"
     row = pg_db.fetch_one(
-        "INSERT INTO users (username, email, password_hash, role) "
-        "VALUES (%s, %s, %s, %s) RETURNING id",
-        (username, email, "hashed_pw", "user"),
+        "INSERT INTO users (username, email, password_hash, role, system_account, tenant_id) "
+        "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+        (username, email, "hashed_pw", "user", system_account, tenant_id),
         commit=True,
     )
     return row["id"]
+
+
+def _insert_tenant(pg_db, name="test_tenant"):
+    """Insert a tenant and return the id."""
+    row = pg_db.fetch_one(
+        "INSERT INTO tenants (name) VALUES (%s) RETURNING id",
+        (name,),
+        commit=True,
+    )
+    return row["id"]
+
+
+def _insert_daily_message(pg_db, sender_name, date="2026-01-01", message_source=None):
+    """Insert a daily_messages row for testing unmapped accounts."""
+    pg_db.fetch_one(
+        "INSERT INTO daily_messages (date, sender_name, message_source, message_count) "
+        "VALUES (%s, %s, %s, 1)",
+        (date, sender_name, message_source),
+        commit=True,
+    )
 
 
 class TestUserToolAccountCRUD:
@@ -98,3 +121,172 @@ class TestUserToolAccountCRUD:
 
         second = repo.create(user_id=user_id, tool_account="grace_qwen")
         assert second is None
+
+
+class TestGetUnmappedToolAccountsTenantFilter:
+    """
+    Issue #2760: Tests for get_unmapped_tool_accounts with tenant filtering.
+
+    Covers:
+    - Non-ASCII display names
+    - Different system_account from username
+    - Custom mapping rules
+    - Cross-tenant duplicate names
+    """
+
+    def test_non_ascii_username_matches_sender_name(self, pg_db):
+        """User with non-ASCII display name can still be matched.
+
+        Issue #2760: sender_name with system_account prefix should match
+        even when username contains non-ASCII characters.
+        """
+        repo = UserToolAccountRepository(db=pg_db)
+        tenant_id = _insert_tenant(pg_db, name="tenant_a")
+
+        # User has Chinese display name but English system_account
+        _insert_user(
+            pg_db,
+            username="张三",  # Chinese display name
+            system_account="zhangsan",
+            tenant_id=tenant_id,
+        )
+
+        # Tool account uses system_account prefix, not username
+        _insert_daily_message(pg_db, sender_name="zhangsan-host-qwen")
+
+        unmapped = repo.get_unmapped_tool_accounts(tenant_id=tenant_id)
+        assert len(unmapped) == 1
+        assert unmapped[0]["sender_name"] == "zhangsan-host-qwen"
+
+    def test_system_account_differs_from_username(self, pg_db):
+        """Sender name uses system_account, not username.
+
+        Issue #2760: Tool accounts typically follow {system_account}-{hostname}-{tool}
+        format, which differs from the display username.
+        """
+        repo = UserToolAccountRepository(db=pg_db)
+        tenant_id = _insert_tenant(pg_db, name="tenant_b")
+
+        # User has different username and system_account
+        _insert_user(
+            pg_db,
+            username="user_a",  # Display name
+            system_account="acct-a",  # System account
+            tenant_id=tenant_id,
+        )
+
+        # Tool account uses system_account prefix
+        _insert_daily_message(pg_db, sender_name="acct-a-host-qwen")
+
+        unmapped = repo.get_unmapped_tool_accounts(tenant_id=tenant_id)
+        assert len(unmapped) == 1
+        assert unmapped[0]["sender_name"] == "acct-a-host-qwen"
+
+    def test_null_system_account_fallback_to_username(self, pg_db):
+        """When system_account is NULL, fallback to username prefix matching.
+
+        Issue #2760: Handle users without system_account set.
+        """
+        repo = UserToolAccountRepository(db=pg_db)
+        tenant_id = _insert_tenant(pg_db, name="tenant_c")
+
+        # User without system_account
+        _insert_user(
+            pg_db,
+            username="fallback_user",
+            system_account=None,
+            tenant_id=tenant_id,
+        )
+
+        # Sender name uses username prefix
+        _insert_daily_message(pg_db, sender_name="fallback_user-host-qwen")
+
+        unmapped = repo.get_unmapped_tool_accounts(tenant_id=tenant_id)
+        assert len(unmapped) == 1
+        assert unmapped[0]["sender_name"] == "fallback_user-host-qwen"
+
+    def test_cross_tenant_duplicate_names(self, pg_db):
+        """Different tenants can have users with same username.
+
+        Issue #2760: Tenant isolation ensures each tenant only sees
+        their own unmapped accounts, even with duplicate usernames.
+        """
+        repo = UserToolAccountRepository(db=pg_db)
+        tenant_a = _insert_tenant(pg_db, name="tenant_d")
+        tenant_b = _insert_tenant(pg_db, name="tenant_e")
+
+        # Both tenants have user with same username
+        _insert_user(
+            pg_db,
+            username="shared_user",
+            system_account="shared-acct-a",
+            tenant_id=tenant_a,
+        )
+        _insert_user(
+            pg_db,
+            username="shared_user",
+            system_account="shared-acct-b",
+            tenant_id=tenant_b,
+        )
+
+        # Messages from both tenants
+        _insert_daily_message(pg_db, sender_name="shared-acct-a-host-qwen")
+        _insert_daily_message(pg_db, sender_name="shared-acct-b-host-qwen")
+
+        # Each tenant only sees their own
+        unmapped_a = repo.get_unmapped_tool_accounts(tenant_id=tenant_a)
+        unmapped_b = repo.get_unmapped_tool_accounts(tenant_id=tenant_b)
+
+        assert len(unmapped_a) == 1
+        assert unmapped_a[0]["sender_name"] == "shared-acct-a-host-qwen"
+
+        assert len(unmapped_b) == 1
+        assert unmapped_b[0]["sender_name"] == "shared-acct-b-host-qwen"
+
+    def test_exact_username_match_included(self, pg_db):
+        """Exact username match should still work.
+
+        Issue #2760: While we prefer system_account, exact username
+        matches should still be included in results.
+        """
+        repo = UserToolAccountRepository(db=pg_db)
+        tenant_id = _insert_tenant(pg_db, name="tenant_f")
+
+        _insert_user(
+            pg_db,
+            username="exactuser",
+            system_account="exact-acct",
+            tenant_id=tenant_id,
+        )
+
+        # Sender name exactly matches username (no prefix)
+        _insert_daily_message(pg_db, sender_name="exactuser")
+
+        unmapped = repo.get_unmapped_tool_accounts(tenant_id=tenant_id)
+        assert len(unmapped) == 1
+        assert unmapped[0]["sender_name"] == "exactuser"
+
+    def test_postgres_like_percent_escape(self, pg_db):
+        """PostgreSQL LIKE pattern uses %% for literal %.
+
+        Issue #2760: The query should use '-%%' which works correctly
+        with psycopg2 parameter handling.
+        """
+        repo = UserToolAccountRepository(db=pg_db)
+        tenant_id = _insert_tenant(pg_db, name="tenant_g")
+
+        _insert_user(
+            pg_db,
+            username="testuser",
+            system_account="testacct",
+            tenant_id=tenant_id,
+        )
+
+        # Normal sender name pattern
+        _insert_daily_message(pg_db, sender_name="testacct-host-qwen")
+
+        # This should NOT cause IndexError from parameter mismatch
+        unmapped = repo.get_unmapped_tool_accounts(tenant_id=tenant_id)
+
+        assert len(unmapped) == 1
+        assert unmapped[0]["sender_name"] == "testacct-host-qwen"
