@@ -122,7 +122,9 @@ class TestUpstreamQuotaExceededAlert:
             headers={"Authorization": "Bearer tok"},
         )
 
-        assert resp.status_code == 403
+        # The allocated-limit-rate-limited path deliberately stays 429:
+        # #2777's 429→403 sweep covered the quota-exceeded paths only.
+        assert resp.status_code == 429
         data = resp.get_json()
         assert data["error"]["type"] == "rate_limit_error"
         assert "retry later" in data["error"]["message"].lower()

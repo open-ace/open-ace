@@ -198,6 +198,7 @@ CREATE TABLE anomaly_status (
  processed_by integer,
  processed_at TIMESTAMP,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ anomaly_id TEXT DEFAULT '' NOT NULL,
  tenant_id integer
 );
 
@@ -2111,7 +2112,9 @@ CREATE INDEX idx_workflows_status_created ON autonomous_workflows (status, creat
 
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows (user_id, status);
 
-CREATE UNIQUE INDEX ix_anomaly_status_type_hash_tenant ON anomaly_status (anomaly_type, affected_users_hash, tenant_id);
+CREATE UNIQUE INDEX ix_anomaly_status_anomaly_id ON anomaly_status (anomaly_id) WHERE ((anomaly_id) <> '');
+
+CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status (anomaly_type, affected_users_hash);
 
 CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions (decision_id);
 

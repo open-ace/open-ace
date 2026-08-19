@@ -31,7 +31,11 @@ def _make_manager_with_spy() -> tuple[SSOManager, list[str]]:
     every SQL string handed to the underlying cursor — i.e. AFTER adaptation,
     exactly what the driver would receive.
     """
-    db = Database(db_url="sqlite:///dummy")  # real Database, dialect controlled via is_postgresql
+    # Dialect follows the db_url, not the module is_postgresql() patch:
+    # since 90bdd9e9 (#2545), execute() adapts via the instance _adapt_sql
+    # (per-connection dialect), so a PG-flavored URL is required for %s
+    # rewriting. connection() is mocked below — nothing connects.
+    db = Database(db_url="postgresql://dummy")
     captured: list[str] = []
 
     mock_conn = MagicMock()

@@ -85,20 +85,6 @@ def _current_tenant_id():
     return user.get("tenant_id")
 
 
-def _is_platform_admin():
-    """Check if current user is platform admin.
-
-    Platform admins can access data across all tenants.
-
-    Returns:
-        bool: True if user has platform_admin role (or legacy admin role).
-    """
-    from app.auth.permissions import is_platform_admin_role
-
-    user = getattr(g, "user", None) or {}
-    return is_platform_admin_role(user.get("role"))
-
-
 # =============================================================================
 # Report Generation Endpoints
 # =============================================================================
@@ -454,19 +440,12 @@ def _validate_days(default: int = 30, min_val: int = 1, max_val: int = 365) -> i
 @compliance_bp.route("/audit/patterns", methods=["GET"])
 @admin_required
 def analyze_patterns():
-    """Analyze audit patterns (admin only).
-
-    Issue #2748: Tenant isolation for audit pattern analysis.
-    Platform admins can access cross-tenant (tenant_id=None).
-    """
-    tenant_id = _current_tenant_id()
-    if tenant_id is None and not _is_platform_admin():
-        return jsonify({"error": "Tenant ID required"}), 400
+    """Analyze audit patterns (admin only)."""
 
     days = _validate_days(default=30)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
-    patterns = _get_audit_analyzer().analyze_patterns(start_time=start_time, tenant_id=tenant_id)
+    patterns = _get_audit_analyzer().analyze_patterns(start_time=start_time)
 
     return jsonify(patterns)
 
@@ -474,21 +453,14 @@ def analyze_patterns():
 @compliance_bp.route("/audit/anomalies", methods=["GET"])
 @admin_required
 def detect_anomalies():
-    """Detect audit anomalies (admin only).
-
-    Issue #2748: Tenant isolation for anomaly detection.
-    Platform admins can access cross-tenant (tenant_id=None).
-    """
-    tenant_id = _current_tenant_id()
-    if tenant_id is None and not _is_platform_admin():
-        return jsonify({"error": "Tenant ID required"}), 400
+    """Detect audit anomalies (admin only)."""
 
     days = _validate_days(default=7)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
-    anomalies = _get_audit_analyzer().detect_anomalies(start_time=start_time, tenant_id=tenant_id)
+    anomalies = _get_audit_analyzer().detect_anomalies(start_time=start_time)
 
-    # Load status info for all anomalies
+    # Load status info for all anomalies, keyed by anomaly_id
     statuses = _get_anomaly_statuses()
 
     def serialize_anomaly(a):
@@ -496,11 +468,11 @@ def detect_anomalies():
         for key in ("first_seen", "last_seen"):
             if isinstance(d.get(key), datetime):
                 d[key] = d[key].isoformat()
-        # Attach status info
-        hash_val = _anomaly_hash(a.anomaly_type, a.affected_users)
-        status_row = statuses.get((a.anomaly_type, hash_val))
+        # Attach status info using the stable anomaly_id
+        status_row = statuses.get(a.anomaly_id) if a.anomaly_id else None
         d["status"] = status_row["status"] if status_row else "pending"
         d["processed_at"] = status_row["processed_at"] if status_row else None
+        d["processed_by"] = status_row["processed_by"] if status_row else None
         return d
 
     return jsonify(
@@ -517,20 +489,13 @@ def detect_anomalies():
 def get_user_profile(user_id: int):
     """Get user behavior profile (admin only).
 
-    Issue #2748: Tenant isolation for user behavior profile.
     get_user_behavior_profile applies no tenant filter of its own, so the
     boundary has to be enforced here.
-    Platform admins can access cross-tenant (tenant_id=None).
     """
-    tenant_id = _current_tenant_id()
-    if tenant_id is None and not _is_platform_admin():
-        return jsonify({"error": "Tenant ID required"}), 400
 
     days = _validate_days(default=30)
 
-    profile = _get_audit_analyzer().get_user_behavior_profile(
-        user_id, days=days, tenant_id=tenant_id
-    )
+    profile = _get_audit_analyzer().get_user_behavior_profile(user_id, days=days)
 
     return jsonify(profile)
 
@@ -540,17 +505,12 @@ def get_user_profile(user_id: int):
 def get_security_score():
     """Get security score (admin only).
 
-    Issue #2748: Tenant isolation for security score generation.
-    Platform admins can access cross-tenant (tenant_id=None).
     Accepts pre-computed anomalies via the ``precomputed_anomalies`` parameter
     of ``generate_security_score`` so that the front-end can request anomalies
     and security-score without duplicating the anomaly detection work
     (Issue #2750).  When called standalone the endpoint computes anomalies
     itself.
     """
-    tenant_id = _current_tenant_id()
-    if tenant_id is None and not _is_platform_admin():
-        return jsonify({"error": "Tenant ID required"}), 400
 
     days = _validate_days(default=30)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
@@ -559,11 +519,13 @@ def get_security_score():
 
     # Compute anomalies once and pass them to the scorer so we don't re-run
     # detection inside generate_security_score.
-    anomalies = analyzer.detect_anomalies(start_time=start_time, tenant_id=tenant_id)
+    anomalies = analyzer.detect_anomalies(start_time=start_time)
+    # Pass statuses so processed/ignored anomalies are excluded from deduction
+    statuses = _get_anomaly_statuses()
     score = analyzer.generate_security_score(
         start_time=start_time,
-        tenant_id=tenant_id,
         precomputed_anomalies=anomalies,
+        anomaly_statuses=statuses,
     )
 
     return jsonify(score)
@@ -712,20 +674,41 @@ def get_retention_status():
 
 
 def _anomaly_hash(anomaly_type: str, affected_users: list) -> str:
-    """Generate a hash for identifying an anomaly group."""
+    """Generate a legacy hash for identifying an anomaly group.
+
+    .. deprecated::
+        This function is kept for backward compatibility only.  New code
+        should use the stable ``anomaly_id`` attached to each
+        ``AnomalyDetection`` instance, which incorporates time-bucket and
+        tenant information.
+    """
     key = f"{anomaly_type}:{','.join(str(u) for u in sorted(affected_users or []))}"
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
 def _get_anomaly_statuses() -> dict:
-    """Load all anomaly statuses as a dict keyed by (type, hash)."""
+    """Load all anomaly statuses keyed by ``anomaly_id``.
+
+    The table is queried for both the new ``anomaly_id`` column and the
+    legacy ``affected_users_hash`` column.  New rows (with anomaly_id) are
+    keyed by anomaly_id; legacy rows (with empty anomaly_id) are skipped
+    because their coarse identity cannot be reliably mapped to individual
+    anomaly instances.
+    """
     db = Database()
     try:
         rows = db.fetch_all(
-            "SELECT anomaly_type, affected_users_hash, status, processed_by, processed_at "
-            "FROM anomaly_status"
+            "SELECT anomaly_id, anomaly_type, affected_users_hash, status, "
+            "processed_by, processed_at FROM anomaly_status"
         )
-        return {(r["anomaly_type"], r["affected_users_hash"]): r for r in rows}
+        result: dict = {}
+        for r in rows:
+            aid = r.get("anomaly_id")
+            if aid:
+                result[aid] = r
+            # Legacy rows without anomaly_id are intentionally ignored so
+            # they do not pollute new anomaly instances.
+        return result
     except Exception as e:
         logger.error(f"Failed to load anomaly statuses: {e}")
         return {}
@@ -736,33 +719,56 @@ def _get_anomaly_statuses() -> dict:
 def update_anomaly_status():
     """Update anomaly status (admin only).
 
-    Body: { "anomaly_type": str, "affected_users": list[int], "status": "processed"|"ignored" }
+    Preferred body::
+
+        { "anomaly_id": str, "status": "processed"|"ignored" }
+
+    Legacy body (still accepted for backward compatibility)::
+
+        { "anomaly_type": str, "affected_users": list[int], "status": ... }
     """
     data = request.get_json()
     if not data:
         return jsonify({"error": "Request body required"}), 400
 
+    anomaly_id = data.get("anomaly_id")
     anomaly_type = data.get("anomaly_type")
     affected_users = data.get("affected_users", [])
     new_status = data.get("status")
 
-    if not anomaly_type or new_status not in ("processed", "ignored"):
+    if new_status not in ("processed", "ignored"):
         return jsonify({"error": "Invalid parameters"}), 400
 
-    hash_val = _anomaly_hash(anomaly_type, affected_users)
+    # Prefer anomaly_id; fall back to legacy type+users hash
+    if not anomaly_id:
+        if not anomaly_type:
+            return jsonify({"error": "anomaly_id or anomaly_type required"}), 400
+        anomaly_id = _anomaly_hash(anomaly_type, affected_users)
+
     user_id = g.user.get("id") if hasattr(g, "user") else None
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     db = Database()
     try:
         db.execute(
-            "INSERT INTO anomaly_status (anomaly_type, affected_users_hash, status, processed_by, processed_at) "
-            "VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT (anomaly_type, affected_users_hash) "
+            "INSERT INTO anomaly_status "
+            "(anomaly_id, anomaly_type, affected_users_hash, status, processed_by, processed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (anomaly_id) "
             "DO UPDATE SET status = ?, processed_by = ?, processed_at = ?",
-            (anomaly_type, hash_val, new_status, user_id, now, new_status, user_id, now),
+            (
+                anomaly_id,
+                anomaly_type or "",
+                _anomaly_hash(anomaly_type or "", affected_users),
+                new_status,
+                user_id,
+                now,
+                new_status,
+                user_id,
+                now,
+            ),
         )
-        return jsonify({"success": True, "status": new_status})
+        return jsonify({"success": True, "status": new_status, "anomaly_id": anomaly_id})
     except Exception as e:
         logger.error(f"Failed to update anomaly status: {e}")
         return jsonify({"error": "Database error"}), 500

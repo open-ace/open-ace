@@ -189,25 +189,26 @@ export const AuditCenter: React.FC = () => {
     actionToResourceTypes,
   } = useAuditActions();
 
-  const handleAnomalyStatusUpdate = async (
-    anomalyType: string,
-    affectedUsers: number[],
-    status: 'processed' | 'ignored'
-  ) => {
+  const handleAnomalyStatusUpdate = async (anomalyId: string, status: 'processed' | 'ignored') => {
     try {
-      await complianceApi.updateAnomalyStatus(anomalyType, affectedUsers, status);
-      // Update local state
+      await complianceApi.updateAnomalyStatus(anomalyId, status);
+      // Update local state – only the targeted anomaly_id is changed.
       setAnomalies((prev) =>
         prev.map((a) =>
-          a.anomaly_type === anomalyType &&
-          JSON.stringify([...(a.affected_users || [])].sort()) ===
-            JSON.stringify([...affectedUsers].sort())
+          a.anomaly_id && a.anomaly_id === anomalyId
             ? { ...a, status, processed_at: new Date().toISOString() }
             : a
         )
       );
     } catch (err) {
       console.error('Failed to update anomaly status:', err);
+      // Refresh from server so the UI reflects the authoritative state.
+      try {
+        const data = await complianceApi.detectAnomalies(days);
+        setAnomalies(data.anomalies);
+      } catch {
+        /* best-effort refresh */
+      }
     }
   };
 
@@ -940,7 +941,7 @@ export const AuditCenter: React.FC = () => {
                       .slice((anomalyPage - 1) * ANOMALY_PAGE_SIZE, anomalyPage * ANOMALY_PAGE_SIZE)
                       .map((anomaly, index) => (
                         <tr
-                          key={`${anomaly.anomaly_type}-${index}`}
+                          key={anomaly.anomaly_id ?? `${anomaly.anomaly_type}-${index}`}
                           className={anomaly.status === 'processed' ? 'opacity-50' : ''}
                         >
                           <td>
@@ -981,36 +982,29 @@ export const AuditCenter: React.FC = () => {
                             </span>
                           </td>
                           <td>
-                            {(!anomaly.status || anomaly.status === 'pending') && (
-                              <div className="btn-group btn-group-sm">
-                                <button
-                                  className="btn btn-outline-success btn-sm"
-                                  title={t('markProcessed', language)}
-                                  onClick={() =>
-                                    handleAnomalyStatusUpdate(
-                                      anomaly.anomaly_type,
-                                      anomaly.affected_users || [],
-                                      'processed'
-                                    )
-                                  }
-                                >
-                                  <i className="bi bi-check-lg" />
-                                </button>
-                                <button
-                                  className="btn btn-outline-warning btn-sm"
-                                  title={t('ignoreAnomaly', language)}
-                                  onClick={() =>
-                                    handleAnomalyStatusUpdate(
-                                      anomaly.anomaly_type,
-                                      anomaly.affected_users || [],
-                                      'ignored'
-                                    )
-                                  }
-                                >
-                                  <i className="bi bi-eye-slash" />
-                                </button>
-                              </div>
-                            )}
+                            {(!anomaly.status || anomaly.status === 'pending') &&
+                              anomaly.anomaly_id && (
+                                <div className="btn-group btn-group-sm">
+                                  <button
+                                    className="btn btn-outline-success btn-sm"
+                                    title={t('markProcessed', language)}
+                                    onClick={() =>
+                                      handleAnomalyStatusUpdate(anomaly.anomaly_id!, 'processed')
+                                    }
+                                  >
+                                    <i className="bi bi-check-lg" />
+                                  </button>
+                                  <button
+                                    className="btn btn-outline-warning btn-sm"
+                                    title={t('ignoreAnomaly', language)}
+                                    onClick={() =>
+                                      handleAnomalyStatusUpdate(anomaly.anomaly_id!, 'ignored')
+                                    }
+                                  >
+                                    <i className="bi bi-eye-slash" />
+                                  </button>
+                                </div>
+                              )}
                           </td>
                         </tr>
                       ))}
