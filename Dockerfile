@@ -52,9 +52,9 @@ RUN echo "deb https://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources
 
 # Copy dependency files. requirements.lock is a hash-pinned lock compiled from
 # requirements.txt and resolved against the SAME aliyun mirror used below, so
-# every pin is installable here (PyPI-latest pins can lag on the mirror). Regen:
-#   uv pip compile --universal --python-version 3.11 --generate-hashes \
-#     --index-url https://mirrors.aliyun.com/pypi/simple/ requirements.txt -o requirements.lock
+# every pin is installable here (PyPI-latest pins can lag on the mirror).
+# Regenerate with scripts/gen_requirements_lock.sh (kept honest by the
+# check-requirements-lock-sync pre-commit hook).
 COPY requirements.lock .
 
 # Create virtual environment and install dependencies
