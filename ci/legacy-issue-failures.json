@@ -82,70 +82,6 @@
     },
     {
       "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "1329",
-      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCheckUserConcurrentLimit::test_fail_open_on_exception",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "1329",
-      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCheckUserConcurrentLimit::test_returns_429_when_at_limit",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "1329",
-      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCheckUserConcurrentLimit::test_returns_none_when_under_limit",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "1329",
-      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCheckUserConcurrentLimit::test_uses_default_when_no_tenant",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "1329",
-      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCountActiveWorkflowsByUser::test_count_active_workflows_only",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "1329",
-      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCountActiveWorkflowsByUser::test_count_multiple_active_statuses",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "1329",
-      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCountActiveWorkflowsByUser::test_count_only_specific_user",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "OperationalError",
-      "issue_number": "1329",
-      "nodeid": "tests/issues/1329/test_concurrent_limit.py::TestCountActiveWorkflowsByUser::test_count_zero_when_no_workflows",
-      "outcome": "error",
-      "summary": "failed on setup with \"sqlite3.OperationalError: database is locked\""
-    },
-    {
-      "category": "setup_error",
       "exception_type": "AssertionError",
       "issue_number": "144",
       "nodeid": "tests/issues/144/e2e_file_changes_panel.py::test_panel_features",
@@ -995,8 +931,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-15 prune 9 resolved issue-165 remote-session e2e entries: stale setup/auth. (a) main()-only runner setup never executed under pytest collection — module-scoped autouse fixture now does lane setup (must_change_password clear, admin login, machine register+assign user_id 1); (b) HA-pool gate requires an api_key_store row advertising the model — fixture seeds qwen3-coder-plus via /api/api-keys; (c) /agent/message needs the agent Bearer token from registration; usage_report needs report_id (legacy window expired 2026-08-04). Negative control: removing the key-seed call re-fails all 9 with the original 400. Shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31878610663",
+    "prune_note": "2026-08-19 prune 8 resolved issue-1329 concurrent-limit entries: stale fixture setup, two stacked layers. (a) auto_db seeded rows on an uncommitted connection before calling load_schema_from_file, whose own-connection executescript blocked on the uncommitted RESERVED lock until the busy timeout raised 'database is locked' (all 8 baseline setup errors); (b) the hand-rolled minimal users/tenants DDL had drifted from authoritative schema-sqlite.sql — CREATE TABLE IF NOT EXISTS left tenants without billing_cycle_end, breaking idx_tenants_billing_cycle after layer (a) was fixed. The fixture now loads the authoritative schema first (#1273, no parallel hand-maintained DDL) and seeds the same rows afterwards; seed columns all exist in the authoritative tables. Negative control: reverting the fixture re-fails all 8 with the original lock timeout. Shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32215616137",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
