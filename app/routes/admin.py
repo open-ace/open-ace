@@ -634,7 +634,7 @@ def api_update_user_quota(user_id):
                         f"{validation_result['error']}"
                     )
                     # Build enhanced error response with detailed context
-                    error_details = dict(validation_result.get("details", {}))
+                    error_details: dict[str, Any] = dict(validation_result.get("details", {}))
                     if validation_result.get("available"):
                         error_details["available"] = validation_result["available"]
                     if validation_result.get("is_unlimited_tenant") is not None:
