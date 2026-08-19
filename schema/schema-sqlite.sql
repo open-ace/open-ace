@@ -1178,6 +1178,12 @@ CREATE TABLE teams (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE tenant_keywords_version (
+ tenant_id INTEGER PRIMARY KEY AUTOINCREMENT,
+ version INTEGER DEFAULT '1' NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
 CREATE TABLE tenant_migrations (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  user_id integer NOT NULL,
@@ -1229,6 +1235,17 @@ CREATE TABLE tenant_quotas (
  max_sessions_per_user integer DEFAULT 5,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE tenant_sensitive_keywords (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer NOT NULL,
+ keyword text NOT NULL,
+ normalized_keyword text NOT NULL,
+ is_enabled INTEGER DEFAULT 1 NOT NULL,
+ created_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP
 );
 
 CREATE TABLE tenant_settings (
@@ -1621,6 +1638,8 @@ CREATE UNIQUE INDEX uq_mapping_rule_user_pattern ON tool_account_mapping_rules (
 CREATE UNIQUE INDEX uq_quota_usage_user_date_period_new ON quota_usage (user_id, date, period);
 
 CREATE UNIQUE INDEX uq_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
+
+CREATE UNIQUE INDEX uq_tenant_keyword ON tenant_sensitive_keywords (tenant_id, normalized_keyword);
 
 CREATE UNIQUE INDEX uq_tenant_usage_tenant_date_new ON tenant_usage (tenant_id, date);
 
@@ -2017,6 +2036,10 @@ CREATE INDEX idx_team_members_user ON team_members (user_id);
 CREATE INDEX idx_teams_owner ON teams (owner_id);
 
 CREATE INDEX idx_teams_sync_source ON teams (json_extract(settings, '$.sync_source'));
+
+CREATE INDEX idx_tenant_keywords_enabled ON tenant_sensitive_keywords (tenant_id, is_enabled) WHERE (is_enabled = true);
+
+CREATE INDEX idx_tenant_keywords_tenant ON tenant_sensitive_keywords (tenant_id);
 
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations (status);
 
