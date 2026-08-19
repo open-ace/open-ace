@@ -18,6 +18,7 @@ from app.auth.decorators import (
     resolve_tenant_scope,
     same_tenant_user_required,
 )
+from app.auth.permissions import is_platform_admin_role
 from app.models.user import User
 from app.modules.compliance.audit import AuditAnalyzer
 from app.modules.compliance.report import ReportGenerator, ReportType
@@ -83,6 +84,20 @@ def _current_tenant_id():
     """Return the authenticated user's tenant scope."""
     user = getattr(g, "user", None) or {}
     return user.get("tenant_id")
+
+
+def _is_platform_admin():
+    """Check if current user is platform admin.
+
+    Platform admins can access data across all tenants.
+
+    Returns:
+        bool: True if user has platform_admin role (or legacy admin role).
+    """
+    from app.auth.permissions import is_platform_admin_role
+
+    user = getattr(g, "user", None) or {}
+    return is_platform_admin_role(user.get("role"))
 
 
 # =============================================================================
@@ -427,9 +442,10 @@ def analyze_patterns():
     """Analyze audit patterns (admin only).
 
     Issue #2748: Tenant isolation for audit pattern analysis.
+    Platform admins can access cross-tenant (tenant_id=None).
     """
     tenant_id = _current_tenant_id()
-    if tenant_id is None:
+    if tenant_id is None and not _is_platform_admin():
         return jsonify({"error": "Tenant ID required"}), 400
 
     days = request.args.get("days", 30, type=int)
@@ -446,9 +462,10 @@ def detect_anomalies():
     """Detect audit anomalies (admin only).
 
     Issue #2748: Tenant isolation for anomaly detection.
+    Platform admins can access cross-tenant (tenant_id=None).
     """
     tenant_id = _current_tenant_id()
-    if tenant_id is None:
+    if tenant_id is None and not _is_platform_admin():
         return jsonify({"error": "Tenant ID required"}), 400
 
     days = request.args.get("days", 7, type=int)
@@ -488,9 +505,10 @@ def get_user_profile(user_id: int):
     Issue #2748: Tenant isolation for user behavior profile.
     get_user_behavior_profile applies no tenant filter of its own, so the
     boundary has to be enforced here.
+    Platform admins can access cross-tenant (tenant_id=None).
     """
     tenant_id = _current_tenant_id()
-    if tenant_id is None:
+    if tenant_id is None and not _is_platform_admin():
         return jsonify({"error": "Tenant ID required"}), 400
 
     days = request.args.get("days", 30, type=int)
@@ -508,9 +526,10 @@ def get_security_score():
     """Get security score (admin only).
 
     Issue #2748: Tenant isolation for security score generation.
+    Platform admins can access cross-tenant (tenant_id=None).
     """
     tenant_id = _current_tenant_id()
-    if tenant_id is None:
+    if tenant_id is None and not _is_platform_admin():
         return jsonify({"error": "Tenant ID required"}), 400
 
     days = request.args.get("days", 30, type=int)
