@@ -12,6 +12,7 @@ Usage:
 import re
 import sys
 from pathlib import Path
+from typing import Dict, List
 
 # Boolean field detection patterns
 BOOLEAN_FIELD_PATTERNS = [
@@ -421,7 +422,7 @@ def convert_to_sqlite(postgres_sql):
 
     # Pre-scan: find PRIMARY KEY constraints from ALTER TABLE statements
     # pg_dump puts PKs in ALTER TABLE, but SQLite needs them inline in CREATE TABLE
-    pk_map = {}  # table_name -> pk_column_name
+    pk_map: dict[str, str] = {}  # table_name -> pk_column_name
     for j, ln in enumerate(lines):
         pk_match = re.search(
             r"ALTER TABLE(?:\s+ONLY)?(?:\s+(?:public\.)?)?(\w+)\s+.*ADD CONSTRAINT\s+\w+\s+PRIMARY KEY\s*\((\w+)\)",
@@ -447,7 +448,7 @@ def convert_to_sqlite(postgres_sql):
 
     # Pre-scan: find FOREIGN KEY constraints from ALTER TABLE statements
     # SQLite requires FKs to be inline in CREATE TABLE, not ALTER TABLE
-    fk_map = {}  # table_name -> list of fk_constraint strings
+    fk_map: dict[str, list[str]] = {}  # table_name -> list of fk_constraint strings
     for j, ln in enumerate(lines):
         if re.match(r"ALTER TABLE", ln):
             # Extract table name
@@ -472,7 +473,9 @@ def convert_to_sqlite(postgres_sql):
                     on_delete = fk_match.group(4) if fk_match.group(4) else ""
 
                     # Build SQLite FK constraint
-                    fk_constraint = f"FOREIGN KEY ({fk_col}) REFERENCES {ref_table}({ref_col}){on_delete}"
+                    fk_constraint = (
+                        f"FOREIGN KEY ({fk_col}) REFERENCES {ref_table}({ref_col}){on_delete}"
+                    )
 
                     if table_name not in fk_map:
                         fk_map[table_name] = []
