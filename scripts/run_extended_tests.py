@@ -698,11 +698,19 @@ def _load_attempt_records(path: str) -> list[dict[str, object]]:
     if not attempts_path.exists():
         return []
     records: list[dict[str, object]] = []
-    for line in attempts_path.read_text(encoding="utf-8").splitlines():
+    for line_number, line in enumerate(
+        attempts_path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
+    ):
         line = line.strip()
         if not line:
             continue
-        records.append(json.loads(line))
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            print(
+                f"WARNING: skipping malformed attempt record {attempts_path}:{line_number}: {exc}",
+                file=sys.stderr,
+            )
     return records
 
 
@@ -730,23 +738,48 @@ def _summarize_attempt_records(
     for nodeid in sorted(by_node):
         node_records = by_node[nodeid]
         attempts = sorted({int(record.get("attempt", 1)) for record in node_records})
-        final = node_records[-1]
-        call_records = [record for record in node_records if record.get("phase") == "call"]
-        decision = call_records[-1] if call_records else final
+        final_attempt = attempts[-1]
+        final_attempt_records = [
+            record for record in node_records if int(record.get("attempt", 1)) == final_attempt
+        ]
+        final = final_attempt_records[-1]
+        call_records = [record for record in final_attempt_records if record.get("phase") == "call"]
+        failed_attempt_records = [
+            record
+            for record in final_attempt_records
+            if record.get("outcome") not in ("passed", "rerun")
+        ]
+        decision = (
+            call_records[-1]
+            if call_records
+            else failed_attempt_records[-1] if failed_attempt_records else final
+        )
         first_attempt_records = [
             record for record in node_records if int(record.get("attempt", 1)) == attempts[0]
         ]
         first_passed = all(record.get("outcome") == "passed" for record in first_attempt_records)
         final_outcome = _canonical_outcome(str(decision.get("outcome", "failed")))
-        total_duration = round(
-            sum(float(record.get("duration_seconds") or 0.0) for record in node_records), 3
-        )
+        per_attempt_durations = {
+            attempt: round(
+                sum(
+                    float(record.get("duration_seconds") or 0.0)
+                    for record in node_records
+                    if int(record.get("attempt", 1)) == attempt
+                ),
+                3,
+            )
+            for attempt in attempts
+        }
+        max_attempt_duration = max(per_attempt_durations.values(), default=0.0)
+        total_duration = round(sum(per_attempt_durations.values()), 3)
         summary: dict[str, object] = {
             "nodeid": nodeid,
             "attempts": len(attempts),
             "first_attempt_outcome": "pass" if first_passed else "fail",
             "final_outcome": final_outcome,
-            "duration_seconds": total_duration,
+            "duration_seconds": max_attempt_duration,
+            "total_duration_seconds": total_duration,
+            "attempt_durations_seconds": per_attempt_durations,
         }
         if final_outcome == "fail":
             failed_records = [
@@ -938,6 +971,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Pytest command:")
         print(" ".join(cmd))
         if args.dry_run:
+            return_code = 0
             return 0
         server_handle = start_server_if_needed(args, env, needs_server)
         return_code = 0
@@ -958,20 +992,23 @@ def main(argv: list[str] | None = None) -> int:
         raise
     finally:
         completed_at = _utc_now()
-        _write_run_envelope(
-            args.envelope_json,
-            args=args,
-            env=env,
-            cmd=cmd,
-            selected_targets=selected_targets,
-            needs_server=needs_server,
-            server_handle=server_handle,
-            return_code=return_code,
-            started_at=started_at,
-            completed_at=completed_at,
-            standalone_outcomes=standalone_outcomes,
-            error_message=error_message,
-        )
+        try:
+            _write_run_envelope(
+                args.envelope_json,
+                args=args,
+                env=env,
+                cmd=cmd,
+                selected_targets=selected_targets,
+                needs_server=needs_server,
+                server_handle=server_handle,
+                return_code=return_code,
+                started_at=started_at,
+                completed_at=completed_at,
+                standalone_outcomes=standalone_outcomes,
+                error_message=error_message,
+            )
+        except Exception as exc:
+            print(f"WARNING: failed to write run envelope: {exc}", file=sys.stderr)
         stop_server(server_handle)
         if test_home is not None:
             test_home.cleanup()

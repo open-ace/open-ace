@@ -404,6 +404,17 @@ def compare_selection_run(
         for nodeid in duplicates:
             diff["invalid"][nodeid] = f"duplicate observed results ({seen_counts[nodeid]})"
         diff["verdict_exit_code"] = 1
+    if not expected_ids:
+        diff["invalid"]["__coverage__"] = "nightly selection is empty (no governed coverage)"
+        diff["verdict_exit_code"] = 1
+    if envelope.get("error"):
+        diff["invalid"]["__execution__"] = f"runner error: {envelope['error']}"
+        diff["verdict_exit_code"] = 1
+    if int(envelope.get("return_code") or 0) != 0 and not raw_outcomes:
+        diff["invalid"][
+            "__execution__"
+        ] = f"runner exited {envelope.get('return_code')} without observed outcomes"
+        diff["verdict_exit_code"] = 1
     per_item = {
         item["nodeid"]: float(item.get("duration_seconds") or 0)
         for item in raw_outcomes

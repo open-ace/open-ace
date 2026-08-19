@@ -413,3 +413,32 @@ class TestComparatorCli:
         assert diff["verdict_exit_code"] == 1
         assert diff["duplicates"] == ["a"]
         assert diff["invalid"]["a"] == "duplicate observed results (2)"
+
+    def test_compare_selection_run_fails_closed_on_empty_selection(self):
+        diff, _ = comparator.compare_selection_run(
+            {"normal": [], "advisory": []},
+            {"job_conclusion": "failure", "return_code": 1, "outcomes": [], "duration_minutes": 0},
+            {},
+        )
+
+        assert diff["verdict_exit_code"] == 1
+        assert (
+            diff["invalid"]["__coverage__"] == "nightly selection is empty (no governed coverage)"
+        )
+        assert "__execution__" in diff["invalid"]
+
+    def test_compare_selection_run_fails_closed_on_runner_error(self):
+        diff, _ = comparator.compare_selection_run(
+            {"normal": ["a"], "advisory": []},
+            {
+                "job_conclusion": "failure",
+                "return_code": 1,
+                "error": "boom",
+                "outcomes": [{"nodeid": "a", "final_outcome": "pass", "duration_seconds": 1}],
+                "duration_minutes": 1,
+            },
+            {},
+        )
+
+        assert diff["verdict_exit_code"] == 1
+        assert diff["invalid"]["__execution__"] == "runner error: boom"
