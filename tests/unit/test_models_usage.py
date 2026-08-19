@@ -74,7 +74,7 @@ class TestUsage:
         assert d["cache_tokens"] == 100
         assert d["request_count"] == 25
         assert d["models_used"] == ["gpt-4"]
-        assert d["created_at"] == "2025-03-10T14:30:00"
+        assert d["created_at"] == "2025-03-10T14:30:00Z"
 
     def test_to_dict_none_created_at(self):
         u = Usage(date="2025-01-01", tool_name="qwen")

@@ -363,7 +363,7 @@ class TestTenant:
         assert d["status"] == "active"
         assert d["plan"] == "premium"
         assert d["contact_email"] == "info@myco.com"
-        assert d["created_at"] == "2025-05-01T12:00:00"
+        assert d["created_at"] == "2025-05-01T12:00:00Z"
         assert d["updated_at"] is None
         assert d["trial_ends_at"] is None
         assert d["subscription_ends_at"] is None

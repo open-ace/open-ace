@@ -97,8 +97,8 @@ class TestMessage:
         assert d["message_id"] == "m1"
         assert d["role"] == "user"
         assert d["host_name"] == "localhost"
-        assert d["timestamp"] == "2025-03-10T12:00:00"
-        assert d["created_at"] == "2025-03-10T12:00:01"
+        assert d["timestamp"] == "2025-03-10T12:00:00Z"
+        assert d["created_at"] == "2025-03-10T12:00:01Z"
         assert d["parent_id"] is None
         assert d["content"] is None
         assert d["tokens_used"] == 0
