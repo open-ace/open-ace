@@ -630,7 +630,7 @@ def convert_to_sqlite(postgres_sql):
             # Add FOREIGN KEY constraints from fk_map
             fk_constraints = fk_map.get(table_name, [])
             for fk_constraint in fk_constraints:
-                converted_columns.append(f"    {fk_constraint}")
+                converted_columns.append(f" {fk_constraint}")
 
             # Build clean CREATE TABLE statement
             table_lines.append(f"CREATE TABLE {table_name} (")
