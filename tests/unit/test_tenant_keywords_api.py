@@ -6,6 +6,19 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolated_app_db(monkeypatch, tmp_path):
+    """Point this file's tests at a throwaway per-test database.
+
+    In the full-suite run the workspace-level app.db is shared across every
+    pytest session; leftover table shapes written by unrelated tests can make
+    create_app's ensure_all_tables() snapshot replay fail (CREATE INDEX on a
+    table whose columns don't match). A fresh DATABASE_URL per test sidesteps
+    that shared state entirely.
+    """
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path}/tenant-keywords.db")
+
+
 class TestTenantKeywordsApiAuth:
     """Test authentication and authorization for tenant keywords API."""
 
