@@ -45,6 +45,7 @@ export interface AuditPattern {
 }
 
 export interface AuditAnomaly {
+  anomaly_id?: string;
   anomaly_type: string;
   description: string;
   severity: 'low' | 'medium' | 'high';
@@ -55,6 +56,7 @@ export interface AuditAnomaly {
   details?: Record<string, unknown>;
   status?: 'pending' | 'processed' | 'ignored';
   processed_at?: string | null;
+  processed_by?: number | null;
 }
 
 export interface UserProfile {
@@ -75,10 +77,18 @@ export interface SecurityScore {
   score: number;
   grade: string;
   anomaly_count: number;
+  pending_count?: number;
+  processed_count?: number;
+  ignored_count?: number;
   high_severity_count: number;
   medium_severity_count: number;
   low_severity_count: number;
-  anomalies: { type: string; severity: string; description: string }[];
+  anomalies: {
+    anomaly_id?: string;
+    type: string;
+    severity: string;
+    description: string;
+  }[];
   recommendations: string[];
 }
 
@@ -256,13 +266,12 @@ export const complianceApi = {
   },
 
   async updateAnomalyStatus(
-    anomalyType: string,
-    affectedUsers: number[],
+    anomalyId: string,
     status: 'processed' | 'ignored'
-  ): Promise<{ success: boolean; status: string }> {
-    return apiClient.post<{ success: boolean; status: string }>(
+  ): Promise<{ success: boolean; status: string; anomaly_id: string }> {
+    return apiClient.post<{ success: boolean; status: string; anomaly_id: string }>(
       '/api/compliance/audit/anomalies/status',
-      { anomaly_type: anomalyType, affected_users: affectedUsers, status }
+      { anomaly_id: anomalyId, status }
     );
   },
 
