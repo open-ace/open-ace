@@ -63,3 +63,43 @@ def ensure_utc_suffix(timestamp: str | datetime | None) -> str | None:
     if timestamp.endswith("Z") or _TZ_PATTERN.search(timestamp):
         return timestamp
     return timestamp + "Z"
+
+
+def parse_utc(value: str | datetime | None) -> datetime | None:
+    """Parse an ISO-8601 timestamp (accepting a trailing ``Z``) into a datetime.
+
+    Read-path companion to :func:`ensure_utc_suffix`. Python 3.10's
+    ``datetime.fromisoformat`` rejects the trailing ``Z`` that
+    ``ensure_utc_suffix`` emits (Python 3.11+ accepts it), so serializing a
+    timestamp with ``ensure_utc_suffix`` and reading it back with a bare
+    ``fromisoformat`` breaks the round-trip on 3.10. Normalizing ``Z`` to
+    ``+00:00`` keeps parsing consistent across supported Python versions.
+
+    This is the tight companion to :func:`ensure_utc_suffix` for model
+    (de)serialization, where inputs are ISO strings from ``datetime.isoformat()``.
+    For raw database text (space-separated timestamps, variable fractional-second
+    widths) use :func:`app.utils.helpers.parse_db_datetime` instead.
+
+    Args:
+        value: A ``datetime`` (returned unchanged), an ISO-8601 string, or
+            ``None``.
+
+    Returns:
+        A ``datetime`` (timezone-aware when the string carried ``Z`` or an
+        offset), or ``None`` for ``None``/blank input.
+
+    Examples:
+        >>> parse_utc(None) is None
+        True
+        >>> parse_utc('2026-08-06T09:54:57Z').tzinfo is not None
+        True
+        >>> parse_utc('2026-08-06T09:54:57').tzinfo is None
+        True
+    """
+    if value is None or isinstance(value, datetime):
+        return value
+    if not value.strip():
+        return None
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    return datetime.fromisoformat(value)
