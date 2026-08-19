@@ -404,8 +404,8 @@ class AuthService:
         if is_locked:
             return None, lockout_msg
 
-        # Get user by username
-        user = self.user_repo.get_user_by_username(username)
+        # Get user by username (Issue #2755: Exclude soft-deleted users)
+        user = self.user_repo.get_user_by_username(username, include_deleted=False)
 
         if not user:
             logger.warning("Login failed: invalid credentials")

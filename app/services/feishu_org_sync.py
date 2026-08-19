@@ -948,8 +948,9 @@ class FeishuOrgSyncService:
             )
             return None, False, False, False
 
+        # Issue #2755: Explicitly exclude soft-deleted users when looking up by email
         if existing_user is None and user.email:
-            email_user = self.user_repo.get_user_by_email(user.email)
+            email_user = self.user_repo.get_user_by_email(user.email, include_deleted=False)
             if email_user:
                 # SECURITY: Feishu emails are NOT verified, so we must not bind
                 # an SSO identity onto an unrelated pre-existing password
