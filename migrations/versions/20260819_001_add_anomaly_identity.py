@@ -92,6 +92,16 @@ def upgrade() -> None:
                 sqlite_where=sa.text("anomaly_id != ''"),
             )
 
+    # Issue #2748: Add composite unique index including tenant_id
+    # This allows same anomaly_key to have different states per tenant
+    if "ix_anomaly_status_type_hash_tenant" not in indexes:
+        op.create_index(
+            "ix_anomaly_status_type_hash_tenant",
+            "anomaly_status",
+            ["anomaly_type", "affected_users_hash", "tenant_id"],
+            unique=True,
+        )
+
 
 def downgrade() -> None:
     """Remove anomaly_id and tenant_id columns from anomaly_status."""
@@ -101,6 +111,8 @@ def downgrade() -> None:
     indexes = {idx["name"] for idx in inspector.get_indexes("anomaly_status")}
     if "ix_anomaly_status_anomaly_id" in indexes:
         op.drop_index("ix_anomaly_status_anomaly_id", table_name="anomaly_status")
+    if "ix_anomaly_status_type_hash_tenant" in indexes:
+        op.drop_index("ix_anomaly_status_type_hash_tenant", table_name="anomaly_status")
 
     columns = _column_names(inspector, "anomaly_status")
     if "tenant_id" in columns:
