@@ -241,7 +241,10 @@ class TestGatewayQuota:
 
         client = remote_app.test_client()
         resp = client.post("/api/remote/llm-proxy", json={"model": "gpt-4"}, headers=_HEADERS)
-        assert resp.status_code == 429
+        # 403 since #2777 (temporary WebUI-compat decision; #2734 notes the
+        # correct long-term status is 429 and should be restored with the
+        # frontend fix — flip this assertion back then).
+        assert resp.status_code == 403
         mock_http.assert_not_called()
 
 
