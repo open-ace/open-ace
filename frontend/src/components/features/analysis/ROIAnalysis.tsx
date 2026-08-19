@@ -434,7 +434,7 @@ export const ROIAnalysis: React.FC = () => {
             tool_name: selectedTool || undefined,
           }),
           roiApi.getOptimizationSuggestions(30),
-          roiApi.getEfficiencyReport(30),
+          roiApi.getEfficiencyReport({ days: 30 }),
         ]);
 
         const data: CachedData = {
