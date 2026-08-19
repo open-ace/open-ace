@@ -281,7 +281,7 @@ def validate_tenant_allocation(
     # Decision D1: For limited tenants, reject unlimited user quota (EXPLICIT_NULL)
     # Important: None means "no change", EXPLICIT_NULL means "set to unlimited"
     # Only validate fields that are being modified (not None)
-    
+
     # Check daily_token_quota
     if new_daily_token_quota is EXPLICIT_NULL and daily_token_limit not in (None, 0):
         result["is_valid"] = False
@@ -373,7 +373,7 @@ def validate_tenant_allocation(
 
     def calculate_total(new_val: int | None | object, allocated: int) -> int | None:
         """Calculate total allocation for limit comparison.
-        
+
         Returns:
             int: Total allocation to check against limit
             None: Skip validation (field not being modified)

@@ -531,7 +531,7 @@ def api_update_user_quota(user_id):
     # - Field omitted (not in request): None - keep current value (no change)
     # - Field with null value: EXPLICIT_NULL - set to unlimited
     # - Field with integer value: integer - set to specified value
-    
+
     def parse_quota_field(field_name: str) -> int | None | object:
         """Parse quota field from request, distinguishing three semantics."""
         if field_name not in data:
@@ -554,11 +554,11 @@ def api_update_user_quota(user_id):
     # Helper function to check if a quota value is increasing (needs validation)
     def is_quota_increase(new_val: int | None | object, current_val: int | None) -> bool:
         """Check if quota value is increasing (needs validation).
-        
+
         Args:
             new_val: None (no change), EXPLICIT_NULL (unlimited), or int (specific value)
             current_val: Current quota value (None = unlimited, or int)
-        
+
         Returns:
             True if validation is needed, False otherwise.
         """
@@ -642,14 +642,14 @@ def api_update_user_quota(user_id):
                         error_response["details"]["available"] = validation_result["available"]
                     if validation_result.get("is_unlimited_tenant") is not None:
                         error_response["details"]["is_unlimited_tenant"] = validation_result["is_unlimited_tenant"]
-                    
+
                     return jsonify(error_response), 400
 
                 # Step 6: Update user quota (within transaction)
                 # Convert EXPLICIT_NULL to None for database storage (unlimited)
                 def to_db_value(val):
                     """Convert quota value for database storage.
-                    
+
                     - None -> keep current (shouldn't reach here in update)
                     - EXPLICIT_NULL -> None (unlimited)
                     - int -> int
@@ -657,7 +657,7 @@ def api_update_user_quota(user_id):
                     if val is EXPLICIT_NULL:
                         return None  # Store as NULL in database (unlimited)
                     return val
-                
+
                 success = user_repo.update_user_quota(
                     user_id=user_id,
                     daily_token_quota=to_db_value(new_daily_token),
@@ -694,7 +694,7 @@ def api_update_user_quota(user_id):
             if val is EXPLICIT_NULL:
                 return None
             return val
-        
+
         success = user_repo.update_user_quota(
             user_id=user_id,
             daily_token_quota=to_db_value_else(new_daily_token),
