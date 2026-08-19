@@ -201,46 +201,6 @@
       "summary": "AssertionError: Expected '_mark_failed' to not have been called. Called 1 times."
     },
     {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1857",
-      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_already_exists_fails_when_retry_still_finds_nothing",
-      "outcome": "failure",
-      "summary": "AssertionError: should fail when recovery can't locate the existing PR"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1857",
-      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_already_exists_falls_back_to_find_existing_pr_without_url",
-      "outcome": "failure",
-      "summary": "AssertionError: Expected 'find_existing_pr' to be called once. Called 0 times."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1857",
-      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_already_exists_recovers_by_parsing_pr_url_from_error",
-      "outcome": "failure",
-      "summary": "AssertionError: PR number not parsed from error URL and persisted"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1857",
-      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_already_exists_retries_find_when_first_returns_none",
-      "outcome": "failure",
-      "summary": "AssertionError: assert 0 == 2"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1857",
-      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_unrecoverable_error_still_fails",
-      "outcome": "failure",
-      "summary": "AssertionError: non-'already exists' error should propagate, not be masked"
-    },
-    {
       "category": "test_body_exception",
       "exception_type": "RuntimeError",
       "issue_number": "1895",
@@ -441,62 +401,6 @@
       "summary": "TypeError: 'PlaywrightContextManager' object does not support the context manager protocol"
     },
     {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "477",
-      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_admin_user_has_access",
-      "outcome": "failure",
-      "summary": "assert 400 == 200"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "477",
-      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_admin_user_offline_machine",
-      "outcome": "failure",
-      "summary": "assert 400 == 200"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "RuntimeError",
-      "issue_number": "477",
-      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_g_user_none_returns_401",
-      "outcome": "failure",
-      "summary": "RuntimeError: Working outside of request context."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "RuntimeError",
-      "issue_number": "477",
-      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_g_user_without_id_returns_403",
-      "outcome": "failure",
-      "summary": "RuntimeError: Working outside of request context."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "RuntimeError",
-      "issue_number": "477",
-      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_no_g_user_returns_401",
-      "outcome": "failure",
-      "summary": "RuntimeError: Working outside of request context."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "477",
-      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_normal_user_without_access_returns_403",
-      "outcome": "failure",
-      "summary": "assert 400 == 403"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "477",
-      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryEdgeCases::test_machine_not_found_returns_404",
-      "outcome": "failure",
-      "summary": "assert 400 == 404"
-    },
-    {
       "category": "test_body_exception",
       "exception_type": "Error",
       "issue_number": "48",
@@ -559,70 +463,6 @@
       "nodeid": "tests/issues/54/test_issue54.py::TestIssue54::test_add_user_modal_fields",
       "outcome": "failure",
       "summary": "playwright._impl._errors.TimeoutError: Page.fill: Timeout 30000ms exceeded."
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_binary_echo",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 133"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_invalid_token_rejected",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 169"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_multiple_messages",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 151"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_text_echo",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 118"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_unknown_terminal_rejected",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 191"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/test_terminal_ws_handler.py::TestHandleVSCodeWs::test_cookie_token_can_authenticate_proxy_ws",
-      "outcome": "failure",
-      "summary": "AssertionError: expected call not found."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/test_terminal_ws_handler.py::TestHandleVSCodeWs::test_invalid_proxy_ws_token_closes",
-      "outcome": "failure",
-      "summary": "AssertionError: expected call not found."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/test_terminal_ws_handler.py::TestHandleVSCodeWs::test_proxy_path_bridges_to_matching_remote_path",
-      "outcome": "failure",
-      "summary": "AssertionError: expected call not found."
     },
     {
       "category": "test_body_exception",
@@ -746,46 +586,6 @@
     },
     {
       "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestAddWorktreeExistingBranch::test_add_worktree_no_b_flag",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestAddWorktreeExistingBranch::test_add_worktree_returns_path_and_branch",
-      "outcome": "failure",
-      "summary": "TypeError: object.__new__() takes exactly one argument (the type to instantiate)"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestDoMergeDeferredRetry::test_uses_graph_merge_base_and_backfills_stale_scope_base",
-      "outcome": "failure",
-      "summary": "AssertionError: assert [call(['fetch... check=False)] == [call(['fetch... check=False)]"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestResolveMergeConflictsWorktreeIsolation::test_removes_existing_worktree_before_adding_temp",
-      "outcome": "failure",
-      "summary": "AssertionError: mock({'worktree_path': ''}) call not found"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "822",
-      "nodeid": "tests/issues/822/test_merge_conflict_detection.py::TestResolveMergeConflictsWorktreeIsolation::test_restores_worktree_even_on_resolution_failure",
-      "outcome": "failure",
-      "summary": "AssertionError: mock({'worktree_path': '/srv/repo/.worktrees/wf-822'}) call not found"
-    },
-    {
-      "category": "test_body_exception",
       "exception_type": "GitHubOpsError",
       "issue_number": "826",
       "nodeid": "tests/issues/826/test_plan_review_semantics.py::TestPlanningIntegration::test_approved_review_skips_refinement",
@@ -807,46 +607,6 @@
       "nodeid": "tests/issues/826/test_plan_review_semantics.py::TestPlanningIntegration::test_substantive_review_triggers_refinement",
       "outcome": "failure",
       "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: trusted common_dir is not a .git directory: /tmp/test.git"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "863",
-      "nodeid": "tests/issues/863/e2e_ip_whitelist_input.py::test_api_ip_whitelist",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/863/e2e_ip_whitelist_input.py, line 95"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "AssertionError",
-      "issue_number": "863",
-      "nodeid": "tests/issues/863/e2e_ip_whitelist_input.py::test_ui_ip_whitelist_dedupe",
-      "outcome": "error",
-      "summary": "failed on setup with \"AssertionError\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "AssertionError",
-      "issue_number": "863",
-      "nodeid": "tests/issues/863/e2e_ip_whitelist_input.py::test_ui_ip_whitelist_empty_lines",
-      "outcome": "error",
-      "summary": "failed on setup with \"AssertionError\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "AssertionError",
-      "issue_number": "863",
-      "nodeid": "tests/issues/863/e2e_ip_whitelist_input.py::test_ui_ip_whitelist_newline",
-      "outcome": "error",
-      "summary": "failed on setup with \"AssertionError\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "AssertionError",
-      "issue_number": "863",
-      "nodeid": "tests/issues/863/e2e_ip_whitelist_input.py::test_ui_ip_whitelist_trim",
-      "outcome": "error",
-      "summary": "failed on setup with \"AssertionError\""
     },
     {
       "category": "assertion_failure",
@@ -923,8 +683,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-19 prune 1 resolved issue-1071 entry: ccf3407a (#2728) rewrote the X-Session-Id privilege-escalation test to patch the real session-manager seam (app.modules.workspace.session_manager.get_session_manager) instead of the nonexistent app.routes.workspace.Database attribute, so the webui filtered-out assertion now passes. Resolution observed in the 2026-08-18 nightly diff and verified on this branch. Shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32166980663",
+    "prune_note": "2026-08-19 prune 5 resolved issue-863 ip-whitelist e2e entries: four stacked layers. (a) The file is a manual e2e script whose check functions took plain args pytest misread as fixtures — checks are now script-internal _check_* steps and pytest runs the whole script in a subprocess requiring a full pass (skips without a reachable server). (b) /api/compliance/security-settings moved to /api/security-settings (governance blueprint). (c) Freshly seeded lane servers boot admin with must_change_password=1 which 403-gates authenticated calls — main() clears the seeded flag in the test DB first (165-cluster precedent). (d) Login inputs are id-based and the Security Center default tab is Content Filter — selectors realigned and every UI check switches to the Security Settings tab. Resolution evidence: run 32261407296 resolved list is exactly these 5 nodeids with new/changed/invalid/collection_errors all 0. Negative control: reverting reproduces the 5. Shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32261407296",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",

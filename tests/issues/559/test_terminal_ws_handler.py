@@ -366,6 +366,7 @@ class TestHandleVSCodeWs:
             self.UUID,
             handler.socket,
             "ws://remote:45678/stable/ws?folder=%2Froot%2Fworkspace",
+            "",  # cs_password: absent in this session's store entry (#2253)
         )
         mock_send_close.assert_not_called()
         assert handler.close_connection is True
@@ -398,6 +399,7 @@ class TestHandleVSCodeWs:
             self.UUID,
             handler.socket,
             "ws://remote:45678/stable/ws?reconnectionToken=abc",
+            "",  # cs_password: absent in this session's store entry (#2253)
         )
         mock_send_close.assert_not_called()
 
@@ -417,5 +419,5 @@ class TestHandleVSCodeWs:
 
         RemoteWSHandler._handle_vscode_ws(handler)
 
-        mock_send_close.assert_called_once_with(handler.socket, 4001)
+        mock_send_close.assert_called_once_with(handler.socket, 4001, "Invalid token")
         assert handler.close_connection is True

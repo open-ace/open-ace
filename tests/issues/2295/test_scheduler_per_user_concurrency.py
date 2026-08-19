@@ -151,6 +151,9 @@ def test_selection_respects_per_user_cap(monkeypatch):
         patch.object(sched, "_promote_queued_workflows"),
         patch.object(sched, "_auto_resume_quota_paused"),
         patch.object(sched, "_reclaim_paused_slots"),
+        # The lease-anchored reclaim is a separate lifecycle concern; these
+        # selection tests seed cross-cycle in-progress entries deliberately.
+        patch.object(sched, "_reclaim_stale_in_progress"),
         patch("app.services.autonomous_scheduler._retry_pending_git_cleanups"),
         patch.object(sched, "_advance_single", side_effect=lambda wid: selected.append(wid)),
         patch.object(sched, "_per_user_cap", side_effect=lambda uid: 1 if uid == 1 else 5),
@@ -180,6 +183,8 @@ def test_waiting_workflow_counts_against_per_user_cap(monkeypatch):
         patch.object(sched, "_promote_queued_workflows"),
         patch.object(sched, "_auto_resume_quota_paused"),
         patch.object(sched, "_reclaim_paused_slots"),
+        # Selection-scoped test: seed entries must survive the reclaim pass.
+        patch.object(sched, "_reclaim_stale_in_progress"),
         patch("app.services.autonomous_scheduler._retry_pending_git_cleanups"),
         patch.object(sched, "_advance_single", side_effect=lambda wid: selected.append(wid)),
         patch.object(sched, "_per_user_cap", return_value=1),

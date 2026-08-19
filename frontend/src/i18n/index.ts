@@ -888,6 +888,9 @@ export const translations: Record<Language, Translations> = {
     password: 'Password',
     loginError: 'Invalid username or password',
     adminOnly: 'Admin only',
+    platformAdminOnly: 'Platform Admin Only',
+    noPermissionForTenantManagement: 'No permission to access tenant management',
+    platformAdminRequired: 'Platform admin permission required',
 
     // Fullscreen
     enterFullscreen: 'Enter Fullscreen',
@@ -2947,6 +2950,9 @@ export const translations: Record<Language, Translations> = {
     password: '密码',
     loginError: '用户名或密码错误',
     adminOnly: '仅管理员可用',
+    platformAdminOnly: '仅限平台管理员',
+    noPermissionForTenantManagement: '无权访问租户管理页面',
+    platformAdminRequired: '需要平台管理员权限',
 
     // Fullscreen
     enterFullscreen: '进入全屏',
@@ -5227,6 +5233,9 @@ export const translations: Record<Language, Translations> = {
     password: 'パスワード',
     loginError: 'ユーザー名またはパスワードが無効です',
     adminOnly: '管理者のみ',
+    platformAdminOnly: 'プラットフォーム管理者のみ',
+    noPermissionForTenantManagement: 'テナント管理にアクセスする権限がありません',
+    platformAdminRequired: 'プラットフォーム管理者権限が必要です',
 
     // Personal Settings (Issue #121)
     personalSettings: '個人設定',
@@ -7132,6 +7141,9 @@ export const translations: Record<Language, Translations> = {
     password: '비밀번호',
     loginError: '사용자 이름 또는 비밀번호가 잘못되었습니다',
     adminOnly: '관리자 전용',
+    platformAdminOnly: '플랫폼 관리자 전용',
+    noPermissionForTenantManagement: '테넌트 관리에 액세스할 권한이 없습니다',
+    platformAdminRequired: '플랫폼 관리자 권한이 필요합니다',
 
     // Personal Settings (Issue #121)
     personalSettings: '개인 설정',
