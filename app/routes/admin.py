@@ -19,6 +19,7 @@ from app.auth.decorators import (
     same_tenant_user_required,
 )
 from app.auth.permissions import is_platform_level_role
+from app.constants import EXPLICIT_NULL
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.usage_repo import UsageRepository
 from app.repositories.user_repo import UserRepository
@@ -525,27 +526,49 @@ def api_update_user_quota(user_id):
     if not tenant_id:
         return jsonify({"error": "User has no tenant assigned"}), 400
 
-    # Step 3: Determine which quota fields are increasing
-    # Decision D3: For quota decreases, skip tenant allocation check
-    # For mixed updates (some increase, some decrease), only validate increasing fields
-    new_daily_token = data.get("daily_token_quota")
-    new_monthly_token = data.get("monthly_token_quota")
-    new_daily_request = data.get("daily_request_quota")
-    new_monthly_request = data.get("monthly_request_quota")
+    # Step 3: Parse quota fields with explicit semantics
+    # Three possible values for each field:
+    # - Field omitted (not in request): None - keep current value (no change)
+    # - Field with null value: EXPLICIT_NULL - set to unlimited
+    # - Field with integer value: integer - set to specified value
+    
+    def parse_quota_field(field_name: str) -> int | None | object:
+        """Parse quota field from request, distinguishing three semantics."""
+        if field_name not in data:
+            return None  # Field omitted - no change
+        value = data[field_name]
+        if value is None:
+            return EXPLICIT_NULL  # Explicit null - set to unlimited
+        return value  # Integer value - set to specified value
+
+    new_daily_token = parse_quota_field("daily_token_quota")
+    new_monthly_token = parse_quota_field("monthly_token_quota")
+    new_daily_request = parse_quota_field("daily_request_quota")
+    new_monthly_request = parse_quota_field("monthly_request_quota")
 
     current_daily_token = current_user.get("daily_token_quota")
     current_monthly_token = current_user.get("monthly_token_quota")
     current_daily_request = current_user.get("daily_request_quota")
     current_monthly_request = current_user.get("monthly_request_quota")
 
-    # Helper function to check if a quota value is increasing
-    def is_quota_increase(new_val: int | None, current_val: int | None) -> bool:
-        """Check if quota value is increasing (needs validation)."""
+    # Helper function to check if a quota value is increasing (needs validation)
+    def is_quota_increase(new_val: int | None | object, current_val: int | None) -> bool:
+        """Check if quota value is increasing (needs validation).
+        
+        Args:
+            new_val: None (no change), EXPLICIT_NULL (unlimited), or int (specific value)
+            current_val: Current quota value (None = unlimited, or int)
+        
+        Returns:
+            True if validation is needed, False otherwise.
+        """
         if new_val is None:
-            return False  # No change or setting to unlimited
+            return False  # No change - skip validation
+        if new_val is EXPLICIT_NULL:
+            return False  # Setting to unlimited - doesn't increase limit usage
         if current_val is None:
             return True  # Setting from unlimited to limited - needs validation
-        return new_val > current_val
+        return new_val > current_val  # Increasing specific value - needs validation
 
     # Check which fields are increasing
     has_increase = (
@@ -606,31 +629,41 @@ def api_update_user_quota(user_id):
                         f"Tenant quota allocation rejected for user {user_id}: "
                         f"{validation_result['error']}"
                     )
-                    return (
-                        jsonify(
-                            {
-                                "error": "Tenant quota exceeded",
-                                "message": validation_result.get(
-                                    "error", "Quota allocation exceeds tenant limit"
-                                ),
-                                "details": {
-                                    "available": validation_result.get("available", {}),
-                                    "is_unlimited_tenant": validation_result.get(
-                                        "is_unlimited_tenant", False
-                                    ),
-                                },
-                            }
+                    # Build enhanced error response with detailed context
+                    error_response = {
+                        "error": "Tenant quota exceeded",
+                        "message": validation_result.get(
+                            "error", "Quota allocation exceeds tenant limit"
                         ),
-                        400,
-                    )
+                        "details": validation_result.get("details", {}),
+                    }
+                    # Include available quota info
+                    if validation_result.get("available"):
+                        error_response["details"]["available"] = validation_result["available"]
+                    if validation_result.get("is_unlimited_tenant") is not None:
+                        error_response["details"]["is_unlimited_tenant"] = validation_result["is_unlimited_tenant"]
+                    
+                    return jsonify(error_response), 400
 
                 # Step 6: Update user quota (within transaction)
+                # Convert EXPLICIT_NULL to None for database storage (unlimited)
+                def to_db_value(val):
+                    """Convert quota value for database storage.
+                    
+                    - None -> keep current (shouldn't reach here in update)
+                    - EXPLICIT_NULL -> None (unlimited)
+                    - int -> int
+                    """
+                    if val is EXPLICIT_NULL:
+                        return None  # Store as NULL in database (unlimited)
+                    return val
+                
                 success = user_repo.update_user_quota(
                     user_id=user_id,
-                    daily_token_quota=new_daily_token,
-                    monthly_token_quota=new_monthly_token,
-                    daily_request_quota=new_daily_request,
-                    monthly_request_quota=new_monthly_request,
+                    daily_token_quota=to_db_value(new_daily_token),
+                    monthly_token_quota=to_db_value(new_monthly_token),
+                    daily_request_quota=to_db_value(new_daily_request),
+                    monthly_request_quota=to_db_value(new_monthly_request),
                 )
 
                 if not success:
@@ -656,12 +689,18 @@ def api_update_user_quota(user_id):
             return jsonify({"error": "Failed to update quota"}), 500
     else:
         # Quota decrease or no change: update directly without tenant check
+        # Convert EXPLICIT_NULL to None for database storage
+        def to_db_value_else(val):
+            if val is EXPLICIT_NULL:
+                return None
+            return val
+        
         success = user_repo.update_user_quota(
             user_id=user_id,
-            daily_token_quota=new_daily_token,
-            monthly_token_quota=new_monthly_token,
-            daily_request_quota=new_daily_request,
-            monthly_request_quota=new_monthly_request,
+            daily_token_quota=to_db_value_else(new_daily_token),
+            monthly_token_quota=to_db_value_else(new_monthly_token),
+            daily_request_quota=to_db_value_else(new_daily_request),
+            monthly_request_quota=to_db_value_else(new_monthly_request),
         )
 
         if not success:
