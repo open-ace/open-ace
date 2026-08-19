@@ -18,7 +18,6 @@ from app.auth.decorators import (
     resolve_tenant_scope,
     same_tenant_user_required,
 )
-from app.auth.permissions import is_platform_admin_role
 from app.models.user import User
 from app.modules.compliance.audit import AuditAnalyzer
 from app.modules.compliance.report import ReportGenerator, ReportType
@@ -436,6 +435,22 @@ def get_saved_report(report_id: str):
 # =============================================================================
 
 
+def _validate_days(default: int = 30, min_val: int = 1, max_val: int = 365) -> int:
+    """Validate and clamp the ``days`` query parameter.
+
+    Returns a clamped integer in [min_val, max_val].  Non-integer or missing
+    values fall back to *default*.
+    """
+    raw = request.args.get("days", None)
+    if raw is None:
+        return default
+    try:
+        days = int(raw)
+    except (ValueError, TypeError):
+        return default
+    return max(min_val, min(days, max_val))
+
+
 @compliance_bp.route("/audit/patterns", methods=["GET"])
 @admin_required
 def analyze_patterns():
@@ -448,7 +463,7 @@ def analyze_patterns():
     if tenant_id is None and not _is_platform_admin():
         return jsonify({"error": "Tenant ID required"}), 400
 
-    days = request.args.get("days", 30, type=int)
+    days = _validate_days(default=30)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     patterns = _get_audit_analyzer().analyze_patterns(start_time=start_time, tenant_id=tenant_id)
@@ -468,7 +483,7 @@ def detect_anomalies():
     if tenant_id is None and not _is_platform_admin():
         return jsonify({"error": "Tenant ID required"}), 400
 
-    days = request.args.get("days", 7, type=int)
+    days = _validate_days(default=7)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     anomalies = _get_audit_analyzer().detect_anomalies(start_time=start_time, tenant_id=tenant_id)
@@ -511,11 +526,9 @@ def get_user_profile(user_id: int):
     if tenant_id is None and not _is_platform_admin():
         return jsonify({"error": "Tenant ID required"}), 400
 
-    days = request.args.get("days", 30, type=int)
+    days = _validate_days(default=30)
 
-    profile = _get_audit_analyzer().get_user_behavior_profile(
-        user_id, days=days, tenant_id=tenant_id
-    )
+    profile = _get_audit_analyzer().get_user_behavior_profile(user_id, days=days, tenant_id=tenant_id)
 
     return jsonify(profile)
 
@@ -527,16 +540,28 @@ def get_security_score():
 
     Issue #2748: Tenant isolation for security score generation.
     Platform admins can access cross-tenant (tenant_id=None).
+    Accepts pre-computed anomalies via the ``precomputed_anomalies`` parameter
+    of ``generate_security_score`` so that the front-end can request anomalies
+    and security-score without duplicating the anomaly detection work
+    (Issue #2750).  When called standalone the endpoint computes anomalies
+    itself.
     """
     tenant_id = _current_tenant_id()
     if tenant_id is None and not _is_platform_admin():
         return jsonify({"error": "Tenant ID required"}), 400
 
-    days = request.args.get("days", 30, type=int)
+    days = _validate_days(default=30)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
-    score = _get_audit_analyzer().generate_security_score(
-        start_time=start_time, tenant_id=tenant_id
+    analyzer = _get_audit_analyzer()
+
+    # Compute anomalies once and pass them to the scorer so we don't re-run
+    # detection inside generate_security_score.
+    anomalies = analyzer.detect_anomalies(start_time=start_time, tenant_id=tenant_id)
+    score = analyzer.generate_security_score(
+        start_time=start_time,
+        tenant_id=tenant_id,
+        precomputed_anomalies=anomalies,
     )
 
     return jsonify(score)

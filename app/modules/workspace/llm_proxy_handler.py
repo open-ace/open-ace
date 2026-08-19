@@ -798,6 +798,51 @@ def _is_autonomous_request(token_payload: dict | None) -> bool:
     return token_payload.get("session_type") == "agent"
 
 
+def _sanitize_matched_rules(rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return a copy of matched_rules with sensitive fields removed (Issue #2747).
+
+    Strips ``sample``, ``keywords``, ``pattern`` and any other fields that
+    could leak actual sensitive content.  Keeps type, count, risk, source
+    and description — sufficient for audit trail purposes.
+    """
+    safe: list[dict[str, Any]] = []
+    for rule in rules:
+        safe_rule: dict[str, Any] = {}
+        for key in ("type", "count", "risk", "severity", "source", "description", "action"):
+            if key in rule:
+                safe_rule[key] = rule[key]
+        safe.append(safe_rule)
+    return safe
+
+
+def _build_safe_content_details(
+    result: Any,
+    *,
+    include_content_meta: bool = False,
+    content: str | None = None,
+) -> dict[str, Any]:
+    """Build audit details dict that never contains raw content (Issue #2747).
+
+    Args:
+        result: FilterResult from ContentFilter.check_content().
+        include_content_meta: If True, add content_length and content_hash
+            (used for content_redacted events).
+        content: Original combined content (for computing hash/length only).
+    """
+    import hashlib
+
+    details: dict[str, Any] = {
+        "risk_level": result.risk_level,
+        "matched_rules": _sanitize_matched_rules(result.matched_rules),
+        "message": result.message,
+    }
+    if include_content_meta and content is not None:
+        details["content_length"] = len(content)
+        details["content_hash"] = hashlib.sha256(content.encode()).hexdigest()[:16]
+        details["redacted"] = True
+    return details
+
+
 def _check_content_filter(
     user_id: int,
     username: str | None,
@@ -860,18 +905,14 @@ def _check_content_filter(
         result = content_filter.check_content(combined_content, tenant_config=tenant_config)
 
         if result.action == "block":
-            # Log the block action
+            # Log the block action — never persist raw content or samples (Issue #2747)
             audit_logger.log_action(
                 action=AuditAction.CONTENT_BLOCKED,
                 user_id=user_id,
                 username=username,
                 resource_type="content",
                 severity="high",
-                details={
-                    "risk_level": result.risk_level,
-                    "matched_rules": result.matched_rules,
-                    "message": result.message,
-                },
+                details=_build_safe_content_details(result),
             )
             return (
                 jsonify(
@@ -879,7 +920,7 @@ def _check_content_filter(
                         "error": {
                             "message": result.message or "Content blocked by content filter",
                             "type": "content_blocked",
-                            "matched_rules": result.matched_rules,
+                            "matched_rules": _sanitize_matched_rules(result.matched_rules),
                             "suggestion": result.suggestion,
                         }
                     }
@@ -888,37 +929,30 @@ def _check_content_filter(
             )
 
         if result.action == "warn":
-            # Log the warn action
+            # Log the warn action — never persist raw content or samples (Issue #2747)
             audit_logger.log_action(
                 action=AuditAction.CONTENT_WARNED,
                 user_id=user_id,
                 username=username,
                 resource_type="content",
                 severity="medium",
-                details={
-                    "risk_level": result.risk_level,
-                    "matched_rules": result.matched_rules,
-                    "message": result.message,
-                },
+                details=_build_safe_content_details(result),
             )
             # Warn: continue normally, the warning is logged but not returned to user
             # (Frontend will show toast based on response headers or separate API)
             return None
 
         if result.action == "redact":
-            # Log the redact action
+            # Log the redact action — never persist original/redacted content (Issue #2747)
             audit_logger.log_action(
                 action=AuditAction.CONTENT_REDACTED,
                 user_id=user_id,
                 username=username,
                 resource_type="content",
                 severity="medium",
-                details={
-                    "risk_level": result.risk_level,
-                    "matched_rules": result.matched_rules,
-                    "original_content": result.original_content,
-                    "redacted_content": result.redacted_content,
-                },
+                details=_build_safe_content_details(
+                    result, include_content_meta=True, content=combined_content
+                ),
             )
             # Redact: return redacted content for caller to modify request
             return result.redacted_content or combined_content

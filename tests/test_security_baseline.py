@@ -337,6 +337,8 @@ class TestCheckAll:
         monkeypatch.setenv("DB_PASSWORD", "ace-secret")
         monkeypatch.setenv("SECRET_KEY", "")
         monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "")
+        # Simulate PostgreSQL backend (DB_PASSWORD matters only for PostgreSQL)
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: True)
 
         result = check_all()
         assert result["status"] == "unhealthy"
@@ -352,6 +354,141 @@ class TestCheckAll:
 
         result = check_all()
         assert result["status"] in ["warning", "healthy"]  # Depends on auto-generation
+
+    # Issue #2810: SQLite backend tests
+    def test_check_all_sqlite_production_no_password_healthy(self, monkeypatch):
+        """Test that production + SQLite + no DB_PASSWORD returns healthy (Issue #2810)."""
+        reset_security_mode_cache()
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
+        monkeypatch.delenv("DB_PASSWORD", raising=False)
+        monkeypatch.setenv("SECRET_KEY", "a-strong-random-secret-key-for-prod-1234567890")
+        monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "a-strong-encryption-key-1234567890ab")
+        # Simulate SQLite backend
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: False)
+
+        result = check_all()
+        assert result["status"] == "healthy"
+        assert result["database_password"]["status"] == "not_applicable"
+        assert result["database_password"]["backend"] == "sqlite"
+        assert result["database_password"]["applicable"] is False
+        assert "sqlite" in result["database_password"]["message"].lower()
+
+    def test_check_all_sqlite_production_with_password_ignored(self, monkeypatch):
+        """Test that SQLite ignores DB_PASSWORD even if set (Issue #2810)."""
+        reset_security_mode_cache()
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
+        monkeypatch.setenv("DB_PASSWORD", "ace-secret")  # Weak/forbidden password
+        monkeypatch.setenv("SECRET_KEY", "a-strong-random-secret-key-for-prod-1234567890")
+        monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "a-strong-encryption-key-1234567890ab")
+        # Simulate SQLite backend
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: False)
+
+        result = check_all()
+        assert result["status"] == "healthy"
+        assert result["database_password"]["status"] == "not_applicable"
+        assert result["database_password"]["backend"] == "sqlite"
+        assert result["database_password"]["applicable"] is False
+
+    def test_check_all_sqlite_development_no_password(self, monkeypatch):
+        """Test that development + SQLite returns not_applicable (Issue #2810)."""
+        reset_security_mode_cache()
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "development")
+        monkeypatch.delenv("DB_PASSWORD", raising=False)
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+        monkeypatch.delenv("OPENACE_ENCRYPTION_KEY", raising=False)
+        # Simulate SQLite backend
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: False)
+
+        result = check_all()
+        assert result["database_password"]["status"] == "not_applicable"
+        assert result["database_password"]["backend"] == "sqlite"
+        assert result["database_password"]["applicable"] is False
+
+    # Issue #2810: PostgreSQL backend tests
+    def test_check_all_postgresql_production_no_password_fails(self, monkeypatch):
+        """Test that production + PostgreSQL + no DB_PASSWORD returns unhealthy (Issue #2810)."""
+        reset_security_mode_cache()
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
+        monkeypatch.delenv("DB_PASSWORD", raising=False)
+        monkeypatch.setenv("SECRET_KEY", "a-strong-random-secret-key-for-prod-1234567890")
+        monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "a-strong-encryption-key-1234567890ab")
+        # Simulate PostgreSQL backend
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: True)
+
+        result = check_all()
+        assert result["status"] == "unhealthy"
+        assert result["database_password"]["status"] == "fail"
+        assert result["database_password"]["backend"] == "postgresql"
+        assert result["database_password"]["applicable"] is True
+
+    def test_check_all_postgresql_production_weak_password_fails(self, monkeypatch):
+        """Test that production + PostgreSQL + weak DB_PASSWORD returns unhealthy (Issue #2810)."""
+        reset_security_mode_cache()
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
+        monkeypatch.setenv("DB_PASSWORD", "ace-secret")
+        monkeypatch.setenv("SECRET_KEY", "a-strong-random-secret-key-for-prod-1234567890")
+        monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "a-strong-encryption-key-1234567890ab")
+        # Simulate PostgreSQL backend
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: True)
+
+        result = check_all()
+        assert result["status"] == "unhealthy"
+        assert result["database_password"]["status"] == "fail"
+        assert result["database_password"]["backend"] == "postgresql"
+        assert result["database_password"]["applicable"] is True
+
+    def test_check_all_postgresql_production_strong_password_passes(self, monkeypatch):
+        """Test that production + PostgreSQL + strong DB_PASSWORD passes (Issue #2810)."""
+        reset_security_mode_cache()
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
+        monkeypatch.setenv("DB_PASSWORD", "my-strong-password-123!")
+        monkeypatch.setenv("SECRET_KEY", "a-strong-random-secret-key-for-prod-1234567890")
+        monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "a-strong-encryption-key-1234567890ab")
+        # Simulate PostgreSQL backend
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: True)
+
+        result = check_all()
+        assert result["status"] == "healthy"
+        assert result["database_password"]["status"] == "pass"
+        assert result["database_password"]["backend"] == "postgresql"
+        assert result["database_password"]["applicable"] is True
+
+    def test_check_all_not_applicable_does_not_affect_overall_status(self, monkeypatch):
+        """Test that not_applicable status does not make overall status unhealthy (Issue #2810)."""
+        reset_security_mode_cache()
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
+        monkeypatch.delenv("DB_PASSWORD", raising=False)
+        monkeypatch.setenv("SECRET_KEY", "a-strong-random-secret-key-for-prod-1234567890")
+        monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "a-strong-encryption-key-1234567890ab")
+        # Simulate SQLite backend
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: False)
+
+        result = check_all()
+        # not_applicable should not cause unhealthy
+        assert result["status"] == "healthy"
+        # Verify no "fail" in effective statuses
+        assert result["database_password"]["status"] == "not_applicable"
+
+    def test_check_all_backend_detection_failure_fail_closed(self, monkeypatch):
+        """Test that backend detection failure defaults to PostgreSQL (fail-closed) (Issue #2810)."""
+        reset_security_mode_cache()
+        monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
+        monkeypatch.delenv("DB_PASSWORD", raising=False)
+        monkeypatch.setenv("SECRET_KEY", "a-strong-random-secret-key-for-prod-1234567890")
+        monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "a-strong-encryption-key-1234567890ab")
+        # Simulate backend detection raising an exception -> should default to PostgreSQL
+        # (fail-closed: if we can't determine the backend, assume password is needed)
+
+        def _raise_error():
+            raise RuntimeError("Database not available")
+
+        monkeypatch.setattr("app.repositories.database.is_postgresql", _raise_error)
+
+        result = check_all()
+        # Should fall back to PostgreSQL behavior (require password)
+        assert result["database_password"]["status"] == "fail"
+        assert result["database_password"]["backend"] == "postgresql"
+        assert result["database_password"]["applicable"] is True
 
 
 class TestCheckResult:
