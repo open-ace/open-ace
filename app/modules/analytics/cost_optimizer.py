@@ -22,10 +22,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, cast
 
-from app.modules.analytics.efficiency_registry import (
-    get_algorithm_version,
-    get_registry,
-)
+from app.modules.analytics.efficiency_registry import get_algorithm_version, get_registry
 from app.modules.analytics.efficiency_thresholds import get_thresholds
 from app.modules.analytics.roi_calculator import ROICalculator
 from app.modules.analytics.task_type_inferencer import InferenceResult, TaskType, TaskTypeInferencer
