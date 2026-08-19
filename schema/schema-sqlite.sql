@@ -2116,6 +2116,8 @@ CREATE UNIQUE INDEX ix_anomaly_status_anomaly_id ON anomaly_status (anomaly_id) 
 
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status (anomaly_type, affected_users_hash);
 
+CREATE UNIQUE INDEX ix_anomaly_status_type_hash_tenant ON anomaly_status (anomaly_type, affected_users_hash, tenant_id);
+
 CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions (decision_id);
 
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules (rule_key, version);
