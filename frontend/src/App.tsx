@@ -24,12 +24,13 @@ import {
   ToastHost,
   ConfirmHost,
   FeatureRouteGuard,
+  PlatformAdminGuard,
 } from '@/components/common';
 import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
 import { initializeQueryKeyRegistry } from '@/utils';
-import { canAccessManageMode, canManageAllTenants } from '@/utils/permissions';
+import { canAccessManageMode } from '@/utils/permissions';
 import { featureFlagsApi } from '@/api';
 
 // Initialize query key registry on app load
@@ -449,7 +450,14 @@ const ManageRoutes: React.FC = () => {
 
           {/* Users */}
           <Route path="users" element={<UserManagement />} />
-          <Route path="tenants" element={<TenantManagement />} />
+          <Route
+            path="tenants"
+            element={
+              <PlatformAdminGuard>
+                <TenantManagement />
+              </PlatformAdminGuard>
+            }
+          />
 
           {/* Projects */}
           <Route path="projects" element={<ProjectManagement />} />
