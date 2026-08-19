@@ -445,6 +445,39 @@ def convert_to_sqlite(postgres_sql):
                         if tbl:
                             pk_map[tbl.group(1)] = pk_match2.group(1)
 
+    # Pre-scan: find FOREIGN KEY constraints from ALTER TABLE statements
+    # SQLite requires FKs to be inline in CREATE TABLE, not ALTER TABLE
+    fk_map = {}  # table_name -> list of fk_constraint strings
+    for j, ln in enumerate(lines):
+        if re.match(r"ALTER TABLE", ln):
+            # Extract table name
+            tbl_match = re.search(r"ALTER TABLE(?:\s+ONLY)?(?:\s+(?:public\.)?)?(\w+)", ln)
+            if not tbl_match:
+                continue
+            table_name = tbl_match.group(1)
+
+            # Look ahead for ADD CONSTRAINT FOREIGN KEY
+            lookahead = j + 1
+            while lookahead < len(lines) and lines[lookahead].strip().startswith("--"):
+                lookahead += 1
+            if lookahead < len(lines):
+                fk_match = re.search(
+                    r"ADD CONSTRAINT\s+\w+\s+FOREIGN KEY\s*\((\w+)\)\s*REFERENCES\s+(\w+)\s*\((\w+)\)(\s+ON\s+DELETE\s+(CASCADE|SET\s+NULL|RESTRICT|NO\s+ACTION))?",
+                    lines[lookahead],
+                )
+                if fk_match:
+                    fk_col = fk_match.group(1)
+                    ref_table = fk_match.group(2)
+                    ref_col = fk_match.group(3)
+                    on_delete = fk_match.group(4) if fk_match.group(4) else ""
+
+                    # Build SQLite FK constraint
+                    fk_constraint = f"FOREIGN KEY ({fk_col}) REFERENCES {ref_table}({ref_col}){on_delete}"
+
+                    if table_name not in fk_map:
+                        fk_map[table_name] = []
+                    fk_map[table_name].append(fk_constraint)
+
     # Header
     output_lines.append("-- Open-ACE Database Schema for SQLite")
     output_lines.append("-- Converted from schema-postgres.sql")
@@ -554,20 +587,34 @@ def convert_to_sqlite(postgres_sql):
                 for idx_c, col in enumerate(converted_columns):
                     # Match: "    pk_col <type> ..." — add PRIMARY KEY to the column
                     if re.match(rf"^\s+{re.escape(pk_col)}\s+", col):
+                        # Check if this column is also a foreign key
+                        is_fk = any(
+                            fk_constraint.startswith(f"FOREIGN KEY ({pk_col})")
+                            for fk_constraint in fk_map.get(table_name, [])
+                        )
+
                         if "integer" in col.lower():
-                            # integer PK: use AUTOINCREMENT for id-like columns
-                            converted_columns[idx_c] = re.sub(
-                                rf"^(\s+{re.escape(pk_col)})\s+integer\s+NOT\s+NULL",
-                                r"\1 INTEGER PRIMARY KEY AUTOINCREMENT",
-                                col,
-                            )
-                            # If NOT NULL wasn't there (e.g. user_id PK)
-                            if "AUTOINCREMENT" not in converted_columns[idx_c]:
+                            # For foreign key PKs, just add PRIMARY KEY (no AUTOINCREMENT)
+                            if is_fk:
                                 converted_columns[idx_c] = re.sub(
                                     rf"^(\s+{re.escape(pk_col)})\s+integer",
                                     r"\1 INTEGER PRIMARY KEY",
                                     col,
                                 )
+                            else:
+                                # integer PK: use AUTOINCREMENT for id-like columns
+                                converted_columns[idx_c] = re.sub(
+                                    rf"^(\s+{re.escape(pk_col)})\s+integer\s+NOT\s+NULL",
+                                    r"\1 INTEGER PRIMARY KEY AUTOINCREMENT",
+                                    col,
+                                )
+                                # If NOT NULL wasn't there (e.g. user_id PK)
+                                if "AUTOINCREMENT" not in converted_columns[idx_c]:
+                                    converted_columns[idx_c] = re.sub(
+                                        rf"^(\s+{re.escape(pk_col)})\s+integer",
+                                        r"\1 INTEGER PRIMARY KEY",
+                                        col,
+                                    )
                         else:
                             # Non-integer PK (e.g. login_attempts.username): just add PRIMARY KEY
                             converted_columns[idx_c] = re.sub(
@@ -577,17 +624,22 @@ def convert_to_sqlite(postgres_sql):
                             )
                         break
 
+            # Add FOREIGN KEY constraints from fk_map
+            fk_constraints = fk_map.get(table_name, [])
+            for fk_constraint in fk_constraints:
+                converted_columns.append(f"    {fk_constraint}")
+
             # Build clean CREATE TABLE statement
             table_lines.append(f"CREATE TABLE {table_name} (")
             for idx, cl in enumerate(converted_columns):
-                # Ensure all columns except the last have a trailing comma
+                # Ensure all columns/constraints except the last have a trailing comma
                 cl_stripped = cl.rstrip()
                 if idx < len(converted_columns) - 1:
-                    # Not the last column - ensure it has a comma
+                    # Not the last - ensure it has a comma
                     if not cl_stripped.endswith(","):
                         cl = cl_stripped + ","
                 else:
-                    # Last column - ensure it doesn't have a comma
+                    # Last - ensure it doesn't have a comma
                     if cl_stripped.endswith(","):
                         cl = cl_stripped[:-1]
                 table_lines.append(cl)
@@ -718,6 +770,11 @@ def convert_to_sqlite(postgres_sql):
                         )
                         output_lines.append("")
                     # PRIMARY KEY handled in CREATE TABLE
+                i += 1
+                continue
+
+            # Skip FOREIGN KEY constraints - they're handled inline in CREATE TABLE
+            if "ADD CONSTRAINT" in full_alter and "FOREIGN KEY" in full_alter:
                 i += 1
                 continue
 
