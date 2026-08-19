@@ -189,10 +189,7 @@ export const AuditCenter: React.FC = () => {
     actionToResourceTypes,
   } = useAuditActions();
 
-  const handleAnomalyStatusUpdate = async (
-    anomalyId: string,
-    status: 'processed' | 'ignored'
-  ) => {
+  const handleAnomalyStatusUpdate = async (anomalyId: string, status: 'processed' | 'ignored') => {
     try {
       await complianceApi.updateAnomalyStatus(anomalyId, status);
       // Update local state – only the targeted anomaly_id is changed.
@@ -944,7 +941,7 @@ export const AuditCenter: React.FC = () => {
                       .slice((anomalyPage - 1) * ANOMALY_PAGE_SIZE, anomalyPage * ANOMALY_PAGE_SIZE)
                       .map((anomaly, index) => (
                         <tr
-                          key={anomaly.anomaly_id || `${anomaly.anomaly_type}-${index}`}
+                          key={anomaly.anomaly_id ?? `${anomaly.anomaly_type}-${index}`}
                           className={anomaly.status === 'processed' ? 'opacity-50' : ''}
                         >
                           <td>
@@ -985,34 +982,29 @@ export const AuditCenter: React.FC = () => {
                             </span>
                           </td>
                           <td>
-                            {(!anomaly.status || anomaly.status === 'pending') && anomaly.anomaly_id && (
-                              <div className="btn-group btn-group-sm">
-                                <button
-                                  className="btn btn-outline-success btn-sm"
-                                  title={t('markProcessed', language)}
-                                  onClick={() =>
-                                    handleAnomalyStatusUpdate(
-                                      anomaly.anomaly_id!,
-                                      'processed'
-                                    )
-                                  }
-                                >
-                                  <i className="bi bi-check-lg" />
-                                </button>
-                                <button
-                                  className="btn btn-outline-warning btn-sm"
-                                  title={t('ignoreAnomaly', language)}
-                                  onClick={() =>
-                                    handleAnomalyStatusUpdate(
-                                      anomaly.anomaly_id!,
-                                      'ignored'
-                                    )
-                                  }
-                                >
-                                  <i className="bi bi-eye-slash" />
-                                </button>
-                              </div>
-                            )}
+                            {(!anomaly.status || anomaly.status === 'pending') &&
+                              anomaly.anomaly_id && (
+                                <div className="btn-group btn-group-sm">
+                                  <button
+                                    className="btn btn-outline-success btn-sm"
+                                    title={t('markProcessed', language)}
+                                    onClick={() =>
+                                      handleAnomalyStatusUpdate(anomaly.anomaly_id!, 'processed')
+                                    }
+                                  >
+                                    <i className="bi bi-check-lg" />
+                                  </button>
+                                  <button
+                                    className="btn btn-outline-warning btn-sm"
+                                    title={t('ignoreAnomaly', language)}
+                                    onClick={() =>
+                                      handleAnomalyStatusUpdate(anomaly.anomaly_id!, 'ignored')
+                                    }
+                                  >
+                                    <i className="bi bi-eye-slash" />
+                                  </button>
+                                </div>
+                              )}
                           </td>
                         </tr>
                       ))}

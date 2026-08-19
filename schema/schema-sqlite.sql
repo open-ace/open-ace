@@ -192,14 +192,14 @@ CREATE TABLE annotations (
 
 CREATE TABLE anomaly_status (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
- anomaly_id TEXT NOT NULL DEFAULT '',
  anomaly_type TEXT NOT NULL,
  affected_users_hash TEXT NOT NULL,
- tenant_id INTEGER,
  status TEXT DEFAULT 'pending' NOT NULL,
  processed_by integer,
  processed_at TIMESTAMP,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ anomaly_id TEXT DEFAULT '' NOT NULL,
+ tenant_id integer
 );
 
 CREATE TABLE api_key_store (
@@ -2112,9 +2112,9 @@ CREATE INDEX idx_workflows_status_created ON autonomous_workflows (status, creat
 
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows (user_id, status);
 
-CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status (anomaly_type, affected_users_hash);
+CREATE UNIQUE INDEX ix_anomaly_status_anomaly_id ON anomaly_status (anomaly_id) WHERE ((anomaly_id) <> '');
 
-CREATE UNIQUE INDEX ix_anomaly_status_anomaly_id ON anomaly_status (anomaly_id) WHERE anomaly_id != '';
+CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status (anomaly_type, affected_users_hash);
 
 CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions (decision_id);
 
