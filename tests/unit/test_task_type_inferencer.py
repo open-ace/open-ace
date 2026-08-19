@@ -2,11 +2,7 @@
 
 import pytest
 
-from app.modules.analytics.task_type_inferencer import (
-    InferenceResult,
-    TaskType,
-    TaskTypeInferencer,
-)
+from app.modules.analytics.task_type_inferencer import InferenceResult, TaskType, TaskTypeInferencer
 
 
 class TestTaskTypeInferencer:
