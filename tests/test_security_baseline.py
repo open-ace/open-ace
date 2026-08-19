@@ -338,9 +338,7 @@ class TestCheckAll:
         monkeypatch.setenv("SECRET_KEY", "")
         monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "")
         # Simulate PostgreSQL backend (DB_PASSWORD matters only for PostgreSQL)
-        monkeypatch.setattr(
-            "app.repositories.database.is_postgresql", lambda: True
-        )
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: True)
 
         result = check_all()
         assert result["status"] == "unhealthy"
@@ -366,9 +364,7 @@ class TestCheckAll:
         monkeypatch.setenv("SECRET_KEY", "a-strong-random-secret-key-for-prod-1234567890")
         monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "a-strong-encryption-key-1234567890ab")
         # Simulate SQLite backend
-        monkeypatch.setattr(
-            "app.repositories.database.is_postgresql", lambda: False
-        )
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: False)
 
         result = check_all()
         assert result["status"] == "healthy"
@@ -385,9 +381,7 @@ class TestCheckAll:
         monkeypatch.setenv("SECRET_KEY", "a-strong-random-secret-key-for-prod-1234567890")
         monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "a-strong-encryption-key-1234567890ab")
         # Simulate SQLite backend
-        monkeypatch.setattr(
-            "app.repositories.database.is_postgresql", lambda: False
-        )
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: False)
 
         result = check_all()
         assert result["status"] == "healthy"
@@ -403,9 +397,7 @@ class TestCheckAll:
         monkeypatch.delenv("SECRET_KEY", raising=False)
         monkeypatch.delenv("OPENACE_ENCRYPTION_KEY", raising=False)
         # Simulate SQLite backend
-        monkeypatch.setattr(
-            "app.repositories.database.is_postgresql", lambda: False
-        )
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: False)
 
         result = check_all()
         assert result["database_password"]["status"] == "not_applicable"
@@ -421,9 +413,7 @@ class TestCheckAll:
         monkeypatch.setenv("SECRET_KEY", "a-strong-random-secret-key-for-prod-1234567890")
         monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "a-strong-encryption-key-1234567890ab")
         # Simulate PostgreSQL backend
-        monkeypatch.setattr(
-            "app.repositories.database.is_postgresql", lambda: True
-        )
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: True)
 
         result = check_all()
         assert result["status"] == "unhealthy"
@@ -439,9 +429,7 @@ class TestCheckAll:
         monkeypatch.setenv("SECRET_KEY", "a-strong-random-secret-key-for-prod-1234567890")
         monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "a-strong-encryption-key-1234567890ab")
         # Simulate PostgreSQL backend
-        monkeypatch.setattr(
-            "app.repositories.database.is_postgresql", lambda: True
-        )
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: True)
 
         result = check_all()
         assert result["status"] == "unhealthy"
@@ -457,9 +445,7 @@ class TestCheckAll:
         monkeypatch.setenv("SECRET_KEY", "a-strong-random-secret-key-for-prod-1234567890")
         monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "a-strong-encryption-key-1234567890ab")
         # Simulate PostgreSQL backend
-        monkeypatch.setattr(
-            "app.repositories.database.is_postgresql", lambda: True
-        )
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: True)
 
         result = check_all()
         assert result["status"] == "healthy"
@@ -475,9 +461,7 @@ class TestCheckAll:
         monkeypatch.setenv("SECRET_KEY", "a-strong-random-secret-key-for-prod-1234567890")
         monkeypatch.setenv("OPENACE_ENCRYPTION_KEY", "a-strong-encryption-key-1234567890ab")
         # Simulate SQLite backend
-        monkeypatch.setattr(
-            "app.repositories.database.is_postgresql", lambda: False
-        )
+        monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: False)
 
         result = check_all()
         # not_applicable should not cause unhealthy
@@ -498,9 +482,7 @@ class TestCheckAll:
         def _raise_error():
             raise RuntimeError("Database not available")
 
-        monkeypatch.setattr(
-            "app.repositories.database.is_postgresql", _raise_error
-        )
+        monkeypatch.setattr("app.repositories.database.is_postgresql", _raise_error)
 
         result = check_all()
         # Should fall back to PostgreSQL behavior (require password)
