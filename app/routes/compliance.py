@@ -421,12 +421,28 @@ def get_saved_report(report_id: str):
 # =============================================================================
 
 
+def _validate_days(default: int = 30, min_val: int = 1, max_val: int = 365) -> int:
+    """Validate and clamp the ``days`` query parameter.
+
+    Returns a clamped integer in [min_val, max_val].  Non-integer or missing
+    values fall back to *default*.
+    """
+    raw = request.args.get("days", None)
+    if raw is None:
+        return default
+    try:
+        days = int(raw)
+    except (ValueError, TypeError):
+        return default
+    return max(min_val, min(days, max_val))
+
+
 @compliance_bp.route("/audit/patterns", methods=["GET"])
 @admin_required
 def analyze_patterns():
     """Analyze audit patterns (admin only)."""
 
-    days = request.args.get("days", 30, type=int)
+    days = _validate_days(default=30)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     patterns = _get_audit_analyzer().analyze_patterns(start_time=start_time)
@@ -439,7 +455,7 @@ def analyze_patterns():
 def detect_anomalies():
     """Detect audit anomalies (admin only)."""
 
-    days = request.args.get("days", 7, type=int)
+    days = _validate_days(default=7)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     anomalies = _get_audit_analyzer().detect_anomalies(start_time=start_time)
@@ -477,7 +493,7 @@ def get_user_profile(user_id: int):
     boundary has to be enforced here.
     """
 
-    days = request.args.get("days", 30, type=int)
+    days = _validate_days(default=30)
 
     profile = _get_audit_analyzer().get_user_behavior_profile(user_id, days=days)
 
@@ -487,12 +503,27 @@ def get_user_profile(user_id: int):
 @compliance_bp.route("/audit/security-score", methods=["GET"])
 @admin_required
 def get_security_score():
-    """Get security score (admin only)."""
+    """Get security score (admin only).
 
-    days = request.args.get("days", 30, type=int)
+    Accepts pre-computed anomalies via the ``precomputed_anomalies`` parameter
+    of ``generate_security_score`` so that the front-end can request anomalies
+    and security-score without duplicating the anomaly detection work
+    (Issue #2750).  When called standalone the endpoint computes anomalies
+    itself.
+    """
+
+    days = _validate_days(default=30)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
-    score = _get_audit_analyzer().generate_security_score(start_time=start_time)
+    analyzer = _get_audit_analyzer()
+
+    # Compute anomalies once and pass them to the scorer so we don't re-run
+    # detection inside generate_security_score.
+    anomalies = analyzer.detect_anomalies(start_time=start_time)
+    score = analyzer.generate_security_score(
+        start_time=start_time,
+        precomputed_anomalies=anomalies,
+    )
 
     return jsonify(score)
 
