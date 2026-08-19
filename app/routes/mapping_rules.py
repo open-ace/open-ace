@@ -332,9 +332,7 @@ def run_auto_mapping():
     if user_role == "tenant_admin":
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
-        stats = service.run_auto_mapping_with_stats(
-            dry_run=dry_run, tenant_id=user_tenant_id
-        )
+        stats = service.run_auto_mapping_with_stats(dry_run=dry_run, tenant_id=user_tenant_id)
     else:
         stats = service.run_auto_mapping_with_stats(dry_run=dry_run)
 
