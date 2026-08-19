@@ -442,7 +442,10 @@ class UserToolAccountRepository:
                 WHERE id = ? AND version = ?
             """
             params = (new_status, id, expected_version)
-            self.db.execute(query, params)
+            cursor = self.db.execute(query, params)
+            # Check if update actually happened (optimistic lock)
+            if cursor.rowcount == 0:
+                return None
             row = self.db.fetch_one("SELECT * FROM user_tool_accounts WHERE id = ?", (id,))
 
         return self._row_to_model(row) if row else None
@@ -488,7 +491,10 @@ class UserToolAccountRepository:
                 WHERE id = ? AND version = ? AND mapping_status = 'pending'
             """
             params = (discovered_at_val, discovered_at_val, id, expected_version)
-            self.db.execute(query, params)
+            cursor = self.db.execute(query, params)
+            # Check if update actually happened (optimistic lock / status check)
+            if cursor.rowcount == 0:
+                return None
             row = self.db.fetch_one("SELECT * FROM user_tool_accounts WHERE id = ?", (id,))
 
         return self._row_to_model(row) if row else None
@@ -515,10 +521,11 @@ class UserToolAccountRepository:
         """Increment observed_message_count.
 
         Issue #2761: Track number of messages seen for this account.
+        Uses COALESCE to handle NULL values (NULL + N = NULL in SQL).
         """
         query = """
             UPDATE user_tool_accounts
-            SET observed_message_count = observed_message_count + ?,
+            SET observed_message_count = COALESCE(observed_message_count, 0) + ?,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """
