@@ -441,62 +441,6 @@
       "summary": "TypeError: 'PlaywrightContextManager' object does not support the context manager protocol"
     },
     {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "477",
-      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_admin_user_has_access",
-      "outcome": "failure",
-      "summary": "assert 400 == 200"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "477",
-      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_admin_user_offline_machine",
-      "outcome": "failure",
-      "summary": "assert 400 == 200"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "RuntimeError",
-      "issue_number": "477",
-      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_g_user_none_returns_401",
-      "outcome": "failure",
-      "summary": "RuntimeError: Working outside of request context."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "RuntimeError",
-      "issue_number": "477",
-      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_g_user_without_id_returns_403",
-      "outcome": "failure",
-      "summary": "RuntimeError: Working outside of request context."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "RuntimeError",
-      "issue_number": "477",
-      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_no_g_user_returns_401",
-      "outcome": "failure",
-      "summary": "RuntimeError: Working outside of request context."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "477",
-      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryAuthCheck::test_normal_user_without_access_returns_403",
-      "outcome": "failure",
-      "summary": "assert 400 == 403"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "477",
-      "nodeid": "tests/issues/477/test_browse_directory_auth.py::TestBrowseRemoteDirectoryEdgeCases::test_machine_not_found_returns_404",
-      "outcome": "failure",
-      "summary": "assert 400 == 404"
-    },
-    {
       "category": "test_body_exception",
       "exception_type": "Error",
       "issue_number": "48",
@@ -859,8 +803,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-19 prune 8 resolved issue-559 terminal-ws entries: two stacked layers. (a) e2e_terminal_ws_handler.py is a manual gevent script whose check functions take plain args pytest misread as fixtures (5 setup errors); in-process conversion is impossible without gevent monkey-patching (the bridge relay's websockets.sync calls block the server thread's hub, starving the pump greenlet), so the checks are now script-internal _check_* steps and pytest runs the whole script in an isolated subprocess requiring a full pass. (b) TestHandleVSCodeWs: #2253 added cs_password to bridge_vscode_ws_raw and a close reason to the vscode invalid-token path; assertions realigned (terminal path still 2-arg send_close). Resolution evidence: run 32242194145 resolved list is exactly these 8 nodeids with new/changed/invalid/collection_errors all 0. Negative control: reverting both files reproduces the 8. Shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32242194145",
+    "prune_note": "2026-08-19 prune 7 resolved issue-477 browse-directory-auth entries: two stacked layers. (a) The remote_module fixture's sys.modules mock set predated remote.py's governance/agent_token/llm_proxy_handler/session_access imports — loading via spec_from_file_location asked the mocked app.modules parent for __spec__ and raised AttributeError at setup (masked to the recorded inner failures in full shards where earlier tests import the real modules); the mock set now matches remote.py's current imports. (b) The #477 defensive g.user checks moved: unauthenticated -> 401 from before_request (load_user), per-machine auth -> @machine_access_required/_check_machine_access (UUID #2540 -> role -> machine existence -> assignment -> tenant isolation #2538); tests realigned to that contract. Resolution evidence: run 32246957318 resolved list is exactly these 7 nodeids with new/changed/invalid/collection_errors all 0 (one shard of that run was first felled by a Playwright CDN 403 and rerun clean). Negative control: reverting reproduces the 7 setup errors. Shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32246957318",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
