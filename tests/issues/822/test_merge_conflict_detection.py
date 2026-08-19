@@ -374,10 +374,13 @@ class TestDoMergeDeferredRetry:
         o._ensure_pr_head_local = MagicMock(return_value=True)
         gh = MagicMock()
         gh.resolve_commit.return_value = "fetched-main-head"
-        gh._run_git.side_effect = [
-            MagicMock(returncode=0, stdout="", stderr=""),
-            MagicMock(returncode=0, stdout="fetched-main-head\n", stderr=""),
-        ]
+
+        def run_git(args, **kw):
+            if args[:1] == ["merge-base"]:
+                return MagicMock(returncode=0, stdout="fetched-main-head\n", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        gh._run_git.side_effect = run_git
         gh.get_changed_files.return_value = [f"business/file-{index}.py" for index in range(16)]
 
         assert (
@@ -385,10 +388,16 @@ class TestDoMergeDeferredRetry:
             == ""
         )
 
-        assert gh._run_git.call_args_list == [
+        # _validate_autonomous_change_scope (wrapping get_changed_files)
+        # now derives the effective round delta itself: it detects merge
+        # commits (rev-parse <pr>^2) and re-derives the merge base (fetch +
+        # merge-base vs the fetched head, falling back to origin/main). The
+        # graph merge-base fetch stays the entrypoint.
+        assert gh._run_git.call_args_list[:2] == [
             call(["fetch", "origin", "main"]),
             call(["merge-base", "resolved-pr-head", "fetched-main-head"], check=False),
         ]
+        assert call(["rev-parse", "resolved-pr-head^2"], check=False) in gh._run_git.call_args_list
         gh.get_changed_files.assert_called_once_with("fetched-main-head", "resolved-pr-head")
         o._update_workflow.assert_called_once_with({"base_commit_sha": "fetched-main-head"})
         assert wf["base_commit_sha"] == "fetched-main-head"
@@ -1939,7 +1948,9 @@ class TestResolveMergeConflictsWorktreeIsolation:
         # First removal is the original worktree_path.
         assert remove_calls[0].args[0] == wf["worktree_path"]
         # worktree_path was cleared in DB.
-        o._update_workflow.assert_any_call({"worktree_path": ""})
+        # Transition updates carry worktree_transition_state metadata now;
+        # assert on the worktree_path value the original assertion guarded.
+        assert any(c.args[0].get("worktree_path") == "" for c in o._update_workflow.call_args_list)
         # Then the temp worktree was added (branch now free).
         assert main_gh.add_worktree.call_count == 2  # temp + restore
         temp_path = main_gh.add_worktree.call_args_list[0].args[0]
@@ -1948,7 +1959,10 @@ class TestResolveMergeConflictsWorktreeIsolation:
         # Original worktree restored in finally block.
         restore_path = main_gh.add_worktree.call_args_list[1].args[0]
         assert restore_path == wf["worktree_path"]
-        o._update_workflow.assert_any_call({"worktree_path": wf["worktree_path"]})
+        assert any(
+            c.args[0].get("worktree_path") == wf["worktree_path"]
+            for c in o._update_workflow.call_args_list
+        )
         # self._gh rebound to the restored worktree.
         assert o._gh is restored_gh
         # _resolve_merge_conflicts only pushes now — merge is deferred to
@@ -1999,7 +2013,10 @@ class TestResolveMergeConflictsWorktreeIsolation:
         main_gh.remove_worktree.assert_called()
         # Original worktree was restored despite the failure.
         main_gh.add_worktree.assert_called_with(wf["worktree_path"], "auto-dev/fc82f22a")
-        o._update_workflow.assert_any_call({"worktree_path": wf["worktree_path"]})
+        assert any(
+            c.args[0].get("worktree_path") == wf["worktree_path"]
+            for c in o._update_workflow.call_args_list
+        )
         assert o._gh is restored_gh
 
 
@@ -2008,20 +2025,25 @@ class TestResolveMergeConflictsWorktreeIsolation:
 
 class TestAddWorktreeExistingBranch:
     def test_add_worktree_no_b_flag(self):
-        """add_worktree checks out an existing branch (no -b)."""
+        """add_worktree checks out an existing branch (no -b).
+
+        The worktree path must live under the repo root (containment guard).
+        """
+        wt = "/tmp/repo/.worktrees/wt"
         gh = GitHubOps("/tmp/repo")
         with patch.object(gh, "_run_git") as mock_run:
-            gh.add_worktree("/tmp/wt", "feature/existing")
+            gh.add_worktree(wt, "feature/existing")
             cmd = mock_run.call_args.args[0]
-            assert cmd == ["worktree", "add", "/tmp/wt", "feature/existing"]
+            assert cmd == ["worktree", "add", wt, "feature/existing"]
             # No -b flag — the branch already exists.
             assert "-b" not in cmd
 
     def test_add_worktree_returns_path_and_branch(self):
+        wt = "/tmp/repo/.worktrees/wt"
         gh = GitHubOps("/tmp/repo")
         with patch.object(gh, "_run_git"):
-            result = gh.add_worktree("/tmp/wt", "feature/x")
-            assert result == {"worktree_path": "/tmp/wt", "branch": "feature/x"}
+            result = gh.add_worktree(wt, "feature/x")
+            assert result == {"worktree_path": wt, "branch": "feature/x"}
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_stale_dirty_when_branch_has_main_does_not_resolve(self, mock_gh_cls):
