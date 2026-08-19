@@ -83,6 +83,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 
 from app.modules.workspace.autonomous.constants import MERGE_POLICY_PAUSE_REASON_PREFIX
 from app.modules.workspace.autonomous.evidence import Verdict
@@ -92,6 +93,12 @@ from app.modules.workspace.autonomous.phase_contract import PhaseResult
 NAME = "merge"
 
 logger = logging.getLogger(__name__)
+
+# Bound on how long a freshly pushed head may take before its required
+# check-runs exist. Mirrors ZERO_CHECK_RUNS_WALL_CLOCK_FLOOR in the
+# orchestrator — the codebase's measured bound for the same CI provisioning
+# lag (#2673); half of it here would re-freeze slow-provisioning heads.
+_POLICY_SETTLE_GRACE_SECONDS = 1200
 
 
 def _required_contexts(gh, pr_number: int, base_branch: str) -> set[str] | None:
@@ -111,6 +118,39 @@ def _required_contexts(gh, pr_number: int, base_branch: str) -> set[str] | None:
         )
         return None
     return set((protection.get("required_status_checks") or {}).get("contexts") or [])
+
+
+def _head_freshly_pushed(gh, pr_head_sha: str) -> bool:
+    """Whether the PR head commit is younger than the settle grace window.
+
+    Right after a push (typically a CI-repair commit), check-runs for the new
+    head SHA may not exist yet, so a refreshed rollup shows no pending entry
+    while GitHub already reports ``blocked`` (required contexts missing for
+    that SHA). A fresh head there means "CI has not settled", not a policy
+    block.
+
+    Fail-closed: an empty SHA, an API failure or an unparseable date returns
+    False so the caller keeps the legacy pause (the monitor sweep
+    re-classifies) — #1989 fail-closed spirit.
+    """
+    sha = (pr_head_sha or "").strip()
+    if not sha:
+        return False
+    try:
+        committed_at = gh.get_commit_committed_at(sha)
+    except Exception as exc:  # noqa: BLE001 — degrade to the legacy pause
+        logger.warning(
+            "PR head %s: could not resolve commit time for policy-settle check: %s",
+            sha[:8],
+            exc,
+        )
+        return False
+    if committed_at is None:
+        return False
+    age = (datetime.now(timezone.utc) - committed_at).total_seconds()
+    # A negative age (clock skew / future committer date) reads as fresh —
+    # the safer direction for a transient-vs-permanent discriminator.
+    return bool(age < _POLICY_SETTLE_GRACE_SECONDS)
 
 
 def _blocking_pending(gh, checks: list[dict], pr_number: int, base_branch: str) -> list[dict]:
@@ -494,6 +534,29 @@ def handle(ctx, deps) -> PhaseResult:
                         any_pending,
                     )
                     return PhaseResult.retry()
+                # Residual #27 race (workflow #2778 / PR #2804): seconds after
+                # a CI-repair push, the new head has runs only for fast
+                # non-required jobs — the required aggregate gate has no run
+                # yet, so no bucket is pending while state is ``blocked``.
+                # Required contexts ABSENT from the rollup (not pending, not
+                # failed) on a freshly pushed head are unsettled CI: keep
+                # deferring. Beyond the grace window the absence is the
+                # repo-misconfig signature (required context with no
+                # provider) and still pauses for a human. Literal name
+                # matching only — the same limitation _blocking_pending has.
+                required = _required_contexts(gh, pr_number, base_branch)
+                if required:
+                    missing_required = required - {(c.get("name") or "") for c in refreshed_checks}
+                    if missing_required and _head_freshly_pushed(gh, pr_head_sha):
+                        logger.info(
+                            "PR #%s: merge rejected by policy with required "
+                            "context(s) %s absent on a head pushed within "
+                            "%ds; deferring",
+                            pr_number,
+                            ", ".join(sorted(missing_required)),
+                            _POLICY_SETTLE_GRACE_SECONDS,
+                        )
+                        return PhaseResult.retry()
                 # No pending checks and GitHub has finished computing, yet
                 # repository policy still requires external action (approval,
                 # marking ready, or a rule change). Persist a manually

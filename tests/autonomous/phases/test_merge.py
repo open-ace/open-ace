@@ -10,7 +10,7 @@ orchestrator concrete class.
 from __future__ import annotations
 
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 from app.modules.workspace.autonomous import phases as phases_pkg
@@ -336,6 +336,103 @@ def test_merge_policy_block_with_settled_ci_still_pauses():
     result = merge_phase.handle(_ctx(_workflow()), deps)
 
     assert result.outcome == "pause"
+    host.emit_status_change.assert_called_once()
+
+
+# ── policy block vs unsettled head (residual #27 race, workflow #2778) ────
+
+
+def _policy_unsettled_deps(*, checks: list, committed_at) -> tuple:
+    """Shared fixture: merge rejected by policy, state=blocked, ``PR Gate``
+    required — the residual-race setup where some checks exist for the head
+    but the required aggregate gate has not reported yet."""
+    deps, host = _build_deps(
+        checks=checks,
+        merge_state={"mergeable": True, "mergeable_state": "blocked"},
+        merge_raises=GitHubOpsError("base branch policy prohibits the merge"),
+    )
+    deps.gh.get_branch_protection.return_value = {
+        "required_status_checks": {"contexts": ["PR Gate"]}
+    }
+    deps.gh.get_commit_committed_at.return_value = committed_at
+    return deps, host
+
+
+def test_merge_policy_block_with_missing_required_on_fresh_head_defers():
+    """~90s after a CI-repair push the new head SHA has runs only for fast
+    non-required jobs — the required aggregate gate has no run yet, so the
+    rollup shows no pending bucket while GitHub reports ``blocked``. A head
+    pushed within the settle-grace window is unsettled CI, not a policy
+    block: defer instead of freezing at a manual-recovery pause (reproduced
+    by workflow #2778 / PR #2804 on 2026-08-19)."""
+    deps, host = _policy_unsettled_deps(
+        checks=[{"name": "Select suites", "bucket": "pass"}],
+        committed_at=datetime.now(timezone.utc) - timedelta(seconds=90),
+    )
+    result = merge_phase.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "retry"
+    host.emit_status_change.assert_not_called()  # did not pause
+
+
+def test_merge_policy_block_with_missing_required_on_stale_head_pauses():
+    """A required context still absent long after the push is the repo-
+    misconfig signature (required context with no provider): the manual-
+    recovery pause must keep firing so a human fixes the ruleset."""
+    deps, host = _policy_unsettled_deps(
+        checks=[{"name": "Select suites", "bucket": "pass"}],
+        committed_at=datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+    result = merge_phase.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "pause"
+    host.emit_status_change.assert_called_once()
+
+
+def test_merge_policy_block_with_unresolvable_commit_time_pauses():
+    """Fail-closed: an unresolvable head commit time (missing date, or the
+    API call failing) must not arm the freshness defer — pause as before and
+    let the monitor sweep re-classify (#1989 fail-closed spirit)."""
+    deps, _ = _policy_unsettled_deps(
+        checks=[{"name": "Select suites", "bucket": "pass"}],
+        committed_at=None,
+    )
+    assert merge_phase.handle(_ctx(_workflow()), deps).outcome == "pause"
+
+    deps_raise, _ = _policy_unsettled_deps(
+        checks=[{"name": "Select suites", "bucket": "pass"}],
+        committed_at=None,
+    )
+    deps_raise.gh.get_commit_committed_at.side_effect = GitHubOpsError("api down")
+    assert merge_phase.handle(_ctx(_workflow()), deps_raise).outcome == "pause"
+
+
+def test_merge_policy_block_with_unobservable_required_still_pauses():
+    """Degraded contract: when the required set cannot be observed (branch
+    protection query fails), no completeness judgment is possible — keep the
+    legacy pause."""
+    deps, host = _policy_unsettled_deps(
+        checks=[{"name": "Select suites", "bucket": "pass"}],
+        committed_at=datetime.now(timezone.utc),
+    )
+    deps.gh.get_branch_protection.side_effect = GitHubOpsError("no access")
+    result = merge_phase.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "pause"
+    host.emit_status_change.assert_called_once()
+
+
+def test_merge_policy_block_with_required_present_skips_commit_time_lookup():
+    """Short-circuit: when every required context has already reported, the
+    freshness machinery must not even consult the commit-time API."""
+    deps, host = _policy_unsettled_deps(
+        checks=[{"name": "PR Gate", "bucket": "pass"}],
+        committed_at=datetime.now(timezone.utc),
+    )
+    result = merge_phase.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "pause"
+    deps.gh.get_commit_committed_at.assert_not_called()
     host.emit_status_change.assert_called_once()
 
 
