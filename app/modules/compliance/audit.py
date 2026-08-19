@@ -31,6 +31,21 @@ class AnomalyDetection:
     details: dict[str, Any]
 
 
+def _parse_timestamp(val: Any) -> datetime:
+    """Parse a timestamp value from SQL into a datetime.
+
+    Handles datetime objects, ISO-format strings, and falls back to now().
+    """
+    if isinstance(val, datetime):
+        return val
+    if isinstance(val, str):
+        try:
+            return datetime.fromisoformat(val)
+        except (ValueError, TypeError):
+            pass
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 class AuditAnalyzer:
     """
     Analyzer for audit logs.
@@ -91,15 +106,7 @@ class AuditAnalyzer:
         # Build base WHERE clause matching audit_logger.query() filters
         conditions = ["timestamp >= ?", "timestamp <= ?"]
         params: list[Any] = [start_time, end_time]
-
-        tenant_id = self.audit_logger._resolve_tenant_id()
-        normalized_tenant_id = self.audit_logger._normalize_tenant_id(tenant_id)
-        if normalized_tenant_id is not None:
-            conditions.append(
-                "(tenant_id = ? OR (tenant_id IS NULL AND user_id IN "
-                "(SELECT id FROM users WHERE tenant_id = ?)))"
-            )
-            params.extend([normalized_tenant_id, normalized_tenant_id])
+        self._build_tenant_filter(conditions, params)
 
         where_clause = " AND ".join(conditions)
 
@@ -235,9 +242,10 @@ class AuditAnalyzer:
                 "total_events": 0,
                 "matching_events": 0,
                 "analyzed_events": 0,
-                "truncated": False,
-                "coverage_ratio": 1.0,
+                "truncated": True,  # Cannot confirm completeness
+                "coverage_ratio": 0.0,
                 "oldest_analyzed_at": None,
+                "error": "Pattern analysis failed due to a database error",
                 "hourly_distribution": {},
                 "login_hourly_distribution": {},
                 "daily_distribution": {},
@@ -376,17 +384,10 @@ class AuditAnalyzer:
                 )
                 range_row = cursor.fetchone()
 
-                def _parse_ts(val: Any) -> datetime:
-                    if isinstance(val, datetime):
-                        return val
-                    if isinstance(val, str):
-                        return datetime.fromisoformat(val)
-                    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-                first_seen = _parse_ts(range_row["first_seen"]) if range_row else datetime.now(
+                first_seen = _parse_timestamp(range_row["first_seen"]) if range_row else datetime.now(
                     timezone.utc
                 ).replace(tzinfo=None)
-                last_seen = _parse_ts(range_row["last_seen"]) if range_row else first_seen
+                last_seen = _parse_timestamp(range_row["last_seen"]) if range_row else first_seen
 
                 return AnomalyDetection(
                     anomaly_type="excessive_failed_logins",
@@ -509,13 +510,6 @@ class AuditAnalyzer:
                 user_id = int(r["user_id"])
                 count = int(r["cnt"])
 
-                def _parse_ts(val: Any) -> datetime:
-                    if isinstance(val, datetime):
-                        return val
-                    if isinstance(val, str):
-                        return datetime.fromisoformat(val)
-                    return datetime.now(timezone.utc).replace(tzinfo=None)
-
                 anomalies.append(
                     AnomalyDetection(
                         anomaly_type="off_hours_activity",
@@ -523,8 +517,8 @@ class AuditAnalyzer:
                         description=f"User {user_id} active during off-hours",
                         affected_users=[user_id],
                         occurrences=count,
-                        first_seen=_parse_ts(r["first_seen"]),
-                        last_seen=_parse_ts(r["last_seen"]),
+                        first_seen=_parse_timestamp(r["first_seen"]),
+                        last_seen=_parse_timestamp(r["last_seen"]),
                         details={
                             "activity_count": count,
                         },
@@ -577,13 +571,6 @@ class AuditAnalyzer:
                     )
                     affected = [int(r["user_id"]) for r in cursor.fetchall()]
 
-                    def _parse_ts(val: Any) -> datetime:
-                        if isinstance(val, datetime):
-                            return val
-                        if isinstance(val, str):
-                            return datetime.fromisoformat(val)
-                        return datetime.now(timezone.utc).replace(tzinfo=None)
-
                     anomalies.append(
                         AnomalyDetection(
                             anomaly_type="frequent_role_changes",
@@ -591,10 +578,10 @@ class AuditAnalyzer:
                             description=f"{role_count} role changes detected",
                             affected_users=affected,
                             occurrences=role_count,
-                            first_seen=_parse_ts(row["first_seen"]) if row else datetime.now(
+                            first_seen=_parse_timestamp(row["first_seen"]) if row else datetime.now(
                                 timezone.utc
                             ).replace(tzinfo=None),
-                            last_seen=_parse_ts(row["last_seen"]) if row else datetime.now(
+                            last_seen=_parse_timestamp(row["last_seen"]) if row else datetime.now(
                                 timezone.utc
                             ).replace(tzinfo=None),
                             details={},
@@ -632,13 +619,6 @@ class AuditAnalyzer:
                     )
                     affected2 = [int(r["user_id"]) for r in cursor.fetchall()]
 
-                    def _parse_ts2(val: Any) -> datetime:
-                        if isinstance(val, datetime):
-                            return val
-                        if isinstance(val, str):
-                            return datetime.fromisoformat(val)
-                        return datetime.now(timezone.utc).replace(tzinfo=None)
-
                     anomalies.append(
                         AnomalyDetection(
                             anomaly_type="frequent_permission_changes",
@@ -646,10 +626,10 @@ class AuditAnalyzer:
                             description=f"{perm_count} permission changes detected",
                             affected_users=affected2,
                             occurrences=perm_count,
-                            first_seen=_parse_ts2(row2["first_seen"]) if row2 else datetime.now(
+                            first_seen=_parse_timestamp(row2["first_seen"]) if row2 else datetime.now(
                                 timezone.utc
                             ).replace(tzinfo=None),
-                            last_seen=_parse_ts2(row2["last_seen"]) if row2 else datetime.now(
+                            last_seen=_parse_timestamp(row2["last_seen"]) if row2 else datetime.now(
                                 timezone.utc
                             ).replace(tzinfo=None),
                             details={},
