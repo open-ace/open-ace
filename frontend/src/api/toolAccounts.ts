@@ -107,9 +107,8 @@ export const toolAccountsApi = {
       description?: string;
     }>
   ): Promise<{ created_count: number; mappings: ToolAccount[] }> {
-    return apiClient.post<{ created_count: number; mappings: ToolAccount[] }>(
-      `/api/tool-accounts/user/${userId}/batch`,
-      { tool_accounts: toolAccounts }
-    );
+    return apiClient.post<{ created_count: number; mappings: ToolAccount[] }>(`/api/tool-accounts/user/${userId}/batch`, {
+      tool_accounts: toolAccounts,
+    });
   },
 };
