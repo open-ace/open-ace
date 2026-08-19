@@ -210,6 +210,30 @@ def validate_expected_skips(state: dict[str, Any], now: datetime | None = None) 
     return errors
 
 
+def validate_execution_dispositions(
+    inventory: dict[str, Any], state: dict[str, Any], promotion: dict[str, Any]
+) -> list[str]:
+    """Reject state records whose id no longer matches a file's executor."""
+    mode_by_path = {str(row.get("path")): row.get("mode") for row in entries(inventory)}
+    errors: list[str] = []
+    for ledger_name, ledger in (("state", state), ("promotion", promotion)):
+        for item_id in ledger.get("entries") or {}:
+            standalone = item_id.startswith("standalone::")
+            path = item_id.removeprefix("standalone::") if standalone else item_id.split("::", 1)[0]
+            mode = mode_by_path.get(path)
+            if mode is None:
+                continue
+            if standalone and mode != "standalone-automated":
+                errors.append(
+                    f"{item_id}: {ledger_name} entry requires standalone-automated disposition"
+                )
+            elif not standalone and mode != "pytest-automated":
+                errors.append(
+                    f"{item_id}: {ledger_name} entry requires pytest-automated disposition"
+                )
+    return errors
+
+
 def check_budgets(lane: str, total_minutes: float, per_item_seconds: dict[str, float]) -> list[str]:
     """Duration budget check (Issue #2491 §时长预算)."""
     budget = BUDGETS.get(lane)
@@ -276,6 +300,7 @@ def validate_all(
         errors.extend(validate_promotion_clocks(promotion))
     if state is not None and promotion is not None:
         errors.extend(validate_required_legality(state, promotion))
+        errors.extend(validate_execution_dispositions(inventory, state, promotion))
     if manifest is not None and state is not None:
         nodeids = set(manifest.get("nodeids") or [])
         for item_id in state.get("entries") or {}:
@@ -335,6 +360,13 @@ def cmd_set_disposition(args: argparse.Namespace) -> int:
         print(f"ERROR: {args.path} not in inventory", file=sys.stderr)
         return 1
     issues = validate_inventory(inventory, Path(args.root))
+    if issues:
+        for line in issues:
+            print(f"ERROR: {line}", file=sys.stderr)
+        return 1
+    state = load_state(Path(args.state))
+    promotion = load_promotion(Path(args.promotion))
+    issues = validate_execution_dispositions(inventory, state, promotion)
     if issues:
         for line in issues:
             print(f"ERROR: {line}", file=sys.stderr)
@@ -542,6 +574,8 @@ def main(argv: list[str] | None = None) -> int:
     sd.add_argument("--note", default="")
     sd.add_argument("--inventory", type=Path, default=DEFAULT_INVENTORY)
     sd.add_argument("--root", type=Path, default=PROJECT_ROOT)
+    sd.add_argument("--state", type=Path, default=DEFAULT_STATE)
+    sd.add_argument("--promotion", type=Path, default=DEFAULT_PROMOTION)
     sd.set_defaults(func=cmd_set_disposition)
 
     q = sub.add_parser(

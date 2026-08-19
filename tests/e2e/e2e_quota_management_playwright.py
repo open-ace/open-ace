@@ -286,6 +286,7 @@ def main():
             import traceback
 
             traceback.print_exc()
+            raise
 
         finally:
             context.close()

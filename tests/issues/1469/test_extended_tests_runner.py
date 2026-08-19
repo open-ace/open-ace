@@ -497,6 +497,38 @@ def test_write_run_envelope_includes_standalone_outcomes(tmp_path, monkeypatch):
     assert payload["server"]["readiness_achieved"] is None
 
 
+def test_standalone_targets_retry_and_preserve_attempt_evidence(monkeypatch):
+    responses = iter(
+        [
+            subprocess.CompletedProcess([], returncode=1),
+            subprocess.CompletedProcess([], returncode=0),
+        ]
+    )
+    monkeypatch.setattr(
+        run_extended_tests.subprocess, "run", lambda *args, **kwargs: next(responses)
+    )
+    monkeypatch.setattr(run_extended_tests.time, "sleep", lambda _seconds: None)
+
+    outcomes = run_extended_tests._run_standalone_targets(
+        ["standalone::tests/e2e/e2e_autonomous_models_error_playwright.py"],
+        env={},
+        timeout_seconds=10,
+        reruns=1,
+    )
+
+    assert outcomes == [
+        {
+            "nodeid": "standalone::tests/e2e/e2e_autonomous_models_error_playwright.py",
+            "attempts": 2,
+            "first_attempt_outcome": "fail",
+            "final_outcome": "pass",
+            "duration_seconds": 0.0,
+            "total_duration_seconds": 0.0,
+            "attempt_durations_seconds": {1: 0.0, 2: 0.0},
+        }
+    ]
+
+
 def test_dry_run_envelope_reports_success(tmp_path):
     selection = tmp_path / "selection.json"
     selection.write_text(

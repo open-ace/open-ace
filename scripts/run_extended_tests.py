@@ -815,56 +815,74 @@ def _run_standalone_targets(
     *,
     env: dict[str, str],
     timeout_seconds: int,
+    reruns: int,
 ) -> list[dict[str, object]]:
     from scripts.e2e.common import failure_fingerprint
 
     results: list[dict[str, object]] = []
     for item_id in target_ids:
         script_path = _standalone_script_path(item_id)
-        started = time.time()
-        try:
-            completed = subprocess.run(
-                [sys.executable, script_path],
-                cwd=PROJECT_ROOT,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=timeout_seconds,
+        attempt_durations: dict[int, float] = {}
+        first_attempt_outcome = "fail"
+        final_failure: tuple[str, str, int | None] | None = None
+        passed = False
+        for attempt in range(1, reruns + 2):
+            started = time.time()
+            try:
+                completed = subprocess.run(
+                    [sys.executable, script_path],
+                    cwd=PROJECT_ROOT,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=timeout_seconds,
+                )
+                duration = round(time.time() - started, 3)
+                attempt_durations[attempt] = duration
+                passed = completed.returncode == 0
+                if not passed:
+                    final_failure = (
+                        "StandaloneExitError",
+                        f"{script_path} exited with code {completed.returncode}",
+                        completed.returncode,
+                    )
+            except subprocess.TimeoutExpired:
+                duration = round(time.time() - started, 3)
+                attempt_durations[attempt] = duration
+                final_failure = (
+                    "TimeoutExpired",
+                    f"{script_path} timed out after {timeout_seconds}s",
+                    None,
+                )
+                passed = False
+            if attempt == 1:
+                first_attempt_outcome = "pass" if passed else "fail"
+            if passed:
+                break
+            if attempt <= reruns:
+                time.sleep(5)
+
+        result: dict[str, object] = {
+            "nodeid": item_id,
+            "attempts": len(attempt_durations),
+            "first_attempt_outcome": first_attempt_outcome,
+            "final_outcome": "pass" if passed else "fail",
+            "duration_seconds": max(attempt_durations.values(), default=0.0),
+            "total_duration_seconds": round(sum(attempt_durations.values()), 3),
+            "attempt_durations_seconds": attempt_durations,
+        }
+        if not passed and final_failure is not None:
+            exception_class, message, return_code = final_failure
+            result["category"] = (
+                "timeout" if exception_class == "TimeoutExpired" else "test_body_exception"
             )
-            duration = round(time.time() - started, 3)
-            passed = completed.returncode == 0
-            result: dict[str, object] = {
-                "nodeid": item_id,
-                "attempts": 1,
-                "first_attempt_outcome": "pass" if passed else "fail",
-                "final_outcome": "pass" if passed else "fail",
-                "duration_seconds": duration,
-            }
-            if not passed:
-                message = f"{script_path} exited with code {completed.returncode}"
-                result["category"] = "test_body_exception"
-                result["fingerprint"] = failure_fingerprint("StandaloneExitError", message)
-                result["exception_class"] = "StandaloneExitError"
-                result["message"] = message
-                result["return_code"] = completed.returncode
-            results.append(result)
-        except subprocess.TimeoutExpired:
-            duration = round(time.time() - started, 3)
-            message = f"{script_path} timed out after {timeout_seconds}s"
-            results.append(
-                {
-                    "nodeid": item_id,
-                    "attempts": 1,
-                    "first_attempt_outcome": "fail",
-                    "final_outcome": "fail",
-                    "duration_seconds": duration,
-                    "category": "timeout",
-                    "fingerprint": failure_fingerprint("TimeoutExpired", message),
-                    "exception_class": "TimeoutExpired",
-                    "message": message,
-                }
-            )
+            result["fingerprint"] = failure_fingerprint(exception_class, message)
+            result["exception_class"] = exception_class
+            result["message"] = message
+            if return_code is not None:
+                result["return_code"] = return_code
+        results.append(result)
     return results
 
 
@@ -983,6 +1001,7 @@ def main(argv: list[str] | None = None) -> int:
                 standalone_selected,
                 env=env,
                 timeout_seconds=args.timeout or 240,
+                reruns=args.reruns,
             )
             if any(item.get("final_outcome") != "pass" for item in standalone_outcomes):
                 return_code = return_code or 1
