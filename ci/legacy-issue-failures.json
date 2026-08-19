@@ -561,70 +561,6 @@
       "summary": "playwright._impl._errors.TimeoutError: Page.fill: Timeout 30000ms exceeded."
     },
     {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_binary_echo",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 133"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_invalid_token_rejected",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 169"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_multiple_messages",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 151"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_text_echo",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 118"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/e2e_terminal_ws_handler.py::test_unknown_terminal_rejected",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/559/e2e_terminal_ws_handler.py, line 191"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/test_terminal_ws_handler.py::TestHandleVSCodeWs::test_cookie_token_can_authenticate_proxy_ws",
-      "outcome": "failure",
-      "summary": "AssertionError: expected call not found."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/test_terminal_ws_handler.py::TestHandleVSCodeWs::test_invalid_proxy_ws_token_closes",
-      "outcome": "failure",
-      "summary": "AssertionError: expected call not found."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "559",
-      "nodeid": "tests/issues/559/test_terminal_ws_handler.py::TestHandleVSCodeWs::test_proxy_path_bridges_to_matching_remote_path",
-      "outcome": "failure",
-      "summary": "AssertionError: expected call not found."
-    },
-    {
       "category": "test_body_exception",
       "exception_type": "AttributeError",
       "issue_number": "72",
@@ -923,8 +859,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-19 prune 1 resolved issue-1071 entry: ccf3407a (#2728) rewrote the X-Session-Id privilege-escalation test to patch the real session-manager seam (app.modules.workspace.session_manager.get_session_manager) instead of the nonexistent app.routes.workspace.Database attribute, so the webui filtered-out assertion now passes. Resolution observed in the 2026-08-18 nightly diff and verified on this branch. Shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32166980663",
+    "prune_note": "2026-08-19 prune 8 resolved issue-559 terminal-ws entries: two stacked layers. (a) e2e_terminal_ws_handler.py is a manual gevent script whose check functions take plain args pytest misread as fixtures (5 setup errors); in-process conversion is impossible without gevent monkey-patching (the bridge relay's websockets.sync calls block the server thread's hub, starving the pump greenlet), so the checks are now script-internal _check_* steps and pytest runs the whole script in an isolated subprocess requiring a full pass. (b) TestHandleVSCodeWs: #2253 added cs_password to bridge_vscode_ws_raw and a close reason to the vscode invalid-token path; assertions realigned (terminal path still 2-arg send_close). Resolution evidence: run 32242194145 resolved list is exactly these 8 nodeids with new/changed/invalid/collection_errors all 0. Negative control: reverting both files reproduces the 8. Shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32242194145",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
