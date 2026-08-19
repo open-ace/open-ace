@@ -323,4 +323,15 @@ def _backfill_missing_columns(conn, dialect: str) -> None:
                 cursor.execute(sql)
         conn.commit()
 
+    # tenant_sensitive_keywords columns (Issue #2789)
+    # Backfill tenant_id for legacy databases that may have created the table
+    # without the tenant_id column before the migration was applied.
+    if _table_exists(conn, "tenant_sensitive_keywords", dialect):
+        if not _column_exists(conn, "tenant_sensitive_keywords", "tenant_id", dialect):
+            sql = "ALTER TABLE tenant_sensitive_keywords ADD COLUMN tenant_id INTEGER"
+            # Set default tenant_id to 1 (default tenant) for existing rows
+            sql += " DEFAULT 1 NOT NULL"
+            cursor.execute(sql)
+            conn.commit()
+
     cursor.close()

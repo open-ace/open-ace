@@ -123,6 +123,17 @@ def test_parse_then_upsert_roundtrip(repo):
 
 
 def test_command_execution_id_persisted(repo):
+    # Issue #2789: Foreign key constraint requires parent record to exist
+    # Create a command_execution_evidence row with id=42 first
+    repo.db.execute(
+        """
+        INSERT INTO command_execution_evidence
+            (id, command_id, session_id, workflow_id, milestone_id, tool_name)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (42, "c1", "sess-1", "wf-1", "ms-1", "Bash"),
+    )
+
     te = _te("c1")
     te.command_execution_id = 42
     repo.upsert(te)
