@@ -28,7 +28,7 @@ class TestAuditActionsSynchronization:
         This test documents the expected action categories and counts,
         serving as a baseline for future audits.
         """
-        # Expected action counts by category (based on audit_logger.py comments)
+        # Expected action counts by category (based on audit_logger.py)
         expected_categories = {
             "Authentication": 4,  # LOGIN, LOGOUT, LOGIN_FAILED, SESSION_EXPIRED
             "User Management": 8,  # USER_CREATE, UPDATE, DELETE, RESTORE, PASSWORD_CHANGE, PASSWORD_CHANGE_FAILED, ROLE_CHANGE, STATUS_CHANGE
@@ -37,9 +37,9 @@ class TestAuditActionsSynchronization:
             "Data Access": 4,  # DATA_VIEW, EXPORT, IMPORT, DELETE
             "System": 3,  # SYSTEM_CONFIG_CHANGE, START, STOP
             "Content Filter": 4,  # CONTENT_BLOCKED, FLAGGED, WARNED, REDACTED
-            "Remote Agent": 10,  # Agent lifecycle plus usage-report security actions, plus token rotation actions
+            "Remote Agent": 7,  # AGENT_REGISTER, TOKEN_ROTATE, TOKEN_REVOKE, TOKEN_ROTATE_CONFIRMED, TOKEN_FORCE_REVOKED, AUTH_FAILURE, RECONNECT
             "SSRF Protection": 3,  # LLM_PROXY_URL_BLOCKED, ALLOWLIST_ENTRY_INVALID, IP_RESOLVED_MISMATCH
-            "Usage Report": 3,  # USAGE_REPORT_ACCEPTED, USAGE_REPORT_AUTH_FAILURE, USAGE_REPORT_BINDING_MISMATCH (Issue #1891)
+            "Usage Report": 3,  # USAGE_REPORT_ACCEPTED, USAGE_REPORT_AUTH_FAILURE, USAGE_REPORT_BINDING_MISMATCH
             "URL Token Security": 7,  # QUERY_SESSION_TOKEN_REJECTED, WEBUI_TOKEN_IN_QUERY_USED, PROXY_TOKEN_IN_QUERY_USED, BROWSER_TOKEN_IN_QUERY_USED, URL_TOKEN_PATH_VIOLATION, LEGACY_WEBUI_TOKEN_USED, TOKEN_LEAK_SUSPECTED
             "Admin Access": 2,  # ADMIN_CROSS_TENANT_ACCESS, ADMIN_GLOBAL_SESSION_LIST
             "SMTP Configuration": 2,  # SMTP_CONFIG_SAVE, SMTP_CONFIG_DELETE
