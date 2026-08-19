@@ -185,19 +185,33 @@ jobs:
           pip install -r requirements-ci.lock
           playwright install chromium --with-deps
 
-      - name: Run full E2E tests
+      - name: Build nightly E2E selection
         run: |
+          mkdir -p test-results
+          python scripts/e2e/selector.py \
+            --event nightly \
+            --out test-results/full-e2e-selection.json
+
+      - name: Run full E2E tests
+        continue-on-error: true
+        run: |
+          set +e
           # Issue #2189: Validate collection before running
           python scripts/run_extended_tests.py \
             --category e2e \
-            --dry-run 2>&1 | grep -E "Collected|Total files" || true
+            --selection-json test-results/full-e2e-selection.json \
+            --dry-run 2>&1 | grep -E "Collected|Total targets" || true
 
           python scripts/run_extended_tests.py \
             --category e2e \
+            --selection-json test-results/full-e2e-selection.json \
             --isolated-home \
             --reruns 1 \
             --timeout 240 \
-            --junitxml test-results/full-e2e.xml
+            --junitxml test-results/full-e2e.xml \
+            --e2e-attempts test-results/full-e2e-attempts.jsonl \
+            --envelope-json test-results/full-e2e-envelope.json
+          echo $? > test-results/full-e2e.exit-code
         env:
           CI: true
           HEADLESS: true
@@ -210,6 +224,50 @@ jobs:
           path: |
             test-results/
             screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  full-e2e-governance:
+    name: Full E2E Governance
+    if: >-
+      always() &&
+      needs.full-e2e.result != 'skipped'
+    needs: [full-e2e]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Download full E2E artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: full-e2e
+          path: artifacts
+      - name: Validate governance ledgers
+        run: |
+          python scripts/e2e/governance.py validate \
+            --json-output test-results/full-e2e-governance-report.json
+      - name: Compare nightly selection against observed outcomes
+        run: |
+          python scripts/e2e/comparator.py compare \
+            --selection artifacts/test-results/full-e2e-selection.json \
+            --envelope artifacts/test-results/full-e2e-envelope.json \
+            --json-output test-results/full-e2e-diff.json \
+            --markdown-output test-results/full-e2e-summary.md \
+            --governance-report test-results/full-e2e-governance-report.json
+      - name: Upload governance artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: full-e2e-governance
+          path: |
+            test-results/full-e2e-governance-report.json
+            test-results/full-e2e-diff.json
+            test-results/full-e2e-summary.md
+            artifacts/
           if-no-files-found: ignore
           retention-days: 14
 
@@ -424,13 +482,13 @@ jobs:
   nightly-summary:
     name: Nightly Quality Gate
     if: always() && github.event_name == 'schedule'
-    needs: [nightly-python, full-e2e, issue-tests, legacy-issue-baseline]
+    needs: [nightly-python, full-e2e-governance, issue-tests, legacy-issue-baseline]
     runs-on: ubuntu-24.04
     steps:
       - name: Publish nightly result
         env:
           PYTHON_RESULT: ${{ needs.nightly-python.result }}
-          E2E_RESULT: ${{ needs.full-e2e.result }}
+          E2E_RESULT: ${{ needs.full-e2e-governance.result }}
           LEGACY_RESULT: ${{ needs.legacy-issue-baseline.result }}
         run: |
           {

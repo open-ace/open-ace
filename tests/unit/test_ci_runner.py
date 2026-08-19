@@ -95,6 +95,17 @@ def test_ci_policy_change_fails_safe_to_all_pr_suites():
     assert "performance" not in selected
 
 
+def test_e2e_governance_change_selects_governance_suite():
+    selected = ci.select_pr_suites(["scripts/e2e/comparator.py"])
+    assert "e2e-governance" in selected
+
+
+def test_extended_runner_change_selects_critical_and_governance_suites():
+    selected = ci.select_pr_suites(["scripts/run_extended_tests.py"])
+    assert "critical-e2e" in selected
+    assert "e2e-governance" in selected
+
+
 def test_test_change_selects_issue_collection():
     selected = ci.select_pr_suites(["tests/unit/test_example.py"])
     assert "default-collection" in selected

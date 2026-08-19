@@ -23,11 +23,14 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TextIO
 from urllib.parse import urlsplit, urlunsplit
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 DEFAULT_BASE_URL = "http://localhost:19888"
 SERVER_CATEGORIES = {
     "all",
@@ -67,6 +70,7 @@ class ServerHandle:
     process: subprocess.Popen
     log_file: TextIO
     log_path: Path
+    stopped_by_runner: bool = False
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -102,6 +106,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=0, help="Per-test timeout in seconds.")
     parser.add_argument("--maxfail", type=int, default=0, help="Stop after this many failures.")
     parser.add_argument("--junitxml", default="", help="Write a pytest JUnit XML report.")
+    parser.add_argument(
+        "--selection-json",
+        default="",
+        help="Run the exact ids from a selector selection.json instead of a category tree.",
+    )
+    parser.add_argument(
+        "--e2e-attempts",
+        default="",
+        help="Append authoritative per-attempt JSONL records to this path.",
+    )
+    parser.add_argument(
+        "--envelope-json",
+        default="",
+        help="Write a machine-readable run envelope to this path.",
+    )
     parser.add_argument("--extra-pytest-arg", action="append", default=[], help="Extra pytest arg.")
     parser.add_argument(
         "--server",
@@ -125,6 +144,45 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def category_needs_server(category: str) -> bool:
     return category in SERVER_CATEGORIES
+
+
+def inventory_entries_by_path() -> dict[str, dict[str, object]]:
+    inventory_path = PROJECT_ROOT / "ci" / "e2e-inventory.json"
+    if not inventory_path.exists():
+        return {}
+    payload = json.loads(inventory_path.read_text(encoding="utf-8"))
+    entries = payload.get("entries") or []
+    return {
+        str(entry.get("path")): entry
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("path")
+    }
+
+
+def target_requires_server(
+    target: str, inventory_by_path: dict[str, dict[str, object]]
+) -> bool | None:
+    if target.startswith("standalone::"):
+        path = _standalone_script_path(target)
+    else:
+        path = target_path(target)
+    entry = inventory_by_path.get(path)
+    if not entry:
+        return None
+    return "server" in (entry.get("capabilities") or [])
+
+
+def execution_needs_server(args: argparse.Namespace, targets: list[str]) -> bool:
+    default_needs_server = category_needs_server(args.category)
+    if not args.selection_json:
+        return default_needs_server
+    inventory_by_path = inventory_entries_by_path()
+    if not inventory_by_path:
+        return default_needs_server
+    resolved = [target_requires_server(target, inventory_by_path) for target in targets]
+    if any(value is None for value in resolved):
+        return default_needs_server
+    return any(bool(value) for value in resolved)
 
 
 def parse_issue_numbers(args: argparse.Namespace) -> list[str]:
@@ -172,9 +230,20 @@ def select_targets(args: argparse.Namespace) -> list[str]:
     return existing
 
 
+def load_selection_targets(path: str) -> list[str]:
+    selection_path = Path(path)
+    payload = json.loads(selection_path.read_text(encoding="utf-8"))
+    targets = list(payload.get("normal") or []) + list(payload.get("advisory") or [])
+    if not targets:
+        raise ValueError(f"No executable targets found in selection: {selection_path}")
+    return [str(target) for target in targets]
+
+
 def discover_test_files(targets: list[str]) -> list[str]:
     files: list[Path] = []
     for target in targets:
+        if target.startswith("standalone::"):
+            continue
         path = PROJECT_ROOT / target_path(target)
         if path.is_file():
             files.append(path)
@@ -183,6 +252,28 @@ def discover_test_files(targets: list[str]) -> list[str]:
         files.extend(path.rglob("e2e_*.py"))
     unique = sorted({file.relative_to(PROJECT_ROOT).as_posix() for file in files})
     return unique
+
+
+def resolved_targets(args: argparse.Namespace) -> list[str]:
+    if args.selection_json:
+        selected = load_selection_targets(args.selection_json)
+        standalone = [item for item in selected if item.startswith("standalone::")]
+        pytest_targets = [item for item in selected if not item.startswith("standalone::")]
+        if standalone and args.split_total > 1:
+            raise ValueError("--selection-json with standalone targets cannot be sharded")
+        if args.split_total == 1:
+            return pytest_targets + standalone
+        return apply_split(pytest_targets, args.split_total, args.split_group)
+    targets = select_targets(args)
+    return apply_split(targets, args.split_total, args.split_group)
+
+
+def standalone_targets(targets: list[str]) -> list[str]:
+    return [target for target in targets if target.startswith("standalone::")]
+
+
+def pytest_targets(targets: list[str]) -> list[str]:
+    return [target for target in targets if not target.startswith("standalone::")]
 
 
 def apply_split(targets: list[str], split_total: int, split_group: int) -> list[str]:
@@ -269,11 +360,11 @@ def check_baseline(category: str, file_count: int, split_total: int = 1) -> bool
 
 
 def print_collection_manifest(files: list[str]) -> None:
-    """Print collection manifest with file list and count (Issue #2189)."""
+    """Print the exact execution manifest (files, nodeids, or standalone ids)."""
     print("\n=== Test Collection Manifest ===")
-    print(f"Total files: {len(files)}")
+    print(f"Total targets: {len(files)}")
     if files:
-        print("\nCollected files:")
+        print("\nCollected targets:")
         for file in files:
             print(f"  - {file}")
     print("=" * 40 + "\n")
@@ -322,20 +413,23 @@ def _quarantine_nodeids(path=None) -> list[str]:
 
 
 def build_pytest_command(args: argparse.Namespace) -> list[str]:
-    targets = select_targets(args)
-    targets = apply_split(targets, args.split_total, args.split_group)
+    targets = resolved_targets(args)
+    pytest_only = pytest_targets(targets)
 
     # Issue #2189: Print the file manifest. Item collection is separately gated
     # by pytest itself; a targeted issue run must not be compared with the full
     # legacy-suite baseline.
     print_collection_manifest(targets)
+    if not pytest_only:
+        return []
     targeted_issue_run = args.category == "issues" and bool(parse_issue_numbers(args))
+    file_count = len(discover_test_files(pytest_only)) if args.selection_json else len(pytest_only)
     if not targeted_issue_run and not check_baseline(
-        args.category, len(targets), split_total=args.split_total
+        args.category, file_count, split_total=args.split_total
     ):
         raise ValueError(f"Test file count below baseline threshold for category: {args.category}")
 
-    cmd = [sys.executable, "-m", "pytest", *targets, "-m", "not postgres"]
+    cmd = [sys.executable, "-m", "pytest", *pytest_only, "-m", "not postgres"]
     # Continue past per-file collection errors so every collectable nodeid gets a
     # terminal result; otherwise one bad file aborts the shard and leaves the
     # rest result-less, which the #2457 failure-baseline completeness gate would
@@ -358,6 +452,8 @@ def build_pytest_command(args: argparse.Namespace) -> list[str]:
         cmd.append(f"--maxfail={args.maxfail}")
     if args.junitxml:
         cmd.append(f"--junitxml={args.junitxml}")
+    if args.e2e_attempts:
+        cmd.extend(["-p", "scripts.e2e.pytest_attempts", f"--e2e-attempts={args.e2e_attempts}"])
     cmd.extend(args.extra_pytest_arg)
     return cmd
 
@@ -366,8 +462,8 @@ def frontend_dist_index() -> Path:
     return PROJECT_ROOT / "static" / "js" / "dist" / "index.html"
 
 
-def ensure_frontend_built(category: str) -> None:
-    if not category_needs_server(category):
+def ensure_frontend_built(needs_server: bool) -> None:
+    if not needs_server:
         return
     if frontend_dist_index().exists():
         return
@@ -492,10 +588,12 @@ def configure_server_address(env: dict[str, str], base_url: str) -> None:
     config_path.write_text(json.dumps(config, indent=2) + "\n")
 
 
-def start_server_if_needed(args: argparse.Namespace, env: dict[str, str]) -> ServerHandle | None:
-    if not category_needs_server(args.category) or args.server == "skip":
+def start_server_if_needed(
+    args: argparse.Namespace, env: dict[str, str], needs_server: bool
+) -> ServerHandle | None:
+    if not needs_server or args.server == "skip":
         return None
-    ensure_frontend_built(args.category)
+    ensure_frontend_built(needs_server)
     if is_healthy(args.base_url):
         print(f"Reusing healthy Open ACE server at {args.base_url}")
         return None
@@ -555,6 +653,7 @@ def stop_server(handle: ServerHandle | None) -> None:
         return
     proc = handle.process
     if proc.poll() is None:
+        handle.stopped_by_runner = True
         proc.send_signal(signal.SIGTERM)
         try:
             proc.wait(timeout=15)
@@ -562,6 +661,291 @@ def stop_server(handle: ServerHandle | None) -> None:
             proc.kill()
             proc.wait(timeout=5)
     handle.log_file.close()
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _current_head_sha() -> str | None:
+    for value in (os.environ.get("GITHUB_SHA"), os.environ.get("COMMIT_SHA")):
+        if value:
+            return value
+    proc = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode == 0:
+        return proc.stdout.strip() or None
+    return None
+
+
+def _current_contract_key() -> str | None:
+    try:
+        from scripts.e2e.common import CONTRACT_SCHEMA_NAME, contract_key_identity, load_artifact
+
+        contract = load_artifact(PROJECT_ROOT / "ci" / "e2e-contract.json", CONTRACT_SCHEMA_NAME)
+        return contract_key_identity(contract)
+    except Exception:
+        return None
+
+
+def _load_attempt_records(path: str) -> list[dict[str, object]]:
+    attempts_path = Path(path)
+    if not attempts_path.exists():
+        return []
+    records: list[dict[str, object]] = []
+    for line_number, line in enumerate(
+        attempts_path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
+    ):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            print(
+                f"WARNING: skipping malformed attempt record {attempts_path}:{line_number}: {exc}",
+                file=sys.stderr,
+            )
+    return records
+
+
+def _canonical_outcome(report_outcome: str) -> str:
+    if report_outcome == "passed":
+        return "pass"
+    if report_outcome == "skipped":
+        return "skip"
+    return "fail"
+
+
+def _summarize_attempt_records(
+    records: list[dict[str, object]], server_evidence: dict[str, object]
+) -> list[dict[str, object]]:
+    from scripts.e2e.comparator import classify_failure, fingerprint_failure
+
+    by_node: dict[str, list[dict[str, object]]] = {}
+    for record in records:
+        nodeid = str(record.get("nodeid", "")).strip()
+        if not nodeid:
+            continue
+        by_node.setdefault(nodeid, []).append(record)
+
+    outcomes: list[dict[str, object]] = []
+    for nodeid in sorted(by_node):
+        node_records = by_node[nodeid]
+        attempts = sorted({int(record.get("attempt", 1)) for record in node_records})
+        final_attempt = attempts[-1]
+        final_attempt_records = [
+            record for record in node_records if int(record.get("attempt", 1)) == final_attempt
+        ]
+        final = final_attempt_records[-1]
+        call_records = [record for record in final_attempt_records if record.get("phase") == "call"]
+        failed_attempt_records = [
+            record
+            for record in final_attempt_records
+            if record.get("outcome") not in ("passed", "rerun")
+        ]
+        decision = (
+            call_records[-1]
+            if call_records
+            else failed_attempt_records[-1] if failed_attempt_records else final
+        )
+        first_attempt_records = [
+            record for record in node_records if int(record.get("attempt", 1)) == attempts[0]
+        ]
+        first_passed = all(record.get("outcome") == "passed" for record in first_attempt_records)
+        final_outcome = _canonical_outcome(str(decision.get("outcome", "failed")))
+        per_attempt_durations = {
+            attempt: round(
+                sum(
+                    float(record.get("duration_seconds") or 0.0)
+                    for record in node_records
+                    if int(record.get("attempt", 1)) == attempt
+                ),
+                3,
+            )
+            for attempt in attempts
+        }
+        max_attempt_duration = max(per_attempt_durations.values(), default=0.0)
+        total_duration = round(sum(per_attempt_durations.values()), 3)
+        summary: dict[str, object] = {
+            "nodeid": nodeid,
+            "attempts": len(attempts),
+            "first_attempt_outcome": "pass" if first_passed else "fail",
+            "final_outcome": final_outcome,
+            "duration_seconds": max_attempt_duration,
+            "total_duration_seconds": total_duration,
+            "attempt_durations_seconds": per_attempt_durations,
+        }
+        if final_outcome == "fail":
+            failed_records = [
+                record
+                for record in node_records
+                if record.get("outcome") not in ("passed", "rerun")
+            ]
+            failed = failed_records[-1] if failed_records else decision
+            failure = {
+                "phase": failed.get("phase", "call"),
+                "exception_class": failed.get("exception_class"),
+                "message": failed.get("message"),
+                "timeout": "timeout"
+                in f"{failed.get('exception_class', '')} {failed.get('message', '')}".lower(),
+            }
+            summary["category"] = classify_failure(failure, server_evidence)
+            summary["fingerprint"] = fingerprint_failure(failure)
+            summary["exception_class"] = failed.get("exception_class")
+            summary["message"] = failed.get("message")
+        outcomes.append(summary)
+    return outcomes
+
+
+def _standalone_script_path(item_id: str) -> str:
+    _, _, path = item_id.partition("::")
+    if not path:
+        raise ValueError(f"Invalid standalone target id: {item_id}")
+    return path
+
+
+def _run_standalone_targets(
+    target_ids: list[str],
+    *,
+    env: dict[str, str],
+    timeout_seconds: int,
+) -> list[dict[str, object]]:
+    from scripts.e2e.common import failure_fingerprint
+
+    results: list[dict[str, object]] = []
+    for item_id in target_ids:
+        script_path = _standalone_script_path(item_id)
+        started = time.time()
+        try:
+            completed = subprocess.run(
+                [sys.executable, script_path],
+                cwd=PROJECT_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout_seconds,
+            )
+            duration = round(time.time() - started, 3)
+            passed = completed.returncode == 0
+            result: dict[str, object] = {
+                "nodeid": item_id,
+                "attempts": 1,
+                "first_attempt_outcome": "pass" if passed else "fail",
+                "final_outcome": "pass" if passed else "fail",
+                "duration_seconds": duration,
+            }
+            if not passed:
+                message = f"{script_path} exited with code {completed.returncode}"
+                result["category"] = "test_body_exception"
+                result["fingerprint"] = failure_fingerprint("StandaloneExitError", message)
+                result["exception_class"] = "StandaloneExitError"
+                result["message"] = message
+                result["return_code"] = completed.returncode
+            results.append(result)
+        except subprocess.TimeoutExpired:
+            duration = round(time.time() - started, 3)
+            message = f"{script_path} timed out after {timeout_seconds}s"
+            results.append(
+                {
+                    "nodeid": item_id,
+                    "attempts": 1,
+                    "first_attempt_outcome": "fail",
+                    "final_outcome": "fail",
+                    "duration_seconds": duration,
+                    "category": "timeout",
+                    "fingerprint": failure_fingerprint("TimeoutExpired", message),
+                    "exception_class": "TimeoutExpired",
+                    "message": message,
+                }
+            )
+    return results
+
+
+def _write_run_envelope(
+    path: str,
+    *,
+    args: argparse.Namespace,
+    env: dict[str, str],
+    cmd: list[str],
+    selected_targets: list[str],
+    needs_server: bool,
+    server_handle: ServerHandle | None,
+    return_code: int,
+    started_at: str,
+    completed_at: str,
+    standalone_outcomes: list[dict[str, object]] | None = None,
+    error_message: str | None = None,
+) -> None:
+    if not path:
+        return
+
+    envelope_path = Path(path)
+    envelope_path.parent.mkdir(parents=True, exist_ok=True)
+    started_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    completed_dt = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+    duration_seconds = max(0.0, (completed_dt - started_dt).total_seconds())
+    server_ready = None
+    server_log = None
+    exit_info = {"code": None, "abnormal": False}
+    if needs_server:
+        server_ready = server_handle is not None or is_healthy(args.base_url)
+    if server_handle is not None:
+        server_log = str(server_handle.log_path)
+        exit_code = server_handle.process.poll()
+        exit_info["code"] = exit_code
+        exit_info["abnormal"] = (
+            exit_code is not None and not server_handle.stopped_by_runner and exit_code != 0
+        )
+    attempts_records = _load_attempt_records(args.e2e_attempts) if args.e2e_attempts else []
+    server_evidence = {
+        "readiness_achieved": server_ready,
+        "exit": exit_info,
+        "environment_missing": False,
+        "liveness_failures": [],
+        "base_url": args.base_url,
+        "log_path": server_log,
+    }
+    outcomes = _summarize_attempt_records(attempts_records, server_evidence)
+    if standalone_outcomes:
+        outcomes.extend(standalone_outcomes)
+        outcomes.sort(key=lambda item: str(item.get("nodeid", "")))
+    payload = {
+        "schema_name": "openace-e2e-run-envelope",
+        "schema_version": 1,
+        "category": args.category,
+        "base_url": args.base_url,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "duration_seconds": round(duration_seconds, 3),
+        "duration_minutes": round(duration_seconds / 60.0, 3),
+        "commit_sha": _current_head_sha(),
+        "contract_key": _current_contract_key(),
+        "job_conclusion": "success" if return_code == 0 else "failure",
+        "return_code": return_code,
+        "error": error_message,
+        "python": f"{sys.version_info.major}.{sys.version_info.minor}",
+        "playwright_browsers_path": env.get("PLAYWRIGHT_BROWSERS_PATH"),
+        "isolated_home": env.get("HOME"),
+        "selected_targets": selected_targets,
+        "pytest_command": cmd,
+        "artifacts": {
+            "junitxml": args.junitxml or None,
+            "attempts_jsonl": args.e2e_attempts or None,
+            "server_log": server_log,
+        },
+        "server": server_evidence,
+        "outcomes": outcomes,
+    }
+    envelope_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -572,16 +956,59 @@ def main(argv: list[str] | None = None) -> int:
         args.base_url = isolated_base_url(args.base_url)
     env["BASE_URL"] = args.base_url
     server_handle: ServerHandle | None = None
+    selected_targets: list[str] = []
+    cmd: list[str] = []
+    standalone_outcomes: list[dict[str, object]] = []
+    return_code = 1
+    error_message: str | None = None
+    started_at = _utc_now()
+    needs_server = category_needs_server(args.category)
 
     try:
+        selected_targets = resolved_targets(args)
+        needs_server = execution_needs_server(args, selected_targets)
         cmd = build_pytest_command(args)
         print("Pytest command:")
         print(" ".join(cmd))
         if args.dry_run:
+            return_code = 0
             return 0
-        server_handle = start_server_if_needed(args, env)
-        return subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=False).returncode
+        server_handle = start_server_if_needed(args, env, needs_server)
+        return_code = 0
+        if cmd:
+            return_code = subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=False).returncode
+        standalone_selected = standalone_targets(selected_targets)
+        if standalone_selected:
+            standalone_outcomes = _run_standalone_targets(
+                standalone_selected,
+                env=env,
+                timeout_seconds=args.timeout or 240,
+            )
+            if any(item.get("final_outcome") != "pass" for item in standalone_outcomes):
+                return_code = return_code or 1
+        return return_code
+    except Exception as exc:
+        error_message = str(exc)
+        raise
     finally:
+        completed_at = _utc_now()
+        try:
+            _write_run_envelope(
+                args.envelope_json,
+                args=args,
+                env=env,
+                cmd=cmd,
+                selected_targets=selected_targets,
+                needs_server=needs_server,
+                server_handle=server_handle,
+                return_code=return_code,
+                started_at=started_at,
+                completed_at=completed_at,
+                standalone_outcomes=standalone_outcomes,
+                error_message=error_message,
+            )
+        except Exception as exc:
+            print(f"WARNING: failed to write run envelope: {exc}", file=sys.stderr)
         stop_server(server_handle)
         if test_home is not None:
             test_home.cleanup()

@@ -23,6 +23,8 @@ STATE_SCHEMA_NAME = "openace-e2e-state"
 PROMOTION_SCHEMA_NAME = "openace-e2e-promotion"
 CONTRACT_SCHEMA_NAME = "openace-e2e-contract"
 MANIFEST_SCHEMA_NAME = "openace-e2e-expected-nodeids"
+RUN_ENVELOPE_SCHEMA_NAME = "openace-e2e-run-envelope"
+COMPARE_RESULT_SCHEMA_NAME = "openace-e2e-compare-result"
 
 MODES = ("pytest-automated", "standalone-automated", "manual-demo")
 EXECUTORS = ("pytest", "standalone")
