@@ -17,7 +17,6 @@ import pytest
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.user_repo import UserRepository
 
-
 pytestmark = [pytest.mark.integration, pytest.mark.issue(2740)]
 
 
@@ -154,9 +153,7 @@ class TestContentFilterAuditUsernameMock:
         # Create safe details (matching Issue #2747 requirements)
         safe_details = {
             "risk_level": "critical",
-            "matched_rules": [
-                {"type": "pii_ssn", "risk": "critical"}  # No 'sample' field
-            ],
+            "matched_rules": [{"type": "pii_ssn", "risk": "critical"}],  # No 'sample' field
         }
 
         # Log with safe details

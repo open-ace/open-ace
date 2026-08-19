@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Any
 
-from flask import Response, g, jsonify, request, stream_with_context
+from flask import Response, jsonify, request, stream_with_context
 
 # ── Model-gateway seam (removable) ────────────────────────────────────────
 # When the LiteLLM-compatible model gateway is enabled, ``get_gateway_planner()``

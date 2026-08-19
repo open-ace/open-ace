@@ -5,13 +5,12 @@ for content filter audit logging.
 """
 
 import json
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from flask import Flask, g
 
 from app.modules.workspace.llm_proxy_handler import _check_content_filter
-
 
 pytestmark = pytest.mark.issue(2740)
 
@@ -209,7 +208,9 @@ class TestUsernameFetchIntegration:
         from app.repositories.user_repo import UserRepository
 
         # Verify method exists
-        assert hasattr(UserRepository, "get_user_by_id"), "UserRepository should have get_user_by_id method"
+        assert hasattr(
+            UserRepository, "get_user_by_id"
+        ), "UserRepository should have get_user_by_id method"
 
         # Method signature: get_user_by_id(self, user_id: int) -> dict | None
         # This test verifies the repository can be instantiated
