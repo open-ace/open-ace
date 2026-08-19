@@ -435,9 +435,7 @@ def analyze_patterns():
     days = request.args.get("days", 30, type=int)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
-    patterns = _get_audit_analyzer().analyze_patterns(
-        start_time=start_time, tenant_id=tenant_id
-    )
+    patterns = _get_audit_analyzer().analyze_patterns(start_time=start_time, tenant_id=tenant_id)
 
     return jsonify(patterns)
 
@@ -456,9 +454,7 @@ def detect_anomalies():
     days = request.args.get("days", 7, type=int)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
-    anomalies = _get_audit_analyzer().detect_anomalies(
-        start_time=start_time, tenant_id=tenant_id
-    )
+    anomalies = _get_audit_analyzer().detect_anomalies(start_time=start_time, tenant_id=tenant_id)
 
     # Load status info for all anomalies
     statuses = _get_anomaly_statuses()

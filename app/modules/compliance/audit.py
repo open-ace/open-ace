@@ -174,7 +174,9 @@ class AuditAnalyzer:
             anomalies.append(failed_login_anomaly)
 
         # Detect rapid activity anomalies
-        rapid_activity_anomalies = self._detect_rapid_activity_anomaly(start_time, end_time, tenant_id)
+        rapid_activity_anomalies = self._detect_rapid_activity_anomaly(
+            start_time, end_time, tenant_id
+        )
         anomalies.extend(rapid_activity_anomalies)
 
         # Detect off-hours activity anomalies

@@ -8,8 +8,8 @@ Create Date: 2026-08-19
 
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "20260819_001"
@@ -26,9 +26,7 @@ def upgrade() -> None:
 
     if dialect == "postgresql":
         # Add tenant_id column (nullable initially to allow existing data)
-        op.add_column(
-            "anomaly_status", sa.Column("tenant_id", sa.Integer(), nullable=True)
-        )
+        op.add_column("anomaly_status", sa.Column("tenant_id", sa.Integer(), nullable=True))
 
         # Add foreign key constraint
         op.create_foreign_key(
@@ -52,8 +50,7 @@ def upgrade() -> None:
         )
 
         # Backfill tenant_id from processed_by user's tenant
-        op.execute(
-            """
+        op.execute("""
             UPDATE anomaly_status
             SET tenant_id = (
                 SELECT u.tenant_id
@@ -61,14 +58,11 @@ def upgrade() -> None:
                 WHERE u.id = anomaly_status.processed_by
             )
             WHERE processed_by IS NOT NULL
-            """
-        )
+            """)
 
     else:  # SQLite
         # Add tenant_id column
-        op.add_column(
-            "anomaly_status", sa.Column("tenant_id", sa.Integer(), nullable=True)
-        )
+        op.add_column("anomaly_status", sa.Column("tenant_id", sa.Integer(), nullable=True))
 
         # Drop old unique index
         op.drop_index("ix_anomaly_status_type_hash", table_name="anomaly_status")
@@ -100,9 +94,7 @@ def downgrade() -> None:
         )
 
         # Drop foreign key constraint
-        op.drop_constraint(
-            "anomaly_status_tenant_id_fkey", "anomaly_status", type_="foreignkey"
-        )
+        op.drop_constraint("anomaly_status_tenant_id_fkey", "anomaly_status", type_="foreignkey")
 
         # Drop tenant_id column
         op.drop_column("anomaly_status", "tenant_id")
