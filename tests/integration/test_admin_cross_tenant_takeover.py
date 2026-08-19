@@ -128,10 +128,16 @@ class _FakeUserRepo:
             if tenant_id is None or u.get("tenant_id") == tenant_id
         ]
 
-    def get_user_by_username(self, username):
+    def get_user_by_username(self, username, include_deleted=False):
         return None
 
-    def get_user_by_email(self, email):
+    def get_user_by_email(self, email, include_deleted=False):
+        return None
+
+    def get_soft_deleted_user_by_username(self, username):
+        return None
+
+    def get_soft_deleted_user_by_email(self, email):
         return None
 
     def update_password(self, user_id, password_hash):

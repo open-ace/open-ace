@@ -117,7 +117,7 @@ class TestSoftDeleteConflictDetection:
         repo = UserRepository(db=tmp_db)
 
         # Insert an active user
-        active_user_id = _insert_user(tmp_db, username="active_user")
+        _insert_user(tmp_db, username="active_user")
 
         # Insert a soft-deleted user
         deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -137,9 +137,7 @@ class TestSoftDeleteConflictDetection:
         repo = UserRepository(db=tmp_db)
 
         # Insert an active user
-        active_user_id = _insert_user(
-            tmp_db, username="active_email_user", email="active_email@test.com"
-        )
+        _insert_user(tmp_db, username="active_email_user", email="active_email@test.com")
 
         # Insert a soft-deleted user
         deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -371,7 +369,7 @@ class TestIncludeDeletedBackwardCompatibility:
 
         # Create deleted user
         deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        deleted_user_id = _insert_user(tmp_db, username="deleted_default", deleted_at=deleted_at)
+        _insert_user(tmp_db, username="deleted_default", deleted_at=deleted_at)
 
         # Default should find active user
         user = repo.get_user_by_username("active_default")
@@ -393,7 +391,7 @@ class TestIncludeDeletedBackwardCompatibility:
 
         # Create deleted user
         deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        deleted_user_id = _insert_user(
+        _insert_user(
             tmp_db,
             username="deleted_email_default",
             email="deleted_default@test.com",
