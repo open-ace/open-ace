@@ -707,7 +707,9 @@ class TenantRepository:
                     )
 
                     settings = TenantSettings(
-                        allowed_tools=allowed_tools if allowed_tools else TenantSettings().allowed_tools,
+                        allowed_tools=(
+                            allowed_tools if allowed_tools else TenantSettings().allowed_tools
+                        ),
                         content_filter_enabled=bool(settings_row.get("content_filter_enabled", 1)),
                         audit_log_enabled=bool(settings_row.get("audit_log_enabled", 1)),
                         audit_log_retention_days=settings_row.get("audit_log_retention_days", 90),
@@ -764,7 +766,11 @@ class TenantRepository:
             tenant_id: Tenant ID.
             settings_dict: Settings dictionary to update.
         """
-        from app.repositories.database import adapt_boolean_value, get_param_placeholder, is_postgresql
+        from app.repositories.database import (
+            adapt_boolean_value,
+            get_param_placeholder,
+            is_postgresql,
+        )
 
         p = get_param_placeholder()
 

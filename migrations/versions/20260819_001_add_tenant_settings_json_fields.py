@@ -58,9 +58,7 @@ def upgrade() -> None:
                     "allowed_tools",
                     sa.dialects.postgresql.JSONB,
                     nullable=True,
-                    server_default=sa.text(
-                        f"'{json.dumps(DEFAULT_ALLOWED_TOOLS)}'::jsonb"
-                    ),
+                    server_default=sa.text(f"'{json.dumps(DEFAULT_ALLOWED_TOOLS)}'::jsonb"),
                 ),
             )
         else:
@@ -124,15 +122,13 @@ def upgrade() -> None:
         connection = op.get_bind()
 
         # Get all tenant settings rows with their JSON settings
-        result = connection.execute(
-            sa.text("""
+        result = connection.execute(sa.text("""
                 SELECT ts.id, ts.tenant_id, t.settings
                 FROM tenant_settings ts
                 JOIN tenants t ON t.id = ts.tenant_id
                 WHERE t.settings IS NOT NULL
                   AND (ts.allowed_tools IS NULL OR ts.roi_assumptions IS NULL)
-            """)
-        )
+            """))
 
         for row in result:
             settings_id = row[0]
@@ -140,7 +136,11 @@ def upgrade() -> None:
 
             if settings_json:
                 try:
-                    settings_dict = json.loads(settings_json) if isinstance(settings_json, str) else settings_json
+                    settings_dict = (
+                        json.loads(settings_json)
+                        if isinstance(settings_json, str)
+                        else settings_json
+                    )
 
                     allowed_tools = settings_dict.get("allowed_tools", DEFAULT_ALLOWED_TOOLS)
                     roi_assumptions = settings_dict.get("roi_assumptions")
@@ -155,11 +155,15 @@ def upgrade() -> None:
                         {
                             "id": settings_id,
                             "allowed_tools": json.dumps(allowed_tools),
-                            "roi_assumptions": json.dumps(roi_assumptions) if roi_assumptions else None,
-                        }
+                            "roi_assumptions": (
+                                json.dumps(roi_assumptions) if roi_assumptions else None
+                            ),
+                        },
                     )
                 except (json.JSONDecodeError, TypeError) as e:
-                    log.warning(f"Failed to parse settings JSON for tenant_settings.id={settings_id}: {e}")
+                    log.warning(
+                        f"Failed to parse settings JSON for tenant_settings.id={settings_id}: {e}"
+                    )
 
     log.info("Migration completed successfully")
 
