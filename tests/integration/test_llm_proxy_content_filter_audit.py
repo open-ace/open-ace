@@ -239,7 +239,15 @@ class TestContentFilterAuditUsernameDatabase:
             )
 
     def test_content_blocked_records_username_real_db(self, test_db, test_user):
-        """Verify audit log records username when content is blocked (real database)."""
-        # This test requires real database
-        # Implementation similar to previous version but marked to skip by default
-        pass
+        """Verify audit log records username when content is blocked (real database).
+
+        This test is skipped by default as it requires a real database environment.
+        To enable: remove the skipif decorator on the class and ensure DATABASE_URL is set.
+        """
+        # This test requires real database with users and audit_logs tables
+        # Marked as skipped by default via @pytest.mark.skipif on class
+        # Implementation placeholder - would need:
+        # 1. Create audit log entry with username
+        # 2. Query audit_logs table
+        # 3. Verify username matches expected value
+        pytest.skip("Real database test - requires DATABASE_URL and schema setup")
