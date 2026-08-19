@@ -140,7 +140,7 @@ def upgrade() -> None:
 
             if settings_json:
                 try:
-                    settings_dict = json.loads(settings_json) if isinstance(settings_json, str) else settings_dict
+                    settings_dict = json.loads(settings_json) if isinstance(settings_json, str) else settings_json
 
                     allowed_tools = settings_dict.get("allowed_tools", DEFAULT_ALLOWED_TOOLS)
                     roi_assumptions = settings_dict.get("roi_assumptions")

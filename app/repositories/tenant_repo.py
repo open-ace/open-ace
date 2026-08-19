@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, cast
 
 from app.models.tenant import QuotaConfig, Tenant, TenantSettings, TenantUsage
-from app.repositories.database import Database, adapt_boolean_value
+from app.repositories.database import Database, adapt_boolean_value, is_postgresql
 from app.utils.helpers import parse_db_datetime
 
 logger = logging.getLogger(__name__)
@@ -688,7 +688,6 @@ class TenantRepository:
                 pass
 
             try:
-                from app.repositories.database import is_postgresql
 
                 settings_row = self.db.fetch_one(
                     "SELECT * FROM tenant_settings WHERE tenant_id = ?", (tenant_id,)
