@@ -316,8 +316,10 @@ CREATE SEQUENCE annotations_id_seq
 ALTER SEQUENCE annotations_id_seq OWNED BY annotations.id;
 CREATE TABLE anomaly_status (
     id integer NOT NULL,
+    anomaly_id character varying(64) NOT NULL DEFAULT ''::character varying,
     anomaly_type character varying(100) NOT NULL,
     affected_users_hash character varying(64) NOT NULL,
+    tenant_id integer,
     status character varying(20) DEFAULT 'pending'::character varying NOT NULL,
     processed_by integer,
     processed_at timestamp without time zone,
@@ -3902,6 +3904,8 @@ CREATE INDEX idx_workflows_status_created ON autonomous_workflows USING btree (s
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows USING btree (user_id, status);
 
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
+
+CREATE UNIQUE INDEX ix_anomaly_status_anomaly_id ON anomaly_status USING btree (anomaly_id) WHERE anomaly_id <> '';
 
 
 --
