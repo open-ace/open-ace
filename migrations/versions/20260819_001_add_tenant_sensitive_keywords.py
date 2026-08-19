@@ -114,23 +114,16 @@ def upgrade() -> None:
         )
 
         # Partial index for enabled keywords (high-frequency query)
-        if dialect == "postgresql":
-            op.create_index(
-                "idx_tenant_keywords_enabled",
-                "tenant_sensitive_keywords",
-                ["tenant_id", "is_enabled"],
-                unique=False,
-                postgresql_where=sa.text("is_enabled = true"),
-            )
-        else:
-            # SQLite partial index
-            op.create_index(
-                "idx_tenant_keywords_enabled",
-                "tenant_sensitive_keywords",
-                ["tenant_id", "is_enabled"],
-                unique=False,
-                sqlite_where=sa.text("is_enabled = 1"),
-            )
+        # Use 'true' for both dialects - SQLite supports 'true' as boolean literal
+        # and schema-sync normalization will handle it consistently
+        op.create_index(
+            "idx_tenant_keywords_enabled",
+            "tenant_sensitive_keywords",
+            ["tenant_id", "is_enabled"],
+            unique=False,
+            postgresql_where=sa.text("is_enabled = true"),
+            sqlite_where=sa.text("is_enabled = true"),
+        )
 
     # ========================================================================
     # tenant_keywords_version table
