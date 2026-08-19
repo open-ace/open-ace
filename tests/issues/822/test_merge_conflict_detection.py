@@ -388,10 +388,11 @@ class TestDoMergeDeferredRetry:
             == ""
         )
 
-        # get_changed_files now derives the effective round delta itself:
-        # it detects merge commits (rev-parse <pr>^2) and re-derives the
-        # merge base (fetch + merge-base vs the fetched head, falling back
-        # to origin/main). The graph merge-base fetch stays the entrypoint.
+        # _validate_autonomous_change_scope (wrapping get_changed_files)
+        # now derives the effective round delta itself: it detects merge
+        # commits (rev-parse <pr>^2) and re-derives the merge base (fetch +
+        # merge-base vs the fetched head, falling back to origin/main). The
+        # graph merge-base fetch stays the entrypoint.
         assert gh._run_git.call_args_list[:2] == [
             call(["fetch", "origin", "main"]),
             call(["merge-base", "resolved-pr-head", "fetched-main-head"], check=False),
