@@ -840,6 +840,11 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "i18n_key": "actionUserDelete",
                 },
                 {
+                    "value": "user_restore",
+                    "label": "User Restore",
+                    "i18n_key": "actionUserRestore",
+                },
+                {
                     "value": "user_password_change",
                     "label": "Password Change",
                     "i18n_key": "actionUserPasswordChange",
