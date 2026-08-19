@@ -134,7 +134,12 @@ def delete_model_gateway_config():
 
 @model_gateway_bp.route("/management/model-gateway-config/test", methods=["POST"])
 def test_model_gateway_connection():
-    """Test the gateway connection with supplied (or stored) credentials."""
+    """Test the gateway connection with supplied (or stored) credentials.
+
+    Issue #2809: Returns 400 for security-blocked URLs (SSRF/policy violations)
+    instead of 200 with ok=false, making security rejections distinguishable
+    from network failures.
+    """
     try:
         data = request.get_json() or {}
         base_url = data.get("base_url")
@@ -147,9 +152,29 @@ def test_model_gateway_connection():
                 base_url = base_url or stored.base_url
                 api_key = api_key or stored.api_key
 
+        # Issue #2809: Extract user context for validation and audit
+        user_id = g.user.get("id") if hasattr(g, "user") and g.user else None
+        tenant_id = g.user.get("tenant_id", 0) if hasattr(g, "user") and g.user else 0
+
         result = get_gateway_service().test_connection(
-            base_url=base_url or "", api_key=api_key or ""
+            base_url=base_url or "",
+            api_key=api_key or "",
+            tenant_id=tenant_id,
+            user_id=user_id,
         )
+
+        # Issue #2809: Return 400 for security-blocked URLs
+        if result.get("blocked"):
+            return (
+                jsonify(
+                    {
+                        "success": True,
+                        "data": result,
+                    }
+                ),
+                400,
+            )
+
         return jsonify({"success": True, "data": result})
     except Exception as e:
         logger.error("Error testing model gateway connection: %s", e)
