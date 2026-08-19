@@ -29,3 +29,10 @@ def test_parse_garbage_and_empty_returns_none():
     assert parse_github_iso_datetime("   ") is None
     assert parse_github_iso_datetime("not-a-date") is None
     assert parse_github_iso_datetime(None) is None
+
+
+def test_parse_offsetless_datetime_rejected():
+    """A parseable but offset-less value would blow up the caller's aware
+    ``now() - committed_at`` subtraction with a TypeError, escaping its
+    fail-closed contract — reject it here instead (PR review finding)."""
+    assert parse_github_iso_datetime("2026-08-18 17:43:12") is None

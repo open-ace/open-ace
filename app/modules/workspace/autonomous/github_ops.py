@@ -32,7 +32,10 @@ def parse_github_iso_datetime(raw) -> datetime | None:
 
     GitHub timestamps end in ``Z``; ``datetime.fromisoformat`` only parses
     that suffix from 3.11 while this repo supports 3.10, so normalize first.
-    Returns None for empty/unparseable input — callers fail closed.
+    A parsed value without a UTC offset is rejected too — callers subtract
+    it from an aware ``now()`` and aware-minus-naive raises, which would
+    escape their fail-closed contract. Returns None for empty, unparseable
+    or offset-less input — callers fail closed.
     """
     if not isinstance(raw, str):
         return None
@@ -40,10 +43,14 @@ def parse_github_iso_datetime(raw) -> datetime | None:
     if not text:
         return None
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         logger.warning("unparseable GitHub datetime: %r", raw)
         return None
+    if parsed.tzinfo is None:
+        logger.warning("GitHub datetime without UTC offset: %r", raw)
+        return None
+    return parsed
 
 
 # ============================================================================
