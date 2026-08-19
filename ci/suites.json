@@ -12,6 +12,7 @@
     "critical-e2e",
     "default-collection",
     "dependency-audit",
+    "e2e-governance",
     "frontend",
     "issue-collection",
     "legacy-pr",
@@ -41,6 +42,18 @@
         }
       ]
     },
+    "e2e-governance": {
+      "description": "Validate E2E governance artifacts, ledgers, and lane closures",
+      "timeout_seconds": 180,
+      "commands": [
+        ["{python}", "scripts/e2e/inventory.py", "validate"],
+        ["{python}", "scripts/e2e/manifest.py", "validate"],
+        ["{python}", "scripts/e2e/governance.py", "validate"],
+        ["{python}", "scripts/e2e/selector.py", "--event", "pr"],
+        ["{python}", "scripts/e2e/selector.py", "--event", "nightly"],
+        ["{python}", "scripts/e2e/selector.py", "--event", "weekly"]
+      ]
+    },
     "python-core": {
       "description": "Required deterministic Python suite on the production runtime",
       "timeout_seconds": 420,
@@ -51,7 +64,7 @@
     },
     "compatibility-smoke": {
       "description": "Fast minimum/maximum Python compatibility coverage",
-      "timeout_seconds": 360,
+      "timeout_seconds": 420,
       "commands": [
         ["{python}", "-m", "compileall", "-q", "app", "scripts", "cli.py", "server.py"],
         ["{python}", "-m", "pytest", "tests/unit/", "-q", "--maxfail=1", "-m", "not performance"]

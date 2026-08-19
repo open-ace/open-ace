@@ -438,7 +438,10 @@ def cmd_classify(args: argparse.Namespace) -> int:
     Refuses (infra count must be 0) when any run carries an
     infrastructure_error classification - infra is never legalized as debt.
     """
-    from .comparator import classify_three_way
+    try:
+        from .comparator import classify_three_way
+    except ImportError:  # pragma: no cover - exercised via CLI
+        from comparator import classify_three_way  # type: ignore[no-redef]
 
     runs = [json.loads(Path(p).read_text(encoding="utf-8")) for p in args.runs]
     errors = validate_reference_runs(runs)
@@ -524,6 +527,7 @@ def main(argv: list[str] | None = None) -> int:
     val.add_argument("--state", type=Path, default=DEFAULT_STATE)
     val.add_argument("--promotion", type=Path, default=DEFAULT_PROMOTION)
     val.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    val.add_argument("--json-output", type=Path, default=None)
     val.set_defaults(func=lambda a: _run_validate(a))
 
     sd = sub.add_parser("set-disposition", help="set a file's inventory disposition")
@@ -590,6 +594,9 @@ def _run_validate(args: argparse.Namespace) -> int:
         promotion_path=args.promotion,
         manifest_path=args.manifest,
     )
+    if args.json_output:
+        args.json_output.parent.mkdir(parents=True, exist_ok=True)
+        args.json_output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
     for line in errors:
         print(f"ERROR: {line}", file=sys.stderr)

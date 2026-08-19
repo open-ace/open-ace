@@ -57,7 +57,13 @@ E2E_PATTERNS = (
     "app/routes/**",
     "app/remote_ws_handler.py",
     "frontend/**",
+    "scripts/run_extended_tests.py",
     "tests/e2e/**",
+)
+E2E_GOVERNANCE_PATTERNS = (
+    "ci/e2e-*.json",
+    "scripts/e2e/**",
+    "scripts/run_extended_tests.py",
 )
 PACKAGE_PATTERNS = (
     "Dockerfile",
@@ -196,6 +202,8 @@ def select_pr_suites(changed_files: list[str]) -> list[str]:
         selected.add("postgres")
     if any(matches(path, E2E_PATTERNS) for path in clean):
         selected.add("critical-e2e")
+    if any(matches(path, E2E_GOVERNANCE_PATTERNS) for path in clean):
+        selected.add("e2e-governance")
     if any(matches(path, PACKAGE_PATTERNS) for path in clean):
         selected.add("package")
     if any(matches(path, DEPENDENCY_PATTERNS) for path in clean):

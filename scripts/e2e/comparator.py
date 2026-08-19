@@ -17,17 +17,32 @@ Two responsibilities:
 
 from __future__ import annotations
 
+import argparse
+import json
+import sys
+from pathlib import Path
 from typing import Any
 
 try:  # package-style import (tests) vs direct-script import (CLI)
-    from .common import OUTCOME_CATEGORIES, GovernanceError, failure_fingerprint, normalize_message
-except ImportError:  # pragma: no cover - exercised via CLI
-    from common import (  # type: ignore[no-redef]
-        OUTCOME_CATEGORIES,
+    from .common import (
+        COMPARE_RESULT_SCHEMA_NAME,
+        RUN_ENVELOPE_SCHEMA_NAME,
         GovernanceError,
         failure_fingerprint,
+        load_artifact,
         normalize_message,
     )
+    from .state import DEFAULT_STATE, load_state
+except ImportError:  # pragma: no cover - exercised via CLI
+    from common import (  # type: ignore[no-redef]
+        COMPARE_RESULT_SCHEMA_NAME,
+        RUN_ENVELOPE_SCHEMA_NAME,
+        GovernanceError,
+        failure_fingerprint,
+        load_artifact,
+        normalize_message,
+    )
+    from state import DEFAULT_STATE, load_state  # type: ignore[no-redef]
 
 INFRA = "infrastructure_error"
 LANE_KILLED_CONCLUSIONS = ("cancelled", "timed_out")
@@ -284,3 +299,188 @@ def compare_run(
     )
     diff["verdict_exit_code"] = 1 if blocking else 0
     return diff
+
+
+def load_run_envelope(path: Path) -> dict[str, Any]:
+    return load_artifact(path, RUN_ENVELOPE_SCHEMA_NAME)
+
+
+def _render_markdown(
+    selection: dict[str, Any],
+    envelope: dict[str, Any],
+    diff: dict[str, Any],
+    budget_errors: list[str],
+    governance_report: dict[str, Any],
+) -> str:
+    outcomes = sorted(
+        envelope.get("outcomes") or [],
+        key=lambda item: float(item.get("duration_seconds") or 0),
+        reverse=True,
+    )
+    slowest = outcomes[:10]
+    server = envelope.get("server") or {}
+    lines = [
+        "## Full E2E Governance",
+        "",
+        f"- exit code: **{diff['verdict_exit_code']}**",
+        f"- event: `{selection.get('event', 'nightly')}`",
+        f"- selected: normal `{len(selection.get('normal') or [])}` / advisory `{len(selection.get('advisory') or [])}` / invalid `{len(selection.get('invalid') or {})}`",
+        f"- observed outcomes: `{len(envelope.get('outcomes') or [])}`",
+        f"- known-only clean run: `{diff['known_only']}`",
+        "",
+        "### Status",
+        "",
+        f"- new failures: `{len(diff['new_failures'])}`",
+        f"- changed failures: `{len(diff['changed'])}`",
+        f"- missing results: `{len(diff['missing'])}`",
+        f"- unexpected results: `{len(diff['unexpected'])}`",
+        f"- unexpected skips: `{len(diff['unexpected_skips'])}`",
+        f"- invalid results: `{len(diff['invalid'])}`",
+        f"- resolved awaiting shrink: `{len(diff['resolved_pending_shrink'])}`",
+        "",
+        "### Budget",
+        "",
+        *([f"- {line}" for line in budget_errors] or ["- nightly budget checks passed"]),
+        "",
+        "### Service Evidence",
+        "",
+        f"- readiness achieved: `{server.get('readiness_achieved')}`",
+        f"- server abnormal exit: `{(server.get('exit') or {}).get('abnormal')}`",
+        f"- server exit code: `{(server.get('exit') or {}).get('code')}`",
+        f"- server log: `{server.get('log_path')}`",
+        "",
+        "### Slowest Items",
+        "",
+    ]
+    if slowest:
+        for item in slowest:
+            lines.append(
+                f"- `{item['nodeid']}` — {item.get('duration_seconds', 0)}s / "
+                f"attempts `{item.get('attempts', 0)}` / final `{item.get('final_outcome')}`"
+            )
+    else:
+        lines.append("- no observed items")
+    lines += ["", "### Governance Report", ""]
+    counts = (governance_report.get("counts") or {}) if governance_report else {}
+    for key, value in counts.items():
+        lines.append(f"- {key}: `{value}`")
+    lines.append("")
+    if diff["invalid"]:
+        lines.append("### Invalid Details")
+        lines.append("")
+        for item_id, reason in sorted(diff["invalid"].items()):
+            lines.append(f"- `{item_id}` — {reason}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def compare_selection_run(
+    selection: dict[str, Any],
+    envelope: dict[str, Any],
+    state_entries: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any], list[str]]:
+    try:
+        from .governance import check_budgets
+    except ImportError:  # pragma: no cover - exercised via CLI
+        from governance import check_budgets  # type: ignore[no-redef]
+
+    expected_ids = sorted((selection.get("normal") or []) + (selection.get("advisory") or []))
+    raw_outcomes = [entry for entry in envelope.get("outcomes") or [] if entry.get("nodeid")]
+    observed = {entry["nodeid"]: entry for entry in raw_outcomes}
+    diff = compare_run(
+        expected_ids,
+        observed,
+        state_entries,
+        job_conclusion=envelope.get("job_conclusion"),
+        envelope_present=True,
+    )
+    seen_counts: dict[str, int] = {}
+    for entry in raw_outcomes:
+        nodeid = str(entry["nodeid"])
+        seen_counts[nodeid] = seen_counts.get(nodeid, 0) + 1
+    duplicates = sorted(nodeid for nodeid, count in seen_counts.items() if count > 1)
+    if duplicates:
+        diff["duplicates"] = duplicates
+        for nodeid in duplicates:
+            diff["invalid"][nodeid] = f"duplicate observed results ({seen_counts[nodeid]})"
+        diff["verdict_exit_code"] = 1
+    if not expected_ids:
+        diff["invalid"]["__coverage__"] = "nightly selection is empty (no governed coverage)"
+        diff["verdict_exit_code"] = 1
+    if envelope.get("error"):
+        diff["invalid"]["__execution__"] = f"runner error: {envelope['error']}"
+        diff["verdict_exit_code"] = 1
+    if int(envelope.get("return_code") or 0) != 0 and not raw_outcomes:
+        diff["invalid"][
+            "__execution__"
+        ] = f"runner exited {envelope.get('return_code')} without observed outcomes"
+        diff["verdict_exit_code"] = 1
+    per_item = {
+        item["nodeid"]: float(item.get("duration_seconds") or 0)
+        for item in raw_outcomes
+        if item.get("nodeid")
+    }
+    budget_errors = check_budgets("nightly", float(envelope.get("duration_minutes") or 0), per_item)
+    if budget_errors:
+        diff["invalid"]["__budget__"] = "; ".join(budget_errors)
+        diff["verdict_exit_code"] = 1
+    if selection.get("closure_errors"):
+        diff["invalid"]["__closure__"] = "; ".join(selection["closure_errors"])
+        diff["verdict_exit_code"] = 1
+    if selection.get("invalid"):
+        diff["invalid"][
+            "__selection__"
+        ] = f"{len(selection['invalid'])} invalid item(s) selected before execution"
+        diff["verdict_exit_code"] = 1
+    return diff, budget_errors
+
+
+def run_cli(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    compare = sub.add_parser(
+        "compare", help="compare one full-E2E envelope against the nightly selection"
+    )
+    compare.add_argument("--selection", type=Path, required=True)
+    compare.add_argument("--envelope", type=Path, required=True)
+    compare.add_argument("--state", type=Path, default=DEFAULT_STATE)
+    compare.add_argument("--json-output", type=Path, required=True)
+    compare.add_argument("--markdown-output", type=Path, required=True)
+    compare.add_argument("--governance-report", type=Path, default=None)
+
+    args = parser.parse_args(argv)
+    if args.cmd != "compare":
+        return 1
+
+    selection = json.loads(args.selection.read_text(encoding="utf-8"))
+    envelope = load_run_envelope(args.envelope)
+    state = load_state(args.state)
+    governance_report: dict[str, Any] = {}
+    if args.governance_report and args.governance_report.exists():
+        governance_report = json.loads(args.governance_report.read_text(encoding="utf-8"))
+    diff, budget_errors = compare_selection_run(selection, envelope, state.get("entries") or {})
+    payload = {
+        "schema_name": COMPARE_RESULT_SCHEMA_NAME,
+        "schema_version": 1,
+        "selection_counts": selection.get("counts", {}),
+        "diff": diff,
+        "budget_errors": budget_errors,
+        "governance_report": governance_report,
+    }
+    args.json_output.parent.mkdir(parents=True, exist_ok=True)
+    args.json_output.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    args.markdown_output.write_text(
+        _render_markdown(selection, envelope, diff, budget_errors, governance_report) + "\n",
+        encoding="utf-8",
+    )
+    print(json.dumps({"verdict_exit_code": diff["verdict_exit_code"]}, indent=2))
+    for item_id, reason in sorted(diff["invalid"].items()):
+        print(f"INVALID: {item_id}: {reason}", file=sys.stderr)
+    return int(diff["verdict_exit_code"])
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(run_cli())
