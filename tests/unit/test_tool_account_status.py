@@ -323,7 +323,7 @@ class TestIncrementMessageCount:
         assert result is True
         call_args = self.db.execute.call_args
         query = call_args[0][0]
-        assert "observed_message_count = observed_message_count + ?" in query
+        assert "COALESCE(observed_message_count, 0) + ?" in query
         params = call_args[0][1]
         assert params == (10, 1)
 
