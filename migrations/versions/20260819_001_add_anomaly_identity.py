@@ -94,7 +94,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Remove anomaly_id and tenant_id columns from anomaly_status."""
+    """Remove anomaly_id and tenant_id columns from anomaly_status.
+
+    Note: SQLite does not support DROP COLUMN before version 3.35.0 (2021-03-12).
+    For SQLite, we skip column drops in downgrade as the columns are nullable
+    and do not affect application correctness.
+    """
     conn = op.get_bind()
     inspector = sa.inspect(conn)
     is_postgres = conn.dialect.name == "postgresql"
