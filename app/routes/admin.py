@@ -641,7 +641,9 @@ def api_update_user_quota(user_id):
                     if validation_result.get("available"):
                         error_response["details"]["available"] = validation_result["available"]
                     if validation_result.get("is_unlimited_tenant") is not None:
-                        error_response["details"]["is_unlimited_tenant"] = validation_result["is_unlimited_tenant"]
+                        error_response["details"]["is_unlimited_tenant"] = validation_result[
+                            "is_unlimited_tenant"
+                        ]
 
                     return jsonify(error_response), 400
 

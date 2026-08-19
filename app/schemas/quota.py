@@ -430,7 +430,9 @@ def validate_tenant_allocation(
             result["error"] = "Tenant daily token quota exceeded"
             result["available"]["daily_token"] = available_daily
             result["details"] = build_quota_error_details(
-                "daily_token", daily_token_limit, allocated_daily_token,
+                "daily_token",
+                daily_token_limit,
+                allocated_daily_token,
                 new_daily_token_quota if new_daily_token_quota is not EXPLICIT_NULL else None,
                 TOKEN_QUOTA_MULTIPLIER,
             )
@@ -462,7 +464,9 @@ def validate_tenant_allocation(
             result["error"] = "Tenant monthly token quota exceeded"
             result["available"]["monthly_token"] = available_monthly
             result["details"] = build_quota_error_details(
-                "monthly_token", monthly_token_limit, allocated_monthly_token,
+                "monthly_token",
+                monthly_token_limit,
+                allocated_monthly_token,
                 new_monthly_token_quota if new_monthly_token_quota is not EXPLICIT_NULL else None,
                 TOKEN_QUOTA_MULTIPLIER,
             )
@@ -489,7 +493,9 @@ def validate_tenant_allocation(
             result["error"] = "Tenant daily request quota exceeded"
             result["available"]["daily_request"] = available_daily
             result["details"] = build_quota_error_details(
-                "daily_request", daily_request_limit, allocated_daily_request,
+                "daily_request",
+                daily_request_limit,
+                allocated_daily_request,
                 new_daily_request_quota if new_daily_request_quota is not EXPLICIT_NULL else None,
             )
             logger.warning(
@@ -511,8 +517,14 @@ def validate_tenant_allocation(
             result["error"] = "Tenant monthly request quota exceeded"
             result["available"]["monthly_request"] = available_monthly
             result["details"] = build_quota_error_details(
-                "monthly_request", monthly_request_limit, allocated_monthly_request,
-                new_monthly_request_quota if new_monthly_request_quota is not EXPLICIT_NULL else None,
+                "monthly_request",
+                monthly_request_limit,
+                allocated_monthly_request,
+                (
+                    new_monthly_request_quota
+                    if new_monthly_request_quota is not EXPLICIT_NULL
+                    else None
+                ),
             )
             logger.warning(
                 f"Tenant {tenant_id} monthly request quota exceeded: "
