@@ -3911,8 +3911,6 @@ CREATE UNIQUE INDEX ix_anomaly_status_anomaly_id ON anomaly_status USING btree (
 
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
 
-CREATE UNIQUE INDEX ix_anomaly_status_type_hash_tenant ON anomaly_status USING btree (anomaly_type, affected_users_hash, tenant_id);
-
 CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions USING btree (decision_id);
 
 
