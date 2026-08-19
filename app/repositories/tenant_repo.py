@@ -34,6 +34,43 @@ def _parse_date(value: Any) -> str:
     return str(value)
 
 
+def _serialize_json_field(value: Any, is_postgresql: bool) -> Any:
+    """Serialize JSON field for database storage.
+
+    Args:
+        value: The value to serialize.
+        is_postgresql: Whether the database is PostgreSQL.
+
+    Returns:
+        For PostgreSQL: The value as-is (psycopg2 handles JSON serialization).
+        For SQLite: JSON-encoded string.
+    """
+    if value is None:
+        return None
+    if is_postgresql:
+        return value  # psycopg2 handles JSON serialization
+    return json.dumps(value)
+
+
+def _deserialize_json_field(value: Any, is_postgresql: bool) -> Any:
+    """Deserialize JSON field from database.
+
+    Args:
+        value: The value from database.
+        is_postgresql: Whether the database is PostgreSQL.
+
+    Returns:
+        Parsed JSON value.
+    """
+    if value is None:
+        return None
+    if is_postgresql:
+        return value  # psycopg2 already returns parsed JSON
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
 class TenantRepository:
     """Repository for tenant data access."""
 
@@ -146,13 +183,30 @@ class TenantRepository:
                 auto_provision_val = adapt_boolean_value(
                     settings_dict.get("auto_provision_users", False)
                 )
+                custom_branding_val = adapt_boolean_value(
+                    settings_dict.get("custom_branding", False)
+                )
+                block_sensitive_keyword_val = adapt_boolean_value(
+                    settings_dict.get("block_sensitive_keyword", False)
+                )
+
+                # Serialize JSON fields for cross-database compatibility
+                allowed_tools_json = _serialize_json_field(
+                    settings_dict.get("allowed_tools"), is_postgresql()
+                )
+                roi_assumptions_json = _serialize_json_field(
+                    settings_dict.get("roi_assumptions"), is_postgresql()
+                )
 
                 cursor.execute(
                     adapt_sql("""
                     INSERT INTO tenant_settings
                     (tenant_id, content_filter_enabled, audit_log_enabled,
-                     audit_log_retention_days, data_retention_days, sso_enabled, sso_provider, auto_provision_users)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     audit_log_retention_days, data_retention_days, sso_enabled,
+                     sso_provider, auto_provision_users, custom_branding,
+                     branding_name, branding_logo_url, allowed_tools, roi_assumptions,
+                     block_sensitive_keyword, sensitive_keyword_match_mode)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """),
                     (
                         tenant_id,
@@ -163,6 +217,13 @@ class TenantRepository:
                         sso_val,
                         settings_dict.get("sso_provider"),
                         auto_provision_val,
+                        custom_branding_val,
+                        settings_dict.get("branding_name"),
+                        settings_dict.get("branding_logo_url"),
+                        allowed_tools_json,
+                        roi_assumptions_json,
+                        block_sensitive_keyword_val,
+                        settings_dict.get("sensitive_keyword_match_mode", "word_boundary"),
                     ),
                 )
 
@@ -627,6 +688,8 @@ class TenantRepository:
                 pass
 
             try:
+                from app.repositories.database import is_postgresql
+
                 settings_row = self.db.fetch_one(
                     "SELECT * FROM tenant_settings WHERE tenant_id = ?", (tenant_id,)
                 )
@@ -636,7 +699,16 @@ class TenantRepository:
                     if match_mode not in ("word_boundary", "substring"):
                         match_mode = "word_boundary"
 
+                    # Deserialize JSON fields
+                    allowed_tools = _deserialize_json_field(
+                        settings_row.get("allowed_tools"), is_postgresql()
+                    )
+                    roi_assumptions = _deserialize_json_field(
+                        settings_row.get("roi_assumptions"), is_postgresql()
+                    )
+
                     settings = TenantSettings(
+                        allowed_tools=allowed_tools if allowed_tools else TenantSettings().allowed_tools,
                         content_filter_enabled=bool(settings_row.get("content_filter_enabled", 1)),
                         audit_log_enabled=bool(settings_row.get("audit_log_enabled", 1)),
                         audit_log_retention_days=settings_row.get("audit_log_retention_days", 90),
@@ -644,6 +716,10 @@ class TenantRepository:
                         sso_enabled=bool(settings_row.get("sso_enabled", 0)),
                         sso_provider=settings_row.get("sso_provider"),
                         auto_provision_users=bool(settings_row.get("auto_provision_users", 0)),
+                        custom_branding=bool(settings_row.get("custom_branding", 0)),
+                        branding_name=settings_row.get("branding_name"),
+                        branding_logo_url=settings_row.get("branding_logo_url"),
+                        roi_assumptions=roi_assumptions,
                         block_sensitive_keyword=bool(
                             settings_row.get("block_sensitive_keyword", 0)
                         ),
@@ -689,7 +765,7 @@ class TenantRepository:
             tenant_id: Tenant ID.
             settings_dict: Settings dictionary to update.
         """
-        from app.repositories.database import adapt_boolean_value, get_param_placeholder
+        from app.repositories.database import adapt_boolean_value, get_param_placeholder, is_postgresql
 
         p = get_param_placeholder()
 
@@ -698,8 +774,9 @@ class TenantRepository:
             f"SELECT id FROM tenant_settings WHERE tenant_id = {p}", (tenant_id,)
         )
 
-        # Field mapping for tenant_settings table
+        # Field mapping for tenant_settings table (all 14 fields)
         field_mapping = {
+            "allowed_tools": "json",
             "content_filter_enabled": bool,
             "audit_log_enabled": bool,
             "audit_log_retention_days": int,
@@ -707,6 +784,10 @@ class TenantRepository:
             "sso_enabled": bool,
             "sso_provider": str,
             "auto_provision_users": bool,
+            "custom_branding": bool,
+            "branding_name": str,
+            "branding_logo_url": str,
+            "roi_assumptions": "json",
             "block_sensitive_keyword": bool,
             "sensitive_keyword_match_mode": str,
         }
@@ -718,8 +799,13 @@ class TenantRepository:
             if key in settings_dict:
                 fields.append(f"{key} = {p}")
                 value = settings_dict[key]
-                if cast_type is bool or cast_type is int and isinstance(value, bool):
+
+                # Handle JSON fields
+                if cast_type == "json":
+                    value = _serialize_json_field(value, is_postgresql())
+                elif cast_type is bool or (cast_type is int and isinstance(value, bool)):
                     value = adapt_boolean_value(value)
+
                 values.append(value)
 
         if not fields:
