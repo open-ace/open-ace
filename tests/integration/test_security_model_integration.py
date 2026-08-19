@@ -75,11 +75,33 @@ def isolated_stack(tmp_path, monkeypatch):
 
     monkeypatch.setattr(akp, "DB_PATH", db_path, raising=False)
 
+    # Load complete schema BEFORE creating managers that need the tables
+    # Issue #2789: RemoteAgentManager.__init__ calls _restore_in_memory_state()
+    # which requires agent_sessions table to exist
+    from app.repositories.database import Database
+
+    db = Database(db_url=f"sqlite:///{db_path}")
+    load_schema_from_file(db_url=db.db_url, dialect="sqlite")
+
+    # Create required tenant and user records for foreign key constraints
+    # (registration_tokens has no FK, but remote_machines does)
+    with db.connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (1, 'test-tenant', 'test-tenant')"
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (1, 'admin', 'test-hash')"
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (2, 'user', 'test-hash')"
+        )
+        conn.commit()
+
     proxy = akp.APIKeyProxyService(db_path=db_path)
     proxy._ensure_tables()
 
     manager = RemoteAgentManager(db_path=db_path)
-    load_schema_from_file(db_url=manager.db.db_url, dialect="sqlite")
 
     return proxy, manager, db_path
 

@@ -382,3 +382,337 @@ class GovernanceRepository:
             except Exception as e2:
                 logger.error(f"Error saving security settings: {e2}")
                 return False
+
+    # =========================================================================
+    # Tenant Sensitive Keywords (Issue #2789)
+    # =========================================================================
+
+    def get_tenant_keywords(
+        self,
+        tenant_id: int,
+        limit: int = 100,
+        offset: int = 0,
+        is_enabled: bool | None = None,
+    ) -> list[dict]:
+        """
+        Get tenant sensitive keywords with pagination.
+
+        Args:
+            tenant_id: Tenant ID.
+            limit: Maximum number of records to return.
+            offset: Number of records to skip.
+            is_enabled: Optional filter for enabled status.
+
+        Returns:
+            List[Dict]: List of tenant keywords.
+        """
+        from app.repositories.database import adapt_sql
+
+        base_query = "SELECT * FROM tenant_sensitive_keywords WHERE tenant_id = ?"
+        params: list[Any] = [tenant_id]
+
+        if is_enabled is not None:
+            base_query += " AND is_enabled = ?"
+            is_enabled_val = is_enabled if self.db.is_postgresql else (1 if is_enabled else 0)
+            params.append(is_enabled_val)
+
+        base_query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        keywords = self.db.fetch_all(adapt_sql(base_query), tuple(params))
+
+        # Convert is_enabled to boolean
+        for kw in keywords:
+            kw["is_enabled"] = bool(kw.get("is_enabled", 1))
+
+        return keywords
+
+    def get_tenant_keywords_count(
+        self,
+        tenant_id: int,
+        is_enabled: bool | None = None,
+    ) -> int:
+        """
+        Get count of tenant sensitive keywords.
+
+        Args:
+            tenant_id: Tenant ID.
+            is_enabled: Optional filter for enabled status.
+
+        Returns:
+            int: Count of keywords.
+        """
+        from app.repositories.database import adapt_sql
+
+        query = "SELECT COUNT(*) as count FROM tenant_sensitive_keywords WHERE tenant_id = ?"
+        params: list[Any] = [tenant_id]
+
+        if is_enabled is not None:
+            query += " AND is_enabled = ?"
+            is_enabled_val = is_enabled if self.db.is_postgresql else (1 if is_enabled else 0)
+            params.append(is_enabled_val)
+
+        result = self.db.fetch_one(adapt_sql(query), tuple(params))
+        return cast("int", result["count"] if result else 0)
+
+    def get_tenant_keyword(self, tenant_id: int, keyword_id: int) -> dict | None:
+        """
+        Get a specific tenant keyword.
+
+        Args:
+            tenant_id: Tenant ID.
+            keyword_id: Keyword ID.
+
+        Returns:
+            Optional[Dict]: Keyword data or None.
+        """
+        from app.repositories.database import adapt_sql
+
+        query = adapt_sql("SELECT * FROM tenant_sensitive_keywords WHERE tenant_id = ? AND id = ?")
+        keyword = self.db.fetch_one(query, (tenant_id, keyword_id))
+
+        if keyword:
+            keyword["is_enabled"] = bool(keyword.get("is_enabled", 1))
+
+        return keyword
+
+    def create_tenant_keyword(
+        self,
+        tenant_id: int,
+        keyword: str,
+        created_by: int | None = None,
+    ) -> tuple[dict | None, bool]:
+        """
+        Create a tenant keyword (idempotent).
+
+        If the keyword already exists for this tenant, returns the existing
+        record with is_new=False instead of creating a duplicate.
+
+        Args:
+            tenant_id: Tenant ID.
+            keyword: Keyword to add.
+            created_by: User ID who created this keyword.
+
+        Returns:
+            Tuple[Optional[Dict], bool]: (keyword record, is_new).
+                is_new is True if a new record was created,
+                False if the keyword already existed.
+        """
+        from app.repositories.database import adapt_sql, is_postgresql
+
+        normalized_keyword = keyword.lower().strip()
+
+        if not normalized_keyword:
+            logger.error("Cannot create empty keyword")
+            return None, False
+
+        # Check if keyword already exists
+        existing_query = adapt_sql(
+            "SELECT * FROM tenant_sensitive_keywords WHERE tenant_id = ? AND normalized_keyword = ?"
+        )
+        existing = self.db.fetch_one(existing_query, (tenant_id, normalized_keyword))
+
+        if existing:
+            existing["is_enabled"] = bool(existing.get("is_enabled", 1))
+            return existing, False
+
+        # Create new keyword
+        try:
+            created_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+
+            if is_postgresql():
+                result = self.db.fetch_one(
+                    """
+                    INSERT INTO tenant_sensitive_keywords
+                    (tenant_id, keyword, normalized_keyword, is_enabled, created_by, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                """,
+                    (tenant_id, keyword, normalized_keyword, True, created_by, created_at),
+                    commit=True,
+                )
+                if result:
+                    result["is_enabled"] = bool(result.get("is_enabled", 1))
+                return result, True
+            else:
+                cursor = self.db.execute(
+                    """
+                    INSERT INTO tenant_sensitive_keywords
+                    (tenant_id, keyword, normalized_keyword, is_enabled, created_by, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                    (tenant_id, keyword, normalized_keyword, 1, created_by, created_at),
+                )
+
+                if cursor.lastrowid:
+                    # Fetch the created record
+                    new_record = self.db.fetch_one(
+                        "SELECT * FROM tenant_sensitive_keywords WHERE id = ?",
+                        (cursor.lastrowid,),
+                    )
+                    if new_record:
+                        new_record["is_enabled"] = bool(new_record.get("is_enabled", 1))
+                    return new_record, True
+
+                return None, False
+
+        except Exception as e:
+            logger.error(f"Error creating tenant keyword: {e}")
+            return None, False
+
+    def update_tenant_keyword(
+        self,
+        tenant_id: int,
+        keyword_id: int,
+        is_enabled: bool | None = None,
+    ) -> bool:
+        """
+        Update a tenant keyword.
+
+        Args:
+            tenant_id: Tenant ID.
+            keyword_id: Keyword ID.
+            is_enabled: New enabled status.
+
+        Returns:
+            bool: True if successful.
+        """
+        from app.repositories.database import adapt_sql
+
+        if is_enabled is None:
+            return False
+
+        updates = ["is_enabled = ?", "updated_at = ?"]
+        is_enabled_val = is_enabled if self.db.is_postgresql else (1 if is_enabled else 0)
+        params: list[Any] = [
+            is_enabled_val,
+            datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            tenant_id,
+            keyword_id,
+        ]
+
+        query = adapt_sql(
+            f"UPDATE tenant_sensitive_keywords SET {', '.join(updates)} WHERE tenant_id = ? AND id = ?"
+        )
+
+        try:
+            cursor = self.db.execute(query, tuple(params))
+            return cast("bool", cursor.rowcount > 0)
+        except Exception as e:
+            logger.error(f"Error updating tenant keyword: {e}")
+            return False
+
+    def delete_tenant_keyword(self, tenant_id: int, keyword_id: int) -> bool:
+        """
+        Delete a tenant keyword.
+
+        Args:
+            tenant_id: Tenant ID.
+            keyword_id: Keyword ID.
+
+        Returns:
+            bool: True if successful.
+        """
+        from app.repositories.database import adapt_sql
+
+        query = adapt_sql("DELETE FROM tenant_sensitive_keywords WHERE tenant_id = ? AND id = ?")
+
+        try:
+            cursor = self.db.execute(query, (tenant_id, keyword_id))
+            return cast("bool", cursor.rowcount > 0)
+        except Exception as e:
+            logger.error(f"Error deleting tenant keyword: {e}")
+            return False
+
+    def get_enabled_tenant_keywords(self, tenant_id: int) -> list[str]:
+        """
+        Get all enabled keywords for a tenant.
+
+        This method is used by ContentFilter to load tenant keywords
+        for content checking.
+
+        Args:
+            tenant_id: Tenant ID.
+
+        Returns:
+            List[str]: List of normalized keywords.
+        """
+        from app.repositories.database import adapt_sql
+
+        query = adapt_sql(
+            "SELECT normalized_keyword FROM tenant_sensitive_keywords WHERE tenant_id = ? AND is_enabled = ?"
+        )
+        is_enabled_val = True if self.db.is_postgresql else 1
+
+        try:
+            rows = self.db.fetch_all(query, (tenant_id, is_enabled_val))
+            return [row["normalized_keyword"] for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting enabled tenant keywords: {e}")
+            return []
+
+    def get_tenant_keywords_version(self, tenant_id: int) -> int | None:
+        """
+        Get the current version number for tenant keywords.
+
+        Args:
+            tenant_id: Tenant ID.
+
+        Returns:
+            Optional[int]: Version number or None if no record exists.
+        """
+        from app.repositories.database import adapt_sql
+
+        query = adapt_sql("SELECT version FROM tenant_keywords_version WHERE tenant_id = ?")
+
+        try:
+            result = self.db.fetch_one(query, (tenant_id,))
+            return cast("int | None", result["version"] if result else None)
+        except Exception as e:
+            logger.error(f"Error getting tenant keywords version: {e}")
+            return None
+
+    def increment_tenant_keywords_version(self, tenant_id: int) -> bool:
+        """
+        Increment the version number for tenant keywords.
+
+        Uses UPSERT to automatically create a record if one doesn't exist.
+        Also updates the updated_at timestamp.
+
+        Args:
+            tenant_id: Tenant ID.
+
+        Returns:
+            bool: True if successful.
+        """
+        from app.repositories.database import is_postgresql
+
+        try:
+            if is_postgresql():
+                self.db.execute(
+                    """
+                    INSERT INTO tenant_keywords_version (tenant_id, version, updated_at)
+                    VALUES (%s, 1, CURRENT_TIMESTAMP)
+                    ON CONFLICT (tenant_id) DO UPDATE SET
+                        version = tenant_keywords_version.version + 1,
+                        updated_at = CURRENT_TIMESTAMP
+                """,
+                    (tenant_id,),
+                )
+            else:
+                # SQLite: Use INSERT OR REPLACE with subquery for version increment
+                # SQLite doesn't support ON CONFLICT DO UPDATE syntax
+                self.db.execute(
+                    """
+                    INSERT OR REPLACE INTO tenant_keywords_version (tenant_id, version, updated_at)
+                    VALUES (?,
+                        COALESCE((SELECT version FROM tenant_keywords_version WHERE tenant_id = ?), 0) + 1,
+                        CURRENT_TIMESTAMP)
+                """,
+                    (tenant_id, tenant_id),
+                )
+
+            return True
+        except Exception as e:
+            logger.error(f"Error incrementing tenant keywords version: {e}")
+            return False
