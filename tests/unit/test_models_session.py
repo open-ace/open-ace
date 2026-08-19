@@ -93,8 +93,8 @@ class TestSession:
         assert d["email"] == "test@test.com"
         assert d["role"] == "user"
         assert d["token"] == "tok-xyz"
-        assert d["created_at"] == "2025-03-10T12:00:00"
-        assert d["expires_at"] == "2025-03-11T12:00:00"
+        assert d["created_at"] == "2025-03-10T12:00:00Z"
+        assert d["expires_at"] == "2025-03-11T12:00:00Z"
 
     def test_to_dict_none_timestamps(self):
         s = Session(username="bob")

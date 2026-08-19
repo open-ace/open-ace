@@ -3,6 +3,9 @@
 import re
 from datetime import datetime
 
+# Pre-compile regex pattern for better performance in batch operations
+_TZ_PATTERN = re.compile(r"[+-]\d{2}:\d{2}$")
+
 
 def ensure_utc_suffix(timestamp: str | datetime | None) -> str | None:
     """Ensure timestamp has UTC 'Z' suffix for frontend parsing.
@@ -57,6 +60,6 @@ def ensure_utc_suffix(timestamp: str | datetime | None) -> str | None:
         return None
     # Check if timestamp already has timezone info
     # Z suffix or timezone offset like +00:00 or -08:00 at the end
-    if timestamp.endswith("Z") or re.search(r"[+-]\d{2}:\d{2}$", timestamp):
+    if timestamp.endswith("Z") or _TZ_PATTERN.search(timestamp):
         return timestamp
     return timestamp + "Z"

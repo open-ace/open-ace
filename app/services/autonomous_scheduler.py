@@ -186,7 +186,7 @@ def _parse_naive_utc(value: str | None) -> datetime | None:
     """Parse a 'YYYY-MM-DD HH:MM:SS' string persisted as naive UTC, or None.
 
     Tolerates missing/malformed values (legacy rows) — callers treat None as
-    'no age information, do not gate on it'.
+    'no age information, do not gate on that'.
     """
     if not value or not isinstance(value, str):
         return None
@@ -194,6 +194,26 @@ def _parse_naive_utc(value: str | None) -> datetime | None:
         return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
     except ValueError:
         return None
+
+
+def _lease_timestamp(value) -> datetime | None:
+    """Normalize a ``locked_at`` lease value to an aware UTC datetime, or None.
+
+    SQLite returns the persisted string; Postgres (RealDictCursor) returns a
+    ``datetime`` for ``timestamp without time zone`` columns — a plain
+    ``.strip()`` on the Postgres shape raises and would take the whole
+    scheduler cycle down (plan-review B2).
+    """
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str) and value.strip():
+        try:
+            return datetime.strptime(value.strip()[:19], "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=timezone.utc
+            )
+        except ValueError:
+            return None
+    return None
 
 
 class AutonomousScheduler:
@@ -218,6 +238,11 @@ class AutonomousScheduler:
         # owners bucket under 0 and count only against the global ceiling). The
         # scheduler selection gates each user at their tenant max_sessions_per_user.
         self._in_progress_by_user: dict[int, set[str]] = {}
+        # workflow_id -> (batch_id, workspace, branch) reserved at selection
+        # time, so a later teardown can release EXACTLY those keys even after
+        # the row changed shape or left the active set (leak self-heal, cf.
+        # _reclaim_stale_in_progress).
+        self._in_progress_key_map: dict[str, tuple[str | None, str, str]] = {}
         self._in_progress_lock = threading.Lock()
         self._running_orchestrators: dict[str, AutonomousOrchestrator] = {}
         self._orchestrator_lock = threading.Lock()
@@ -273,6 +298,124 @@ class AutonomousScheduler:
         with self._orchestrator_lock:
             return self._running_orchestrators.get(workflow_id)
 
+    # Reap threshold mirrors the repository's LOCK_TIMEOUT_SECONDS: an
+    # in-progress entry whose DB lease is gone/stale cannot belong to a live
+    # worker (the heartbeat renews live leases every 60s regardless of agent
+    # duration), so the memory entry is fiction and safe to drop — acquire_lock
+    # breaks equally-stale leases cross-process anyway, so aligning memory to
+    # lease truth adds no new concurrency exposure.
+    _IN_PROGRESS_STALE_SECONDS = 1800
+
+    def _reclaim_stale_in_progress(self, workflows: list, repo) -> None:
+        """Self-heal leaked _in_progress entries against the DB lease.
+
+        An entry whose worker exited without its finally (exception-class
+        leak in the pre-try section is the observed 2026-08-19 shape,
+        workflow fec4782b: ~50 min frozen, restart healed in 1s) freezes the
+        workflow — and its batch/workspace/branch conflict keys — until a
+        service restart. The distributed lease already encodes liveness
+        (heartbeats renew every 60s independent of agent duration), so an
+        entry with no live lease behind it is fiction: reap it.
+
+        SCOPE (honest): this pass runs at the top of _process_workflows, so
+        it heals leaks whose cycle has returned — exception-class leaks and
+        entries orphaned after their worker exited. A worker HUNG mid-cycle
+        parks the whole cycle inside the executor's shutdown(wait=True) and
+        this pass cannot run; a restart remains the remedy there. The reap
+        WARNING is the discriminator: a frozen workflow WITHOUT a reap
+        warning means the cycle itself is parked (hang) — evidence for a
+        watchdog follow-up.
+
+        Rules:
+        - Row in the active set with a fresh lease → live worker, keep.
+        - Row in the active set with no lease → reap (leak signature).
+        - Row in the active set with an unparseable lease → keep
+          (unknown is not stale — fail-closed, matching the lookup-error
+          branch).
+        - Row NOT in the active set (paused/terminal statuses are excluded
+          from get_active_workflows) → fetch it once: paused keeps the
+          entry (#1002 — an in-flight advance() owns the resumption), a
+          fresh lease keeps it (snapshot raced a transition), a lookup
+          error keeps it, anything else reaps.
+        Healthy state pays zero extra queries: the fetch only happens for
+        entries missing from the active list, i.e. only when leaked.
+        """
+        with self._in_progress_lock:
+            if not self._in_progress_ids:
+                return
+            ids_snapshot = list(self._in_progress_ids)
+        rows_by_id = {wf.get("workflow_id"): wf for wf in workflows}
+        for wid in ids_snapshot:
+            row = rows_by_id.get(wid)
+            if row is not None:
+                if row.get("status") == "paused":
+                    continue
+                raw_lease = row.get("locked_at")
+                locked_dt = _lease_timestamp(raw_lease)
+                if locked_dt is None:
+                    if raw_lease:
+                        continue  # unparseable is unknown, not stale — keep
+                    where = "active, lease=NULL"
+                elif (
+                    datetime.now(timezone.utc) - locked_dt
+                ).total_seconds() < self._IN_PROGRESS_STALE_SECONDS:
+                    continue  # fresh lease — live worker
+                else:
+                    where = f"active, lease stale ({raw_lease})"
+            else:
+                try:
+                    missing = repo.get_workflow(wid) or {}
+                except Exception as exc:
+                    logger.warning(
+                        "Skipping stale-in-progress reclaim for workflow %s "
+                        "(status lookup failed: %s)",
+                        wid[:8],
+                        exc,
+                    )
+                    continue
+                if missing.get("status") == "paused":
+                    continue
+                missing_dt = _lease_timestamp(missing.get("locked_at"))
+                if missing_dt is not None and (
+                    (datetime.now(timezone.utc) - missing_dt).total_seconds()
+                    < self._IN_PROGRESS_STALE_SECONDS
+                ):
+                    continue  # live lease behind a snapshot race — keep
+                where = f"not-in-active-set, status={missing.get('status') or 'unknown'}"
+            logger.warning(
+                "Reaping stale in-progress entry for workflow %s (%s); " "no live lease behind it",
+                wid[:8],
+                where,
+            )
+            self._discard_in_progress_entry(wid)
+
+    def _discard_in_progress_entry(self, workflow_id: str, legacy_wf: dict | None = None) -> None:
+        """Remove one workflow's in-progress bookkeeping, keys included.
+
+        Single authority for memory-entry teardown, used by _advance_single's
+        acquire-fail branch and finally, by clear_in_progress, and by the
+        lease-anchored reclaim pass (_reclaim_stale_in_progress). The key map
+        recorded exactly which conflict keys the entry reserved at selection
+        time (waiting workflows reserve none), so teardown releases those and
+        only those — never a key a different workflow holds. ``legacy_wf``
+        covers entries created before a mid-flight deploy introduced the map.
+        Idempotent; callers must NOT hold _in_progress_lock.
+        """
+        with self._in_progress_lock:
+            self._in_progress_ids.discard(workflow_id)
+            for bucket in self._in_progress_by_user.values():
+                bucket.discard(workflow_id)
+            batch_id, workspace, branch = self._in_progress_key_map.pop(workflow_id, (None, "", ""))
+            if not any((batch_id, workspace, branch)) and legacy_wf is not None:
+                workspace, branch = self._conflict_keys(legacy_wf)
+                batch_id = legacy_wf.get("batch_id")
+            if batch_id:
+                self._in_progress_batch_ids.discard(batch_id)
+            if workspace:
+                self._in_progress_workspaces.discard(workspace)
+            if branch:
+                self._in_progress_branches.discard(branch)
+
     def clear_in_progress(self, workflow_id: str, wf: dict | None = None) -> None:
         """Clear stale in-progress state for a workflow.
 
@@ -296,25 +439,9 @@ class AutonomousScheduler:
         with self._orchestrator_lock:
             self._running_orchestrators.pop(workflow_id, None)
 
-        with self._in_progress_lock:
-            self._in_progress_ids.discard(workflow_id)
-            # Also clear git-conflict keys so _process_workflows doesn't skip
-            # the retried workflow on workspace/branch/batch collision. The
-            # workflow dict is available from the retry endpoint.
-            if wf:
-                workspace, branch = self._conflict_keys(wf)
-                if workspace:
-                    self._in_progress_workspaces.discard(workspace)
-                if branch:
-                    self._in_progress_branches.discard(branch)
-                batch_id = wf.get("batch_id")
-                if batch_id:
-                    self._in_progress_batch_ids.discard(batch_id)
-                # Per-user bucket (#2295). wf.get (not wf[]) — legacy/odd rows may
-                # lack the key; the review flagged wf["user_id"] would KeyError.
-                owner_id = wf.get("user_id")
-                if owner_id is not None:
-                    self._in_progress_by_user.get(owner_id, set()).discard(workflow_id)
+        # Memory entry teardown (ids + per-user + the keys this entry reserved
+        # per the key map; falls back to the caller's wf for pre-map entries).
+        self._discard_in_progress_entry(workflow_id, legacy_wf=wf)
 
         # Release the DB-level lock so the next cycle can acquire it.
         try:
@@ -575,42 +702,30 @@ class AutonomousScheduler:
         # the same worker-thread name. Without a process-unique owner, an old
         # worker's finally could release a newer process's replacement lease.
         lock_owner = f"{socket.gethostname()}/{os.getpid()}/{threading.current_thread().name}"
-        repo = _get_repo()
 
-        # Get workflow's batch_id and git-conflict keys for cleanup
-        workflow = repo.get_workflow(workflow_id)
-        batch_id = workflow.get("batch_id") if workflow else None
-        # Owner used for per-user in-progress accounting (#2295). Resolved here
-        # (NOT inside the try below) so the Site-A early return + the finally can
-        # both discard from _in_progress_by_user without a NameError.
-        owner_id = workflow.get("user_id") if workflow else None
-        # None owner (legacy rows) buckets under 0; counts only against the global
-        # ceiling, not any per-user cap (the selection gate skips None owners).
-        owner_bucket = owner_id if owner_id is not None else 0
-        workspace, branch = self._conflict_keys(workflow) if workflow else ("", "")
-        # Waiting workflows bypass conflict locks (see _process_workflows).
-        # Capture this so cleanup paths don't release another workflow's keys.
-        #
-        # Load-bearing invariant: this advance-time read of ``status == waiting``
-        # agrees with the selection-time read in ``_process_workflows`` only
-        # because the ``waiting -> developing/merging`` transition happens inside
-        # ``advance()`` below — no other actor flips the status between selection
-        # and this point. If that ever changes, the finally cleanup below could
-        # release (or fail to release) the wrong workflow's conflict keys.
-        was_waiting = bool(workflow and workflow.get("status") == "waiting")
+        # Pre-try section: an exception here bypasses the main try/finally
+        # entirely, so the in-progress entry selected for this worker would
+        # leak and freeze the workflow until a service restart (observed
+        # 2026-08-19, workflow fec4782b). Discard the entry on any raise and
+        # let the executor's future.result() catch log it; _get_repo is inside
+        # the try for the same reason. A HANG here still parks this cycle's
+        # executor (shutdown waits) — restart territory, see
+        # _reclaim_stale_in_progress's scope note.
+        try:
+            repo = _get_repo()
+            # Only owner_id is still consumed below (quota gate). Conflict-key
+            # and waiting-state cleanup now live in the key map written at
+            # selection time — no per-call snapshots needed here anymore.
+            workflow = repo.get_workflow(workflow_id)
+            owner_id = workflow.get("user_id") if workflow else None
+        except Exception:
+            self._discard_in_progress_entry(workflow_id)
+            raise
 
         # Acquire DB-level distributed lock
         if not repo.acquire_lock(workflow_id, lock_owner):
             logger.debug("Workflow %s is locked by another instance, skipping", workflow_id[:8])
-            with self._in_progress_lock:
-                self._in_progress_ids.discard(workflow_id)
-                self._in_progress_by_user.get(owner_bucket, set()).discard(workflow_id)
-                if batch_id and not was_waiting:
-                    self._in_progress_batch_ids.discard(batch_id)
-                if workspace and not was_waiting:
-                    self._in_progress_workspaces.discard(workspace)
-                if branch and not was_waiting:
-                    self._in_progress_branches.discard(branch)
+            self._discard_in_progress_entry(workflow_id)
             return workflow_id
 
         heartbeat_stop = threading.Event()
@@ -706,15 +821,7 @@ class AutonomousScheduler:
                 repo.release_lock(workflow_id, lock_owner)
             except Exception:
                 logger.warning("Failed to release lock for workflow %s", workflow_id[:8])
-            with self._in_progress_lock:
-                self._in_progress_ids.discard(workflow_id)
-                self._in_progress_by_user.get(owner_bucket, set()).discard(workflow_id)
-                if batch_id and not was_waiting:
-                    self._in_progress_batch_ids.discard(batch_id)
-                if workspace and not was_waiting:
-                    self._in_progress_workspaces.discard(workspace)
-                if branch and not was_waiting:
-                    self._in_progress_branches.discard(branch)
+            self._discard_in_progress_entry(workflow_id)
         return workflow_id
 
     def _heartbeat_workflow_lock(
@@ -1036,6 +1143,12 @@ class AutonomousScheduler:
             logger.error("Failed to query active workflows: %s", e)
             return
 
+        # Self-heal _in_progress entries with no live DB lease behind them
+        # (leaked workers; 2026-08-19 fec4782b). Scope: leaks whose cycle has
+        # returned — a hung worker parks this very cycle, see the reclaim's
+        # docstring.
+        self._reclaim_stale_in_progress(workflows, repo)
+
         # Filter out paused, already-in-progress workflows, batch workflows
         # whose batch is already being processed, and workflows whose git
         # working tree (worktree_path or project_path) OR branch is already
@@ -1145,9 +1258,17 @@ class AutonomousScheduler:
                 # another workflow's keys in _advance_single's finally.
                 is_waiting = wf.get("status") == "waiting"
                 batch_id = wf.get("batch_id")
+                workspace, branch = self._conflict_keys(wf)
+                # Record exactly what this entry reserved so any teardown
+                # (finally / clear_in_progress / stale reclaim) releases these
+                # and only these keys, even after the row changes shape.
+                self._in_progress_key_map[wf_id] = (
+                    batch_id if (batch_id and not is_waiting) else None,
+                    workspace if (workspace and not is_waiting) else "",
+                    branch if (branch and not is_waiting) else "",
+                )
                 if batch_id and not is_waiting:
                     self._in_progress_batch_ids.add(batch_id)
-                workspace, branch = self._conflict_keys(wf)
                 if workspace and not is_waiting:
                     self._in_progress_workspaces.add(workspace)
                 if branch and not is_waiting:
