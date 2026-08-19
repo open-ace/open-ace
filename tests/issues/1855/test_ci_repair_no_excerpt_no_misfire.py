@@ -217,6 +217,11 @@ def test_get_check_failure_excerpt_falls_back_to_run_list_for_rest_api_link():
     from app.modules.workspace.autonomous.github_ops import GitHubOps
 
     gh = GitHubOps.__new__(GitHubOps)
+    # d2aab16f version gate: _supports_escape_sequences_flag consults this
+    # probe attribute (set in __init__, which __new__ bypasses); modern gh
+    # supports --allow-escape-sequences, so the REST-link fallback path
+    # under test runs ungated.
+    gh._escape_flag_supported = True
 
     # Simulate gh command outputs via _run_gh.
     run_list_json = '[{"databaseId": 999, "name": "lint"}]'
