@@ -196,9 +196,7 @@ class ParameterizedEfficiencyCalculator:
         ideal_range = adjustments.get(
             "output_ratio_ideal_range", thresholds.output_ratio.ideal_range
         )
-        good_range = adjustments.get(
-            "output_ratio_good_range", thresholds.output_ratio.good_range
-        )
+        good_range = adjustments.get("output_ratio_good_range", thresholds.output_ratio.good_range)
         acceptable_min = adjustments.get(
             "output_ratio_acceptable_min", thresholds.output_ratio.acceptable_min
         )
@@ -206,9 +204,7 @@ class ParameterizedEfficiencyCalculator:
         cost_excellent = adjustments.get(
             "cost_per_request_excellent", thresholds.cost_per_request.excellent
         )
-        cost_good = adjustments.get(
-            "cost_per_request_good", thresholds.cost_per_request.good
-        )
+        cost_good = adjustments.get("cost_per_request_good", thresholds.cost_per_request.good)
         cost_acceptable = adjustments.get(
             "cost_per_request_acceptable", thresholds.cost_per_request.acceptable
         )
@@ -272,7 +268,7 @@ class ParameterizedEfficiencyCalculator:
         adjustments = self.TASK_TYPE_ADJUSTMENTS.get(task_type, {})
 
         # Get waste threshold (document analysis has lower threshold)
-        waste_threshold = adjustments.get(
+        waste_threshold: float = adjustments.get(
             "waste_output_ratio_threshold",
             thresholds.waste_calculation.output_ratio_threshold,
         )
@@ -283,12 +279,16 @@ class ParameterizedEfficiencyCalculator:
             output_ratio = output_tokens / total_tokens
             if output_ratio < waste_threshold:
                 # Calculate waste based on deviation from threshold
-                waste = (waste_threshold - output_ratio) * thresholds.waste_calculation.waste_coefficient / waste_threshold
+                waste = (
+                    (waste_threshold - output_ratio)
+                    * thresholds.waste_calculation.waste_coefficient
+                    / waste_threshold
+                )
                 input_waste = min(waste, thresholds.waste_calculation.waste_coefficient)
             else:
-                input_waste = 0
+                input_waste = 0.0
         else:
-            input_waste = 0
+            input_waste = 0.0
 
         return min(input_waste, 100.0)
 
