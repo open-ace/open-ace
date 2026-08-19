@@ -257,13 +257,19 @@ def discover_test_files(targets: list[str]) -> list[str]:
 def resolved_targets(args: argparse.Namespace) -> list[str]:
     if args.selection_json:
         selected = load_selection_targets(args.selection_json)
-        standalone = [item for item in selected if item.startswith("standalone::")]
-        pytest_targets = [item for item in selected if not item.startswith("standalone::")]
-        if standalone and args.split_total > 1:
-            raise ValueError("--selection-json with standalone targets cannot be sharded")
         if args.split_total == 1:
-            return pytest_targets + standalone
-        return apply_split(pytest_targets, args.split_total, args.split_group)
+            return selected
+        if args.split_total < 1:
+            raise ValueError("--split-total must be >= 1")
+        if args.split_group < 1 or args.split_group > args.split_total:
+            raise ValueError("--split-group must be between 1 and --split-total")
+        # Keep selector nodeids intact. Sharding files would re-expand a
+        # nodeid selection and make standalone entries impossible to govern.
+        return [
+            target
+            for index, target in enumerate(sorted(selected))
+            if index % args.split_total == args.split_group - 1
+        ]
     targets = select_targets(args)
     return apply_split(targets, args.split_total, args.split_group)
 

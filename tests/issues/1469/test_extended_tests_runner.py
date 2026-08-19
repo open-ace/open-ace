@@ -209,6 +209,49 @@ def test_selection_json_uses_exact_targets_and_skips_standalone_for_pytest(tmp_p
     assert "standalone::tests/e2e/e2e_autonomous_models_error_playwright.py" not in cmd
 
 
+def test_selection_json_shards_nodeids_and_standalone_entries_together(tmp_path):
+    selection = tmp_path / "selection.json"
+    selected = [
+        "tests/e2e/browser/test_login.py::test_login_page_loads",
+        "standalone::tests/e2e/e2e_autonomous_models_error_playwright.py",
+        "tests/e2e/browser/test_navigation.py::test_menu_navigation",
+    ]
+    selection.write_text(
+        __import__("json").dumps({"normal": selected, "advisory": []}) + "\n",
+        encoding="utf-8",
+    )
+    first = run_extended_tests.parse_args(
+        [
+            "--category",
+            "e2e",
+            "--selection-json",
+            str(selection),
+            "--split-total",
+            "2",
+            "--split-group",
+            "1",
+        ]
+    )
+    second = run_extended_tests.parse_args(
+        [
+            "--category",
+            "e2e",
+            "--selection-json",
+            str(selection),
+            "--split-total",
+            "2",
+            "--split-group",
+            "2",
+        ]
+    )
+
+    first_targets = run_extended_tests.resolved_targets(first)
+    second_targets = run_extended_tests.resolved_targets(second)
+    assert set(first_targets).isdisjoint(second_targets)
+    assert set(first_targets) | set(second_targets) == set(selected)
+    assert any(target.startswith("standalone::") for target in first_targets + second_targets)
+
+
 def test_execution_needs_server_uses_selected_item_capabilities(tmp_path, monkeypatch):
     selection = tmp_path / "selection.json"
     selection.write_text(
