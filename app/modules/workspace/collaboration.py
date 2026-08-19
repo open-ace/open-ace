@@ -21,6 +21,7 @@ from app.repositories.database import (
     get_database_url,
     is_postgresql,
 )
+from app.utils.datetime_utils import ensure_utc_suffix
 from app.utils.helpers import parse_db_datetime
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ class TeamMember:
             "user_id": self.user_id,
             "username": self.username,
             "role": self.role,
-            "joined_at": self.joined_at.isoformat() if self.joined_at else None,
+            "joined_at": ensure_utc_suffix(self.joined_at),
         }
 
 
@@ -86,8 +87,8 @@ class Team:
             "owner_id": self.owner_id,
             "members": [m.to_dict() for m in self.members],
             "settings": self.settings,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": ensure_utc_suffix(self.created_at),
+            "updated_at": ensure_utc_suffix(self.updated_at),
         }
 
 
@@ -123,12 +124,12 @@ class SharedSession:
             "share_type": self.share_type,
             "target_id": self.target_id,
             "target_name": self.target_name,
-            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "expires_at": ensure_utc_suffix(self.expires_at),
             "allow_comments": self.allow_comments,
             "allow_copy": self.allow_copy,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": ensure_utc_suffix(self.created_at),
             "access_count": self.access_count,
-            "last_accessed": self.last_accessed.isoformat() if self.last_accessed else None,
+            "last_accessed": ensure_utc_suffix(self.last_accessed),
         }
 
     def is_expired(self) -> bool:
@@ -192,8 +193,8 @@ class Annotation:
             "annotation_type": self.annotation_type,
             "position": self.position,
             "parent_id": self.parent_id,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": ensure_utc_suffix(self.created_at),
+            "updated_at": ensure_utc_suffix(self.updated_at),
         }
 
 

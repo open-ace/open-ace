@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.models.user import User
+from app.utils.datetime_utils import ensure_utc_suffix
 
 
 @dataclass
@@ -32,8 +33,8 @@ class Session:
             "email": self.email,
             "role": self.role,
             "token": self.token,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "created_at": ensure_utc_suffix(self.created_at),
+            "expires_at": ensure_utc_suffix(self.expires_at),
         }
 
     @classmethod
