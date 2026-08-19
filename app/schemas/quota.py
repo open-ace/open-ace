@@ -289,7 +289,7 @@ def validate_tenant_allocation(
         result["details"] = {
             "field": "daily_token_quota",
             "reason": "explicit_null_not_allowed",
-            "tenant_limit": daily_token_limit,  # type: ignore[misc]
+            "tenant_limit": daily_token_limit,  # type: ignore[dict-item]
             "suggestion": "Provide a specific value or set tenant to unlimited",
         }
         logger.warning(
@@ -304,7 +304,7 @@ def validate_tenant_allocation(
         result["details"] = {
             "field": "monthly_token_quota",
             "reason": "explicit_null_not_allowed",
-            "tenant_limit": monthly_token_limit,  # type: ignore[misc]
+            "tenant_limit": monthly_token_limit,  # type: ignore[dict-item]
             "suggestion": "Provide a specific value or set tenant to unlimited",
         }
         logger.warning(
@@ -319,7 +319,7 @@ def validate_tenant_allocation(
         result["details"] = {
             "field": "daily_request_quota",
             "reason": "explicit_null_not_allowed",
-            "tenant_limit": daily_request_limit,  # type: ignore[misc]
+            "tenant_limit": daily_request_limit,  # type: ignore[dict-item]
             "suggestion": "Provide a specific value or set tenant to unlimited",
         }
         logger.warning(
@@ -334,7 +334,7 @@ def validate_tenant_allocation(
         result["details"] = {
             "field": "monthly_request_quota",
             "reason": "explicit_null_not_allowed",
-            "tenant_limit": monthly_request_limit,  # type: ignore[misc]
+            "tenant_limit": monthly_request_limit,  # type: ignore[dict-item]
             "suggestion": "Provide a specific value or set tenant to unlimited",
         }
         logger.warning(
@@ -524,7 +524,7 @@ def validate_tenant_allocation(
                 allocated_monthly_request,
                 (
                     new_monthly_request_quota
-                    if new_monthly_request_quota is not EXPLICIT_NULL
+                    if isinstance(new_monthly_request_quota, int)
                     else None
                 ),
             )
