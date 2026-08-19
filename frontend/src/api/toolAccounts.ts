@@ -5,6 +5,12 @@
 import { apiClient } from './client';
 
 // Types
+export type MappingSource =
+  'manual' | 'auto' | 'predeclared' | 'import' | 'discovered' | 'legacy_predeclared';
+
+export type MappingStatus =
+  'pending' | 'active' | 'stale' | 'conflict_type' | 'conflict_owner' | 'conflict_tenant';
+
 export interface ToolAccount {
   id: number;
   user_id: number;
@@ -14,6 +20,15 @@ export interface ToolAccount {
   description: string | null;
   created_at: string | null;
   updated_at: string | null;
+  // Issue #2761: New fields
+  mapping_source?: MappingSource | null;
+  mapping_status?: MappingStatus | null;
+  discovered_at?: string | null;
+  last_activity_at?: string | null;
+  observed_message_count?: number;
+  created_by?: number | null;
+  tenant_id?: number | null;
+  version?: number;
 }
 
 export interface UnmappedAccount {
@@ -63,6 +78,9 @@ export const toolAccountsApi = {
     tool_account: string;
     tool_type?: string;
     description?: string;
+    // Issue #2761: New fields for predeclared accounts
+    mapping_source?: MappingSource;
+    mapping_status?: MappingStatus;
   }): Promise<{ mapping: ToolAccount; updated_messages: number }> {
     return apiClient.post<{ mapping: ToolAccount; updated_messages: number }>(
       '/api/tool-accounts',
