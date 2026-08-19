@@ -41,24 +41,27 @@ FROM ${BASE_REGISTRY}/python:3.11-slim AS builder
 WORKDIR /app
 
 # Install build dependencies (using Chinese mirror)
-RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.list && \
-    echo "deb http://mirrors.aliyun.com/debian/ trixie-updates main" >> /etc/apt/sources.list && \
-    echo "deb http://mirrors.aliyun.com/debian-security trixie-security main" >> /etc/apt/sources.list && \
+RUN echo "deb https://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.list && \
+    echo "deb https://mirrors.aliyun.com/debian/ trixie-updates main" >> /etc/apt/sources.list && \
+    echo "deb https://mirrors.aliyun.com/debian-security trixie-security main" >> /etc/apt/sources.list && \
     rm -f /etc/apt/sources.list.d/debian.sources && \
     apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency files
-COPY requirements.txt .
+# Copy dependency files. requirements.lock is a hash-pinned lock compiled from
+# requirements.txt and resolved against the SAME aliyun mirror used below, so
+# every pin is installable here (PyPI-latest pins can lag on the mirror). Regen:
+#   uv pip compile --universal --python-version 3.11 --generate-hashes \
+#     --index-url https://mirrors.aliyun.com/pypi/simple/ requirements.txt -o requirements.lock
+COPY requirements.lock .
 
 # Create virtual environment and install dependencies
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com && \
-    pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
-
+RUN pip install --no-cache-dir --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
+    pip install --no-cache-dir --require-hashes -r requirements.lock -i https://mirrors.aliyun.com/pypi/simple/
 # =============================================================================
 # Production Stage
 # =============================================================================
@@ -71,9 +74,9 @@ LABEL description="AI Computing Explorer"
 LABEL version="1.0.0"
 
 # Install runtime dependencies + Node.js 20 + qwen-code-webui for multi-user workspace
-RUN echo "deb http://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.list && \
-    echo "deb http://mirrors.aliyun.com/debian/ trixie-updates main" >> /etc/apt/sources.list && \
-    echo "deb http://mirrors.aliyun.com/debian-security trixie-security main" >> /etc/apt/sources.list && \
+RUN echo "deb https://mirrors.aliyun.com/debian/ trixie main" > /etc/apt/sources.list && \
+    echo "deb https://mirrors.aliyun.com/debian/ trixie-updates main" >> /etc/apt/sources.list && \
+    echo "deb https://mirrors.aliyun.com/debian-security trixie-security main" >> /etc/apt/sources.list && \
     rm -f /etc/apt/sources.list.d/debian.sources && \
     apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
@@ -331,7 +334,7 @@ FROM production AS development
 USER root
 
 # Install development tools
-RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com \
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ \
     pytest \
     pytest-cov \
     pytest-asyncio \
