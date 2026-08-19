@@ -125,4 +125,3 @@ Issue #2180: 管理接口租户隔离修复审计清单
 - Issue #2180: 管理接口租户隔离修复
 - Issue #2179: 权限原语建立
 - `app/services/base.py`: TenantScopedService
-- `app/repositories/predicate.py`: TenantPredicateBuilder
