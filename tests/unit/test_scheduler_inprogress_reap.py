@@ -90,12 +90,6 @@ def test_discard_entry_for_keyless_workflow_touches_no_shared_keys():
 # ── Task 2: lease-anchored reclaim ───────────────────────────────────────
 
 
-def _with_reap_mocks(sched: AutonomousScheduler) -> None:
-    """_reclaim_stale_in_progress needs repo only for rows missing from the
-    active list; healthy paths must not touch it."""
-    sched._repo_for_missing_rows = None  # marker, real impl uses method param
-
-
 def test_stale_lease_entry_is_reaped_with_keys_and_warning(caplog):
     """THE regression (fec4782b): entry present, row active/eligible, lease
     gone — must be reaped with its keys, loudly."""
@@ -209,6 +203,57 @@ def test_healthy_state_issues_no_queries():
     repo = MagicMock(name="repo")
     sched._reclaim_stale_in_progress([row], repo=repo)
     repo.get_workflow.assert_not_called()
+
+
+def test_missing_row_with_fresh_lease_is_kept():
+    """A row missing from the snapshot but holding a fresh lease is a live
+    worker behind a snapshot race (e.g. #1002 paused→resume flipping to
+    active between fetch and lookup) — the lease is the truth, keep it."""
+    sched = _bare_scheduler()
+    _mark(sched, "w-race", batch="b7", workspace="/ws/e", branch="")
+    repo = MagicMock(name="repo")
+    repo.get_workflow.return_value = {
+        "workflow_id": "w-race",
+        "status": "developing",
+        "locked_at": _fmt(datetime.now(timezone.utc) - timedelta(seconds=30)),
+    }
+    sched._reclaim_stale_in_progress([], repo=repo)
+    assert "w-race" in sched._in_progress_ids
+    assert "/ws/e" in sched._in_progress_workspaces
+
+
+def test_active_row_with_unparseable_lease_is_kept():
+    """Unknown is not stale (fail-closed, symmetric with the lookup-error
+    branch): a present-but-unparseable lease keeps the entry."""
+    sched = _bare_scheduler()
+    _mark(sched, "w-junk", batch="b8", workspace="/ws/f", branch="")
+    row = {"workflow_id": "w-junk", "status": "developing", "locked_at": "not-a-date"}
+    sched._reclaim_stale_in_progress([row], repo=MagicMock())
+    assert "w-junk" in sched._in_progress_ids
+
+
+def test_discard_entry_legacy_wf_fallback_releases_keys():
+    """Pre-map entries (created before a mid-flight deploy) fall back to the
+    caller's workflow dict for conflict keys, preserving clear_in_progress's
+    old semantics."""
+    sched = _bare_scheduler()
+    wid = "w-legacy"
+    with sched._in_progress_lock:
+        sched._in_progress_ids.add(wid)
+        sched._in_progress_by_user.setdefault(3, set()).add(wid)
+        sched._in_progress_batch_ids.add("b-legacy")
+        sched._in_progress_workspaces.add("/ws/legacy")
+    legacy_wf = {
+        "batch_id": "b-legacy",
+        "project_path": "/proj",
+        "worktree_path": "/ws/legacy",
+        "branch_name": "auto-dev/leg",
+        "status": "developing",
+    }
+    sched._discard_in_progress_entry(wid, legacy_wf=legacy_wf)
+    assert wid not in sched._in_progress_ids
+    assert "b-legacy" not in sched._in_progress_batch_ids
+    assert "/ws/legacy" not in sched._in_progress_workspaces
 
 
 # ── Task 3: pre-try exception protection ─────────────────────────────────

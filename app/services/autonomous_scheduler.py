@@ -307,25 +307,38 @@ class AutonomousScheduler:
     _IN_PROGRESS_STALE_SECONDS = 1800
 
     def _reclaim_stale_in_progress(self, workflows: list, repo) -> None:
-        """Self-heal _in_progress entries against the DB lease (liveness truth).
+        """Self-heal leaked _in_progress entries against the DB lease.
 
-        A worker that hangs or dies without its finally never drops its
-        in-memory entry, freezing the workflow — and its batch/workspace/
-        branch conflict keys — until a service restart (observed 2026-08-19,
-        workflow fec4782b: ~50 min frozen, restart healed in 1s). The
-        distributed lease already encodes liveness: heartbeats renew it every
-        60s independent of agent duration.
+        An entry whose worker exited without its finally (exception-class
+        leak in the pre-try section is the observed 2026-08-19 shape,
+        workflow fec4782b: ~50 min frozen, restart healed in 1s) freezes the
+        workflow — and its batch/workspace/branch conflict keys — until a
+        service restart. The distributed lease already encodes liveness
+        (heartbeats renew every 60s independent of agent duration), so an
+        entry with no live lease behind it is fiction: reap it.
+
+        SCOPE (honest): this pass runs at the top of _process_workflows, so
+        it heals leaks whose cycle has returned — exception-class leaks and
+        entries orphaned after their worker exited. A worker HUNG mid-cycle
+        parks the whole cycle inside the executor's shutdown(wait=True) and
+        this pass cannot run; a restart remains the remedy there. The reap
+        WARNING is the discriminator: a frozen workflow WITHOUT a reap
+        warning means the cycle itself is parked (hang) — evidence for a
+        watchdog follow-up.
 
         Rules:
         - Row in the active set with a fresh lease → live worker, keep.
-        - Row in the active set with NULL/stale lease → reap (leaked).
-        - Row NOT in the active set (paused/failed/completed/cancelled are
-          excluded from get_active_workflows) → fetch its status once:
-          paused keeps the entry (#1002 — an in-flight advance() owns the
-          resumption), any other terminal-ish status reaps, a lookup error
-          keeps it (fail-closed).
-        Healthy state pays zero extra queries: the status fetch only happens
-        for entries missing from the active list, i.e. only when leaked.
+        - Row in the active set with no lease → reap (leak signature).
+        - Row in the active set with an unparseable lease → keep
+          (unknown is not stale — fail-closed, matching the lookup-error
+          branch).
+        - Row NOT in the active set (paused/terminal statuses are excluded
+          from get_active_workflows) → fetch it once: paused keeps the
+          entry (#1002 — an in-flight advance() owns the resumption), a
+          fresh lease keeps it (snapshot raced a transition), a lookup
+          error keeps it, anything else reaps.
+        Healthy state pays zero extra queries: the fetch only happens for
+        entries missing from the active list, i.e. only when leaked.
         """
         with self._in_progress_lock:
             if not self._in_progress_ids:
@@ -337,15 +350,18 @@ class AutonomousScheduler:
             if row is not None:
                 if row.get("status") == "paused":
                     continue
-                locked_dt = _lease_timestamp(row.get("locked_at"))
-                age = (
-                    (datetime.now(timezone.utc) - locked_dt).total_seconds()
-                    if locked_dt is not None
-                    else None
-                )
-                if age is not None and age < self._IN_PROGRESS_STALE_SECONDS:
+                raw_lease = row.get("locked_at")
+                locked_dt = _lease_timestamp(raw_lease)
+                if locked_dt is None:
+                    if raw_lease:
+                        continue  # unparseable is unknown, not stale — keep
+                    where = "active, lease=NULL"
+                elif (
+                    datetime.now(timezone.utc) - locked_dt
+                ).total_seconds() < self._IN_PROGRESS_STALE_SECONDS:
                     continue  # fresh lease — live worker
-                where = f"active, lease={row.get('locked_at') or 'NULL'}"
+                else:
+                    where = f"active, lease stale ({raw_lease})"
             else:
                 try:
                     missing = repo.get_workflow(wid) or {}
@@ -359,10 +375,15 @@ class AutonomousScheduler:
                     continue
                 if missing.get("status") == "paused":
                     continue
+                missing_dt = _lease_timestamp(missing.get("locked_at"))
+                if missing_dt is not None and (
+                    (datetime.now(timezone.utc) - missing_dt).total_seconds()
+                    < self._IN_PROGRESS_STALE_SECONDS
+                ):
+                    continue  # live lease behind a snapshot race — keep
                 where = f"not-in-active-set, status={missing.get('status') or 'unknown'}"
             logger.warning(
-                "Reaping stale in-progress entry for workflow %s (%s); "
-                "worker is gone or hung without a live lease",
+                "Reaping stale in-progress entry for workflow %s (%s); " "no live lease behind it",
                 wid[:8],
                 where,
             )
@@ -681,16 +702,17 @@ class AutonomousScheduler:
         # the same worker-thread name. Without a process-unique owner, an old
         # worker's finally could release a newer process's replacement lease.
         lock_owner = f"{socket.gethostname()}/{os.getpid()}/{threading.current_thread().name}"
-        repo = _get_repo()
 
-        # Pre-try section: an exception or hang here bypasses the main
-        # try/finally entirely, so the in-progress entry selected for this
-        # worker would leak and freeze the workflow until a service restart
-        # (observed 2026-08-19, workflow fec4782b). Reap the entry on any
-        # raise and let the executor's future.result() catch log it; a HANG
-        # here is healed by _reclaim_stale_in_progress once the DB lease
-        # proves no live worker holds the workflow.
+        # Pre-try section: an exception here bypasses the main try/finally
+        # entirely, so the in-progress entry selected for this worker would
+        # leak and freeze the workflow until a service restart (observed
+        # 2026-08-19, workflow fec4782b). Discard the entry on any raise and
+        # let the executor's future.result() catch log it; _get_repo is inside
+        # the try for the same reason. A HANG here still parks this cycle's
+        # executor (shutdown waits) — restart territory, see
+        # _reclaim_stale_in_progress's scope note.
         try:
+            repo = _get_repo()
             # Only owner_id is still consumed below (quota gate). Conflict-key
             # and waiting-state cleanup now live in the key map written at
             # selection time — no per-call snapshots needed here anymore.
@@ -1121,9 +1143,10 @@ class AutonomousScheduler:
             logger.error("Failed to query active workflows: %s", e)
             return
 
-        # Self-heal in-progress entries whose DB lease is gone/stale (hung or
-        # leaked worker) so a frozen workflow resumes within the lease window
-        # instead of waiting for a service restart (2026-08-19, fec4782b).
+        # Self-heal _in_progress entries with no live DB lease behind them
+        # (leaked workers; 2026-08-19 fec4782b). Scope: leaks whose cycle has
+        # returned — a hung worker parks this very cycle, see the reclaim's
+        # docstring.
         self._reclaim_stale_in_progress(workflows, repo)
 
         # Filter out paused, already-in-progress workflows, batch workflows
