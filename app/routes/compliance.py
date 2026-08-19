@@ -424,12 +424,20 @@ def get_saved_report(report_id: str):
 @compliance_bp.route("/audit/patterns", methods=["GET"])
 @admin_required
 def analyze_patterns():
-    """Analyze audit patterns (admin only)."""
+    """Analyze audit patterns (admin only).
+
+    Issue #2748: Tenant isolation for audit pattern analysis.
+    """
+    tenant_id = _current_tenant_id()
+    if tenant_id is None:
+        return jsonify({"error": "Tenant ID required"}), 400
 
     days = request.args.get("days", 30, type=int)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
-    patterns = _get_audit_analyzer().analyze_patterns(start_time=start_time)
+    patterns = _get_audit_analyzer().analyze_patterns(
+        start_time=start_time, tenant_id=tenant_id
+    )
 
     return jsonify(patterns)
 
@@ -437,12 +445,20 @@ def analyze_patterns():
 @compliance_bp.route("/audit/anomalies", methods=["GET"])
 @admin_required
 def detect_anomalies():
-    """Detect audit anomalies (admin only)."""
+    """Detect audit anomalies (admin only).
+
+    Issue #2748: Tenant isolation for anomaly detection.
+    """
+    tenant_id = _current_tenant_id()
+    if tenant_id is None:
+        return jsonify({"error": "Tenant ID required"}), 400
 
     days = request.args.get("days", 7, type=int)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
-    anomalies = _get_audit_analyzer().detect_anomalies(start_time=start_time)
+    anomalies = _get_audit_analyzer().detect_anomalies(
+        start_time=start_time, tenant_id=tenant_id
+    )
 
     # Load status info for all anomalies
     statuses = _get_anomaly_statuses()
@@ -473,13 +489,19 @@ def detect_anomalies():
 def get_user_profile(user_id: int):
     """Get user behavior profile (admin only).
 
+    Issue #2748: Tenant isolation for user behavior profile.
     get_user_behavior_profile applies no tenant filter of its own, so the
     boundary has to be enforced here.
     """
+    tenant_id = _current_tenant_id()
+    if tenant_id is None:
+        return jsonify({"error": "Tenant ID required"}), 400
 
     days = request.args.get("days", 30, type=int)
 
-    profile = _get_audit_analyzer().get_user_behavior_profile(user_id, days=days)
+    profile = _get_audit_analyzer().get_user_behavior_profile(
+        user_id, days=days, tenant_id=tenant_id
+    )
 
     return jsonify(profile)
 
@@ -487,12 +509,20 @@ def get_user_profile(user_id: int):
 @compliance_bp.route("/audit/security-score", methods=["GET"])
 @admin_required
 def get_security_score():
-    """Get security score (admin only)."""
+    """Get security score (admin only).
+
+    Issue #2748: Tenant isolation for security score generation.
+    """
+    tenant_id = _current_tenant_id()
+    if tenant_id is None:
+        return jsonify({"error": "Tenant ID required"}), 400
 
     days = request.args.get("days", 30, type=int)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
-    score = _get_audit_analyzer().generate_security_score(start_time=start_time)
+    score = _get_audit_analyzer().generate_security_score(
+        start_time=start_time, tenant_id=tenant_id
+    )
 
     return jsonify(score)
 

@@ -68,7 +68,10 @@ class AuditAnalyzer:
         self.permission_change_threshold = settings.get("audit_permission_change_threshold", 10)
 
     def analyze_patterns(
-        self, start_time: datetime | None = None, end_time: datetime | None = None
+        self,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        tenant_id: int | None = None,
     ) -> dict[str, Any]:
         """
         Analyze patterns in audit logs.
@@ -76,6 +79,8 @@ class AuditAnalyzer:
         Args:
             start_time: Start of analysis period.
             end_time: End of analysis period.
+            tenant_id: Tenant ID for data isolation. If provided, only analyze
+                audit logs belonging to this tenant.
 
         Returns:
             Dict with pattern analysis results.
@@ -88,6 +93,7 @@ class AuditAnalyzer:
         logs = self.audit_logger.query(
             start_time=start_time,
             end_time=end_time,
+            tenant_id=tenant_id,
             limit=10000,
         )
 
@@ -138,7 +144,10 @@ class AuditAnalyzer:
         }
 
     def detect_anomalies(
-        self, start_time: datetime | None = None, end_time: datetime | None = None
+        self,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        tenant_id: int | None = None,
     ) -> list[AnomalyDetection]:
         """
         Detect anomalies in audit logs.
@@ -146,6 +155,8 @@ class AuditAnalyzer:
         Args:
             start_time: Start of analysis period.
             end_time: End of analysis period.
+            tenant_id: Tenant ID for data isolation. If provided, only analyze
+                audit logs belonging to this tenant.
 
         Returns:
             List[AnomalyDetection]: Detected anomalies.
@@ -158,32 +169,33 @@ class AuditAnalyzer:
         anomalies = []
 
         # Detect failed login anomalies
-        failed_login_anomaly = self._detect_failed_login_anomaly(start_time, end_time)
+        failed_login_anomaly = self._detect_failed_login_anomaly(start_time, end_time, tenant_id)
         if failed_login_anomaly:
             anomalies.append(failed_login_anomaly)
 
         # Detect rapid activity anomalies
-        rapid_activity_anomalies = self._detect_rapid_activity_anomaly(start_time, end_time)
+        rapid_activity_anomalies = self._detect_rapid_activity_anomaly(start_time, end_time, tenant_id)
         anomalies.extend(rapid_activity_anomalies)
 
         # Detect off-hours activity anomalies
-        off_hours_anomalies = self._detect_off_hours_anomaly(start_time, end_time)
+        off_hours_anomalies = self._detect_off_hours_anomaly(start_time, end_time, tenant_id)
         anomalies.extend(off_hours_anomalies)
 
         # Detect unusual action patterns
-        action_anomalies = self._detect_action_pattern_anomaly(start_time, end_time)
+        action_anomalies = self._detect_action_pattern_anomaly(start_time, end_time, tenant_id)
         anomalies.extend(action_anomalies)
 
         return anomalies
 
     def _detect_failed_login_anomaly(
-        self, start_time: datetime, end_time: datetime
+        self, start_time: datetime, end_time: datetime, tenant_id: int | None = None
     ) -> AnomalyDetection | None:
         """Detect failed login anomalies."""
         failed_logins = self.audit_logger.query(
             action="login_failed",
             start_time=start_time,
             end_time=end_time,
+            tenant_id=tenant_id,
             limit=1000,
         )
 
@@ -221,12 +233,13 @@ class AuditAnalyzer:
         )
 
     def _detect_rapid_activity_anomaly(
-        self, start_time: datetime, end_time: datetime
+        self, start_time: datetime, end_time: datetime, tenant_id: int | None = None
     ) -> list[AnomalyDetection]:
         """Detect rapid activity anomalies."""
         logs = self.audit_logger.query(
             start_time=start_time,
             end_time=end_time,
+            tenant_id=tenant_id,
             limit=10000,
         )
 
@@ -266,12 +279,13 @@ class AuditAnalyzer:
         return anomalies
 
     def _detect_off_hours_anomaly(
-        self, start_time: datetime, end_time: datetime
+        self, start_time: datetime, end_time: datetime, tenant_id: int | None = None
     ) -> list[AnomalyDetection]:
         """Detect off-hours activity anomalies."""
         logs = self.audit_logger.query(
             start_time=start_time,
             end_time=end_time,
+            tenant_id=tenant_id,
             limit=10000,
         )
 
@@ -316,12 +330,13 @@ class AuditAnalyzer:
         return anomalies
 
     def _detect_action_pattern_anomaly(
-        self, start_time: datetime, end_time: datetime
+        self, start_time: datetime, end_time: datetime, tenant_id: int | None = None
     ) -> list[AnomalyDetection]:
         """Detect unusual action patterns."""
         logs = self.audit_logger.query(
             start_time=start_time,
             end_time=end_time,
+            tenant_id=tenant_id,
             limit=10000,
         )
 
@@ -363,13 +378,17 @@ class AuditAnalyzer:
 
         return anomalies
 
-    def get_user_behavior_profile(self, user_id: int, days: int = 30) -> dict[str, Any]:
+    def get_user_behavior_profile(
+        self, user_id: int, days: int = 30, tenant_id: int | None = None
+    ) -> dict[str, Any]:
         """
         Get behavior profile for a user.
 
         Args:
             user_id: User ID.
             days: Number of days to analyze.
+            tenant_id: Tenant ID for data isolation. If provided, only analyze
+                audit logs belonging to this tenant.
 
         Returns:
             Dict with user behavior profile.
@@ -382,6 +401,7 @@ class AuditAnalyzer:
             user_id=user_id,
             start_time=start_time,
             end_time=end_time,
+            tenant_id=tenant_id,
             limit=1000,
         )
 
@@ -536,7 +556,10 @@ class AuditAnalyzer:
         }
 
     def generate_security_score(
-        self, start_time: datetime | None = None, end_time: datetime | None = None
+        self,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        tenant_id: int | None = None,
     ) -> dict[str, Any]:
         """
         Generate a security score based on audit analysis.
@@ -544,6 +567,8 @@ class AuditAnalyzer:
         Args:
             start_time: Start of analysis period.
             end_time: End of analysis period.
+            tenant_id: Tenant ID for data isolation. If provided, only analyze
+                audit logs belonging to this tenant.
 
         Returns:
             Dict with security score and breakdown.
@@ -554,7 +579,7 @@ class AuditAnalyzer:
             end_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # Get anomalies
-        anomalies = self.detect_anomalies(start_time, end_time)
+        anomalies = self.detect_anomalies(start_time, end_time, tenant_id=tenant_id)
 
         # Calculate score (100 = best, 0 = worst)
         score: float = 100
