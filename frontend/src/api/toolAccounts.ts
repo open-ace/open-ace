@@ -5,9 +5,21 @@
 import { apiClient } from './client';
 
 // Types
-export type MappingSource = 'manual' | 'auto' | 'predeclared' | 'import' | 'discovered' | 'legacy_predeclared';
+export type MappingSource =
+  | 'manual'
+  | 'auto'
+  | 'predeclared'
+  | 'import'
+  | 'discovered'
+  | 'legacy_predeclared';
 
-export type MappingStatus = 'pending' | 'active' | 'stale' | 'conflict_type' | 'conflict_owner' | 'conflict_tenant';
+export type MappingStatus =
+  | 'pending'
+  | 'active'
+  | 'stale'
+  | 'conflict_type'
+  | 'conflict_owner'
+  | 'conflict_tenant';
 
 export interface ToolAccount {
   id: number;
@@ -80,7 +92,10 @@ export const toolAccountsApi = {
     mapping_source?: MappingSource;
     mapping_status?: MappingStatus;
   }): Promise<{ mapping: ToolAccount; updated_messages: number }> {
-    return apiClient.post<{ mapping: ToolAccount; updated_messages: number }>('/api/tool-accounts', data);
+    return apiClient.post<{ mapping: ToolAccount; updated_messages: number }>(
+      '/api/tool-accounts',
+      data
+    );
   },
 
   async update(
@@ -107,8 +122,9 @@ export const toolAccountsApi = {
       description?: string;
     }>
   ): Promise<{ created_count: number; mappings: ToolAccount[] }> {
-    return apiClient.post<{ created_count: number; mappings: ToolAccount[] }>(`/api/tool-accounts/user/${userId}/batch`, {
-      tool_accounts: toolAccounts,
-    });
+    return apiClient.post<{ created_count: number; mappings: ToolAccount[] }>(
+      `/api/tool-accounts/user/${userId}/batch`,
+      { tool_accounts: toolAccounts }
+    );
   },
 };
