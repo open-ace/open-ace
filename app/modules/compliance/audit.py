@@ -4,10 +4,11 @@ Open ACE - Audit Analyzer
 Analyzes audit logs for compliance and security insights.
 """
 
+import hashlib
 import logging
 import math
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -15,6 +16,32 @@ from app.modules.governance.audit_logger import AuditLogger
 from app.repositories.database import adapt_sql, get_db_connection, is_postgresql  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+
+def make_anomaly_id(
+    anomaly_type: str,
+    affected_users: list[int],
+    time_bucket: str,
+    tenant_id: int | None = None,
+) -> str:
+    """Generate a stable anomaly_id that includes time bucket and tenant.
+
+    The identity incorporates:
+      - tenant_id (isolates state per tenant)
+      - anomaly_type
+      - sorted affected user list
+      - time_bucket (e.g. "2026-08-19-14" for an hour bucket, "2026-08-19" for a day)
+
+    This guarantees that the same user/type pair in different hours or days
+    produces distinct anomaly instances.
+    """
+    key = (
+        f"{tenant_id or 0}:"
+        f"{anomaly_type}:"
+        f"{','.join(str(u) for u in sorted(affected_users or []))}:"
+        f"{time_bucket}"
+    )
+    return hashlib.sha256(key.encode()).hexdigest()[:24]
 
 
 @dataclass
@@ -29,6 +56,8 @@ class AnomalyDetection:
     first_seen: datetime
     last_seen: datetime
     details: dict[str, Any]
+    anomaly_id: str = field(default="")
+    tenant_id: int | None = None
 
 
 def _parse_timestamp(val: Any) -> datetime:
@@ -403,6 +432,11 @@ class AuditAnalyzer:
                         "threshold": self.failed_login_threshold,
                         "user_breakdown": user_breakdown,
                     },
+                    anomaly_id=make_anomaly_id(
+                        "excessive_failed_logins",
+                        affected_users,
+                        first_seen.strftime("%Y-%m-%d"),
+                    ),
                 )
         except Exception as e:
             logger.error(f"Failed to detect failed login anomalies: {e}", exc_info=True)
@@ -443,6 +477,8 @@ class AuditAnalyzer:
                 user_id = int(r["user_id"])
                 hour_str = r["hour"]
                 count = int(r["cnt"])
+                hour_str_s = str(hour_str)
+                first_seen = datetime.strptime(hour_str_s, "%Y-%m-%d %H")
                 anomalies.append(
                     AnomalyDetection(
                         anomaly_type="rapid_activity",
@@ -450,14 +486,14 @@ class AuditAnalyzer:
                         description=f"User {user_id} had {count} actions in one hour",
                         affected_users=[user_id],
                         occurrences=count,
-                        first_seen=datetime.strptime(str(hour_str), "%Y-%m-%d %H"),
-                        last_seen=datetime.strptime(str(hour_str), "%Y-%m-%d %H")
-                        + timedelta(hours=1),
+                        first_seen=first_seen,
+                        last_seen=first_seen + timedelta(hours=1),
                         details={
-                            "hour": str(hour_str),
+                            "hour": hour_str_s,
                             "action_count": count,
                             "threshold": self.rapid_action_threshold,
                         },
+                        anomaly_id=make_anomaly_id("rapid_activity", [user_id], hour_str_s),
                     )
                 )
             return anomalies
@@ -511,6 +547,8 @@ class AuditAnalyzer:
             for r in rows:
                 user_id = int(r["user_id"])
                 count = int(r["cnt"])
+                fs = _parse_timestamp(r["first_seen"])
+                ls = _parse_timestamp(r["last_seen"])
 
                 anomalies.append(
                     AnomalyDetection(
@@ -519,11 +557,14 @@ class AuditAnalyzer:
                         description=f"User {user_id} active during off-hours",
                         affected_users=[user_id],
                         occurrences=count,
-                        first_seen=_parse_timestamp(r["first_seen"]),
-                        last_seen=_parse_timestamp(r["last_seen"]),
+                        first_seen=fs,
+                        last_seen=ls,
                         details={
                             "activity_count": count,
                         },
+                        anomaly_id=make_anomaly_id(
+                            "off_hours_activity", [user_id], fs.strftime("%Y-%m-%d")
+                        ),
                     )
                 )
             return anomalies
@@ -572,6 +613,16 @@ class AuditAnalyzer:
                         tuple(params),
                     )
                     affected = [int(r["user_id"]) for r in cursor.fetchall()]
+                    fs = (
+                        _parse_timestamp(row["first_seen"])
+                        if row
+                        else datetime.now(timezone.utc).replace(tzinfo=None)
+                    )
+                    ls = (
+                        _parse_timestamp(row["last_seen"])
+                        if row
+                        else datetime.now(timezone.utc).replace(tzinfo=None)
+                    )
 
                     anomalies.append(
                         AnomalyDetection(
@@ -580,17 +631,12 @@ class AuditAnalyzer:
                             description=f"{role_count} role changes detected",
                             affected_users=affected,
                             occurrences=role_count,
-                            first_seen=(
-                                _parse_timestamp(row["first_seen"])
-                                if row
-                                else datetime.now(timezone.utc).replace(tzinfo=None)
-                            ),
-                            last_seen=(
-                                _parse_timestamp(row["last_seen"])
-                                if row
-                                else datetime.now(timezone.utc).replace(tzinfo=None)
-                            ),
+                            first_seen=fs,
+                            last_seen=ls,
                             details={},
+                            anomaly_id=make_anomaly_id(
+                                "frequent_role_changes", affected, fs.strftime("%Y-%m-%d")
+                            ),
                         )
                     )
 
@@ -624,6 +670,16 @@ class AuditAnalyzer:
                         tuple(params2),
                     )
                     affected2 = [int(r["user_id"]) for r in cursor.fetchall()]
+                    fs2 = (
+                        _parse_timestamp(row2["first_seen"])
+                        if row2
+                        else datetime.now(timezone.utc).replace(tzinfo=None)
+                    )
+                    ls2 = (
+                        _parse_timestamp(row2["last_seen"])
+                        if row2
+                        else datetime.now(timezone.utc).replace(tzinfo=None)
+                    )
 
                     anomalies.append(
                         AnomalyDetection(
@@ -632,17 +688,14 @@ class AuditAnalyzer:
                             description=f"{perm_count} permission changes detected",
                             affected_users=affected2,
                             occurrences=perm_count,
-                            first_seen=(
-                                _parse_timestamp(row2["first_seen"])
-                                if row2
-                                else datetime.now(timezone.utc).replace(tzinfo=None)
-                            ),
-                            last_seen=(
-                                _parse_timestamp(row2["last_seen"])
-                                if row2
-                                else datetime.now(timezone.utc).replace(tzinfo=None)
-                            ),
+                            first_seen=fs2,
+                            last_seen=ls2,
                             details={},
+                            anomaly_id=make_anomaly_id(
+                                "frequent_permission_changes",
+                                affected2,
+                                fs2.strftime("%Y-%m-%d"),
+                            ),
                         )
                     )
 
@@ -828,6 +881,7 @@ class AuditAnalyzer:
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         precomputed_anomalies: list[AnomalyDetection] | None = None,
+        anomaly_statuses: dict[str, dict] | None = None,
     ) -> dict[str, Any]:
         """
         Generate a security score based on audit analysis.
@@ -837,6 +891,10 @@ class AuditAnalyzer:
             end_time: End of analysis period.
             precomputed_anomalies: Optional pre-computed anomalies to avoid
                 re-running anomaly detection (Issue #2750).
+            anomaly_statuses: Mapping of anomaly_id -> status row.
+                When provided, ``processed`` and ``ignored`` anomalies are
+                excluded from the active deduction so that operator
+                acknowledgement is reflected in the score.
 
         Returns:
             Dict with security score and breakdown.
@@ -852,12 +910,30 @@ class AuditAnalyzer:
             if precomputed_anomalies is not None
             else self.detect_anomalies(start_time, end_time)
         )
+        anomaly_statuses = anomaly_statuses or {}
 
-        # Calculate score (100 = best, 0 = worst)
+        # Partition anomalies by status
+        pending: list[AnomalyDetection] = []
+        processed: list[AnomalyDetection] = []
+        ignored: list[AnomalyDetection] = []
+        for a in anomalies:
+            status_row = anomaly_statuses.get(a.anomaly_id) if a.anomaly_id else None
+            status = status_row["status"] if status_row else "pending"
+            if status == "processed":
+                processed.append(a)
+            elif status == "ignored":
+                ignored.append(a)
+            else:
+                pending.append(a)
+
+        # Calculate score (100 = best, 0 = worst).
+        # Only *pending* anomalies contribute to the active deduction so
+        # that marking an anomaly as processed/ignored actually improves
+        # the score.
         score: float = 100
 
         # Deduct points using risk-weighted frequency-based scoring
-        for anomaly in anomalies:
+        for anomaly in pending:
             base = self.BASE_DEDUCTIONS.get(anomaly.severity, 3)
             weight = self.RISK_WEIGHTS.get(anomaly.anomaly_type, 1.0)
             # Frequency factor: log2 scaling, capped at 5x
@@ -879,22 +955,31 @@ class AuditAnalyzer:
         else:
             grade = "F"
 
+        all_anomalies_for_report = pending + processed + ignored
         return {
             "score": round(score),
             "grade": grade,
             "anomaly_count": len(anomalies),
-            "high_severity_count": len([a for a in anomalies if a.severity == "high"]),
-            "medium_severity_count": len([a for a in anomalies if a.severity == "medium"]),
-            "low_severity_count": len([a for a in anomalies if a.severity == "low"]),
+            "pending_count": len(pending),
+            "processed_count": len(processed),
+            "ignored_count": len(ignored),
+            "high_severity_count": len(
+                [a for a in all_anomalies_for_report if a.severity == "high"]
+            ),
+            "medium_severity_count": len(
+                [a for a in all_anomalies_for_report if a.severity == "medium"]
+            ),
+            "low_severity_count": len([a for a in all_anomalies_for_report if a.severity == "low"]),
             "anomalies": [
                 {
+                    "anomaly_id": a.anomaly_id,
                     "type": a.anomaly_type,
                     "severity": a.severity,
                     "description": a.description,
                 }
-                for a in anomalies
+                for a in all_anomalies_for_report
             ],
-            "recommendations": self._generate_security_recommendations(anomalies),
+            "recommendations": self._generate_security_recommendations(pending),
         }
 
     def _generate_security_recommendations(self, anomalies: list[AnomalyDetection]) -> list[str]:

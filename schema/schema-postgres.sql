@@ -321,7 +321,9 @@ CREATE TABLE anomaly_status (
     status character varying(20) DEFAULT 'pending'::character varying NOT NULL,
     processed_by integer,
     processed_at timestamp without time zone,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    anomaly_id character varying(64) DEFAULT ''::character varying NOT NULL,
+    tenant_id integer
 );
 
 CREATE SEQUENCE anomaly_status_id_seq
@@ -3946,21 +3948,27 @@ CREATE INDEX idx_workflows_status_created ON autonomous_workflows USING btree (s
 
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows USING btree (user_id, status);
 
+CREATE UNIQUE INDEX ix_anomaly_status_anomaly_id ON anomaly_status USING btree (anomaly_id) WHERE ((anomaly_id)::text <> ''::text);
+
+
+--
+--
+
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
-
-
---
---
 
 CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions USING btree (decision_id);
 
+
+--
+--
+
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules USING btree (rule_key, version);
 
-
---
---
-
 CREATE UNIQUE INDEX uq_projects_path ON projects USING btree (tenant_id, path) WHERE (is_active IS TRUE);
+
+
+--
+--
 
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects USING btree (user_id, project_id);
 
