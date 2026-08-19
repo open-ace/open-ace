@@ -81,6 +81,7 @@ class AuditAction(Enum):
     USER_CREATE = "user_create"
     USER_UPDATE = "user_update"
     USER_DELETE = "user_delete"
+    USER_RESTORE = "user_restore"  # Issue #2755: Restore soft-deleted users
     USER_PASSWORD_CHANGE = "user_password_change"
     USER_PASSWORD_CHANGE_FAILED = "user_password_change_failed"
     USER_ROLE_CHANGE = "user_role_change"

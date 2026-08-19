@@ -142,30 +142,42 @@ class UserRepository:
         query = adapt_sql("SELECT * FROM users WHERE id = ?")
         return self.db.fetch_one(query, (user_id,))
 
-    def get_user_by_username(self, username: str) -> dict | None:
+    def get_user_by_username(self, username: str, include_deleted: bool = False) -> dict | None:
         """
         Get user by username.
 
         Args:
             username: Username.
+            include_deleted: Whether to include soft-deleted users.
 
         Returns:
             Optional[Dict]: User data or None.
+
+        Issue #2755: Added include_deleted parameter to support soft-delete conflict detection.
         """
-        query = adapt_sql("SELECT * FROM users WHERE username = ?")
+        if include_deleted:
+            query = adapt_sql("SELECT * FROM users WHERE username = ?")
+        else:
+            query = adapt_sql("SELECT * FROM users WHERE username = ? AND deleted_at IS NULL")
         return self.db.fetch_one(query, (username,))
 
-    def get_user_by_email(self, email: str) -> dict | None:
+    def get_user_by_email(self, email: str, include_deleted: bool = False) -> dict | None:
         """
         Get user by email.
 
         Args:
             email: Email address.
+            include_deleted: Whether to include soft-deleted users.
 
         Returns:
             Optional[Dict]: User data or None.
+
+        Issue #2755: Added include_deleted parameter to support soft-delete conflict detection.
         """
-        query = adapt_sql("SELECT * FROM users WHERE email = ?")
+        if include_deleted:
+            query = adapt_sql("SELECT * FROM users WHERE email = ?")
+        else:
+            query = adapt_sql("SELECT * FROM users WHERE email = ? AND deleted_at IS NULL")
         return self.db.fetch_one(query, (email,))
 
     def get_all_users(
@@ -204,6 +216,189 @@ class UserRepository:
         if params:
             return self.db.fetch_all(query, tuple(params))
         return self.db.fetch_all(query)
+
+    def get_soft_deleted_user_by_username(self, username: str) -> dict | None:
+        """
+        Get soft-deleted user by username.
+
+        Args:
+            username: Username.
+
+        Returns:
+            Optional[Dict]: User data or None if not found or not soft-deleted.
+
+        Issue #2755: Used for detecting soft-delete conflicts during user creation.
+        """
+        query = adapt_sql("SELECT * FROM users WHERE username = ? AND deleted_at IS NOT NULL")
+        return self.db.fetch_one(query, (username,))
+
+    def get_soft_deleted_user_by_email(self, email: str) -> dict | None:
+        """
+        Get soft-deleted user by email.
+
+        Args:
+            email: Email address.
+
+        Returns:
+            Optional[Dict]: User data or None if not found or not soft-deleted.
+
+        Issue #2755: Used for detecting soft-delete conflicts during user creation.
+        """
+        query = adapt_sql("SELECT * FROM users WHERE email = ? AND deleted_at IS NOT NULL")
+        return self.db.fetch_one(query, (email,))
+
+    def delete_all_sessions_for_user(self, user_id: int) -> dict[str, int]:
+        """
+        Delete all sessions for a user across all session tables.
+
+        Args:
+            user_id: User ID.
+
+        Returns:
+            dict: Counts per table {
+                'sessions': N,
+                'sso_sessions': M,
+                'web_user_auth_sessions': K
+            }
+
+        Issue #2755: Ensures complete session revocation on user deletion and restoration.
+        """
+        counts: dict[str, int] = {
+            'sessions': 0,
+            'sso_sessions': 0,
+            'web_user_auth_sessions': 0,
+        }
+
+        try:
+            # Delete from sessions table
+            cursor = self.db.execute(
+                adapt_sql("DELETE FROM sessions WHERE user_id = ?"),
+                (user_id,),
+            )
+            counts['sessions'] = cast("int", cursor.rowcount)
+
+            # Delete from sso_sessions table (if exists)
+            try:
+                cursor = self.db.execute(
+                    adapt_sql("DELETE FROM sso_sessions WHERE user_id = ?"),
+                    (user_id,),
+                )
+                counts['sso_sessions'] = cast("int", cursor.rowcount)
+            except Exception as e:
+                # Table may not exist in some deployments
+                logger.debug(f"Could not delete from sso_sessions: {e}")
+                counts['sso_sessions'] = 0
+
+            # Delete from web_user_auth_sessions table (if exists)
+            try:
+                cursor = self.db.execute(
+                    adapt_sql("DELETE FROM web_user_auth_sessions WHERE user_id = ?"),
+                    (user_id,),
+                )
+                counts['web_user_auth_sessions'] = cast("int", cursor.rowcount)
+            except Exception as e:
+                # Table may not exist in some deployments
+                logger.debug(f"Could not delete from web_user_auth_sessions: {e}")
+                counts['web_user_auth_sessions'] = 0
+
+            logger.info(
+                f"Deleted sessions for user {user_id}: "
+                f"sessions={counts['sessions']}, sso_sessions={counts['sso_sessions']}, "
+                f"web_user_auth_sessions={counts['web_user_auth_sessions']}"
+            )
+            return counts
+
+        except Exception as e:
+            logger.error(f"Error deleting sessions for user {user_id}: {e}")
+            return counts
+
+    def restore_user_with_update(
+        self,
+        user_id: int,
+        username: str | None = None,
+        email: str | None = None,
+        password_hash: str | None = None,
+        role: str | None = None,
+        is_active: bool | None = None,
+        system_account: str | None = None,
+        tenant_id: int | None = None,
+    ) -> bool:
+        """
+        Restore a soft-deleted user with optional field updates.
+
+        Uses optimistic locking: only succeeds if user is currently soft-deleted
+        (deleted_at IS NOT NULL).
+
+        Args:
+            user_id: User ID.
+            username: New username (optional).
+            email: New email (optional).
+            password_hash: New password hash (optional).
+            role: New role (optional).
+            is_active: New active status (optional).
+            system_account: System account name (optional).
+            tenant_id: Tenant ID (optional, must match original for restore).
+
+        Returns:
+            bool: True if successful, False if user not found or not soft-deleted.
+
+        Issue #2755: Atomic restore operation with optimistic locking.
+        """
+        updates = []
+        params: list[Any] = []
+
+        if username is not None:
+            updates.append("username = ?")
+            params.append(username)
+
+        if email is not None:
+            updates.append("email = ?")
+            params.append(email)
+
+        if password_hash is not None:
+            updates.append("password_hash = ?")
+            params.append(password_hash)
+
+        if role is not None:
+            updates.append("role = ?")
+            params.append(role)
+
+        if is_active is not None:
+            updates.append("is_active = ?")
+            if self.db.is_postgresql:
+                params.append(is_active)
+            else:
+                params.append(1 if is_active else 0)
+
+        if system_account is not None:
+            updates.append("system_account = ?")
+            params.append(system_account)
+
+        if tenant_id is not None:
+            updates.append("tenant_id = ?")
+            params.append(tenant_id)
+
+        # Always clear deleted_at when restoring
+        updates.append("deleted_at = NULL")
+
+        params.append(user_id)
+
+        # Use optimistic locking: only update if deleted_at IS NOT NULL
+        query = adapt_sql(
+            f"UPDATE users SET {', '.join(updates)} WHERE id = ? AND deleted_at IS NOT NULL"
+        )
+
+        try:
+            cursor = self.db.execute(query, tuple(params))
+            success = cast("bool", cursor.rowcount > 0)
+            if success:
+                logger.info(f"Successfully restored user {user_id}")
+            else:
+                logger.warning(f"Failed to restore user {user_id}: user not found or not soft-deleted")
+            return success
+        except Exception as e:
+            logger.error(f"Error restoring user {user_id}: {e}")
+            return False
 
     def update_user(
         self,
