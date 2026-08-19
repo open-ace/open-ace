@@ -68,6 +68,7 @@ class TestHealSkipDerivation:
             "check-schema-sync",
             "check-migration-heads",
             "check-migration-rules",
+            "check-requirements-lock-sync",
             "validate-schema",
             "sql-compat-check",
             "api-security-scan",
