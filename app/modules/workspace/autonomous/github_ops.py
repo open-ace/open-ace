@@ -26,6 +26,33 @@ from app.utils.workspace import OPENACE_RM_WRAPPER
 
 logger = logging.getLogger(__name__)
 
+
+def parse_github_iso_datetime(raw) -> datetime | None:
+    """Parse a GitHub API ISO-8601 timestamp into an aware datetime.
+
+    GitHub timestamps end in ``Z``; ``datetime.fromisoformat`` only parses
+    that suffix from 3.11 while this repo supports 3.10, so normalize first.
+    A parsed value without a UTC offset is rejected too — callers subtract
+    it from an aware ``now()`` and aware-minus-naive raises, which would
+    escape their fail-closed contract. Returns None for empty, unparseable
+    or offset-less input — callers fail closed.
+    """
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        logger.warning("unparseable GitHub datetime: %r", raw)
+        return None
+    if parsed.tzinfo is None:
+        logger.warning("GitHub datetime without UTC offset: %r", raw)
+        return None
+    return parsed
+
+
 # ============================================================================
 # 【Issue #2334】审计日志配置
 # ============================================================================
@@ -1591,6 +1618,22 @@ class GitHubOps:
             "mergeable": data.get("mergeable"),
             "mergeable_state": str(data.get("mergeable_state") or "").strip().lower(),
         }
+
+    def get_commit_committed_at(self, sha: str) -> datetime | None:
+        """A commit's committer date (≈ push time) as an aware UTC datetime.
+
+        Used by the merge phase's policy-settle check to tell a freshly
+        pushed head (check-runs may not exist yet) from a stale one. Returns
+        None when the date is missing or unparseable — callers fail closed.
+        """
+        repo = self.get_repo_name()
+        result = self._run_gh(
+            self._gh_api_args([f"repos/{repo}/commits/{sha}"]),
+            repo_scoped=False,
+        )
+        data = json.loads((result.stdout or "").strip() or "{}")
+        raw = ((data.get("commit") or {}).get("committer") or {}).get("date")
+        return parse_github_iso_datetime(raw)
 
     @staticmethod
     def _is_not_found(stderr: str) -> bool:
