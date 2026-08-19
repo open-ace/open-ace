@@ -847,18 +847,32 @@ class TestAdminWithTenantIdNotScoped:
         self, mock_service_class, admin_with_tenant_client
     ):
         """Admin with tenant_id should run auto-mapping globally, not tenant-scoped."""
+        from app.services.tool_account_auto_mapping_service import AutoMappingStats
+
         mock_service = MagicMock()
-        mock_service.run_auto_mapping.return_value = ([], [])
+        # Issue #2760: Mock the new method with stats
+        mock_stats = AutoMappingStats(
+            discovered_count=0,
+            already_mapped_count=0,
+            candidate_count=0,
+            mapped_count=0,
+            unmatched_count=0,
+            excluded_count=0,
+            exclusion_reasons={},
+            mappings=[],
+        )
+        mock_service.run_auto_mapping_with_stats.return_value = mock_stats
         mock_service_class.return_value = mock_service
 
-        admin_with_tenant_client.post(
+        response = admin_with_tenant_client.post(
             "/api/mapping-rules/auto-map",
             data=json.dumps({"dry_run": True}),
             content_type="application/json",
         )
 
-        # Should NOT pass tenant_id to run_auto_mapping
-        mock_service.run_auto_mapping.assert_called_once_with(dry_run=True)
+        # Should NOT pass tenant_id to run_auto_mapping_with_stats
+        mock_service.run_auto_mapping_with_stats.assert_called_once_with(dry_run=True)
+        assert response.status_code == 200
 
     @patch("app.routes.mapping_rules.ToolAccountMappingRuleRepository")
     def test_admin_with_tenant_sees_all_rules(self, mock_repo_class, admin_with_tenant_client):

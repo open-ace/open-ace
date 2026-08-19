@@ -318,6 +318,7 @@ def run_auto_mapping():
 
     Issue #2180: Tenant admin can only run for their tenant.
     Issue #2374: Changed to fail-closed pattern for consistency.
+    Issue #2760: Return detailed stats to distinguish zero-result reasons.
     """
     data = request.get_json() or {}
     dry_run = data.get("dry_run", False)
@@ -327,20 +328,24 @@ def run_auto_mapping():
 
     service = ToolAccountAutoMappingService()
 
+    # Issue #2760: Use new method with detailed stats
     if user_role == "tenant_admin":
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
-        results, still_unmapped = service.run_auto_mapping(
-            dry_run=dry_run, tenant_id=user_tenant_id
-        )
+        stats = service.run_auto_mapping_with_stats(dry_run=dry_run, tenant_id=user_tenant_id)
     else:
-        results, still_unmapped = service.run_auto_mapping(dry_run=dry_run)
+        stats = service.run_auto_mapping_with_stats(dry_run=dry_run)
 
     return jsonify(
         {
-            "mapped_count": len(results),
-            "unmapped_count": len(still_unmapped),
-            "mappings": [r.__dict__ for r in results],
+            "discovered_count": stats.discovered_count,
+            "already_mapped_count": stats.already_mapped_count,
+            "candidate_count": stats.candidate_count,
+            "mapped_count": stats.mapped_count,
+            "unmatched_count": stats.unmatched_count,
+            "excluded_count": stats.excluded_count,
+            "exclusion_reasons": stats.exclusion_reasons,
+            "mappings": stats.mappings,
             "dry_run": dry_run,
         }
     )
