@@ -398,12 +398,29 @@ def get_optimization_cost_trend():
 
 @roi_bp.route("/optimization/efficiency", methods=["GET"])
 def get_efficiency_report():
-    """Get efficiency analysis report."""
+    """Get efficiency analysis report.
+
+    Query Parameters:
+        days: Number of days to analyze (default: 30)
+        task_type: Optional task type filter (GENERAL, CODE_GENERATION,
+            DOCUMENT_ANALYSIS, CONVERSATION)
+        algorithm_version: Optional algorithm version (v1.0, v2.0, auto)
+            - auto: Use A/B test grouping based on tenant_id
+            - v1.0: Legacy algorithm
+            - v2.0: Parameterized algorithm with task-type awareness
+    """
     try:
         days = request.args.get("days", default=30, type=int)
+        task_type = request.args.get("task_type", default=None, type=str)
+        algorithm_version = request.args.get("algorithm_version", default=None, type=str)
 
         optimizer = CostOptimizer()
-        report = optimizer.get_efficiency_report(days, tenant_id=_caller_tenant_id())
+        report = optimizer.get_efficiency_report(
+            days,
+            tenant_id=_caller_tenant_id(),
+            task_type=task_type,
+            algorithm_version=algorithm_version,
+        )
 
         return jsonify({"success": True, "data": report})
     except Exception as e:

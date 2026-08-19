@@ -3,6 +3,16 @@ Open ACE - Cost Optimizer Module
 
 Analyzes usage patterns and provides cost optimization suggestions.
 Identifies opportunities for cost savings and efficiency improvements.
+
+Algorithm Versions:
+    v1.0 (Legacy): Original algorithm with hardcoded thresholds
+    v2.0 (Parameterized): Configurable thresholds with task-type awareness
+
+Task Types:
+    GENERAL: Default for unclassified tasks
+    CODE_GENERATION: Code generation tasks (higher output ratio)
+    DOCUMENT_ANALYSIS: Document analysis tasks (higher input ratio)
+    CONVERSATION: Chat/conversation tasks (balanced ratio)
 """
 
 import logging
@@ -12,7 +22,13 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, cast
 
+from app.modules.analytics.efficiency_registry import (
+    get_algorithm_version,
+    get_registry,
+)
+from app.modules.analytics.efficiency_thresholds import get_thresholds
 from app.modules.analytics.roi_calculator import ROICalculator
+from app.modules.analytics.task_type_inferencer import InferenceResult, TaskType, TaskTypeInferencer
 from app.repositories.database import Database
 from app.utils.cache import cached
 
@@ -585,9 +601,13 @@ class CostOptimizer:
         output_tokens: int,
         requests: int,
         total_cost: float,
+        task_type: TaskType = TaskType.GENERAL,
+        algorithm_version: str | None = None,
     ) -> float:
         """
         Calculate efficiency score based on multiple factors.
+
+        Supports algorithm versioning for A/B testing and gradual rollout.
 
         Args:
             tokens: Total tokens used.
@@ -595,9 +615,23 @@ class CostOptimizer:
             output_tokens: Output tokens.
             requests: Number of requests.
             total_cost: Total cost.
+            task_type: Task type for threshold adjustment (v2.0 only).
+            algorithm_version: Algorithm version ("v1.0", "v2.0", or None for default).
 
         Returns:
             Efficiency score (0-100).
+
+        Algorithm Versions:
+            v1.0 (Legacy): Original algorithm with hardcoded thresholds.
+                - Base score: 60 points
+                - Output ratio 30-50%: +20 points
+                - Cost per request < $0.01: +15 points
+                - Avg tokens 500-2000: +5 points
+
+            v2.0 (Parameterized): Configurable thresholds with task-type awareness.
+                - Uses EfficiencyThresholds from environment or defaults
+                - Adjusts thresholds based on task_type
+                - See efficiency_thresholds.py for configuration options
 
         Note:
             This method differs from ROICalculator._calculate_efficiency_score:
@@ -605,6 +639,39 @@ class CostOptimizer:
             - CostOptimizer uses cost efficiency (avg_cost_per_request thresholds)
             This difference is intentional: CostOptimizer focuses on raw cost metrics,
             while ROICalculator incorporates estimated labor savings.
+        """
+        registry = get_registry()
+        version = algorithm_version or registry.get_default_version()
+
+        try:
+            calculator = registry.get_calculator(version)
+            thresholds = get_thresholds()
+            return calculator.calculate_efficiency_score(
+                tokens=tokens,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                requests=requests,
+                total_cost=total_cost,
+                task_type=task_type,
+                thresholds=thresholds,
+            )
+        except Exception as e:
+            logger.error("Efficiency score calculation failed for version %s: %s", version, e)
+            # Fallback to v1.0 algorithm
+            return self._calculate_efficiency_score_v1(tokens, input_tokens, output_tokens, requests, total_cost)
+
+    def _calculate_efficiency_score_v1(
+        self,
+        tokens: int,
+        input_tokens: int,
+        output_tokens: int,
+        requests: int,
+        total_cost: float,
+    ) -> float:
+        """
+        Legacy efficiency score calculation (v1.0).
+
+        Preserved for fallback and A/B testing baseline.
         """
         # Base score: 60 points
         efficiency_score = 60.0
@@ -661,16 +728,63 @@ class CostOptimizer:
         self,
         input_tokens: int,
         output_tokens: int,
+        task_type: TaskType = TaskType.GENERAL,
+        algorithm_version: str | None = None,
     ) -> float:
         """
         Calculate waste percentage based on input/output imbalance.
 
+        Supports algorithm versioning for A/B testing and gradual rollout.
+
         Args:
             input_tokens: Input tokens.
             output_tokens: Output tokens.
+            task_type: Task type for threshold adjustment (v2.0 only).
+            algorithm_version: Algorithm version ("v1.0", "v2.0", or None for default).
 
         Returns:
             Waste percentage (0-100).
+
+        Algorithm Versions:
+            v1.0 (Legacy): Simple linear calculation.
+                - Output ratio < 10%: waste = (1 - output_ratio) * 50
+                - Output ratio >= 10%: no waste
+
+            v2.0 (Parameterized): Configurable with task-type awareness.
+                - Threshold configurable via OPENACE_EFFICIENCY_WASTE_OUTPUT_RATIO_THRESHOLD
+                - DOCUMENT_ANALYSIS tasks have lower threshold (0.05 vs 0.10)
+                - Non-linear calculation based on deviation from threshold
+
+        Limitation:
+            Assumes low output ratio = waste, which may not hold for all task types.
+            v2.0 attempts to address this with task-type-specific thresholds.
+        """
+        registry = get_registry()
+        version = algorithm_version or registry.get_default_version()
+
+        try:
+            calculator = registry.get_calculator(version)
+            thresholds = get_thresholds()
+            return calculator.calculate_waste_percentage(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                task_type=task_type,
+                thresholds=thresholds,
+            )
+        except Exception as e:
+            logger.error("Waste percentage calculation failed for version %s: %s", version, e)
+            # Fallback to v1.0 algorithm
+            return self._calculate_waste_percentage_v1(input_tokens, output_tokens)
+
+    def _calculate_waste_percentage_v1(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> float:
+        """
+        Legacy waste percentage calculation (v1.0).
+
+        Preserved for fallback and A/B testing baseline.
         """
         total_tokens = input_tokens + output_tokens
 
@@ -771,18 +885,58 @@ class CostOptimizer:
         return recommendations
 
     @cached(ttl=120, key_prefix="cost", skip_args=[0])
-    def get_efficiency_report(self, days: int = 30, tenant_id: int | None = None) -> dict[str, Any]:
+    def get_efficiency_report(
+        self,
+        days: int = 30,
+        tenant_id: int | None = None,
+        task_type: str | None = None,
+        algorithm_version: str | None = None,
+    ) -> dict[str, Any]:
         """
         Get efficiency analysis report.
+
+        Supports algorithm versioning for A/B testing and gradual rollout.
 
         Args:
             days: Number of days to analyze.
             tenant_id: Optional tenant scope (caller's tenant). Included in the
                 cache key so one tenant never reads another's aggregate.
+            task_type: Optional task type filter (GENERAL, CODE_GENERATION,
+                DOCUMENT_ANALYSIS, CONVERSATION). If not provided, uses GENERAL.
+            algorithm_version: Algorithm version ("v1.0", "v2.0", or None for
+                default/auto selection).
 
         Returns:
-            Dict with efficiency metrics.
+            Dict with efficiency metrics including:
+                - algorithm_version: The algorithm version used
+                - applied_task_type: The task type applied
+                - inference_confidence: Task type inference confidence (0-100)
+                - overall_efficiency: Efficiency score (0-100)
+                - waste_percentage: Waste percentage (0-100)
+                - And other existing metrics
         """
+        # Determine algorithm version
+        resolved_version = algorithm_version
+        if resolved_version is None or resolved_version == "auto":
+            resolved_version = get_algorithm_version(tenant_id)
+
+        # Determine task type
+        inference_result: InferenceResult
+        if task_type:
+            try:
+                resolved_task_type = TaskType(task_type.upper())
+                inference_result = InferenceResult(
+                    task_type=resolved_task_type,
+                    confidence=100.0,
+                    matched_patterns=[],
+                )
+            except ValueError:
+                logger.warning("Unknown task_type %s, using GENERAL", task_type)
+                inference_result = TaskTypeInferencer.infer(None)
+        else:
+            # Infer from data (could be enhanced to use actual tool_name)
+            inference_result = TaskTypeInferencer.infer(None)
+
         end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
         start_date = (
             datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
@@ -814,13 +968,24 @@ class CostOptimizer:
         # Average cost per request
         avg_cost_per_request = total_cost / total_requests if total_requests > 0 else 0
 
-        # Efficiency score
+        # Efficiency score (with version and task_type)
         efficiency_score = self._calculate_efficiency_score(
-            total_tokens, total_input, total_output, total_requests, total_cost
+            total_tokens,
+            total_input,
+            total_output,
+            total_requests,
+            total_cost,
+            task_type=inference_result.task_type,
+            algorithm_version=resolved_version,
         )
 
-        # Waste percentage
-        waste_percentage = self._calculate_waste_percentage(total_input, total_output)
+        # Waste percentage (with version and task_type)
+        waste_percentage = self._calculate_waste_percentage(
+            total_input,
+            total_output,
+            task_type=inference_result.task_type,
+            algorithm_version=resolved_version,
+        )
 
         # Generate recommendations
         recommendation_items = self._generate_recommendations(
@@ -847,7 +1012,10 @@ class CostOptimizer:
             "unique_tools": len(
                 {r.get("tool_name") for r in data["by_model"] if r.get("tool_name")}
             ),
-            # ===== New fields =====
+            # ===== New fields (v2.0) =====
+            "algorithm_version": resolved_version,
+            "applied_task_type": inference_result.task_type.value,
+            "inference_confidence": inference_result.confidence,
             "overall_efficiency": round(efficiency_score, 1),
             "avg_cost_per_request": round(avg_cost_per_request, 6),
             "waste_percentage": round(waste_percentage, 1),
