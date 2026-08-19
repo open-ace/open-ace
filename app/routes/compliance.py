@@ -517,13 +517,18 @@ def detect_anomalies():
 def get_user_profile(user_id: int):
     """Get user behavior profile (admin only).
 
+    Issue #2748: Tenant isolation for user behavior profile.
     get_user_behavior_profile applies no tenant filter of its own, so the
     boundary has to be enforced here.
+    Platform admins can access cross-tenant (tenant_id=None).
     """
+    tenant_id = _current_tenant_id()
+    if tenant_id is None and not _is_platform_admin():
+        return jsonify({"error": "Tenant ID required"}), 400
 
     days = _validate_days(default=30)
 
-    profile = _get_audit_analyzer().get_user_behavior_profile(user_id, days=days)
+    profile = _get_audit_analyzer().get_user_behavior_profile(user_id, days=days, tenant_id=tenant_id)
 
     return jsonify(profile)
 
@@ -533,12 +538,17 @@ def get_user_profile(user_id: int):
 def get_security_score():
     """Get security score (admin only).
 
+    Issue #2748: Tenant isolation for security score generation.
+    Platform admins can access cross-tenant (tenant_id=None).
     Accepts pre-computed anomalies via the ``precomputed_anomalies`` parameter
     of ``generate_security_score`` so that the front-end can request anomalies
     and security-score without duplicating the anomaly detection work
     (Issue #2750).  When called standalone the endpoint computes anomalies
     itself.
     """
+    tenant_id = _current_tenant_id()
+    if tenant_id is None and not _is_platform_admin():
+        return jsonify({"error": "Tenant ID required"}), 400
 
     days = _validate_days(default=30)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
@@ -547,11 +557,12 @@ def get_security_score():
 
     # Compute anomalies once and pass them to the scorer so we don't re-run
     # detection inside generate_security_score.
-    anomalies = analyzer.detect_anomalies(start_time=start_time)
+    anomalies = analyzer.detect_anomalies(start_time=start_time, tenant_id=tenant_id)
     # Pass statuses so processed/ignored anomalies are excluded from deduction
     statuses = _get_anomaly_statuses()
     score = analyzer.generate_security_score(
         start_time=start_time,
+        tenant_id=tenant_id,
         precomputed_anomalies=anomalies,
         anomaly_statuses=statuses,
     )
