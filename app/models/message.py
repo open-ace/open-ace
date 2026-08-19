@@ -8,6 +8,8 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from app.utils.datetime_utils import ensure_utc_suffix
+
 logger = logging.getLogger(__name__)
 
 
@@ -53,14 +55,14 @@ class Message:
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "model": self.model,
-            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "timestamp": ensure_utc_suffix(self.timestamp),
             "sender_id": self.sender_id,
             "sender_name": self.sender_name,
             "message_source": self.message_source,
             "feishu_conversation_id": self.feishu_conversation_id,
             "group_subject": self.group_subject,
             "is_group_chat": self.is_group_chat,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": ensure_utc_suffix(self.created_at),
         }
 
     @classmethod
