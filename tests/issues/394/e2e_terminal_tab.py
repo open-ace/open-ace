@@ -20,11 +20,18 @@ Tests the terminal tab functionality including:
 Run:
   HEADLESS=true  python tests/394/e2e_terminal_tab.py
   HEADLESS=false python tests/394/e2e_terminal_tab.py
+
+Pytest note (#2457): step functions are named `_check_*` and the script is
+driven by `run_all_checks()`. The only collected test is
+`test_e2e_terminal_tab_script`, which re-runs this file as a subprocess
+against BASE_URL (exported by the lane runner) and asserts on its exit
+code — the same pattern as tests/issues/559/e2e_terminal_ws_handler.py.
 """
 
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import time
 import traceback
@@ -32,6 +39,7 @@ import traceback
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+import pytest
 import requests
 from playwright.sync_api import expect, sync_playwright
 
@@ -40,8 +48,8 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-terminal-tab")
 
-TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
-TEST_PASS = "admin123"
+TEST_USER = os.environ.get("TEST_REAL_USER", "admin")
+TEST_PASS = os.environ.get("TEST_REAL_PASS", "admin123")
 
 
 def log(stage, msg):
@@ -53,6 +61,34 @@ def take_screenshot(page, name):
     path = os.path.join(SCREENSHOT_DIR, f"{name}.png")
     page.screenshot(path=path)
     log("Screenshot", path)
+
+
+def _clear_seeded_password_gate():
+    """Clear must_change_password for the seeded admin (lane/CI only, #2457).
+
+    Freshly initialized databases gate the admin behind a password-change
+    flow that would intercept the UI pages this script exercises. Deployed
+    environments keep their own user list and are unaffected (no-op when
+    the default DB is absent or the gate is already clear).
+    """
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "UPDATE users SET must_change_password = 0 "
+                "WHERE username = ? AND must_change_password = 1",
+                (TEST_USER,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        log("Setup", f"password-gate clear skipped: {exc}")
 
 
 def login_via_api():
@@ -141,14 +177,17 @@ def start_mock_terminal_server():
 # ═══════════════════════════════════════════════════════════
 
 
-def test_terminal_option_in_modal(page):
+def _check_terminal_option_in_modal(page):
     """Verify terminal option exists in the new session modal."""
     log("Phase 1", "Navigating to workspace...")
     page.goto(f"{BASE_URL}/work/workspace", wait_until="networkidle", timeout=30000)
     time.sleep(2)
     take_screenshot(page, "p1-01-workspace")
 
-    new_tab_btn = page.locator(".workspace-new-tab-btn")
+    # Sidebar button on a fresh workspace (no tabs yet); the tab-strip
+    # ".workspace-new-tab-btn" only renders once at least one tab exists —
+    # both open the same NewSessionModal (Workspace.tsx / SessionList.tsx)
+    new_tab_btn = page.locator("[data-testid='new-session-btn'], .workspace-new-tab-btn").first
     new_tab_btn.wait_for(state="visible", timeout=10000)
     new_tab_btn.click()
     time.sleep(1)
@@ -180,7 +219,7 @@ def test_terminal_option_in_modal(page):
 # ═══════════════════════════════════════════════════════════
 
 
-def test_session_sync_api(token):
+def _check_session_sync_api(token):
     """Test session-sync API endpoint accepts data."""
     log("Phase 2", "Testing session-sync endpoint...")
     headers = {"Cookie": f"session_token={token}", "Content-Type": "application/json"}
@@ -231,7 +270,7 @@ def test_session_sync_api(token):
 # ═══════════════════════════════════════════════════════════
 
 
-def test_terminal_connection_and_interaction(page, mock_ws_port):
+def _check_terminal_connection_and_interaction(page, mock_ws_port):
     """
     Test full terminal lifecycle with mock WebSocket server.
 
@@ -272,8 +311,8 @@ def test_terminal_connection_and_interaction(page, mock_ws_port):
         page.goto(f"{BASE_URL}/work/workspace", wait_until="networkidle", timeout=30000)
         time.sleep(2)
 
-        # Open new session modal
-        new_tab_btn = page.locator(".workspace-new-tab-btn")
+        # Open new session modal (see Phase 1 note on the selector)
+        new_tab_btn = page.locator("[data-testid='new-session-btn'], .workspace-new-tab-btn").first
         new_tab_btn.wait_for(state="visible", timeout=10000)
         new_tab_btn.click()
         time.sleep(1)
@@ -413,13 +452,14 @@ def test_terminal_connection_and_interaction(page, mock_ws_port):
 # ═══════════════════════════════════════════════════════════
 
 
-def test_terminal_tab():
-    """Run all terminal tab tests."""
+def run_all_checks():
+    """Run all terminal tab checks (script entrypoint)."""
+    _clear_seeded_password_gate()
     token = login_via_api()
     log("Setup", f"Logged in as {TEST_USER}")
 
     # Phase 2: API-level tests
-    test_session_sync_api(token)
+    _check_session_sync_api(token)
 
     # Start mock terminal server for Phase 4
     mock_ws_port = start_mock_terminal_server()
@@ -433,24 +473,21 @@ def test_terminal_tab():
             viewport={"width": 1280, "height": 900},
             locale="en",
         )
-        context.add_cookies(
-            [
-                {
-                    "name": "session_token",
-                    "value": token,
-                    "domain": "localhost",
-                    "path": "/",
-                }
-            ]
-        )
         page = context.new_page()
 
         try:
+            # UI login establishes the full client-side auth state the SPA
+            # needs (cookie alone is not enough for the workspace route)
+            page.goto(f"{BASE_URL}/login", wait_until="networkidle", timeout=30000)
+            page.fill("#username", TEST_USER)
+            page.fill("#password", TEST_PASS)
+            page.click("button[type='submit']")
+            page.wait_for_load_state("networkidle", timeout=30000)
             # Phase 1: Modal UI verification
-            test_terminal_option_in_modal(page)
+            _check_terminal_option_in_modal(page)
 
             # Phase 4: Full terminal connection & interaction
-            test_terminal_connection_and_interaction(page, mock_ws_port)
+            _check_terminal_connection_and_interaction(page, mock_ws_port)
 
             log("Result", "All Phase 1-4 tests passed!")
         except Exception as e:
@@ -468,4 +505,27 @@ if __name__ == "__main__":
     print(f"  BASE_URL:  {BASE_URL}")
     print(f"  HEADLESS:  {HEADLESS}")
     print("=" * 60)
-    test_terminal_tab()
+    run_all_checks()
+
+
+# ═══════════════════════════════════════════════════════════
+# Pytest entry (single collected test; see module docstring)
+# ═══════════════════════════════════════════════════════════
+
+
+def test_e2e_terminal_tab_script():
+    """Drive this script as a subprocess against BASE_URL (#2457)."""
+    try:
+        resp = requests.get(f"{BASE_URL}/login", timeout=5)
+        resp.raise_for_status()
+    except Exception:
+        pytest.skip(f"test server not reachable at {BASE_URL}")
+
+    proc = subprocess.run(
+        [sys.executable, os.path.abspath(__file__)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert proc.returncode == 0, f"script failed:\n{proc.stdout}\n{proc.stderr}"
+    assert "All Phase 1-4 tests passed!" in proc.stdout
