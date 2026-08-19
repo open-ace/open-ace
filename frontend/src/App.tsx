@@ -29,7 +29,7 @@ import { useAuth, useTheme } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t } from '@/i18n';
 import { initializeQueryKeyRegistry } from '@/utils';
-import { canAccessManageMode } from '@/utils/permissions';
+import { canAccessManageMode, canManageAllTenants } from '@/utils/permissions';
 import { featureFlagsApi } from '@/api';
 
 // Initialize query key registry on app load
