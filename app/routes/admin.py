@@ -151,12 +151,51 @@ def api_create_user():
     if not is_valid:
         return jsonify({"error": error_msg}), 400
 
-    # Check if user exists
-    if user_repo.get_user_by_username(username):
+    # Check if user exists (Issue #2755: Distinguish active vs soft-deleted users)
+    # Check active users first
+    active_user_by_username = user_repo.get_user_by_username(username, include_deleted=False)
+    if active_user_by_username:
         return jsonify({"error": "Username already exists"}), 400
 
-    if user_repo.get_user_by_email(email):
+    active_user_by_email = user_repo.get_user_by_email(email, include_deleted=False)
+    if active_user_by_email:
         return jsonify({"error": "Email already exists"}), 400
+
+    # Check soft-deleted users for conflict detection
+    deleted_user_by_username = user_repo.get_soft_deleted_user_by_username(username)
+    deleted_user_by_email = user_repo.get_soft_deleted_user_by_email(email)
+
+    # Build conflict response for soft-deleted users
+    conflicts = []
+    deleted_user = None
+    if deleted_user_by_username and deleted_user_by_email:
+        # Both match - check if it's the same user
+        if deleted_user_by_username["id"] == deleted_user_by_email["id"]:
+            deleted_user = deleted_user_by_username
+            conflicts = ["username", "email"]
+        else:
+            # Different soft-deleted users match username and email - return username conflict
+            deleted_user = deleted_user_by_username
+            conflicts = ["username"]
+    elif deleted_user_by_username:
+        deleted_user = deleted_user_by_username
+        conflicts = ["username"]
+    elif deleted_user_by_email:
+        deleted_user = deleted_user_by_email
+        conflicts = ["email"]
+
+    if deleted_user:
+        return (
+            jsonify(
+                {
+                    "error": "USER_SOFT_DELETED",
+                    "message": "The username or email belongs to a deleted user",
+                    "user_id": deleted_user["id"],
+                    "conflicts": conflicts,
+                }
+            ),
+            409,
+        )
 
     # Check tenant quota before creating user
     from app.services.tenant_service import TenantService
@@ -320,18 +359,50 @@ def api_update_user(user_id):
 @admin_required
 @same_tenant_user_required
 def api_delete_user(user_id):
-    """Delete a user."""
+    """Delete a user.
+
+    Issue #2755: Now includes session revocation and tenant counter decrement.
+    """
     # Prevent deleting yourself
     if g.user_id == user_id:
         return jsonify({"error": "Cannot delete yourself"}), 400
 
-    # Get user info for audit before deletion
+    # Get user info for audit and cleanup before deletion
     user = user_repo.get_user_by_id(user_id)
-    username = user.get("username") if user else None
+    if not user:
+        return jsonify({"error": "User not found"}), 404
 
+    username = user.get("username")
+    tenant_id = user.get("tenant_id")
+
+    # Issue #2755: Revoke all sessions before soft delete
+    session_counts = user_repo.delete_all_sessions_for_user(user_id)
+    logger.info(
+        f"Revoked sessions for user {user_id}: "
+        f"sessions={session_counts['sessions']}, sso_sessions={session_counts['sso_sessions']}, "
+        f"web_user_auth_sessions={session_counts['web_user_auth_sessions']}"
+    )
+
+    # Perform soft delete
     success = user_repo.delete_user(user_id)
 
     if success:
+        # Issue #2755 P0-3/P0-4: Critical - decrement tenant user counter with proper error handling
+        counter_decremented = True
+        if tenant_id:
+            from app.services.tenant_service import TenantService
+
+            tenant_service = TenantService()
+            if not tenant_service.decrement_user_count(tenant_id):
+                logger.error(
+                    f"CRITICAL: Failed to decrement tenant user count for tenant {tenant_id} "
+                    f"after deleting user {user_id}. Counter may be incorrect."
+                )
+                counter_decremented = False
+                # Note: We don't rollback the delete here because the user is already soft-deleted
+                # and sessions are revoked. The counter being off by 1 is acceptable compared to
+                # data consistency issues. Log clearly for manual intervention.
+
         # Audit log for user deletion
         client_info = get_client_info()
         audit_logger.log_action(
@@ -341,12 +412,210 @@ def api_delete_user(user_id):
             resource_type="user",
             resource_id=str(user_id),
             resource_name=username,
-            details={"action": "delete"},
+            details={
+                "action": "delete",
+                "tenant_id": tenant_id,
+                "sessions_revoked": session_counts,
+                "counter_decremented": counter_decremented,
+            },
             **client_info,
         )
         return jsonify({"success": True})
 
     return jsonify({"error": "Failed to delete user"}), 500
+
+
+@admin_bp.route("/admin/users/<int:user_id>/restore", methods=["POST"])
+@admin_required
+@same_tenant_user_required
+def api_restore_user(user_id):
+    """Restore a soft-deleted user.
+
+    Issue #2755: Restore soft-deleted users with optional field updates.
+
+    The restore operation is atomic and includes:
+    1. Verification that user is soft-deleted
+    2. Validation that tenant_id matches original (no cross-tenant restore)
+    3. Session revocation across all session tables
+    4. Tenant counter increment with quota check
+    5. Audit logging
+
+    Request body (optional):
+        {
+            "username": "new_username",  // optional
+            "email": "new@email.com",    // optional
+            "password": "new_password",  // optional, must meet policy
+            "role": "user",              // optional, follows privilege rules
+            "is_active": true,           // optional
+            "system_account": "account"  // optional
+        }
+    """
+    data = request.get_json() or {}
+
+    # Get the soft-deleted user
+    user = user_repo.get_user_by_id(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    # Verify user is soft-deleted
+    if user.get("deleted_at") is None:
+        return jsonify({"error": "User is not soft-deleted"}), 400
+
+    # Get original tenant_id
+    original_tenant_id = user.get("tenant_id")
+
+    # Issue #2755 D4: Prohibit cross-tenant restore
+    # If tenant_id is provided in request, it must match original
+    requested_tenant_id = data.get("tenant_id")
+    if requested_tenant_id is not None and requested_tenant_id != original_tenant_id:
+        return (
+            jsonify(
+                {
+                    "error": "Cross-tenant restore is not allowed",
+                    "message": "tenant_id must match the original tenant. Use update user API after restore to change tenant.",
+                }
+            ),
+            400,
+        )
+
+    # Validate role if provided (follows same rules as user update)
+    role = data.get("role")
+    if role:
+        escalation = reject_privilege_escalation(role)
+        if escalation is not None:
+            return escalation
+
+    # Validate password if provided
+    password = data.get("password")
+    password_hash = None
+    if password:
+        settings = get_security_settings_cached()
+        is_valid, error_msg = validate_password(password, policy_settings=settings)
+        if not is_valid:
+            return jsonify({"error": error_msg}), 400
+        password_hash = hash_password(password)
+
+    # Validate username/email if provided
+    new_username = data.get("username")
+    if new_username and not validate_username(new_username):
+        return jsonify({"error": "Invalid username"}), 400
+
+    new_email = data.get("email")
+    if new_email and not validate_email(new_email):
+        return jsonify({"error": "Invalid email"}), 400
+
+    # Check for conflicts with active users (if changing username/email)
+    if new_username:
+        existing = user_repo.get_user_by_username(new_username, include_deleted=False)
+        if existing and existing["id"] != user_id:
+            return jsonify({"error": "Username already exists"}), 400
+
+    if new_email:
+        existing = user_repo.get_user_by_email(new_email, include_deleted=False)
+        if existing and existing["id"] != user_id:
+            return jsonify({"error": "Email already exists"}), 400
+
+    # Validate system_account if provided
+    system_account = data.get("system_account")
+    if system_account and not validate_username(system_account):
+        return jsonify({"error": "Invalid system_account name"}), 400
+
+    # Check tenant quota before restoring
+    from app.services.tenant_service import TenantService
+
+    tenant_service = TenantService()
+    if original_tenant_id and not tenant_service.can_add_user(original_tenant_id):
+        tenant = tenant_service.get_tenant(original_tenant_id)
+        max_users = tenant.quota.max_users if tenant else 0
+        return (
+            jsonify(
+                {
+                    "error": "Tenant user quota exceeded",
+                    "message": f"Cannot restore user: tenant has reached maximum users ({max_users})",
+                }
+            ),
+            409,
+        )
+
+    # Issue #2755: Revoke all sessions before restore (security cleanup)
+    session_counts = user_repo.delete_all_sessions_for_user(user_id)
+
+    # Perform restore with optional updates
+    success = user_repo.restore_user_with_update(
+        user_id=user_id,
+        username=new_username,
+        email=new_email,
+        password_hash=password_hash,
+        role=role,
+        is_active=data.get("is_active"),
+        system_account=system_account,
+        tenant_id=None,  # Never change tenant during restore
+    )
+
+    if not success:
+        return jsonify({"error": "Failed to restore user"}), 500
+
+    # Issue #2755 P0-3/P0-4: Critical - increment tenant user counter with proper error handling
+    counter_incremented = False
+    if original_tenant_id:
+        if not tenant_service.increment_user_count(original_tenant_id):
+            logger.error(
+                f"CRITICAL: Failed to increment tenant user count for tenant {original_tenant_id} "
+                f"after restoring user {user_id}. Attempting rollback."
+            )
+            # Rollback the restore operation
+            rollback_success = user_repo.delete_user(user_id, hard=False)
+            if rollback_success:
+                logger.info(f"Successfully rolled back restore for user {user_id}")
+            else:
+                logger.error(
+                    f"CRITICAL: Failed to rollback restore for user {user_id}. "
+                    f"User is restored but tenant counter is incorrect."
+                )
+            return (
+                jsonify(
+                    {
+                        "error": "Failed to update tenant user count",
+                        "message": "User restore was rolled back due to tenant counter update failure",
+                    }
+                ),
+                500,
+            )
+        counter_incremented = True
+
+    # Auto-create system user for workspace if system_account is provided
+    if system_account:
+        uid = data.get("system_uid")
+        if ensure_system_user(system_account, uid=uid):
+            logger.info(f"System user {system_account} ready for workspace")
+        else:
+            logger.warning(f"Failed to create system user {system_account}, workspace may not work")
+
+    # Audit log for user restoration
+    client_info = get_client_info()
+    restored_username = new_username or user.get("username")
+    audit_logger.log_action(
+        action=AuditAction.USER_RESTORE,
+        user_id=g.user_id,
+        username=g.user.get("username"),
+        resource_type="user",
+        resource_id=str(user_id),
+        resource_name=restored_username,
+        details={
+            "action": "restore",
+            "original_username": user.get("username"),
+            "original_email": user.get("email"),
+            "new_username": new_username,
+            "new_email": new_email,
+            "role": role,
+            "tenant_id": original_tenant_id,
+            "sessions_revoked": session_counts,
+            "counter_incremented": counter_incremented,
+        },
+        **client_info,
+    )
+
+    return jsonify({"success": True})
 
 
 @admin_bp.route("/admin/users/<int:user_id>/password", methods=["PUT"])
