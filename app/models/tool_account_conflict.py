@@ -10,6 +10,8 @@ the expected tool type, owner, or tenant, a conflict record is created.
 from dataclasses import dataclass
 from datetime import datetime
 
+from app.utils.datetime_utils import ensure_utc_suffix
+
 
 @dataclass
 class ToolAccountConflict:
@@ -34,8 +36,8 @@ class ToolAccountConflict:
             "conflict_type": self.conflict_type,
             "expected_value": self.expected_value,
             "actual_value": self.actual_value,
-            "detected_at": self.detected_at.isoformat() if self.detected_at else None,
-            "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
+            "detected_at": ensure_utc_suffix(self.detected_at),
+            "resolved_at": ensure_utc_suffix(self.resolved_at),
             "resolved_by": self.resolved_by,
             "resolution_action": self.resolution_action,
             "details": self.details,
@@ -63,8 +65,8 @@ class BackfillLog:
             "backfilled_count": self.backfilled_count,
             "first_date": self.first_date,
             "last_date": self.last_date,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "started_at": ensure_utc_suffix(self.started_at),
+            "completed_at": ensure_utc_suffix(self.completed_at),
             "status": self.status,
         }
 
@@ -92,7 +94,7 @@ class MappingMigrationStatus:
             "last_processed_id": self.last_processed_id,
             "total_count": self.total_count,
             "processed_count": self.processed_count,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "started_at": ensure_utc_suffix(self.started_at),
+            "completed_at": ensure_utc_suffix(self.completed_at),
             "error_message": self.error_message,
         }

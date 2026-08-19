@@ -7,6 +7,9 @@ Data models for usage tracking.
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from app.utils.datetime_utils import ensure_utc_suffix
+from app.utils.helpers import parse_db_datetime
+
 
 @dataclass
 class Usage:
@@ -37,7 +40,7 @@ class Usage:
             "cache_tokens": self.cache_tokens,
             "request_count": self.request_count,
             "models_used": self.models_used,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": ensure_utc_suffix(self.created_at),
         }
 
     @classmethod
@@ -54,9 +57,7 @@ class Usage:
             cache_tokens=data.get("cache_tokens", 0),
             request_count=data.get("request_count", 0),
             models_used=data.get("models_used"),
-            created_at=(
-                datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
-            ),
+            created_at=parse_db_datetime(data.get("created_at")),
         )
 
 
