@@ -3932,6 +3932,9 @@ ALTER TABLE ONLY alerts_history
 ALTER TABLE ONLY anomaly_status
     ADD CONSTRAINT anomaly_status_processed_by_fkey FOREIGN KEY (processed_by) REFERENCES users(id);
 
+ALTER TABLE ONLY anomaly_status
+    ADD CONSTRAINT anomaly_status_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE SET NULL;
+
 ALTER TABLE ONLY api_key_store
     ADD CONSTRAINT api_key_store_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id);
 
