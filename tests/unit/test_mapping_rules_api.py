@@ -277,15 +277,25 @@ class TestAutoMapping:
     @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
     def test_run_auto_mapping_success(self, mock_service_class, admin_client):
         """POST /api/mapping-rules/auto-map should run auto-mapping."""
+        from app.services.tool_account_auto_mapping_service import AutoMappingStats
+
         mock_service = MagicMock()
-        mock_result = MagicMock()
-        mock_result.__dict__ = {
-            "tool_account": "test-account",
-            "user_id": 1,
-            "username": "test_user",
-            "matched_by": "username",
-        }
-        mock_service.run_auto_mapping.return_value = ([mock_result], [])
+        mock_stats = AutoMappingStats(
+            discovered_count=10,
+            already_mapped_count=5,
+            candidate_count=5,
+            mapped_count=1,
+            unmatched_count=4,
+            excluded_count=0,
+            exclusion_reasons={},
+            mappings=[{
+                "tool_account": "test-account",
+                "user_id": 1,
+                "username": "test_user",
+                "matched_by": "username",
+            }],
+        )
+        mock_service.run_auto_mapping_with_stats.return_value = mock_stats
         mock_service_class.return_value = mock_service
 
         response = admin_client.post(
@@ -296,13 +306,25 @@ class TestAutoMapping:
         assert response.status_code == 200
         data = json.loads(response.data)
         assert data["mapped_count"] == 1
-        assert data["unmapped_count"] == 0
+        assert data["unmatched_count"] == 4
 
     @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
     def test_run_auto_mapping_dry_run(self, mock_service_class, admin_client):
         """POST /api/mapping-rules/auto-map should support dry_run mode."""
+        from app.services.tool_account_auto_mapping_service import AutoMappingStats
+
         mock_service = MagicMock()
-        mock_service.run_auto_mapping.return_value = ([], [])
+        mock_stats = AutoMappingStats(
+            discovered_count=0,
+            already_mapped_count=0,
+            candidate_count=0,
+            mapped_count=0,
+            unmatched_count=0,
+            excluded_count=0,
+            exclusion_reasons={},
+            mappings=[],
+        )
+        mock_service.run_auto_mapping_with_stats.return_value = mock_stats
         mock_service_class.return_value = mock_service
 
         response = admin_client.post(
