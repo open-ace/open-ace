@@ -11,8 +11,9 @@ Tests for:
 PostgreSQL version - uses pg_db fixture.
 """
 
-import pytest
 from datetime import datetime, timedelta
+
+import pytest
 
 # Marks every test in this module as requiring a live PostgreSQL server.
 pytestmark = pytest.mark.postgres
