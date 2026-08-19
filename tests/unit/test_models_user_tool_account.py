@@ -56,8 +56,8 @@ class TestUserToolAccount:
         assert d["tool_account"] == "charlie_feishu"
         assert d["tool_type"] == "feishu"
         assert d["description"] == "Charlie Feishu"
-        assert d["created_at"] == "2025-08-10T14:30:00"
-        assert d["updated_at"] == "2025-08-10T14:30:00"
+        assert d["created_at"] == "2025-08-10T14:30:00Z"
+        assert d["updated_at"] == "2025-08-10T14:30:00Z"
 
     def test_to_dict_none_timestamps(self):
         uta = UserToolAccount(id=1, user_id=1, tool_account="test")

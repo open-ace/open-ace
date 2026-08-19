@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from app.utils.datetime_utils import ensure_utc_suffix
 from app.utils.helpers import parse_db_datetime
 
 
@@ -32,8 +33,8 @@ class ProjectCategory:
             "key_patterns": self.key_patterns,
             "sort_order": self.sort_order,
             "is_active": self.is_active,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": ensure_utc_suffix(self.created_at),
+            "updated_at": ensure_utc_suffix(self.updated_at),
         }
 
     @classmethod

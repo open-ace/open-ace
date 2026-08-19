@@ -53,6 +53,12 @@ def sync_env(tmp_path, monkeypatch):
     db = Database(db_url=f"sqlite:///{tmp_path / 'feishu-sync.db'}")
     load_schema_from_file(db_url=db.db_url, dialect="sqlite")
 
+    # Issue #2789: Foreign key constraint requires tenant to exist
+    db.execute(
+        "INSERT INTO tenants (id, name, slug, quota) VALUES (?, ?, ?, ?)",
+        (7, "Feishu Test Tenant", "feishu-test", '{"max_users": 100}'),
+    )
+
     config = {
         "feishu": {
             "app_id": "test-app-id",

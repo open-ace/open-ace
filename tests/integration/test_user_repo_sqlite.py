@@ -110,7 +110,9 @@ class TestUserCRUD:
     def test_get_user_by_id(self, tmp_db):
         """Retrieve user by ID."""
         repo = UserRepository(db=tmp_db)
-        user_id = _insert_user(tmp_db, username="dave")
+        # Issue #2789: Foreign key constraint requires tenant to exist
+        _insert_tenant(tmp_db, name="Default Tenant")
+        user_id = _insert_user(tmp_db, username="dave", tenant_id=1)
 
         user = repo.get_user_by_id(user_id)
         assert user is not None
@@ -125,7 +127,9 @@ class TestUserCRUD:
     def test_get_user_by_username(self, tmp_db):
         """Retrieve user by username."""
         repo = UserRepository(db=tmp_db)
-        _insert_user(tmp_db, username="eve")
+        # Issue #2789: Foreign key constraint requires tenant to exist
+        _insert_tenant(tmp_db, name="Default Tenant")
+        _insert_user(tmp_db, username="eve", tenant_id=1)
 
         user = repo.get_user_by_username("eve")
         assert user is not None
@@ -140,8 +144,10 @@ class TestUserCRUD:
     def test_get_all_users(self, tmp_db):
         """Retrieve all users."""
         repo = UserRepository(db=tmp_db)
-        _insert_user(tmp_db, username="user1")
-        _insert_user(tmp_db, username="user2")
+        # Issue #2789: Foreign key constraint requires tenant to exist
+        _insert_tenant(tmp_db, name="Default Tenant")
+        _insert_user(tmp_db, username="user1", tenant_id=1)
+        _insert_user(tmp_db, username="user2", tenant_id=1)
 
         users = repo.get_all_users()
         assert len(users) >= 2
@@ -152,7 +158,9 @@ class TestUserCRUD:
     def test_update_user_username(self, tmp_db):
         """Update username field."""
         repo = UserRepository(db=tmp_db)
-        user_id = _insert_user(tmp_db, username="oldname")
+        # Issue #2789: Foreign key constraint requires tenant to exist
+        _insert_tenant(tmp_db, name="Default Tenant")
+        user_id = _insert_user(tmp_db, username="oldname", tenant_id=1)
 
         result = repo.update_user(user_id, username="newname")
         assert result is True
@@ -163,7 +171,9 @@ class TestUserCRUD:
     def test_update_user_email(self, tmp_db):
         """Update email field."""
         repo = UserRepository(db=tmp_db)
-        user_id = _insert_user(tmp_db, username="frank", email="old@test.com")
+        # Issue #2789: Foreign key constraint requires tenant to exist
+        _insert_tenant(tmp_db, name="Default Tenant")
+        user_id = _insert_user(tmp_db, username="frank", email="old@test.com", tenant_id=1)
 
         result = repo.update_user(user_id, email="new@test.com")
         assert result is True
@@ -174,7 +184,9 @@ class TestUserCRUD:
     def test_update_user_role(self, tmp_db):
         """Update role field."""
         repo = UserRepository(db=tmp_db)
-        user_id = _insert_user(tmp_db, username="grace")
+        # Issue #2789: Foreign key constraint requires tenant to exist
+        _insert_tenant(tmp_db, name="Default Tenant")
+        user_id = _insert_user(tmp_db, username="grace", tenant_id=1)
 
         # Issue #2332: 'admin' role no longer valid, use 'manager'
         result = repo.update_user(user_id, role="manager")
@@ -186,7 +198,9 @@ class TestUserCRUD:
     def test_update_user_is_active(self, tmp_db):
         """Update is_active field."""
         repo = UserRepository(db=tmp_db)
-        user_id = _insert_user(tmp_db, username="henry")
+        # Issue #2789: Foreign key constraint requires tenant to exist
+        _insert_tenant(tmp_db, name="Default Tenant")
+        user_id = _insert_user(tmp_db, username="henry", tenant_id=1)
 
         # Set inactive
         result = repo.update_user(user_id, is_active=False)

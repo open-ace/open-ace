@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
+from app.utils.datetime_utils import ensure_utc_suffix
+
 
 class MappingSource(str, Enum):
     """Origin of the tool account mapping."""
@@ -67,14 +69,12 @@ class UserToolAccount:
             "tool_account": self.tool_account,
             "tool_type": self.tool_type,
             "description": self.description,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": ensure_utc_suffix(self.created_at),
+            "updated_at": ensure_utc_suffix(self.updated_at),
             "mapping_source": self.mapping_source,
             "mapping_status": self.mapping_status,
-            "discovered_at": self.discovered_at.isoformat() if self.discovered_at else None,
-            "last_activity_at": (
-                self.last_activity_at.isoformat() if self.last_activity_at else None
-            ),
+            "discovered_at": ensure_utc_suffix(self.discovered_at),
+            "last_activity_at": ensure_utc_suffix(self.last_activity_at),
             "observed_message_count": self.observed_message_count,
             "created_by": self.created_by,
             "tenant_id": self.tenant_id,

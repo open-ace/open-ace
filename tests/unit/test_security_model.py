@@ -117,6 +117,19 @@ def manager(tmp_path, monkeypatch):
     db_path = str(tmp_path / "test_agent.db")
     mgr = RemoteAgentManager(db_path=db_path)
     load_schema_from_file(db_url=mgr.db.db_url, dialect="sqlite")
+
+    # Issue #2789: Create required tenant and user for foreign key constraints
+    # SQLite foreign keys are enabled by database.py, so we need test data
+    with mgr.db.connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (1, 'test-tenant', 'test-tenant')"
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (1, 'test-user', 'test-hash')"
+        )
+        conn.commit()
+
     return mgr
 
 

@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
+from app.utils.datetime_utils import ensure_utc_suffix
+from app.utils.helpers import parse_db_datetime
+
 logger = logging.getLogger(__name__)
 
 
@@ -79,8 +82,8 @@ class ToolAccountMappingRule:
             "is_auto": self.is_auto,
             "is_active": self.is_active,
             "description": self.description,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": ensure_utc_suffix(self.created_at),
+            "updated_at": ensure_utc_suffix(self.updated_at),
         }
 
     @classmethod
@@ -96,12 +99,8 @@ class ToolAccountMappingRule:
             is_auto=data.get("is_auto", True),
             is_active=data.get("is_active", True),
             description=data.get("description"),
-            created_at=(
-                datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
-            ),
-            updated_at=(
-                datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
-            ),
+            created_at=parse_db_datetime(data.get("created_at")),
+            updated_at=parse_db_datetime(data.get("updated_at")),
         )
 
     def matches(self, tool_account: str, tool_type: str | None = None) -> bool:

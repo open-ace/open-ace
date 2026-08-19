@@ -78,6 +78,77 @@ def _create_sqlite_tables(db):
 
     load_schema_from_file(db_url=db.db_url, dialect="sqlite")
 
+    # Issue #2789: Create tenant_sensitive_keywords and tenant_keywords_version tables
+    # These tables are defined in migration 20260819_001 but may not be in schema.sql yet
+    _create_tenant_keywords_tables(db, dialect="sqlite")
+
+
+def _create_tenant_keywords_tables(db, dialect="sqlite"):
+    """Create tenant keywords tables for Issue #2789.
+
+    Creates tables if they don't exist (idempotent).
+    """
+    try:
+        if dialect == "sqlite":
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS tenant_sensitive_keywords (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id INTEGER NOT NULL,
+                    keyword TEXT NOT NULL,
+                    normalized_keyword TEXT NOT NULL,
+                    is_enabled INTEGER DEFAULT 1 NOT NULL,
+                    created_by INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP
+                )
+            """)
+            db.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_keyword
+                ON tenant_sensitive_keywords(tenant_id, normalized_keyword)
+            """)
+            db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tenant_keywords_tenant
+                ON tenant_sensitive_keywords(tenant_id)
+            """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS tenant_keywords_version (
+                    tenant_id INTEGER PRIMARY KEY,
+                    version INTEGER DEFAULT 1 NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+            """)
+        else:
+            # PostgreSQL
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS tenant_sensitive_keywords (
+                    id SERIAL PRIMARY KEY,
+                    tenant_id INTEGER NOT NULL,
+                    keyword TEXT NOT NULL,
+                    normalized_keyword TEXT NOT NULL,
+                    is_enabled BOOLEAN DEFAULT TRUE NOT NULL,
+                    created_by INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP
+                )
+            """)
+            db.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_keyword
+                ON tenant_sensitive_keywords(tenant_id, normalized_keyword)
+            """)
+            db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tenant_keywords_tenant
+                ON tenant_sensitive_keywords(tenant_id)
+            """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS tenant_keywords_version (
+                    tenant_id INTEGER PRIMARY KEY,
+                    version BIGINT DEFAULT 1 NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+            """)
+    except Exception as e:
+        logger.warning(f"Could not create tenant_keywords tables (may already exist): {e}")
+
 
 def _get_pg_base_url():
     """Return the base PostgreSQL URL for creating/dropping test databases."""
@@ -94,6 +165,9 @@ def _create_pg_tables(db):
     from app.repositories.schema_init import load_schema_from_file
 
     load_schema_from_file(db_url=db.db_url, dialect="postgresql")
+
+    # Issue #2789: Create tenant_sensitive_keywords and tenant_keywords_version tables
+    _create_tenant_keywords_tables(db, dialect="postgresql")
 
 
 @pytest.fixture
@@ -168,15 +242,25 @@ def app(tmp_db):
     from flask import Flask
 
     from app.routes.compliance import compliance_bp
+    from app.routes.governance import governance_bp
 
     app = Flask(__name__)
     app.register_blueprint(compliance_bp)
+    app.register_blueprint(governance_bp, url_prefix="/api")
     app.config["TESTING"] = True
 
     # Patch database to use tmp_db
     with patch("app.repositories.database.Database", return_value=tmp_db):
         with patch("app.routes.compliance.report_generator.db", tmp_db):
-            yield app
+            # Issue #2789: Patch governance_repo to use tmp_db
+            with patch("app.routes.governance.governance_repo.db", tmp_db):
+                with patch("app.routes.governance.governance_repo._ensure_config_dir"):
+                    # Patch GovernanceRepository constructor to always use tmp_db
+                    with patch(
+                        "app.repositories.governance_repo.GovernanceRepository.__init__",
+                        lambda self, db=None: setattr(self, "db", tmp_db),
+                    ):
+                        yield app
 
 
 @pytest.fixture
@@ -195,3 +279,80 @@ def auth_headers():
 
     # In tests, we'll patch g.user_id before each request
     return {"Content-Type": "application/json"}
+
+
+# ---------------------------------------------------------------------------
+# Additional fixtures for tenant keywords tests (Issue #2789)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def db_session(tmp_db):
+    """Alias for tmp_db for compatibility with tenant keywords tests."""
+    return tmp_db
+
+
+@pytest.fixture
+def admin_client(app, tmp_db):
+    """Create authenticated admin test client for tenant keywords tests."""
+    from unittest.mock import patch
+
+    # Ensure necessary tenant and user records exist for foreign key constraints
+    # Tenant 1 is required for tenant_id references
+    tmp_db.execute(
+        "INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (1, 'Default Tenant', 'default')"
+    )
+    # User 1 is required for created_by references (platform admin)
+    # Note: password_hash is required, role must be valid ('platform_admin', 'tenant_admin', etc.)
+    tmp_db.execute("""INSERT OR IGNORE INTO users
+           (id, username, email, password_hash, role, tenant_id)
+           VALUES (1, 'admin', 'admin@test.com', 'test_hash', 'platform_admin', NULL)""")
+    # User 2 for tenant admin (tenant_id must NOT be NULL for tenant_admin role)
+    tmp_db.execute("""INSERT OR IGNORE INTO users
+           (id, username, email, password_hash, role, tenant_id)
+           VALUES (2, 'tenant_admin', 'tenant@test.com', 'test_hash', 'tenant_admin', 1)""")
+
+    # Mock authenticated admin user
+    admin_user = {
+        "id": 1,
+        "username": "admin",
+        "email": "admin@test.com",
+        "role": "platform_admin",  # Must match valid role in users table
+        "tenant_id": None,  # Platform admin
+    }
+
+    with patch("app.auth.decorators._load_user_from_token", return_value=admin_user):
+        client = app.test_client()
+        client.set_cookie("session_token", "test-admin-token")
+        yield client
+
+
+@pytest.fixture
+def tenant_admin_client(app, tmp_db):
+    """Create authenticated tenant admin test client for tenant keywords tests."""
+    from unittest.mock import patch
+
+    # Ensure necessary tenant and user records exist for foreign key constraints
+    tmp_db.execute(
+        "INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (1, 'Default Tenant', 'default')"
+    )
+    tmp_db.execute("""INSERT OR IGNORE INTO users
+           (id, username, email, password_hash, role, tenant_id)
+           VALUES (1, 'admin', 'admin@test.com', 'test_hash', 'platform_admin', NULL)""")
+    tmp_db.execute("""INSERT OR IGNORE INTO users
+           (id, username, email, password_hash, role, tenant_id)
+           VALUES (2, 'tenant_admin', 'tenant@test.com', 'test_hash', 'tenant_admin', 1)""")
+
+    # Mock authenticated tenant admin user
+    tenant_user = {
+        "id": 2,
+        "username": "tenant_admin",
+        "email": "tenant@test.com",
+        "role": "tenant_admin",  # Must be tenant_admin for same_tenant_or_platform_admin decorator
+        "tenant_id": 1,
+    }
+
+    with patch("app.auth.decorators._load_user_from_token", return_value=tenant_user):
+        client = app.test_client()
+        client.set_cookie("session_token", "test-tenant-token")
+        yield client
