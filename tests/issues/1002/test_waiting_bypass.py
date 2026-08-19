@@ -159,6 +159,10 @@ class TestAdvanceSingleWaitingCleanup:
         sched._in_progress_batch_ids.add("batch-1")
         sched._in_progress_workspaces.add("/proj")
         sched._in_progress_branches.add("shared/branch")
+        # Teardown discards exactly the keys the entry reserved at selection
+        # time (c0ebbf7f key map); a map-less entry is a pre-deploy legacy
+        # shape nobody owns, so register w-dev's keys the way selection does
+        sched._in_progress_key_map["w-dev"] = ("batch-1", "/proj", "shared/branch")
 
         developing_wf = {
             "workflow_id": "w-dev",
