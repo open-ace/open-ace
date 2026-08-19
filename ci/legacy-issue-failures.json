@@ -201,46 +201,6 @@
       "summary": "AssertionError: Expected '_mark_failed' to not have been called. Called 1 times."
     },
     {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1857",
-      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_already_exists_fails_when_retry_still_finds_nothing",
-      "outcome": "failure",
-      "summary": "AssertionError: should fail when recovery can't locate the existing PR"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1857",
-      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_already_exists_falls_back_to_find_existing_pr_without_url",
-      "outcome": "failure",
-      "summary": "AssertionError: Expected 'find_existing_pr' to be called once. Called 0 times."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1857",
-      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_already_exists_recovers_by_parsing_pr_url_from_error",
-      "outcome": "failure",
-      "summary": "AssertionError: PR number not parsed from error URL and persisted"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1857",
-      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_already_exists_retries_find_when_first_returns_none",
-      "outcome": "failure",
-      "summary": "AssertionError: assert 0 == 2"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1857",
-      "nodeid": "tests/issues/1857/test_pr_review_duplicate_create.py::test_create_pr_unrecoverable_error_still_fails",
-      "outcome": "failure",
-      "summary": "AssertionError: non-'already exists' error should propagate, not be masked"
-    },
-    {
       "category": "test_body_exception",
       "exception_type": "RuntimeError",
       "issue_number": "1895",
@@ -803,8 +763,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-19 prune 7 resolved issue-477 browse-directory-auth entries: two stacked layers. (a) The remote_module fixture's sys.modules mock set predated remote.py's governance/agent_token/llm_proxy_handler/session_access imports — loading via spec_from_file_location asked the mocked app.modules parent for __spec__ and raised AttributeError at setup (masked to the recorded inner failures in full shards where earlier tests import the real modules); the mock set now matches remote.py's current imports. (b) The #477 defensive g.user checks moved: unauthenticated -> 401 from before_request (load_user), per-machine auth -> @machine_access_required/_check_machine_access (UUID #2540 -> role -> machine existence -> assignment -> tenant isolation #2538); tests realigned to that contract. Resolution evidence: run 32246957318 resolved list is exactly these 7 nodeids with new/changed/invalid/collection_errors all 0 (one shard of that run was first felled by a Playwright CDN 403 and rerun clean). Negative control: reverting reproduces the 7 setup errors. Shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32246957318",
+    "prune_note": "2026-08-19 prune 5 resolved issue-1857 duplicate-PR-create entries: three stacked seam drifts after the pr_review phase extraction (#2044 T11). (a) The migrated handler validates change scope BEFORE creating the PR; the test orchestrator never stubbed it, so the real validator ran git against the fake project_path and every test failed in an early PhaseResult.failed with create_pr called 0 times (the recorded 'expected call not found'/no-raise failures) — _make_orchestrator now stubs the validator (1816-cluster pattern). (b) github_pr_number rides workflow_patch committed with the terminal PhaseResult; the old stop-after-PR-block trick aborted before the commit — the three recovery tests now let the flow complete (review APPROVE + summary). (c) Agent seam renamed to _run_agent_with_context_recovery and the find-retry sleep moved into phases/pr_review.py (patch target 'time.sleep'). Resolution evidence: run 32251776518 resolved list is exactly these 5 nodeids with new/changed/invalid/collection_errors all 0. Negative control: reverting reproduces the 5. Shrink-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32251776518",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
