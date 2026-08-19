@@ -1266,7 +1266,7 @@ CREATE TABLE tenant_settings (
  block_sensitive_keyword INTEGER DEFAULT 0,
  sensitive_keyword_match_mode TEXT DEFAULT 'word_boundary',
  allowed_tools TEXT DEFAULT '["claude", "qwen", "openclaw", "codex", "zcode"]',
- roi_assumptions TEXT DEFAULT NULL
+ roi_assumptions TEXT
 );
 
 CREATE TABLE tenant_usage (

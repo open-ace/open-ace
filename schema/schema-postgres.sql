@@ -1943,7 +1943,7 @@ CREATE TABLE tenant_settings (
     block_sensitive_keyword boolean DEFAULT false,
     sensitive_keyword_match_mode character varying(50) DEFAULT 'word_boundary'::character varying,
     allowed_tools jsonb DEFAULT '["claude", "qwen", "openclaw", "codex", "zcode"]'::jsonb,
-    roi_assumptions jsonb DEFAULT NULL
+    roi_assumptions jsonb
 );
 
 CREATE SEQUENCE tenant_settings_id_seq
