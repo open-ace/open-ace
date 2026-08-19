@@ -1,6 +1,7 @@
 """Unit tests for AutonomousScheduler."""
 
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -294,6 +295,12 @@ class TestSchedulerProcessWorkflows:
 
         # Mark wf-1 as already in progress
         scheduler._in_progress_ids.add("wf-1")
+        # ... backed by a fresh locked_at lease: the lease-anchored reclaim
+        # (c0ebbf7f) reaps in-progress memory entries with no live lease
+        # behind them, so the fixture must give wf-1 one.
+        mock_repo.get_active_workflows.return_value[0]["locked_at"] = datetime.now(
+            timezone.utc
+        ).strftime("%Y-%m-%d %H:%M:%S")
 
         with patch(
             "app.routes.autonomous._get_repo",
