@@ -257,6 +257,8 @@ def check_all() -> dict:
     Run all security baseline checks.
 
     Uses unified security mode detection from security_mode.py (Issue #2185).
+    Issue #2810: Detects database backend to skip password checks for SQLite,
+    which does not use server-side password authentication.
 
     Returns:
         dict: Dictionary with check results and overall status.
@@ -265,14 +267,48 @@ def check_all() -> dict:
     mode = get_security_mode()
 
     # Get environment values
-    db_password = os.environ.get("DB_PASSWORD")
     secret_key = os.environ.get("SECRET_KEY")
     encryption_key = os.environ.get("OPENACE_ENCRYPTION_KEY")
     multi_user_mode = os.environ.get("WORKSPACE_MULTI_USER_MODE", "").lower() == "true"
     allow_root_multi_user = os.environ.get("OPENACE_ALLOW_ROOT_MULTI_USER", "").lower() == "1"
 
+    # Issue #2810: Detect database backend to determine if password check applies.
+    # SQLite does not use server-side password authentication, so the check is
+    # not applicable. Only PostgreSQL (and other password-authenticated backends)
+    # require DB_PASSWORD validation.
+    try:
+        from app.repositories.database import is_postgresql
+
+        use_postgresql = is_postgresql()
+    except Exception:
+        # If backend detection fails, default to PostgreSQL for safety
+        # (fail-closed: assume password check is needed)
+        use_postgresql = True
+
+    if use_postgresql:
+        db_password = os.environ.get("DB_PASSWORD")
+        db_result = check_database_password(db_password, mode)
+        db_entry = {
+            "status": db_result.status,
+            "message": db_result.message,
+            "recommendation": db_result.recommendation,
+            "backend": "postgresql",
+            "applicable": True,
+        }
+        effective_db_status = db_result.status
+    else:
+        # SQLite does not use server-side password authentication
+        db_entry = {
+            "status": "not_applicable",
+            "message": "SQLite does not use server-side password authentication.",
+            "recommendation": None,
+            "backend": "sqlite",
+            "applicable": False,
+        }
+        # not_applicable is treated as pass for overall status determination
+        effective_db_status = "pass"
+
     # Run checks
-    db_result = check_database_password(db_password, mode)
     secret_result = check_secret_key(secret_key, mode)
     encryption_result = check_encryption_key(encryption_key, mode)
 
@@ -283,11 +319,7 @@ def check_all() -> dict:
     # Determine overall status
     results = {
         "mode": mode.value,
-        "database_password": {
-            "status": db_result.status,
-            "message": db_result.message,
-            "recommendation": db_result.recommendation,
-        },
+        "database_password": db_entry,
         "secret_key": {
             "status": secret_result.status,
             "message": secret_result.message,
@@ -305,9 +337,9 @@ def check_all() -> dict:
         },
     }
 
-    # Overall status
+    # Overall status (Issue #2810: not_applicable for SQLite is treated as pass)
     statuses = [
-        db_result.status,
+        effective_db_status,
         secret_result.status,
         encryption_result.status,
         root_result.status,
