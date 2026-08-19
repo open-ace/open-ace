@@ -539,7 +539,9 @@ def api_update_user_quota(user_id):
         value = data[field_name]
         if value is None:
             return EXPLICIT_NULL  # Explicit null - set to unlimited
-        return value  # Integer value - set to specified value
+        if isinstance(value, int):
+            return value
+        return int(value) if value else 0  # type: ignore[call-overload]
 
     new_daily_token = parse_quota_field("daily_token_quota")
     new_monthly_token = parse_quota_field("monthly_token_quota")
@@ -568,6 +570,8 @@ def api_update_user_quota(user_id):
             return False  # Setting to unlimited - doesn't increase limit usage
         if current_val is None:
             return True  # Setting from unlimited to limited - needs validation
+        # At this point, new_val must be an int
+        assert isinstance(new_val, int), f"Expected int, got {type(new_val)}"
         return new_val > current_val  # Increasing specific value - needs validation
 
     # Check which fields are increasing

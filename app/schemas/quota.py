@@ -289,7 +289,7 @@ def validate_tenant_allocation(
         result["details"] = {
             "field": "daily_token_quota",
             "reason": "explicit_null_not_allowed",
-            "tenant_limit": daily_token_limit,
+            "tenant_limit": daily_token_limit,  # type: ignore[misc]
             "suggestion": "Provide a specific value or set tenant to unlimited",
         }
         logger.warning(
@@ -304,7 +304,7 @@ def validate_tenant_allocation(
         result["details"] = {
             "field": "monthly_token_quota",
             "reason": "explicit_null_not_allowed",
-            "tenant_limit": monthly_token_limit,
+            "tenant_limit": monthly_token_limit,  # type: ignore[misc]
             "suggestion": "Provide a specific value or set tenant to unlimited",
         }
         logger.warning(
@@ -319,7 +319,7 @@ def validate_tenant_allocation(
         result["details"] = {
             "field": "daily_request_quota",
             "reason": "explicit_null_not_allowed",
-            "tenant_limit": daily_request_limit,
+            "tenant_limit": daily_request_limit,  # type: ignore[misc]
             "suggestion": "Provide a specific value or set tenant to unlimited",
         }
         logger.warning(
@@ -334,7 +334,7 @@ def validate_tenant_allocation(
         result["details"] = {
             "field": "monthly_request_quota",
             "reason": "explicit_null_not_allowed",
-            "tenant_limit": monthly_request_limit,
+            "tenant_limit": monthly_request_limit,  # type: ignore[misc]
             "suggestion": "Provide a specific value or set tenant to unlimited",
         }
         logger.warning(
@@ -382,6 +382,8 @@ def validate_tenant_allocation(
             return None  # No change, skip validation
         if new_val is EXPLICIT_NULL:
             return allocated  # Unlimited user doesn't count against limit
+        # At this point, new_val must be an int (not None and not EXPLICIT_NULL)
+        assert isinstance(new_val, int)
         return allocated + new_val  # Add new user's quota to allocated
 
     total_daily_token = calculate_total(new_daily_token_quota, allocated_daily_token)
@@ -433,7 +435,7 @@ def validate_tenant_allocation(
                 "daily_token",
                 daily_token_limit,
                 allocated_daily_token,
-                new_daily_token_quota if new_daily_token_quota is not EXPLICIT_NULL else None,
+                new_daily_token_quota if isinstance(new_daily_token_quota, int) else None,
                 TOKEN_QUOTA_MULTIPLIER,
             )
             logger.warning(
@@ -467,7 +469,7 @@ def validate_tenant_allocation(
                 "monthly_token",
                 monthly_token_limit,
                 allocated_monthly_token,
-                new_monthly_token_quota if new_monthly_token_quota is not EXPLICIT_NULL else None,
+                new_monthly_token_quota if isinstance(new_monthly_token_quota, int) else None,
                 TOKEN_QUOTA_MULTIPLIER,
             )
             logger.warning(
@@ -496,7 +498,7 @@ def validate_tenant_allocation(
                 "daily_request",
                 daily_request_limit,
                 allocated_daily_request,
-                new_daily_request_quota if new_daily_request_quota is not EXPLICIT_NULL else None,
+                new_daily_request_quota if isinstance(new_daily_request_quota, int) else None,
             )
             logger.warning(
                 f"Tenant {tenant_id} daily request quota exceeded: "
