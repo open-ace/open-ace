@@ -10,7 +10,12 @@ from typing import Any
 try:  # package-style import (tests) vs direct-script import (CLI)
     from .common import RUN_ENVELOPE_SCHEMA_NAME, GovernanceError, dump_artifact, load_artifact
 except ImportError:  # pragma: no cover - exercised via CLI
-    from common import RUN_ENVELOPE_SCHEMA_NAME, GovernanceError, dump_artifact, load_artifact  # type: ignore[no-redef]
+    from common import (  # type: ignore[no-redef]
+        RUN_ENVELOPE_SCHEMA_NAME,
+        GovernanceError,
+        dump_artifact,
+        load_artifact,
+    )
 
 
 def _timestamp(value: str) -> datetime:
