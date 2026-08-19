@@ -69,9 +69,7 @@ class TestLegacyEfficiencyCalculator:
             (100, 10, 90, 1, 0.001),
             (0, 0, 0, 0, 0),
         ]:
-            score = calculator.calculate_efficiency_score(
-                tokens, input_t, output_t, requests, cost
-            )
+            score = calculator.calculate_efficiency_score(tokens, input_t, output_t, requests, cost)
             assert 0 <= score <= 100
 
     def test_calculate_efficiency_score_ideal_output_ratio(self):
@@ -148,9 +146,7 @@ class TestParameterizedEfficiencyCalculator:
             (100, 10, 90, 1, 0.001),
             (0, 0, 0, 0, 0),
         ]:
-            score = calculator.calculate_efficiency_score(
-                tokens, input_t, output_t, requests, cost
-            )
+            score = calculator.calculate_efficiency_score(tokens, input_t, output_t, requests, cost)
             assert 0 <= score <= 100
 
     def test_calculate_efficiency_score_with_task_type(self):
