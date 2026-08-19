@@ -408,14 +408,12 @@ class TestIssue2779SudoersChownCheck:
         script_content = self.INSTALL_SCRIPT.read_text()
 
         # Wrapper check loop should include openace-chown
-        assert (
-            "openace-chown" in script_content
-        ), "openace-chown wrapper check missing"
+        assert "openace-chown" in script_content, "openace-chown wrapper check missing"
 
         # Should check for wrapper existence and user authorization
         # Pattern: for wrapper in ... openace-chown ...
         assert (
-            'for wrapper in' in script_content and 'openace-chown' in script_content
+            "for wrapper in" in script_content and "openace-chown" in script_content
         ), "Wrapper loop pattern not found"
 
     def test_openace_utils_definition_excludes_chown(self):
@@ -428,20 +426,18 @@ class TestIssue2779SudoersChownCheck:
         script_content = self.INSTALL_SCRIPT.read_text()
 
         # Find OPENACE_UTILS definition
-        matches = re.findall(
-            r'Cmnd_Alias OPENACE_UTILS = (.+)',
-            script_content
-        )
+        matches = re.findall(r"Cmnd_Alias OPENACE_UTILS = (.+)", script_content)
 
         for match in matches:
             # Should NOT contain chown
             assert (
-                '/usr/bin/chown' not in match
+                "/usr/bin/chown" not in match
             ), f"OPENACE_UTILS incorrectly contains chown: {match}"
 
             # Should contain expected safe commands
-            assert '/usr/bin/test' in match or 'test *' in match, \
-                f"OPENACE_UTILS missing test command: {match}"
+            assert (
+                "/usr/bin/test" in match or "test *" in match
+            ), f"OPENACE_UTILS missing test command: {match}"
 
     def test_correct_config_no_false_warning(self, tmp_path: Path):
         """
@@ -498,15 +494,16 @@ deploy-user ALL=(root) NOPASSWD: OPENACE_UTILS
         script_content = self.INSTALL_SCRIPT.read_text()
 
         # Verify wrapper check loop exists and includes openace-chown
-        assert 'for wrapper in' in script_content, "Wrapper loop not found"
-        assert 'openace-chown' in script_content, "openace-chown wrapper check missing"
+        assert "for wrapper in" in script_content, "Wrapper loop not found"
+        assert "openace-chown" in script_content, "openace-chown wrapper check missing"
 
         # Verify user-anchored grep pattern exists in wrapper checks
         # Pattern: grep -E "^${run_user}" to anchor to current user
         # This prevents false positives from other users' rules
         # At minimum, verify wrapper check references user variable
-        assert '${run_user}' in script_content or '$run_user' in script_content, \
-            "Wrapper check should reference run_user variable"
+        assert (
+            "${run_user}" in script_content or "$run_user" in script_content
+        ), "Wrapper check should reference run_user variable"
 
     def test_idempotent_upgrade_no_sudoers_rewrite(self, tmp_path: Path):
         """
