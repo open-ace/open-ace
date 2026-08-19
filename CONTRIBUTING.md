@@ -78,6 +78,12 @@ declared in `requirements-ci.in` and the `dev` extra. After changing either inpu
 keep those declarations aligned and regenerate the reviewed lock
 with `uv pip compile --universal --python-version 3.10 requirements-ci.in -o requirements-ci.lock`.
 
+The production Docker image installs a separate hash-pinned lock,
+`requirements.lock`, compiled from `requirements.txt` and resolved against the
+aliyun mirror the image uses (so every pin is installable there). After changing
+`requirements.txt`, regenerate it with `scripts/gen_requirements_lock.sh`; the
+`check-requirements-lock-sync` pre-commit hook fails if you forget.
+
 ## 📝 Code Style
 
 - Follow [PEP 8](https://pep8.org/) style guidelines

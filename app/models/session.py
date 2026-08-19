@@ -8,8 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.models.user import User
-from app.utils.datetime_utils import ensure_utc_suffix
-from app.utils.helpers import parse_db_datetime
+from app.utils.datetime_utils import ensure_utc_suffix, parse_utc
 
 
 @dataclass
@@ -48,8 +47,8 @@ class Session:
             email=data.get("email"),
             role=data.get("role", "user"),
             token=data.get("token", ""),
-            created_at=parse_db_datetime(data.get("created_at")),
-            expires_at=parse_db_datetime(data.get("expires_at")),
+            created_at=parse_utc(data.get("created_at")),
+            expires_at=parse_utc(data.get("expires_at")),
         )
 
     def is_expired(self) -> bool:

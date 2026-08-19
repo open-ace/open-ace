@@ -1,4 +1,10 @@
-"""Unit tests for User model."""
+"""Unit tests for User model.
+
+Includes regression coverage for the Python 3.10 round-trip bug (Issue #2765):
+User.to_dict emits UTC 'Z'-suffixed timestamps via ensure_utc_suffix,
+and User.from_dict must parse them back on every supported Python version
+(3.10's datetime.fromisoformat rejects a bare 'Z').
+"""
 
 from datetime import datetime, timezone
 
@@ -122,7 +128,7 @@ class TestUser:
         u = User.from_dict(data)
         assert u.id == 20
         assert u.username == "alice"
-        # parse_db_datetime returns timezone-aware datetime for Z suffix
+        # parse_utc returns timezone-aware datetime for Z suffix
         assert u.created_at.year == 2025
         assert u.created_at.month == 7
         assert u.created_at.day == 1
@@ -170,7 +176,7 @@ class TestUser:
         assert restored.username == original.username
         assert restored.email == original.email
         assert restored.role == original.role
-        # parse_db_datetime returns timezone-aware datetime for Z suffix
+        # parse_utc returns timezone-aware datetime for Z suffix
         # Compare timestamp values instead of objects
         assert restored.created_at.year == original.created_at.year
         assert restored.created_at.month == original.created_at.month

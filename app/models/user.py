@@ -8,8 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
-from app.utils.datetime_utils import ensure_utc_suffix
-from app.utils.helpers import parse_db_datetime
+from app.utils.datetime_utils import ensure_utc_suffix, parse_utc
 
 
 class UserRole(Enum):
@@ -93,8 +92,8 @@ class User:
             password_hash=data.get("password_hash", ""),
             role=data.get("role", "user"),
             is_active=data.get("is_active", True),
-            created_at=parse_db_datetime(data.get("created_at")),
-            last_login=parse_db_datetime(data.get("last_login")),
+created_at=parse_utc(data.get("created_at")),
+            last_login=parse_utc(data.get("last_login")),
             tenant_id=data.get("tenant_id"),
             daily_token_quota=data.get("daily_token_quota"),
             monthly_token_quota=data.get("monthly_token_quota"),
