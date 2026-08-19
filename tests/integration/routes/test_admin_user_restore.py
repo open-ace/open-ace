@@ -8,11 +8,12 @@ Tests cover:
 - Audit logging
 """
 
-import pytest
 from datetime import datetime, timezone
 
-from app.repositories.user_repo import UserRepository
+import pytest
+
 from app.modules.governance.audit_logger import AuditAction
+from app.repositories.user_repo import UserRepository
 
 
 def _insert_user(tmp_db, username="testuser", email=None, tenant_id=None, deleted_at=None):
@@ -48,7 +49,12 @@ def _insert_session(tmp_db, user_id, token="test_token"):
     """Insert a session row for testing."""
     cursor = tmp_db.execute(
         "INSERT INTO sessions (user_id, token, created_at, expires_at) VALUES (?, ?, ?, ?)",
-        (user_id, token, datetime.now(timezone.utc).replace(tzinfo=None), datetime.now(timezone.utc).replace(tzinfo=None)),
+        (
+            user_id,
+            token,
+            datetime.now(timezone.utc).replace(tzinfo=None),
+            datetime.now(timezone.utc).replace(tzinfo=None),
+        ),
     )
     return cursor.lastrowid
 
@@ -57,7 +63,12 @@ def _insert_web_user_auth_session(tmp_db, user_id, session_token="web_token"):
     """Insert a web_user_auth_sessions row for testing."""
     cursor = tmp_db.execute(
         "INSERT INTO web_user_auth_sessions (user_id, session_token, created_at, expires_at) VALUES (?, ?, ?, ?)",
-        (user_id, session_token, datetime.now(timezone.utc).replace(tzinfo=None), datetime.now(timezone.utc).replace(tzinfo=None)),
+        (
+            user_id,
+            session_token,
+            datetime.now(timezone.utc).replace(tzinfo=None),
+            datetime.now(timezone.utc).replace(tzinfo=None),
+        ),
     )
     return cursor.lastrowid
 
@@ -88,7 +99,9 @@ class TestSoftDeleteConflictDetection:
 
         # Insert a soft-deleted user
         deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        user_id = _insert_user(tmp_db, username="deleted_email_user", email="deleted@test.com", deleted_at=deleted_at)
+        user_id = _insert_user(
+            tmp_db, username="deleted_email_user", email="deleted@test.com", deleted_at=deleted_at
+        )
 
         # Default behavior should NOT find the deleted user
         user = repo.get_user_by_email("deleted@test.com", include_deleted=False)
@@ -124,11 +137,18 @@ class TestSoftDeleteConflictDetection:
         repo = UserRepository(db=tmp_db)
 
         # Insert an active user
-        active_user_id = _insert_user(tmp_db, username="active_email_user", email="active_email@test.com")
+        active_user_id = _insert_user(
+            tmp_db, username="active_email_user", email="active_email@test.com"
+        )
 
         # Insert a soft-deleted user
         deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        deleted_user_id = _insert_user(tmp_db, username="soft_deleted_email_user", email="deleted_email@test.com", deleted_at=deleted_at)
+        deleted_user_id = _insert_user(
+            tmp_db,
+            username="soft_deleted_email_user",
+            email="deleted_email@test.com",
+            deleted_at=deleted_at,
+        )
 
         # Should not find active user
         user = repo.get_soft_deleted_user_by_email("active_email@test.com")
@@ -367,11 +387,18 @@ class TestIncludeDeletedBackwardCompatibility:
         repo = UserRepository(db=tmp_db)
 
         # Create active user
-        active_user_id = _insert_user(tmp_db, username="active_email_default", email="active_default@test.com")
+        active_user_id = _insert_user(
+            tmp_db, username="active_email_default", email="active_default@test.com"
+        )
 
         # Create deleted user
         deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        deleted_user_id = _insert_user(tmp_db, username="deleted_email_default", email="deleted_default@test.com", deleted_at=deleted_at)
+        deleted_user_id = _insert_user(
+            tmp_db,
+            username="deleted_email_default",
+            email="deleted_default@test.com",
+            deleted_at=deleted_at,
+        )
 
         # Default should find active user
         user = repo.get_user_by_email("active_default@test.com")

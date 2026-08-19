@@ -293,12 +293,18 @@ class UserRepository:
             except Exception as e:
                 error_str = str(e).lower()
                 # Only ignore "table not found" errors
-                if "no such table" in error_str or "relation" in error_str or "does not exist" in error_str:
+                if (
+                    "no such table" in error_str
+                    or "relation" in error_str
+                    or "does not exist" in error_str
+                ):
                     logger.debug(f"Table {table_name} not found, skipping")
                     return 0
                 else:
                     # Log unexpected errors but don't fail the whole operation
-                    logger.error(f"Unexpected error deleting from {table_name} for user {user_id}: {e}")
+                    logger.error(
+                        f"Unexpected error deleting from {table_name} for user {user_id}: {e}"
+                    )
                     return 0
 
         # Delete from optional tables
