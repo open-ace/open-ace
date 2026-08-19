@@ -1,7 +1,7 @@
 """Add allowed_tools and roi_assumptions columns to tenant_settings
 
-Revision ID: 20260819_001_add_tenant_settings_json_fields
-Revises: 20260818_002_add_tool_account_mapping_fields
+Revision ID: 20260819_003
+Revises: 20260819_002
 Create Date: 2026-08-19
 
 Issue: #2788
@@ -23,8 +23,8 @@ from alembic import op
 
 log = logging.getLogger(__name__)
 
-revision: str = "20260819_001_add_tenant_settings_json_fields"
-down_revision: str | None = "20260818_002_add_tool_account_mapping_fields"
+revision: str = "20260819_003"
+down_revision: str | None = "20260819_002"
 branch_labels: str | None = None
 depends_on: str | None = None
 
