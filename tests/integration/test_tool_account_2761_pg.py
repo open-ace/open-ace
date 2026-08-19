@@ -102,13 +102,13 @@ class TestPredeclaredAccount:
         tenant_id = _insert_tenant(pg_db, name="tenant2")
 
         # Create pending and active accounts
-        pending = repo.create(
+        repo.create(
             user_id=user_id,
             tool_account="charlie-pending",
             mapping_status=MappingStatus.PENDING.value,
             tenant_id=tenant_id,
         )
-        active = repo.create(
+        repo.create(
             user_id=user_id,
             tool_account="charlie-active",
             mapping_status=MappingStatus.ACTIVE.value,
