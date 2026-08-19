@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.models.user import User
+from app.utils.datetime_utils import ensure_utc_suffix, parse_utc
 
 
 @dataclass
@@ -32,8 +33,8 @@ class Session:
             "email": self.email,
             "role": self.role,
             "token": self.token,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "created_at": ensure_utc_suffix(self.created_at),
+            "expires_at": ensure_utc_suffix(self.expires_at),
         }
 
     @classmethod
@@ -46,12 +47,8 @@ class Session:
             email=data.get("email"),
             role=data.get("role", "user"),
             token=data.get("token", ""),
-            created_at=(
-                datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
-            ),
-            expires_at=(
-                datetime.fromisoformat(data["expires_at"]) if data.get("expires_at") else None
-            ),
+            created_at=parse_utc(data.get("created_at")),
+            expires_at=parse_utc(data.get("expires_at")),
         )
 
     def is_expired(self) -> bool:

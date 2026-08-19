@@ -321,7 +321,9 @@ CREATE TABLE anomaly_status (
     status character varying(20) DEFAULT 'pending'::character varying NOT NULL,
     processed_by integer,
     processed_at timestamp without time zone,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    anomaly_id character varying(64) DEFAULT ''::character varying NOT NULL,
+    tenant_id integer
 );
 
 CREATE SEQUENCE anomaly_status_id_seq
@@ -3903,155 +3905,26 @@ CREATE INDEX idx_workflows_status_created ON autonomous_workflows USING btree (s
 
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows USING btree (user_id, status);
 
+CREATE UNIQUE INDEX ix_anomaly_status_anomaly_id ON anomaly_status USING btree (anomaly_id) WHERE ((anomaly_id)::text <> ''::text);
+
+
+--
+--
+
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
-
-
---
---
 
 CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions USING btree (decision_id);
 
+
+--
+--
+
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules USING btree (rule_key, version);
-
-
---
---
 
 CREATE UNIQUE INDEX uq_projects_path ON projects USING btree (tenant_id, path) WHERE (is_active IS TRUE);
 
+
+--
+--
+
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects USING btree (user_id, project_id);
-
-
---
---
-
-CREATE TRIGGER trigger_set_token_version BEFORE INSERT ON agent_tokens FOR EACH ROW EXECUTE FUNCTION set_token_version_trigger();
-
-ALTER TABLE ONLY alerts_history
-    ADD CONSTRAINT alerts_history_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY anomaly_status
-    ADD CONSTRAINT anomaly_status_processed_by_fkey FOREIGN KEY (processed_by) REFERENCES users(id);
-
-ALTER TABLE ONLY api_key_store
-    ADD CONSTRAINT api_key_store_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id);
-
-ALTER TABLE ONLY api_key_store
-    ADD CONSTRAINT api_key_store_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE ONLY archive_files
-    ADD CONSTRAINT archive_files_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id);
-
-ALTER TABLE ONLY autonomous_workflows
-    ADD CONSTRAINT autonomous_workflows_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY backfill_logs
-    ADD CONSTRAINT backfill_logs_mapping_id_fkey FOREIGN KEY (mapping_id) REFERENCES user_tool_accounts(id);
-
-ALTER TABLE ONLY consistency_violations
-    ADD CONSTRAINT consistency_violations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY test_execution_evidence
-    ADD CONSTRAINT fk_test_evidence_command_execution FOREIGN KEY (command_execution_id) REFERENCES command_execution_evidence(id);
-
-ALTER TABLE ONLY user_daily_stats
-    ADD CONSTRAINT fk_user_daily_stats_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY users
-    ADD CONSTRAINT fk_users_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE SET NULL;
-
-ALTER TABLE ONLY insights_reports
-    ADD CONSTRAINT insights_reports_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE ONLY legal_holds
-    ADD CONSTRAINT legal_holds_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE ONLY machine_assignments
-    ADD CONSTRAINT machine_assignments_granted_by_fkey FOREIGN KEY (granted_by) REFERENCES users(id);
-
-ALTER TABLE ONLY machine_assignments
-    ADD CONSTRAINT machine_assignments_machine_id_fkey FOREIGN KEY (machine_id) REFERENCES remote_machines(machine_id);
-
-ALTER TABLE ONLY machine_assignments
-    ADD CONSTRAINT machine_assignments_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE ONLY quota_alerts
-    ADD CONSTRAINT quota_alerts_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY quota_usage
-    ADD CONSTRAINT quota_usage_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY recycle_bin
-    ADD CONSTRAINT recycle_bin_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id);
-
-ALTER TABLE ONLY recycle_bin
-    ADD CONSTRAINT recycle_bin_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE ONLY remote_machines
-    ADD CONSTRAINT remote_machines_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id);
-
-ALTER TABLE ONLY remote_machines
-    ADD CONSTRAINT remote_machines_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE ONLY retention_evidence
-    ADD CONSTRAINT retention_evidence_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id);
-
-ALTER TABLE ONLY retention_executions
-    ADD CONSTRAINT retention_executions_policy_id_fkey FOREIGN KEY (policy_id) REFERENCES retention_policies(id);
-
-ALTER TABLE ONLY retention_executions
-    ADD CONSTRAINT retention_executions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE ONLY retention_policies
-    ADD CONSTRAINT retention_policies_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE ONLY session_messages
-    ADD CONSTRAINT session_messages_session_id_fkey FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id);
-
-ALTER TABLE ONLY sessions
-    ADD CONSTRAINT sessions_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY sso_identities
-    ADD CONSTRAINT sso_identities_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE ONLY sso_providers
-    ADD CONSTRAINT sso_providers_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
-
-ALTER TABLE ONLY sso_sessions
-    ADD CONSTRAINT sso_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE ONLY tenant_migrations
-    ADD CONSTRAINT tenant_migrations_migrated_by_fkey FOREIGN KEY (migrated_by) REFERENCES users(id);
-
-ALTER TABLE ONLY tenant_migrations
-    ADD CONSTRAINT tenant_migrations_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE ONLY tenant_period_history
-    ADD CONSTRAINT tenant_period_history_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY tenant_quotas
-    ADD CONSTRAINT tenant_quotas_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY tenant_settings
-    ADD CONSTRAINT tenant_settings_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY tenant_usage
-    ADD CONSTRAINT tenant_usage_new_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY tool_account_conflicts
-    ADD CONSTRAINT tool_account_conflicts_mapping_id_fkey FOREIGN KEY (mapping_id) REFERENCES user_tool_accounts(id);
-
-ALTER TABLE ONLY tool_account_conflicts
-    ADD CONSTRAINT tool_account_conflicts_resolved_by_fkey FOREIGN KEY (resolved_by) REFERENCES users(id);
-
-ALTER TABLE ONLY tool_account_mapping_rules
-    ADD CONSTRAINT tool_account_mapping_rules_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY user_tool_accounts
-    ADD CONSTRAINT user_tool_accounts_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY web_user_auth_sessions
-    ADD CONSTRAINT web_user_auth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-
-ALTER TABLE ONLY workflow_milestones
-    ADD CONSTRAINT workflow_milestones_workflow_id_fkey FOREIGN KEY (workflow_id) REFERENCES autonomous_workflows(workflow_id) ON DELETE CASCADE;

@@ -4,17 +4,44 @@ Open ACE - Audit Analyzer
 Analyzes audit logs for compliance and security insights.
 """
 
+import hashlib
 import logging
 import math
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.modules.governance.audit_logger import AuditLogger
-from app.repositories.database import adapt_sql, get_db_connection  # noqa: E402
+from app.repositories.database import adapt_sql, get_db_connection, is_postgresql  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+
+def make_anomaly_id(
+    anomaly_type: str,
+    affected_users: list[int],
+    time_bucket: str,
+    tenant_id: int | None = None,
+) -> str:
+    """Generate a stable anomaly_id that includes time bucket and tenant.
+
+    The identity incorporates:
+      - tenant_id (isolates state per tenant)
+      - anomaly_type
+      - sorted affected user list
+      - time_bucket (e.g. "2026-08-19-14" for an hour bucket, "2026-08-19" for a day)
+
+    This guarantees that the same user/type pair in different hours or days
+    produces distinct anomaly instances.
+    """
+    key = (
+        f"{tenant_id or 0}:"
+        f"{anomaly_type}:"
+        f"{','.join(str(u) for u in sorted(affected_users or []))}:"
+        f"{time_bucket}"
+    )
+    return hashlib.sha256(key.encode()).hexdigest()[:24]
 
 
 @dataclass
@@ -29,6 +56,23 @@ class AnomalyDetection:
     first_seen: datetime
     last_seen: datetime
     details: dict[str, Any]
+    anomaly_id: str = field(default="")
+    tenant_id: int | None = None
+
+
+def _parse_timestamp(val: Any) -> datetime:
+    """Parse a timestamp value from SQL into a datetime.
+
+    Handles datetime objects, ISO-format strings, and falls back to now().
+    """
+    if isinstance(val, datetime):
+        return val
+    if isinstance(val, str):
+        try:
+            return datetime.fromisoformat(val)
+        except (ValueError, TypeError):
+            pass
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class AuditAnalyzer:
@@ -71,77 +115,203 @@ class AuditAnalyzer:
         self, start_time: datetime | None = None, end_time: datetime | None = None
     ) -> dict[str, Any]:
         """
-        Analyze patterns in audit logs.
+        Analyze patterns in audit logs using SQL aggregation.
+
+        Uses database-side GROUP BY queries instead of loading objects into
+        Python, so results cover the full time range regardless of data volume.
 
         Args:
             start_time: Start of analysis period.
             end_time: End of analysis period.
 
         Returns:
-            Dict with pattern analysis results.
+            Dict with pattern analysis results including completeness metadata.
         """
         if not start_time:
             start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
         if not end_time:
             end_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        logs = self.audit_logger.query(
-            start_time=start_time,
-            end_time=end_time,
-            limit=10000,
-        )
+        # Build base WHERE clause matching audit_logger.query() filters
+        conditions = ["timestamp >= ?", "timestamp <= ?"]
+        params: list[Any] = [start_time, end_time]
+        self._build_tenant_filter(conditions, params)
 
-        # Analyze by hour of day
-        hourly_activity: defaultdict[int, int] = defaultdict(int)
-        for log in logs:
-            if log.timestamp:
-                hour = log.timestamp.hour
-                hourly_activity[hour] += 1
+        where_clause = " AND ".join(conditions)
 
-        # Analyze login by hour of day (for "Login Pattern" chart)
-        login_hourly_activity: defaultdict[int, int] = defaultdict(int)
-        for log in logs:
-            if log.timestamp and log.action == "login":
-                hour = log.timestamp.hour
-                login_hourly_activity[hour] += 1
+        # Use database-specific hour/day extraction
+        if is_postgresql():
+            hour_expr = "EXTRACT(HOUR FROM timestamp)"
+            # PostgreSQL: EXTRACT(DOW FROM ts) returns 0=Sunday..6=Saturday
+            # Python weekday(): 0=Monday..6=Sunday
+            # Convert: (dow - 1 + 7) % 7 gives Python weekday
+            day_expr = "CAST((EXTRACT(DOW FROM timestamp)::int - 1 + 7) % 7 AS int)"
+        else:
+            # SQLite: strftime('%w', ts) returns 0=Sunday..6=Saturday
+            # Convert to Python weekday: (cast(strftime('%w') as int) - 1 + 7) % 7
+            hour_expr = "CAST(strftime('%H', timestamp) AS integer)"
+            day_expr = "(CAST(strftime('%w', timestamp) AS integer) - 1 + 7) % 7"
 
-        # Analyze by day of week
-        daily_activity: defaultdict[int, int] = defaultdict(int)
-        for log in logs:
-            if log.timestamp:
-                day = log.timestamp.weekday()
-                daily_activity[day] += 1
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
 
-        # Analyze by action type
-        action_distribution: defaultdict[str, int] = defaultdict(int)
-        for log in logs:
-            action_distribution[log.action] += 1
+                # 1. Total count
+                cursor.execute(
+                    adapt_sql(f"SELECT COUNT(*) as cnt FROM audit_logs WHERE {where_clause}"),
+                    tuple(params),
+                )
+                row = cursor.fetchone()
+                total_events = int(row["cnt"]) if row else 0
 
-        # Analyze by user
-        user_activity: defaultdict[int, int] = defaultdict(int)
-        for log in logs:
-            if log.user_id:
-                user_activity[log.user_id] += 1
+                # 2. Hourly distribution
+                cursor.execute(
+                    adapt_sql(
+                        f"SELECT {hour_expr} as hour, COUNT(*) as cnt "
+                        f"FROM audit_logs WHERE {where_clause} "
+                        f"GROUP BY {hour_expr} ORDER BY {hour_expr}"
+                    ),
+                    tuple(params),
+                )
+                hourly_distribution = {}
+                for r in cursor.fetchall():
+                    hourly_distribution[int(r["hour"])] = int(r["cnt"])
+
+                # 3. Login hourly distribution
+                login_where = f"{where_clause} AND action = ?"
+                login_params = list(params) + ["login"]
+                cursor.execute(
+                    adapt_sql(
+                        f"SELECT {hour_expr} as hour, COUNT(*) as cnt "
+                        f"FROM audit_logs WHERE {login_where} "
+                        f"GROUP BY {hour_expr} ORDER BY {hour_expr}"
+                    ),
+                    tuple(login_params),
+                )
+                login_hourly_distribution = {}
+                for r in cursor.fetchall():
+                    login_hourly_distribution[int(r["hour"])] = int(r["cnt"])
+
+                # 4. Daily distribution (by weekday)
+                cursor.execute(
+                    adapt_sql(
+                        f"SELECT {day_expr} as day, COUNT(*) as cnt "
+                        f"FROM audit_logs WHERE {where_clause} "
+                        f"GROUP BY {day_expr} ORDER BY {day_expr}"
+                    ),
+                    tuple(params),
+                )
+                daily_distribution = {}
+                for r in cursor.fetchall():
+                    daily_distribution[int(r["day"])] = int(r["cnt"])
+
+                # 5. Action distribution
+                cursor.execute(
+                    adapt_sql(
+                        f"SELECT action, COUNT(*) as cnt "
+                        f"FROM audit_logs WHERE {where_clause} "
+                        f"GROUP BY action ORDER BY cnt DESC"
+                    ),
+                    tuple(params),
+                )
+                action_distribution = {}
+                for r in cursor.fetchall():
+                    action_distribution[r["action"]] = int(r["cnt"])
+
+                # 6. Top users
+                cursor.execute(
+                    adapt_sql(
+                        f"SELECT user_id, COUNT(*) as cnt "
+                        f"FROM audit_logs WHERE {where_clause} AND user_id IS NOT NULL "
+                        f"GROUP BY user_id ORDER BY cnt DESC LIMIT 10"
+                    ),
+                    tuple(params),
+                )
+                top_users = []
+                for r in cursor.fetchall():
+                    top_users.append((int(r["user_id"]), int(r["cnt"])))
+
+                # 7. Unique users count
+                cursor.execute(
+                    adapt_sql(
+                        f"SELECT COUNT(DISTINCT user_id) as cnt "
+                        f"FROM audit_logs WHERE {where_clause} AND user_id IS NOT NULL"
+                    ),
+                    tuple(params),
+                )
+                unique_users_row = cursor.fetchone()
+                unique_users = int(unique_users_row["cnt"]) if unique_users_row else 0
+
+                # 8. Oldest analyzed timestamp
+                cursor.execute(
+                    adapt_sql(
+                        f"SELECT MIN(timestamp) as oldest FROM audit_logs WHERE {where_clause}"
+                    ),
+                    tuple(params),
+                )
+                oldest_row = cursor.fetchone()
+                oldest_val = oldest_row["oldest"] if oldest_row else None
+                oldest_analyzed_at = None
+                if oldest_val is not None:
+                    if isinstance(oldest_val, str):
+                        try:
+                            oldest_analyzed_at = datetime.fromisoformat(oldest_val)
+                        except (ValueError, TypeError):
+                            oldest_analyzed_at = None
+                    elif isinstance(oldest_val, datetime):
+                        oldest_analyzed_at = oldest_val
+
+        except Exception as e:
+            logger.error(f"Failed to analyze patterns via SQL: {e}", exc_info=True)
+            return {
+                "period": {
+                    "start": start_time.isoformat(),
+                    "end": end_time.isoformat(),
+                },
+                "total_events": 0,
+                "matching_events": 0,
+                "analyzed_events": 0,
+                "truncated": True,  # Cannot confirm completeness
+                "coverage_ratio": 0.0,
+                "oldest_analyzed_at": None,
+                "error": "Pattern analysis failed due to a database error",
+                "hourly_distribution": {},
+                "login_hourly_distribution": {},
+                "daily_distribution": {},
+                "action_distribution": {},
+                "unique_users": 0,
+                "top_users": [],
+            }
 
         return {
             "period": {
                 "start": start_time.isoformat(),
                 "end": end_time.isoformat(),
             },
-            "total_events": len(logs),
-            "hourly_distribution": dict(sorted(hourly_activity.items())),
-            "login_hourly_distribution": dict(sorted(login_hourly_activity.items())),
-            "daily_distribution": dict(sorted(daily_activity.items())),
-            "action_distribution": dict(sorted(action_distribution.items(), key=lambda x: -x[1])),
-            "unique_users": len(user_activity),
-            "top_users": sorted(user_activity.items(), key=lambda x: -x[1])[:10],
+            # Backward-compatible: total_events now reflects real count
+            "total_events": total_events,
+            # Completeness metadata (Issue #2750)
+            "matching_events": total_events,
+            "analyzed_events": total_events,
+            "truncated": False,
+            "coverage_ratio": 1.0,
+            "oldest_analyzed_at": oldest_analyzed_at.isoformat() if oldest_analyzed_at else None,
+            "hourly_distribution": dict(sorted(hourly_distribution.items())),
+            "login_hourly_distribution": dict(sorted(login_hourly_distribution.items())),
+            "daily_distribution": dict(sorted(daily_distribution.items())),
+            "action_distribution": action_distribution,
+            "unique_users": unique_users,
+            "top_users": top_users,
         }
 
     def detect_anomalies(
         self, start_time: datetime | None = None, end_time: datetime | None = None
     ) -> list[AnomalyDetection]:
         """
-        Detect anomalies in audit logs.
+        Detect anomalies in audit logs using SQL-based detection.
+
+        Each detector uses a specialized SQL query that only retrieves the
+        aggregated data needed, instead of loading up to 10,000 full objects.
 
         Args:
             start_time: Start of analysis period.
@@ -176,192 +346,363 @@ class AuditAnalyzer:
 
         return anomalies
 
+    def _build_tenant_filter(
+        self, conditions: list[str], params: list[Any]
+    ) -> tuple[list[str], list[Any]]:
+        """Add tenant scope filter to conditions/params if applicable."""
+        tenant_id = self.audit_logger._resolve_tenant_id()
+        normalized_tenant_id = self.audit_logger._normalize_tenant_id(tenant_id)
+        if normalized_tenant_id is not None:
+            conditions.append(
+                "(tenant_id = ? OR (tenant_id IS NULL AND user_id IN "
+                "(SELECT id FROM users WHERE tenant_id = ?)))"
+            )
+            params.extend([normalized_tenant_id, normalized_tenant_id])
+        return conditions, params
+
     def _detect_failed_login_anomaly(
         self, start_time: datetime, end_time: datetime
     ) -> AnomalyDetection | None:
-        """Detect failed login anomalies."""
-        failed_logins = self.audit_logger.query(
-            action="login_failed",
-            start_time=start_time,
-            end_time=end_time,
-            limit=1000,
-        )
+        """Detect failed login anomalies using SQL aggregation."""
+        conditions = ["action = ?", "timestamp >= ?", "timestamp <= ?"]
+        params: list[Any] = ["login_failed", start_time, end_time]
+        self._build_tenant_filter(conditions, params)
+        where_clause = " AND ".join(conditions)
 
-        if len(failed_logins) < self.failed_login_threshold:
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+
+                # Total failed logins
+                cursor.execute(
+                    adapt_sql(f"SELECT COUNT(*) as cnt FROM audit_logs WHERE {where_clause}"),
+                    tuple(params),
+                )
+                row = cursor.fetchone()
+                total_failed = int(row["cnt"]) if row else 0
+
+                if total_failed < self.failed_login_threshold:
+                    return None
+
+                # Group by user with HAVING clause
+                cursor.execute(
+                    adapt_sql(
+                        f"SELECT user_id, COUNT(*) as cnt, "
+                        f"MIN(timestamp) as first_seen, MAX(timestamp) as last_seen "
+                        f"FROM audit_logs WHERE {where_clause} AND user_id IS NOT NULL "
+                        f"GROUP BY user_id HAVING COUNT(*) >= ? "
+                        f"ORDER BY cnt DESC"
+                    ),
+                    tuple(params + [self.failed_login_threshold]),
+                )
+                user_rows = cursor.fetchall()
+
+                if not user_rows:
+                    return None
+
+                affected_users = [int(r["user_id"]) for r in user_rows]
+                user_breakdown = {str(int(r["user_id"])): int(r["cnt"]) for r in user_rows}
+
+                # Overall first/last seen across all failed logins
+                cursor.execute(
+                    adapt_sql(
+                        f"SELECT MIN(timestamp) as first_seen, MAX(timestamp) as last_seen "
+                        f"FROM audit_logs WHERE {where_clause}"
+                    ),
+                    tuple(params),
+                )
+                range_row = cursor.fetchone()
+
+                first_seen = (
+                    _parse_timestamp(range_row["first_seen"])
+                    if range_row
+                    else datetime.now(timezone.utc).replace(tzinfo=None)
+                )
+                last_seen = _parse_timestamp(range_row["last_seen"]) if range_row else first_seen
+
+                return AnomalyDetection(
+                    anomaly_type="excessive_failed_logins",
+                    severity="high" if len(affected_users) > 3 else "medium",
+                    description=f"{len(affected_users)} user(s) with excessive failed login attempts",
+                    affected_users=affected_users,
+                    occurrences=total_failed,
+                    first_seen=first_seen,
+                    last_seen=last_seen,
+                    details={
+                        "threshold": self.failed_login_threshold,
+                        "user_breakdown": user_breakdown,
+                    },
+                    anomaly_id=make_anomaly_id(
+                        "excessive_failed_logins",
+                        affected_users,
+                        first_seen.strftime("%Y-%m-%d"),
+                    ),
+                )
+        except Exception as e:
+            logger.error(f"Failed to detect failed login anomalies: {e}", exc_info=True)
             return None
-
-        # Group by user
-        user_failures = defaultdict(list)
-        for log in failed_logins:
-            if log.user_id:
-                user_failures[log.user_id].append(log)
-
-        # Find users with excessive failures
-        affected_users = [
-            user_id
-            for user_id, logs in user_failures.items()
-            if len(logs) >= self.failed_login_threshold
-        ]
-
-        if not affected_users:
-            return None
-
-        return AnomalyDetection(
-            anomaly_type="excessive_failed_logins",
-            severity="high" if len(affected_users) > 3 else "medium",
-            description=f"{len(affected_users)} user(s) with excessive failed login attempts",
-            affected_users=affected_users,
-            occurrences=len(failed_logins),
-            first_seen=min(l.timestamp for l in failed_logins if l.timestamp),
-            last_seen=max(l.timestamp for l in failed_logins if l.timestamp),
-            details={
-                "threshold": self.failed_login_threshold,
-                "user_breakdown": {str(k): len(v) for k, v in user_failures.items()},
-            },
-        )
 
     def _detect_rapid_activity_anomaly(
         self, start_time: datetime, end_time: datetime
     ) -> list[AnomalyDetection]:
-        """Detect rapid activity anomalies."""
-        logs = self.audit_logger.query(
-            start_time=start_time,
-            end_time=end_time,
-            limit=10000,
-        )
+        """Detect rapid activity anomalies using SQL aggregation."""
+        conditions = ["timestamp >= ?", "timestamp <= ?", "user_id IS NOT NULL"]
+        params: list[Any] = [start_time, end_time]
+        self._build_tenant_filter(conditions, params)
+        where_clause = " AND ".join(conditions)
 
-        anomalies = []
+        # Database-specific hour bucket expression
+        if is_postgresql():
+            hour_bucket_expr = "TO_CHAR(timestamp, 'YYYY-MM-DD HH24')"
+        else:
+            hour_bucket_expr = "strftime('%Y-%m-%d %H', timestamp)"
 
-        # Group by user and hour
-        user_hourly_activity: defaultdict[int, defaultdict[str, int]] = defaultdict(
-            lambda: defaultdict(int)
-        )
-        for log in logs:
-            if log.user_id and log.timestamp:
-                hour_key = log.timestamp.strftime("%Y-%m-%d %H")
-                user_hourly_activity[log.user_id][hour_key] += 1
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    adapt_sql(
+                        f"SELECT user_id, {hour_bucket_expr} as hour, COUNT(*) as cnt "
+                        f"FROM audit_logs WHERE {where_clause} "
+                        f"GROUP BY user_id, {hour_bucket_expr} "
+                        f"HAVING COUNT(*) > ? "
+                        f"ORDER BY cnt DESC"
+                    ),
+                    tuple(params + [self.rapid_action_threshold]),
+                )
+                rows = cursor.fetchall()
 
-        # Find users with rapid activity
-        for user_id, hourly in user_hourly_activity.items():
-            for hour, count in hourly.items():
-                if count > self.rapid_action_threshold:
-                    anomalies.append(
-                        AnomalyDetection(
-                            anomaly_type="rapid_activity",
-                            severity="medium",
-                            description=f"User {user_id} had {count} actions in one hour",
-                            affected_users=[user_id],
-                            occurrences=count,
-                            first_seen=datetime.strptime(str(hour), "%Y-%m-%d %H"),
-                            last_seen=datetime.strptime(str(hour), "%Y-%m-%d %H")
-                            + timedelta(hours=1),
-                            details={
-                                "hour": hour,
-                                "action_count": count,
-                                "threshold": self.rapid_action_threshold,
-                            },
-                        )
+            anomalies = []
+            for r in rows:
+                user_id = int(r["user_id"])
+                hour_str = r["hour"]
+                count = int(r["cnt"])
+                hour_str_s = str(hour_str)
+                first_seen = datetime.strptime(hour_str_s, "%Y-%m-%d %H")
+                anomalies.append(
+                    AnomalyDetection(
+                        anomaly_type="rapid_activity",
+                        severity="medium",
+                        description=f"User {user_id} had {count} actions in one hour",
+                        affected_users=[user_id],
+                        occurrences=count,
+                        first_seen=first_seen,
+                        last_seen=first_seen + timedelta(hours=1),
+                        details={
+                            "hour": hour_str_s,
+                            "action_count": count,
+                            "threshold": self.rapid_action_threshold,
+                        },
+                        anomaly_id=make_anomaly_id("rapid_activity", [user_id], hour_str_s),
                     )
-
-        return anomalies
+                )
+            return anomalies
+        except Exception as e:
+            logger.error(f"Failed to detect rapid activity anomalies: {e}", exc_info=True)
+            return []
 
     def _detect_off_hours_anomaly(
         self, start_time: datetime, end_time: datetime
     ) -> list[AnomalyDetection]:
-        """Detect off-hours activity anomalies."""
-        logs = self.audit_logger.query(
-            start_time=start_time,
-            end_time=end_time,
-            limit=10000,
-        )
-
+        """Detect off-hours activity anomalies using SQL aggregation."""
         # Define off-hours (10 PM - 6 AM)
         OFF_HOURS_START = 22
         OFF_HOURS_END = 6
 
-        off_hours_logs = [
-            log
-            for log in logs
-            if log.timestamp
-            and (log.timestamp.hour >= OFF_HOURS_START or log.timestamp.hour < OFF_HOURS_END)
+        # Database-specific hour extraction for WHERE clause
+        if is_postgresql():
+            hour_check = "(EXTRACT(HOUR FROM timestamp) >= ? OR EXTRACT(HOUR FROM timestamp) < ?)"
+        else:
+            hour_check = (
+                "(CAST(strftime('%H', timestamp) AS integer) >= ? "
+                "OR CAST(strftime('%H', timestamp) AS integer) < ?)"
+            )
+
+        conditions = [
+            "timestamp >= ?",
+            "timestamp <= ?",
+            "user_id IS NOT NULL",
+            hour_check,
         ]
+        params: list[Any] = [start_time, end_time, OFF_HOURS_START, OFF_HOURS_END]
+        self._build_tenant_filter(conditions, params)
+        where_clause = " AND ".join(conditions)
 
-        if not off_hours_logs:
-            return []
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    adapt_sql(
+                        f"SELECT user_id, COUNT(*) as cnt, "
+                        f"MIN(timestamp) as first_seen, MAX(timestamp) as last_seen "
+                        f"FROM audit_logs WHERE {where_clause} "
+                        f"GROUP BY user_id HAVING COUNT(*) > ? "
+                        f"ORDER BY cnt DESC"
+                    ),
+                    tuple(params + [self.off_hours_threshold]),
+                )
+                rows = cursor.fetchall()
 
-        # Group by user
-        user_off_hours = defaultdict(list)
-        for log in off_hours_logs:
-            if log.user_id:
-                user_off_hours[log.user_id].append(log)
+            anomalies = []
+            for r in rows:
+                user_id = int(r["user_id"])
+                count = int(r["cnt"])
+                fs = _parse_timestamp(r["first_seen"])
+                ls = _parse_timestamp(r["last_seen"])
 
-        anomalies = []
-        for user_id, logs_list in user_off_hours.items():
-            if len(logs_list) > self.off_hours_threshold:
                 anomalies.append(
                     AnomalyDetection(
                         anomaly_type="off_hours_activity",
                         severity="low",
                         description=f"User {user_id} active during off-hours",
                         affected_users=[user_id],
-                        occurrences=len(logs_list),
-                        first_seen=min(l.timestamp for l in logs_list if l.timestamp),
-                        last_seen=max(l.timestamp for l in logs_list if l.timestamp),
+                        occurrences=count,
+                        first_seen=fs,
+                        last_seen=ls,
                         details={
-                            "activity_count": len(logs_list),
+                            "activity_count": count,
                         },
+                        anomaly_id=make_anomaly_id(
+                            "off_hours_activity", [user_id], fs.strftime("%Y-%m-%d")
+                        ),
                     )
                 )
-
-        return anomalies
+            return anomalies
+        except Exception as e:
+            logger.error(f"Failed to detect off-hours anomalies: {e}", exc_info=True)
+            return []
 
     def _detect_action_pattern_anomaly(
         self, start_time: datetime, end_time: datetime
     ) -> list[AnomalyDetection]:
-        """Detect unusual action patterns."""
-        logs = self.audit_logger.query(
-            start_time=start_time,
-            end_time=end_time,
-            limit=10000,
-        )
-
+        """Detect unusual action patterns using SQL aggregation."""
         anomalies = []
 
-        # Check for role changes
-        role_changes = [l for l in logs if l.action == "user_role_change"]
-        if len(role_changes) > self.role_change_threshold:
-            anomalies.append(
-                AnomalyDetection(
-                    anomaly_type="frequent_role_changes",
-                    severity="high",
-                    description=f"{len(role_changes)} role changes detected",
-                    affected_users=list({l.user_id for l in role_changes if l.user_id}),
-                    occurrences=len(role_changes),
-                    first_seen=min(l.timestamp for l in role_changes if l.timestamp),
-                    last_seen=max(l.timestamp for l in role_changes if l.timestamp),
-                    details={},
-                )
-            )
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
 
-        # Check for permission changes
-        permission_changes = [
-            l for l in logs if l.action in ("permission_grant", "permission_revoke")
-        ]
-        if len(permission_changes) > self.permission_change_threshold:
-            anomalies.append(
-                AnomalyDetection(
-                    anomaly_type="frequent_permission_changes",
-                    severity="medium",
-                    description=f"{len(permission_changes)} permission changes detected",
-                    affected_users=list({l.user_id for l in permission_changes if l.user_id}),
-                    occurrences=len(permission_changes),
-                    first_seen=min(l.timestamp for l in permission_changes if l.timestamp),
-                    last_seen=max(l.timestamp for l in permission_changes if l.timestamp),
-                    details={},
-                )
-            )
+                # Check for role changes
+                conditions = [
+                    "action = ?",
+                    "timestamp >= ?",
+                    "timestamp <= ?",
+                ]
+                params: list[Any] = ["user_role_change", start_time, end_time]
+                self._build_tenant_filter(conditions, params)
+                where_clause = " AND ".join(conditions)
 
-        return anomalies
+                cursor.execute(
+                    adapt_sql(
+                        f"SELECT COUNT(*) as cnt, "
+                        f"MIN(timestamp) as first_seen, MAX(timestamp) as last_seen "
+                        f"FROM audit_logs WHERE {where_clause}"
+                    ),
+                    tuple(params),
+                )
+                row = cursor.fetchone()
+                role_count = int(row["cnt"]) if row else 0
+
+                if role_count > self.role_change_threshold:
+                    # Get distinct user_ids
+                    cursor.execute(
+                        adapt_sql(
+                            f"SELECT DISTINCT user_id FROM audit_logs "
+                            f"WHERE {where_clause} AND user_id IS NOT NULL"
+                        ),
+                        tuple(params),
+                    )
+                    affected = [int(r["user_id"]) for r in cursor.fetchall()]
+                    fs = (
+                        _parse_timestamp(row["first_seen"])
+                        if row
+                        else datetime.now(timezone.utc).replace(tzinfo=None)
+                    )
+                    ls = (
+                        _parse_timestamp(row["last_seen"])
+                        if row
+                        else datetime.now(timezone.utc).replace(tzinfo=None)
+                    )
+
+                    anomalies.append(
+                        AnomalyDetection(
+                            anomaly_type="frequent_role_changes",
+                            severity="high",
+                            description=f"{role_count} role changes detected",
+                            affected_users=affected,
+                            occurrences=role_count,
+                            first_seen=fs,
+                            last_seen=ls,
+                            details={},
+                            anomaly_id=make_anomaly_id(
+                                "frequent_role_changes", affected, fs.strftime("%Y-%m-%d")
+                            ),
+                        )
+                    )
+
+                # Check for permission changes
+                conditions2 = [
+                    "action IN (?, ?)",
+                    "timestamp >= ?",
+                    "timestamp <= ?",
+                ]
+                params2: list[Any] = ["permission_grant", "permission_revoke", start_time, end_time]
+                self._build_tenant_filter(conditions2, params2)
+                where_clause2 = " AND ".join(conditions2)
+
+                cursor.execute(
+                    adapt_sql(
+                        f"SELECT COUNT(*) as cnt, "
+                        f"MIN(timestamp) as first_seen, MAX(timestamp) as last_seen "
+                        f"FROM audit_logs WHERE {where_clause2}"
+                    ),
+                    tuple(params2),
+                )
+                row2 = cursor.fetchone()
+                perm_count = int(row2["cnt"]) if row2 else 0
+
+                if perm_count > self.permission_change_threshold:
+                    cursor.execute(
+                        adapt_sql(
+                            f"SELECT DISTINCT user_id FROM audit_logs "
+                            f"WHERE {where_clause2} AND user_id IS NOT NULL"
+                        ),
+                        tuple(params2),
+                    )
+                    affected2 = [int(r["user_id"]) for r in cursor.fetchall()]
+                    fs2 = (
+                        _parse_timestamp(row2["first_seen"])
+                        if row2
+                        else datetime.now(timezone.utc).replace(tzinfo=None)
+                    )
+                    ls2 = (
+                        _parse_timestamp(row2["last_seen"])
+                        if row2
+                        else datetime.now(timezone.utc).replace(tzinfo=None)
+                    )
+
+                    anomalies.append(
+                        AnomalyDetection(
+                            anomaly_type="frequent_permission_changes",
+                            severity="medium",
+                            description=f"{perm_count} permission changes detected",
+                            affected_users=affected2,
+                            occurrences=perm_count,
+                            first_seen=fs2,
+                            last_seen=ls2,
+                            details={},
+                            anomaly_id=make_anomaly_id(
+                                "frequent_permission_changes",
+                                affected2,
+                                fs2.strftime("%Y-%m-%d"),
+                            ),
+                        )
+                    )
+
+            return anomalies
+        except Exception as e:
+            logger.error(f"Failed to detect action pattern anomalies: {e}", exc_info=True)
+            return []
 
     def get_user_behavior_profile(self, user_id: int, days: int = 30) -> dict[str, Any]:
         """
@@ -536,7 +877,11 @@ class AuditAnalyzer:
         }
 
     def generate_security_score(
-        self, start_time: datetime | None = None, end_time: datetime | None = None
+        self,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        precomputed_anomalies: list[AnomalyDetection] | None = None,
+        anomaly_statuses: dict[str, dict] | None = None,
     ) -> dict[str, Any]:
         """
         Generate a security score based on audit analysis.
@@ -544,6 +889,12 @@ class AuditAnalyzer:
         Args:
             start_time: Start of analysis period.
             end_time: End of analysis period.
+            precomputed_anomalies: Optional pre-computed anomalies to avoid
+                re-running anomaly detection (Issue #2750).
+            anomaly_statuses: Mapping of anomaly_id -> status row.
+                When provided, ``processed`` and ``ignored`` anomalies are
+                excluded from the active deduction so that operator
+                acknowledgement is reflected in the score.
 
         Returns:
             Dict with security score and breakdown.
@@ -553,14 +904,36 @@ class AuditAnalyzer:
         if not end_time:
             end_time = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        # Get anomalies
-        anomalies = self.detect_anomalies(start_time, end_time)
+        # Use pre-computed anomalies if provided, otherwise compute them
+        anomalies = (
+            precomputed_anomalies
+            if precomputed_anomalies is not None
+            else self.detect_anomalies(start_time, end_time)
+        )
+        anomaly_statuses = anomaly_statuses or {}
 
-        # Calculate score (100 = best, 0 = worst)
+        # Partition anomalies by status
+        pending: list[AnomalyDetection] = []
+        processed: list[AnomalyDetection] = []
+        ignored: list[AnomalyDetection] = []
+        for a in anomalies:
+            status_row = anomaly_statuses.get(a.anomaly_id) if a.anomaly_id else None
+            status = status_row["status"] if status_row else "pending"
+            if status == "processed":
+                processed.append(a)
+            elif status == "ignored":
+                ignored.append(a)
+            else:
+                pending.append(a)
+
+        # Calculate score (100 = best, 0 = worst).
+        # Only *pending* anomalies contribute to the active deduction so
+        # that marking an anomaly as processed/ignored actually improves
+        # the score.
         score: float = 100
 
         # Deduct points using risk-weighted frequency-based scoring
-        for anomaly in anomalies:
+        for anomaly in pending:
             base = self.BASE_DEDUCTIONS.get(anomaly.severity, 3)
             weight = self.RISK_WEIGHTS.get(anomaly.anomaly_type, 1.0)
             # Frequency factor: log2 scaling, capped at 5x
@@ -582,22 +955,31 @@ class AuditAnalyzer:
         else:
             grade = "F"
 
+        all_anomalies_for_report = pending + processed + ignored
         return {
             "score": round(score),
             "grade": grade,
             "anomaly_count": len(anomalies),
-            "high_severity_count": len([a for a in anomalies if a.severity == "high"]),
-            "medium_severity_count": len([a for a in anomalies if a.severity == "medium"]),
-            "low_severity_count": len([a for a in anomalies if a.severity == "low"]),
+            "pending_count": len(pending),
+            "processed_count": len(processed),
+            "ignored_count": len(ignored),
+            "high_severity_count": len(
+                [a for a in all_anomalies_for_report if a.severity == "high"]
+            ),
+            "medium_severity_count": len(
+                [a for a in all_anomalies_for_report if a.severity == "medium"]
+            ),
+            "low_severity_count": len([a for a in all_anomalies_for_report if a.severity == "low"]),
             "anomalies": [
                 {
+                    "anomaly_id": a.anomaly_id,
                     "type": a.anomaly_type,
                     "severity": a.severity,
                     "description": a.description,
                 }
-                for a in anomalies
+                for a in all_anomalies_for_report
             ],
-            "recommendations": self._generate_security_recommendations(anomalies),
+            "recommendations": self._generate_security_recommendations(pending),
         }
 
     def _generate_security_recommendations(self, anomalies: list[AnomalyDetection]) -> list[str]:

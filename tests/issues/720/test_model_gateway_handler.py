@@ -241,7 +241,10 @@ class TestGatewayQuota:
 
         client = remote_app.test_client()
         resp = client.post("/api/remote/llm-proxy", json={"model": "gpt-4"}, headers=_HEADERS)
-        assert resp.status_code == 429
+        # 403 since #2777 (temporary WebUI-compat decision; #2734 notes the
+        # correct long-term status is 429 and should be restored with the
+        # frontend fix — flip this assertion back then).
+        assert resp.status_code == 403
         mock_http.assert_not_called()
 
 
@@ -373,38 +376,60 @@ class TestModelGatewayTestConnection:
         "base_url,expected_url",
         [
             # 无版本后缀：应添加 /v1
-            ("http://gateway:8000", "http://gateway:8000/v1/models"),
+            ("http://gateway:8080", "http://gateway:8080/v1/models"),
             # 含 /v1 后缀：应去重
-            ("http://gateway:8000/v1", "http://gateway:8000/v1/models"),
+            ("http://gateway:8080/v1", "http://gateway:8080/v1/models"),
             # 含 /v1 后缀 + 尾部斜杠：应正确处理
-            ("http://gateway:8000/v1/", "http://gateway:8000/v1/models"),
+            ("http://gateway:8080/v1/", "http://gateway:8080/v1/models"),
             # 含 /v2 后缀：应去重
-            ("http://gateway:8000/v2", "http://gateway:8000/v2/models"),
+            ("http://gateway:8080/v2", "http://gateway:8080/v2/models"),
             # 含 /v2 后缀 + 尾部斜杠：应正确处理
-            ("http://gateway:8000/v2/", "http://gateway:8000/v2/models"),
+            ("http://gateway:8080/v2/", "http://gateway:8080/v2/models"),
             # 含 /v3 后缀：应去重
-            ("http://gateway:8000/v3", "http://gateway:8000/v3/models"),
+            ("http://gateway:8080/v3", "http://gateway:8080/v3/models"),
             # 非版本路径：应添加 /v1
-            ("http://gateway:8000/api", "http://gateway:8000/api/v1/models"),
+            ("http://gateway:8080/api", "http://gateway:8080/api/v1/models"),
             # 混合格式 v1beta：不应去重
-            ("http://gateway:8000/v1beta", "http://gateway:8000/v1beta/v1/models"),
+            ("http://gateway:8080/v1beta", "http://gateway:8080/v1beta/v1/models"),
         ],
     )
     def test_test_connection_url_deduplication(self, base_url, expected_url):
         """验证 test_connection 对各种 base_url 格式的 URL 构建逻辑"""
+        import ipaddress
+        import socket
+
         from app.modules.workspace.model_gateway.service import ModelGatewayService
 
         service = ModelGatewayService(repository=MagicMock())
 
-        with patch("requests.request") as mock_req:
+        # Mock DNS resolver to return a public IP
+        def mock_resolver(host, port, type=None):
+            return [
+                (
+                    socket.AF_INET,
+                    socket.SOCK_STREAM,
+                    6,
+                    "",
+                    (ipaddress.IPv4Address("93.184.216.34"), port),
+                )
+            ]
+
+        # Mock safe_request instead of requests.request (Issue #2809)
+        with patch("app.utils.outbound_url_guard.safe_request") as mock_req:
             mock_req.return_value.status_code = 200
 
-            result = service.test_connection(base_url, "test-key")
+            with patch(
+                "app.utils.llm_proxy_url_validator.socket.getaddrinfo", side_effect=mock_resolver
+            ):
+                with patch(
+                    "app.utils.outbound_url_guard.socket.getaddrinfo", side_effect=mock_resolver
+                ):
+                    result = service.test_connection(base_url, "test-key")
 
-            # 验证请求的 URL
-            called_url = mock_req.call_args.kwargs["url"]
-            assert called_url == expected_url, f"Expected {expected_url}, got {called_url}"
-            assert result["ok"] is True
+                    # 验证请求的 URL
+                    called_url = mock_req.call_args.kwargs["url"]
+                    assert called_url == expected_url, f"Expected {expected_url}, got {called_url}"
+                    assert result["ok"] is True
 
     def test_test_connection_with_empty_base_url(self):
         """空 base_url 应返回错误"""
@@ -430,31 +455,77 @@ class TestModelGatewayTestConnection:
 
     def test_test_connection_with_404_response(self):
         """404 响应应返回失败"""
+        import ipaddress
+        import socket
+
         from app.modules.workspace.model_gateway.service import ModelGatewayService
 
         service = ModelGatewayService(repository=MagicMock())
 
-        with patch("requests.request") as mock_req:
+        # Mock DNS resolver to return a public IP
+        def mock_resolver(host, port, type=None):
+            return [
+                (
+                    socket.AF_INET,
+                    socket.SOCK_STREAM,
+                    6,
+                    "",
+                    (ipaddress.IPv4Address("93.184.216.34"), port),
+                )
+            ]
+
+        # Mock safe_request instead of requests.request (Issue #2809)
+        with patch("app.utils.outbound_url_guard.safe_request") as mock_req:
             mock_req.return_value.status_code = 404
 
-            result = service.test_connection("http://gateway:8000/v1", "test-key")
+            with patch(
+                "app.utils.llm_proxy_url_validator.socket.getaddrinfo", side_effect=mock_resolver
+            ):
+                with patch(
+                    "app.utils.outbound_url_guard.socket.getaddrinfo", side_effect=mock_resolver
+                ):
+                    result = service.test_connection("http://gateway:8080/v1", "test-key")
 
-            assert result["ok"] is False
-            assert result["status"] == 404
-            assert "404" in result["message"]
+                    assert result["ok"] is False
+                    assert result["status"] == 404
+                    assert "404" in result["message"]
 
     def test_test_connection_with_network_error(self):
         """网络错误应返回失败"""
+        import ipaddress
+        import socket
+
         from app.modules.workspace.model_gateway.service import ModelGatewayService
 
         service = ModelGatewayService(repository=MagicMock())
 
-        with patch("requests.request", side_effect=Exception("Network error")):
-            result = service.test_connection("http://gateway:8000", "test-key")
+        # Mock DNS resolver to return a public IP
+        def mock_resolver(host, port, type=None):
+            return [
+                (
+                    socket.AF_INET,
+                    socket.SOCK_STREAM,
+                    6,
+                    "",
+                    (ipaddress.IPv4Address("93.184.216.34"), port),
+                )
+            ]
 
-            assert result["ok"] is False
-            assert result["status"] is None
-            assert "unreachable" in result["message"]
+        # Mock safe_request instead of requests.request (Issue #2809)
+        with patch(
+            "app.utils.outbound_url_guard.safe_request", side_effect=Exception("Network error")
+        ):
+            with patch(
+                "app.utils.llm_proxy_url_validator.socket.getaddrinfo", side_effect=mock_resolver
+            ):
+                with patch(
+                    "app.utils.outbound_url_guard.socket.getaddrinfo", side_effect=mock_resolver
+                ):
+                    result = service.test_connection("http://gateway:8080", "test-key")
+
+                    assert result["ok"] is False
+                    assert result["status"] is None
+                    assert "unreachable" in result["message"]
 
 
 if __name__ == "__main__":

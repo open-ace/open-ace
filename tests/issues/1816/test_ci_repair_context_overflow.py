@@ -481,7 +481,10 @@ def test_empty_review_or_summary_fails_closed(empty_stage):
     orch._gh._run_git.side_effect = run_git
     empty = AgentTaskResult(session_id=f"{empty_stage}-track", success=True, response_text="  \n")
     if empty_stage == "review":
-        results = [empty]
+        # b3d5a911 (#2717) retries an empty review ONCE on a fresh session
+        # before failing closed (mirroring fb680a17 for summaries); the retry
+        # must also come back empty so the fail-closed assertions below hold.
+        results = [empty, empty]
     else:
         results = [
             AgentTaskResult(

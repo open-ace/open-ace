@@ -197,7 +197,9 @@ CREATE TABLE anomaly_status (
  status TEXT DEFAULT 'pending' NOT NULL,
  processed_by integer,
  processed_at TIMESTAMP,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ anomaly_id TEXT DEFAULT '' NOT NULL,
+ tenant_id integer
 );
 
 CREATE TABLE api_key_store (
@@ -2111,6 +2113,8 @@ CREATE INDEX idx_workflows_parent ON autonomous_workflows (parent_workflow_id);
 CREATE INDEX idx_workflows_status_created ON autonomous_workflows (status, created_at);
 
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows (user_id, status);
+
+CREATE UNIQUE INDEX ix_anomaly_status_anomaly_id ON anomaly_status (anomaly_id) WHERE ((anomaly_id) <> '');
 
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status (anomaly_type, affected_users_hash);
 

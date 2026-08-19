@@ -119,11 +119,32 @@ def start_gevent_server(app):
 
 
 # ═══════════════════════════════════════════════════════════
-# Tests
+# Checks (script-internal steps, called from main())
+#
+# These are NOT pytest tests: the bridge relay (websockets.sync inside
+# gevent greenlets) only works under gevent monkey-patching, which must
+# never run in the shared pytest process (see the guard at the top).
+# pytest runs the whole script in a subprocess below and requires a
+# full pass; the child's monkey-patch is fully isolated.
 # ═══════════════════════════════════════════════════════════
 
 
-def test_text_echo(upstream_port, server_port, terminal_id, token):
+def test_e2e_terminal_ws_handler_script():
+    """Run the manual e2e script in a subprocess and require a full pass."""
+    import subprocess
+
+    proc = subprocess.run(
+        [sys.executable, os.path.abspath(__file__)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    tail = f"stdout tail:\n{proc.stdout[-1500:]}\nstderr tail:\n{proc.stderr[-1500:]}"
+    assert proc.returncode == 0, f"e2e script failed:\n{tail}"
+    assert "All E2E tests passed!" in proc.stdout, f"e2e script incomplete:\n{tail}"
+
+
+def _check_text_echo(upstream_port, server_port, terminal_id, token):
     """Browser sends text -> upstream echoes -> browser receives text."""
     import socket
 
@@ -138,7 +159,7 @@ def test_text_echo(upstream_port, server_port, terminal_id, token):
     log("PASS", "text echo")
 
 
-def test_binary_echo(upstream_port, server_port, terminal_id, token):
+def _check_binary_echo(upstream_port, server_port, terminal_id, token):
     """Browser sends binary -> upstream echoes -> browser receives binary."""
     import socket
 
@@ -156,7 +177,7 @@ def test_binary_echo(upstream_port, server_port, terminal_id, token):
     log("PASS", "binary echo")
 
 
-def test_multiple_messages(upstream_port, server_port, terminal_id, token):
+def _check_multiple_messages(upstream_port, server_port, terminal_id, token):
     """Send multiple messages in sequence, verify order."""
     import socket
 
@@ -174,7 +195,7 @@ def test_multiple_messages(upstream_port, server_port, terminal_id, token):
     log("PASS", "multiple messages in order")
 
 
-def test_invalid_token_rejected(server_port, terminal_id):
+def _check_invalid_token_rejected(server_port, terminal_id):
     """Invalid token should cause the server to close the connection."""
     import socket
 
@@ -196,7 +217,7 @@ def test_invalid_token_rejected(server_port, terminal_id):
     log("PASS", "invalid token rejected")
 
 
-def test_unknown_terminal_rejected(server_port):
+def _check_unknown_terminal_rejected(server_port):
     """Unknown terminal_id should cause the server to close the connection."""
     import socket
 
@@ -258,11 +279,11 @@ def main():
     log("Setup", f"Registered terminal {terminal_id[:8]} -> upstream {upstream_url}")
 
     try:
-        test_text_echo(upstream_port, server_port, terminal_id, token)
-        test_binary_echo(upstream_port, server_port, terminal_id, token)
-        test_multiple_messages(upstream_port, server_port, terminal_id, token)
-        test_invalid_token_rejected(server_port, terminal_id)
-        test_unknown_terminal_rejected(server_port)
+        _check_text_echo(upstream_port, server_port, terminal_id, token)
+        _check_binary_echo(upstream_port, server_port, terminal_id, token)
+        _check_multiple_messages(upstream_port, server_port, terminal_id, token)
+        _check_invalid_token_rejected(server_port, terminal_id)
+        _check_unknown_terminal_rejected(server_port)
     finally:
         terminal_info_store.pop(machine_id, terminal_id)
         server.stop()

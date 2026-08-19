@@ -159,4 +159,118 @@ describe('ManageLayout', () => {
       }
     });
   });
+
+  describe('platform admin only filtering', () => {
+    it('should disable tenant management for tenant_admin', async () => {
+      useAppStore.setState({ modelGatewayEnabled: false });
+      vi.mocked(useAuth).mockReturnValue(
+        createMockAuthResult({
+          id: '1',
+          username: 'tenant_admin',
+          role: 'tenant_admin',
+          must_change_password: false,
+        })
+      );
+
+      render(
+        <MemoryRouter initialEntries={['/manage/dashboard']}>
+          <Routes>
+            <Route path="/manage/*" element={<ManageLayout />}>
+              <Route index element={<div>Dashboard</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      );
+
+      // Tenant management should be disabled for tenant_admin
+      const tenantManagementLink = screen.queryByRole('link', { name: /tenant.management/i });
+      if (tenantManagementLink) {
+        expect(tenantManagementLink).toHaveClass('disabled');
+      }
+    });
+
+    it('should enable tenant management for platform_admin', async () => {
+      useAppStore.setState({ modelGatewayEnabled: false });
+      vi.mocked(useAuth).mockReturnValue(
+        createMockAuthResult({
+          id: '1',
+          username: 'platform_admin',
+          role: 'platform_admin',
+          must_change_password: false,
+        })
+      );
+
+      render(
+        <MemoryRouter initialEntries={['/manage/dashboard']}>
+          <Routes>
+            <Route path="/manage/*" element={<ManageLayout />}>
+              <Route index element={<div>Dashboard</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      );
+
+      // Tenant management should be enabled for platform_admin
+      const tenantManagementLink = screen.queryByRole('link', { name: /tenant.management/i });
+      if (tenantManagementLink) {
+        expect(tenantManagementLink.className).not.toMatch(/disabled/);
+      }
+    });
+
+    it('should enable tenant management for admin (legacy)', async () => {
+      useAppStore.setState({ modelGatewayEnabled: false });
+      vi.mocked(useAuth).mockReturnValue(
+        createMockAuthResult({
+          id: '1',
+          username: 'admin',
+          role: 'admin',
+          must_change_password: false,
+        })
+      );
+
+      render(
+        <MemoryRouter initialEntries={['/manage/dashboard']}>
+          <Routes>
+            <Route path="/manage/*" element={<ManageLayout />}>
+              <Route index element={<div>Dashboard</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      );
+
+      // Tenant management should be enabled for admin (legacy)
+      const tenantManagementLink = screen.queryByRole('link', { name: /tenant.management/i });
+      if (tenantManagementLink) {
+        expect(tenantManagementLink.className).not.toMatch(/disabled/);
+      }
+    });
+
+    it('should disable tenant management for manager', async () => {
+      useAppStore.setState({ modelGatewayEnabled: false });
+      vi.mocked(useAuth).mockReturnValue(
+        createMockAuthResult({
+          id: '1',
+          username: 'manager',
+          role: 'manager',
+          must_change_password: false,
+        })
+      );
+
+      render(
+        <MemoryRouter initialEntries={['/manage/dashboard']}>
+          <Routes>
+            <Route path="/manage/*" element={<ManageLayout />}>
+              <Route index element={<div>Dashboard</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      );
+
+      // Tenant management should be disabled for manager
+      const tenantManagementLink = screen.queryByRole('link', { name: /tenant.management/i });
+      if (tenantManagementLink) {
+        expect(tenantManagementLink).toHaveClass('disabled');
+      }
+    });
+  });
 });

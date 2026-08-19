@@ -421,12 +421,28 @@ def get_saved_report(report_id: str):
 # =============================================================================
 
 
+def _validate_days(default: int = 30, min_val: int = 1, max_val: int = 365) -> int:
+    """Validate and clamp the ``days`` query parameter.
+
+    Returns a clamped integer in [min_val, max_val].  Non-integer or missing
+    values fall back to *default*.
+    """
+    raw = request.args.get("days", None)
+    if raw is None:
+        return default
+    try:
+        days = int(raw)
+    except (ValueError, TypeError):
+        return default
+    return max(min_val, min(days, max_val))
+
+
 @compliance_bp.route("/audit/patterns", methods=["GET"])
 @admin_required
 def analyze_patterns():
     """Analyze audit patterns (admin only)."""
 
-    days = request.args.get("days", 30, type=int)
+    days = _validate_days(default=30)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     patterns = _get_audit_analyzer().analyze_patterns(start_time=start_time)
@@ -439,12 +455,12 @@ def analyze_patterns():
 def detect_anomalies():
     """Detect audit anomalies (admin only)."""
 
-    days = request.args.get("days", 7, type=int)
+    days = _validate_days(default=7)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
     anomalies = _get_audit_analyzer().detect_anomalies(start_time=start_time)
 
-    # Load status info for all anomalies
+    # Load status info for all anomalies, keyed by anomaly_id
     statuses = _get_anomaly_statuses()
 
     def serialize_anomaly(a):
@@ -452,11 +468,11 @@ def detect_anomalies():
         for key in ("first_seen", "last_seen"):
             if isinstance(d.get(key), datetime):
                 d[key] = d[key].isoformat()
-        # Attach status info
-        hash_val = _anomaly_hash(a.anomaly_type, a.affected_users)
-        status_row = statuses.get((a.anomaly_type, hash_val))
+        # Attach status info using the stable anomaly_id
+        status_row = statuses.get(a.anomaly_id) if a.anomaly_id else None
         d["status"] = status_row["status"] if status_row else "pending"
         d["processed_at"] = status_row["processed_at"] if status_row else None
+        d["processed_by"] = status_row["processed_by"] if status_row else None
         return d
 
     return jsonify(
@@ -477,7 +493,7 @@ def get_user_profile(user_id: int):
     boundary has to be enforced here.
     """
 
-    days = request.args.get("days", 30, type=int)
+    days = _validate_days(default=30)
 
     profile = _get_audit_analyzer().get_user_behavior_profile(user_id, days=days)
 
@@ -487,12 +503,30 @@ def get_user_profile(user_id: int):
 @compliance_bp.route("/audit/security-score", methods=["GET"])
 @admin_required
 def get_security_score():
-    """Get security score (admin only)."""
+    """Get security score (admin only).
 
-    days = request.args.get("days", 30, type=int)
+    Accepts pre-computed anomalies via the ``precomputed_anomalies`` parameter
+    of ``generate_security_score`` so that the front-end can request anomalies
+    and security-score without duplicating the anomaly detection work
+    (Issue #2750).  When called standalone the endpoint computes anomalies
+    itself.
+    """
+
+    days = _validate_days(default=30)
     start_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
 
-    score = _get_audit_analyzer().generate_security_score(start_time=start_time)
+    analyzer = _get_audit_analyzer()
+
+    # Compute anomalies once and pass them to the scorer so we don't re-run
+    # detection inside generate_security_score.
+    anomalies = analyzer.detect_anomalies(start_time=start_time)
+    # Pass statuses so processed/ignored anomalies are excluded from deduction
+    statuses = _get_anomaly_statuses()
+    score = analyzer.generate_security_score(
+        start_time=start_time,
+        precomputed_anomalies=anomalies,
+        anomaly_statuses=statuses,
+    )
 
     return jsonify(score)
 
@@ -640,20 +674,41 @@ def get_retention_status():
 
 
 def _anomaly_hash(anomaly_type: str, affected_users: list) -> str:
-    """Generate a hash for identifying an anomaly group."""
+    """Generate a legacy hash for identifying an anomaly group.
+
+    .. deprecated::
+        This function is kept for backward compatibility only.  New code
+        should use the stable ``anomaly_id`` attached to each
+        ``AnomalyDetection`` instance, which incorporates time-bucket and
+        tenant information.
+    """
     key = f"{anomaly_type}:{','.join(str(u) for u in sorted(affected_users or []))}"
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
 def _get_anomaly_statuses() -> dict:
-    """Load all anomaly statuses as a dict keyed by (type, hash)."""
+    """Load all anomaly statuses keyed by ``anomaly_id``.
+
+    The table is queried for both the new ``anomaly_id`` column and the
+    legacy ``affected_users_hash`` column.  New rows (with anomaly_id) are
+    keyed by anomaly_id; legacy rows (with empty anomaly_id) are skipped
+    because their coarse identity cannot be reliably mapped to individual
+    anomaly instances.
+    """
     db = Database()
     try:
         rows = db.fetch_all(
-            "SELECT anomaly_type, affected_users_hash, status, processed_by, processed_at "
-            "FROM anomaly_status"
+            "SELECT anomaly_id, anomaly_type, affected_users_hash, status, "
+            "processed_by, processed_at FROM anomaly_status"
         )
-        return {(r["anomaly_type"], r["affected_users_hash"]): r for r in rows}
+        result: dict = {}
+        for r in rows:
+            aid = r.get("anomaly_id")
+            if aid:
+                result[aid] = r
+            # Legacy rows without anomaly_id are intentionally ignored so
+            # they do not pollute new anomaly instances.
+        return result
     except Exception as e:
         logger.error(f"Failed to load anomaly statuses: {e}")
         return {}
@@ -664,33 +719,56 @@ def _get_anomaly_statuses() -> dict:
 def update_anomaly_status():
     """Update anomaly status (admin only).
 
-    Body: { "anomaly_type": str, "affected_users": list[int], "status": "processed"|"ignored" }
+    Preferred body::
+
+        { "anomaly_id": str, "status": "processed"|"ignored" }
+
+    Legacy body (still accepted for backward compatibility)::
+
+        { "anomaly_type": str, "affected_users": list[int], "status": ... }
     """
     data = request.get_json()
     if not data:
         return jsonify({"error": "Request body required"}), 400
 
+    anomaly_id = data.get("anomaly_id")
     anomaly_type = data.get("anomaly_type")
     affected_users = data.get("affected_users", [])
     new_status = data.get("status")
 
-    if not anomaly_type or new_status not in ("processed", "ignored"):
+    if new_status not in ("processed", "ignored"):
         return jsonify({"error": "Invalid parameters"}), 400
 
-    hash_val = _anomaly_hash(anomaly_type, affected_users)
+    # Prefer anomaly_id; fall back to legacy type+users hash
+    if not anomaly_id:
+        if not anomaly_type:
+            return jsonify({"error": "anomaly_id or anomaly_type required"}), 400
+        anomaly_id = _anomaly_hash(anomaly_type, affected_users)
+
     user_id = g.user.get("id") if hasattr(g, "user") else None
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     db = Database()
     try:
         db.execute(
-            "INSERT INTO anomaly_status (anomaly_type, affected_users_hash, status, processed_by, processed_at) "
-            "VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT (anomaly_type, affected_users_hash) "
+            "INSERT INTO anomaly_status "
+            "(anomaly_id, anomaly_type, affected_users_hash, status, processed_by, processed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (anomaly_id) "
             "DO UPDATE SET status = ?, processed_by = ?, processed_at = ?",
-            (anomaly_type, hash_val, new_status, user_id, now, new_status, user_id, now),
+            (
+                anomaly_id,
+                anomaly_type or "",
+                _anomaly_hash(anomaly_type or "", affected_users),
+                new_status,
+                user_id,
+                now,
+                new_status,
+                user_id,
+                now,
+            ),
         )
-        return jsonify({"success": True, "status": new_status})
+        return jsonify({"success": True, "status": new_status, "anomaly_id": anomaly_id})
     except Exception as e:
         logger.error(f"Failed to update anomaly status: {e}")
         return jsonify({"error": "Database error"}), 500
