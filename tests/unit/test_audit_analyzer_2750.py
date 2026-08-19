@@ -21,14 +21,16 @@ import pytest
 from app.modules.compliance.audit import AnomalyDetection, AuditAnalyzer
 from app.modules.governance.audit_logger import AuditLogger
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 # adapt_sql is a pass-through for SQLite; we patch it to be a no-op since
 # the test environment has a PostgreSQL DATABASE_URL but we run real SQLite.
-_noop_adapt = lambda q: q
+def _noop_adapt(q: str) -> str:
+    """Pass-through for adapt_sql in tests (SQLite uses ? placeholders)."""
+    return q
 
 
 def _create_sqlite_db():
@@ -78,22 +80,24 @@ def _seed_logs(conn, count, base_time=None, actions=None, user_ids=None):
         ts = base_time + timedelta(seconds=i * 60)
         action = actions[i % len(actions)]
         user_id = user_ids[i % len(user_ids)]
-        rows.append((
-            ts.isoformat(),
-            user_id,
-            f"user{user_id}",
-            action,
-            "info",
-            "",
-            None,
-            None,
-            None,
-            None,
-            None,
-            1,
-            None,
-            None,
-        ))
+        rows.append(
+            (
+                ts.isoformat(),
+                user_id,
+                f"user{user_id}",
+                action,
+                "info",
+                "",
+                None,
+                None,
+                None,
+                None,
+                None,
+                1,
+                None,
+                None,
+            )
+        )
     conn.executemany(
         """INSERT INTO audit_logs
            (timestamp, user_id, username, action, severity, resource_type,
@@ -312,10 +316,24 @@ class TestAnomalyDetectionSQL:
         rows = []
         for i in range(20):
             ts = base + timedelta(minutes=i)
-            rows.append((
-                ts.isoformat(), 1, "user1", "login_failed", "warning",
-                "", None, None, None, None, None, 0, "invalid password", None,
-            ))
+            rows.append(
+                (
+                    ts.isoformat(),
+                    1,
+                    "user1",
+                    "login_failed",
+                    "warning",
+                    "",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    0,
+                    "invalid password",
+                    None,
+                )
+            )
         conn.executemany(
             """INSERT INTO audit_logs
                (timestamp, user_id, username, action, severity, resource_type,
@@ -351,10 +369,24 @@ class TestAnomalyDetectionSQL:
         rows = []
         for i in range(3):
             ts = base + timedelta(minutes=i)
-            rows.append((
-                ts.isoformat(), 1, "user1", "login_failed", "warning",
-                "", None, None, None, None, None, 0, None, None,
-            ))
+            rows.append(
+                (
+                    ts.isoformat(),
+                    1,
+                    "user1",
+                    "login_failed",
+                    "warning",
+                    "",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+            )
         conn.executemany(
             """INSERT INTO audit_logs
                (timestamp, user_id, username, action, severity, resource_type,
@@ -386,10 +418,24 @@ class TestAnomalyDetectionSQL:
         rows = []
         for i in range(60):
             ts = base + timedelta(seconds=i)
-            rows.append((
-                ts.isoformat(), 1, "user1", "data_view", "info",
-                "", None, None, None, None, None, 1, None, None,
-            ))
+            rows.append(
+                (
+                    ts.isoformat(),
+                    1,
+                    "user1",
+                    "data_view",
+                    "info",
+                    "",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    1,
+                    None,
+                    None,
+                )
+            )
         conn.executemany(
             """INSERT INTO audit_logs
                (timestamp, user_id, username, action, severity, resource_type,
@@ -425,10 +471,24 @@ class TestAnomalyDetectionSQL:
         rows = []
         for i in range(15):
             ts = base + timedelta(minutes=i)
-            rows.append((
-                ts.isoformat(), 1, "user1", "data_view", "info",
-                "", None, None, None, None, None, 1, None, None,
-            ))
+            rows.append(
+                (
+                    ts.isoformat(),
+                    1,
+                    "user1",
+                    "data_view",
+                    "info",
+                    "",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    1,
+                    None,
+                    None,
+                )
+            )
         conn.executemany(
             """INSERT INTO audit_logs
                (timestamp, user_id, username, action, severity, resource_type,
@@ -463,10 +523,24 @@ class TestAnomalyDetectionSQL:
         rows = []
         for i in range(10):
             ts = base + timedelta(minutes=i)
-            rows.append((
-                ts.isoformat(), (i % 3) + 1, f"user{(i % 3) + 1}", "user_role_change", "info",
-                "", None, None, None, None, None, 1, None, None,
-            ))
+            rows.append(
+                (
+                    ts.isoformat(),
+                    (i % 3) + 1,
+                    f"user{(i % 3) + 1}",
+                    "user_role_change",
+                    "info",
+                    "",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    1,
+                    None,
+                    None,
+                )
+            )
         conn.executemany(
             """INSERT INTO audit_logs
                (timestamp, user_id, username, action, severity, resource_type,
@@ -486,9 +560,7 @@ class TestAnomalyDetectionSQL:
 
         anomalies = analyzer._detect_action_pattern_anomaly(start, end)
 
-        role_change_anomalies = [
-            a for a in anomalies if a.anomaly_type == "frequent_role_changes"
-        ]
+        role_change_anomalies = [a for a in anomalies if a.anomaly_type == "frequent_role_changes"]
         assert len(role_change_anomalies) == 1
         assert role_change_anomalies[0].occurrences == 10
 
@@ -654,10 +726,24 @@ class TestLargeDatasetAnomaliesNotIgnored:
         rows = []
         for i in range(20):
             ts = base + timedelta(minutes=i)
-            rows.append((
-                ts.isoformat(), 99, "attacker", "login_failed", "warning",
-                "", None, None, None, None, None, 0, "invalid password", None,
-            ))
+            rows.append(
+                (
+                    ts.isoformat(),
+                    99,
+                    "attacker",
+                    "login_failed",
+                    "warning",
+                    "",
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    0,
+                    "invalid password",
+                    None,
+                )
+            )
         conn.executemany(
             """INSERT INTO audit_logs
                (timestamp, user_id, username, action, severity, resource_type,
@@ -669,7 +755,8 @@ class TestLargeDatasetAnomaliesNotIgnored:
 
         # 19,980 normal logs after the failed logins (no login_failed actions)
         _seed_logs(
-            conn, 19980,
+            conn,
+            19980,
             base_time=base + timedelta(hours=1),
             actions=["login", "logout", "data_view", "user_create"],
         )

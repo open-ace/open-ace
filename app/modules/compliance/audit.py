@@ -384,9 +384,11 @@ class AuditAnalyzer:
                 )
                 range_row = cursor.fetchone()
 
-                first_seen = _parse_timestamp(range_row["first_seen"]) if range_row else datetime.now(
-                    timezone.utc
-                ).replace(tzinfo=None)
+                first_seen = (
+                    _parse_timestamp(range_row["first_seen"])
+                    if range_row
+                    else datetime.now(timezone.utc).replace(tzinfo=None)
+                )
                 last_seen = _parse_timestamp(range_row["last_seen"]) if range_row else first_seen
 
                 return AnomalyDetection(
@@ -578,12 +580,16 @@ class AuditAnalyzer:
                             description=f"{role_count} role changes detected",
                             affected_users=affected,
                             occurrences=role_count,
-                            first_seen=_parse_timestamp(row["first_seen"]) if row else datetime.now(
-                                timezone.utc
-                            ).replace(tzinfo=None),
-                            last_seen=_parse_timestamp(row["last_seen"]) if row else datetime.now(
-                                timezone.utc
-                            ).replace(tzinfo=None),
+                            first_seen=(
+                                _parse_timestamp(row["first_seen"])
+                                if row
+                                else datetime.now(timezone.utc).replace(tzinfo=None)
+                            ),
+                            last_seen=(
+                                _parse_timestamp(row["last_seen"])
+                                if row
+                                else datetime.now(timezone.utc).replace(tzinfo=None)
+                            ),
                             details={},
                         )
                     )
@@ -626,12 +632,16 @@ class AuditAnalyzer:
                             description=f"{perm_count} permission changes detected",
                             affected_users=affected2,
                             occurrences=perm_count,
-                            first_seen=_parse_timestamp(row2["first_seen"]) if row2 else datetime.now(
-                                timezone.utc
-                            ).replace(tzinfo=None),
-                            last_seen=_parse_timestamp(row2["last_seen"]) if row2 else datetime.now(
-                                timezone.utc
-                            ).replace(tzinfo=None),
+                            first_seen=(
+                                _parse_timestamp(row2["first_seen"])
+                                if row2
+                                else datetime.now(timezone.utc).replace(tzinfo=None)
+                            ),
+                            last_seen=(
+                                _parse_timestamp(row2["last_seen"])
+                                if row2
+                                else datetime.now(timezone.utc).replace(tzinfo=None)
+                            ),
                             details={},
                         )
                     )
