@@ -528,7 +528,9 @@ def get_user_profile(user_id: int):
 
     days = _validate_days(default=30)
 
-    profile = _get_audit_analyzer().get_user_behavior_profile(user_id, days=days, tenant_id=tenant_id)
+    profile = _get_audit_analyzer().get_user_behavior_profile(
+        user_id, days=days, tenant_id=tenant_id
+    )
 
     return jsonify(profile)
 

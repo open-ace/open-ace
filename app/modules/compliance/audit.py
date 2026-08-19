@@ -309,20 +309,28 @@ class AuditAnalyzer:
         anomalies = []
 
         # Detect failed login anomalies
-        failed_login_anomaly = self._detect_failed_login_anomaly(start_time, end_time, tenant_id=tenant_id)
+        failed_login_anomaly = self._detect_failed_login_anomaly(
+            start_time, end_time, tenant_id=tenant_id
+        )
         if failed_login_anomaly:
             anomalies.append(failed_login_anomaly)
 
         # Detect rapid activity anomalies
-        rapid_activity_anomalies = self._detect_rapid_activity_anomaly(start_time, end_time, tenant_id=tenant_id)
+        rapid_activity_anomalies = self._detect_rapid_activity_anomaly(
+            start_time, end_time, tenant_id=tenant_id
+        )
         anomalies.extend(rapid_activity_anomalies)
 
         # Detect off-hours activity anomalies
-        off_hours_anomalies = self._detect_off_hours_anomaly(start_time, end_time, tenant_id=tenant_id)
+        off_hours_anomalies = self._detect_off_hours_anomaly(
+            start_time, end_time, tenant_id=tenant_id
+        )
         anomalies.extend(off_hours_anomalies)
 
         # Detect unusual action patterns
-        action_anomalies = self._detect_action_pattern_anomaly(start_time, end_time, tenant_id=tenant_id)
+        action_anomalies = self._detect_action_pattern_anomaly(
+            start_time, end_time, tenant_id=tenant_id
+        )
         anomalies.extend(action_anomalies)
 
         return anomalies
