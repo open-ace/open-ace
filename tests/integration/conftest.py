@@ -293,16 +293,35 @@ def db_session(tmp_db):
 
 
 @pytest.fixture
-def admin_client(app):
+def admin_client(app, tmp_db):
     """Create authenticated admin test client for tenant keywords tests."""
     from unittest.mock import patch
+
+    # Ensure necessary tenant and user records exist for foreign key constraints
+    # Tenant 1 is required for tenant_id references
+    tmp_db.execute(
+        "INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (1, 'Default Tenant', 'default')"
+    )
+    # User 1 is required for created_by references (platform admin)
+    # Note: password_hash is required, role must be valid ('platform_admin', 'tenant_admin', etc.)
+    tmp_db.execute(
+        """INSERT OR IGNORE INTO users
+           (id, username, email, password_hash, role, tenant_id)
+           VALUES (1, 'admin', 'admin@test.com', 'test_hash', 'platform_admin', NULL)"""
+    )
+    # User 2 for tenant admin (tenant_id must NOT be NULL for tenant_admin role)
+    tmp_db.execute(
+        """INSERT OR IGNORE INTO users
+           (id, username, email, password_hash, role, tenant_id)
+           VALUES (2, 'tenant_admin', 'tenant@test.com', 'test_hash', 'tenant_admin', 1)"""
+    )
 
     # Mock authenticated admin user
     admin_user = {
         "id": 1,
         "username": "admin",
         "email": "admin@test.com",
-        "role": "admin",
+        "role": "platform_admin",  # Must match valid role in users table
         "tenant_id": None,  # Platform admin
     }
 
@@ -313,9 +332,24 @@ def admin_client(app):
 
 
 @pytest.fixture
-def tenant_admin_client(app):
+def tenant_admin_client(app, tmp_db):
     """Create authenticated tenant admin test client for tenant keywords tests."""
     from unittest.mock import patch
+
+    # Ensure necessary tenant and user records exist for foreign key constraints
+    tmp_db.execute(
+        "INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (1, 'Default Tenant', 'default')"
+    )
+    tmp_db.execute(
+        """INSERT OR IGNORE INTO users
+           (id, username, email, password_hash, role, tenant_id)
+           VALUES (1, 'admin', 'admin@test.com', 'test_hash', 'platform_admin', NULL)"""
+    )
+    tmp_db.execute(
+        """INSERT OR IGNORE INTO users
+           (id, username, email, password_hash, role, tenant_id)
+           VALUES (2, 'tenant_admin', 'tenant@test.com', 'test_hash', 'tenant_admin', 1)"""
+    )
 
     # Mock authenticated tenant admin user
     tenant_user = {
