@@ -9,15 +9,12 @@ Verifies that:
   - generate_security_score respects pending/processed/ignored.
 """
 
-import pytest
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
-from app.modules.compliance.audit import (
-    AnomalyDetection,
-    AuditAnalyzer,
-    make_anomaly_id,
-)
+import pytest
+
+from app.modules.compliance.audit import AnomalyDetection, AuditAnalyzer, make_anomaly_id
 
 
 # ──────────────────────────────────────────────────────────────
@@ -105,9 +102,7 @@ class TestSecurityScoreRespectsStatus:
         analyzer.audit_logger = MagicMock()
         with patch.object(analyzer, "detect_anomalies", return_value=[a1, a2]):
             # No statuses → both pending → deductions apply
-            score_all_pending = analyzer.generate_security_score(
-                anomaly_statuses={}
-            )
+            score_all_pending = analyzer.generate_security_score(anomaly_statuses={})
 
             # a1 is processed → only a2 contributes
             score_one_processed = analyzer.generate_security_score(
@@ -122,11 +117,9 @@ class TestSecurityScoreRespectsStatus:
                 }
             )
 
-        assert score_all_pending["score"] < score_one_processed["score"], (
-            "Processing one anomaly should improve the score"
-        )
-        assert score_all_processed["score"] == 100, (
-            "All processed anomalies → score should be 100"
-        )
+        assert (
+            score_all_pending["score"] < score_one_processed["score"]
+        ), "Processing one anomaly should improve the score"
+        assert score_all_processed["score"] == 100, "All processed anomalies → score should be 100"
         assert score_all_processed["pending_count"] == 0
         assert score_all_processed["processed_count"] == 2

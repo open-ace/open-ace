@@ -19,9 +19,7 @@ not be matched against newly detected anomalies.
 import os
 import sys
 
-project_root = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-)
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
 
 from app.repositories.database import Database
@@ -42,8 +40,7 @@ def apply_migration() -> None:
         if not _col_exists(cursor, "anomaly_status", "anomaly_id"):
             print("Adding anomaly_id column to anomaly_status …")
             cursor.execute(
-                "ALTER TABLE anomaly_status "
-                "ADD COLUMN anomaly_id TEXT NOT NULL DEFAULT ''"
+                "ALTER TABLE anomaly_status " "ADD COLUMN anomaly_id TEXT NOT NULL DEFAULT ''"
             )
         else:
             print("anomaly_id column already exists – skipping.")
@@ -51,9 +48,7 @@ def apply_migration() -> None:
         # 2. Add tenant_id column
         if not _col_exists(cursor, "anomaly_status", "tenant_id"):
             print("Adding tenant_id column to anomaly_status …")
-            cursor.execute(
-                "ALTER TABLE anomaly_status ADD COLUMN tenant_id INTEGER"
-            )
+            cursor.execute("ALTER TABLE anomaly_status ADD COLUMN tenant_id INTEGER")
         else:
             print("tenant_id column already exists – skipping.")
 

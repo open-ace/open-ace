@@ -493,9 +493,7 @@ class AuditAnalyzer:
                             "action_count": count,
                             "threshold": self.rapid_action_threshold,
                         },
-                        anomaly_id=make_anomaly_id(
-                            "rapid_activity", [user_id], hour_str_s
-                        ),
+                        anomaly_id=make_anomaly_id("rapid_activity", [user_id], hour_str_s),
                     )
                 )
             return anomalies
@@ -971,9 +969,7 @@ class AuditAnalyzer:
             "medium_severity_count": len(
                 [a for a in all_anomalies_for_report if a.severity == "medium"]
             ),
-            "low_severity_count": len(
-                [a for a in all_anomalies_for_report if a.severity == "low"]
-            ),
+            "low_severity_count": len([a for a in all_anomalies_for_report if a.severity == "low"]),
             "anomalies": [
                 {
                     "anomaly_id": a.anomaly_id,
