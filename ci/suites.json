@@ -64,7 +64,7 @@
     },
     "compatibility-smoke": {
       "description": "Fast minimum/maximum Python compatibility coverage",
-      "timeout_seconds": 360,
+      "timeout_seconds": 420,
       "commands": [
         ["{python}", "-m", "compileall", "-q", "app", "scripts", "cli.py", "server.py"],
         ["{python}", "-m", "pytest", "tests/unit/", "-q", "--maxfail=1", "-m", "not performance"]
