@@ -31,9 +31,8 @@ class TestSQLiteCreateOrIgnore:
         db_fd, db_path = tempfile.mkstemp(suffix=".db")
 
         try:
-            db = Database()
-            db.db_path = db_path
-            db._connection_pool = {}
+            # Use proper db_url parameter for Database initialization
+            db = Database(db_url=f"sqlite:///{db_path}")
 
             # Create table
             db.execute("""
@@ -262,9 +261,8 @@ class TestSQLiteEdgeCases:
         db_fd, db_path = tempfile.mkstemp(suffix=".db")
 
         try:
-            db = Database()
-            db.db_path = db_path
-            db._connection_pool = {}
+            # Use proper db_url parameter for Database initialization
+            db = Database(db_url=f"sqlite:///{db_path}")
 
             # Create table
             db.execute("""
@@ -319,9 +317,8 @@ class TestSQLiteEdgeCases:
         db_fd, db_path = tempfile.mkstemp(suffix=".db")
 
         try:
-            db = Database()
-            db.db_path = db_path
-            db._connection_pool = {}
+            # Use proper db_url parameter for Database initialization
+            db = Database(db_url=f"sqlite:///{db_path}")
 
             # Create table
             db.execute("""

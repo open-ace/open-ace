@@ -47,6 +47,18 @@ repos:
         files: ^migrations/versions/.*\.py$
         pass_filenames: false
 
+      # Check that requirements.lock still satisfies requirements.txt. The prod
+      # Docker image installs requirements.lock with --require-hashes and no PR
+      # CI lane builds the image, so a forgotten regeneration surfaces only at
+      # runtime. Deterministic (no network); regenerate via
+      # scripts/gen_requirements_lock.sh.
+      - id: check-requirements-lock-sync
+        name: Check requirements.lock sync
+        entry: python3 scripts/lint/check_requirements_lock_sync.py
+        language: system
+        files: ^requirements\.(txt|lock)$
+        pass_filenames: false
+
       # Validate PostgreSQL schema for boolean field consistency
       - id: validate-schema
         name: Validate PostgreSQL schema boolean fields

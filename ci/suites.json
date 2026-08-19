@@ -32,6 +32,7 @@
       "timeout_seconds": 300,
       "commands": [
         ["{python}", "-m", "pip_audit", "-r", "requirements-ci.lock", "--skip-editable"],
+        ["{python}", "-m", "pip_audit", "-r", "requirements.lock", "--skip-editable"],
         {
           "working_directory": "frontend",
           "command": ["npm", "ci", "--no-audit", "--no-fund"]

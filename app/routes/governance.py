@@ -17,6 +17,7 @@ from app.auth.decorators import (
     auth_required,
     enforce_resource_tenant_scope,
     platform_admin_required,
+    same_tenant_or_platform_admin,
     same_tenant_user_required,
 )
 from app.modules.governance.audit_logger import AuditAction, AuditLogger, get_action_categories
@@ -390,6 +391,7 @@ def api_check_content():
             tenant = tenant_repo.get_by_id(tenant_id)
             if tenant and tenant.settings:
                 tenant_config = {
+                    "tenant_id": tenant_id,  # Issue #2789: Pass tenant_id for keyword loading
                     "block_sensitive_keyword": tenant.settings.block_sensitive_keyword,
                     "sensitive_keyword_match_mode": tenant.settings.sensitive_keyword_match_mode,
                 }
@@ -463,28 +465,31 @@ def api_add_pattern():
 @governance_bp.route("/content/filter/keywords", methods=["POST"])
 @platform_admin_required
 def api_add_keyword():
-    """Add a custom sensitive keyword."""
+    """Add a custom sensitive keyword.
 
-    data = request.get_json() or {}
-    keyword = data.get("keyword")
+    DEPRECATED: This endpoint is deprecated and will be removed in a future version.
+    Use POST /api/tenants/{tenant_id}/sensitive-keywords instead.
 
-    if not keyword:
-        return jsonify({"error": "Keyword is required"}), 400
-
-    get_content_filter().add_custom_keyword(keyword)
-
-    # Log the action
-    client_info = get_client_info()
-    audit_logger.log_action(
-        action=AuditAction.SYSTEM_CONFIG_CHANGE,
-        user_id=g.user_id,
-        username=g.user.get("username"),
-        resource_type="content_filter",
-        details={"action": "add_keyword", "keyword": keyword},
-        **client_info,
+    Issue #2789: This endpoint does not persist keywords to database.
+    """
+    # Return deprecation warning
+    return (
+        jsonify(
+            {
+                "success": False,
+                "error": "Deprecated",
+                "message": "This endpoint is deprecated and will be removed in a future version.",
+                "migration_guide": "Use POST /api/tenants/{tenant_id}/sensitive-keywords instead.",
+                "documentation": "/docs/api/migrations/sensitive-keywords-v2.md",
+            }
+        ),
+        200,
+        {
+            "Deprecation": "true",
+            "Sunset": "Sat, 01 Nov 2026 00:00:00 GMT",
+            "Link": '</api/tenants/{tenant_id}/sensitive-keywords>; rel="successor-version"',
+        },
     )
-
-    return jsonify({"success": True, "keyword": keyword})
 
 
 # ============================================================================
@@ -689,3 +694,259 @@ def api_get_password_policy():
     """
     policy = governance_repo.get_password_policy()
     return jsonify(policy)
+
+
+# ============================================================================
+# Tenant Sensitive Keywords (Issue #2789)
+# ============================================================================
+
+
+@governance_bp.route("/tenants/<int:tenant_id>/sensitive-keywords", methods=["GET"])
+@same_tenant_or_platform_admin
+def api_get_tenant_keywords(tenant_id):
+    """Get tenant sensitive keywords with pagination.
+
+    Issue #2789: List all sensitive keywords for a specific tenant.
+
+    Args:
+        tenant_id: Tenant ID from URL path.
+
+    Query Parameters:
+        limit: Maximum number of records (default 100, max 1000).
+        offset: Number of records to skip (default 0).
+        is_enabled: Filter by enabled status (optional).
+
+    Returns:
+        JSON response with keywords list and pagination info.
+    """
+    # Get query parameters
+    limit = min(request.args.get("limit", default=100, type=int), 1000)
+    offset = request.args.get("offset", default=0, type=int)
+    is_enabled_str = request.args.get("is_enabled")
+
+    # Parse is_enabled filter
+    is_enabled = None
+    if is_enabled_str is not None:
+        is_enabled = is_enabled_str.lower() in ("true", "1", "yes")
+
+    # Get keywords from repository
+    keywords = governance_repo.get_tenant_keywords(
+        tenant_id=tenant_id,
+        limit=limit,
+        offset=offset,
+        is_enabled=is_enabled,
+    )
+
+    # Get total count
+    total = governance_repo.get_tenant_keywords_count(
+        tenant_id=tenant_id,
+        is_enabled=is_enabled,
+    )
+
+    return jsonify(
+        {
+            "keywords": keywords,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "tenant_id": tenant_id,
+        }
+    )
+
+
+@governance_bp.route("/tenants/<int:tenant_id>/sensitive-keywords", methods=["POST"])
+@same_tenant_or_platform_admin
+def api_create_tenant_keyword(tenant_id):
+    """Create a tenant sensitive keyword.
+
+    Issue #2789: Add a new sensitive keyword for a specific tenant.
+    Idempotent: if keyword already exists, returns existing record.
+
+    Args:
+        tenant_id: Tenant ID from URL path.
+
+    Request Body:
+        keyword: The keyword to add (required).
+
+    Returns:
+        JSON response with created/existing keyword record.
+        HTTP 201 if newly created, HTTP 200 if already exists.
+    """
+    data = request.get_json() or {}
+    keyword = data.get("keyword")
+
+    if not keyword or not keyword.strip():
+        return jsonify({"error": "Keyword is required"}), 400
+
+    keyword = keyword.strip()
+
+    # Create keyword (idempotent)
+    record, is_new = governance_repo.create_tenant_keyword(
+        tenant_id=tenant_id,
+        keyword=keyword,
+        created_by=g.user_id,
+    )
+
+    if record is None:
+        return jsonify({"error": "Failed to create keyword"}), 500
+
+    # Increment version number for cache invalidation
+    governance_repo.increment_tenant_keywords_version(tenant_id)
+
+    # Invalidate cache in current process
+    from app.modules.governance.content_filter_singleton import invalidate_tenant_keywords_cache
+
+    invalidate_tenant_keywords_cache(tenant_id)
+
+    # Add is_new flag to response
+    record["is_new"] = is_new
+
+    # Log the action
+    client_info = get_client_info()
+    audit_logger.log_action(
+        action=AuditAction.SYSTEM_CONFIG_CHANGE,
+        user_id=g.user_id,
+        username=g.user.get("username"),
+        resource_type="tenant_sensitive_keyword",
+        resource_id=str(record["id"]),
+        resource_name=keyword,
+        tenant_id=tenant_id,
+        details={
+            "action": "create",
+            "keyword": keyword,
+            "is_new": is_new,
+        },
+        **client_info,
+    )
+
+    status_code = 201 if is_new else 200
+    return jsonify(record), status_code
+
+
+@governance_bp.route(
+    "/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>", methods=["PUT"]
+)
+@same_tenant_or_platform_admin
+def api_update_tenant_keyword(tenant_id, keyword_id):
+    """Update a tenant sensitive keyword.
+
+    Issue #2789: Update an existing sensitive keyword (enable/disable).
+
+    Args:
+        tenant_id: Tenant ID from URL path.
+        keyword_id: Keyword ID from URL path.
+
+    Request Body:
+        is_enabled: New enabled status (required).
+
+    Returns:
+        JSON response with success status.
+    """
+    data = request.get_json() or {}
+    is_enabled = data.get("is_enabled")
+
+    if is_enabled is None:
+        return jsonify({"error": "is_enabled is required"}), 400
+
+    # Check if keyword exists
+    existing = governance_repo.get_tenant_keyword(tenant_id, keyword_id)
+    if existing is None:
+        return jsonify({"error": "Keyword not found"}), 404
+
+    # Update keyword
+    success = governance_repo.update_tenant_keyword(
+        tenant_id=tenant_id,
+        keyword_id=keyword_id,
+        is_enabled=is_enabled,
+    )
+
+    if not success:
+        return jsonify({"error": "Failed to update keyword"}), 500
+
+    # Increment version number for cache invalidation
+    governance_repo.increment_tenant_keywords_version(tenant_id)
+
+    # Invalidate cache in current process
+    from app.modules.governance.content_filter_singleton import invalidate_tenant_keywords_cache
+
+    invalidate_tenant_keywords_cache(tenant_id)
+
+    # Log the action
+    client_info = get_client_info()
+    audit_logger.log_action(
+        action=AuditAction.SYSTEM_CONFIG_CHANGE,
+        user_id=g.user_id,
+        username=g.user.get("username"),
+        resource_type="tenant_sensitive_keyword",
+        resource_id=str(keyword_id),
+        resource_name=existing.get("keyword", ""),
+        tenant_id=tenant_id,
+        details={
+            "action": "update",
+            "keyword": existing.get("keyword"),
+            "changes": {"is_enabled": is_enabled},
+        },
+        **client_info,
+    )
+
+    return jsonify({"success": True})
+
+
+@governance_bp.route(
+    "/tenants/<int:tenant_id>/sensitive-keywords/<int:keyword_id>", methods=["DELETE"]
+)
+@same_tenant_or_platform_admin
+def api_delete_tenant_keyword(tenant_id, keyword_id):
+    """Delete a tenant sensitive keyword.
+
+    Issue #2789: Remove a sensitive keyword for a specific tenant.
+
+    Args:
+        tenant_id: Tenant ID from URL path.
+        keyword_id: Keyword ID from URL path.
+
+    Returns:
+        JSON response with success status.
+    """
+    # Check if keyword exists
+    existing = governance_repo.get_tenant_keyword(tenant_id, keyword_id)
+    if existing is None:
+        return jsonify({"error": "Keyword not found"}), 404
+
+    keyword_name = existing.get("keyword", "")
+
+    # Delete keyword
+    success = governance_repo.delete_tenant_keyword(
+        tenant_id=tenant_id,
+        keyword_id=keyword_id,
+    )
+
+    if not success:
+        return jsonify({"error": "Failed to delete keyword"}), 500
+
+    # Increment version number for cache invalidation
+    governance_repo.increment_tenant_keywords_version(tenant_id)
+
+    # Invalidate cache in current process
+    from app.modules.governance.content_filter_singleton import invalidate_tenant_keywords_cache
+
+    invalidate_tenant_keywords_cache(tenant_id)
+
+    # Log the action
+    client_info = get_client_info()
+    audit_logger.log_action(
+        action=AuditAction.SYSTEM_CONFIG_CHANGE,
+        user_id=g.user_id,
+        username=g.user.get("username"),
+        resource_type="tenant_sensitive_keyword",
+        resource_id=str(keyword_id),
+        resource_name=keyword_name,
+        tenant_id=tenant_id,
+        details={
+            "action": "delete",
+            "keyword": keyword_name,
+        },
+        **client_info,
+    )
+
+    return jsonify({"success": True})
