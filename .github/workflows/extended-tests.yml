@@ -78,9 +78,19 @@ jobs:
 
       - name: Install dependencies
         run: |
+          install_playwright_browser() {
+            if timeout 10m playwright install chromium --with-deps; then
+              echo "Installed Playwright Chromium with system dependencies."
+              return 0
+            fi
+
+            echo "playwright install --with-deps stalled or failed; falling back to browser-only install."
+            playwright install chromium
+          }
+
           python -m pip install --upgrade pip
           pip install -r requirements-ci.lock
-          playwright install chromium --with-deps
+          install_playwright_browser
 
       - name: Run critical extended tests
         run: python scripts/ci.py run critical-e2e
@@ -181,9 +191,19 @@ jobs:
 
       - name: Install dependencies
         run: |
+          install_playwright_browser() {
+            if timeout 10m playwright install chromium --with-deps; then
+              echo "Installed Playwright Chromium with system dependencies."
+              return 0
+            fi
+
+            echo "playwright install --with-deps stalled or failed; falling back to browser-only install."
+            playwright install chromium
+          }
+
           python -m pip install --upgrade pip
           pip install -r requirements-ci.lock
-          playwright install chromium --with-deps
+          install_playwright_browser
 
       - name: Build nightly E2E selection
         run: |
@@ -312,9 +332,19 @@ jobs:
 
       - name: Install dependencies
         run: |
+          install_playwright_browser() {
+            if timeout 10m playwright install chromium --with-deps; then
+              echo "Installed Playwright Chromium with system dependencies."
+              return 0
+            fi
+
+            echo "playwright install --with-deps stalled or failed; falling back to browser-only install."
+            playwright install chromium
+          }
+
           python -m pip install --upgrade pip
           pip install -r requirements-ci.lock
-          playwright install chromium --with-deps
+          install_playwright_browser
 
       - name: Run issue regression shard
         # Known legacy failures make pytest exit non-zero; keep going so the
@@ -386,9 +416,19 @@ jobs:
 
       - name: Install dependencies
         run: |
+          install_playwright_browser() {
+            if timeout 10m playwright install chromium --with-deps; then
+              echo "Installed Playwright Chromium with system dependencies."
+              return 0
+            fi
+
+            echo "playwright install --with-deps stalled or failed; falling back to browser-only install."
+            playwright install chromium
+          }
+
           python -m pip install --upgrade pip
           pip install -r requirements-ci.lock
-          playwright install chromium --with-deps
+          install_playwright_browser
 
       - name: Run selected extended tests
         run: |
