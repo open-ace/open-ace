@@ -8,8 +8,8 @@ This migration adds:
 - Indexes for efficient queries
 - Foreign key constraints with cascade delete
 
-Revision ID: 20260819_001
-Revises: 20260818_002_add_tool_account_mapping_fields
+Revision ID: 20260819_002
+Revises: 20260819_001_add_anomaly_identity
 Create Date: 2026-08-19
 
 """
@@ -18,8 +18,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "20260819_001"
-down_revision = "20260818_002_add_tool_account_mapping_fields"
+revision = "20260819_002"
+down_revision = "20260819_001_add_anomaly_identity"
 branch_labels = None
 depends_on = None
 
