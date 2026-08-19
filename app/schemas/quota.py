@@ -522,11 +522,7 @@ def validate_tenant_allocation(
                 "monthly_request",
                 monthly_request_limit,
                 allocated_monthly_request,
-                (
-                    new_monthly_request_quota
-                    if isinstance(new_monthly_request_quota, int)
-                    else None
-                ),
+                (new_monthly_request_quota if isinstance(new_monthly_request_quota, int) else None),
             )
             logger.warning(
                 f"Tenant {tenant_id} monthly request quota exceeded: "
