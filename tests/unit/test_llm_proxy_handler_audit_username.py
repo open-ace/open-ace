@@ -152,11 +152,15 @@ class TestUsernameFetchFromDatabase:
         """Verify audit logger receives username parameter."""
         from app.modules.governance.audit_logger import AuditAction, AuditLogger
 
-        # Mock database connection
-        mock_db = MagicMock()
+        # Mock database connection and cursor
         mock_cursor = MagicMock()
-        mock_db._get_connection.return_value = mock_cursor
-        mock_db.execute = MagicMock(return_value=True)
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_conn.commit = MagicMock()
+
+        mock_db = MagicMock()
+        # Mock connection() returning a context manager
+        mock_db.connection.return_value.__enter__.return_value = mock_conn
 
         # Create AuditLogger with mocked database
         audit_logger = AuditLogger()
@@ -176,8 +180,8 @@ class TestUsernameFetchFromDatabase:
             # Verify the call succeeded
             assert result is True, "Expected log_action to succeed"
 
-            # Verify database execute was called
-            assert mock_db.execute.called, "Expected database execute to be called"
+            # Verify cursor execute was called
+            assert mock_cursor.execute.called, "Expected cursor execute to be called"
 
     def test_g_user_not_used_in_llm_proxy_handler(self):
         """Verify that g.user is not accessed for username in this route.
