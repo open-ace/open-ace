@@ -16,6 +16,8 @@ import pytest
 
 from app.modules.compliance.audit import AnomalyDetection, AuditAnalyzer, make_anomaly_id
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2749)]
+
 
 # ──────────────────────────────────────────────────────────────
 # make_anomaly_id
