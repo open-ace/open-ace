@@ -311,3 +311,129 @@ class TestCostOptimizer:
         data = {"by_model": [{"tool_name": "tool1"}]}
         suggestions = opt._analyze_tool_usage(data)
         assert len(suggestions) == 0
+
+    # ===== New tests for algorithm versioning (Issue #2758) =====
+
+    def test_get_efficiency_report_with_algorithm_version(self):
+        """Test efficiency report with explicit algorithm version."""
+        opt, mock_db = self._make_optimizer()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "test",
+                "model": "gpt-4",
+                "date": "2026-01-01",
+                "input_tokens": 1000,
+                "output_tokens": 500,
+            }
+        ]
+        report = opt.get_efficiency_report(days=30, algorithm_version="v1.0")
+        assert report["algorithm_version"] == "v1.0"
+        assert "overall_efficiency" in report
+
+    def test_get_efficiency_report_with_task_type(self):
+        """Test efficiency report with explicit task type."""
+        opt, mock_db = self._make_optimizer()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "code_generator",
+                "model": "gpt-4",
+                "date": "2026-01-01",
+                "input_tokens": 1000,
+                "output_tokens": 500,
+            }
+        ]
+        report = opt.get_efficiency_report(days=30, task_type="CODE_GENERATION")
+        assert report["applied_task_type"] == "CODE_GENERATION"
+        assert report["inference_confidence"] == 100.0
+
+    def test_get_efficiency_report_default_algorithm_version(self):
+        """Test efficiency report uses default algorithm version."""
+        opt, mock_db = self._make_optimizer()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "test",
+                "model": "gpt-4",
+                "date": "2026-01-01",
+                "input_tokens": 1000,
+                "output_tokens": 500,
+            }
+        ]
+        report = opt.get_efficiency_report(days=30)
+        assert "algorithm_version" in report
+        assert report["algorithm_version"] in ("v1.0", "v2.0")
+
+    def test_calculate_efficiency_score_v1_range(self):
+        """Test v1.0 efficiency score is in [0, 100]."""
+        opt, _ = self._make_optimizer()
+        # Test with various inputs
+        for tokens, input_t, output_t, requests, cost in [
+            (1000, 500, 500, 10, 0.05),
+            (10000, 9000, 1000, 100, 1.0),
+            (100, 10, 90, 1, 0.001),
+            (0, 0, 0, 0, 0),
+        ]:
+            score = opt._calculate_efficiency_score_v1(tokens, input_t, output_t, requests, cost)
+            assert 0 <= score <= 100
+
+    def test_calculate_waste_percentage_v1_range(self):
+        """Test v1.0 waste percentage is in [0, 100]."""
+        opt, _ = self._make_optimizer()
+        # Test with various inputs
+        for input_t, output_t in [
+            (1000, 100),  # Low output ratio -> should have waste
+            (500, 500),  # Balanced -> no waste
+            (100, 1000),  # High output ratio -> no waste
+            (0, 0),  # Zero tokens
+        ]:
+            waste = opt._calculate_waste_percentage_v1(input_t, output_t)
+            assert 0 <= waste <= 100
+
+    def test_efficiency_score_backwards_compatible(self):
+        """Test new efficiency score API is backwards compatible."""
+        opt, mock_db = self._make_optimizer()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "test",
+                "model": "gpt-4",
+                "date": "2026-01-01",
+                "input_tokens": 1000,
+                "output_tokens": 500,
+            }
+        ]
+        # Old call style (no new params) should still work
+        report = opt.get_efficiency_report(days=30)
+        assert "overall_efficiency" in report
+        assert "waste_percentage" in report
+        assert "recommendation_items" in report
+
+
+class TestEfficiencyReportAPIValidation:
+    """Test API parameter validation for efficiency report endpoint."""
+
+    def test_invalid_task_type_converted_to_general(self):
+        """Test that invalid task_type parameter is converted to GENERAL."""
+        # CostOptimizer gracefully handles invalid values
+        from unittest.mock import MagicMock
+
+        opt = CostOptimizer(db=MagicMock())
+        report = opt.get_efficiency_report(days=30, task_type="INVALID_TYPE")
+        assert report["applied_task_type"] == "GENERAL"
+
+    def test_valid_task_types_accepted(self):
+        """Test that valid task types are accepted."""
+        from unittest.mock import MagicMock
+
+        opt = CostOptimizer(db=MagicMock())
+        for task_type in ["GENERAL", "CODE_GENERATION", "DOCUMENT_ANALYSIS", "CONVERSATION"]:
+            report = opt.get_efficiency_report(days=30, task_type=task_type)
+            assert report["applied_task_type"] == task_type
+            assert report["inference_confidence"] == 100.0
+
+    def test_valid_algorithm_versions_accepted(self):
+        """Test that valid algorithm versions are accepted."""
+        from unittest.mock import MagicMock
+
+        opt = CostOptimizer(db=MagicMock())
+        for version in ["v1.0", "v2.0"]:
+            report = opt.get_efficiency_report(days=30, algorithm_version=version)
+            assert report["algorithm_version"] == version

@@ -126,6 +126,12 @@ export interface EfficiencyReport {
   model_distribution: Record<string, number>;
   unique_models: number;
   unique_tools: number;
+  /** Algorithm version used (v1.0 or v2.0) */
+  algorithm_version?: string;
+  /** Task type applied (GENERAL, CODE_GENERATION, DOCUMENT_ANALYSIS, CONVERSATION) */
+  applied_task_type?: string;
+  /** Task type inference confidence (0-100) */
+  inference_confidence?: number;
   overall_efficiency?: number;
   avg_cost_per_request?: number;
   waste_percentage?: number;
@@ -280,8 +286,16 @@ export const roiApi = {
     return response.data;
   },
 
-  async getEfficiencyReport(days?: number): Promise<EfficiencyReport> {
-    const queryParams: Record<string, string> = days ? { days: String(days) } : {};
+  async getEfficiencyReport(params?: {
+    days?: number;
+    task_type?: string;
+    algorithm_version?: string;
+  }): Promise<EfficiencyReport> {
+    const queryParams: Record<string, string> = {};
+    if (params?.days) queryParams.days = String(params.days);
+    if (params?.task_type) queryParams.task_type = params.task_type;
+    if (params?.algorithm_version) queryParams.algorithm_version = params.algorithm_version;
+
     const response = await apiClient.get<{ success: boolean; data: EfficiencyReport }>(
       '/api/optimization/efficiency',
       queryParams

@@ -108,11 +108,17 @@ def downgrade() -> None:
     if "ix_anomaly_status_anomaly_id" in indexes:
         op.drop_index("ix_anomaly_status_anomaly_id", table_name="anomaly_status")
 
-    # SQLite does not support DROP COLUMN in most versions
-    # Skip column drops for SQLite - the nullable columns do not affect correctness
+    columns = _column_names(inspector, "anomaly_status")
     if is_postgres:
-        columns = _column_names(inspector, "anomaly_status")
+        # PostgreSQL supports DROP COLUMN directly
         if "tenant_id" in columns:
             op.drop_column("anomaly_status", "tenant_id")
         if "anomaly_id" in columns:
             op.drop_column("anomaly_status", "anomaly_id")
+    else:
+        # SQLite requires batch_alter_table for DROP COLUMN
+        with op.batch_alter_table("anomaly_status") as batch_op:
+            if "tenant_id" in columns:
+                batch_op.drop_column("tenant_id")
+            if "anomaly_id" in columns:
+                batch_op.drop_column("anomaly_id")
