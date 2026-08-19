@@ -4,7 +4,11 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.models.tool_account_conflict import BackfillLog, MappingMigrationStatus, ToolAccountConflict
+from app.models.tool_account_conflict import (
+    BackfillLog,
+    MappingMigrationStatus,
+    ToolAccountConflict,
+)
 
 
 class TestToolAccountConflict:

@@ -92,7 +92,7 @@ class User:
             password_hash=data.get("password_hash", ""),
             role=data.get("role", "user"),
             is_active=data.get("is_active", True),
-created_at=parse_utc(data.get("created_at")),
+            created_at=parse_utc(data.get("created_at")),
             last_login=parse_utc(data.get("last_login")),
             tenant_id=data.get("tenant_id"),
             daily_token_quota=data.get("daily_token_quota"),
