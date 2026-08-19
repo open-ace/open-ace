@@ -321,7 +321,8 @@ CREATE TABLE anomaly_status (
     status character varying(20) DEFAULT 'pending'::character varying NOT NULL,
     processed_by integer,
     processed_at timestamp without time zone,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    tenant_id integer
 );
 
 CREATE SEQUENCE anomaly_status_id_seq
@@ -3901,7 +3902,7 @@ CREATE INDEX idx_workflows_status_created ON autonomous_workflows USING btree (s
 
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows USING btree (user_id, status);
 
-CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
+CREATE UNIQUE INDEX ix_anomaly_status_type_hash_tenant ON anomaly_status USING btree (anomaly_type, affected_users_hash, tenant_id);
 
 
 --
