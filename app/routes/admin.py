@@ -634,20 +634,20 @@ def api_update_user_quota(user_id):
                         f"{validation_result['error']}"
                     )
                     # Build enhanced error response with detailed context
+                    error_details = dict(validation_result.get("details", {}))
+                    if validation_result.get("available"):
+                        error_details["available"] = validation_result["available"]
+                    if validation_result.get("is_unlimited_tenant") is not None:
+                        error_details["is_unlimited_tenant"] = validation_result[
+                            "is_unlimited_tenant"
+                        ]
                     error_response = {
                         "error": "Tenant quota exceeded",
                         "message": validation_result.get(
                             "error", "Quota allocation exceeds tenant limit"
                         ),
-                        "details": validation_result.get("details", {}),
+                        "details": error_details,
                     }
-                    # Include available quota info
-                    if validation_result.get("available"):
-                        error_response["details"]["available"] = validation_result["available"]
-                    if validation_result.get("is_unlimited_tenant") is not None:
-                        error_response["details"]["is_unlimited_tenant"] = validation_result[
-                            "is_unlimited_tenant"
-                        ]
 
                     return jsonify(error_response), 400
 
