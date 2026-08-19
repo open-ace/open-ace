@@ -20,20 +20,16 @@ def auto_db(tmp_path):
         try:
             db_path = str(tmp_path / "test_concurrent.db")
             db = Database(db_url=f"sqlite:///{db_path}")
+            # Let the authoritative schema (schema-sqlite.sql) create every
+            # table (#1273). A hand-rolled minimal users/tenants DDL drifted
+            # from it: the missing columns (e.g. tenants.billing_cycle_end)
+            # broke CREATE INDEX statements in the schema script.
+            from app.repositories.schema_init import load_schema_from_file
+
+            load_schema_from_file(db_url=db.db_url, dialect="sqlite")
             conn = db.get_connection()
             try:
                 cursor = conn.cursor()
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS users (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        username TEXT UNIQUE NOT NULL,
-                        email TEXT UNIQUE NOT NULL,
-                        password_hash TEXT NOT NULL,
-                        role TEXT DEFAULT 'user',
-                        tenant_id INTEGER,
-                        is_active INTEGER DEFAULT 1
-                    )
-                """)
                 cursor.execute(
                     "INSERT INTO users (username, email, password_hash, role, tenant_id) VALUES (?, ?, ?, ?, ?)",
                     ("testuser", "test@test.com", "hash123", "user", 1),
@@ -42,21 +38,10 @@ def auto_db(tmp_path):
                     "INSERT INTO users (username, email, password_hash, role, tenant_id) VALUES (?, ?, ?, ?, ?)",
                     ("otheruser", "other@test.com", "hash456", "user", 1),
                 )
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS tenants (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT NOT NULL,
-                        slug TEXT UNIQUE NOT NULL,
-                        quota TEXT
-                    )
-                """)
                 cursor.execute(
                     "INSERT INTO tenants (name, slug, quota) VALUES (?, ?, ?)",
                     ("Test Tenant", "test-tenant", '{"max_sessions_per_user": 3}'),
                 )
-                from app.repositories.schema_init import load_schema_from_file
-
-                load_schema_from_file(db_url=db.db_url, dialect="sqlite")
                 conn.commit()
             finally:
                 conn.close()
