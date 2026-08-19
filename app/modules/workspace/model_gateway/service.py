@@ -4,11 +4,14 @@ Thin orchestration over :class:`ModelGatewayConfigRepository`. The connection te
 issues a minimal ``GET /v1/models`` (or ``/models``) probe against the gateway with
 the supplied key and reports a sanitized result — the key is never included in the
 returned payload.
+
+Issue #2809: Added SSRF validation and safe_request for connection test.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from app.modules.workspace.model_gateway.planner import _resolve_target_url
@@ -54,11 +57,20 @@ class ModelGatewayService:
     def delete_config(self) -> bool:
         return self._repo.delete_config()
 
-    def test_connection(self, base_url: str, api_key: str) -> dict[str, Any]:
+    def test_connection(
+        self,
+        base_url: str,
+        api_key: str,
+        tenant_id: int = 0,
+        user_id: int | None = None,
+    ) -> dict[str, Any]:
         """Probe the gateway with a minimal request; never echo the key back.
 
         Uses planner's _resolve_target_url to handle base_url that already
         contains version suffix (e.g., /v1, /v2) to avoid double-versioning.
+
+        Issue #2809: Added SSRF validation and safe_request to prevent
+        bypassing outbound URL security guards.
 
         Note: .rstrip("/") is CRITICAL for correct URL construction when base_url
         ends with a slash (e.g., "http://gateway/v1/"). Without it, _resolve_target_url
@@ -70,25 +82,66 @@ class ModelGatewayService:
             return {"ok": False, "status": None, "message": "Gateway base URL is required"}
 
         try:
-            import requests as http_requests
-
             # Use planner's URL resolution logic (handles /v1, /v2, etc. deduplication)
             # _resolve_target_url(base_url, "models") will:
             # - Add /v1 prefix if base_url has no version suffix
             # - Skip /v1 prefix if base_url already ends with /v{N}
             url, _ = _resolve_target_url(base_url, "models")
 
+            # Issue #2809: Validate URL with SSRF protection before making request
+            from app.utils.llm_proxy_url_validator import (
+                audit_blocked_url,
+                sanitize_error_message,
+                validate_llm_proxy_url,
+            )
+            from app.utils.outbound_url_guard import OutboundUrlBlockedError, safe_request
+
+            validation_result = validate_llm_proxy_url(url, tenant_id, "gateway-test")
+            if not validation_result.allowed:
+                sanitized_error = sanitize_error_message(validation_result.error or "Invalid URL")
+                logger.warning(
+                    "Gateway test connection blocked for tenant %s: %s",
+                    tenant_id,
+                    sanitized_error,
+                )
+                audit_blocked_url(
+                    tenant_id=tenant_id,
+                    provider="gateway-test",
+                    url=url,
+                    reason=validation_result.error or "ssrf_violation",
+                    user_id=user_id,
+                )
+                return {
+                    "ok": False,
+                    "status": None,
+                    "message": sanitized_error,
+                    "blocked": True,
+                }
+
+            # Issue #2809: Use safe_request for DNS rebinding protection
+            # Use shorter timeout to avoid worker blocking (configurable via env)
+            connect_timeout = int(os.environ.get("OPENACE_GATEWAY_TEST_CONNECT_TIMEOUT", "5"))
+            read_timeout = int(os.environ.get("OPENACE_GATEWAY_TEST_READ_TIMEOUT", "10"))
+
             headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-            resp = http_requests.request(
+            resp = safe_request(
                 method="GET",
                 url=url,
                 headers=headers,
-                timeout=15,
-                proxies={"http": None, "https": None},  # type: ignore[dict-item]
+                timeout=(connect_timeout, read_timeout),
             )
             ok = resp.status_code < 400
             message = "Gateway reachable" if ok else f"Gateway returned status {resp.status_code}"
             return {"ok": ok, "status": resp.status_code, "message": message}
+        except OutboundUrlBlockedError as exc:
+            # DNS rebinding or other outbound guard block at connect time
+            logger.warning("Model gateway connection test blocked by outbound guard: %s", exc)
+            return {
+                "ok": False,
+                "status": None,
+                "message": "Connection blocked by security policy",
+                "blocked": True,
+            }
         except Exception as exc:
             logger.warning("Model gateway connection test failed: %s", exc)
             return {

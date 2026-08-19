@@ -6,6 +6,11 @@ Tests validation of tenant allocation limits including:
 - Unlimited tenant handling
 - Multiple users allocation
 - Quota decrease scenarios
+
+Field semantics (important):
+- None: No change, keep current value (skip validation for this field)
+- EXPLICIT_NULL: Set to unlimited (validate against tenant limits)
+- int value: Set to specified value (validate against tenant limits)
 """
 
 from unittest.mock import MagicMock, patch
@@ -60,7 +65,8 @@ class TestValidateTenantAllocation:
         assert result["is_unlimited_tenant"] is True
 
     def test_limited_tenant_rejects_unlimited_user_quota(self):
-        """Test that limited tenant rejects null user quota."""
+        """Test that limited tenant rejects EXPLICIT_NULL user quota."""
+        from app.constants import EXPLICIT_NULL
         from app.schemas.quota import validate_tenant_allocation
 
         # Mock database with limited tenant
@@ -75,12 +81,35 @@ class TestValidateTenantAllocation:
         result = validate_tenant_allocation(
             tenant_id=1,
             user_id=None,
-            new_daily_token_quota=None,  # Unlimited
+            new_daily_token_quota=EXPLICIT_NULL,  # Explicit unlimited
             db=mock_db,
         )
 
         assert result["is_valid"] is False
         assert "unlimited" in result["error"].lower()
+
+    def test_none_field_skips_validation(self):
+        """Test that None field skips validation (no change)."""
+        from app.schemas.quota import validate_tenant_allocation
+
+        # Mock database with limited tenant
+        mock_db = MagicMock()
+        mock_db.fetch_one.return_value = {
+            "daily_token_limit": 10000000,  # 10M
+            "monthly_token_limit": 100000000,  # 100M
+            "daily_request_limit": 1000,
+            "monthly_request_limit": 10000,
+        }
+
+        result = validate_tenant_allocation(
+            tenant_id=1,
+            user_id=None,
+            new_daily_token_quota=None,  # None means "no change", should skip validation
+            db=mock_db,
+        )
+
+        # Should be valid because None means "no change" - no validation performed
+        assert result["is_valid"] is True
 
     def test_allocation_within_limit(self):
         """Test allocation that fits within tenant limit."""
