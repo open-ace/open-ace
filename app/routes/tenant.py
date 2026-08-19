@@ -241,11 +241,13 @@ def create_tenant():
             return jsonify({"error": "Invalid admin email"}), 400
 
         # Check if username already exists
-        if user_repo.get_user_by_username(admin_username):
+        # Issue #2755: Explicitly exclude soft-deleted users
+        if user_repo.get_user_by_username(admin_username, include_deleted=False):
             return jsonify({"error": "Admin username already exists"}), 400
 
         # Check if email already exists (if provided)
-        if admin_email and user_repo.get_user_by_email(admin_email):
+        # Issue #2755: Explicitly exclude soft-deleted users
+        if admin_email and user_repo.get_user_by_email(admin_email, include_deleted=False):
             return jsonify({"error": "Admin email already exists"}), 400
 
         # Create admin user

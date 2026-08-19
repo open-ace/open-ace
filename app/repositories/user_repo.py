@@ -264,9 +264,9 @@ class UserRepository:
         Issue #2755: Ensures complete session revocation on user deletion and restoration.
         """
         counts: dict[str, int] = {
-            'sessions': 0,
-            'sso_sessions': 0,
-            'web_user_auth_sessions': 0,
+            "sessions": 0,
+            "sso_sessions": 0,
+            "web_user_auth_sessions": 0,
         }
 
         try:
@@ -275,42 +275,42 @@ class UserRepository:
                 adapt_sql("DELETE FROM sessions WHERE user_id = ?"),
                 (user_id,),
             )
-            counts['sessions'] = cast("int", cursor.rowcount)
-
-            # Delete from sso_sessions table (if exists)
-            try:
-                cursor = self.db.execute(
-                    adapt_sql("DELETE FROM sso_sessions WHERE user_id = ?"),
-                    (user_id,),
-                )
-                counts['sso_sessions'] = cast("int", cursor.rowcount)
-            except Exception as e:
-                # Table may not exist in some deployments
-                logger.debug(f"Could not delete from sso_sessions: {e}")
-                counts['sso_sessions'] = 0
-
-            # Delete from web_user_auth_sessions table (if exists)
-            try:
-                cursor = self.db.execute(
-                    adapt_sql("DELETE FROM web_user_auth_sessions WHERE user_id = ?"),
-                    (user_id,),
-                )
-                counts['web_user_auth_sessions'] = cast("int", cursor.rowcount)
-            except Exception as e:
-                # Table may not exist in some deployments
-                logger.debug(f"Could not delete from web_user_auth_sessions: {e}")
-                counts['web_user_auth_sessions'] = 0
-
-            logger.info(
-                f"Deleted sessions for user {user_id}: "
-                f"sessions={counts['sessions']}, sso_sessions={counts['sso_sessions']}, "
-                f"web_user_auth_sessions={counts['web_user_auth_sessions']}"
-            )
-            return counts
+            counts["sessions"] = cast("int", cursor.rowcount)
 
         except Exception as e:
-            logger.error(f"Error deleting sessions for user {user_id}: {e}")
-            return counts
+            logger.error(f"Error deleting from sessions for user {user_id}: {e}")
+            # Continue to try other tables even if sessions fails
+
+        # Helper function to safely delete from optional tables
+        def _safe_delete(table_name: str) -> int:
+            """Delete from optional table, returning count or 0 if table doesn't exist."""
+            try:
+                cursor = self.db.execute(
+                    adapt_sql(f"DELETE FROM {table_name} WHERE user_id = ?"),
+                    (user_id,),
+                )
+                return cast("int", cursor.rowcount)
+            except Exception as e:
+                error_str = str(e).lower()
+                # Only ignore "table not found" errors
+                if "no such table" in error_str or "relation" in error_str or "does not exist" in error_str:
+                    logger.debug(f"Table {table_name} not found, skipping")
+                    return 0
+                else:
+                    # Log unexpected errors but don't fail the whole operation
+                    logger.error(f"Unexpected error deleting from {table_name} for user {user_id}: {e}")
+                    return 0
+
+        # Delete from optional tables
+        counts["sso_sessions"] = _safe_delete("sso_sessions")
+        counts["web_user_auth_sessions"] = _safe_delete("web_user_auth_sessions")
+
+        logger.info(
+            f"Deleted sessions for user {user_id}: "
+            f"sessions={counts['sessions']}, sso_sessions={counts['sso_sessions']}, "
+            f"web_user_auth_sessions={counts['web_user_auth_sessions']}"
+        )
+        return counts
 
     def restore_user_with_update(
         self,
@@ -394,7 +394,9 @@ class UserRepository:
             if success:
                 logger.info(f"Successfully restored user {user_id}")
             else:
-                logger.warning(f"Failed to restore user {user_id}: user not found or not soft-deleted")
+                logger.warning(
+                    f"Failed to restore user {user_id}: user not found or not soft-deleted"
+                )
             return success
         except Exception as e:
             logger.error(f"Error restoring user {user_id}: {e}")

@@ -185,12 +185,17 @@ def api_create_user():
         conflicts = ["email"]
 
     if deleted_user:
-        return jsonify({
-            "error": "USER_SOFT_DELETED",
-            "message": "The username or email belongs to a deleted user",
-            "user_id": deleted_user["id"],
-            "conflicts": conflicts,
-        }), 409
+        return (
+            jsonify(
+                {
+                    "error": "USER_SOFT_DELETED",
+                    "message": "The username or email belongs to a deleted user",
+                    "user_id": deleted_user["id"],
+                    "conflicts": conflicts,
+                }
+            ),
+            409,
+        )
 
     # Check tenant quota before creating user
     from app.services.tenant_service import TenantService
@@ -382,16 +387,21 @@ def api_delete_user(user_id):
     success = user_repo.delete_user(user_id)
 
     if success:
-        # Issue #2755: Decrement tenant user counter
+        # Issue #2755 P0-3/P0-4: Critical - decrement tenant user counter with proper error handling
+        counter_decremented = True
         if tenant_id:
             from app.services.tenant_service import TenantService
 
             tenant_service = TenantService()
             if not tenant_service.decrement_user_count(tenant_id):
-                logger.warning(
-                    f"Failed to decrement tenant user count for tenant {tenant_id} "
-                    f"after deleting user {user_id}"
+                logger.error(
+                    f"CRITICAL: Failed to decrement tenant user count for tenant {tenant_id} "
+                    f"after deleting user {user_id}. Counter may be incorrect."
                 )
+                counter_decremented = False
+                # Note: We don't rollback the delete here because the user is already soft-deleted
+                # and sessions are revoked. The counter being off by 1 is acceptable compared to
+                # data consistency issues. Log clearly for manual intervention.
 
         # Audit log for user deletion
         client_info = get_client_info()
@@ -406,6 +416,7 @@ def api_delete_user(user_id):
                 "action": "delete",
                 "tenant_id": tenant_id,
                 "sessions_revoked": session_counts,
+                "counter_decremented": counter_decremented,
             },
             **client_info,
         )
@@ -457,10 +468,15 @@ def api_restore_user(user_id):
     # If tenant_id is provided in request, it must match original
     requested_tenant_id = data.get("tenant_id")
     if requested_tenant_id is not None and requested_tenant_id != original_tenant_id:
-        return jsonify({
-            "error": "Cross-tenant restore is not allowed",
-            "message": "tenant_id must match the original tenant. Use update user API after restore to change tenant.",
-        }), 400
+        return (
+            jsonify(
+                {
+                    "error": "Cross-tenant restore is not allowed",
+                    "message": "tenant_id must match the original tenant. Use update user API after restore to change tenant.",
+                }
+            ),
+            400,
+        )
 
     # Validate role if provided (follows same rules as user update)
     role = data.get("role")
@@ -511,10 +527,15 @@ def api_restore_user(user_id):
     if original_tenant_id and not tenant_service.can_add_user(original_tenant_id):
         tenant = tenant_service.get_tenant(original_tenant_id)
         max_users = tenant.quota.max_users if tenant else 0
-        return jsonify({
-            "error": "Tenant user quota exceeded",
-            "message": f"Cannot restore user: tenant has reached maximum users ({max_users})",
-        }), 409
+        return (
+            jsonify(
+                {
+                    "error": "Tenant user quota exceeded",
+                    "message": f"Cannot restore user: tenant has reached maximum users ({max_users})",
+                }
+            ),
+            409,
+        )
 
     # Issue #2755: Revoke all sessions before restore (security cleanup)
     session_counts = user_repo.delete_all_sessions_for_user(user_id)
@@ -534,13 +555,33 @@ def api_restore_user(user_id):
     if not success:
         return jsonify({"error": "Failed to restore user"}), 500
 
-    # Increment tenant user counter
+    # Issue #2755 P0-3/P0-4: Critical - increment tenant user counter with proper error handling
+    counter_incremented = False
     if original_tenant_id:
         if not tenant_service.increment_user_count(original_tenant_id):
-            logger.warning(
-                f"Failed to increment tenant user count for tenant {original_tenant_id} "
-                f"after restoring user {user_id}"
+            logger.error(
+                f"CRITICAL: Failed to increment tenant user count for tenant {original_tenant_id} "
+                f"after restoring user {user_id}. Attempting rollback."
             )
+            # Rollback the restore operation
+            rollback_success = user_repo.delete_user(user_id, hard=False)
+            if rollback_success:
+                logger.info(f"Successfully rolled back restore for user {user_id}")
+            else:
+                logger.error(
+                    f"CRITICAL: Failed to rollback restore for user {user_id}. "
+                    f"User is restored but tenant counter is incorrect."
+                )
+            return (
+                jsonify(
+                    {
+                        "error": "Failed to update tenant user count",
+                        "message": "User restore was rolled back due to tenant counter update failure",
+                    }
+                ),
+                500,
+            )
+        counter_incremented = True
 
     # Auto-create system user for workspace if system_account is provided
     if system_account:
@@ -548,9 +589,7 @@ def api_restore_user(user_id):
         if ensure_system_user(system_account, uid=uid):
             logger.info(f"System user {system_account} ready for workspace")
         else:
-            logger.warning(
-                f"Failed to create system user {system_account}, workspace may not work"
-            )
+            logger.warning(f"Failed to create system user {system_account}, workspace may not work")
 
     # Audit log for user restoration
     client_info = get_client_info()
@@ -571,6 +610,7 @@ def api_restore_user(user_id):
             "role": role,
             "tenant_id": original_tenant_id,
             "sessions_revoked": session_counts,
+            "counter_incremented": counter_incremented,
         },
         **client_info,
     )
