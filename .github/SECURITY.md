@@ -16,15 +16,15 @@ We take the security of Open ACE seriously. If you have discovered a security vu
 
 Instead, please report them via:
 
-1. **GitHub Security Advisories** (Preferred)
+1. **GitHub Security Advisories** (preferred)
    - Go to the [Security Advisories](https://github.com/open-ace/open-ace/security/advisories) page
-   - Click "Report a vulnerability"
-   - Fill in the details
+   - Click **"Report a vulnerability"** and fill in the details
+   - This opens a private channel visible only to the maintainers
 
-2. **Email**
-   - Send an email to the maintainers
-   - Include details about the vulnerability
-   - Steps to reproduce if applicable
+2. **If you cannot use GitHub Security Advisories**
+   - Open a regular GitHub issue that only asks a maintainer to contact you
+     privately — **do not include any vulnerability details** in it
+   - A maintainer will move the conversation into a private advisory
 
 ### What to Include
 

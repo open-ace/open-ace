@@ -1,7 +1,17 @@
 # CODEOWNERS
 #
-# Add active ownership rules once the Open ACE GitHub organization has
-# maintainer teams or users ready for required review assignment.
+# Default reviewers for the whole repository.
 #
-# Example:
-# * @open-ace/maintainers
+# The @open-ace/maintainers team already exists and is populated. For GitHub to
+# honor this rule the team must also have WRITE access to this repository --
+# GitHub silently ignores a CODEOWNERS owner that lacks write access. A repo
+# admin / org owner grants it once with:
+#
+#   gh api --method PUT orgs/open-ace/teams/maintainers/repos/open-ace/open-ace -f permission=push
+#
+# That makes GitHub auto-request review from the team on matching PRs. It does
+# NOT by itself make code-owner review a merge requirement; enforcing that
+# additionally needs the "Require review from Code Owners" toggle in the main
+# branch ruleset (intentionally deferred for now).
+
+* @open-ace/maintainers
