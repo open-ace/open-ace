@@ -387,35 +387,35 @@
     },
     {
       "path": "tests/e2e/e2e_anomaly_all_button_playwright.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "e2e-governance",
       "issue": 2491,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "initial disposition (issue #2491 P1 draft)"
+      "collects": false,
+      "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
       "path": "tests/e2e/e2e_anomaly_description_playwright.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "e2e-governance",
       "issue": 2491,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "initial disposition (issue #2491 P1 draft)"
+      "collects": false,
+      "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
       "path": "tests/e2e/e2e_autonomous_models_error_playwright.py",
@@ -450,131 +450,131 @@
     },
     {
       "path": "tests/e2e/e2e_compliance_report_playwright.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "e2e-governance",
       "issue": 2491,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "initial disposition (issue #2491 P1 draft)"
+      "collects": false,
+      "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
       "path": "tests/e2e/e2e_dashboard_date_range_playwright.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "e2e-governance",
       "issue": 2491,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "initial disposition (issue #2491 P1 draft)"
+      "collects": false,
+      "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
       "path": "tests/e2e/e2e_data_retention_cleanup_playwright.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "e2e-governance",
       "issue": 2491,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "initial disposition (issue #2491 P1 draft)"
+      "collects": false,
+      "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
       "path": "tests/e2e/e2e_data_retention_playwright.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "e2e-governance",
       "issue": 2491,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "initial disposition (issue #2491 P1 draft)"
+      "collects": false,
+      "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
       "path": "tests/e2e/e2e_global_confirm_toast_playwright.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "e2e-governance",
       "issue": 2491,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "initial disposition (issue #2491 P1 draft)"
+      "collects": false,
+      "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
       "path": "tests/e2e/e2e_model_gateway_playwright.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "e2e-governance",
       "issue": 2491,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "initial disposition (issue #2491 P1 draft)"
+      "collects": false,
+      "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
       "path": "tests/e2e/e2e_page_refresh_playwright.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "e2e-governance",
       "issue": 2491,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "initial disposition (issue #2491 P1 draft)"
+      "collects": false,
+      "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
       "path": "tests/e2e/e2e_quota_management_playwright.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "e2e-governance",
       "issue": 2491,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "initial disposition (issue #2491 P1 draft)"
+      "collects": false,
+      "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
       "path": "tests/e2e/e2e_roi_daily_costs_axis_playwright.py",
@@ -642,35 +642,35 @@
     },
     {
       "path": "tests/e2e/e2e_token_trend_all_button_playwright.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "e2e-governance",
       "issue": 2491,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "initial disposition (issue #2491 P1 draft)"
+      "collects": false,
+      "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
       "path": "tests/e2e/e2e_user_segmentation_pie_chart_playwright.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "e2e-governance",
       "issue": 2491,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "initial disposition (issue #2491 P1 draft)"
+      "collects": false,
+      "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
       "path": "tests/e2e/manage/e2e_api_key_cli_settings.py",

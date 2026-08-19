@@ -319,12 +319,15 @@ def cmd_set_disposition(args: argparse.Namespace) -> int:
             row["mode"] = args.mode
             if args.mode == "manual-demo":
                 row["executor"] = "none"
+                row["collects"] = False
                 row["notes"] = args.note or "manual demo: not automated coverage"
             elif args.mode == "standalone-automated":
                 row["executor"] = "standalone"
+                row["collects"] = False
                 row["notes"] = args.note or "standalone automated entry"
             else:
                 row["executor"] = "pytest"
+                row["collects"] = True
                 row["notes"] = args.note or ""
             if args.home_lane:
                 row["home_lane"] = args.home_lane

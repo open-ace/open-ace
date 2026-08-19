@@ -251,3 +251,25 @@ class TestClosure:
         assert [i.id for i in items] == ["standalone::tests/e2e/remote/e2e_x.py"]
         selection = selector.select("weekly", items)
         assert selection.advisory == ["standalone::tests/e2e/remote/e2e_x.py"]
+
+    def test_standalone_files_do_not_also_expand_manifest_nodeids(self):
+        inventory = {
+            "schema_name": "openace-e2e-inventory",
+            "schema_version": 1,
+            "entries": [
+                {
+                    "path": "tests/e2e/remote/e2e_x.py",
+                    "mode": "standalone-automated",
+                    "home_lane": "nightly",
+                    "executor": "standalone",
+                    "entry_ids": ["standalone::tests/e2e/remote/e2e_x.py"],
+                },
+            ],
+        }
+        items = selector.build_items(
+            inventory,
+            {"entries": {}},
+            {"entries": {}},
+            ["tests/e2e/remote/e2e_x.py::test_helper"],
+        )
+        assert [i.id for i in items] == ["standalone::tests/e2e/remote/e2e_x.py"]

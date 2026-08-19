@@ -249,8 +249,9 @@ def build_items(
     # pytest nodeids
     for nodeid in manifest_nodeids:
         path = nodeid.split("::")[0]
-        if _mode_for(path) == "manual-demo":
-            continue  # manual items never count as automated coverage
+        mode = _mode_for(path)
+        if mode in ("manual-demo", "standalone-automated"):
+            continue  # standalone/manual items are governed outside pytest nodeids
         state_e = state_entries.get(nodeid) or {}
         promo_e = promo_entries.get(nodeid) or {}
         items.append(
