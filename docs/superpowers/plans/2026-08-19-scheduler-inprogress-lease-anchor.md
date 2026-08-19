@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让调度器内存态 `_in_progress_*` 集合以 DB 租约为存活锚点自愈,任何泄漏/挂死最多冻结工作流 ~30 分钟(租约超时),不再需要服务重启。
+**Goal:** 让调度器内存态 `_in_progress_*` 集合以 DB 租约为存活锚点自愈:**周期已返回的泄漏类**(异常绕过清理等)最多冻结到下一周期;挂死(hang)类不在本修复范围(见 PR 审查后的 scope 降格,修订记录第 6 条)。
 
 **Architecture:** 三层:(1) 统一内存条目回收 helper(记录每个工作流占用的冲突键 `_in_progress_key_map`,一处实现三处复用);(2) `_process_workflows` 每周期用已取回的 active rows 做租约 staleness 回收;(3) `_advance_single` try 前置段的异常也走回收。
 
@@ -20,7 +20,7 @@
 
 **推断(标注:未经直接观察证明)**:该 worker 在前置段的 DB 调用上无限期挂起(连接池耗尽/锁等待)——hang 按定义不产生日志,且进程已重启,线程栈不可事后获取。备选解释(前一个 worker 挂死在 advance() 内且心跳线程同步无声死亡)与"心跳应有续租/告警日志"矛盾,已排除为主因。
 
-**结论**:无论挂死点在前置段哪一行,生命周期缺陷是同一个:**内存 in-progress 条目无存活锚点、前置段无清理保护**。修复以 DB 租约为存活真相(活 worker ⇒ 心跳每 60s 续租,与 agent 时长无关),两层覆盖两种变体;另加一条诊断日志,下次复发时留下现场证据。
+**结论**:无论挂死点在前置段哪一行,生命周期缺陷是同一个:**内存 in-progress 条目无存活锚点、前置段无清理保护**。修复以 DB 租约为存活真相(活 worker ⇒ 心跳每 60s 续租,与 agent 时长无关),三层修复(统一回收/租约锚点回收遍/前置段保护;scope 见修订记录第 6 条);另加诊断 WARNING,下次复发时留下现场证据。
 
 ## Global Constraints
 
@@ -297,9 +297,9 @@ Expected: 新增 4 条 FAIL(`_reclaim_stale_in_progress` 不存在)
 
 挂载点(`_process_workflows`,L~1023 `_reclaim_paused_slots(repo)` 调用之后):
 ```python
-        # Self-heal in-progress entries whose DB lease is gone/stale (hung or
-        # leaked worker) so a frozen workflow resumes within the lease window
-        # instead of waiting for a service restart (2026-08-19 fec4782b).
+        # Self-heal _in_progress entries with no live DB lease behind them
+        # (leaked worker; 2026-08-19 fec4782b). Scope: leaks whose cycle has
+        # returned — see the reclaim docstring.
         self._reclaim_stale_in_progress(workflows)
 ```
 注意放在 `workflows = repo.get_active_workflows()` 取数**之后**。
@@ -404,3 +404,4 @@ git commit -m "fix(scheduler): clear in-progress entry when pre-try repo access 
 3. **B3(计划自带测试写坏)**:fresh-lease 测试断言了从未写入的集合成员;pre-try 测试缺 `pytest.raises` 且 mock 了 helper 却断言真实状态。实现侧测试全部重写自洽(真实 helper + 真实集合断言)。
 4. **B4(挂载点矛盾)**:统一为"`workflows = repo.get_active_workflows()` 的 try/except 之后、filter 之前"(Task 2 正文旧表述作废)。
 5. 事实纠偏见根因段第 2 条(NULL 写者);Task 1 Step 5(a) 的伪码占位段已废弃,以实现的 mark 段(先解包再记 map)为准。
+6. **PR #2846 审查后的 scope 降格(2026-08-19)**:PR 独立审查实证——worker 若为**挂死**,`_process_workflows` 的 `ThreadPoolExecutor` 上下文(`shutdown(wait=True)`)会把整个周期停住,本回收遍(位于周期顶部)永远没机会运行,挂死类仍需重启。故修复范围诚实化为:**仅治愈"周期已返回"的泄漏**(异常类——事故 fec4782b 的观测形态:泄漏期间其他工作流持续推进,说明周期未被停住);挂死场景下"冻结但无 Reaping WARNING"本身即周期被停住的诊断证据,watchdog 留作有证据后的跟进。原文"两层覆盖两种变体/30 分钟内自愈/不再需要重启"等表述按此修正。审查同时落地:缺失行新鲜租约保留(收窄 #1002 resume 竞态)、乱串租约按 unknown 保留(fail-closed 对称)、`_get_repo()` 入 try、2295 选路 fixture patch 回收遍。
