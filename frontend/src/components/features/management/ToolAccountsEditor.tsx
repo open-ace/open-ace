@@ -49,7 +49,7 @@ const getStatusBadgeVariant = (
 /**
  * Get status display text
  */
-const getStatusDisplay = (status?: MappingStatus | null, language: string): string => {
+const getStatusDisplay = (status?: MappingStatus | null, language: string = 'en'): string => {
   switch (status) {
     case 'active':
       return language === 'zh' ? '活跃' : 'Active';
@@ -208,7 +208,6 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
                 {account.mapping_status && (
                   <Badge
                     variant={getStatusBadgeVariant(account.mapping_status)}
-                    size="sm"
                     className="me-1"
                     style={{ fontSize: '0.65rem' }}
                   >
@@ -243,7 +242,6 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
         {/* Issue #2761: Change "Add" to "Advanced Preconfigure" */}
         <Button
           variant="outline-secondary"
-          size="sm"
           onClick={() => {
             setAddError(null);
             setShowPredeclaredConfirm(true);
@@ -253,7 +251,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
           {language === 'zh' ? '高级预配置' : 'Advanced Preconfigure'}
         </Button>
         {unmappedAccounts.length > 0 && (
-          <Button variant="outline-primary" size="sm" onClick={() => setShowUnmappedModal(true)}>
+          <Button variant="outline-primary" onClick={() => setShowUnmappedModal(true)}>
             <i className="bi bi-link me-1" />
             {t('mapToUser', language)}
             <Badge variant="secondary" className="ms-1">
