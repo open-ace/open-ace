@@ -60,7 +60,7 @@ export const toolAccountsApi = {
   },
 
   async getByUser(userId: number): Promise<ToolAccount[]> {
-    return apiClient.get<ToolAccount[]>(\`/api/tool-accounts/user/\${userId}\`);
+    return apiClient.get<ToolAccount[]>(`/api/tool-accounts/user/${userId}`);
   },
 
   async getUnmapped(): Promise<UnmappedAccount[]> {
@@ -80,10 +80,7 @@ export const toolAccountsApi = {
     mapping_source?: MappingSource;
     mapping_status?: MappingStatus;
   }): Promise<{ mapping: ToolAccount; updated_messages: number }> {
-    return apiClient.post<{ mapping: ToolAccount; updated_messages: number }>(
-      '/api/tool-accounts',
-      data
-    );
+    return apiClient.post<{ mapping: ToolAccount; updated_messages: number }>('/api/tool-accounts', data);
   },
 
   async update(
@@ -95,11 +92,11 @@ export const toolAccountsApi = {
       description?: string;
     }
   ): Promise<ToolAccount> {
-    return apiClient.put<ToolAccount>(\`/api/tool-accounts/\${id}\`, data);
+    return apiClient.put<ToolAccount>(`/api/tool-accounts/${id}`, data);
   },
 
   async delete(id: number): Promise<void> {
-    await apiClient.delete(\`/api/tool-accounts/\${id}\`);
+    await apiClient.delete(`/api/tool-accounts/${id}`);
   },
 
   async batchCreate(
@@ -111,7 +108,7 @@ export const toolAccountsApi = {
     }>
   ): Promise<{ created_count: number; mappings: ToolAccount[] }> {
     return apiClient.post<{ created_count: number; mappings: ToolAccount[] }>(
-      \`/api/tool-accounts/user/\${userId}/batch\`,
+      `/api/tool-accounts/user/${userId}/batch`,
       { tool_accounts: toolAccounts }
     );
   },
