@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "20260819_001"
-down_revision = "20260818_002"
+down_revision = "20260818_002_add_tool_account_mapping_fields"
 branch_labels = None
 depends_on = None
 
