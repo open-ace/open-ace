@@ -1177,10 +1177,9 @@ CREATE TABLE teams (
 );
 
 CREATE TABLE tenant_keywords_version (
- tenant_id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id INTEGER PRIMARY KEY,
  version INTEGER DEFAULT 1 NOT NULL,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- PRIMARY KEY (tenant_id)
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 CREATE TABLE tenant_migrations (
@@ -1265,6 +1264,17 @@ CREATE TABLE tenant_sensitive_keywords (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  updated_at TIMESTAMP,
     UNIQUE (tenant_id, normalized_keyword)
+);
+
+CREATE TABLE tenant_usage (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer NOT NULL,
+ date date NOT NULL,
+ tokens_used integer DEFAULT 0,
+ requests_made integer DEFAULT 0,
+ active_users integer DEFAULT 0,
+ new_users integer DEFAULT 0,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE tenants (

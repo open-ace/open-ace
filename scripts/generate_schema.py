@@ -537,6 +537,12 @@ def convert_to_sqlite(postgres_sql):
                         converted_columns.append(f"    {unique_match.group(0)}")
                     continue
 
+                # Skip PRIMARY KEY constraints - they're handled via pk_map below
+                if stripped.startswith("PRIMARY KEY") or (
+                    stripped.startswith("CONSTRAINT") and "PRIMARY KEY" in stripped
+                ):
+                    continue
+
                 # Convert column definitions
                 converted = _sqlite_convert_column(bl)
 
@@ -573,7 +579,17 @@ def convert_to_sqlite(postgres_sql):
 
             # Build clean CREATE TABLE statement
             table_lines.append(f"CREATE TABLE {table_name} (")
-            for cl in converted_columns:
+            for idx, cl in enumerate(converted_columns):
+                # Ensure all columns except the last have a trailing comma
+                cl_stripped = cl.rstrip()
+                if idx < len(converted_columns) - 1:
+                    # Not the last column - ensure it has a comma
+                    if not cl_stripped.endswith(","):
+                        cl = cl_stripped + ","
+                else:
+                    # Last column - ensure it doesn't have a comma
+                    if cl_stripped.endswith(","):
+                        cl = cl_stripped[:-1]
                 table_lines.append(cl)
             table_lines.append(");")
 
@@ -655,16 +671,20 @@ def convert_to_sqlite(postgres_sql):
 
         # Handle ALTER TABLE statements
         if re.match(r"ALTER TABLE", line):
-            # Collect full statement
-            alter_parts = [line]
-            i += 1
-            while i < len(lines) and not lines[i].rstrip().endswith(";"):
-                alter_parts.append(lines[i])
+            # Check if this line already ends with semicolon (single-line statement)
+            if line.rstrip().endswith(";"):
+                # Single-line ALTER TABLE - process directly
+                full_alter = line.strip()
+            else:
+                # Multi-line ALTER TABLE - collect full statement
+                alter_parts = [line]
                 i += 1
-            if i < len(lines):
-                alter_parts.append(lines[i])
-
-            full_alter = " ".join(p.strip() for p in alter_parts)
+                while i < len(lines) and not lines[i].rstrip().endswith(";"):
+                    alter_parts.append(lines[i])
+                    i += 1
+                if i < len(lines):
+                    alter_parts.append(lines[i])
+                full_alter = " ".join(p.strip() for p in alter_parts)
 
             # Skip: FOREIGN KEY, PRIMARY KEY, SET DEFAULT nextval, OWNER
             if any(kw in full_alter for kw in ["FOREIGN KEY", "OWNER TO", "nextval"]):
