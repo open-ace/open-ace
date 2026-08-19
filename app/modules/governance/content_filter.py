@@ -462,15 +462,20 @@ class ContentFilter:
         current_time = time.time()
 
         # Check cache validity (TTL + version)
+        # Step 1: Quick TTL check under lock
         with self._cache_lock:
             cached_time = self._tenant_keywords_cache_time.get(tenant_id, 0)
-            if current_time - cached_time < self._tenant_keywords_cache_ttl:
-                # TTL valid, check version
+            ttl_valid = current_time - cached_time < self._tenant_keywords_cache_ttl
+            if ttl_valid:
                 cached_version = self._tenant_keywords_version.get(tenant_id)
-                db_version = self.governance_repo.get_tenant_keywords_version(tenant_id)
-                # If db_version is None (no version record), force reload to ensure consistency
-                if cached_version is not None and cached_version == db_version:
-                    return self._tenant_keywords_cache.get(tenant_id, [])
+                cached_keywords = self._tenant_keywords_cache.get(tenant_id, [])
+
+        # Step 2: If TTL valid, check version outside lock (DB I/O)
+        if ttl_valid:
+            # If db_version is None (no version record), force reload to ensure consistency
+            db_version = self.governance_repo.get_tenant_keywords_version(tenant_id)
+            if cached_version is not None and cached_version == db_version:
+                return cached_keywords
 
         # Cache invalid, load from DB
         try:

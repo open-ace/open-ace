@@ -640,13 +640,13 @@ class GovernanceRepository:
         from app.repositories.database import adapt_sql
 
         query = adapt_sql(
-            "SELECT keyword FROM tenant_sensitive_keywords WHERE tenant_id = ? AND is_enabled = ?"
+            "SELECT normalized_keyword FROM tenant_sensitive_keywords WHERE tenant_id = ? AND is_enabled = ?"
         )
         is_enabled_val = True if self.db.is_postgresql else 1
 
         try:
             rows = self.db.fetch_all(query, (tenant_id, is_enabled_val))
-            return [row["keyword"] for row in rows]
+            return [row["normalized_keyword"] for row in rows]
         except Exception as e:
             logger.error(f"Error getting enabled tenant keywords: {e}")
             return []

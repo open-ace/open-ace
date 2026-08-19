@@ -759,8 +759,8 @@ class TestTenantSensitiveKeywords:
     def test_get_enabled_tenant_keywords(self):
         """Should return list of enabled keywords."""
         self.db.fetch_all.return_value = [
-            {"keyword": "secret1"},
-            {"keyword": "secret2"},
+            {"normalized_keyword": "secret1"},
+            {"normalized_keyword": "secret2"},
         ]
         result = self.repo.get_enabled_tenant_keywords(tenant_id=1)
         assert result == ["secret1", "secret2"]
