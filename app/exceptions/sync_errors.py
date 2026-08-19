@@ -104,4 +104,4 @@ class DingTalkSyncError(OrgSyncError):
             provider="dingtalk",
             http_status=http_status,
             details=details,
-        )
+        )]
