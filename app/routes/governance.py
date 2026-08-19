@@ -794,9 +794,7 @@ def api_create_tenant_keyword(tenant_id):
     governance_repo.increment_tenant_keywords_version(tenant_id)
 
     # Invalidate cache in current process
-    from app.modules.governance.content_filter_singleton import (
-        invalidate_tenant_keywords_cache,
-    )
+    from app.modules.governance.content_filter_singleton import invalidate_tenant_keywords_cache
 
     invalidate_tenant_keywords_cache(tenant_id)
 
@@ -869,9 +867,7 @@ def api_update_tenant_keyword(tenant_id, keyword_id):
     governance_repo.increment_tenant_keywords_version(tenant_id)
 
     # Invalidate cache in current process
-    from app.modules.governance.content_filter_singleton import (
-        invalidate_tenant_keywords_cache,
-    )
+    from app.modules.governance.content_filter_singleton import invalidate_tenant_keywords_cache
 
     invalidate_tenant_keywords_cache(tenant_id)
 
@@ -932,9 +928,7 @@ def api_delete_tenant_keyword(tenant_id, keyword_id):
     governance_repo.increment_tenant_keywords_version(tenant_id)
 
     # Invalidate cache in current process
-    from app.modules.governance.content_filter_singleton import (
-        invalidate_tenant_keywords_cache,
-    )
+    from app.modules.governance.content_filter_singleton import invalidate_tenant_keywords_cache
 
     invalidate_tenant_keywords_cache(tenant_id)
 
