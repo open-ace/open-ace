@@ -130,19 +130,36 @@ class TestTenantKeywordsVersionCache:
 class TestTenantKeywordsAudit:
     """Tests for audit logging (Issue #2789)."""
 
+    @pytest.fixture(autouse=True)
+    def _ensure_audit_table(self):
+        """Initialize the workspace-level app.db used by the audit_logger.
+
+        The module-level AuditLogger connects to the default database, which
+        has no audit_logs table yet when integration tests run before the
+        unit-lane tests have bootstrapped it.
+        """
+        from app.repositories.schema_init import ensure_all_tables
+
+        ensure_all_tables()
+
     def test_create_keyword_generates_audit_log(self, admin_client, db_session):
         """Create keyword should generate audit log."""
-        admin_client.post(
+        from app.routes.governance import audit_logger
+
+        before = audit_logger.count()
+        response = admin_client.post(
             "/api/tenants/1/sensitive-keywords",
             json={"keyword": "AuditTestKeyword"},
             content_type="application/json",
         )
 
-        # Check audit log was created - verify no exception was raised
-        # (Actual audit log verification would need audit_logs table)
+        assert response.status_code in (200, 201)
+        assert audit_logger.count() >= before + 1
 
     def test_update_keyword_generates_audit_log(self, admin_client, db_session):
         """Update keyword should generate audit log."""
+        from app.routes.governance import audit_logger
+
         # Create first
         create_resp = admin_client.post(
             "/api/tenants/1/sensitive-keywords",
@@ -152,16 +169,20 @@ class TestTenantKeywordsAudit:
         keyword_id = create_resp.get_json().get("id")
 
         # Update
-        admin_client.put(
+        before = audit_logger.count()
+        response = admin_client.put(
             f"/api/tenants/1/sensitive-keywords/{keyword_id}",
             json={"is_enabled": False},
             content_type="application/json",
         )
 
-        # Verify no exception
+        assert response.status_code == 200
+        assert audit_logger.count() >= before + 1
 
     def test_delete_keyword_generates_audit_log(self, admin_client, db_session):
         """Delete keyword should generate audit log."""
+        from app.routes.governance import audit_logger
+
         # Create first
         create_resp = admin_client.post(
             "/api/tenants/1/sensitive-keywords",
@@ -171,9 +192,11 @@ class TestTenantKeywordsAudit:
         keyword_id = create_resp.get_json().get("id")
 
         # Delete
-        admin_client.delete(f"/api/tenants/1/sensitive-keywords/{keyword_id}")
+        before = audit_logger.count()
+        response = admin_client.delete(f"/api/tenants/1/sensitive-keywords/{keyword_id}")
 
-        # Verify no exception
+        assert response.status_code in (200, 204)
+        assert audit_logger.count() >= before + 1
 
 
 class TestIdempotentKeywordCreation:
