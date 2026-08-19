@@ -414,6 +414,22 @@ def get_efficiency_report():
         task_type = request.args.get("task_type", default=None, type=str)
         algorithm_version = request.args.get("algorithm_version", default=None, type=str)
 
+        # Validate task_type parameter
+        valid_task_types = ["GENERAL", "CODE_GENERATION", "DOCUMENT_ANALYSIS", "CONVERSATION"]
+        if task_type and task_type.upper() not in valid_task_types:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid task_type. Must be one of: {', '.join(valid_task_types)}"
+            }), 400
+
+        # Validate algorithm_version parameter
+        valid_versions = ["v1.0", "v2.0", "auto"]
+        if algorithm_version and algorithm_version not in valid_versions:
+            return jsonify({
+                "success": False,
+                "error": f"Invalid algorithm_version. Must be one of: {', '.join(valid_versions)}"
+            }), 400
+
         optimizer = CostOptimizer()
         report = optimizer.get_efficiency_report(
             days,

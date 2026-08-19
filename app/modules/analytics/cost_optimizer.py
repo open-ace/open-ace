@@ -656,7 +656,8 @@ class CostOptimizer:
                 thresholds=thresholds,
             )
         except Exception as e:
-            logger.error("Efficiency score calculation failed for version %s: %s", version, e)
+            # Log as warning since we fallback to v1.0 and system remains functional
+            logger.warning("Efficiency score calculation failed for version %s: %s, falling back to v1.0", version, e)
             # Fallback to v1.0 algorithm
             return self._calculate_efficiency_score_v1(tokens, input_tokens, output_tokens, requests, total_cost)
 
@@ -772,7 +773,8 @@ class CostOptimizer:
                 thresholds=thresholds,
             )
         except Exception as e:
-            logger.error("Waste percentage calculation failed for version %s: %s", version, e)
+            # Log as warning since we fallback to v1.0 and system remains functional
+            logger.warning("Waste percentage calculation failed for version %s: %s, falling back to v1.0", version, e)
             # Fallback to v1.0 algorithm
             return self._calculate_waste_percentage_v1(input_tokens, output_tokens)
 

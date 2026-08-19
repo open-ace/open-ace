@@ -405,3 +405,35 @@ class TestCostOptimizer:
         assert "overall_efficiency" in report
         assert "waste_percentage" in report
         assert "recommendation_items" in report
+
+
+class TestEfficiencyReportAPIValidation:
+    """Test API parameter validation for efficiency report endpoint."""
+
+    def test_invalid_task_type_converted_to_general(self):
+        """Test that invalid task_type parameter is converted to GENERAL."""
+        # CostOptimizer gracefully handles invalid values
+        from unittest.mock import MagicMock
+
+        opt = CostOptimizer(db=MagicMock())
+        report = opt.get_efficiency_report(days=30, task_type="INVALID_TYPE")
+        assert report["applied_task_type"] == "GENERAL"
+
+    def test_valid_task_types_accepted(self):
+        """Test that valid task types are accepted."""
+        from unittest.mock import MagicMock
+
+        opt = CostOptimizer(db=MagicMock())
+        for task_type in ["GENERAL", "CODE_GENERATION", "DOCUMENT_ANALYSIS", "CONVERSATION"]:
+            report = opt.get_efficiency_report(days=30, task_type=task_type)
+            assert report["applied_task_type"] == task_type
+            assert report["inference_confidence"] == 100.0
+
+    def test_valid_algorithm_versions_accepted(self):
+        """Test that valid algorithm versions are accepted."""
+        from unittest.mock import MagicMock
+
+        opt = CostOptimizer(db=MagicMock())
+        for version in ["v1.0", "v2.0"]:
+            report = opt.get_efficiency_report(days=30, algorithm_version=version)
+            assert report["algorithm_version"] == version
