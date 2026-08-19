@@ -288,12 +288,14 @@ class TestAutoMapping:
             unmatched_count=4,
             excluded_count=0,
             exclusion_reasons={},
-            mappings=[{
-                "tool_account": "test-account",
-                "user_id": 1,
-                "username": "test_user",
-                "matched_by": "username",
-            }],
+            mappings=[
+                {
+                    "tool_account": "test-account",
+                    "user_id": 1,
+                    "username": "test_user",
+                    "matched_by": "username",
+                }
+            ],
         )
         mock_service.run_auto_mapping_with_stats.return_value = mock_stats
         mock_service_class.return_value = mock_service
