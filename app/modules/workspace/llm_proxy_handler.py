@@ -853,7 +853,9 @@ def _check_content_filter(
 
     Args:
         user_id: User ID for audit logging.
-        username: Username for audit logging.
+        username: Username for audit logging, fetched from users table by user_id.
+                  May be None if user not found or database query fails.
+                  Does NOT come from g.user (route has no auth decorator).
         request_body: Raw request body bytes.
         tenant_id: Optional tenant ID for tenant-specific filtering config.
 
@@ -1316,7 +1318,24 @@ def handle_llm_proxy_request(
         )
         content_filter_result = None
     else:
-        username = g.user.get("username") if hasattr(g, "user") else None
+        # Issue #2740: Fetch username from database instead of g.user
+        # This route has no auth decorator, so g.user is not set.
+        # Reference: session_manager.py uses LEFT JOIN to fetch username.
+        username = None
+        try:
+            from app.repositories.user_repo import UserRepository
+
+            user_repo = UserRepository()
+            user = user_repo.get_user_by_id(user_id)
+            username = user.get("username") if user else None
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch username for audit log: %s (user_id=%s)",
+                e,
+                user_id,
+            )
+            # username remains None, do not block the request
+
         content_filter_result = _check_content_filter(
             user_id=user_id,
             username=username,
