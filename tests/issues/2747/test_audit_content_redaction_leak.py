@@ -16,14 +16,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.modules.governance.audit_logger import (
+    _AUDIT_DETAILS_DENYLIST,
     AuditAction,
     AuditLog,
     AuditLogger,
     _sanitize_details,
-    _AUDIT_DETAILS_DENYLIST,
 )
 from app.modules.governance.content_filter import ContentFilter, FilterResult
-
 
 # ── ContentFilter tests ──────────────────────────────────────────────────────
 
@@ -159,11 +158,22 @@ class TestSanitizeDetails:
     def test_all_denylist_keys_covered(self):
         """Verify the denylist includes the expected keys."""
         expected = {
-            "original_content", "redacted_content", "password", "secret",
-            "api_key", "apikey", "access_token", "auth_token", "private_key",
-            "ssh_key", "credential", "token", "sample", "keywords",
+            "original_content",
+            "redacted_content",
+            "password",
+            "secret",
+            "api_key",
+            "apikey",
+            "access_token",
+            "auth_token",
+            "private_key",
+            "ssh_key",
+            "credential",
+            "token",
+            "sample",
+            "keywords",
         }
-        assert _AUDIT_DETAILS_DENYLIST == frozenset(expected)
+        assert frozenset(expected) == _AUDIT_DETAILS_DENYLIST
 
 
 class TestAuditLoggerWriteSanitize:
@@ -328,9 +338,7 @@ class TestLlmProxyHandlerHelpers:
             message="Content redacted",
         )
         content = "my email is test@example.com"
-        details = _build_safe_content_details(
-            result, include_content_meta=True, content=content
-        )
+        details = _build_safe_content_details(result, include_content_meta=True, content=content)
         assert "original_content" not in details
         assert "redacted_content" not in details
         assert details["content_length"] == len(content)

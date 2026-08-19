@@ -52,7 +52,9 @@ class FilterResult:
     action: str = "none"  # none, warn, block, redact
     matched_rules: list[dict[str, Any]] = field(default_factory=list)
     redacted_content: str | None = None
-    original_content: str | None = None  # Always None — never persist original content (Issue #2747)
+    original_content: str | None = (
+        None  # Always None — never persist original content (Issue #2747)
+    )
     message: str | None = None
     suggestion: str | None = None
     timestamp: datetime = field(

@@ -62,11 +62,7 @@ def _sanitize_details(obj: Any) -> Any:
     are returned as-is.
     """
     if isinstance(obj, dict):
-        return {
-            k: _sanitize_details(v)
-            for k, v in obj.items()
-            if k not in _AUDIT_DETAILS_DENYLIST
-        }
+        return {k: _sanitize_details(v) for k, v in obj.items() if k not in _AUDIT_DETAILS_DENYLIST}
     if isinstance(obj, list):
         return [_sanitize_details(item) for item in obj]
     return obj

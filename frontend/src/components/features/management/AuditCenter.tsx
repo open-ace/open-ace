@@ -106,11 +106,7 @@ type TabType = 'log' | 'analysis';
 // Issue #2747: Allowlist of safe detail fields for content-filter events.
 // The backend already strips sensitive keys, but the frontend enforces a
 // second layer so that historical data or unexpected fields never leak.
-const CONTENT_EVENT_ACTIONS = new Set([
-  'content_redacted',
-  'content_blocked',
-  'content_warned',
-]);
+const CONTENT_EVENT_ACTIONS = new Set(['content_redacted', 'content_blocked', 'content_warned']);
 const CONTENT_DETAIL_ALLOWLIST = new Set([
   'risk_level',
   'matched_rules',
@@ -129,7 +125,7 @@ const CONTENT_DETAIL_ALLOWLIST = new Set([
  */
 const sanitizeDetailsForDisplay = (
   action: string | null | undefined,
-  details: Record<string, unknown> | null | undefined,
+  details: Record<string, unknown> | null | undefined
 ): Record<string, unknown> => {
   if (!details || typeof details !== 'object') return {};
   if (action && CONTENT_EVENT_ACTIONS.has(action)) {
@@ -694,7 +690,7 @@ export const AuditCenter: React.FC = () => {
                       {(() => {
                         const safeDetails = sanitizeDetailsForDisplay(
                           selectedLog.action,
-                          selectedLog.details,
+                          selectedLog.details
                         );
                         return (
                           Object.keys(safeDetails).length > 0 && (
