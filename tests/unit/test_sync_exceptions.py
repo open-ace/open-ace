@@ -94,10 +94,11 @@ class TestFeishuSyncError:
         exc = FeishuSyncError(
             message="With details",
             code=FeishuSyncError.CODE_CREDENTIALS_PLACEHOLDER,
-            details={"app_id": "placeholder_value"},
+            details={"tenant_id": 123, "sync_enabled": True},
         )
 
-        assert exc.details == {"app_id": "placeholder_value"}
+        # Non-sensitive fields should be preserved
+        assert exc.details == {"tenant_id": 123, "sync_enabled": True}
 
 
 class TestDingTalkSyncError:
@@ -139,7 +140,8 @@ class TestDingTalkSyncError:
             details={"app_key": "placeholder_value"},
         )
 
-        assert exc.details == {"app_key": "placeholder_value"}
+        # app_key is in denylist, should be stripped
+        assert exc.details == {}
 
 
 class TestExceptionHierarchy:
@@ -184,3 +186,71 @@ class TestExceptionHierarchy:
         with pytest.raises(OrgSyncError) as exc_info:
             raise dingtalk_exc
         assert "DingTalk error" in str(exc_info.value)
+
+
+class TestDetailsSanitization:
+    """Tests for sensitive data sanitization in details."""
+
+    def test_sanitizes_app_secret(self):
+        """app_secret should be stripped from details."""
+        exc = FeishuSyncError(
+            message="Test",
+            code=FeishuSyncError.CODE_CREDENTIALS_PLACEHOLDER,
+            details={"app_secret": "secret_value", "safe_field": "ok"},
+        )
+        assert "app_secret" not in exc.details
+        assert exc.details.get("safe_field") == "ok"
+
+    def test_sanitizes_app_key(self):
+        """app_key should be stripped from details."""
+        exc = DingTalkSyncError(
+            message="Test",
+            code=DingTalkSyncError.CODE_CREDENTIALS_PLACEHOLDER,
+            details={"app_key": "key_value", "tenant_id": 123},
+        )
+        assert "app_key" not in exc.details
+        assert exc.details.get("tenant_id") == 123
+
+    def test_sanitizes_password(self):
+        """password should be stripped from details."""
+        exc = OrgSyncError(
+            message="Test",
+            code="TEST",
+            provider="test",
+            details={"password": "secret", "username": "admin"},
+        )
+        assert "password" not in exc.details
+        assert exc.details.get("username") == "admin"
+
+    def test_sanitizes_nested_dict(self):
+        """Sensitive fields in nested dicts should be stripped."""
+        exc = OrgSyncError(
+            message="Test",
+            code="TEST",
+            provider="test",
+            details={
+                "config": {
+                    "app_secret": "nested_secret",
+                    "setting": "value",
+                }
+            },
+        )
+        assert "app_secret" not in exc.details.get("config", {})
+        assert exc.details.get("config", {}).get("setting") == "value"
+
+    def test_preserves_non_sensitive_fields(self):
+        """Non-sensitive fields should be preserved."""
+        exc = FeishuSyncError(
+            message="Test",
+            code=FeishuSyncError.CODE_CREDENTIALS_PLACEHOLDER,
+            details={
+                "department_id": "abc123",
+                "user_count": 10,
+                "sync_enabled": True,
+            },
+        )
+        assert exc.details == {
+            "department_id": "abc123",
+            "user_count": 10,
+            "sync_enabled": True,
+        }

@@ -8,6 +8,46 @@ be marked as deprecated in future versions.
 
 from __future__ import annotations
 
+from typing import Any
+
+from app.modules.governance.audit_logger import _sanitize_details
+
+# Additional denylist for sync-specific sensitive fields
+# These are not in the general audit denylist but should never appear in error responses
+_SYNC_DETAILS_DENYLIST: frozenset[str] = frozenset(
+    {
+        "app_id",
+        "app_key",
+        "app_secret",
+        "client_id",
+        "client_secret",
+    }
+)
+
+
+def _sanitize_sync_details(obj: Any) -> dict:
+    """Sanitize details to remove sync-specific sensitive fields.
+
+    Combines the general audit denylist with sync-specific fields.
+    Recursively processes nested dicts.
+
+    Args:
+        obj: The details dict to sanitize.
+
+    Returns:
+        Sanitized dict with sensitive fields removed.
+    """
+    # First apply general audit sanitization (handles recursion)
+    result = _sanitize_details(obj)
+    # Then remove sync-specific fields at all levels
+    if isinstance(result, dict):
+        return {
+            k: _sanitize_sync_details(v) if isinstance(v, dict) else v
+            for k, v in result.items()
+            if k not in _SYNC_DETAILS_DENYLIST
+        }
+    return result if result else {}
+
 
 class OrgSyncError(Exception):
     """Base exception for organization sync errors.
@@ -39,8 +79,9 @@ class OrgSyncError(Exception):
         self.code = code
         self.provider = provider
         self.http_status = http_status
-        # Ensure details never contains sensitive data
-        self.details = details if details is not None else {"provider": provider}
+        # Sanitize details to remove sensitive fields (app_secret, token, password, etc.)
+        # This ensures credentials are never leaked in error responses
+        self.details = _sanitize_sync_details(details) if details else {"provider": provider}
 
 
 class FeishuSyncError(OrgSyncError):
@@ -104,4 +145,4 @@ class DingTalkSyncError(OrgSyncError):
             provider="dingtalk",
             http_status=http_status,
             details=details,
-        )]
+        )
