@@ -13,6 +13,7 @@ gracefully (reuse the existing PR) if gh reports "already exists" anyway.
 from unittest.mock import MagicMock, patch
 
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
+from app.modules.workspace.autonomous.models import AgentTaskResult
 
 
 def _make_workflow(**overrides):
@@ -73,6 +74,11 @@ def _make_orchestrator(wf_data):
         orch = AutonomousOrchestrator(wf_data["workflow_id"])
         orch.repo = mock_repo
         orch.emitter = MagicMock()
+        # The migrated pr_review handler validates the change scope BEFORE
+        # creating the PR; the real method runs git against project_path
+        # (a fake /tmp path here) and would fail every test with a scope
+        # error before the PR-creation block these tests exercise.
+        orch._validate_autonomous_change_scope = MagicMock(return_value="")
     return orch, mock_repo
 
 
@@ -136,6 +142,25 @@ def test_re_entry_skips_create_pr_when_pr_already_exists():
     gh.find_existing_pr.assert_not_called()
 
 
+def _approve_and_summarize(orch):
+    """Let the review/summary agents succeed so the recovered PR number is
+    committed with the terminal PhaseResult's workflow_patch (the migrated
+    handler defers the github_pr_number write to phase commit instead of
+    writing it inline during recovery)."""
+    approve = AgentTaskResult(
+        session_id="rev-1",
+        success=True,
+        response_text='批准\nREVIEW_RESULT: {"verdict":"APPROVE","blocking_findings":[]}',
+    )
+    summary = AgentTaskResult(
+        session_id="sum-1",
+        success=True,
+        response_text="总结：需求已全部落实，可以合并。",
+    )
+    orch._run_agent_with_context_recovery = MagicMock(side_effect=[approve, summary])
+    orch._accumulate_tokens = MagicMock()
+
+
 # ── Layer 2: recover when 'already exists' slips through the guard ─────
 
 
@@ -154,12 +179,9 @@ def test_create_pr_already_exists_recovers_by_parsing_pr_url_from_error():
         "https://github.com/open-ace/open-ace/pull/1877"
     )
     orch._get_gh = MagicMock(return_value=gh)
-    orch._run_agent = MagicMock(side_effect=RuntimeError("stop-after-pr-block"))
+    _approve_and_summarize(orch)
 
-    try:
-        orch._do_pr_review(wf)
-    except RuntimeError:
-        pass
+    orch._do_pr_review(wf)
 
     # Recovery: PR number parsed from the URL in the error text.
     updates = [c.args[1] for c in mock_repo.update_workflow.call_args_list]
@@ -186,12 +208,9 @@ def test_create_pr_already_exists_falls_back_to_find_existing_pr_without_url():
         "title": "[Auto] Dev round 1",
     }
     orch._get_gh = MagicMock(return_value=gh)
-    orch._run_agent = MagicMock(side_effect=RuntimeError("stop-after-pr-block"))
+    _approve_and_summarize(orch)
 
-    try:
-        orch._do_pr_review(wf)
-    except RuntimeError:
-        pass
+    orch._do_pr_review(wf)
 
     gh.find_existing_pr.assert_called_once_with("auto-dev/wf-1857")
     updates = [c.args[1] for c in mock_repo.update_workflow.call_args_list]
@@ -212,14 +231,13 @@ def test_create_pr_already_exists_retries_find_when_first_returns_none():
         {"number": 1877, "url": "https://github.com/open-ace/open-ace/pull/1877"},
     ]
     orch._get_gh = MagicMock(return_value=gh)
-    orch._run_agent = MagicMock(side_effect=RuntimeError("stop-after-pr-block"))
+    _approve_and_summarize(orch)
 
-    # Patch sleep so the test doesn't actually wait.
-    with patch("app.modules.workspace.autonomous.orchestrator.time.sleep") as mock_sleep:
-        try:
-            orch._do_pr_review(wf)
-        except RuntimeError:
-            pass
+    # Patch sleep so the test doesn't actually wait (the migrated handler
+    # imports time inside phases/pr_review.py, so patch the module attr
+    # itself).
+    with patch("time.sleep") as mock_sleep:
+        orch._do_pr_review(wf)
 
     assert gh.find_existing_pr.call_count == 2
     mock_sleep.assert_called_once_with(2)
