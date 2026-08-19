@@ -435,9 +435,11 @@ class TestSudoersSecurityBaseline:
 
     def test_docker_entrypoint_no_rm_wildcard(self):
         """docker-entrypoint.sh should not contain rm * wildcard."""
-        entrypoint_path = Path(
-            "/home/rhuang/open-ace/.worktrees/caade971-ac6b-4d62-921c-329d30c20162/docker-entrypoint.sh"
-        )
+        # Find docker-entrypoint.sh relative to this test file
+        test_dir = Path(__file__).parent
+        repo_root = test_dir.parent.parent
+        entrypoint_path = repo_root / "docker-entrypoint.sh"
+
         if not entrypoint_path.exists():
             pytest.skip("docker-entrypoint.sh not found")
 
@@ -460,9 +462,11 @@ class TestSudoersSecurityBaseline:
 
     def test_docker_entrypoint_no_openace_cli(self):
         """docker-entrypoint.sh should not define OPENACE_CLI alias."""
-        entrypoint_path = Path(
-            "/home/rhuang/open-ace/.worktrees/caade971-ac6b-4d62-921c-329d30c20162/docker-entrypoint.sh"
-        )
+        # Find docker-entrypoint.sh relative to this test file
+        test_dir = Path(__file__).parent
+        repo_root = test_dir.parent.parent
+        entrypoint_path = repo_root / "docker-entrypoint.sh"
+
         if not entrypoint_path.exists():
             pytest.skip("docker-entrypoint.sh not found")
 
