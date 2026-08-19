@@ -1177,8 +1177,8 @@ CREATE TABLE teams (
 );
 
 CREATE TABLE tenant_keywords_version (
- tenant_id INTEGER PRIMARY KEY,
- version INTEGER DEFAULT 1 NOT NULL,
+ tenant_id INTEGER PRIMARY KEY AUTOINCREMENT,
+ version INTEGER DEFAULT '1' NOT NULL,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
@@ -1235,6 +1235,17 @@ CREATE TABLE tenant_quotas (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE tenant_sensitive_keywords (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ tenant_id integer NOT NULL,
+ keyword text NOT NULL,
+ normalized_keyword text NOT NULL,
+ is_enabled INTEGER DEFAULT 1 NOT NULL,
+ created_by integer,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP
+);
+
 CREATE TABLE tenant_settings (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  tenant_id integer NOT NULL,
@@ -1252,18 +1263,6 @@ CREATE TABLE tenant_settings (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  block_sensitive_keyword INTEGER DEFAULT 0,
  sensitive_keyword_match_mode TEXT DEFAULT 'word_boundary'
-);
-
-CREATE TABLE tenant_sensitive_keywords (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- tenant_id integer NOT NULL,
- keyword text NOT NULL,
- normalized_keyword text NOT NULL,
- is_enabled INTEGER DEFAULT 1 NOT NULL,
- created_by integer,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- updated_at TIMESTAMP,
-    UNIQUE (tenant_id, normalized_keyword)
 );
 
 CREATE TABLE tenant_usage (
@@ -1635,6 +1634,8 @@ CREATE UNIQUE INDEX uq_mapping_rule_user_pattern ON tool_account_mapping_rules (
 CREATE UNIQUE INDEX uq_quota_usage_user_date_period_new ON quota_usage (user_id, date, period);
 
 CREATE UNIQUE INDEX uq_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
+
+CREATE UNIQUE INDEX uq_tenant_keyword ON tenant_sensitive_keywords (tenant_id, normalized_keyword);
 
 CREATE UNIQUE INDEX uq_tenant_usage_tenant_date_new ON tenant_usage (tenant_id, date);
 
