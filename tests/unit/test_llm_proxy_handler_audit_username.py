@@ -83,7 +83,7 @@ class TestUsernameFetchFromDatabase:
             try:
                 user = repo.get_user_by_id(1)
                 username = user.get("username") if user else None
-            except Exception:
+            except Exception:  # allow-swallow: test framework error handling
                 username = None
 
             # Verify username is None after exception
@@ -102,7 +102,7 @@ class TestUsernameFetchFromDatabase:
         try:
             # Simulate database error
             raise Exception("Database connection failed")
-        except Exception as e:
+        except Exception as e:  # allow-swallow: test framework error handling
             # This matches the log pattern in llm_proxy_handler
             logger = logging.getLogger(__name__)
             logger.warning(
@@ -125,7 +125,7 @@ class TestUsernameFetchFromDatabase:
 
         with patch(
             "app.modules.workspace.llm_proxy_handler._get_tenant_sensitive_keyword_config_wrapper"
-        ) as mock_config:
+        ):
             with patch(
                 "app.modules.governance.content_filter.ContentFilter.check_content"
             ) as mock_check:
