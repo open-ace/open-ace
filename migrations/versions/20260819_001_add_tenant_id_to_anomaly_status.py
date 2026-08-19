@@ -25,29 +25,51 @@ def upgrade() -> None:
     dialect = bind.dialect.name
 
     if dialect == "postgresql":
-        # Add tenant_id column (nullable initially to allow existing data)
-        op.add_column("anomaly_status", sa.Column("tenant_id", sa.Integer(), nullable=True))
-
-        # Add foreign key constraint
-        op.create_foreign_key(
-            "anomaly_status_tenant_id_fkey",
-            "anomaly_status",
-            "tenants",
-            ["tenant_id"],
-            ["id"],
-            ondelete="SET NULL",
+        # Check if column already exists (may be present from schema bootstrap)
+        result = bind.execute(
+            sa.text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'anomaly_status' AND column_name = 'tenant_id'"
+            )
         )
+        if result.fetchone() is None:
+            # Add tenant_id column (nullable initially to allow existing data)
+            op.add_column("anomaly_status", sa.Column("tenant_id", sa.Integer(), nullable=True))
 
-        # Drop old unique index
-        op.drop_index("ix_anomaly_status_type_hash", table_name="anomaly_status")
+        # Check if foreign key already exists
+        fk_result = bind.execute(
+            sa.text(
+                "SELECT constraint_name FROM information_schema.table_constraints "
+                "WHERE table_name = 'anomaly_status' AND constraint_name = 'anomaly_status_tenant_id_fkey'"
+            )
+        )
+        if fk_result.fetchone() is None:
+            # Add foreign key constraint
+            op.create_foreign_key(
+                "anomaly_status_tenant_id_fkey",
+                "anomaly_status",
+                "tenants",
+                ["tenant_id"],
+                ["id"],
+                ondelete="SET NULL",
+            )
+
+        # Drop old unique index if exists
+        try:
+            op.drop_index("ix_anomaly_status_type_hash", table_name="anomaly_status")
+        except Exception:
+            pass
 
         # Create new composite unique index including tenant_id
-        op.create_index(
-            "ix_anomaly_status_type_hash_tenant",
-            "anomaly_status",
-            ["anomaly_type", "affected_users_hash", "tenant_id"],
-            unique=True,
-        )
+        try:
+            op.create_index(
+                "ix_anomaly_status_type_hash_tenant",
+                "anomaly_status",
+                ["anomaly_type", "affected_users_hash", "tenant_id"],
+                unique=True,
+            )
+        except Exception:
+            pass
 
         # Backfill tenant_id from processed_by user's tenant
         op.execute("""
@@ -61,19 +83,32 @@ def upgrade() -> None:
             """)
 
     else:  # SQLite
-        # Add tenant_id column
-        op.add_column("anomaly_status", sa.Column("tenant_id", sa.Integer(), nullable=True))
+        # Check if column already exists
+        result = bind.execute(
+            sa.text(
+                "SELECT name FROM pragma_table_info('anomaly_status') WHERE name = 'tenant_id'"
+            )
+        )
+        if result.fetchone() is None:
+            # Add tenant_id column
+            op.add_column("anomaly_status", sa.Column("tenant_id", sa.Integer(), nullable=True))
 
-        # Drop old unique index
-        op.drop_index("ix_anomaly_status_type_hash", table_name="anomaly_status")
+        # Drop old unique index if exists
+        try:
+            op.drop_index("ix_anomaly_status_type_hash", table_name="anomaly_status")
+        except Exception:
+            pass
 
         # Create new composite unique index including tenant_id
-        op.create_index(
-            "ix_anomaly_status_type_hash_tenant",
-            "anomaly_status",
-            ["anomaly_type", "affected_users_hash", "tenant_id"],
-            unique=True,
-        )
+        try:
+            op.create_index(
+                "ix_anomaly_status_type_hash_tenant",
+                "anomaly_status",
+                ["anomaly_type", "affected_users_hash", "tenant_id"],
+                unique=True,
+            )
+        except Exception:
+            pass
 
 
 def downgrade() -> None:
