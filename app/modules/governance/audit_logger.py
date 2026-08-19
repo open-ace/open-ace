@@ -31,6 +31,46 @@ from app.repositories.database import Database, adapt_boolean_value, adapt_sql
 
 logger = logging.getLogger(__name__)
 
+# ── Sensitive-key denylist for audit details (Issue #2747) ──────────────────
+# Keys that must NEVER appear in persisted audit-log ``details``.
+# Applied recursively to nested dicts/lists so that fields inside
+# ``matched_rules`` (e.g. ``sample``) are also stripped.
+_AUDIT_DETAILS_DENYLIST: frozenset[str] = frozenset(
+    {
+        "original_content",
+        "redacted_content",
+        "password",
+        "secret",
+        "api_key",
+        "apikey",
+        "access_token",
+        "auth_token",
+        "private_key",
+        "ssh_key",
+        "credential",
+        "token",
+        "sample",
+        "keywords",
+    }
+)
+
+
+def _sanitize_details(obj: Any) -> Any:
+    """Recursively remove denylisted keys from audit details (Issue #2747).
+
+    Returns a deep copy with sensitive keys stripped.  Non-dict/list values
+    are returned as-is.
+    """
+    if isinstance(obj, dict):
+        return {
+            k: _sanitize_details(v)
+            for k, v in obj.items()
+            if k not in _AUDIT_DETAILS_DENYLIST
+        }
+    if isinstance(obj, list):
+        return [_sanitize_details(item) for item in obj]
+    return obj
+
 
 class AuditAction(Enum):
     """Enumeration of auditable actions."""
@@ -172,7 +212,7 @@ class AuditLog:
             "severity": self.severity,
             "resource_type": self.resource_type,
             "resource_id": self.resource_id,
-            "details": self.details,
+            "details": _sanitize_details(self.details) if self.details else self.details,
             "ip_address": self.ip_address,
             "user_agent": self.user_agent,
             "session_id": self.session_id,
@@ -363,6 +403,9 @@ class AuditLogger:
             if resource_name:
                 details = dict(details or {})
                 details.setdefault("resource_name", resource_name)
+            # Strip sensitive keys before persisting (Issue #2747)
+            if details:
+                details = _sanitize_details(details)
             details_json = json.dumps(details) if details else None
             effective_tenant_id = self._resolve_tenant_id(tenant_id=tenant_id, user_id=user_id)
 

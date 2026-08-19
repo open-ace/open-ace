@@ -103,6 +103,47 @@ const RESOURCE_TYPE_LABELS: Record<string, string> = {
 
 type TabType = 'log' | 'analysis';
 
+// Issue #2747: Allowlist of safe detail fields for content-filter events.
+// The backend already strips sensitive keys, but the frontend enforces a
+// second layer so that historical data or unexpected fields never leak.
+const CONTENT_EVENT_ACTIONS = new Set([
+  'content_redacted',
+  'content_blocked',
+  'content_warned',
+]);
+const CONTENT_DETAIL_ALLOWLIST = new Set([
+  'risk_level',
+  'matched_rules',
+  'message',
+  'suggestion',
+  'content_length',
+  'content_hash',
+  'redacted',
+  'resource_name',
+]);
+
+/**
+ * Return a sanitised copy of ``details`` for display.
+ * For content-filter events only allowlisted keys are kept;
+ * all other event types are returned as-is.
+ */
+const sanitizeDetailsForDisplay = (
+  action: string | null | undefined,
+  details: Record<string, unknown> | null | undefined,
+): Record<string, unknown> => {
+  if (!details || typeof details !== 'object') return {};
+  if (action && CONTENT_EVENT_ACTIONS.has(action)) {
+    const safe: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(details)) {
+      if (CONTENT_DETAIL_ALLOWLIST.has(k)) {
+        safe[k] = v;
+      }
+    }
+    return safe;
+  }
+  return details;
+};
+
 export const AuditCenter: React.FC = () => {
   const language = useLanguage();
   const { data: users, isLoading: usersLoading } = useUsers();
@@ -650,24 +691,30 @@ export const AuditCenter: React.FC = () => {
                           )}
                         </tbody>
                       </table>
-                      {selectedLog.details &&
-                        typeof selectedLog.details === 'object' &&
-                        Object.keys(selectedLog.details).length > 0 && (
-                          <div className="mt-3">
-                            <h6>{t('tableDetails', language)}</h6>
-                            <pre
-                              className="audit-detail-pre p-3 rounded"
-                              style={{
-                                maxHeight: '300px',
-                                overflow: 'auto',
-                                whiteSpace: 'pre-wrap',
-                                wordBreak: 'break-word',
-                              }}
-                            >
-                              {JSON.stringify(selectedLog.details, null, 2)}
-                            </pre>
-                          </div>
-                        )}
+                      {(() => {
+                        const safeDetails = sanitizeDetailsForDisplay(
+                          selectedLog.action,
+                          selectedLog.details,
+                        );
+                        return (
+                          Object.keys(safeDetails).length > 0 && (
+                            <div className="mt-3">
+                              <h6>{t('tableDetails', language)}</h6>
+                              <pre
+                                className="audit-detail-pre p-3 rounded"
+                                style={{
+                                  maxHeight: '300px',
+                                  overflow: 'auto',
+                                  whiteSpace: 'pre-wrap',
+                                  wordBreak: 'break-word',
+                                }}
+                              >
+                                {JSON.stringify(safeDetails, null, 2)}
+                              </pre>
+                            </div>
+                          )
+                        );
+                      })()}
                     </div>
                     <div className="modal-footer">
                       <Button variant="secondary" onClick={() => setSelectedLog(null)}>

@@ -52,7 +52,7 @@ class FilterResult:
     action: str = "none"  # none, warn, block, redact
     matched_rules: list[dict[str, Any]] = field(default_factory=list)
     redacted_content: str | None = None
-    original_content: str | None = None  # For audit logging with redact
+    original_content: str | None = None  # Always None — never persist original content (Issue #2747)
     message: str | None = None
     suggestion: str | None = None
     timestamp: datetime = field(
@@ -546,7 +546,6 @@ class ContentFilter:
                         "type": pattern_name,
                         "count": len(matches),
                         "risk": risk,
-                        "sample": matches[0] if matches else None,
                         "source": "builtin",
                     }
                 )
@@ -621,7 +620,7 @@ class ContentFilter:
             action=overall_action,
             matched_rules=matched_rules,
             redacted_content=redacted if overall_action == "redact" else None,
-            original_content=content if overall_action == "redact" else None,
+            original_content=None,  # Never persist original content (Issue #2747)
             message=message,
             suggestion=suggestion,
         )
