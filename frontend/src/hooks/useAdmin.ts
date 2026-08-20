@@ -63,6 +63,23 @@ export function useDeleteUser() {
   });
 }
 
+export function useRestoreUser() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      userId,
+      data,
+    }: {
+      userId: number;
+      data?: import('@/api').RestoreUserRequest;
+    }) => adminApi.restoreUser(userId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+    },
+  });
+}
+
 export function useUpdateUserPassword() {
   return useMutation({
     mutationFn: ({ userId, password }: { userId: number; password: string }) =>

@@ -8,6 +8,7 @@ import {
   useCreateUser,
   useUpdateUser,
   useDeleteUser,
+  useRestoreUser,
   useResetUserPassword,
   useSyncFeishuOrg,
   usePageRefresh,
