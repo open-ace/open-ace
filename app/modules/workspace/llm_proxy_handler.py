@@ -474,6 +474,25 @@ def _record_llm_usage(
                     return
 
         # Update evidence with session context
+        # Issue #2732: Populate tool_name and host_name from session for daily_usage aggregation
+        tool_name = session.tool_name if session else None
+        if not tool_name:
+            tool_name = "qwen-code"
+            logger.debug(
+                "Session %s has no tool_name, using default: %s",
+                session_id[:8] if session_id else "unknown",
+                tool_name,
+            )
+
+        host_name = session.host_name if session else None
+        if not host_name:
+            host_name = "localhost"
+            logger.debug(
+                "Session %s has no host_name, using default: %s",
+                session_id[:8] if session_id else "unknown",
+                host_name,
+            )
+
         evidence = UsageEvidence(
             input_tokens=evidence.input_tokens,
             output_tokens=evidence.output_tokens,
@@ -484,6 +503,8 @@ def _record_llm_usage(
             model=evidence.model,
             protocol=evidence.protocol,
             api_version=evidence.api_version,
+            tool_name=tool_name,
+            host_name=host_name,
             is_final=evidence.is_final,
             is_indeterminate=evidence.is_indeterminate,
             is_merged=evidence.is_merged,

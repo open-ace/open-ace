@@ -40,6 +40,10 @@ class UsageEvidence:
     )
     api_version: str | None = None  # Anthropic API version
 
+    # ── Dimension fields (Issue #2732) ───────────────────────────────────
+    tool_name: str | None = None  # Tool name for daily_usage aggregation
+    host_name: str | None = None  # Host name for daily_usage aggregation
+
     # ── State flags ──────────────────────────────────────────────────────
     is_final: bool = True  # True=final value, False=partial/incremental
     is_indeterminate: bool = False  # True=protocol unknown/cannot determine final
@@ -126,6 +130,8 @@ class UsageEvidence:
             model=other.model or self.model,
             protocol=other.protocol or self.protocol,
             api_version=other.api_version or self.api_version,
+            tool_name=other.tool_name or self.tool_name,
+            host_name=other.host_name or self.host_name,
             is_final=other.is_final,  # Take the final status from the latest event
             is_indeterminate=self.is_indeterminate or other.is_indeterminate,
             is_merged=True,
@@ -414,6 +420,8 @@ class UsageEvidence:
             "model": self.model,
             "protocol": self.protocol,
             "api_version": self.api_version,
+            "tool_name": self.tool_name,
+            "host_name": self.host_name,
             "is_final": self.is_final,
             "is_indeterminate": self.is_indeterminate,
             "is_merged": self.is_merged,
