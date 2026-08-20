@@ -27,6 +27,9 @@ __all__ = [
     "ensure_shared_group",
     "add_user_to_shared_group",
     "setup_shared_project_permissions",
+    "estimate_file_count_fast",
+    "setup_permissions_with_depth_limit",
+    "verify_setgid_support",
 ]
 
 # Shared project group name (Issue #2730)
@@ -427,3 +430,241 @@ def setup_shared_project_permissions(path: str) -> tuple[bool, str]:
         return (False, "Permission setup timed out")
     except Exception as e:
         return (False, str(e))
+
+
+# ============================================================================
+# Performance Optimization Functions (Issue #2746)
+# ============================================================================
+
+
+def estimate_file_count_fast(path: str, timeout: int = 5) -> int:
+    """Fast file count estimation using sampling method.
+
+    Samples only the first 3 directory levels and extrapolates total.
+    This avoids traversing the entire directory tree for large projects.
+
+    Args:
+        path: Absolute path to the project directory.
+        timeout: Maximum time (seconds) for estimation.
+
+    Returns:
+        Estimated total file count. Returns 50000 if estimation times out.
+    """
+    import time
+
+    if not os.path.isabs(path) or not os.path.exists(path):
+        return 50000  # Default to maximum
+
+    try:
+        start_time = time.time()
+
+        # Count files in first 3 levels only
+        result = subprocess.run(
+            ["find", path, "-maxdepth", "3", "-type", "f"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+
+        if result.returncode != 0:
+            return 50000
+
+        lines = result.stdout.strip().split("\n")
+        count_3_levels = len([l for l in lines if l])  # Count non-empty lines
+
+        # Extrapolate: assume each level doubles (typical tree structure)
+        # For 10 levels: total ≈ count_3_levels * 2^(10-3) = count_3_levels * 128
+        # Cap at reasonable maximum
+        estimated_total = min(count_3_levels * 128, 50000)
+
+        elapsed = time.time() - start_time
+        logger.debug(
+            f"Estimated {estimated_total} files from {count_3_levels} samples "
+            f"(took {elapsed:.2f}s)"
+        )
+
+        return estimated_total
+
+    except subprocess.TimeoutExpired:
+        logger.warning(f"File count estimation timed out after {timeout}s")
+        return 50000
+    except Exception as e:
+        logger.error(f"Error estimating file count: {e}")
+        return 50000
+
+
+def setup_permissions_with_depth_limit(
+    path: str,
+    depth_limit: int | None = None,
+    timeout: int = 60,
+    progress_callback=None,
+) -> tuple[bool, str, int]:
+    """Set permissions with optional recursion depth limit.
+
+    Optimized version that:
+    1. Uses batch processing (find | xargs) instead of -exec
+    2. Limits recursion depth when specified
+    3. Provides progress feedback via callback
+    4. Has better timeout handling
+
+    Args:
+        path: Absolute path to the project directory.
+        depth_limit: Maximum recursion depth (None = no limit).
+        timeout: Timeout in seconds for entire operation.
+        progress_callback: Optional callback function(percent, processed, total).
+
+    Returns:
+        Tuple of (success, error_message, files_processed).
+    """
+    if not _is_docker_multi_user_mode():
+        return (True, "", 0)
+
+    if not path or not os.path.isabs(path) or not os.path.exists(path):
+        return (False, "Invalid path", 0)
+
+    try:
+        # Ensure shared group
+        if not ensure_shared_group():
+            return (False, "Failed to create shared group", 0)
+
+        # Set root directory permissions
+        subprocess.run(
+            ["chown", f":{SHARED_GROUP_NAME}", path],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        subprocess.run(
+            ["chmod", "2775", path],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        # Build find command with optional depth limit
+        find_cmd = ["find", path]
+        if depth_limit:
+            find_cmd.extend(["-maxdepth", str(depth_limit)])
+
+        files_processed = 0
+
+        # Process directories with batch chmod (more efficient than -exec)
+        dir_cmd = find_cmd + ["-type", "d"]
+        dir_result = subprocess.run(
+            dir_cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout // 2,
+        )
+
+        if dir_result.returncode == 0 and dir_result.stdout.strip():
+            dirs = [d for d in dir_result.stdout.strip().split("\n") if d]
+            # Batch process: use xargs to run chmod on multiple dirs at once
+            chmod_process = subprocess.Popen(
+                ["xargs", "-0", "chmod", "2775"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            # Use null-separated input for xargs
+            chmod_process.communicate(input="\0".join(dirs), timeout=timeout // 2)
+            files_processed += len(dirs)
+
+            if progress_callback and len(dirs) > 100:
+                progress_callback(50, files_processed, -1)
+
+        # Process files with batch chmod
+        file_cmd = find_cmd + ["-type", "f"]
+        file_result = subprocess.run(
+            file_cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout // 2,
+        )
+
+        if file_result.returncode == 0 and file_result.stdout.strip():
+            files = [f for f in file_result.stdout.strip().split("\n") if f]
+            # Batch process files
+            chmod_process = subprocess.Popen(
+                ["xargs", "-0", "chmod", "664"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            chmod_process.communicate(input="\0".join(files), timeout=timeout // 2)
+            files_processed += len(files)
+
+            if progress_callback:
+                progress_callback(100, files_processed, files_processed)
+
+        logger.info(f"Set permissions for {files_processed} items in {path}")
+        return (True, "", files_processed)
+
+    except subprocess.TimeoutExpired:
+        return (False, f"Operation timed out after {timeout}s", 0)
+    except subprocess.CalledProcessError as e:
+        return (False, f"Command failed: {e.stderr}", 0)
+    except Exception as e:
+        return (False, f"Unexpected error: {e}", 0)
+
+
+def verify_setgid_support(path: str) -> tuple[bool, str]:
+    """Verify that setgid is supported and working on the filesystem.
+
+    Creates a test subdirectory to verify that:
+    1. setgid bit can be set on directories (2775)
+    2. New subdirectories inherit the setgid bit
+
+    Args:
+        path: Path to test (will create a temporary subdirectory).
+
+    Returns:
+        Tuple of (supported, error_message).
+    """
+    import tempfile
+
+    if not os.path.isabs(path) or not os.path.exists(path):
+        return (False, "Path does not exist")
+
+    test_dir = None
+    try:
+        # Create temporary test directory
+        test_dir = tempfile.mkdtemp(prefix=".setgid_test_", dir=path)
+
+        # Set setgid on test directory
+        result = subprocess.run(
+            ["chmod", "2775", test_dir],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return (False, f"Failed to set setgid: {result.stderr}")
+
+        # Create subdirectory to test inheritance
+        subdir = os.path.join(test_dir, "test_subdir")
+        os.makedirs(subdir)
+
+        # Check if subdirectory inherited setgid
+        stat_result = os.stat(subdir)
+        mode = stat_result.st_mode
+
+        # setgid bit is 0o2000 (octal)
+        has_setgid = bool(mode & 0o2000)
+
+        if has_setgid:
+            logger.info(f"setgid inheritance verified at {path}")
+            return (True, "")
+        else:
+            logger.warning(f"setgid not inherited at {path}")
+            return (False, "setgid not inherited by new subdirectories")
+
+    except Exception as e:
+        return (False, f"Verification failed: {e}")
+    finally:
+        # Clean up test directory
+        if test_dir and os.path.exists(test_dir):
+            import shutil
+
+            shutil.rmtree(test_dir, ignore_errors=True)
