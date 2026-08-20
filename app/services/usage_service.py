@@ -4,7 +4,6 @@ Open ACE - AI Computing Explorer - Usage Service
 Business logic for usage data operations.
 """
 
-import json
 import logging
 from datetime import datetime
 
@@ -34,27 +33,31 @@ class UsageService:
         host_name: str | None = None,
         tenant_id: int | None = None,
     ) -> list[dict]:
-        """
-        Get today's usage data, aggregated from daily_usage table.
+        """Get today's usage data, aggregated from agent_sessions table.
 
-        Queries daily_usage directly via repository layer (few rows)
-        instead of daily_messages (hundreds of thousands of rows) to
-        avoid request_count multiplication and improve performance.
+        Issue #2842: Query agent_sessions directly for real-time usage data,
+        avoiding sync delay from daily_usage table.
 
         Args:
-            tool_name: Optional tool name filter.
-            host_name: Optional host name filter.
+            tool_name: Optional tool name filter (not used, for API compatibility).
+            host_name: Optional host name filter (not used, for API compatibility).
+            tenant_id: Optional tenant ID filter.
 
         Returns:
-            List[Dict]: List of usage records merged by normalized tool_name.
+            List[Dict]: List of usage records by tool_name.
         """
         today = datetime.now().strftime("%Y-%m-%d")
-        rows = self.usage_repo.get_usage_rows_by_date(today, tool_name, host_name, tenant_id)
 
-        # Aggregate by normalized tool name using dict for deduplication
+        # Query agent_sessions for today's sessions
+        # This gives real-time data without sync delay
+        rows = self.usage_repo.get_today_session_usage(today, tenant_id)
+
+        # Aggregate by normalized tool name
         merged: dict[str, dict] = {}
         for row in rows:
-            tool = normalize_tool_name(row["tool_name"])
+            raw_tool = row.get("tool_name") or "unknown"
+            tool = normalize_tool_name(raw_tool)
+
             if tool not in merged:
                 merged[tool] = {
                     "date": today,
@@ -64,28 +67,13 @@ class UsageService:
                     "output_tokens": 0,
                     "cache_tokens": 0,
                     "request_count": 0,
-                    "models_used_set": set(),
-                    "hosts_set": set(),
+                    "hosts": [],
                 }
 
             merged[tool]["tokens_used"] += row.get("tokens_used") or 0
             merged[tool]["input_tokens"] += row.get("input_tokens") or 0
             merged[tool]["output_tokens"] += row.get("output_tokens") or 0
-            merged[tool]["cache_tokens"] += row.get("cache_tokens") or 0
             merged[tool]["request_count"] += row.get("request_count") or 0
-            merged[tool]["hosts_set"].add(row.get("host_name") or "unknown")
-
-            if row.get("models_used"):
-                try:
-                    models = (
-                        json.loads(row["models_used"])
-                        if isinstance(row["models_used"], str)
-                        else row["models_used"]
-                    )
-                    if isinstance(models, list):
-                        merged[tool]["models_used_set"].update(models)
-                except (json.JSONDecodeError, TypeError):
-                    pass
 
         result = []
         for data in merged.values():
@@ -98,8 +86,8 @@ class UsageService:
                     "output_tokens": data["output_tokens"],
                     "cache_tokens": data["cache_tokens"],
                     "request_count": data["request_count"],
-                    "models_used": list(data["models_used_set"]) or None,
-                    "hosts": list(data["hosts_set"]),
+                    "models_used": None,
+                    "hosts": data["hosts"],
                 }
             )
 
