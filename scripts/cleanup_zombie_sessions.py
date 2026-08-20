@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 # Add project root to path
 sys.path.insert(0, ".")
 
-from app.repositories.database import Database, _param
+from app.repositories.database import Database, _param, is_postgresql
 
 logging.basicConfig(
     level=logging.INFO,
@@ -107,9 +107,15 @@ class ZombieSessionCleaner:
                 cursor = conn.cursor()
                 # Check if there's a cleanup_history table
                 # Note: We create the table in _record_cleanup_complete if it doesn't exist
-                cursor.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name='cleanup_history'"
-                )
+                if is_postgresql():
+                    cursor.execute(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_name = 'cleanup_history'"
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='cleanup_history'"
+                    )
                 if cursor.fetchone():
                     cursor.execute(
                         f"SELECT id FROM cleanup_history WHERE cleanup_id = {_param()}",
@@ -231,15 +237,27 @@ class ZombieSessionCleaner:
                 cursor = conn.cursor()
 
                 # Create cleanup_history table if it doesn't exist
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS cleanup_history (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        cleanup_id TEXT NOT NULL,
-                        cleanup_type TEXT NOT NULL,
-                        stats TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
+                # Use database-specific syntax
+                if is_postgresql():
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS cleanup_history (
+                            id SERIAL PRIMARY KEY,
+                            cleanup_id TEXT NOT NULL,
+                            cleanup_type TEXT NOT NULL,
+                            stats TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                else:
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS cleanup_history (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            cleanup_id TEXT NOT NULL,
+                            cleanup_type TEXT NOT NULL,
+                            stats TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
 
                 cursor.execute(
                     f"""
