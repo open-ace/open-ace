@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from shared.file_change_parser import (
+from scripts.shared.file_change_parser import (
     CpParser,
     FileChangeParserRegistry,
     FileChangeRecord,
