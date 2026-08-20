@@ -287,6 +287,8 @@ def api_create_project():
                     path,
                     depth_limit=None,  # No depth limit for small projects
                     timeout=60,
+                    user_id=user_id,  # Issue #2745: Pass user_id for audit log
+                    project_id=project_id,  # Issue #2745: Pass project_id for audit log
                 )
                 if not success:
                     logger.error(f"Failed to setup shared permissions: {error_msg}")
@@ -397,6 +399,8 @@ def api_update_project(project_id):
                     project.path,
                     depth_limit=None,
                     timeout=60,
+                    user_id=user_id,  # Issue #2745: Pass user_id for audit log
+                    project_id=project_id,  # Issue #2745: Pass project_id for audit log
                 )
                 if not success:
                     logger.error(f"Failed to setup shared permissions: {error_msg}")
@@ -643,6 +647,8 @@ def api_fix_project_permissions(project_id):
             project.path,
             depth_limit=depth_limit,
             timeout=60,
+            user_id=user_id,  # Issue #2745: Pass user_id for audit log
+            project_id=project_id,  # Issue #2745: Pass project_id for audit log
         )
 
         if success:

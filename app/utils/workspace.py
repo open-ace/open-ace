@@ -13,6 +13,7 @@ import os
 import platform
 import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -498,6 +499,8 @@ def setup_permissions_with_depth_limit(
     depth_limit: int | None = None,
     timeout: int = 60,
     progress_callback=None,
+    user_id: int | None = None,
+    project_id: int | None = None,
 ) -> tuple[bool, str, int]:
     """Set permissions with optional recursion depth limit.
 
@@ -506,21 +509,29 @@ def setup_permissions_with_depth_limit(
     2. Limits recursion depth when specified
     3. Provides progress feedback via callback
     4. Has better timeout handling
+    5. Records audit log for permission setup (Issue #2745)
 
     Args:
         path: Absolute path to the project directory.
         depth_limit: Maximum recursion depth (None = no limit).
         timeout: Timeout in seconds for entire operation.
         progress_callback: Optional callback function(percent, processed, total).
+        user_id: User ID who initiated the operation (for audit log).
+        project_id: Project ID for audit log resource_id.
 
     Returns:
         Tuple of (success, error_message, files_processed).
     """
+    import time
+
     if not _is_docker_multi_user_mode():
         return (True, "", 0)
 
     if not path or not os.path.isabs(path) or not os.path.exists(path):
         return (False, "Invalid path", 0)
+
+    operation_start_time = time.time()
+    operation_start_datetime = datetime.now().isoformat()
 
     try:
         # Ensure shared group
@@ -600,14 +611,64 @@ def setup_permissions_with_depth_limit(
                 progress_callback(100, files_processed, files_processed)
 
         logger.info(f"Set permissions for {files_processed} items in {path}")
+
+        # Record audit log for successful permission setup (Issue #2745)
+        _log_permission_audit(
+            user_id=user_id,
+            project_id=project_id,
+            path=path,
+            success=True,
+            files_processed=files_processed,
+            operation_start_time=operation_start_time,
+            operation_start_datetime=operation_start_datetime,
+            depth_limit=depth_limit,
+        )
+
         return (True, "", files_processed)
 
     except subprocess.TimeoutExpired:
-        return (False, f"Operation timed out after {timeout}s", 0)
+        error_msg = f"Operation timed out after {timeout}s"
+        # Record audit log for failed permission setup (Issue #2745)
+        _log_permission_audit(
+            user_id=user_id,
+            project_id=project_id,
+            path=path,
+            success=False,
+            files_processed=0,
+            operation_start_time=operation_start_time,
+            operation_start_datetime=operation_start_datetime,
+            error_message=error_msg,
+            depth_limit=depth_limit,
+        )
+        return (False, error_msg, 0)
     except subprocess.CalledProcessError as e:
-        return (False, f"Command failed: {e.stderr}", 0)
+        error_msg = f"Command failed: {e.stderr}"
+        _log_permission_audit(
+            user_id=user_id,
+            project_id=project_id,
+            path=path,
+            success=False,
+            files_processed=0,
+            operation_start_time=operation_start_time,
+            operation_start_datetime=operation_start_datetime,
+            error_message=error_msg,
+            depth_limit=depth_limit,
+        )
+        return (False, error_msg, 0)
     except Exception as e:
-        return (False, f"Unexpected error: {e}", 0)
+        error_msg = f"Unexpected error: {e}"
+        _log_permission_audit(
+            user_id=user_id,
+            project_id=project_id,
+            path=path,
+            success=False,
+            files_processed=0,
+            operation_start_time=operation_start_time,
+            operation_start_datetime=operation_start_datetime,
+            error_message=error_msg,
+            depth_limit=depth_limit,
+        )
+        return (False, error_msg, 0)
 
 
 def verify_setgid_support(path: str) -> tuple[bool, str]:
@@ -668,3 +729,80 @@ def verify_setgid_support(path: str) -> tuple[bool, str]:
             import shutil
 
             shutil.rmtree(test_dir, ignore_errors=True)
+
+
+# ============================================================================
+# Audit Log Helper Functions (Issue #2745)
+# ============================================================================
+
+
+def _log_permission_audit(
+    user_id: int | None,
+    project_id: int | None,
+    path: str,
+    success: bool,
+    files_processed: int,
+    operation_start_time: float,
+    operation_start_datetime: str,
+    error_message: str | None = None,
+    depth_limit: int | None = None,
+) -> None:
+    """Record audit log for shared project permission setup.
+
+    Uses a separate database connection to avoid transaction rollback issues.
+    Failures are logged but never raise exceptions.
+
+    Args:
+        user_id: User ID who initiated the operation.
+        project_id: Project ID for resource_id.
+        path: Project path.
+        success: Whether the operation succeeded.
+        files_processed: Number of files processed.
+        operation_start_time: Unix timestamp when operation started.
+        operation_start_datetime: ISO format datetime when operation started.
+        error_message: Error message if operation failed.
+        depth_limit: Recursion depth limit used.
+    """
+    import time
+
+    try:
+        from app.modules.governance.audit_logger import AuditAction, AuditLogger
+
+        audit_logger = AuditLogger()
+
+        operation_end_time = time.time()
+        duration_seconds = operation_end_time - operation_start_time
+
+        details = {
+            "path": path,
+            "files_processed": files_processed,
+            "operation_start_time": operation_start_datetime,
+            "operation_end_time": datetime.now().isoformat(),
+            "duration_seconds": round(duration_seconds, 2),
+            "success": success,
+        }
+
+        if depth_limit is not None:
+            details["depth_limit"] = depth_limit
+
+        if error_message:
+            details["error_message"] = error_message
+
+        audit_logger.log_action(
+            action=AuditAction.SHARED_PROJECT_PERMISSION_SETUP_COMPLETE,
+            user_id=user_id,
+            resource_type="project",
+            resource_id=str(project_id) if project_id else None,
+            details=details,
+            success=success,
+            error_message=error_message,
+        )
+
+        logger.debug(
+            f"Recorded permission audit log: user_id={user_id}, project_id={project_id}, "
+            f"path={path}, success={success}, files_processed={files_processed}"
+        )
+
+    except Exception as e:
+        # Audit log failure should not affect main operation
+        logger.error(f"Failed to record permission audit log: {e}")
