@@ -144,8 +144,15 @@ class TestDailyUsageSink:
 
 
 class TestConcurrentIncrement:
-    """Test concurrent increment_usage for atomic semantics."""
+    """Test concurrent increment_usage for atomic semantics.
 
+    Note: These tests are marked as 'performance' because they involve
+    concurrent database operations with lock contention, which can be slow.
+    They are excluded from the default CI test matrix (python-core suite
+    uses '-m "not postgres and not performance"').
+    """
+
+    @pytest.mark.performance
     def test_concurrent_increment_sqlite(self):
         """Test atomic increment with concurrent writes (SQLite)."""
         if is_postgresql():
@@ -239,6 +246,7 @@ class TestConcurrentIncrement:
                 assert row["tokens_used"] > 0
                 assert row["request_count"] > 0
 
+    @pytest.mark.performance
     def test_concurrent_increment_postgresql(self):
         """Test atomic increment with concurrent writes (PostgreSQL)."""
         if not is_postgresql():
