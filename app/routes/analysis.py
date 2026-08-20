@@ -94,6 +94,9 @@ def _validate_date_range_or_error(start_date: str | None, end_date: str | None):
     """
     is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
     if not is_valid:
+        # error_code is guaranteed to be str when is_valid is False
+        # (validate_date_range contract: returns error_code: str on failure)
+        assert error_code is not None  # Type narrowing for mypy
         return (
             jsonify(
                 {"success": False, "error": get_error_message(error_code), "error_code": error_code}
@@ -103,6 +106,9 @@ def _validate_date_range_or_error(start_date: str | None, end_date: str | None):
     # Return parsed values (None if both were missing) - Service layer handles defaults
     if parsed_start is None:
         return None, None
+    # When parsed_start is not None, parsed_end is also not None
+    # (validate_date_range contract: both dates parsed successfully on success)
+    assert parsed_end is not None  # Type narrowing for mypy
     return parsed_start.strftime("%Y-%m-%d"), parsed_end.strftime("%Y-%m-%d")
 
 

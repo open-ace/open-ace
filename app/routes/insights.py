@@ -61,15 +61,20 @@ def generate_report():
         language = data.get("language", "zh")  # Default to Chinese
 
         # Issue #2738: Validate date range
-        is_valid, error_code, parsed_start, parsed_end = validate_date_range(
-            start_date, end_date
-        )
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
         if not is_valid:
-            return jsonify({
-                "success": False,
-                "error": get_error_message(error_code),
-                "error_code": error_code
-            }), 400
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(error_code),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
 
         # Apply default values if both are missing
         if parsed_start is None:
@@ -78,6 +83,8 @@ def generate_report():
             start_date = start.strftime("%Y-%m-%d")
             end_date = end.strftime("%Y-%m-%d")
         else:
+            # When parsed_start is not None, parsed_end is also not None
+            assert parsed_end is not None  # Type narrowing for mypy
             start_date = parsed_start.strftime("%Y-%m-%d")
             end_date = parsed_end.strftime("%Y-%m-%d")
 

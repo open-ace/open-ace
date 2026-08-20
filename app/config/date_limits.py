@@ -98,16 +98,14 @@ def is_future_date_allowed() -> bool:
         if hasattr(g, "_allow_future_date"):
             return g._allow_future_date  # type: ignore[no-any-return]
         value = (
-            os.environ.get(ENV_ALLOW_FUTURE_DATE, str(DEFAULT_ALLOW_FUTURE_DATE)).lower()
-            == "true"
+            os.environ.get(ENV_ALLOW_FUTURE_DATE, str(DEFAULT_ALLOW_FUTURE_DATE)).lower() == "true"
         )
         g._allow_future_date = value  # type: ignore[attr-defined]
         return value
     except RuntimeError:
         # Outside application context (e.g., unit tests)
         return (
-            os.environ.get(ENV_ALLOW_FUTURE_DATE, str(DEFAULT_ALLOW_FUTURE_DATE)).lower()
-            == "true"
+            os.environ.get(ENV_ALLOW_FUTURE_DATE, str(DEFAULT_ALLOW_FUTURE_DATE)).lower() == "true"
         )
 
 

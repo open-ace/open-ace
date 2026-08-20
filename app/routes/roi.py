@@ -161,15 +161,20 @@ def get_roi():
         tool_name = request.args.get("tool_name")
 
         # Issue #2738: Validate date range
-        is_valid, error_code, parsed_start, parsed_end = validate_date_range(
-            start_date, end_date
-        )
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
         if not is_valid:
-            return jsonify({
-                "success": False,
-                "error": get_error_message(error_code),
-                "error_code": error_code
-            }), 400
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(error_code),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
 
         # Apply default values if both are missing
         if parsed_start is None:
@@ -178,6 +183,8 @@ def get_roi():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
         else:
+            # When parsed_start is not None, parsed_end is also not None
+            assert parsed_end is not None  # Type narrowing for mypy
             start_date = parsed_start.strftime("%Y-%m-%d")
             end_date = parsed_end.strftime("%Y-%m-%d")
 
@@ -205,15 +212,22 @@ def get_roi_trend():
         user_id = request.args.get("user_id", type=int)
 
         # Issue #2738: Validate months parameter
-        is_valid, error_code, validated_months = validate_time_window(
-            months, "months"
-        )
+        is_valid, error_code, validated_months = validate_time_window(months, "months")
         if not is_valid:
-            return jsonify({
-                "success": False,
-                "error": get_error_message(error_code, param_name="months", min_val=1, max_val=24),
-                "error_code": error_code
-            }), 400
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(
+                            error_code, param_name="months", min_val=1, max_val=24
+                        ),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
 
         try:
             assumptions, assumption_source = _build_roi_assumptions()
@@ -237,15 +251,20 @@ def get_roi_by_tool():
         end_date = request.args.get("end_date")
 
         # Issue #2738: Validate date range
-        is_valid, error_code, parsed_start, parsed_end = validate_date_range(
-            start_date, end_date
-        )
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
         if not is_valid:
-            return jsonify({
-                "success": False,
-                "error": get_error_message(error_code),
-                "error_code": error_code
-            }), 400
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(error_code),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
 
         # Apply default values if both are missing
         if parsed_start is None:
@@ -254,6 +273,8 @@ def get_roi_by_tool():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
         else:
+            # When parsed_start is not None, parsed_end is also not None
+            assert parsed_end is not None  # Type narrowing for mypy
             start_date = parsed_start.strftime("%Y-%m-%d")
             end_date = parsed_end.strftime("%Y-%m-%d")
 
@@ -281,15 +302,20 @@ def get_roi_by_user():
         end_date = request.args.get("end_date")
 
         # Issue #2738: Validate date range
-        is_valid, error_code, parsed_start, parsed_end = validate_date_range(
-            start_date, end_date
-        )
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
         if not is_valid:
-            return jsonify({
-                "success": False,
-                "error": get_error_message(error_code),
-                "error_code": error_code
-            }), 400
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(error_code),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
 
         # Apply default values if both are missing
         if parsed_start is None:
@@ -298,6 +324,8 @@ def get_roi_by_user():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
         else:
+            # When parsed_start is not None, parsed_end is also not None
+            assert parsed_end is not None  # Type narrowing for mypy
             start_date = parsed_start.strftime("%Y-%m-%d")
             end_date = parsed_end.strftime("%Y-%m-%d")
 
@@ -333,15 +361,20 @@ def get_cost_breakdown():
         user_id = request.args.get("user_id", type=int)
 
         # Issue #2738: Validate date range
-        is_valid, error_code, parsed_start, parsed_end = validate_date_range(
-            start_date, end_date
-        )
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
         if not is_valid:
-            return jsonify({
-                "success": False,
-                "error": get_error_message(error_code),
-                "error_code": error_code
-            }), 400
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(error_code),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
 
         # Apply default values if both are missing
         if parsed_start is None:
@@ -350,6 +383,8 @@ def get_cost_breakdown():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
         else:
+            # When parsed_start is not None, parsed_end is also not None
+            assert parsed_end is not None  # Type narrowing for mypy
             start_date = parsed_start.strftime("%Y-%m-%d")
             end_date = parsed_end.strftime("%Y-%m-%d")
 
@@ -387,15 +422,20 @@ def get_daily_costs():
         tool_name = request.args.get("tool_name")
 
         # Issue #2738: Validate date range
-        is_valid, error_code, parsed_start, parsed_end = validate_date_range(
-            start_date, end_date
-        )
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
         if not is_valid:
-            return jsonify({
-                "success": False,
-                "error": get_error_message(error_code),
-                "error_code": error_code
-            }), 400
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(error_code),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
 
         # Apply default values if both are missing
         if parsed_start is None:
@@ -404,6 +444,8 @@ def get_daily_costs():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
         else:
+            # When parsed_start is not None, parsed_end is also not None
+            assert parsed_end is not None  # Type narrowing for mypy
             start_date = parsed_start.strftime("%Y-%m-%d")
             end_date = parsed_end.strftime("%Y-%m-%d")
 
@@ -431,15 +473,20 @@ def get_roi_summary():
         user_id = request.args.get("user_id", type=int)
 
         # Issue #2738: Validate date range
-        is_valid, error_code, parsed_start, parsed_end = validate_date_range(
-            start_date, end_date
-        )
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
         if not is_valid:
-            return jsonify({
-                "success": False,
-                "error": get_error_message(error_code),
-                "error_code": error_code
-            }), 400
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(error_code),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
 
         # Apply default values if both are missing
         if parsed_start is None:
@@ -448,6 +495,8 @@ def get_roi_summary():
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
         else:
+            # When parsed_start is not None, parsed_end is also not None
+            assert parsed_end is not None  # Type narrowing for mypy
             start_date = parsed_start.strftime("%Y-%m-%d")
             end_date = parsed_end.strftime("%Y-%m-%d")
 
@@ -477,15 +526,22 @@ def get_optimization_suggestions():
         days = request.args.get("days", default=30, type=int)
 
         # Issue #2738: Validate days parameter
-        is_valid, error_code, validated_days = validate_time_window(
-            days, "days"
-        )
+        is_valid, error_code, validated_days = validate_time_window(days, "days")
         if not is_valid:
-            return jsonify({
-                "success": False,
-                "error": get_error_message(error_code, param_name="days", min_val=1, max_val=365),
-                "error_code": error_code
-            }), 400
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(
+                            error_code, param_name="days", min_val=1, max_val=365
+                        ),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
 
         optimizer = CostOptimizer()
         suggestions = optimizer.analyze(validated_days, tenant_id=_caller_tenant_id())
@@ -503,15 +559,22 @@ def get_optimization_cost_trend():
         days = request.args.get("days", default=30, type=int)
 
         # Issue #2738: Validate days parameter
-        is_valid, error_code, validated_days = validate_time_window(
-            days, "days"
-        )
+        is_valid, error_code, validated_days = validate_time_window(days, "days")
         if not is_valid:
-            return jsonify({
-                "success": False,
-                "error": get_error_message(error_code, param_name="days", min_val=1, max_val=365),
-                "error_code": error_code
-            }), 400
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(
+                            error_code, param_name="days", min_val=1, max_val=365
+                        ),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
 
         optimizer = CostOptimizer()
         trend = optimizer.get_cost_trend(validated_days, tenant_id=_caller_tenant_id())
@@ -541,15 +604,22 @@ def get_efficiency_report():
         algorithm_version = request.args.get("algorithm_version", default=None, type=str)
 
         # Issue #2738: Validate days parameter
-        is_valid, error_code, validated_days = validate_time_window(
-            days, "days"
-        )
+        is_valid, error_code, validated_days = validate_time_window(days, "days")
         if not is_valid:
-            return jsonify({
-                "success": False,
-                "error": get_error_message(error_code, param_name="days", min_val=1, max_val=365),
-                "error_code": error_code
-            }), 400
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(
+                            error_code, param_name="days", min_val=1, max_val=365
+                        ),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
 
         # Validate task_type parameter
         valid_task_types = ["GENERAL", "CODE_GENERATION", "DOCUMENT_ANALYSIS", "CONVERSATION"]

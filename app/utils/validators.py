@@ -232,9 +232,7 @@ def validate_date_range(
         return False, ERROR_DATE_RANGE_EXCEEDED, None, None
 
     # Priority 5: Future date check
-    allow_future_resolved = (
-        allow_future if allow_future is not None else is_future_date_allowed()
-    )
+    allow_future_resolved = allow_future if allow_future is not None else is_future_date_allowed()
     if not allow_future_resolved:
         # Use UTC time for consistency with existing code (roi.py:161)
         now_utc = datetime.now(timezone.utc).date()
