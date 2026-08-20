@@ -527,8 +527,20 @@ class TestModelDistributionAccumulation:
 
         # First order
         mock_db.fetch_all.return_value = [
-            {"tool_name": "t1", "model": "m1", "date": "d", "input_tokens": 100, "output_tokens": 20},
-            {"tool_name": "t2", "model": "m1", "date": "d", "input_tokens": 30, "output_tokens": 10},
+            {
+                "tool_name": "t1",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 100,
+                "output_tokens": 20,
+            },
+            {
+                "tool_name": "t2",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 30,
+                "output_tokens": 10,
+            },
             {"tool_name": "t3", "model": "m2", "date": "d", "input_tokens": 50, "output_tokens": 5},
         ]
         report1 = opt.get_efficiency_report(days=30)
@@ -537,8 +549,20 @@ class TestModelDistributionAccumulation:
         opt2, mock_db2 = self._make_optimizer()
         mock_db2.fetch_all.return_value = [
             {"tool_name": "t3", "model": "m2", "date": "d", "input_tokens": 50, "output_tokens": 5},
-            {"tool_name": "t2", "model": "m1", "date": "d", "input_tokens": 30, "output_tokens": 10},
-            {"tool_name": "t1", "model": "m1", "date": "d", "input_tokens": 100, "output_tokens": 20},
+            {
+                "tool_name": "t2",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 30,
+                "output_tokens": 10,
+            },
+            {
+                "tool_name": "t1",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 100,
+                "output_tokens": 20,
+            },
         ]
         report2 = opt2.get_efficiency_report(days=30)
 
@@ -550,23 +574,47 @@ class TestModelDistributionAccumulation:
         """Distribution sum should equal total_tokens."""
         opt, mock_db = self._make_optimizer()
         mock_db.fetch_all.return_value = [
-            {"tool_name": "t1", "model": "m1", "date": "d", "input_tokens": 100, "output_tokens": 20},
-            {"tool_name": "t2", "model": "m1", "date": "d", "input_tokens": 30, "output_tokens": 10},
+            {
+                "tool_name": "t1",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 100,
+                "output_tokens": 20,
+            },
+            {
+                "tool_name": "t2",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 30,
+                "output_tokens": 10,
+            },
             {"tool_name": "t3", "model": "m2", "date": "d", "input_tokens": 50, "output_tokens": 5},
         ]
         report = opt.get_efficiency_report(days=30)
 
         distribution_sum = sum(report["model_distribution"].values())
-        assert distribution_sum == report["total_tokens"], (
-            f"Distribution sum {distribution_sum} != total_tokens {report['total_tokens']}"
-        )
+        assert (
+            distribution_sum == report["total_tokens"]
+        ), f"Distribution sum {distribution_sum} != total_tokens {report['total_tokens']}"
 
     def test_unique_models_count(self):
         """unique_models should equal number of distinct model keys."""
         opt, mock_db = self._make_optimizer()
         mock_db.fetch_all.return_value = [
-            {"tool_name": "t1", "model": "m1", "date": "d", "input_tokens": 100, "output_tokens": 20},
-            {"tool_name": "t2", "model": "m1", "date": "d", "input_tokens": 30, "output_tokens": 10},
+            {
+                "tool_name": "t1",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 100,
+                "output_tokens": 20,
+            },
+            {
+                "tool_name": "t2",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 30,
+                "output_tokens": 10,
+            },
             {"tool_name": "t3", "model": "m2", "date": "d", "input_tokens": 50, "output_tokens": 5},
         ]
         report = opt.get_efficiency_report(days=30)
