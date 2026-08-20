@@ -13,7 +13,7 @@ import logging
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required
-from app.auth.permissions import is_platform_level_role
+from app.auth.permissions import is_platform_admin_role, is_platform_level_role
 from app.models.user import User
 from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
 from app.repositories.user_repo import UserRepository
@@ -66,27 +66,27 @@ def get_all_rules():
 
     Issue #2180: Tenant admin sees only rules for users in their tenant.
     Platform admin sees all rules.
+
+    Issue #2617: Use is_platform_admin_role for consistent role checking.
     """
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
 
     repo = ToolAccountMappingRuleRepository()
 
-    if user_role == "tenant_admin":
-        # Tenant admin: only see rules for users in their tenant
+    if is_platform_admin_role(user_role):
+        # Platform admin sees all rules.
+        # Platform-level roles have global access (platform_admin always, admin only in non-strict mode).
+        # Issue #2286: Centralized role check via is_platform_admin_role.
+        rules = repo.get_all()
+    else:
+        # Non-platform admins must be tenant-scoped.
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         # Get rules filtered by tenant's users
         all_rules = repo.get_all()
         tenant_user_ids = set(_get_tenant_scoped_user_ids(user_tenant_id))
         rules = [r for r in all_rules if r.user_id in tenant_user_ids]
-    elif User.is_admin_role(user_role):
-        # Platform admin and legacy admin: can see all rules.
-        # Issue #2286: 'admin' is treated as 'platform_admin' for backward compatibility,
-        # regardless of whether tenant_id is set.
-        rules = repo.get_all()
-    else:
-        return jsonify({"error": "Permission denied"}), 403
 
     return jsonify([rule.to_dict() for rule in rules])
 
@@ -98,13 +98,15 @@ def get_user_rules(user_id: int):
     Get mapping rules for a specific user.
 
     Issue #2180: Validate user belongs to caller's tenant.
+    Issue #2617: Use is_platform_admin_role for consistent role checking.
     """
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
 
-    # Validate user belongs to caller's tenant (tenant admin only).
-    # Issue #2286: 'admin' and 'platform_admin' have global access regardless of tenant_id.
-    if user_role == "tenant_admin":
+    # Validate user belongs to caller's tenant (non-platform admins only).
+    # Platform-level roles have global access (platform_admin always, admin only in non-strict mode).
+    # Issue #2286: Centralized role check via is_platform_admin_role.
+    if not is_platform_admin_role(user_role):
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         if not _validate_user_in_tenant(user_id, user_tenant_id):
@@ -122,6 +124,7 @@ def create_rule():
     Create a new mapping rule.
 
     Issue #2180: Validate user_id belongs to caller's tenant.
+    Issue #2617: Use is_platform_admin_role for consistent role checking.
     """
     data = request.get_json()
     if not data:
@@ -135,9 +138,10 @@ def create_rule():
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
 
-    # Validate user belongs to caller's tenant (tenant admin only).
-    # Issue #2286: 'admin' and 'platform_admin' have global access regardless of tenant_id.
-    if user_role == "tenant_admin":
+    # Validate user belongs to caller's tenant (non-platform admins only).
+    # Platform-level roles have global access (platform_admin always, admin only in non-strict mode).
+    # Issue #2286: Centralized role check via is_platform_admin_role.
+    if not is_platform_admin_role(user_role):
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         if not _validate_user_in_tenant(user_id, user_tenant_id):
@@ -168,6 +172,7 @@ def update_rule(id: int):
     Update a mapping rule.
 
     Issue #2180: Validate rule belongs to user in caller's tenant.
+    Issue #2617: Use is_platform_admin_role for consistent role checking.
     """
     data = request.get_json()
     if not data:
@@ -183,15 +188,18 @@ def update_rule(id: int):
     if not existing_rule:
         return jsonify({"error": "Rule not found"}), 404
 
-    if user_role == "tenant_admin":
+    # Validate user belongs to caller's tenant (non-platform admins only).
+    # Platform-level roles have global access (platform_admin always, admin only in non-strict mode).
+    # Issue #2286: Centralized role check via is_platform_admin_role.
+    if not is_platform_admin_role(user_role):
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         if not _validate_user_in_tenant(existing_rule.user_id, user_tenant_id):
             return jsonify({"error": "Rule not found"}), 404
 
-    # If user_id is being changed, validate new user too (tenant admin only)
+    # If user_id is being changed, validate new user too (non-platform admins only)
     new_user_id = data.get("user_id")
-    if new_user_id and user_role == "tenant_admin":
+    if new_user_id and not is_platform_admin_role(user_role):
         if not _validate_user_in_tenant(new_user_id, user_tenant_id):
             return jsonify({"error": "Cannot assign rule to user in different tenant"}), 403
 
@@ -220,6 +228,7 @@ def delete_rule(id: int):
     Delete a mapping rule.
 
     Issue #2180: Validate rule belongs to user in caller's tenant.
+    Issue #2617: Use is_platform_admin_role for consistent role checking.
     """
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
@@ -231,7 +240,10 @@ def delete_rule(id: int):
     if not existing_rule:
         return jsonify({"error": "Rule not found"}), 404
 
-    if user_role == "tenant_admin":
+    # Validate user belongs to caller's tenant (non-platform admins only).
+    # Platform-level roles have global access (platform_admin always, admin only in non-strict mode).
+    # Issue #2286: Centralized role check via is_platform_admin_role.
+    if not is_platform_admin_role(user_role):
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         if not _validate_user_in_tenant(existing_rule.user_id, user_tenant_id):
@@ -252,13 +264,15 @@ def generate_default_rules(user_id: int):
 
     Issue #2131: Return detailed results with created and skipped counts.
     Issue #2180: Validate user belongs to caller's tenant.
+    Issue #2617: Use is_platform_admin_role for consistent role checking.
     """
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
 
-    # Validate user belongs to caller's tenant (tenant admin only).
-    # Issue #2286: 'admin' and 'platform_admin' have global access regardless of tenant_id.
-    if user_role == "tenant_admin":
+    # Validate user belongs to caller's tenant (non-platform admins only).
+    # Platform-level roles have global access (platform_admin always, admin only in non-strict mode).
+    # Issue #2286: Centralized role check via is_platform_admin_role.
+    if not is_platform_admin_role(user_role):
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         if not _validate_user_in_tenant(user_id, user_tenant_id):
