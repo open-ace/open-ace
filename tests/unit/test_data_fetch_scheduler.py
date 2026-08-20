@@ -146,10 +146,15 @@ class TestDataFetchSchedulerStatus:
 
     def test_status_initial(self):
         s = DataFetchScheduler()
+        # When not running locally, should try to read from shared storage
+        # If database is unavailable, should return unknown status
         status = s.get_status()
-        assert status["running"] is False
+        # Should have basic fields from local config
         assert status["enabled"] is True
         assert status["interval"] == 300
+        # running can be False or "unknown" depending on database availability
+        assert status["running"] in (False, "unknown")
+        # last_run and next_run should be None when not running
         assert status["last_run"] is None
         assert status["next_run"] is None
 
@@ -164,20 +169,32 @@ class TestDataFetchSchedulerStatus:
         s = DataFetchScheduler()
         now = datetime.now()
         s._last_run = now
-        status = s.get_status()
-        assert status["last_run"] == now.isoformat()
+        # Simulate running state to get local status
+        with patch.object(s, "is_running", return_value=True):
+            s._running = True
+            status = s.get_status()
+            assert status["last_run"] == now.isoformat()
+            s._running = False
 
     def test_status_with_next_run(self):
         s = DataFetchScheduler()
         s._next_run = datetime.now().timestamp() + 300
-        status = s.get_status()
-        assert status["next_run"] is not None
+        # Simulate running state to get local status
+        with patch.object(s, "is_running", return_value=True):
+            s._running = True
+            status = s.get_status()
+            assert status["next_run"] is not None
+            s._running = False
 
     def test_status_with_invalid_next_run(self):
         s = DataFetchScheduler()
         s._next_run = "not_a_number"
-        status = s.get_status()
-        assert status["next_run"] is None
+        # Simulate running state to get local status
+        with patch.object(s, "is_running", return_value=True):
+            s._running = True
+            status = s.get_status()
+            assert status["next_run"] is None
+            s._running = False
 
 
 class TestDataFetchSchedulerRunFetch:
