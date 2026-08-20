@@ -41,6 +41,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 import pytest
 import requests
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import expect, sync_playwright
 
 # ── Config ──
@@ -350,12 +351,32 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port):
         create_btn = modal.locator(".btn-primary").last
         create_btn.click()
         log("Phase 4", "Clicked Create - mock server will handle connection")
-        time.sleep(3)
-        take_screenshot(page, "p4-02-terminal-created")
 
-        # ── Verify: xterm.js rendered ──
+        # The terminal tab mounts asynchronously (tab switch, React mount,
+        # then a dynamic import of the @xterm/xterm chunk); slow CI runners
+        # regularly exceed any fixed sleep, so wait for xterm to actually
+        # attach and dump browser diagnostics if it never does.
+        console_errors: list[str] = []
+        page.on(
+            "console",
+            lambda msg: (
+                console_errors.append(f"[console.{msg.type}] {msg.text}")
+                if msg.type in ("error", "warning")
+                else None
+            ),
+        )
+        page.on("pageerror", lambda err: console_errors.append(f"[pageerror] {err}"))
+
         xterm_screen = page.locator(".xterm-screen")
-        assert xterm_screen.count() > 0, "xterm.js terminal not rendered (no .xterm-screen)"
+        try:
+            xterm_screen.wait_for(state="visible", timeout=30000)
+        except PlaywrightTimeoutError:
+            take_screenshot(page, "error-no-xterm")
+            log("Phase 4", "body text: " + page.locator("body").inner_text()[:400])
+            if console_errors:
+                log("Phase 4", "browser errors: " + " | ".join(console_errors[-10:]))
+            raise
+        take_screenshot(page, "p4-02-terminal-created")
         log("Phase 4", "xterm.js terminal rendered!")
 
         # ── Verify: dark background (terminal area) ──
