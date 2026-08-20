@@ -777,9 +777,7 @@ class CpParser(FileChangeParser):
         if re.search(r"-[a-zA-Z]*a[a-zA-Z]*\b", command):
             return True
         # Check for --recursive long option
-        if re.search(r"--recursive\b", command):
-            return True
-        return False
+        return bool(re.search(r"--recursive\b", command))
 
     def _resolve_path(self, path: str, project_path: str) -> str | None:
         if not path:
