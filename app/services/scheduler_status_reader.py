@@ -206,23 +206,11 @@ class SchedulerStatusReader:
         next_run = self._calculate_next_run(last_run_at, heartbeat_at, running, interval_seconds)
 
         # Format timestamps
-        heartbeat_str = None
-        if heartbeat_at:
-            heartbeat_str = (
-                heartbeat_at.isoformat()
-                if hasattr(heartbeat_at, "isoformat")
-                else str(heartbeat_at)
-            )
+        heartbeat_str = heartbeat_at.isoformat() if heartbeat_at else None
 
-        last_run_str = None
-        if last_run_at:
-            last_run_str = (
-                last_run_at.isoformat() if hasattr(last_run_at, "isoformat") else str(last_run_at)
-            )
+        last_run_str = last_run_at.isoformat() if last_run_at else None
 
-        next_run_str = None
-        if next_run:
-            next_run_str = next_run.isoformat() if hasattr(next_run, "isoformat") else str(next_run)
+        next_run_str = next_run.isoformat() if next_run else None
 
         return {
             "running": running,
