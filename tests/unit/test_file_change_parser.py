@@ -11,10 +11,13 @@ from datetime import datetime, timezone
 import pytest
 
 from shared.file_change_parser import (
+    EditParser,
     FileChangeParserRegistry,
     FileChangeRecord,
     MkdirParser,
     ParserContext,
+    RmParser,
+    WriteFileParser,
     append_file_change_blocks,
     extract_file_changes,
 )
@@ -111,6 +114,175 @@ class TestMkdirParser:
             assert records[0].is_directory is True
             assert records[0].session_id == "test-session"
             assert records[0].source == "bash_mkdir"
+
+
+class TestRmParser:
+    """Tests for RmParser."""
+
+    def setup_method(self):
+        """Clear registry before each test."""
+        FileChangeParserRegistry.clear()
+        FileChangeParserRegistry.register(RmParser())
+
+    def test_can_parse_bash_rm(self):
+        """Test that parser recognizes rm in Bash commands."""
+        parser = RmParser()
+        assert parser.can_parse("Bash", {"command": "rm foo"}) is True
+        assert parser.can_parse("Bash", {"command": "rm -rf foo/bar"}) is True
+        assert parser.can_parse("Bash", {"command": "ls -la"}) is False
+        assert parser.can_parse("Write", {"file_path": "/tmp/test.txt"}) is False
+
+    def test_extract_paths_simple(self):
+        """Test extracting paths from simple rm command."""
+        parser = RmParser()
+        paths = parser._extract_paths("rm foo")
+        assert "foo" in paths
+
+    def test_extract_paths_with_flags(self):
+        """Test extracting paths from rm -rf command."""
+        parser = RmParser()
+        paths = parser._extract_paths("rm -rf foo/bar")
+        assert len(paths) >= 1
+
+    def test_is_directory_flag(self):
+        """Test detecting directory deletion flag."""
+        parser = RmParser()
+        assert parser._is_directory_flag("rm -rf foo") is True
+        assert parser._is_directory_flag("rm -r foo") is True
+        assert parser._is_directory_flag("rm foo") is False
+
+    def test_resolve_path_inherited(self):
+        """Test that RmParser inherits _resolve_path from base class."""
+        parser = RmParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            abs_path = parser._resolve_path("foo/bar", tmpdir)
+            expected = os.path.normpath(os.path.join(tmpdir, "foo/bar"))
+            assert abs_path == expected
+
+    def test_is_safe_path_dangerous_chars(self):
+        """Test that dangerous characters are rejected (security enhancement)."""
+        parser = RmParser()
+        # After refactoring, RmParser should inherit dangerous char check from base class
+        assert parser._is_safe_path("foo; rm -rf /", "/tmp") is False
+        assert parser._is_safe_path("$(whoami)", "/tmp") is False
+        assert parser._is_safe_path("foo`bar", "/tmp") is False
+
+    def test_parse_creates_record(self):
+        """Test that parse creates FileChangeRecord."""
+        parser = RmParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test-session",
+                tool_use_id="tool-123",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            records = parser.parse("Bash", {"command": "rm test-file"}, context)
+
+            assert len(records) >= 1
+            assert records[0].change_type == "delete"
+            assert records[0].session_id == "test-session"
+            assert records[0].source == "bash_rm"
+
+
+class TestWriteFileParser:
+    """Tests for WriteFileParser."""
+
+    def setup_method(self):
+        """Clear registry before each test."""
+        FileChangeParserRegistry.clear()
+        FileChangeParserRegistry.register(WriteFileParser())
+
+    def test_can_parse_write_file(self):
+        """Test that parser recognizes write_file tool."""
+        parser = WriteFileParser()
+        assert parser.can_parse("write_file", {"file_path": "/tmp/test.txt"}) is True
+        assert parser.can_parse("Write", {"file_path": "/tmp/test.txt"}) is True
+        assert parser.can_parse("Bash", {"command": "mkdir foo"}) is False
+
+    def test_parse_creates_record(self):
+        """Test that parse creates FileChangeRecord."""
+        parser = WriteFileParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test-session",
+                tool_use_id="tool-123",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            records = parser.parse("Write", {"file_path": "test-file.txt"}, context)
+
+            assert len(records) == 1
+            assert records[0].change_type == "modify"
+            assert records[0].is_directory is False
+            assert records[0].session_id == "test-session"
+            assert records[0].source == "write_file"
+
+    def test_resolve_path_inherited(self):
+        """Test that WriteFileParser inherits _resolve_path from base class."""
+        parser = WriteFileParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            abs_path = parser._resolve_path("foo/bar.txt", tmpdir)
+            expected = os.path.normpath(os.path.join(tmpdir, "foo/bar.txt"))
+            assert abs_path == expected
+
+    def test_is_safe_path_dangerous_chars(self):
+        """Test that dangerous characters are rejected (security enhancement)."""
+        parser = WriteFileParser()
+        # After refactoring, WriteFileParser should inherit dangerous char check from base class
+        assert parser._is_safe_path("foo; rm -rf /", "/tmp") is False
+        assert parser._is_safe_path("$(whoami)", "/tmp") is False
+        assert parser._is_safe_path("foo`bar", "/tmp") is False
+
+
+class TestEditParser:
+    """Tests for EditParser."""
+
+    def setup_method(self):
+        """Clear registry before each test."""
+        FileChangeParserRegistry.clear()
+        FileChangeParserRegistry.register(EditParser())
+
+    def test_can_parse_edit(self):
+        """Test that parser recognizes edit tool."""
+        parser = EditParser()
+        assert parser.can_parse("edit", {"file_path": "/tmp/test.txt"}) is True
+        assert parser.can_parse("Write", {"file_path": "/tmp/test.txt"}) is False
+        assert parser.can_parse("Bash", {"command": "mkdir foo"}) is False
+
+    def test_parse_creates_record(self):
+        """Test that parse creates FileChangeRecord."""
+        parser = EditParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test-session",
+                tool_use_id="tool-123",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            records = parser.parse("edit", {"file_path": "test-file.txt"}, context)
+
+            assert len(records) == 1
+            assert records[0].change_type == "modify"
+            assert records[0].is_directory is False
+            assert records[0].session_id == "test-session"
+            assert records[0].source == "edit"
+
+    def test_resolve_path_inherited(self):
+        """Test that EditParser inherits _resolve_path from base class."""
+        parser = EditParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            abs_path = parser._resolve_path("foo/bar.txt", tmpdir)
+            expected = os.path.normpath(os.path.join(tmpdir, "foo/bar.txt"))
+            assert abs_path == expected
+
+    def test_is_safe_path_dangerous_chars(self):
+        """Test that dangerous characters are rejected (security enhancement)."""
+        parser = EditParser()
+        # After refactoring, EditParser should inherit dangerous char check from base class
+        assert parser._is_safe_path("foo; rm -rf /", "/tmp") is False
+        assert parser._is_safe_path("$(whoami)", "/tmp") is False
+        assert parser._is_safe_path("foo`bar", "/tmp") is False
 
 
 class TestFileChangeParserRegistry:
