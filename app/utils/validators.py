@@ -318,6 +318,12 @@ def validate_project_name(name: str) -> tuple[bool, str | None]:
         # Name is optional, empty string is valid
         return True, None
 
+    # Strip leading/trailing spaces to avoid storage and display issues
+    name = name.strip()
+
+    if not name:
+        return False, "Project name cannot be empty or whitespace only"
+
     if len(name) > 255:
         return False, "Project name must be less than 255 characters"
 
@@ -326,9 +332,9 @@ def validate_project_name(name: str) -> tuple[bool, str | None]:
     if re.search(r"[\t\n\r\f\v]", name):
         return False, "Project name cannot contain tabs or newlines"
 
-    # Allow alphanumeric, underscore, hyphen, space, and Chinese characters
-    # Disallow: < > " ' & / \ and other special characters that may cause XSS or path issues
-    pattern = r"^[a-zA-Z0-9_\-\s\u4e00-\u9fff\u3400-\u4dbf]+$"
+    # Allow alphanumeric, underscore, hyphen, regular space, and Chinese characters
+    # Using literal space instead of \s to avoid matching Unicode whitespace (\xa0, \u2000, etc.)
+    pattern = r"^[a-zA-Z0-9_\- \u4e00-\u9fff\u3400-\u4dbf]+$"
     if not re.match(pattern, name):
         return False, (
             "Project name can only contain letters, numbers, underscores, "

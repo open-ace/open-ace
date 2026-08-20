@@ -813,13 +813,14 @@ class TestValidateProjectName:
 
     # Edge cases
     def test_whitespace_only(self):
-        """Whitespace-only name should be valid (spaces are allowed)."""
+        """Whitespace-only name should be invalid."""
         is_valid, msg = validate_project_name("   ")
-        assert is_valid is True
-        assert msg is None
+        assert is_valid is False
+        assert msg is not None
+        assert "empty or whitespace" in msg
 
     def test_leading_trailing_spaces(self):
-        """Leading/trailing spaces should be valid (spaces are allowed)."""
+        """Leading/trailing spaces should be stripped; stripped name should pass."""
         is_valid, msg = validate_project_name("  valid project  ")
         assert is_valid is True
         assert msg is None
@@ -847,6 +848,19 @@ class TestValidateProjectName:
         is_valid, msg = validate_project_name("project\x00name")
         assert is_valid is False
         assert msg is not None
+
+    def test_unicode_nbsp_rejected(self):
+        """Unicode non-breaking space (\\xa0) should be invalid."""
+        is_valid, msg = validate_project_name("project\xa0name")
+        assert is_valid is False
+        assert msg is not None
+
+    def test_unicode_width_spaces_rejected(self):
+        """Unicode various width spaces should be invalid."""
+        for ws_char in ["\u2000", "\u2001", "\u200a", "\u3000"]:
+            is_valid, msg = validate_project_name(f"project{ws_char}name")
+            assert is_valid is False, f"Expected {repr(ws_char)} to be rejected"
+            assert msg is not None
 
     # Security test cases
     @pytest.mark.parametrize(
