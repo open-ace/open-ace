@@ -153,7 +153,7 @@ def start_mock_terminal_server():
 
     async def run_server():
         async with websockets.serve(
-            handle_connection, "localhost", 0, subprotocols=["binary"]
+            handle_connection, "127.0.0.1", 0, subprotocols=["binary"]
         ) as server:
             port_holder[0] = server.sockets[0].getsockname()[1]
             await asyncio.Future()  # run forever
@@ -283,7 +283,9 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port):
         log("Phase 4", "SKIPPED - websockets package not available")
         return
 
-    mock_ws_url = f"ws://localhost:{mock_ws_port}"
+    # 127.0.0.1 (not localhost): on Linux CI chromium resolves localhost to
+    # ::1 first, and the mock server only listens on IPv4.
+    mock_ws_url = f"ws://127.0.0.1:{mock_ws_port}"
     log("Phase 4", f"Mock terminal server running on port {mock_ws_port}")
 
     # Intercept start_terminal API: return mock server info directly
@@ -355,26 +357,40 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port):
         # The terminal tab mounts asynchronously (tab switch, React mount,
         # then a dynamic import of the @xterm/xterm chunk); slow CI runners
         # regularly exceed any fixed sleep, so wait for xterm to actually
-        # attach and dump browser diagnostics if it never does.
-        console_errors: list[str] = []
-        page.on(
+        # attach. Diagnostics attach at the context level so they survive a
+        # full-page navigation, and capture every console level because the
+        # app logs its progress ([Terminal] ... / [TerminalTab] ...) as info.
+        browser_log: list[str] = []
+        page.context.on(
             "console",
-            lambda msg: (
-                console_errors.append(f"[console.{msg.type}] {msg.text}")
-                if msg.type in ("error", "warning")
-                else None
-            ),
+            lambda msg: browser_log.append(f"[console.{msg.type}] {msg.text[:200]}"),
         )
-        page.on("pageerror", lambda err: console_errors.append(f"[pageerror] {err}"))
+        page.context.on("pageerror", lambda err: browser_log.append(f"[pageerror] {err}"))
+        page.context.on(
+            "requestfailed",
+            lambda req: browser_log.append(f"[requestfailed] {req.method} {req.url} {req.failure}"),
+        )
 
         xterm_screen = page.locator(".xterm-screen")
         try:
             xterm_screen.wait_for(state="visible", timeout=30000)
         except PlaywrightTimeoutError:
             take_screenshot(page, "error-no-xterm")
+            log("Phase 4", f"url: {page.url}")
+            try:
+                nav = page.evaluate(
+                    "performance.getEntriesByType('navigation')"
+                    ".map(e => e.type + ' -> ' + e.name)"
+                )
+                root_len = page.evaluate(
+                    "(document.getElementById('root') || {}).innerHTML?.length ?? -1"
+                )
+                log("Phase 4", f"navigation: {nav}; root innerHTML length: {root_len}")
+            except Exception as exc:  # noqa: BLE001 - diagnostics only
+                log("Phase 4", f"page evaluation failed: {exc}")
             log("Phase 4", "body text: " + page.locator("body").inner_text()[:400])
-            if console_errors:
-                log("Phase 4", "browser errors: " + " | ".join(console_errors[-10:]))
+            if browser_log:
+                log("Phase 4", "browser tail: " + " | ".join(browser_log[-25:]))
             raise
         take_screenshot(page, "p4-02-terminal-created")
         log("Phase 4", "xterm.js terminal rendered!")
