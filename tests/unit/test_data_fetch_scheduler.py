@@ -396,7 +396,7 @@ class TestDataFetchSchedulerRunFetch:
         mock_dingtalk,
         mock_ds_repo,
     ):
-        """When some scripts fail, status=completed with warning."""
+        """When some scripts fail, status=partial. Issue #2822."""
         mock_leader.return_value.try_acquire_leadership.return_value = True
         mock_fetch.return_value = {
             "qwen": {"success": True},
@@ -411,7 +411,7 @@ class TestDataFetchSchedulerRunFetch:
 
         mock_leader.return_value.record_run.assert_called_once()
         call_args = mock_leader.return_value.record_run.call_args[0]
-        assert call_args[0] == "completed"  # partial failure is still "completed"
+        assert call_args[0] == "partial"  # Issue #2822: partial failure has distinct status
         assert "Partial failure" in call_args[2]
         assert "codex" in call_args[2]
         assert "zcode" in call_args[2]
@@ -839,3 +839,213 @@ class TestGlobalSchedulerInstance:
     def test_global_instance_exists(self):
         assert scheduler is not None
         assert isinstance(scheduler, DataFetchScheduler)
+
+
+class TestSchedulerRunStatus:
+    """Test scheduler_run_status module. Issue #2822."""
+
+    def setup_method(self):
+        DataFetchScheduler._instance = None
+
+    def test_compute_status_all_success(self):
+        """All tools successful -> completed."""
+        from app.services.scheduler_run_status import compute_data_fetch_status
+
+        results = {"tool1": {"success": True}, "tool2": {"success": True}}
+        status, error_msg, summary = compute_data_fetch_status(results)
+
+        assert status == "completed"
+        assert error_msg is None
+        assert summary["status"] == "completed"
+        assert summary["tools_total"] == 2
+        assert summary["tools_failed"] == 0
+
+    def test_compute_status_all_failed(self):
+        """All tools failed -> failed."""
+        from app.services.scheduler_run_status import compute_data_fetch_status
+
+        results = {"tool1": {"success": False}, "tool2": {"success": False}}
+        status, error_msg, summary = compute_data_fetch_status(results)
+
+        assert status == "failed"
+        assert "All fetch scripts failed" in error_msg
+        assert summary["status"] == "failed"
+        assert summary["tools_failed"] == 2
+
+    def test_compute_status_partial_failure(self):
+        """Partial failure -> partial."""
+        from app.services.scheduler_run_status import compute_data_fetch_status
+
+        results = {"tool1": {"success": True}, "tool2": {"success": False}}
+        status, error_msg, summary = compute_data_fetch_status(results)
+
+        assert status == "partial"
+        assert "Partial failure" in error_msg
+        assert summary["status"] == "partial"
+        assert summary["tools_failed"] == 1
+        assert "tool2" in summary["failed_tools"]
+
+    def test_compute_status_partial_boundary_single_failure(self):
+        """5 tools with 1 failure -> partial (not failed)."""
+        from app.services.scheduler_run_status import compute_data_fetch_status
+
+        results = {
+            "tool1": {"success": True},
+            "tool2": {"success": True},
+            "tool3": {"success": True},
+            "tool4": {"success": True},
+            "tool5": {"success": False},
+        }
+        status, error_msg, summary = compute_data_fetch_status(results)
+
+        assert status == "partial"
+        assert summary["status"] == "partial"
+        assert summary["tools_failed"] == 1
+
+    def test_compute_status_partial_boundary_most_failed(self):
+        """5 tools with 4 failures -> partial (not failed)."""
+        from app.services.scheduler_run_status import compute_data_fetch_status
+
+        results = {
+            "tool1": {"success": True},
+            "tool2": {"success": False},
+            "tool3": {"success": False},
+            "tool4": {"success": False},
+            "tool5": {"success": False},
+        }
+        status, error_msg, summary = compute_data_fetch_status(results)
+
+        assert status == "partial"
+        assert summary["status"] == "partial"
+        assert summary["tools_failed"] == 4
+
+    def test_compute_status_none_results(self):
+        """None results -> failed."""
+        from app.services.scheduler_run_status import compute_data_fetch_status
+
+        status, error_msg, summary = compute_data_fetch_status(None)
+
+        assert status == "failed"
+        assert "unexpected error" in error_msg.lower()
+        assert summary["status"] == "failed"
+
+    def test_compute_status_empty_results(self):
+        """Empty results -> completed."""
+        from app.services.scheduler_run_status import compute_data_fetch_status
+
+        status, error_msg, summary = compute_data_fetch_status({})
+
+        assert status == "completed"
+        assert error_msg is None
+        assert summary["status"] == "completed"
+        assert summary["tools_total"] == 0
+
+    def test_compute_status_skipped_results(self):
+        """Skipped results -> skipped."""
+        from app.services.scheduler_run_status import compute_data_fetch_status
+
+        results = {"_skipped": True}
+        status, error_msg, summary = compute_data_fetch_status(results)
+
+        assert status == "skipped"
+        assert "Concurrent" in error_msg
+        assert summary["status"] == "skipped"
+
+    def test_validate_status_valid(self):
+        """Valid status values."""
+        from app.services.scheduler_run_status import validate_status
+
+        assert validate_status("completed") is True
+        assert validate_status("partial") is True
+        assert validate_status("failed") is True
+        assert validate_status("skipped") is True
+
+    def test_validate_status_invalid(self):
+        """Invalid status values."""
+        from app.services.scheduler_run_status import validate_status
+
+        assert validate_status("unknown") is False
+        assert validate_status("") is False
+        assert validate_status("PARTIAL") is False
+
+    def test_structured_error_message_format(self):
+        """Structured error message contains JSON with required fields."""
+        from app.services.scheduler_run_status import compute_data_fetch_status
+        import json
+
+        results = {"tool1": {"success": True}, "tool2": {"success": False}}
+        status, error_msg, summary = compute_data_fetch_status(results)
+
+        # Parse JSON from error message
+        error_data = json.loads(error_msg)
+
+        assert error_data["type"] == "partial_failure"
+        assert error_data["tools_total"] == 2
+        assert error_data["tools_failed"] == 1
+        assert "tool2" in error_data["failed_tools"]
+        assert "Partial failure" in error_data["message"]
+
+    def test_rollback_with_enable_partial_false(self, monkeypatch):
+        """When ENABLE_PARTIAL_STATUS=false, persisted status is completed but memory is partial."""
+        import importlib
+        import app.services.scheduler_run_status as status_module
+
+        # Set environment variable before reloading module
+        monkeypatch.setenv("ENABLE_PARTIAL_STATUS", "false")
+        importlib.reload(status_module)
+
+        results = {"tool1": {"success": True}, "tool2": {"success": False}}
+        status, error_msg, summary = status_module.compute_data_fetch_status(results)
+
+        # Persisted status should be "completed" (rollback mode)
+        assert status == "completed"
+        # Memory summary should still be accurate ("partial")
+        assert summary["status"] == "partial"
+        assert summary["tools_failed"] == 1
+        # Error message should still contain failure info
+        assert "Partial failure" in error_msg
+
+        # Restore default
+        monkeypatch.setenv("ENABLE_PARTIAL_STATUS", "true")
+        importlib.reload(status_module)
+
+    @patch("app.repositories.daily_stats_repo.DailyStatsRepository")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_dingtalk_org")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._maybe_sync_feishu_org")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._check_quotas")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_usage_summary")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_daily_stats")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._aggregate_user_stats")
+    @patch("app.services.data_fetch_scheduler.DataFetchScheduler._refresh_materialized_views")
+    @patch("app.routes.fetch.run_fetch_scripts")
+    @patch("app.services.leader_election.LeaderElectionClient")
+    def test_status_consistency_memory_vs_db(
+        self,
+        mock_leader,
+        mock_fetch,
+        mock_mv,
+        mock_agg,
+        mock_ds,
+        mock_summary,
+        mock_quotas,
+        mock_feishu,
+        mock_dingtalk,
+        mock_ds_repo,
+    ):
+        """Memory and DB status should be consistent after partial failure."""
+        mock_leader.return_value.try_acquire_leadership.return_value = True
+        mock_fetch.return_value = {
+            "tool1": {"success": True},
+            "tool2": {"success": False},
+        }
+
+        s = DataFetchScheduler()
+        s._run_fetch()
+
+        # Verify memory summary
+        assert s._last_result_summary["status"] == "partial"
+
+        # Verify record_run was called with partial
+        mock_leader.return_value.record_run.assert_called_once()
+        call_args = mock_leader.return_value.record_run.call_args[0]
+        assert call_args[0] == "partial"

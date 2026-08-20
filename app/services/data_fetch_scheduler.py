@@ -247,6 +247,7 @@ class DataFetchScheduler:
         from app.repositories.database import Database
         from app.routes.fetch import run_fetch_scripts
         from app.services.leader_election import LeaderElectionClient
+        from app.services.scheduler_run_status import compute_data_fetch_status
 
         # Acquire distributed lock for this job
         db = Database()
@@ -266,75 +267,14 @@ class DataFetchScheduler:
 
         try:
             results = run_fetch_scripts()
-            logger.info(
-                "Scheduled data fetch finished: {}".format(
-                    "errored"
-                    if results is None
-                    else (
-                        "skipped"
-                        if results.get("_skipped")
-                        else (
-                            "empty"
-                            if not results
-                            else (
-                                "all_failed"
-                                if all(not v.get("success", False) for v in results.values())
-                                else "completed"
-                            )
-                        )
-                    )
-                )
-            )
 
-            if results is None:
-                # Unexpected error in run_fetch_scripts() itself
-                status = "failed"
-                error_message = "Data fetch encountered an unexpected error"
-                self._last_result_summary = {"status": "failed", "error": "unexpected_error"}
-            elif isinstance(results, dict) and results.get("_skipped"):
-                # Concurrent fetch already running
-                status = "skipped"
-                error_message = "Concurrent data fetch already running"
-                self._last_result_summary = {"status": "skipped"}
-            elif not results:
-                # No scripts available to run - not an error
-                status = "completed"
-                error_message = None
-                self._last_result_summary = {
-                    "status": "completed",
-                    "tools_total": 0,
-                    "tools_failed": 0,
-                }
-            else:
-                # Check per-tool results
-                failed_tools = [k for k, v in results.items() if not v.get("success", False)]
+            # Compute status using unified logic (Issue #2822)
+            status, error_message, result_summary = compute_data_fetch_status(results)
+            self._last_result_summary = result_summary
 
-                if len(failed_tools) == len(results):
-                    status = "failed"
-                    error_message = "All fetch scripts failed"
-                    self._last_result_summary = {
-                        "status": "failed",
-                        "tools_total": len(results),
-                        "tools_failed": len(failed_tools),
-                        "failed_tools": failed_tools,
-                    }
-                elif failed_tools:
-                    status = "completed"
-                    error_message = f"Partial failure: {', '.join(failed_tools)}"
-                    self._last_result_summary = {
-                        "status": "partial",
-                        "tools_total": len(results),
-                        "tools_failed": len(failed_tools),
-                        "failed_tools": failed_tools,
-                    }
-                else:
-                    status = "completed"
-                    error_message = None
-                    self._last_result_summary = {
-                        "status": "completed",
-                        "tools_total": len(results),
-                        "tools_failed": 0,
-                    }
+            # Log the result
+            log_status = result_summary.get("status", status)
+            logger.info(f"Scheduled data fetch finished: {log_status}")
 
         except Exception as e:
             status = "failed"
