@@ -1583,11 +1583,18 @@ export const Workspace: React.FC = () => {
       // Pass raw project path — getEffectiveUrl will URL-encode it.
       // ChatPage Strategy 1.5 decodes it, correctly handling hyphens in paths.
       const encodedProjectName = remoteParams?.projectPath ?? undefined;
+
+      // Issue #2645: Add default permission mode for new local sessions
+      // "ask" mode ensures user confirmation for tool calls (safe default)
+      const defaultSettings = remoteParams?.workspaceType !== 'remote'
+        ? { permissionMode: 'ask' }
+        : undefined;
+
       const effectiveUrl = getEffectiveUrl(
         restoreSessionId ?? remoteParams?.sessionId ?? undefined,
         encodedProjectName,
         undefined,
-        undefined,
+        defaultSettings,
         remoteParams
       );
       if (!effectiveUrl) return;
