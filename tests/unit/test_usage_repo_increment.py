@@ -28,11 +28,18 @@ class TestIncrementUsage:
 
         repo = UsageRepository(Database())
 
-        # Create table
+        # Drop existing table first to ensure clean state
+        # (CREATE TABLE IF NOT EXISTS would skip if table exists with wrong schema)
+        with repo.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DROP TABLE IF EXISTS daily_usage")
+            conn.commit()
+
+        # Create table with correct schema
         with repo.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS daily_usage (
+                CREATE TABLE daily_usage (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     date DATE NOT NULL,
                     tool_name TEXT NOT NULL,
@@ -48,7 +55,7 @@ class TestIncrementUsage:
                 )
             """)
             cursor.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_usage_unique
+                CREATE UNIQUE INDEX idx_daily_usage_unique
                 ON daily_usage (tenant_id, date, tool_name, host_name)
             """)
             conn.commit()
@@ -166,11 +173,17 @@ class TestConcurrentIncrement:
         # Use in-memory SQLite for testing
         repo = UsageRepository(Database())
 
-        # Create table
+        # Drop existing table first to ensure clean state
+        with repo.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DROP TABLE IF EXISTS daily_usage")
+            conn.commit()
+
+        # Create table with correct schema
         with repo.db.connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS daily_usage (
+                CREATE TABLE daily_usage (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     date DATE NOT NULL,
                     tool_name TEXT NOT NULL,
@@ -186,7 +199,7 @@ class TestConcurrentIncrement:
                 )
             """)
             cursor.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_usage_unique
+                CREATE UNIQUE INDEX idx_daily_usage_unique
                 ON daily_usage (tenant_id, date, tool_name, host_name)
             """)
             conn.commit()
