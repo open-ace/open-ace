@@ -1,12 +1,17 @@
-"""Unit tests for validators."""
+"""Unit tests for validators.
+
+Issue #2738: Added tests for date range validation.
+"""
 
 import pytest
 
 from app.utils.validators import (
     validate_date,
+    validate_date_range,
     validate_email,
     validate_host_name,
     validate_password,
+    validate_time_window,
     validate_tool_name,
     validate_username,
 )
@@ -477,3 +482,197 @@ class TestValidatePassword:
         is_valid, msg = validate_password("1234567", policy_settings=policy)
         assert is_valid is False
         assert "8" in msg
+
+
+# ==================== Date Range Validation Tests (Issue #2738) ====================
+
+
+class TestValidateDateRange:
+    """Test validate_date_range function."""
+
+    def test_both_missing_returns_none(self):
+        """Both dates missing should return (True, None, None, None)."""
+        is_valid, error_code, start, end = validate_date_range(None, None)
+        assert is_valid is True
+        assert error_code is None
+        assert start is None
+        assert end is None
+
+    def test_only_start_provided(self):
+        """Only start_date provided should return incomplete_date_range error."""
+        is_valid, error_code, start, end = validate_date_range("2026-01-01", None)
+        assert is_valid is False
+        assert error_code == "incomplete_date_range"
+        assert start is None
+        assert end is None
+
+    def test_only_end_provided(self):
+        """Only end_date provided should return incomplete_date_range error."""
+        is_valid, error_code, start, end = validate_date_range(None, "2026-01-31")
+        assert is_valid is False
+        assert error_code == "incomplete_date_range"
+        assert start is None
+        assert end is None
+
+    def test_invalid_format_slash(self):
+        """Invalid date format with slash should return invalid_date_format error."""
+        is_valid, error_code, start, end = validate_date_range("2026/01/01", "2026-01-31")
+        assert is_valid is False
+        assert error_code == "invalid_date_format"
+
+    def test_invalid_format_invalid_calendar(self):
+        """Invalid calendar date should return invalid_date_format error."""
+        is_valid, error_code, start, end = validate_date_range("2026-02-30", "2026-03-01")
+        assert is_valid is False
+        assert error_code == "invalid_date_format"
+
+    def test_start_equals_end(self):
+        """Same start and end date should be valid (single day query)."""
+        is_valid, error_code, start, end = validate_date_range("2026-01-15", "2026-01-15")
+        assert is_valid is True
+        assert error_code is None
+        assert str(start) == "2026-01-15"
+        assert str(end) == "2026-01-15"
+
+    def test_start_after_end(self):
+        """Start date after end date should return invalid_date_order error."""
+        is_valid, error_code, start, end = validate_date_range("2026-01-31", "2026-01-01")
+        assert is_valid is False
+        assert error_code == "invalid_date_order"
+        assert start is None
+        assert end is None
+
+    def test_exceeds_max_days(self):
+        """Range exceeding max_days should return date_range_exceeded error."""
+        # 366 days span to exceed 365 max
+        is_valid, error_code, start, end = validate_date_range(
+            "2025-01-01", "2026-01-02", max_days=365
+        )
+        assert is_valid is False
+        assert error_code == "date_range_exceeded"
+
+    def test_exactly_max_days(self):
+        """Range exactly at max_days should be valid."""
+        is_valid, error_code, start, end = validate_date_range(
+            "2025-01-01", "2025-12-31", max_days=365  # 364 days difference
+        )
+        assert is_valid is True
+        assert error_code is None
+
+    def test_future_date_rejected(self):
+        """Future dates should be rejected when allow_future=False."""
+        is_valid, error_code, start, end = validate_date_range(
+            "2027-01-01", "2027-01-31", allow_future=False
+        )
+        assert is_valid is False
+        assert error_code == "future_date_not_allowed"
+
+    def test_future_date_allowed(self):
+        """Future dates should be allowed when allow_future=True."""
+        is_valid, error_code, start, end = validate_date_range(
+            "2027-01-01", "2027-01-31", allow_future=True
+        )
+        assert is_valid is True
+        assert error_code is None
+
+    def test_extreme_date_min(self):
+        """Minimum valid date should work."""
+        is_valid, error_code, start, end = validate_date_range("0001-01-01", "0001-01-02")
+        assert is_valid is True
+        assert error_code is None
+
+    def test_extreme_date_max(self):
+        """Maximum valid date should work."""
+        # Extreme dates are in the future, so allow_future=True is needed
+        is_valid, error_code, start, end = validate_date_range(
+            "9999-12-30", "9999-12-31", allow_future=True
+        )
+        assert is_valid is True
+        assert error_code is None
+
+    def test_valid_range(self):
+        """Valid date range should pass."""
+        is_valid, error_code, start, end = validate_date_range("2026-01-01", "2026-01-31")
+        assert is_valid is True
+        assert error_code is None
+        assert str(start) == "2026-01-01"
+        assert str(end) == "2026-01-31"
+
+    # Priority tests: format check before future check
+    def test_format_priority_over_future(self):
+        """Invalid date format should return invalid_date_format, not future_date_not_allowed."""
+        is_valid, error_code, start, end = validate_date_range("2027-02-30", "2027-03-01")
+        assert is_valid is False
+        assert error_code == "invalid_date_format"
+
+    def test_order_priority_over_future(self):
+        """Invalid order should return invalid_date_order before checking future."""
+        is_valid, error_code, start, end = validate_date_range("2027-01-31", "2027-01-01")
+        assert is_valid is False
+        assert error_code == "invalid_date_order"
+
+
+class TestValidateTimeWindow:
+    """Test validate_time_window function."""
+
+    def test_months_zero(self):
+        """months=0 should return invalid_time_window error."""
+        is_valid, error_code, value = validate_time_window(0, "months")
+        assert is_valid is False
+        assert error_code == "invalid_time_window"
+        assert value is None
+
+    def test_months_negative(self):
+        """Negative months should return invalid_time_window error."""
+        is_valid, error_code, value = validate_time_window(-1, "months")
+        assert is_valid is False
+        assert error_code == "invalid_time_window"
+
+    def test_months_exceeds_max(self):
+        """months exceeding max should return invalid_time_window error."""
+        is_valid, error_code, value = validate_time_window(25, "months", max_val=24)
+        assert is_valid is False
+        assert error_code == "invalid_time_window"
+
+    def test_months_at_min(self):
+        """months=1 should be valid."""
+        is_valid, error_code, value = validate_time_window(1, "months")
+        assert is_valid is True
+        assert error_code is None
+        assert value == 1
+
+    def test_months_at_max(self):
+        """months=24 should be valid."""
+        is_valid, error_code, value = validate_time_window(24, "months", max_val=24)
+        assert is_valid is True
+        assert error_code is None
+        assert value == 24
+
+    def test_days_zero(self):
+        """days=0 should return invalid_time_window error."""
+        is_valid, error_code, value = validate_time_window(0, "days")
+        assert is_valid is False
+        assert error_code == "invalid_time_window"
+
+    def test_days_exceeds_max(self):
+        """days exceeding max should return invalid_time_window error."""
+        is_valid, error_code, value = validate_time_window(366, "days", max_val=365)
+        assert is_valid is False
+        assert error_code == "invalid_time_window"
+
+    def test_days_at_min(self):
+        """days=1 should be valid."""
+        is_valid, error_code, value = validate_time_window(1, "days")
+        assert is_valid is True
+        assert error_code is None
+        assert value == 1
+
+    def test_custom_bounds(self):
+        """Custom min_val and max_val should work."""
+        is_valid, error_code, value = validate_time_window(5, "custom", min_val=1, max_val=10)
+        assert is_valid is True
+        assert value == 5
+
+        is_valid, error_code, value = validate_time_window(11, "custom", min_val=1, max_val=10)
+        assert is_valid is False
+        assert error_code == "invalid_time_window"

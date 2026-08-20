@@ -2,6 +2,8 @@
 Open ACE - ROI API Routes
 
 API endpoints for ROI analysis and cost optimization.
+
+Issue #2738: Added date range validation.
 """
 
 import logging
@@ -15,6 +17,8 @@ from app.auth.decorators import auth_required, require_tenant_scope
 from app.modules.analytics.cost_optimizer import CostOptimizer
 from app.modules.analytics.roi_calculator import AssumptionSource, ROIAssumptions, ROICalculator
 from app.repositories.tenant_repo import TenantRepository
+from app.utils.date_range_errors import get_error_message
+from app.utils.validators import validate_date_range, validate_time_window
 
 if TYPE_CHECKING:
     from app.models.tenant import Tenant
@@ -156,12 +160,26 @@ def get_roi():
         user_id = request.args.get("user_id", type=int)
         tool_name = request.args.get("tool_name")
 
-        # Default to last 30 days if not specified
-        if not start_date or not end_date:
+        # Issue #2738: Validate date range
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(
+            start_date, end_date
+        )
+        if not is_valid:
+            return jsonify({
+                "success": False,
+                "error": get_error_message(error_code),
+                "error_code": error_code
+            }), 400
+
+        # Apply default values if both are missing
+        if parsed_start is None:
             end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
+        else:
+            start_date = parsed_start.strftime("%Y-%m-%d")
+            end_date = parsed_end.strftime("%Y-%m-%d")
 
         try:
             assumptions, assumption_source = _build_roi_assumptions()
@@ -186,13 +204,24 @@ def get_roi_trend():
         months = request.args.get("months", default=6, type=int)
         user_id = request.args.get("user_id", type=int)
 
+        # Issue #2738: Validate months parameter
+        is_valid, error_code, validated_months = validate_time_window(
+            months, "months"
+        )
+        if not is_valid:
+            return jsonify({
+                "success": False,
+                "error": get_error_message(error_code, param_name="months", min_val=1, max_val=24),
+                "error_code": error_code
+            }), 400
+
         try:
             assumptions, assumption_source = _build_roi_assumptions()
         except ValueError as e:
             return jsonify({"success": False, "error": str(e)}), 400
 
         calculator = ROICalculator(assumptions=assumptions, assumption_source=assumption_source)
-        trends = calculator.get_roi_trend(months, user_id, tenant_id=_caller_tenant_id())
+        trends = calculator.get_roi_trend(validated_months, user_id, tenant_id=_caller_tenant_id())
 
         return jsonify({"success": True, "data": [t.to_dict() for t in trends]})
     except Exception as e:
@@ -207,11 +236,26 @@ def get_roi_by_tool():
         start_date = request.args.get("start_date")
         end_date = request.args.get("end_date")
 
-        if not start_date or not end_date:
+        # Issue #2738: Validate date range
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(
+            start_date, end_date
+        )
+        if not is_valid:
+            return jsonify({
+                "success": False,
+                "error": get_error_message(error_code),
+                "error_code": error_code
+            }), 400
+
+        # Apply default values if both are missing
+        if parsed_start is None:
             end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
+        else:
+            start_date = parsed_start.strftime("%Y-%m-%d")
+            end_date = parsed_end.strftime("%Y-%m-%d")
 
         try:
             assumptions, assumption_source = _build_roi_assumptions()
@@ -236,11 +280,26 @@ def get_roi_by_user():
         start_date = request.args.get("start_date")
         end_date = request.args.get("end_date")
 
-        if not start_date or not end_date:
+        # Issue #2738: Validate date range
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(
+            start_date, end_date
+        )
+        if not is_valid:
+            return jsonify({
+                "success": False,
+                "error": get_error_message(error_code),
+                "error_code": error_code
+            }), 400
+
+        # Apply default values if both are missing
+        if parsed_start is None:
             end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
+        else:
+            start_date = parsed_start.strftime("%Y-%m-%d")
+            end_date = parsed_end.strftime("%Y-%m-%d")
 
         try:
             assumptions, assumption_source = _build_roi_assumptions()
@@ -273,11 +332,26 @@ def get_cost_breakdown():
         end_date = request.args.get("end_date")
         user_id = request.args.get("user_id", type=int)
 
-        if not start_date or not end_date:
+        # Issue #2738: Validate date range
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(
+            start_date, end_date
+        )
+        if not is_valid:
+            return jsonify({
+                "success": False,
+                "error": get_error_message(error_code),
+                "error_code": error_code
+            }), 400
+
+        # Apply default values if both are missing
+        if parsed_start is None:
             end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
+        else:
+            start_date = parsed_start.strftime("%Y-%m-%d")
+            end_date = parsed_end.strftime("%Y-%m-%d")
 
         calculator = ROICalculator()
         breakdown = calculator.get_cost_breakdown(
@@ -312,11 +386,26 @@ def get_daily_costs():
         user_id = request.args.get("user_id", type=int)
         tool_name = request.args.get("tool_name")
 
-        if not start_date or not end_date:
+        # Issue #2738: Validate date range
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(
+            start_date, end_date
+        )
+        if not is_valid:
+            return jsonify({
+                "success": False,
+                "error": get_error_message(error_code),
+                "error_code": error_code
+            }), 400
+
+        # Apply default values if both are missing
+        if parsed_start is None:
             end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
+        else:
+            start_date = parsed_start.strftime("%Y-%m-%d")
+            end_date = parsed_end.strftime("%Y-%m-%d")
 
         calculator = ROICalculator()
         daily_costs = calculator.get_daily_costs(
@@ -341,11 +430,26 @@ def get_roi_summary():
         end_date = request.args.get("end_date")
         user_id = request.args.get("user_id", type=int)
 
-        if not start_date or not end_date:
+        # Issue #2738: Validate date range
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(
+            start_date, end_date
+        )
+        if not is_valid:
+            return jsonify({
+                "success": False,
+                "error": get_error_message(error_code),
+                "error_code": error_code
+            }), 400
+
+        # Apply default values if both are missing
+        if parsed_start is None:
             end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
+        else:
+            start_date = parsed_start.strftime("%Y-%m-%d")
+            end_date = parsed_end.strftime("%Y-%m-%d")
 
         try:
             assumptions, assumption_source = _build_roi_assumptions()
@@ -372,8 +476,19 @@ def get_optimization_suggestions():
     try:
         days = request.args.get("days", default=30, type=int)
 
+        # Issue #2738: Validate days parameter
+        is_valid, error_code, validated_days = validate_time_window(
+            days, "days"
+        )
+        if not is_valid:
+            return jsonify({
+                "success": False,
+                "error": get_error_message(error_code, param_name="days", min_val=1, max_val=365),
+                "error_code": error_code
+            }), 400
+
         optimizer = CostOptimizer()
-        suggestions = optimizer.analyze(days, tenant_id=_caller_tenant_id())
+        suggestions = optimizer.analyze(validated_days, tenant_id=_caller_tenant_id())
 
         return jsonify({"success": True, "data": [s.to_dict() for s in suggestions]})
     except Exception as e:
@@ -387,8 +502,19 @@ def get_optimization_cost_trend():
     try:
         days = request.args.get("days", default=30, type=int)
 
+        # Issue #2738: Validate days parameter
+        is_valid, error_code, validated_days = validate_time_window(
+            days, "days"
+        )
+        if not is_valid:
+            return jsonify({
+                "success": False,
+                "error": get_error_message(error_code, param_name="days", min_val=1, max_val=365),
+                "error_code": error_code
+            }), 400
+
         optimizer = CostOptimizer()
-        trend = optimizer.get_cost_trend(days, tenant_id=_caller_tenant_id())
+        trend = optimizer.get_cost_trend(validated_days, tenant_id=_caller_tenant_id())
 
         return jsonify({"success": True, "data": trend})
     except Exception as e:
@@ -413,6 +539,17 @@ def get_efficiency_report():
         days = request.args.get("days", default=30, type=int)
         task_type = request.args.get("task_type", default=None, type=str)
         algorithm_version = request.args.get("algorithm_version", default=None, type=str)
+
+        # Issue #2738: Validate days parameter
+        is_valid, error_code, validated_days = validate_time_window(
+            days, "days"
+        )
+        if not is_valid:
+            return jsonify({
+                "success": False,
+                "error": get_error_message(error_code, param_name="days", min_val=1, max_val=365),
+                "error_code": error_code
+            }), 400
 
         # Validate task_type parameter
         valid_task_types = ["GENERAL", "CODE_GENERATION", "DOCUMENT_ANALYSIS", "CONVERSATION"]
@@ -442,7 +579,7 @@ def get_efficiency_report():
 
         optimizer = CostOptimizer()
         report = optimizer.get_efficiency_report(
-            days,
+            validated_days,
             tenant_id=_caller_tenant_id(),
             task_type=task_type,
             algorithm_version=algorithm_version,

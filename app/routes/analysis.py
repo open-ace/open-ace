@@ -2,6 +2,8 @@
 Open ACE - Analysis Routes
 
 API routes for usage analysis and reporting.
+
+Issue #2738: Added date range validation.
 """
 
 from __future__ import annotations
@@ -11,6 +13,8 @@ from flask import Blueprint, g, jsonify, request
 from app.auth.decorators import auth_required
 from app.models.user import User
 from app.services.analysis_service import AnalysisService
+from app.utils.date_range_errors import get_error_message
+from app.utils.validators import validate_date_range
 
 analysis_bp = Blueprint("analysis", __name__)
 analysis_service = AnalysisService()
@@ -71,6 +75,41 @@ def _check_tenant_access():
     return None
 
 
+def _validate_date_range_or_error(start_date: str | None, end_date: str | None):
+    """Validate date range and return error response if invalid.
+
+    Issue #2738: Helper function for analysis endpoints.
+
+    Args:
+        start_date: Start date string or None
+        end_date: End date string or None
+
+    Returns:
+        tuple: (start_date, end_date) on success
+        tuple: (error_response, None) on validation failure
+
+    Note:
+        analysis.py does NOT apply defaults in the route layer.
+        Service layer handles defaults (get_batch_analysis uses get_days_ago(30)).
+    """
+    is_valid, error_code, parsed_start, parsed_end = validate_date_range(
+        start_date, end_date
+    )
+    if not is_valid:
+        return (
+            jsonify({
+                "success": False,
+                "error": get_error_message(error_code),
+                "error_code": error_code
+            }),
+            400
+        )
+    # Return original values (None if both missing) - Service layer handles defaults
+    if parsed_start is None:
+        return None, None
+    return parsed_start.strftime("%Y-%m-%d"), parsed_end.strftime("%Y-%m-%d")
+
+
 @analysis_bp.route("/analysis/batch")
 def api_batch_analysis():
     """Get all analysis data in a single request for better performance.
@@ -82,6 +121,12 @@ def api_batch_analysis():
     start_date = request.args.get("start")
     end_date = request.args.get("end")
     host = request.args.get("host")
+
+    # Issue #2738: Validate date range
+    validated = _validate_date_range_or_error(start_date, end_date)
+    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+        return validated[0]
+    start_date, end_date = validated
 
     # Get all data in one call
     result = analysis_service.get_batch_analysis(
@@ -100,6 +145,12 @@ def api_key_metrics():
     start_date = request.args.get("start")
     end_date = request.args.get("end")
     host = request.args.get("host")
+
+    # Issue #2738: Validate date range
+    validated = _validate_date_range_or_error(start_date, end_date)
+    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+        return validated[0]
+    start_date, end_date = validated
 
     metrics = analysis_service.get_key_metrics(
         start_date=start_date,
@@ -135,6 +186,12 @@ def api_daily_hourly_usage():
     end_date = request.args.get("end")
     host = request.args.get("host")
 
+    # Issue #2738: Validate date range
+    validated = _validate_date_range_or_error(start_date, end_date)
+    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+        return validated[0]
+    start_date, end_date = validated
+
     result = analysis_service.get_daily_hourly_usage(
         start_date=start_date,
         end_date=end_date,
@@ -151,6 +208,12 @@ def api_peak_usage():
     start_date = request.args.get("start")
     end_date = request.args.get("end")
     host = request.args.get("host")
+
+    # Issue #2738: Validate date range
+    validated = _validate_date_range_or_error(start_date, end_date)
+    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+        return validated[0]
+    start_date, end_date = validated
 
     result = analysis_service.get_peak_usage(
         start_date=start_date,
@@ -170,6 +233,12 @@ def api_user_ranking():
     host = request.args.get("host")
     limit = request.args.get("limit", 10, type=int)
 
+    # Issue #2738: Validate date range
+    validated = _validate_date_range_or_error(start_date, end_date)
+    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+        return validated[0]
+    start_date, end_date = validated
+
     result = analysis_service.get_user_ranking(
         start_date=start_date,
         end_date=end_date,
@@ -188,6 +257,12 @@ def api_conversation_stats():
     end_date = request.args.get("end")
     host = request.args.get("host")
 
+    # Issue #2738: Validate date range
+    validated = _validate_date_range_or_error(start_date, end_date)
+    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+        return validated[0]
+    start_date, end_date = validated
+
     result = analysis_service.get_conversation_stats(
         start_date=start_date,
         end_date=end_date,
@@ -205,6 +280,12 @@ def api_user_segmentation():
     end_date = request.args.get("end")
     host = request.args.get("host")
 
+    # Issue #2738: Validate date range
+    validated = _validate_date_range_or_error(start_date, end_date)
+    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+        return validated[0]
+    start_date, end_date = validated
+
     result = analysis_service.get_user_segmentation(
         start_date=start_date,
         end_date=end_date,
@@ -221,6 +302,12 @@ def api_tool_comparison():
     start_date = request.args.get("start")
     end_date = request.args.get("end")
     host = request.args.get("host")
+
+    # Issue #2738: Validate date range
+    validated = _validate_date_range_or_error(start_date, end_date)
+    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+        return validated[0]
+    start_date, end_date = validated
 
     result = analysis_service.get_tool_comparison(
         start_date=start_date,
@@ -240,6 +327,12 @@ def api_anomaly_detection():
     host = request.args.get("host")
     anomaly_type = request.args.get("type")
     severity = request.args.get("severity")
+
+    # Issue #2738: Validate date range
+    validated = _validate_date_range_or_error(start_date, end_date)
+    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+        return validated[0]
+    start_date, end_date = validated
 
     result = analysis_service.detect_anomalies(
         start_date=start_date,
@@ -261,6 +354,12 @@ def api_anomaly_trend():
     host = request.args.get("host")
     anomaly_type = request.args.get("type")
     severity = request.args.get("severity")
+
+    # Issue #2738: Validate date range
+    validated = _validate_date_range_or_error(start_date, end_date)
+    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+        return validated[0]
+    start_date, end_date = validated
 
     result = analysis_service.get_anomaly_trend(
         start_date=start_date,
