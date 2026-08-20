@@ -335,6 +335,32 @@ class SchedulerWorker:
             # 同步失败不应阻止 scheduler 启动，但需要记录错误
             logger.error(f"Failed to sync system users: {e}")
 
+    def _validate_schedulers_started(self) -> None:
+        """Validate that schedulers actually started.
+
+        Issue #2820: Self-check to ensure scheduler process role is correct.
+        """
+        from app.utils.process_role import validate_process_role
+
+        is_valid, message = validate_process_role()
+        if not is_valid:
+            logger.error(f"Scheduler process validation failed: {message}")
+            # Log warning but don't exit - allow graceful degradation
+        else:
+            logger.info("Scheduler process validation passed")
+
+        # Check critical schedulers are running
+        try:
+            from app.services.data_fetch_scheduler import scheduler
+
+            if not scheduler._running:
+                logger.error(
+                    "SCHEDULER_MODE=scheduler but data_fetch scheduler is not running. "
+                    "This may indicate a configuration or initialization error."
+                )
+        except Exception as e:
+            logger.warning(f"Could not validate data_fetch scheduler: {e}")
+
     def _start_schedulers(self) -> None:
         """Start all background schedulers."""
         logger.info("Starting background schedulers...")
@@ -406,6 +432,9 @@ class SchedulerWorker:
 
         self._schedulers_started = True
         logger.info("All background schedulers started")
+
+        # Issue #2820: Validate that critical schedulers are running
+        self._validate_schedulers_started()
 
     def _register_signal_handlers(self) -> None:
         """Register graceful shutdown handlers."""
