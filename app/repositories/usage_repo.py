@@ -238,7 +238,7 @@ class UsageRepository:
         request_count: int,
         models_json: str | None,
     ) -> bool:
-        """PostgreSQL implementation of increment_usage with atomic UPSERT."""
+        """Atomically increment usage in PostgreSQL with UPSERT."""
         import time
 
         start_time = time.time()
@@ -320,7 +320,7 @@ class UsageRepository:
         request_count: int,
         models_used: list[str] | None,
     ) -> bool:
-        """SQLite implementation with transaction + retry mechanism."""
+        """Increment usage in SQLite with transaction and retry mechanism."""
         import time
 
         max_retries = 3
@@ -467,7 +467,7 @@ class UsageRepository:
                             )
                         return True
 
-                    except Exception as e:
+                    except Exception:
                         conn.rollback()
                         raise
 

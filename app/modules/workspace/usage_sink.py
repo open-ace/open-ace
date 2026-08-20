@@ -503,9 +503,7 @@ class DailyUsageSink:
             repo = UsageRepository()
 
             # Calculate cache tokens
-            cache_tokens = (evidence.cache_read_tokens or 0) + (
-                evidence.cache_write_tokens or 0
-            )
+            cache_tokens = (evidence.cache_read_tokens or 0) + (evidence.cache_write_tokens or 0)
 
             # Prepare models list (skip if no model)
             models_used = [evidence.model] if evidence.model else None

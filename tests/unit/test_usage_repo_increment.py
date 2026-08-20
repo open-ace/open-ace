@@ -234,9 +234,6 @@ class TestConcurrentIncrement:
             """)
             row = cursor.fetchone()
             if row:
-                # Should have total from all threads
-                expected_tokens = num_threads * tokens_per_thread
-                expected_requests = num_threads
                 # Note: Due to SQLite locking, some increments may have been retries
                 # Just verify that we have some tokens recorded
                 assert row["tokens_used"] > 0

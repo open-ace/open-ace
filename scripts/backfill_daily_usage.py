@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Backfill daily_usage from agent_sessions for Issue #2732.
 
