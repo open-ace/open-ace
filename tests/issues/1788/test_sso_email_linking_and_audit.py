@@ -136,7 +136,9 @@ def test_finalize_sso_login_links_by_email_when_admin_opts_in(app_ctx):
     ):
         sso_module._finalize_sso_login("corp-saml", _auth_result(email="match@example.com"), None)
 
-    user_repo.get_user_by_email.assert_called_once_with("match@example.com")
+    # #2755: email linking must exclude soft-deleted users, so the repository
+    # call now passes include_deleted=False explicitly.
+    user_repo.get_user_by_email.assert_called_once_with("match@example.com", include_deleted=False)
     manager.link_identity.assert_called_once()
     assert manager.link_identity.call_args.kwargs["user_id"] == 7
     create_mock.assert_not_called()
