@@ -266,6 +266,9 @@ def test_timing_issue_with_rejected_verification_reopens_development():
     assert patch.get("dev_round") == 2
     assert patch.get("current_round") == 0
     assert patch.get("verification_status") is None  # single auto-reopen guard
+    # Stale merge SHA dropped so acceptance re-resolves the NEXT merge instead
+    # of replaying the rejected verdict on the previous delivery.
+    assert patch.get("verification_merge_sha") == ""
     assert "call-chain:tenant_repo" in (patch.get("user_feedback") or "")
     reopened = [
         ms
@@ -350,6 +353,33 @@ def test_reopen_omitted_when_verification_not_rejected(verification_status):
         ms.get("milestone_type") == "timing_issue" for ms in result.milestone_events
     ), result.milestone_events
     host.dev_round_cap_remaining.assert_not_called()
+
+
+def test_reopen_reads_pr_and_status_from_host_fallback():
+    """The reopen trigger's PR number / verification status fall back to the
+    host's live DB read when the wf snapshot omits them (v2 review defence)."""
+    gh = _gh_ancestor()
+    host = _host()
+    host.dev_round_cap_remaining.return_value = 2
+    host.get_workflow_field.side_effect = {
+        "github_pr_number": 2851,
+        "verification_status": "rejected",
+    }.get
+    deps = _deps(host, gh)
+    wf = _workflow(
+        github_pr_number=None,
+        verification_status=None,
+        verification_report=_REJECTED_REPORT,
+        dev_round=1,
+    )
+
+    result = pr_review_phase.handle(_ctx(wf), deps)
+
+    assert result.outcome == "completed"
+    assert result.next_phase == "development"
+    assert result.next_status == "developing"
+    assert result.workflow_patch.get("dev_round") == 2
+    assert "call-chain:tenant_repo" in (result.workflow_patch.get("user_feedback") or "")
 
 
 def test_reopen_requires_recorded_pr():

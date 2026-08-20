@@ -250,6 +250,11 @@ def handle(ctx, deps) -> PhaseResult:
                         "dev_round": new_dev_round,
                         "current_round": 0,
                         "verification_status": None,  # single auto-reopen guard
+                        # Drop the stale merge SHA so acceptance_verification
+                        # re-resolves the NEXT merge (L617 only fetches when
+                        # empty) instead of replaying/verifying the previous
+                        # rejected delivery.
+                        "verification_merge_sha": "",
                         "user_feedback": feedback,
                         "error_message": "",
                     },

@@ -12529,20 +12529,25 @@ class AutonomousOrchestrator:
         # endless report↔wait loop. Inject only on evidence of a FRESH human
         # resume: (a) user_feedback is non-empty (both resume routes write
         # it; resume-with-feedback requires it non-empty), or (b) the latest
-        # completed milestone is 'requirement_received' (created only by the
-        # cancel-with-feedback route; covers its empty-feedback variant). The
-        # repair round's second tick has neither: feedback was consumed and
-        # cleared by the dev prompt and the latest completed milestone is
-        # report's round_completed.
+        # completed milestone is 'requirement_received' (created by the
+        # cancel-with-feedback route and by the new-requirements polling
+        # path below; the polling path immediately moves the workflow to
+        # planning, so it can never linger as the latest completed milestone
+        # of a waiting workflow — only the cancel route's can). The repair
+        # round's second tick has neither: feedback was consumed and cleared
+        # by the dev prompt and the latest completed milestone is report's
+        # round_completed.
+        rejected_acceptance = (wf.get("verification_status") or "").strip().lower() == "rejected"
         fresh_human_resume = bool(user_feedback and user_feedback.strip())
-        if not fresh_human_resume:
+        # Milestone lookup only runs for rejected workflows with empty
+        # feedback; ordinary waiting ticks (the common case) skip the extra
+        # DB query.
+        if rejected_acceptance and not fresh_human_resume:
             for ms in reversed(self.repo.list_milestones(self._workflow_id)):
                 if ms.get("status") == "completed":
                     fresh_human_resume = ms.get("milestone_type") == "requirement_received"
                     break
-        if (
-            wf.get("verification_status") or ""
-        ).strip().lower() == "rejected" and fresh_human_resume:
+        if rejected_acceptance and fresh_human_resume:
             # Defensive guard for _rejection_feedback returning empty (both
             # its branches currently return non-empty text).
             rejection_fb = _rejection_feedback(wf, wf.get("github_pr_number"))
@@ -12590,6 +12595,13 @@ class AutonomousOrchestrator:
                     # Persist the (possibly rejection-augmented) feedback: the
                     # dev prompt reads the DB field via _get_user_feedback_prompt.
                     "user_feedback": user_feedback,
+                    # Drop the stale merge SHA of the rejected delivery so the
+                    # NEXT merge re-resolves fresh (acceptance only fetches the
+                    # PR's merge commit when the cached value is empty) and
+                    # drop the paused banner text (same #2491/#2658 UX hygiene
+                    # as the resume-with-feedback route).
+                    "verification_merge_sha": "",
+                    "error_message": "",
                 },
             )
 

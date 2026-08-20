@@ -1040,6 +1040,12 @@ def test_wait_injects_rejection_feedback_on_resume(monkeypatch):
     feedback = result.workflow_patch.get("user_feedback") or ""
     assert "call-chain:tenant_repo" in feedback, feedback
     assert "REJECTED" in feedback and "2851" in feedback
+    # Stale merge SHA of the rejected delivery must be dropped so the NEXT
+    # merge re-resolves fresh (acceptance only fetches the PR merge commit
+    # when the cached value is empty — otherwise it replays the old verdict
+    # on the new delivery); paused banner text cleared (#2491/#2658 hygiene).
+    assert result.workflow_patch.get("verification_merge_sha") == ""
+    assert result.workflow_patch.get("error_message") == ""
 
 
 def test_wait_appends_rejection_feedback_to_human_feedback(monkeypatch):

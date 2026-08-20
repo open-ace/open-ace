@@ -1,7 +1,7 @@
-# 修复方案（v6）：验收 rejected 重入被 pr_review timing-issue 短路掩盖
+# 修复方案（v7）：验收 rejected 重入被 pr_review timing-issue 短路掩盖
 
-- 日期：2026-08-20（v2 按一轮 9 条意见修订；v3 按二轮 8 条意见修订；v4 按三轮 6 条意见修订；v5 按四轮 2 条意见修订行号基准；v6 按五轮 1 critical 修订 `_do_wait` 注入一次性防护）
-- 分支：`fix/acceptance-rejected-timing-issue-shortcircuit`（基于 `origin/main` @ 18a0f676）
+- 日期：2026-08-20（v2 按一轮 9 条意见修订；v3 按二轮 8 条意见修订；v4 按三轮 6 条意见修订；v5 按四轮 2 条意见修订行号基准；v6 按五轮 1 critical 修订 `_do_wait` 注入一次性防护；v7 按 PR 审查 1 major + 4 minor 修订：两处 patch 清空 `verification_merge_sha` + resume patch 清空 `error_message`、守卫重排省一次 DB 查询、注释修正、补 host 回退分支测试）
+- 分支：`fix/acceptance-rejected-timing-issue-shortcircuit`（基于 `origin/main` @ 18a0f676；v7 实施时已变基至 `origin/main` @ 0fb32f96）
 - 生产环境：192.168.31.159（openace-scheduler.service，PostgreSQL `openace` 库）
 - 受害工作流：#331（issue #2765，验收 rejected 后流程终止为 completed，修复未落地）
 - **行号基准声明**：文中行号对应工作区 `d015c45d`（`fix/merged-pr-reuse-and-scheduler-starvation` tip）；与 `origin/main` @ 18a0f676 在 orchestrator.py 上有约 60 行偏移（#2867 相关 hunk，不触碰任何本方案改动点）。**实施时一律以符号（函数名/常量名/语句）定位为准，行号仅作对照参考。**
@@ -209,7 +209,9 @@ user_feedback = wf.get("user_feedback", "")
 #   (a) user_feedback is non-empty (both resume routes write it: cancel-with-
 #       feedback and resume-with-feedback), or
 #   (b) the latest completed milestone is 'requirement_received' (created by
-#       the cancel-with-feedback route; covers its empty-feedback variant).
+#       the cancel-with-feedback route and by the new-requirements polling
+#       path; the polling path immediately moves the workflow to planning,
+#       so only the cancel route's can linger on a waiting tick).
 # The repair round's second tick has neither: feedback was consumed+cleared by
 # the dev prompt and the latest completed milestone is report's round_completed.
 fresh_human_resume = bool(user_feedback and user_feedback.strip())
@@ -227,10 +229,15 @@ if (wf.get("verification_status") or "").strip().lower() == "rejected" and fresh
             else rejection_fb
         )
 if user_feedback and user_feedback.strip():
-    ...  # 既有 resume 决策逻辑不动，但 return 的 workflow_patch 增补一个字段：
+    ...  # 既有 resume 决策逻辑不动，但 return 的 workflow_patch 增补字段（v7）：
     #     workflow_patch={
     #         "dev_round": new_dev_round, "current_round": 0,
     #         "user_feedback": user_feedback,   # ← 持久化注入结果（关键）
+    #         "verification_merge_sha": "",     # ← v7（PR 审查 major 1）：丢弃被拒
+    #                                          #    交付的陈旧 merge SHA，下一次
+    #                                          #    merge 后验收重新解析新 PR 的
+    #                                          #    merge commit，避免 replayed-rejected
+    #         "error_message": "",             # ← v7（minor 5）：清暂停横幅文案
     #     }
 ```
 
