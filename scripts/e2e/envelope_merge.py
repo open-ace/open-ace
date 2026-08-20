@@ -51,7 +51,9 @@ def merge(envelopes: list[dict[str, Any]]) -> dict[str, Any]:
                 raise GovernanceError(f"outcome appears in multiple shards: {item_id}")
             outcomes_by_id[item_id] = outcome
 
-    all_success = all(envelope.get("job_conclusion") == "success" for envelope in envelopes)
+    all_completed = all(envelope.get("job_conclusion") == "success" for envelope in envelopes)
+    return_code = max(int(envelope.get("return_code") or 0) for envelope in envelopes)
+    errors = [str(envelope["error"]) for envelope in envelopes if envelope.get("error")]
     max_duration = max(float(envelope.get("duration_seconds") or 0) for envelope in envelopes)
     return {
         "category": envelopes[0].get("category"),
@@ -62,9 +64,11 @@ def merge(envelopes: list[dict[str, Any]]) -> dict[str, Any]:
         "duration_minutes": round(max_duration / 60.0, 3),
         "commit_sha": envelopes[0].get("commit_sha"),
         "contract_key": envelopes[0].get("contract_key"),
-        "job_conclusion": "success" if all_success else "failure",
-        "return_code": 0 if all_success else 1,
-        "error": None if all_success else "one or more Full E2E shards failed",
+        "job_conclusion": "success" if all_completed else "failure",
+        "return_code": return_code,
+        "error": (
+            None if all_completed else "; ".join(errors) or "one or more Full E2E shards aborted"
+        ),
         "python": envelopes[0].get("python"),
         "playwright_browsers_path": envelopes[0].get("playwright_browsers_path"),
         "isolated_home": None,

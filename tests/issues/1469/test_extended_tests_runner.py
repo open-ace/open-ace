@@ -394,7 +394,9 @@ def test_write_run_envelope_summarizes_attempts(tmp_path, monkeypatch):
     assert payload["commit_sha"] == "deadbeef"
     assert payload["contract_key"] == "contract-v1"
     assert payload["duration_minutes"] == 2.5
-    assert payload["job_conclusion"] == "failure"
+    assert payload["job_conclusion"] == "success"
+    assert payload["return_code"] == 1
+    assert payload["error"] is None
     assert payload["artifacts"]["attempts_jsonl"] == str(attempts)
     assert payload["server"]["readiness_achieved"] is True
     assert [item["nodeid"] for item in payload["outcomes"]] == [

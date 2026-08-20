@@ -952,7 +952,9 @@ def _write_run_envelope(
         "duration_minutes": round(duration_seconds / 60.0, 3),
         "commit_sha": _current_head_sha(),
         "contract_key": _current_contract_key(),
-        "job_conclusion": "success" if return_code == 0 else "failure",
+        # Test failures are observed outcomes for governance to reconcile. Only
+        # runner exceptions make the execution itself incomplete or invalid.
+        "job_conclusion": "failure" if error_message else "success",
         "return_code": return_code,
         "error": error_message,
         "python": f"{sys.version_info.major}.{sys.version_info.minor}",

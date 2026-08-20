@@ -57,6 +57,17 @@ def test_merge_combines_disjoint_shards_and_uses_wall_clock_budget():
     assert merged["artifacts"]["shard_count"] == 2
 
 
+def test_merge_preserves_test_failures_without_marking_runner_error():
+    failed = _envelope("tests/e2e/browser/test_login.py::test_failed", outcome="fail")
+    failed["return_code"] = 1
+
+    merged = merge_mod.merge([failed, _envelope("tests/e2e/browser/test_login.py::test_ok")])
+
+    assert merged["job_conclusion"] == "success"
+    assert merged["return_code"] == 1
+    assert merged["error"] is None
+
+
 def test_merge_rejects_overlapping_shards():
     envelope = _envelope("tests/e2e/browser/test_login.py::test_ok")
     with pytest.raises(common.GovernanceError, match="multiple shards"):
