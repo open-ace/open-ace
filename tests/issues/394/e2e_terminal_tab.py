@@ -352,7 +352,7 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port):
         # Terminal creation now requires a selected API model in addition to
         # the machine. Local runs can satisfy this quickly, while CI may still
         # be loading models when the machine click returns.
-        model_select = modal.locator("select.form-select:not(.form-select-sm)")
+        model_select = modal.locator("select.form-select")
         try:
             model_select.wait_for(state="visible", timeout=15000)
             expect(model_select).not_to_have_value("", timeout=15000)
