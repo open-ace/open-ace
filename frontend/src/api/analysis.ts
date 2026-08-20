@@ -336,7 +336,7 @@ export const analysisApi = {
       if (validatedDays > 90) validatedDays = 90;
     }
 
-    return apiClient.get<ForecastResponse>('/api/analysis/forecast', {
+    return apiClient.get<ForecastResponse>('/api/analytics/forecast', {
       days: String(validatedDays),
     });
   },
