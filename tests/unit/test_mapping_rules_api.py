@@ -620,7 +620,9 @@ class TestTenantValidation:
                 )
 
             def _token_patch(self):
-                return patch("app.auth.decorators._extract_session_token", return_value="test-token")
+                return patch(
+                    "app.auth.decorators._extract_session_token", return_value="test-token"
+                )
 
             def get(self, *args, **kwargs):
                 with self._token_patch():
@@ -665,7 +667,9 @@ class TestTenantValidation:
                 )
 
             def _token_patch(self):
-                return patch("app.auth.decorators._extract_session_token", return_value="test-token")
+                return patch(
+                    "app.auth.decorators._extract_session_token", return_value="test-token"
+                )
 
             def get(self, *args, **kwargs):
                 with self._token_patch():
@@ -711,7 +715,9 @@ class TestTenantValidation:
                 )
 
             def _token_patch(self):
-                return patch("app.auth.decorators._extract_session_token", return_value="test-token")
+                return patch(
+                    "app.auth.decorators._extract_session_token", return_value="test-token"
+                )
 
             def get(self, *args, **kwargs):
                 with self._token_patch():
@@ -739,7 +745,9 @@ class TestTenantValidation:
 
     @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
     @patch("app.routes.mapping_rules._validate_user_in_tenant")
-    def test_platform_admin_cross_tenant_allowed(self, mock_validate, mock_service_class, platform_admin_client):
+    def test_platform_admin_cross_tenant_allowed(
+        self, mock_validate, mock_service_class, platform_admin_client
+    ):
         """Platform admin can operate across tenants."""
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
         from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
@@ -781,7 +789,9 @@ class TestTenantValidation:
 
     @patch("app.routes.mapping_rules._validate_user_in_tenant", return_value=True)
     @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
-    def test_tenant_admin_same_tenant_allowed(self, mock_service_class, mock_validate, tenant_admin_client):
+    def test_tenant_admin_same_tenant_allowed(
+        self, mock_service_class, mock_validate, tenant_admin_client
+    ):
         """Tenant admin can operate on same-tenant users."""
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
         from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
@@ -813,7 +823,9 @@ class TestTenantValidation:
 
     @patch("app.auth.permissions.get_cached_strict_mode", return_value=True)
     @patch("app.routes.mapping_rules._validate_user_in_tenant", return_value=False)
-    def test_admin_strict_mode_cross_tenant_denied(self, mock_validate, mock_strict, admin_client_with_tenant):
+    def test_admin_strict_mode_cross_tenant_denied(
+        self, mock_validate, mock_strict, admin_client_with_tenant
+    ):
         """Admin in strict mode cannot operate across tenants."""
         response = admin_client_with_tenant.post("/api/mapping-rules/user/100/generate-default")
         assert response.status_code == 404
@@ -823,7 +835,9 @@ class TestTenantValidation:
     @patch("app.auth.permissions.get_cached_strict_mode", return_value=True)
     @patch("app.routes.mapping_rules._validate_user_in_tenant", return_value=True)
     @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
-    def test_admin_strict_mode_same_tenant_allowed(self, mock_service_class, mock_validate, mock_strict, admin_client_with_tenant):
+    def test_admin_strict_mode_same_tenant_allowed(
+        self, mock_service_class, mock_validate, mock_strict, admin_client_with_tenant
+    ):
         """Admin in strict mode can operate on same-tenant users."""
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
         from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
@@ -855,7 +869,9 @@ class TestTenantValidation:
 
     @patch("app.auth.permissions.get_cached_strict_mode", return_value=False)
     @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
-    def test_admin_non_strict_mode_cross_tenant_allowed(self, mock_service_class, mock_strict, admin_client_with_tenant):
+    def test_admin_non_strict_mode_cross_tenant_allowed(
+        self, mock_service_class, mock_strict, admin_client_with_tenant
+    ):
         """Admin in non-strict mode can operate across tenants."""
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
         from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
@@ -925,7 +941,9 @@ class TestTenantValidation:
 
     @patch("app.auth.permissions.get_cached_strict_mode", return_value=True)
     @patch("app.routes.mapping_rules._validate_user_in_tenant", return_value=False)
-    def test_create_rule_strict_mode_admin_cross_tenant_denied(self, mock_validate, mock_strict, admin_client_with_tenant):
+    def test_create_rule_strict_mode_admin_cross_tenant_denied(
+        self, mock_validate, mock_strict, admin_client_with_tenant
+    ):
         """Admin in strict mode cannot create rules for cross-tenant users."""
         response = admin_client_with_tenant.post(
             "/api/mapping-rules",
@@ -972,7 +990,9 @@ class TestTenantValidation:
 
     @patch("app.auth.permissions.get_cached_strict_mode", return_value=True)
     @patch("app.routes.mapping_rules._validate_user_in_tenant", return_value=False)
-    def test_get_user_rules_strict_mode_admin_cross_tenant_denied(self, mock_validate, mock_strict, admin_client_with_tenant):
+    def test_get_user_rules_strict_mode_admin_cross_tenant_denied(
+        self, mock_validate, mock_strict, admin_client_with_tenant
+    ):
         """Admin in strict mode cannot get rules for cross-tenant users."""
         response = admin_client_with_tenant.get("/api/mapping-rules/user/100")
         assert response.status_code == 404
