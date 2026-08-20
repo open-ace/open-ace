@@ -4,14 +4,18 @@ Open ACE - AI Computing Explorer - Usage Routes
 API routes for usage data operations.
 """
 
+import logging
+
 from flask import Blueprint, g, jsonify, request
 
-from app.auth.decorators import auth_required, require_tenant_scope
+from app.auth.decorators import _log_cross_tenant_operation, auth_required, require_tenant_scope
 from app.auth.permissions import is_platform_admin_role
 from app.services.summary_service import SummaryService
 from app.services.usage_service import UsageService
 from app.utils.helpers import get_days_ago, get_today
 from app.utils.request_context import get_current_tenant_id
+
+logger = logging.getLogger(__name__)
 
 usage_bp = Blueprint("usage", __name__)
 usage_service = UsageService()
@@ -60,10 +64,11 @@ def api_summary():
             summary = summary_service.get_summary(host_name=host)
         else:
             # 查询路径：使用 usage_service.get_usage_summary()
+            # Issue #2821: 明确传 None，避免空字符串导致意外行为
             summary = usage_service.get_usage_summary(
                 host_name=host,
-                start_date=start_date,
-                end_date=end_date,
+                start_date=None,
+                end_date=None,
                 tenant_id=tenant_id,
             )
     else:
@@ -133,12 +138,6 @@ def _log_summary_refresh_audit(actor_tenant_id: int, host: str | None) -> None:
         actor_tenant_id: 平台管理员的 tenant_id
         host: 刷新的 host 参数（如有）
     """
-    import logging
-
-    from app.auth.decorators import _log_cross_tenant_operation
-
-    logger = logging.getLogger(__name__)
-
     try:
         _log_cross_tenant_operation(
             actor_user_id=g.user_id,
