@@ -626,7 +626,7 @@ def setup_permissions_with_depth_limit(
 
         return (True, "", files_processed)
 
-    except subprocess.TimeoutExpired as e:
+    except subprocess.TimeoutExpired:
         error_msg = f"Operation timed out after {timeout}s"
         # Record audit log for failed permission setup (Issue #2745)
         _log_permission_audit(
