@@ -922,8 +922,11 @@ class RemoteAgentManager:
         commands_deleted = 0
         outputs_deleted = 0
         agent_notified = False
+        lock_acquired = False
+        lock_key = 0
 
         # Step 0: Acquire Advisory Lock for PostgreSQL (prevent concurrent deregistration)
+        # Use session-level lock (pg_advisory_lock) so it persists across transactions
         if is_postgresql():
             try:
                 # Use SHA256 hash for consistent lock key across processes
@@ -931,87 +934,102 @@ class RemoteAgentManager:
                 with self.db.connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute("SET LOCAL lock_timeout = '30s'")
-                    cursor.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
+                    cursor.execute("SELECT pg_advisory_lock(%s)", (lock_key,))
+                    lock_acquired = True
+                    logger.debug("Acquired advisory lock for machine %s", machine_id[:8])
             except Exception as e:
                 logger.warning("Failed to acquire advisory lock for machine %s: %s", machine_id[:8], e)
                 # Continue without lock for SQLite or if lock fails
+                # Another concurrent deregistration may still be in progress
 
-        # Step 1: Try to notify Agent about session termination
-        agent_notified = self._notify_agent_deregister(machine_id)
+        try:
+            # Step 1: Try to notify Agent about session termination
+            agent_notified = self._notify_agent_deregister(machine_id)
 
-        # Step 2: Get all non-terminal sessions for this machine
-        session_ids = self._get_sessions_to_terminate(machine_id)
+            # Step 2: Get all non-terminal sessions for this machine
+            session_ids = self._get_sessions_to_terminate(machine_id)
 
-        if session_ids:
-            # Step 3: Terminate sessions in batches
-            for batch_idx, batch_start in enumerate(range(0, len(session_ids), DEREGISTER_BATCH_SIZE)):
-                batch = session_ids[batch_start:batch_start + DEREGISTER_BATCH_SIZE]
-                batch_result = self._terminate_sessions_batch(machine_id, batch, batch_idx)
+            if session_ids:
+                # Step 3: Terminate sessions in batches
+                for batch_idx, batch_start in enumerate(range(0, len(session_ids), DEREGISTER_BATCH_SIZE)):
+                    batch = session_ids[batch_start:batch_start + DEREGISTER_BATCH_SIZE]
+                    batch_result = self._terminate_sessions_batch(machine_id, batch, batch_idx)
 
-                if batch_result['success']:
-                    sessions_terminated += len(batch)
-                else:
-                    # Record failed batch
-                    failed_batches.append({
-                        'batch_index': batch_idx,
-                        'session_ids': batch,
-                        'error_message': batch_result.get('error', 'Unknown error'),
-                    })
+                    if batch_result['success']:
+                        sessions_terminated += len(batch)
+                    else:
+                        # Record failed batch
+                        failed_batches.append({
+                            'batch_index': batch_idx,
+                            'session_ids': batch,
+                            'error_message': batch_result.get('error', 'Unknown error'),
+                        })
 
-            # Step 4: Clean up runtime data (commands and outputs)
-            commands_deleted = self._cleanup_runtime_commands(machine_id)
-            outputs_deleted = self._cleanup_runtime_outputs(session_ids)
+                # Step 4: Clean up runtime data (commands and outputs)
+                commands_deleted = self._cleanup_runtime_commands(machine_id)
+                outputs_deleted = self._cleanup_runtime_outputs(session_ids)
 
-        # Step 5: Delete machine-related tables (original logic)
-        with self.db.connection() as conn:
-            cursor = conn.cursor()
+            # Step 5: Delete machine-related tables (original logic)
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
 
-            cursor.execute(
-                f"DELETE FROM machine_assignments WHERE machine_id = {_param()}", (machine_id,)
-            )
-            cursor.execute(f"DELETE FROM agent_tokens WHERE machine_id = {_param()}", (machine_id,))
-            cursor.execute(
-                f"DELETE FROM remote_machines WHERE machine_id = {_param()}", (machine_id,)
-            )
+                cursor.execute(
+                    f"DELETE FROM machine_assignments WHERE machine_id = {_param()}", (machine_id,)
+                )
+                cursor.execute(f"DELETE FROM agent_tokens WHERE machine_id = {_param()}", (machine_id,))
+                cursor.execute(
+                    f"DELETE FROM remote_machines WHERE machine_id = {_param()}", (machine_id,)
+                )
 
-            success = cast("bool", cursor.rowcount > 0)
-            conn.commit()
+                success = cast("bool", cursor.rowcount > 0)
+                conn.commit()
 
-        # Step 6: Clean up memory state
-        with self._lock:
-            self._connections.pop(machine_id, None)
-            # Clean up session-related memory state for terminated sessions
-            for session_id in session_ids:
-                self._session_machines.pop(session_id, None)
-                self._output_buffers.pop(session_id, None)
-                self._buffer_offsets.pop(session_id, None)
-                self._session_end_flags[session_id] = True
-                self._last_delivered.pop(session_id, None)
-                self._output_accumulator.pop(session_id, None)
+            # Step 6: Clean up memory state
+            with self._lock:
+                self._connections.pop(machine_id, None)
+                # Clean up session-related memory state for terminated sessions
+                for session_id in session_ids:
+                    self._session_machines.pop(session_id, None)
+                    self._output_buffers.pop(session_id, None)
+                    self._buffer_offsets.pop(session_id, None)
+                    self._session_end_flags[session_id] = True
+                    self._last_delivered.pop(session_id, None)
+                    self._output_accumulator.pop(session_id, None)
 
-        self._last_heartbeat_db_write.pop(machine_id, None)
+            self._last_heartbeat_db_write.pop(machine_id, None)
 
-        # Step 7: Record failed batches for compensation
-        if failed_batches:
-            self._record_failed_batches(machine_id, failed_batches)
-            logger.warning(
-                "Machine %s deregistered with %d failed batches, will be retried by compensation worker",
+            # Step 7: Record failed batches for compensation
+            if failed_batches:
+                self._record_failed_batches(machine_id, failed_batches)
+                logger.warning(
+                    "Machine %s deregistered with %d failed batches, will be retried by compensation worker",
+                    machine_id[:8],
+                    len(failed_batches),
+                )
+
+            # Step 8: Log deregistration result (for audit)
+            logger.info(
+                "Machine %s deregistered: sessions_terminated=%d, commands_deleted=%d, outputs_deleted=%d, agent_notified=%s, failed_batches=%d",
                 machine_id[:8],
+                sessions_terminated,
+                commands_deleted,
+                outputs_deleted,
+                agent_notified,
                 len(failed_batches),
             )
 
-        # Step 8: Log deregistration result (for audit)
-        logger.info(
-            "Machine %s deregistered: sessions_terminated=%d, commands_deleted=%d, outputs_deleted=%d, agent_notified=%s, failed_batches=%d",
-            machine_id[:8],
-            sessions_terminated,
-            commands_deleted,
-            outputs_deleted,
-            agent_notified,
-            len(failed_batches),
-        )
+            return cast("bool", success)
 
-        return cast("bool", success)
+        finally:
+            # Step 9: Release Advisory Lock if acquired
+            if lock_acquired and is_postgresql():
+                try:
+                    with self.db.connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_key,))
+                        logger.debug("Released advisory lock for machine %s", machine_id[:8])
+                except Exception as e:
+                    logger.warning("Failed to release advisory lock for machine %s: %s", machine_id[:8], e)
 
     def _notify_agent_deregister(self, machine_id: str) -> bool:
         """Try to notify agent that sessions will be terminated.
