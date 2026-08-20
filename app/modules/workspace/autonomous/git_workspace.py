@@ -37,6 +37,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Phases that execute agent/git work in the workflow workspace. A workflow
+# resumed AFTER merge cleanup (rejected-acceptance repair round, or new
+# issue-comment requirements) reaches these with worktree_path/branch_name
+# deliberately cleared; running them against project_path (the main
+# checkout) commits repair work straight onto local main (#322/#329/#340).
+_WORKSPACE_CONSUMING_PHASES = ("development", "pr_review")
+
 
 def _GitHubOps(*args, **kwargs):
     """Resolve ``GitHubOps`` through the orchestrator module at call time.
@@ -83,7 +90,11 @@ class GitWorkspaceService:
 
         Returns the canonical worktree path. For non-worktree strategies, or
         when ``worktree_path`` is intentionally empty (merge cleanup / conflict
-        resolution clears it), this is a no-op returning ``project_path``.
+        resolution clears it) in a phase that never touches the workspace
+        (wait/report/acceptance/planning/merge), this is a no-op returning
+        ``project_path``. A workspace-consuming phase (development/pr_review)
+        reached with an empty path after merge cleanup instead recreates the
+        worktree (#322/#329/#340).
         """
         strategy = wf.get("branch_strategy", "new-branch")
         project_path = wf.get("project_path", "")
@@ -107,9 +118,38 @@ class GitWorkspaceService:
                 raise RuntimeError(
                     "worktree transition in progress " f"(state={ts!r}); reconcile before execution"
                 )
-            return worktree_path or project_path  # type: ignore[no-any-return]
-
-        canonical: str = os.path.realpath(worktree_path)
+            # Post-merge-cleanup resume (#322/#329/#340): the merged delivery's
+            # cleanup cleared the fields because the workflow was "done"; a
+            # rejected-acceptance / new-requirements resume brings it back into
+            # a workspace-consuming phase. Recreate the worktree via the same
+            # authoritative-head recovery as the dir-gone path below instead of
+            # returning the main checkout. Phases that never touch the workspace
+            # (wait/report/acceptance/planning/merge) keep the historical no-op
+            # (the merge-retry rationale in the comment above still holds).
+            if (
+                strategy == "worktree"
+                and project_path
+                and not worktree_path
+                and wf.get("current_phase") in _WORKSPACE_CONSUMING_PHASES
+            ):
+                # fall through to the recreation section below. Path: prefer
+                # the same canonical location preparation/CI-repair use —
+                # preferred_worktree_path SURVIVES merge cleanup (cleanup
+                # clears only worktree_path/branch_name), so this recreates
+                # at the exact original spot. Legacy sibling format is a
+                # defensive fallback for the (practically unreachable) case
+                # where no preferred path can be derived; an empty
+                # branch_name there yields a bogus path that `worktree add`
+                # rejects loudly (fail-closed, not silent).
+                canonical: str = self.get_preferred_worktree_path(wf) or os.path.realpath(
+                    os.path.normpath(
+                        f"{project_path}/../{(wf.get('branch_name') or '').strip().replace('/', '-')}"
+                    )
+                )
+            else:
+                return worktree_path or project_path  # type: ignore[no-any-return]
+        else:
+            canonical = os.path.realpath(worktree_path)
         # Resolve system_account up front so the validity check below can use
         # it: os.path.isfile() stats as the service user and raises
         # PermissionError under a user-private parent (700 home, Issue #1395).
