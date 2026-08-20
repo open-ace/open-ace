@@ -19,6 +19,7 @@ from typing import Any
 
 from app.repositories.database import DB_PATH, get_database_url, is_postgresql
 from app.utils.helpers import parse_db_datetime
+from app.utils.datetime_utils import ensure_utc_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ class SyncEvent:
         return {
             "event_id": self.event_id,
             "event_type": self.event_type,
-            "timestamp": self.timestamp.isoformat(),
+            "timestamp": ensure_utc_suffix(self.timestamp),
             "source": self.source,
             "session_id": self.session_id,
             "user_id": self.user_id,
@@ -112,8 +113,8 @@ class SyncState:
         """Convert to dictionary."""
         return {
             "client_id": self.client_id,
-            "connected_at": self.connected_at.isoformat(),
-            "last_activity": self.last_activity.isoformat(),
+            "connected_at": ensure_utc_suffix(self.connected_at),
+            "last_activity": ensure_utc_suffix(self.last_activity),
             "subscriptions": list(self.subscriptions),
             "user_id": self.user_id,
             "session_id": self.session_id,

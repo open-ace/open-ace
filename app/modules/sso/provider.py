@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, cast
 
+from app.utils.datetime_utils import ensure_utc_suffix
+
 
 class ProviderType(Enum):
     """SSO provider types."""
@@ -133,7 +135,7 @@ class SSOToken:
             "refresh_token": "***" if self.refresh_token else None,
             "id_token": "***" if self.id_token else None,
             "scope": self.scope,
-            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "expires_at": ensure_utc_suffix(self.expires_at),
         }
 
     def is_expired(self) -> bool:

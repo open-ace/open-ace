@@ -11,6 +11,8 @@ import sqlite3
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+from app.utils.datetime_utils import ensure_utc_suffix
 from enum import Enum
 from typing import Any
 
@@ -72,8 +74,8 @@ class PromptTemplate:
             "is_public": self.is_public,
             "is_featured": self.is_featured,
             "use_count": self.use_count,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": ensure_utc_suffix(self.created_at),
+            "updated_at": ensure_utc_suffix(self.updated_at),
         }
 
     @classmethod
