@@ -11,8 +11,6 @@ import sqlite3
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-
-from app.utils.datetime_utils import ensure_utc_suffix
 from enum import Enum
 from typing import Any
 
@@ -24,6 +22,7 @@ from app.repositories.database import (
     get_database_url,
     is_postgresql,
 )
+from app.utils.datetime_utils import ensure_utc_suffix
 
 logger = logging.getLogger(__name__)
 
