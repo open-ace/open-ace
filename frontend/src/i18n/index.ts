@@ -981,8 +981,10 @@ export const translations: Record<Language, Translations> = {
     // Global SSO settings - Issue #2128
     enableGlobalSSO: 'Enable Global SSO Login',
     globalSSODesc: 'Control whether SSO login is available on the login page (affects all tenants)',
-    globalSSOHint: 'When enabled, users can sign in through configured SSO providers. This setting affects all tenants.',
-    globalSSOWarning: 'This setting affects all tenants. Disable with caution during security incidents.',
+    globalSSOHint:
+      'When enabled, users can sign in through configured SSO providers. This setting affects all tenants.',
+    globalSSOWarning:
+      'This setting affects all tenants. Disable with caution during security incidents.',
     autoProvisionUsers: 'Auto Provision Users',
     autoProvisionDesc: 'Automatically create user accounts on first SSO login',
     autoProvisionHint: 'Automatically create user accounts for this tenant on first SSO login',
@@ -4408,8 +4410,10 @@ export const translations: Record<Language, Translations> = {
     // Global SSO settings - Issue #2128
     enableGlobalSSO: 'グローバルSSOログインを有効化',
     globalSSODesc: 'ログインページでのSSOログイン利用可否を制御（全テナントに影響）',
-    globalSSOHint: '有効にすると、ユーザーは設定済みのSSOプロバイダーでログインできます。この設定は全テナントに影響します。',
-    globalSSOWarning: 'この設定は全テナントに影響します。セキュリティインシデント時は慎重に無効化してください。',
+    globalSSOHint:
+      '有効にすると、ユーザーは設定済みのSSOプロバイダーでログインできます。この設定は全テナントに影響します。',
+    globalSSOWarning:
+      'この設定は全テナントに影響します。セキュリティインシデント時は慎重に無効化してください。',
     autoProvisionUsers: 'ユーザー自動作成',
     autoProvisionDesc: '初回SSOログイン時にユーザーアカウントを自動作成',
     autoProvisionHint: '初回SSOログイン時にこのテナントのユーザーアカウントを自動作成',
@@ -6321,7 +6325,8 @@ export const translations: Record<Language, Translations> = {
     // Global SSO settings - Issue #2128
     enableGlobalSSO: '글로벌 SSO 로그인 활성화',
     globalSSODesc: '로그인 페이지에서 SSO 로그인 사용 가능 여부 제어 (모든 테넌트에 영향)',
-    globalSSOHint: '활성화하면 사용자가 구성된 SSO 제공업체를 통해 로그인할 수 있습니다. 이 설정은 모든 테넌트에 영향합니다.',
+    globalSSOHint:
+      '활성화하면 사용자가 구성된 SSO 제공업체를 통해 로그인할 수 있습니다. 이 설정은 모든 테넌트에 영향합니다.',
     globalSSOWarning: '이 설정은 모든 테넌트에 영향합니다. 보안 사고 시 신중하게 비활성화하세요.',
     autoProvisionUsers: '사용자 자동 생성',
     autoProvisionDesc: '첫 SSO 로그인 시 사용자 계정 자동 생성',

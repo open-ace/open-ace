@@ -35,15 +35,14 @@ vi.mock('@/i18n', () => ({
     const translations: Record<string, string> = {
       ssoSettings: 'SSO Settings',
       ssoConfiguration: 'SSO Configuration',
-      enableSSO: 'Enable SSO',
-      ssoEnabledDesc: 'Enable SSO login for users through configured providers',
-      ssoSystemSettingHint:
-        'SSO enable switch has been moved to System Settings. Please configure SSO providers here.',
       // Issue #2128: Global SSO settings
       enableGlobalSSO: 'Enable Global SSO Login',
-      globalSSODesc: 'Control whether SSO login is available on the login page (affects all tenants)',
-      globalSSOHint: 'When enabled, users can sign in through configured SSO providers. This setting affects all tenants.',
-      globalSSOWarning: 'This setting affects all tenants. Disable with caution during security incidents.',
+      globalSSODesc:
+        'Control whether SSO login is available on the login page (affects all tenants)',
+      globalSSOHint:
+        'When enabled, users can sign in through configured SSO providers. This setting affects all tenants.',
+      globalSSOWarning:
+        'This setting affects all tenants. Disable with caution during security incidents.',
       autoProvisionUsers: 'Auto Provision Users',
       autoProvisionDesc: 'Automatically create user accounts on first SSO login',
       autoProvisionHint: 'Automatically create user accounts for this tenant on first SSO login',
@@ -52,6 +51,7 @@ vi.mock('@/i18n', () => ({
       save: 'Save',
       loading: 'Loading...',
       settingsSaved: 'Settings saved successfully',
+      saveFailed: 'Failed to save settings',
       registeredProviders: 'Registered Providers',
       noProvidersRegistered: 'No SSO providers registered',
       availableProviders: 'Available Providers',
@@ -210,7 +210,9 @@ describe('SSOSettings Accessibility', () => {
       render(<SSOSettings />);
 
       // Wait for component to load - Issue #2128: Now uses enableGlobalSSO
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable Global SSO Login/i });
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
       expect(ssoEnabledInput).toHaveAttribute('aria-describedby', 'globalSSODesc');
     });
 
@@ -227,7 +229,9 @@ describe('SSOSettings Accessibility', () => {
     it('should reference valid description element IDs', async () => {
       render(<SSOSettings />);
 
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable Global SSO Login/i });
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
       const ssoDescId = ssoEnabledInput.getAttribute('aria-describedby');
       const ssoDescElement = document.getElementById(ssoDescId || '');
       expect(ssoDescElement).toBeInTheDocument();
@@ -282,7 +286,9 @@ describe('SSOSettings Accessibility', () => {
     it('should render checkboxes with correct initial state', async () => {
       render(<SSOSettings />);
 
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable Global SSO Login/i });
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
       expect(ssoEnabledInput).not.toBeChecked();
 
       const autoProvisionInput = await screen.findByRole('checkbox', {
@@ -294,7 +300,9 @@ describe('SSOSettings Accessibility', () => {
     it('should toggle Global SSO checkbox on click', async () => {
       render(<SSOSettings />);
 
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable Global SSO Login/i });
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
       fireEvent.click(ssoEnabledInput);
       expect(ssoEnabledInput).toBeChecked();
 
@@ -328,7 +336,9 @@ describe('SSOSettings Accessibility', () => {
       render(<SSOSettings />);
 
       // Issue #2128: Updated to new label text
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable Global SSO Login/i });
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
       expect(ssoEnabledInput).toHaveAttribute('id', 'ssoEnabled');
 
       const autoProvisionInput = await screen.findByRole('checkbox', {

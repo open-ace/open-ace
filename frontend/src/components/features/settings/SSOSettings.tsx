@@ -498,11 +498,33 @@ export const SSOSettings: React.FC = () => {
           {t('globalSSOHint', language)}
         </small>
         {ssoEnabled && (
-          <div className="alert alert-warning py-2 mb-0" role="alert">
+          <div className="alert alert-warning py-2 mb-2" role="alert">
             <i className="bi bi-exclamation-triangle me-1" />
             {t('globalSSOWarning', language)}
           </div>
         )}
+        <div className="mt-2">
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={async () => {
+              setIsSaving(true);
+              try {
+                await systemApi.updateSystemSettings({ sso_enabled: ssoEnabled });
+                success(t('settingsSaved', language));
+              } catch (err) {
+                console.error('Failed to save global SSO setting:', err);
+                toastError(t('saveFailed', language));
+              } finally {
+                setIsSaving(false);
+              }
+            }}
+            loading={isSaving}
+          >
+            <i className="bi bi-check-lg me-1" />
+            {t('save', language)}
+          </Button>
+        </div>
       </Card>
 
       {/* Tenant-level SSO Settings */}
