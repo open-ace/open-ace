@@ -11,6 +11,7 @@ import os
 import platform
 import pwd
 import subprocess
+from datetime import datetime, timezone
 
 import sqlalchemy as sa
 from flask import Blueprint, g, jsonify, request
@@ -27,6 +28,7 @@ from app.models.user import User
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.user_repo import UserRepository
 from app.services.permission_task_service import (
+    PERMISSION_MAX_QUEUE_SIZE,
     PERMISSION_PRIORITY_AUTO_CREATE,
     PERMISSION_PRIORITY_MANUAL_FIX,
     PERMISSION_SYNC_THRESHOLD,
@@ -289,21 +291,23 @@ def api_create_project():
                 if not success:
                     logger.error(f"Failed to setup shared permissions: {error_msg}")
                     # Update project status to failed
-                    from app import db
+                    from app import db  # type: ignore[attr-defined]
 
                     db.execute(
-                        sa.text("""
+                        sa.text(
+                            """
                             UPDATE projects
                             SET permission_status = 'failed'
                             WHERE id = :project_id
-                        """),
+                        """
+                        ),
                         {"project_id": project_id},
                     )
                     db.commit()
                     permission_warning = f"Permission setup failed: {error_msg}"
             else:
                 # Large project: submit async task
-                from app import db
+                from app import db  # type: ignore[attr-defined]
 
                 service = get_permission_task_service()
                 success, error_msg, task_info = service.submit_task(
@@ -404,7 +408,7 @@ def api_update_project(project_id):
                     )
             else:
                 # Large project: submit async task
-                from app import db
+                from app import db  # type: ignore[attr-defined]
 
                 service = get_permission_task_service()
                 success, error_msg, task_info = service.submit_task(
@@ -581,7 +585,7 @@ def api_fix_project_permissions(project_id):
     data = request.get_json() or {}
     force_async = data.get("async", False)
     depth_limit = data.get("depth_limit")
-    force_restart = data.get("force_restart", False)
+    force_restart = data.get("force_restart", False)  # noqa: F841
 
     # Validate depth_limit parameter
     if depth_limit is not None:
@@ -596,7 +600,7 @@ def api_fix_project_permissions(project_id):
 
     if use_async:
         # Async mode: submit background task
-        from app import db
+        from app import db  # type: ignore[attr-defined]
 
         service = get_permission_task_service()
 
@@ -669,7 +673,7 @@ def api_get_permission_task_status(task_id):
     Returns:
         JSON response with task status information.
     """
-    from app import db
+    from app import db  # type: ignore[attr-defined]
 
     tenant_id = get_current_tenant_id()
     service = get_permission_task_service()
@@ -743,7 +747,7 @@ def api_cancel_permission_task(task_id):
     Returns:
         JSON response with success status or error message.
     """
-    from app import db
+    from app import db  # type: ignore[attr-defined]
 
     tenant_id = get_current_tenant_id()
     service = get_permission_task_service()

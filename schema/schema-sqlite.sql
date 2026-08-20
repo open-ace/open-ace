@@ -706,6 +706,36 @@ CREATE TABLE parse_failure_records (
  created_at TIMESTAMP NOT NULL
 );
 
+CREATE TABLE permission_checkpoints (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ task_id TEXT NOT NULL,
+ processed_paths text,
+ last_position TEXT,
+ snapshot_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP
+);
+
+CREATE TABLE permission_tasks (
+ task_id TEXT PRIMARY KEY NOT NULL,
+ project_id integer,
+ user_id integer,
+ path TEXT NOT NULL,
+ status TEXT NOT NULL,
+ priority integer DEFAULT 10 NOT NULL,
+ progress integer DEFAULT 0 NOT NULL,
+ files_processed integer DEFAULT 0 NOT NULL,
+ total_files integer DEFAULT 0 NOT NULL,
+ depth_limit integer,
+ checkpoint_data text,
+ checksum TEXT,
+ error_message text,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP,
+ started_at TIMESTAMP,
+ completed_at TIMESTAMP
+);
+
 CREATE TABLE policy_decisions (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  decision_id text NOT NULL,
@@ -785,7 +815,9 @@ CREATE TABLE projects (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  is_active INTEGER DEFAULT 1 NOT NULL,
  is_shared INTEGER DEFAULT 0 NOT NULL,
- tenant_id integer DEFAULT 1 NOT NULL
+ tenant_id integer DEFAULT 1 NOT NULL,
+ permission_status TEXT,
+ permission_task_id TEXT
 );
 
 CREATE TABLE prompt_templates (
@@ -1925,6 +1957,14 @@ CREATE INDEX idx_parse_failure_timestamp ON parse_failure_records ("timestamp");
 
 CREATE INDEX idx_parse_failure_unresolved ON parse_failure_records (resolved) WHERE (resolved = false);
 
+CREATE INDEX idx_permission_tasks_checksum ON permission_tasks (checksum);
+
+CREATE INDEX idx_permission_tasks_priority_created ON permission_tasks (priority, created_at);
+
+CREATE INDEX idx_permission_tasks_project ON permission_tasks (project_id);
+
+CREATE INDEX idx_permission_tasks_status ON permission_tasks (status);
+
 CREATE INDEX idx_policy_decisions_fingerprint ON policy_decisions (fingerprint_hash);
 
 CREATE INDEX idx_policy_decisions_request_id ON policy_decisions (request_id);
@@ -1942,6 +1982,8 @@ CREATE INDEX idx_projects_created_by ON projects (created_by);
 CREATE INDEX idx_projects_is_active ON projects (is_active);
 
 CREATE INDEX idx_projects_path ON projects (tenant_id, path);
+
+CREATE INDEX idx_projects_permission_status ON projects (permission_status);
 
 CREATE INDEX idx_projects_tenant_created_by ON projects (tenant_id, created_by);
 
