@@ -2,10 +2,12 @@
 Open ACE - Insights Routes
 
 API routes for AI conversation insights report generation and management.
+
+Issue #2738: Added date range validation.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, g, jsonify, request
 
@@ -14,6 +16,8 @@ from app.repositories.insights_repo import InsightsReportRepository
 from app.repositories.message_repo import MessageRepository
 from app.repositories.user_repo import UserRepository
 from app.services.insights_service import InsightsService
+from app.utils.date_range_errors import get_error_message
+from app.utils.validators import validate_date_range
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +47,8 @@ def generate_report():
 
     Defaults to last 7 days if no dates provided.
     If a report already exists for the date range, returns cached version.
+
+    Issue #2738: Added date range validation.
     """
 
     user_id = g.user_id
@@ -54,11 +60,33 @@ def generate_report():
         end_date = data.get("end_date")
         language = data.get("language", "zh")  # Default to Chinese
 
-        if not start_date or not end_date:
-            end = datetime.now()
+        # Issue #2738: Validate date range
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
+        if not is_valid:
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(error_code),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
+
+        # Apply default values if both are missing
+        if parsed_start is None:
+            end = datetime.now(timezone.utc).replace(tzinfo=None)
             start = end - timedelta(days=7)
             start_date = start.strftime("%Y-%m-%d")
             end_date = end.strftime("%Y-%m-%d")
+        else:
+            # When parsed_start is not None, parsed_end is also not None
+            assert parsed_end is not None  # Type narrowing for mypy
+            start_date = parsed_start.strftime("%Y-%m-%d")
+            end_date = parsed_end.strftime("%Y-%m-%d")
 
         # Generate insights
         report, error = insights_service.generate_insights(
