@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from flask import Flask
 
+from app.utils.llm_proxy_url_validator import LlmProxyValidationResult
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -29,6 +31,11 @@ def workspace_app():
     app.config["TESTING"] = True
     app.register_blueprint(workspace_bp, url_prefix="/api/workspace")
     return app
+
+
+def _mock_validate_llm_proxy_url(url, tenant_id, provider, *, resolver=None):
+    """Mock validate_llm_proxy_url to return allowed=True."""
+    return LlmProxyValidationResult(True)
 
 
 def _mock_proxy_token(**overrides):
@@ -97,6 +104,10 @@ class TestNoActiveNonWebuiSession:
     @patch(_QUOTA_PATH)
     @patch(_SESSION_MGR_PATH)
     @patch(_PROXY_PATH)
+    @patch(
+        "app.utils.llm_proxy_url_validator.validate_llm_proxy_url",
+        _mock_validate_llm_proxy_url,
+    )
     def test_uses_webui_aggregate_when_no_active_session(
         self,
         mock_get_proxy,
@@ -151,6 +162,10 @@ class TestActiveNonWebuiSession:
     @patch(_QUOTA_PATH)
     @patch(_SESSION_MGR_PATH)
     @patch(_PROXY_PATH)
+    @patch(
+        "app.utils.llm_proxy_url_validator.validate_llm_proxy_url",
+        _mock_validate_llm_proxy_url,
+    )
     def test_uses_active_session_when_available(
         self,
         mock_get_proxy,
@@ -208,6 +223,10 @@ class TestMultipleActiveSessions:
     @patch(_QUOTA_PATH)
     @patch(_SESSION_MGR_PATH)
     @patch(_PROXY_PATH)
+    @patch(
+        "app.utils.llm_proxy_url_validator.validate_llm_proxy_url",
+        _mock_validate_llm_proxy_url,
+    )
     def test_uses_most_recently_updated_session(
         self,
         mock_get_proxy,
@@ -269,6 +288,10 @@ class TestXSessionIdHeaderOverride:
     @patch(_QUOTA_PATH)
     @patch(_SESSION_MGR_PATH)
     @patch(_PROXY_PATH)
+    @patch(
+        "app.utils.llm_proxy_url_validator.validate_llm_proxy_url",
+        _mock_validate_llm_proxy_url,
+    )
     def test_header_takes_precedence_over_active_session(
         self,
         mock_get_proxy,
@@ -332,6 +355,10 @@ class TestWebuiSessionFilter:
     @patch(_QUOTA_PATH)
     @patch(_SESSION_MGR_PATH)
     @patch(_PROXY_PATH)
+    @patch(
+        "app.utils.llm_proxy_url_validator.validate_llm_proxy_url",
+        _mock_validate_llm_proxy_url,
+    )
     def test_filters_webui_sessions_from_lookup(
         self,
         mock_get_proxy,
