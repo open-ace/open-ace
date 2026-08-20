@@ -224,9 +224,7 @@ class TestSummaryRefreshPermissions:
         with self._mock_auth(user):
             with patch("app.routes.usage.summary_service") as mock_summary:
                 mock_summary.refresh_summary.return_value = True
-                with patch(
-                    "app.routes.usage._log_summary_refresh_audit"
-                ) as mock_audit:
+                with patch("app.routes.usage._log_summary_refresh_audit") as mock_audit:
                     client = app.test_client()
                     response = client.post(
                         "/api/summary/refresh",
