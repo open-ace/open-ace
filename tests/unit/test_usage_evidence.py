@@ -229,3 +229,86 @@ class TestUsageEvidence:
         assert d["effective_quota_tokens"] == 150
         assert d["effective_cost_tokens"] == 150
         assert d["total_session_tokens"] == 150
+
+    def test_dimension_fields_default(self):
+        """Test that tool_name and host_name default to None."""
+        evidence = UsageEvidence()
+        assert evidence.tool_name is None
+        assert evidence.host_name is None
+
+    def test_dimension_fields_set(self):
+        """Test setting tool_name and host_name."""
+        evidence = UsageEvidence(
+            input_tokens=100,
+            output_tokens=50,
+            tool_name="qwen-code",
+            host_name="localhost",
+            tenant_id=1,
+        )
+        assert evidence.tool_name == "qwen-code"
+        assert evidence.host_name == "localhost"
+
+    def test_dimension_fields_in_to_dict(self):
+        """Test that tool_name and host_name appear in to_dict()."""
+        evidence = UsageEvidence(
+            input_tokens=100,
+            output_tokens=50,
+            tool_name="qwen-code",
+            host_name="localhost",
+            tenant_id=1,
+        )
+        d = evidence.to_dict()
+        assert d["tool_name"] == "qwen-code"
+        assert d["host_name"] == "localhost"
+
+    def test_merge_with_dimension_fields(self):
+        """Test merging dimension fields."""
+        ev1 = UsageEvidence(
+            input_tokens=100,
+            output_tokens=50,
+            tool_name="qwen-code",
+            host_name="localhost",
+            session_id="sess-123",
+            tenant_id=1,
+        )
+        ev2 = UsageEvidence(
+            input_tokens=0,
+            output_tokens=50,
+            tool_name=None,  # Should use ev1's value
+            host_name=None,
+            session_id="sess-123",
+            tenant_id=1,
+            is_final=True,
+        )
+
+        merged = ev1.merge_with(ev2)
+
+        # Should keep ev1's dimension values when ev2 has None
+        assert merged.tool_name == "qwen-code"
+        assert merged.host_name == "localhost"
+
+    def test_merge_with_dimension_fields_override(self):
+        """Test that later dimension fields override earlier ones."""
+        ev1 = UsageEvidence(
+            input_tokens=100,
+            output_tokens=50,
+            tool_name="tool1",
+            host_name="host1",
+            session_id="sess-123",
+            tenant_id=1,
+        )
+        ev2 = UsageEvidence(
+            input_tokens=0,
+            output_tokens=50,
+            tool_name="tool2",  # Should override
+            host_name="host2",
+            session_id="sess-123",
+            tenant_id=1,
+            is_final=True,
+        )
+
+        merged = ev1.merge_with(ev2)
+
+        # ev2's values should take precedence
+        assert merged.tool_name == "tool2"
+        assert merged.host_name == "host2"

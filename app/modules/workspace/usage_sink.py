@@ -471,6 +471,80 @@ def _record_messages_internal(
     return message_delta
 
 
+class DailyUsageSink:
+    """Sink for incrementing daily_usage table.
+
+    Issue #2732: Write usage data to daily_usage for Dashboard "today's usage" display.
+    Uses atomic increment semantics to avoid overwriting accumulated data.
+    """
+
+    def consume(self, evidence: UsageEvidence) -> bool:
+        """Consume usage evidence and increment daily_usage.
+
+        Args:
+            evidence: Usage evidence.
+
+        Returns:
+            True if successful or skipped (not a failure), False if failed.
+        """
+        # Skip if no session_id (not a failure, just skip)
+        if not evidence.session_id:
+            logger.debug("Skipping daily_usage record: no session_id")
+            return True
+
+        # Skip if no tokens (nothing to record)
+        if evidence.input_tokens == 0 and evidence.output_tokens == 0:
+            logger.debug("Skipping daily_usage record: zero tokens")
+            return True
+
+        try:
+            from app.repositories.usage_repo import UsageRepository
+
+            repo = UsageRepository()
+
+            # Calculate cache tokens
+            cache_tokens = (evidence.cache_read_tokens or 0) + (
+                evidence.cache_write_tokens or 0
+            )
+
+            # Prepare models list (skip if no model)
+            models_used = [evidence.model] if evidence.model else None
+
+            # Call increment_usage with dimensions from evidence
+            success = repo.increment_usage(
+                tool_name=evidence.tool_name or "qwen-code",
+                host_name=evidence.host_name or "localhost",
+                tenant_id=evidence.tenant_id,
+                tokens_used=evidence.total_session_tokens(),
+                input_tokens=evidence.input_tokens,
+                output_tokens=evidence.output_tokens,
+                cache_tokens=cache_tokens,
+                request_count=1,
+                models_used=models_used,
+            )
+
+            if not success:
+                logger.warning(
+                    "DailyUsageSink failed for session %s",
+                    evidence.session_id[:8],
+                )
+
+            return success
+
+        except Exception as e:
+            logger.error(
+                "DailyUsageSink failed: %s",
+                e,
+                extra={
+                    "session_id": evidence.session_id,
+                    "tenant_id": evidence.tenant_id,
+                    "tool_name": evidence.tool_name,
+                    "host_name": evidence.host_name,
+                },
+            )
+            return False
+
+
 def create_default_sink(
     request_body: bytes | None = None,
     response_body: bytes | None = None,
@@ -505,5 +579,8 @@ def create_default_sink(
                 model=model,
             )
         )
+
+    # Issue #2732: Add DailyUsageSink for Dashboard "today's usage"
+    sinks.append(DailyUsageSink())
 
     return CompositeSink(sinks)
