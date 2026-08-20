@@ -109,7 +109,14 @@ def _make_gh_with_changes():
     gh.get_diff.return_value = "diff --git a/app/x.py b/app/x.py\n+new line"
     gh.get_pr_checks.return_value = []  # no CI fails for simplicity
     gh.get_pr_head_sha.return_value = "head-sha-123"
-    gh.get_pr.return_value = {"number": 1877, "url": "https://x/pull/1877"}
+    gh.get_pr.return_value = {
+        "number": 1877,
+        "url": "https://x/pull/1877",
+        # The pr_review liveness check (merged-PR reuse fix) probes the
+        # recorded PR's state; a mock without it reads as non-OPEN and would
+        # wrongly force a fresh PR creation.
+        "state": "OPEN",
+    }
     return gh
 
 

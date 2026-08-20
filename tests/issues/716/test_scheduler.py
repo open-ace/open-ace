@@ -1,6 +1,8 @@
 """Unit tests for AutonomousScheduler."""
 
+import logging
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -377,3 +379,246 @@ class TestSchedulerProcessWorkflows:
 
                 called_ids = [call.args[0] for call in mock_orch_cls.call_args_list]
                 assert called_ids == ["wf-pending"]
+
+
+class TestNonBlockingAdvancePath:
+    """Tests for the non-blocking advance submission path
+    (_process_workflows(wait=False) + _reap_completed_futures).
+
+    Regression guard for the 2026-08-20 starvation incident: _run_loop waited
+    for a tens-of-minutes advance inside _process_workflows, parking
+    promotion/auto-resume/reclaim/cleanup and delaying newly created batches
+    by ~49 minutes (batches 280f009c / 3fc727cb). The loop now submits to a
+    persistent background executor and returns; completed futures are reaped
+    on later ticks."""
+
+    def setup_method(self):
+        AutonomousScheduler._instance = None
+
+    @pytest.fixture(autouse=True)
+    def _allow_quota(self):
+        """Same quota stub as TestSchedulerProcessWorkflows: _advance_single
+        is patched wholesale in these tests, but keep the guard so a future
+        edit routing these tests through the real advance stays green."""
+        mock = MagicMock()
+        mock.return_value.check_quota.return_value = {"allowed": True, "reason": None}
+        with patch("app.modules.governance.quota_manager.QuotaManager", mock):
+            yield
+
+    def test_wait_false_returns_before_slow_advance_finishes(self):
+        """wait=False must submit the advance and return immediately — a slow
+        advance (agent runs + CI polling can run tens of minutes) must not
+        park the scheduler tick. The slot is registered before submission and
+        the future is tracked for later reaping."""
+        scheduler = AutonomousScheduler()
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_advance(workflow_id):
+            started.set()
+            release.wait(timeout=10)
+            # Mirror the real _advance_single's finally-block cleanup so the
+            # slot accounting is exercised end-to-end.
+            scheduler._in_progress_ids.discard(workflow_id)
+            return workflow_id
+
+        mock_repo = MagicMock()
+        mock_repo.get_queued_workflows.return_value = []
+        mock_repo.get_active_workflows.return_value = [
+            {"workflow_id": "wf-slow", "status": "pending"}
+        ]
+
+        try:
+            with (
+                patch("app.routes.autonomous._get_repo", return_value=mock_repo),
+                patch.object(scheduler, "_advance_single", side_effect=slow_advance),
+            ):
+                t0 = time.monotonic()
+                scheduler._process_workflows(wait=False)
+                submit_elapsed = time.monotonic() - t0
+
+                # The submit path returned without waiting for the advance...
+                assert started.wait(timeout=5), "advance never started"
+                assert not release.is_set(), "submit path blocked until advance finished"
+                assert submit_elapsed < 4.5, f"submit blocked for {submit_elapsed:.2f}s"
+                # ...but the slot is reserved and the future is tracked.
+                assert "wf-slow" in scheduler._in_progress_ids
+                assert len(scheduler._in_flight_futures) == 1
+
+            release.set()
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and not all(
+                f.done() for f in scheduler._in_flight_futures
+            ):
+                time.sleep(0.01)
+            scheduler._reap_completed_futures()
+            assert scheduler._in_flight_futures == {}
+            assert "wf-slow" not in scheduler._in_progress_ids
+        finally:
+            # Drain the executor so the test leaves no worker threads behind.
+            if scheduler._bg_executor:
+                scheduler._bg_executor.shutdown(wait=True)
+
+    def test_reap_completed_futures_logs_errors(self, caplog):
+        """An exception escaping _advance_single on the background path must
+        surface in the log via _reap_completed_futures — without it the error
+        would vanish silently (the legacy as_completed loop logged it)."""
+        scheduler = AutonomousScheduler()
+
+        def boom(workflow_id):
+            raise RuntimeError(f"boom {workflow_id}")
+
+        mock_repo = MagicMock()
+        mock_repo.get_queued_workflows.return_value = []
+        mock_repo.get_active_workflows.return_value = [
+            {"workflow_id": "wf-boom", "status": "pending"}
+        ]
+
+        try:
+            with (
+                patch("app.routes.autonomous._get_repo", return_value=mock_repo),
+                patch.object(scheduler, "_advance_single", side_effect=boom),
+            ):
+                scheduler._process_workflows(wait=False)
+
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and not all(
+                f.done() for f in scheduler._in_flight_futures
+            ):
+                time.sleep(0.01)
+
+            with caplog.at_level(logging.ERROR, logger="app.services.autonomous_scheduler"):
+                scheduler._reap_completed_futures()
+
+            assert any(
+                "wf-boom" in r.message and "boom" in r.message for r in caplog.records
+            ), caplog.messages
+            # Reaped: a second reap is a no-op.
+            assert scheduler._in_flight_futures == {}
+        finally:
+            if scheduler._bg_executor:
+                scheduler._bg_executor.shutdown(wait=True)
+
+    def test_stop_reaps_and_shuts_down_background_executor(self, caplog):
+        """stop() must reap completed background advances (so their errors are
+        logged) and release the executor without waiting for in-flight work
+        (in-flight advances were already told to shut down via
+        prepare_for_shutdown). It must also RESET the executor reference so a
+        later start() on the same singleton rebuilds a live executor instead
+        of submitting to the dead one forever (silent-outage restart bug)."""
+        scheduler = AutonomousScheduler()
+        scheduler._get_bg_executor()
+        executor = scheduler._bg_executor
+
+        # Seed one completed-but-unreaped failing future, as a tick that was
+        # interrupted between completion and reaping would leave behind.
+        def boom(workflow_id):
+            raise RuntimeError(f"boom {workflow_id}")
+
+        future = executor.submit(boom, "wf-boom")
+        with scheduler._futures_lock:
+            scheduler._in_flight_futures[future] = "wf-boom"
+        # Wait for completion; result() re-raises the boom — that's expected.
+        with pytest.raises(RuntimeError, match="boom wf-boom"):
+            future.result(timeout=5)
+
+        scheduler._stop_event.set()
+        with caplog.at_level(logging.ERROR, logger="app.services.autonomous_scheduler"):
+            scheduler.stop()
+
+        # The completed future's error surfaced and the tracking dict drained.
+        assert any(
+            "wf-boom" in r.message and "boom" in r.message for r in caplog.records
+        ), caplog.messages
+        assert scheduler._in_flight_futures == {}
+        # The old executor is dead...
+        with pytest.raises(RuntimeError):
+            executor.submit(lambda: None)
+        # ...and the reference was reset so start() rebuilds a live one.
+        assert scheduler._bg_executor is None
+
+    def test_submit_failure_releases_slot_without_touching_sibling_keys(self, caplog):
+        """A RuntimeError from executor.submit mid-tick (stop() raced the loop)
+        must release the workflow's own registration — and, for a WAITING
+        workflow (which deliberately registers an EMPTY key map), must NOT fall
+        back to the row's conflict keys: that legacy fallback would discard a
+        running batch sibling's reservation from the shared sets."""
+        scheduler = AutonomousScheduler()
+        scheduler._get_bg_executor()
+        dead = scheduler._bg_executor
+        dead.shutdown(wait=False)
+
+        # A running sibling already holds the batch-1 reservation.
+        scheduler._in_progress_ids.add("wf-sibling")
+        scheduler._in_progress_batch_ids.add("batch-1")
+        scheduler._in_progress_key_map["wf-sibling"] = ("batch-1", "/wt/1", "auto/1")
+
+        mock_repo = MagicMock()
+        mock_repo.get_queued_workflows.return_value = []
+        mock_repo.get_active_workflows.return_value = [
+            # The sibling backs its in-progress entry with a fresh lease so
+            # _reclaim_stale_in_progress leaves it alone; it's already in
+            # _in_progress_ids so selection skips it.
+            {
+                "workflow_id": "wf-sibling",
+                "status": "planning",
+                "batch_id": "batch-1",
+                "worktree_path": "/wt/1",
+                "branch_name": "auto/1",
+                "locked_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            },
+            {
+                "workflow_id": "wf-wait",
+                "status": "waiting",
+                "batch_id": "batch-1",
+                "worktree_path": "/wt/1",
+                "branch_name": "auto/1",
+            },
+        ]
+
+        with (
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
+            patch.object(scheduler, "_get_bg_executor", return_value=dead),
+            patch.object(scheduler, "_advance_single") as advance,
+        ):
+            with caplog.at_level(logging.WARNING, logger="app.services.autonomous_scheduler"):
+                scheduler._process_workflows(wait=False)
+
+        # Submit failed → the advance never ran...
+        advance.assert_not_called()
+        # ...the waiting workflow's own registration was released...
+        assert "wf-wait" not in scheduler._in_progress_ids
+        assert "wf-wait" not in scheduler._in_progress_key_map
+        # ...with a warning explaining why...
+        assert any(
+            "wf-wait" in r.message and "releasing slot" in r.message for r in caplog.records
+        ), caplog.messages
+        # ...but the running sibling's batch reservation survived (the empty
+        # key map recorded at selection means no legacy-key fallback fired).
+        assert "batch-1" in scheduler._in_progress_batch_ids
+
+    def test_wait_true_still_blocks_until_advances_finish(self):
+        """The legacy wait=True semantics (used by direct callers and relied on
+        by the older unit tests) are unchanged: the call returns only after
+        every submitted advance finished."""
+        scheduler = AutonomousScheduler()
+        finished = threading.Event()
+
+        def quick_advance(workflow_id):
+            scheduler._in_progress_ids.discard(workflow_id)
+            finished.set()
+            return workflow_id
+
+        mock_repo = MagicMock()
+        mock_repo.get_queued_workflows.return_value = []
+        mock_repo.get_active_workflows.return_value = [
+            {"workflow_id": "wf-quick", "status": "pending"}
+        ]
+
+        with (
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
+            patch.object(scheduler, "_advance_single", side_effect=quick_advance),
+        ):
+            scheduler._process_workflows(wait=True)
+
+        assert finished.is_set()
