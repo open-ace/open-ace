@@ -2806,15 +2806,6 @@ ${line}"
             fi
         done
 
-        # 【修复 P2】Check chown rule (consistent with docker-entrypoint.sh)
-        # chown is defined in OPENACE_UTILS Cmnd_Alias (line 1862), not as a direct user rule
-        # Check if OPENACE_UTILS Cmnd_Alias exists and contains chown
-        if ! grep -q "Cmnd_Alias OPENACE_UTILS" "$sudoers_file" 2>/dev/null || \
-           ! grep -E "Cmnd_Alias OPENACE_UTILS.*chown" "$sudoers_file" 2>/dev/null; then
-            print_warning "Sudoers missing OPENACE_UTILS Cmnd_Alias or chown command"
-            need_update=true
-        fi
-
         # 【修复 Issue #2674】Check cross-user mkdir rule (MKDIR_SAFE).
         # github_ops.create_verification_worktree_dir emits
         # 'sudo -u <account> mkdir ...' (bare mkdir), which the (root)-runas
@@ -5165,10 +5156,35 @@ do_upgrade() {
             cp "$target_path/usage.db" "$backup_dir/"
         fi
 
-        # Backup frontend build artifacts if source doesn't have them (Issue #1943)
-        # static/js/dist is not tracked in git, so upgrading from git repo would lose it
+        # Validate the new frontend and snapshot the deployment's current
+        # release before any target files are removed (Issues #1943, #2875).
+        # A package build may contain its build machine's previous release;
+        # reconcile_install replaces that with the deployment's previous
+        # release after the new package has been copied.
+        local frontend_retention_helper="$SOURCE_DIR/scripts/frontend_asset_retention.py"
+        local source_frontend_dist="$SOURCE_DIR/static/js/dist"
         local preserve_frontend=false
-        if [ -d "$target_path/static/js/dist" ] && [ ! -d "$SOURCE_DIR/static/js/dist" ]; then
+        local reconcile_frontend=false
+        local retain_previous_frontend=false
+        local frontend_snapshot_dir=""
+        if [ -d "$source_frontend_dist" ]; then
+            reconcile_frontend=true
+            print_info "Validating frontend release metadata before upgrade..."
+            python3 "$frontend_retention_helper" validate-source \
+                --dist "$source_frontend_dist"
+
+            if [ -d "$target_path/static/js/dist" ]; then
+                frontend_snapshot_dir=$(mktemp -d /tmp/open-ace-frontend-assets.XXXXXX)
+                chmod 700 "$frontend_snapshot_dir"
+                print_info "Snapshotting the currently deployed frontend release..."
+                python3 "$frontend_retention_helper" snapshot \
+                    --dist "$target_path/static/js/dist" \
+                    --output "$frontend_snapshot_dir"
+                retain_previous_frontend=true
+            fi
+        elif [ -d "$target_path/static/js/dist" ]; then
+            # static/js/dist is not tracked in git, so upgrading from a source
+            # checkout without build artifacts must preserve the complete dist.
             print_info "Backing up frontend build artifacts (static/js/dist)..."
             mkdir -p "$backup_dir/static/js"
             cp -r "$target_path/static/js/dist" "$backup_dir/static/js/"
@@ -5241,6 +5257,25 @@ do_upgrade() {
             print_warning "Preserved existing frontend build artifacts"
             print_warning "To rebuild frontend with latest code, run:"
             print_warning "  cd $target_path/frontend && npm install && npm run build"
+        elif [ "$reconcile_frontend" = true ]; then
+            print_info "Finalizing frontend release retention..."
+            if [ "$retain_previous_frontend" = true ]; then
+                python3 "$target_path/scripts/frontend_asset_retention.py" reconcile \
+                    --target-dist "$target_path/static/js/dist" \
+                    --snapshot "$frontend_snapshot_dir"
+                case "$frontend_snapshot_dir" in
+                    /tmp/open-ace-frontend-assets.*)
+                        rm -rf -- "$frontend_snapshot_dir"
+                        ;;
+                    *)
+                        print_error "Refusing to remove unexpected frontend snapshot path"
+                        exit 1
+                        ;;
+                esac
+            else
+                python3 "$target_path/scripts/frontend_asset_retention.py" reconcile \
+                    --target-dist "$target_path/static/js/dist"
+            fi
         fi
     fi
 

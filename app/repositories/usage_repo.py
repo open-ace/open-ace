@@ -159,6 +159,346 @@ class UsageRepository:
         logger.debug(f"Saved usage: {date} - {tool_name} - {host_name}")
         return True
 
+    def increment_usage(
+        self,
+        tool_name: str,
+        host_name: str,
+        tenant_id: int | None,
+        tokens_used: int = 0,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_tokens: int = 0,
+        request_count: int = 1,
+        models_used: list[str] | None = None,
+    ) -> bool:
+        """
+        Atomically increment usage data in daily_usage table.
+
+        Issue #2732: Use atomic increment semantics instead of overwrite.
+        Uses database-side CURRENT_DATE for consistent date handling.
+
+        Args:
+            tool_name: Name of the tool.
+            host_name: Host name.
+            tenant_id: Tenant ID.
+            tokens_used: Total tokens used.
+            input_tokens: Input tokens.
+            output_tokens: Output tokens.
+            cache_tokens: Cache tokens (cache_read + cache_write).
+            request_count: Number of requests (default 1).
+            models_used: List of models used (will be merged with existing).
+
+        Returns:
+            bool: True if successful.
+        """
+        # Normalize at the write boundary
+        tool_name = normalize_tool_name(tool_name)
+        effective_tenant_id = self._normalize_tenant_id(tenant_id) or 1
+
+        # Filter out empty models
+        if models_used and len(models_used) == 0:
+            models_used = None
+
+        models_json = json.dumps(models_used) if models_used else None
+
+        if is_postgresql():
+            return self._increment_usage_postgresql(
+                tool_name=tool_name,
+                host_name=host_name,
+                tenant_id=effective_tenant_id,
+                tokens_used=tokens_used,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_tokens=cache_tokens,
+                request_count=request_count,
+                models_json=models_json,
+            )
+        else:
+            return self._increment_usage_sqlite(
+                tool_name=tool_name,
+                host_name=host_name,
+                tenant_id=effective_tenant_id,
+                tokens_used=tokens_used,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_tokens=cache_tokens,
+                request_count=request_count,
+                models_used=models_used,
+            )
+
+    def _increment_usage_postgresql(
+        self,
+        tool_name: str,
+        host_name: str,
+        tenant_id: int,
+        tokens_used: int,
+        input_tokens: int,
+        output_tokens: int,
+        cache_tokens: int,
+        request_count: int,
+        models_json: str | None,
+    ) -> bool:
+        """Atomically increment usage in PostgreSQL with UPSERT."""
+        import time
+
+        start_time = time.time()
+
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+
+                # Use CURRENT_DATE for consistent date handling
+                cursor.execute(
+                    """
+                    INSERT INTO daily_usage
+                    (date, tool_name, host_name, tokens_used, input_tokens,
+                     output_tokens, cache_tokens, request_count, models_used, tenant_id)
+                    VALUES (CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (tenant_id, date, tool_name, host_name) DO UPDATE SET
+                        tokens_used = daily_usage.tokens_used + EXCLUDED.tokens_used,
+                        input_tokens = daily_usage.input_tokens + EXCLUDED.input_tokens,
+                        output_tokens = daily_usage.output_tokens + EXCLUDED.output_tokens,
+                        cache_tokens = daily_usage.cache_tokens + EXCLUDED.cache_tokens,
+                        request_count = daily_usage.request_count + EXCLUDED.request_count,
+                        models_used = CASE
+                            WHEN EXCLUDED.models_used IS NULL
+                            THEN daily_usage.models_used
+                            ELSE (
+                                SELECT json_agg(DISTINCT elem)
+                                FROM json_array_elements(
+                                    COALESCE(daily_usage.models_used::json, '[]')
+                                    || EXCLUDED.models_used::json
+                                ) elem
+                            )
+                        END
+                """,
+                    (
+                        tool_name,
+                        host_name,
+                        tokens_used,
+                        input_tokens,
+                        output_tokens,
+                        cache_tokens,
+                        request_count,
+                        models_json,
+                        tenant_id,
+                    ),
+                )
+                conn.commit()
+
+            elapsed_ms = (time.time() - start_time) * 1000
+            logger.debug(
+                "Incremented usage for %s/%s (tenant=%d) in %.1fms",
+                tool_name,
+                host_name,
+                tenant_id,
+                elapsed_ms,
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                "Failed to increment usage (PostgreSQL): %s",
+                e,
+                extra={
+                    "tool_name": tool_name,
+                    "host_name": host_name,
+                    "tenant_id": tenant_id,
+                },
+            )
+            return False
+
+    def _increment_usage_sqlite(
+        self,
+        tool_name: str,
+        host_name: str,
+        tenant_id: int,
+        tokens_used: int,
+        input_tokens: int,
+        output_tokens: int,
+        cache_tokens: int,
+        request_count: int,
+        models_used: list[str] | None,
+    ) -> bool:
+        """Increment usage in SQLite with transaction and retry mechanism."""
+        import time
+
+        max_retries = 3
+        retry_delay = 0.1  # 100ms
+
+        for attempt in range(max_retries):
+            start_time = time.time()
+
+            try:
+                with self.db.connection() as conn:
+                    # Set busy timeout for SQLite
+                    cursor = conn.cursor()
+                    cursor.execute("PRAGMA busy_timeout = 5000")
+
+                    # Begin immediate transaction to lock database
+                    cursor.execute("BEGIN IMMEDIATE TRANSACTION")
+
+                    try:
+                        # Try to insert (ignore conflict)
+                        cursor.execute(
+                            """
+                            INSERT OR IGNORE INTO daily_usage
+                            (date, tool_name, host_name, tokens_used, input_tokens,
+                             output_tokens, cache_tokens, request_count, models_used, tenant_id)
+                            VALUES (DATE('now', 'localtime'), ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                            (
+                                tool_name,
+                                host_name,
+                                tokens_used,
+                                input_tokens,
+                                output_tokens,
+                                cache_tokens,
+                                request_count,
+                                json.dumps(models_used) if models_used else None,
+                                tenant_id,
+                            ),
+                        )
+
+                        # Query existing models_used
+                        cursor.execute(
+                            """
+                            SELECT models_used FROM daily_usage
+                            WHERE date = DATE('now', 'localtime')
+                              AND tool_name = ?
+                              AND host_name = ?
+                              AND tenant_id = ?
+                        """,
+                            (tool_name, host_name, tenant_id),
+                        )
+                        row = cursor.fetchone()
+                        existing_models_json = row["models_used"] if row else None
+
+                        # Merge models
+                        existing_models = []
+                        if existing_models_json:
+                            try:
+                                existing_models = json.loads(existing_models_json)
+                                if not isinstance(existing_models, list):
+                                    existing_models = []
+                            except (json.JSONDecodeError, TypeError):
+                                existing_models = []
+
+                        merged_models = None
+                        if models_used:
+                            merged_models = list(set(existing_models + models_used))
+
+                        # Update with increment
+                        if merged_models:
+                            cursor.execute(
+                                """
+                                UPDATE daily_usage
+                                SET
+                                    tokens_used = tokens_used + ?,
+                                    input_tokens = input_tokens + ?,
+                                    output_tokens = output_tokens + ?,
+                                    cache_tokens = cache_tokens + ?,
+                                    request_count = request_count + ?,
+                                    models_used = ?
+                                WHERE date = DATE('now', 'localtime')
+                                  AND tool_name = ?
+                                  AND host_name = ?
+                                  AND tenant_id = ?
+                            """,
+                                (
+                                    tokens_used,
+                                    input_tokens,
+                                    output_tokens,
+                                    cache_tokens,
+                                    request_count,
+                                    json.dumps(merged_models),
+                                    tool_name,
+                                    host_name,
+                                    tenant_id,
+                                ),
+                            )
+                        else:
+                            cursor.execute(
+                                """
+                                UPDATE daily_usage
+                                SET
+                                    tokens_used = tokens_used + ?,
+                                    input_tokens = input_tokens + ?,
+                                    output_tokens = output_tokens + ?,
+                                    cache_tokens = cache_tokens + ?,
+                                    request_count = request_count + ?
+                                WHERE date = DATE('now', 'localtime')
+                                  AND tool_name = ?
+                                  AND host_name = ?
+                                  AND tenant_id = ?
+                            """,
+                                (
+                                    tokens_used,
+                                    input_tokens,
+                                    output_tokens,
+                                    cache_tokens,
+                                    request_count,
+                                    tool_name,
+                                    host_name,
+                                    tenant_id,
+                                ),
+                            )
+
+                        conn.commit()
+
+                        elapsed_ms = (time.time() - start_time) * 1000
+
+                        # Log lock wait warning
+                        if elapsed_ms > 100:
+                            logger.warning(
+                                "SQLite lock wait exceeded 100ms: %.1fms for %s/%s (tenant=%d)",
+                                elapsed_ms,
+                                tool_name,
+                                host_name,
+                                tenant_id,
+                            )
+                        else:
+                            logger.debug(
+                                "Incremented usage for %s/%s (tenant=%d) in %.1fms",
+                                tool_name,
+                                host_name,
+                                tenant_id,
+                                elapsed_ms,
+                            )
+                        return True
+
+                    except Exception:
+                        conn.rollback()
+                        raise
+
+            except Exception as e:
+                elapsed_ms = (time.time() - start_time) * 1000
+                logger.warning(
+                    "SQLite increment attempt %d/%d failed: %s (%.1fms)",
+                    attempt + 1,
+                    max_retries,
+                    e,
+                    elapsed_ms,
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+
+                # Final failure
+                logger.error(
+                    "Failed to increment usage (SQLite) after %d retries: %s",
+                    max_retries,
+                    e,
+                    extra={
+                        "tool_name": tool_name,
+                        "host_name": host_name,
+                        "tenant_id": tenant_id,
+                    },
+                )
+                return False
+
+        return False
+
     def get_usage_rows_by_date(
         self,
         date: str,
@@ -212,6 +552,58 @@ class UsageRepository:
             WHERE {where_clause}
         """
         return self.db.fetch_all(query, tuple(params))
+
+    def get_today_session_usage(
+        self,
+        date: str,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """Get today's usage from agent_sessions table.
+
+        Issue #2842: Dashboard today's usage shows empty because local WebUI
+        sessions don't sync to daily_usage table. This method queries
+        agent_sessions directly to get real-time usage data.
+
+        Args:
+            date: Date string (YYYY-MM-DD).
+            tenant_id: Optional tenant ID filter.
+
+        Returns:
+            List[Dict]: Aggregated usage by tool_name.
+        """
+        try:
+            conditions = ["CAST(created_at AS DATE) = ?"]
+            params: list = [date]
+            normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+            if normalized_tenant_id is not None:
+                conditions.append("tenant_id = ?")
+                params.append(normalized_tenant_id)
+
+            where_clause = " AND ".join(conditions)
+
+            # Query agent_sessions for today's sessions
+            # Use COALESCE for tool_name to handle NULL values
+            rows = self.db.fetch_all(
+                f"""
+                SELECT
+                    COALESCE(tool_name, 'unknown') as tool_name,
+                    SUM(COALESCE(total_tokens, 0)) as tokens_used,
+                    SUM(COALESCE(total_input_tokens, 0)) as input_tokens,
+                    SUM(COALESCE(total_output_tokens, 0)) as output_tokens,
+                    SUM(COALESCE(request_count, 0)) as request_count
+                FROM agent_sessions
+                WHERE {where_clause}
+                  AND workspace_type IN ('local', 'remote', 'terminal')
+                GROUP BY COALESCE(tool_name, 'unknown')
+                """,
+                tuple(params),
+            )
+
+            return rows if rows else []
+        except Exception as e:
+            logger.warning("Failed to get today session usage: %s", e)
+            return []
 
     def get_usage_by_date(
         self,

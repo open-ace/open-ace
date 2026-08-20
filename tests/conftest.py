@@ -165,6 +165,24 @@ def _clear_cache():
     except ImportError:
         pass
 
+    # Issue #2738: Reset date limits config cache to prevent cross-test pollution
+    try:
+        from flask import g
+
+        for attr in [
+            "_max_date_range_days",
+            "_max_months",
+            "_max_days",
+            "_allow_future_date",
+        ]:
+            if hasattr(g, attr):
+                delattr(g, attr)
+    except ImportError:
+        pass
+    except RuntimeError:
+        # Outside application context - safe to ignore
+        pass
+
 
 class TestConfig:
     """Test configuration that mimics the real config module."""

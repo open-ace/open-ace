@@ -92,18 +92,45 @@ def upgrade() -> None:
                 sqlite_where=sa.text("anomaly_id != ''"),
             )
 
+    # Issue #2748: Add composite unique index including tenant_id
+    # This allows same anomaly_key to have different states per tenant
+    if "ix_anomaly_status_type_hash_tenant" not in indexes:
+        op.create_index(
+            "ix_anomaly_status_type_hash_tenant",
+            "anomaly_status",
+            ["anomaly_type", "affected_users_hash", "tenant_id"],
+            unique=True,
+        )
+
 
 def downgrade() -> None:
-    """Remove anomaly_id and tenant_id columns from anomaly_status."""
+    """Remove anomaly_id and tenant_id columns from anomaly_status.
+
+    Note: SQLite does not support DROP COLUMN before version 3.35.0 (2021-03-12).
+    For SQLite, we skip column drops in downgrade as the columns are nullable
+    and do not affect application correctness.
+    """
     conn = op.get_bind()
     inspector = sa.inspect(conn)
+    is_postgres = conn.dialect.name == "postgresql"
 
     indexes = {idx["name"] for idx in inspector.get_indexes("anomaly_status")}
     if "ix_anomaly_status_anomaly_id" in indexes:
         op.drop_index("ix_anomaly_status_anomaly_id", table_name="anomaly_status")
+    if "ix_anomaly_status_type_hash_tenant" in indexes:
+        op.drop_index("ix_anomaly_status_type_hash_tenant", table_name="anomaly_status")
 
     columns = _column_names(inspector, "anomaly_status")
-    if "tenant_id" in columns:
-        op.drop_column("anomaly_status", "tenant_id")
-    if "anomaly_id" in columns:
-        op.drop_column("anomaly_status", "anomaly_id")
+    if is_postgres:
+        # PostgreSQL supports DROP COLUMN directly
+        if "tenant_id" in columns:
+            op.drop_column("anomaly_status", "tenant_id")
+        if "anomaly_id" in columns:
+            op.drop_column("anomaly_status", "anomaly_id")
+    else:
+        # SQLite requires batch_alter_table for DROP COLUMN
+        with op.batch_alter_table("anomaly_status") as batch_op:
+            if "tenant_id" in columns:
+                batch_op.drop_column("tenant_id")
+            if "anomaly_id" in columns:
+                batch_op.drop_column("anomaly_id")

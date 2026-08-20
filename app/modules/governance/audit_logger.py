@@ -166,6 +166,10 @@ class AuditAction(Enum):
     TOOL_ACCOUNT_MAPPING_DELETE = "tool_account_mapping_delete"
     TOOL_ACCOUNT_MAPPING_BATCH = "tool_account_mapping_batch"
 
+    # Shared project permission actions (Issue #2745)
+    SHARED_PROJECT_PERMISSION_SETUP_START = "shared_project_permission_setup_start"
+    SHARED_PROJECT_PERMISSION_SETUP_COMPLETE = "shared_project_permission_setup_complete"
+
 
 class AuditSeverity(Enum):
     """Severity levels for audit events."""
@@ -880,6 +884,16 @@ def get_action_categories() -> dict[str, dict[str, Any]]:
                     "value": "permission_revoke",
                     "label": "Permission Revoke",
                     "i18n_key": "actionPermissionRevoke",
+                },
+                {
+                    "value": "shared_project_permission_setup_start",
+                    "label": "Shared Project Permission Setup Start",
+                    "i18n_key": "actionSharedProjectPermissionSetupStart",
+                },
+                {
+                    "value": "shared_project_permission_setup_complete",
+                    "label": "Shared Project Permission Setup Complete",
+                    "i18n_key": "actionSharedProjectPermissionSetupComplete",
                 },
             ],
         },

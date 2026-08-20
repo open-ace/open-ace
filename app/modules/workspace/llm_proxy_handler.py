@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Any
 
-from flask import Response, g, jsonify, request, stream_with_context
+from flask import Response, jsonify, request, stream_with_context
 
 # ── Model-gateway seam (removable) ────────────────────────────────────────
 # When the LiteLLM-compatible model gateway is enabled, ``get_gateway_planner()``
@@ -474,6 +474,25 @@ def _record_llm_usage(
                     return
 
         # Update evidence with session context
+        # Issue #2732: Populate tool_name and host_name from session for daily_usage aggregation
+        tool_name = session.tool_name if session else None
+        if not tool_name:
+            tool_name = "qwen-code"
+            logger.debug(
+                "Session %s has no tool_name, using default: %s",
+                session_id[:8] if session_id else "unknown",
+                tool_name,
+            )
+
+        host_name = session.host_name if session else None
+        if not host_name:
+            host_name = "localhost"
+            logger.debug(
+                "Session %s has no host_name, using default: %s",
+                session_id[:8] if session_id else "unknown",
+                host_name,
+            )
+
         evidence = UsageEvidence(
             input_tokens=evidence.input_tokens,
             output_tokens=evidence.output_tokens,
@@ -484,6 +503,8 @@ def _record_llm_usage(
             model=evidence.model,
             protocol=evidence.protocol,
             api_version=evidence.api_version,
+            tool_name=tool_name,
+            host_name=host_name,
             is_final=evidence.is_final,
             is_indeterminate=evidence.is_indeterminate,
             is_merged=evidence.is_merged,
@@ -853,7 +874,9 @@ def _check_content_filter(
 
     Args:
         user_id: User ID for audit logging.
-        username: Username for audit logging.
+        username: Username for audit logging, fetched from users table by user_id.
+                  May be None if user not found or database query fails.
+                  Does NOT come from g.user (route has no auth decorator).
         request_body: Raw request body bytes.
         tenant_id: Optional tenant ID for tenant-specific filtering config.
 
@@ -1316,7 +1339,24 @@ def handle_llm_proxy_request(
         )
         content_filter_result = None
     else:
-        username = g.user.get("username") if hasattr(g, "user") else None
+        # Issue #2740: Fetch username from database instead of g.user
+        # This route has no auth decorator, so g.user is not set.
+        # Reference: session_manager.py uses LEFT JOIN to fetch username.
+        username = None
+        try:
+            from app.repositories.user_repo import UserRepository
+
+            user_repo = UserRepository()
+            user = user_repo.get_user_by_id(user_id)
+            username = user.get("username") if user else None
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch username for audit log: %s (user_id=%s)",
+                e,
+                user_id,
+            )
+            # username remains None, do not block the request
+
         content_filter_result = _check_content_filter(
             user_id=user_id,
             username=username,

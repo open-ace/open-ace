@@ -424,8 +424,12 @@ export const ROIAnalysis: React.FC = () => {
             tool_name: selectedTool || undefined,
             assumptions: overrideAssumptions ?? undefined,
           }),
-          roiApi.getROITrend(6, undefined, overrideAssumptions ?? undefined),
-          roiApi.getCostBreakdown({ start_date: startDate, end_date: endDate }),
+          roiApi.getROITrend(6, selectedTool || undefined, overrideAssumptions ?? undefined),
+          roiApi.getCostBreakdown({
+            start_date: startDate,
+            end_date: endDate,
+            tool_name: selectedTool || undefined,
+          }),
           // CRITICAL: Must pass selectedTool to maintain cache consistency
           // Cache key depends on tool parameter (see getCacheKey)
           roiApi.getDailyCosts({
@@ -433,8 +437,8 @@ export const ROIAnalysis: React.FC = () => {
             end_date: endDate,
             tool_name: selectedTool || undefined,
           }),
-          roiApi.getOptimizationSuggestions(30),
-          roiApi.getEfficiencyReport(30),
+          roiApi.getOptimizationSuggestions(30, selectedTool || undefined),
+          roiApi.getEfficiencyReport({ days: 30, tool_name: selectedTool || undefined }),
         ]);
 
         const data: CachedData = {

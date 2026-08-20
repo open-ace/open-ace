@@ -2,6 +2,8 @@
 Open ACE - ROI API Routes
 
 API endpoints for ROI analysis and cost optimization.
+
+Issue #2738: Added date range validation.
 """
 
 import logging
@@ -15,6 +17,8 @@ from app.auth.decorators import auth_required, require_tenant_scope
 from app.modules.analytics.cost_optimizer import CostOptimizer
 from app.modules.analytics.roi_calculator import AssumptionSource, ROIAssumptions, ROICalculator
 from app.repositories.tenant_repo import TenantRepository
+from app.utils.date_range_errors import get_error_message
+from app.utils.validators import validate_date_range, validate_time_window
 
 if TYPE_CHECKING:
     from app.models.tenant import Tenant
@@ -36,6 +40,26 @@ def _parse_positive_float_arg(name: str) -> tuple[float | None, str | None]:
     if not math.isfinite(parsed) or parsed <= 0:
         return None, f"{name} must be a positive number"
     return parsed, None
+
+
+def _parse_tool_name() -> str | None:
+    """Parse and validate tool_name parameter.
+
+    Returns:
+        Normalized tool_name, or None if empty/not provided.
+
+    Raises:
+        ValueError: If tool_name is too long (>100 chars).
+    """
+    tool_name = request.args.get("tool_name")
+    if tool_name is None:
+        return None
+    tool_name = tool_name.strip()
+    if tool_name == "":
+        return None
+    if len(tool_name) > 100:
+        raise ValueError("tool_name must be 100 characters or fewer")
+    return tool_name
 
 
 def _get_caller_tenant() -> Optional["Tenant"]:
@@ -156,12 +180,33 @@ def get_roi():
         user_id = request.args.get("user_id", type=int)
         tool_name = request.args.get("tool_name")
 
-        # Default to last 30 days if not specified
-        if not start_date or not end_date:
+        # Issue #2738: Validate date range
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
+        if not is_valid:
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(error_code),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
+
+        # Apply default values if both are missing
+        if parsed_start is None:
             end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
+        else:
+            # When parsed_start is not None, parsed_end is also not None
+            assert parsed_end is not None  # Type narrowing for mypy
+            start_date = parsed_start.strftime("%Y-%m-%d")
+            end_date = parsed_end.strftime("%Y-%m-%d")
 
         try:
             assumptions, assumption_source = _build_roi_assumptions()
@@ -186,13 +231,40 @@ def get_roi_trend():
         months = request.args.get("months", default=6, type=int)
         user_id = request.args.get("user_id", type=int)
 
+        # Issue #2738: Validate months parameter
+        is_valid, error_code, validated_months = validate_time_window(months, "months")
+        if not is_valid:
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(
+                            error_code, param_name="months", min_val=1, max_val=24
+                        ),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
+
+        # Parse and validate tool_name parameter
+        try:
+            tool_name = _parse_tool_name()
+        except ValueError as e:
+            logger.warning(f"Invalid tool_name parameter: {e}")
+            return jsonify({"success": False, "error": str(e), "code": "INVALID_TOOL_NAME"}), 400
+
         try:
             assumptions, assumption_source = _build_roi_assumptions()
         except ValueError as e:
             return jsonify({"success": False, "error": str(e)}), 400
 
         calculator = ROICalculator(assumptions=assumptions, assumption_source=assumption_source)
-        trends = calculator.get_roi_trend(months, user_id, tenant_id=_caller_tenant_id())
+        trends = calculator.get_roi_trend(
+            validated_months, user_id, tool_name=tool_name, tenant_id=_caller_tenant_id()
+        )
 
         return jsonify({"success": True, "data": [t.to_dict() for t in trends]})
     except Exception as e:
@@ -207,11 +279,33 @@ def get_roi_by_tool():
         start_date = request.args.get("start_date")
         end_date = request.args.get("end_date")
 
-        if not start_date or not end_date:
+        # Issue #2738: Validate date range
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
+        if not is_valid:
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(error_code),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
+
+        # Apply default values if both are missing
+        if parsed_start is None:
             end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
+        else:
+            # When parsed_start is not None, parsed_end is also not None
+            assert parsed_end is not None  # Type narrowing for mypy
+            start_date = parsed_start.strftime("%Y-%m-%d")
+            end_date = parsed_end.strftime("%Y-%m-%d")
 
         try:
             assumptions, assumption_source = _build_roi_assumptions()
@@ -236,11 +330,33 @@ def get_roi_by_user():
         start_date = request.args.get("start_date")
         end_date = request.args.get("end_date")
 
-        if not start_date or not end_date:
+        # Issue #2738: Validate date range
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
+        if not is_valid:
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(error_code),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
+
+        # Apply default values if both are missing
+        if parsed_start is None:
             end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
+        else:
+            # When parsed_start is not None, parsed_end is also not None
+            assert parsed_end is not None  # Type narrowing for mypy
+            start_date = parsed_start.strftime("%Y-%m-%d")
+            end_date = parsed_end.strftime("%Y-%m-%d")
 
         try:
             assumptions, assumption_source = _build_roi_assumptions()
@@ -273,15 +389,44 @@ def get_cost_breakdown():
         end_date = request.args.get("end_date")
         user_id = request.args.get("user_id", type=int)
 
-        if not start_date or not end_date:
+        # Issue #2738: Validate date range
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
+        if not is_valid:
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(error_code),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
+
+        # Apply default values if both are missing
+        if parsed_start is None:
             end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
+        else:
+            # When parsed_start is not None, parsed_end is also not None
+            assert parsed_end is not None  # Type narrowing for mypy
+            start_date = parsed_start.strftime("%Y-%m-%d")
+            end_date = parsed_end.strftime("%Y-%m-%d")
+
+        # Parse and validate tool_name parameter
+        try:
+            tool_name = _parse_tool_name()
+        except ValueError as e:
+            logger.warning(f"Invalid tool_name parameter: {e}")
+            return jsonify({"success": False, "error": str(e), "code": "INVALID_TOOL_NAME"}), 400
 
         calculator = ROICalculator()
         breakdown = calculator.get_cost_breakdown(
-            start_date, end_date, user_id, tenant_id=_caller_tenant_id()
+            start_date, end_date, user_id, tool_name=tool_name, tenant_id=_caller_tenant_id()
         )
 
         return jsonify(
@@ -312,11 +457,33 @@ def get_daily_costs():
         user_id = request.args.get("user_id", type=int)
         tool_name = request.args.get("tool_name")
 
-        if not start_date or not end_date:
+        # Issue #2738: Validate date range
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
+        if not is_valid:
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(error_code),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
+
+        # Apply default values if both are missing
+        if parsed_start is None:
             end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
+        else:
+            # When parsed_start is not None, parsed_end is also not None
+            assert parsed_end is not None  # Type narrowing for mypy
+            start_date = parsed_start.strftime("%Y-%m-%d")
+            end_date = parsed_end.strftime("%Y-%m-%d")
 
         calculator = ROICalculator()
         daily_costs = calculator.get_daily_costs(
@@ -341,11 +508,33 @@ def get_roi_summary():
         end_date = request.args.get("end_date")
         user_id = request.args.get("user_id", type=int)
 
-        if not start_date or not end_date:
+        # Issue #2738: Validate date range
+        is_valid, error_code, parsed_start, parsed_end = validate_date_range(start_date, end_date)
+        if not is_valid:
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(error_code),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
+
+        # Apply default values if both are missing
+        if parsed_start is None:
             end_date = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d")
             start_date = (
                 datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
             ).strftime("%Y-%m-%d")
+        else:
+            # When parsed_start is not None, parsed_end is also not None
+            assert parsed_end is not None  # Type narrowing for mypy
+            start_date = parsed_start.strftime("%Y-%m-%d")
+            end_date = parsed_end.strftime("%Y-%m-%d")
 
         try:
             assumptions, assumption_source = _build_roi_assumptions()
@@ -372,8 +561,35 @@ def get_optimization_suggestions():
     try:
         days = request.args.get("days", default=30, type=int)
 
+        # Issue #2738: Validate days parameter
+        is_valid, error_code, validated_days = validate_time_window(days, "days")
+        if not is_valid:
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(
+                            error_code, param_name="days", min_val=1, max_val=365
+                        ),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
+
+        # Parse and validate tool_name parameter
+        try:
+            tool_name = _parse_tool_name()
+        except ValueError as e:
+            logger.warning(f"Invalid tool_name parameter: {e}")
+            return jsonify({"success": False, "error": str(e), "code": "INVALID_TOOL_NAME"}), 400
+
         optimizer = CostOptimizer()
-        suggestions = optimizer.analyze(days, tenant_id=_caller_tenant_id())
+        suggestions = optimizer.analyze(
+            validated_days, tool_name=tool_name, tenant_id=_caller_tenant_id()
+        )
 
         return jsonify({"success": True, "data": [s.to_dict() for s in suggestions]})
     except Exception as e:
@@ -387,8 +603,26 @@ def get_optimization_cost_trend():
     try:
         days = request.args.get("days", default=30, type=int)
 
+        # Issue #2738: Validate days parameter
+        is_valid, error_code, validated_days = validate_time_window(days, "days")
+        if not is_valid:
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(
+                            error_code, param_name="days", min_val=1, max_val=365
+                        ),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
+
         optimizer = CostOptimizer()
-        trend = optimizer.get_cost_trend(days, tenant_id=_caller_tenant_id())
+        trend = optimizer.get_cost_trend(validated_days, tenant_id=_caller_tenant_id())
 
         return jsonify({"success": True, "data": trend})
     except Exception as e:
@@ -398,12 +632,82 @@ def get_optimization_cost_trend():
 
 @roi_bp.route("/optimization/efficiency", methods=["GET"])
 def get_efficiency_report():
-    """Get efficiency analysis report."""
+    """Get efficiency analysis report.
+
+    Query Parameters:
+        days: Number of days to analyze (default: 30)
+        tool_name: Optional tool name filter
+        task_type: Optional task type filter (GENERAL, CODE_GENERATION,
+            DOCUMENT_ANALYSIS, CONVERSATION)
+        algorithm_version: Optional algorithm version (v1.0, v2.0, auto)
+            - auto: Use A/B test grouping based on tenant_id
+            - v1.0: Legacy algorithm
+            - v2.0: Parameterized algorithm with task-type awareness
+    """
     try:
         days = request.args.get("days", default=30, type=int)
+        task_type = request.args.get("task_type", default=None, type=str)
+        algorithm_version = request.args.get("algorithm_version", default=None, type=str)
+
+        # Issue #2738: Validate days parameter
+        is_valid, error_code, validated_days = validate_time_window(days, "days")
+        if not is_valid:
+            # error_code is guaranteed to be str when is_valid is False
+            assert error_code is not None  # Type narrowing for mypy
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": get_error_message(
+                            error_code, param_name="days", min_val=1, max_val=365
+                        ),
+                        "error_code": error_code,
+                    }
+                ),
+                400,
+            )
+
+        # Parse and validate tool_name parameter
+        try:
+            tool_name = _parse_tool_name()
+        except ValueError as e:
+            logger.warning(f"Invalid tool_name parameter: {e}")
+            return jsonify({"success": False, "error": str(e), "code": "INVALID_TOOL_NAME"}), 400
+
+        # Validate task_type parameter
+        valid_task_types = ["GENERAL", "CODE_GENERATION", "DOCUMENT_ANALYSIS", "CONVERSATION"]
+        if task_type and task_type.upper() not in valid_task_types:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"Invalid task_type. Must be one of: {', '.join(valid_task_types)}",
+                    }
+                ),
+                400,
+            )
+
+        # Validate algorithm_version parameter
+        valid_versions = ["v1.0", "v2.0", "auto"]
+        if algorithm_version and algorithm_version not in valid_versions:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"Invalid algorithm_version. Must be one of: {', '.join(valid_versions)}",
+                    }
+                ),
+                400,
+            )
 
         optimizer = CostOptimizer()
-        report = optimizer.get_efficiency_report(days, tenant_id=_caller_tenant_id())
+        report = optimizer.get_efficiency_report(
+            validated_days,
+            tool_name=tool_name,
+            tenant_id=_caller_tenant_id(),
+            task_type=task_type,
+            algorithm_version=algorithm_version,
+        )
 
         return jsonify({"success": True, "data": report})
     except Exception as e:

@@ -32,7 +32,7 @@ class DistributedScheduler:
     Example:
         class MyScheduler(DistributedScheduler):
             def __init__(self, db: Database):
-                super().__init__("my_scheduler", db, strategy="advisory")
+                super().__init__("my_scheduler", db, strategy="heartbeat")
 
             def run(self):
                 self.run_with_lock(self._run_job)
@@ -134,9 +134,14 @@ class DistributedScheduler:
             # Record execution
             client.record_run(status, duration_ms, error_message)
 
-            # Release leadership (for heartbeat strategy)
-            if self.strategy == "heartbeat":
-                client.release_leadership()
+            # Release leadership. The client always holds the lease via the
+            # heartbeat strategy after acquisition (the deprecated "advisory"
+            # strategy falls back to heartbeat), so the leader row + heartbeat
+            # thread must be released regardless of the requested strategy.
+            # Gating on self.strategy == "heartbeat" would leak both for an
+            # "advisory"/"auto" scheduler; release_leadership() is a safe no-op
+            # when this client is not the leader.
+            client.release_leadership()
 
         return True
 

@@ -2289,8 +2289,67 @@ def _extract_verifier_json(text: str) -> dict | None:
             try:
                 parsed = _json.loads(cleaned)
             except Exception:
-                return None
+                # Last resort (#2867): glm reproduces the Chinese acceptance
+                # criteria verbatim, so a checklist item that quotes a UI label
+                # lands with UNESCAPED inner ASCII double quotes (…进入"租户管理"。).
+                # Escape structurally-inner quotes, then re-strip trailing commas
+                # and parse strictly. Still fail-closed: an unrecoverable blob
+                # raises and returns None (never a fabricated verdict).
+                requoted = _strip_trailing_commas(_escape_inner_string_quotes(candidate))
+                try:
+                    parsed = _json.loads(requoted)
+                except Exception:
+                    return None
         return parsed if isinstance(parsed, dict) else None
+
+    def _escape_inner_string_quotes(s: str) -> str:
+        # Repair a JSON candidate whose string VALUES contain unescaped ASCII
+        # double quotes (#2867). A string token's real closing quote is the one
+        # followed — past whitespace — by a structural delimiter (``:`` ``,``
+        # ``}`` ``]``) or end-of-input; any other in-string ``"`` is an inner
+        # quote the model forgot to escape, so we backslash-escape it. This is a
+        # heuristic: a value that itself ends a quoted run right before a real
+        # delimiter (…said "yes", ok) can still be misread, but that produces
+        # invalid JSON downstream (→ None, fail-closed), never a wrong verdict.
+        out: list[str] = []
+        in_str = False
+        escaped = False
+        n = len(s)
+        i = 0
+        while i < n:
+            ch = s[i]
+            if not in_str:
+                out.append(ch)
+                if ch == '"':
+                    in_str = True
+                i += 1
+                continue
+            # inside a string
+            if escaped:
+                out.append(ch)
+                escaped = False
+                i += 1
+                continue
+            if ch == "\\":
+                out.append(ch)
+                escaped = True
+                i += 1
+                continue
+            if ch == '"':
+                j = i + 1
+                while j < n and s[j] in " \t\r\n":
+                    j += 1
+                nxt = s[j] if j < n else ""
+                if nxt in ("", ":", ",", "}", "]"):
+                    out.append(ch)  # real closing quote
+                    in_str = False
+                else:
+                    out.append('\\"')  # unescaped inner quote → escape it
+                i += 1
+                continue
+            out.append(ch)
+            i += 1
+        return "".join(out)
 
     def _strip_trailing_commas(s: str) -> str:
         out: list[str] = []
@@ -9113,6 +9172,11 @@ class AutonomousOrchestrator:
                 "verdicts": [],
                 "snapshot": None,
                 "infra_error": "verification agent output was not valid JSON",
+                # Deterministic failure (#2867): the agent emitted output that
+                # cannot be parsed. Re-running it usually reproduces the same
+                # unparseable form, so the phase caps consecutive repeats of this
+                # kind below the transient-retry budget instead of burning it.
+                "infra_error_kind": "unparseable_output",
             }
         if not isinstance(parsed, dict):
             return {

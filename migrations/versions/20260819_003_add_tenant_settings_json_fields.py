@@ -94,7 +94,6 @@ def upgrade() -> None:
                     "roi_assumptions",
                     sa.Text,
                     nullable=True,
-                    server_default=None,
                 ),
             )
 

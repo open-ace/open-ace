@@ -136,9 +136,11 @@ CREATE TABLE agent_sessions (
     tenant_id integer DEFAULT 1 NOT NULL,
     tenant_version integer DEFAULT 1 NOT NULL,
     total_cache_read_tokens integer DEFAULT 0 NOT NULL,
-    total_cache_write_tokens integer DEFAULT 0 NOT NULL
+    total_cache_write_tokens integer DEFAULT 0 NOT NULL,
+    daily_usage_synced boolean DEFAULT false NOT NULL
 );
 
+COMMENT ON COLUMN agent_sessions.daily_usage_synced IS 'Whether usage has been synced to daily_usage table';
 CREATE SEQUENCE agent_sessions_id_seq
     AS integer
     START WITH 1
@@ -1022,6 +1024,68 @@ CREATE TABLE parse_failure_records (
     created_at timestamp with time zone NOT NULL
 );
 
+CREATE TABLE permission_checkpoints (
+    id integer NOT NULL,
+    task_id character varying(36) NOT NULL,
+    processed_paths text,
+    last_position character varying(512),
+    snapshot_time timestamp without time zone DEFAULT now() NOT NULL,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone
+);
+
+COMMENT ON COLUMN permission_checkpoints.task_id IS 'Associated task ID';
+COMMENT ON COLUMN permission_checkpoints.processed_paths IS 'JSON array of processed paths';
+COMMENT ON COLUMN permission_checkpoints.last_position IS 'Last processed position';
+COMMENT ON COLUMN permission_checkpoints.snapshot_time IS 'Checkpoint snapshot timestamp';
+COMMENT ON COLUMN permission_checkpoints.created_at IS 'Checkpoint creation timestamp';
+COMMENT ON COLUMN permission_checkpoints.updated_at IS 'Checkpoint last update timestamp';
+CREATE SEQUENCE permission_checkpoints_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE permission_checkpoints_id_seq OWNED BY permission_checkpoints.id;
+CREATE TABLE permission_tasks (
+    task_id character varying(36) NOT NULL,
+    project_id integer,
+    user_id integer,
+    path character varying(512) NOT NULL,
+    status character varying(20) NOT NULL,
+    priority integer DEFAULT 10 NOT NULL,
+    progress integer DEFAULT 0 NOT NULL,
+    files_processed integer DEFAULT 0 NOT NULL,
+    total_files integer DEFAULT 0 NOT NULL,
+    depth_limit integer,
+    checkpoint_data text,
+    checksum character varying(32),
+    error_message text,
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone,
+    started_at timestamp without time zone,
+    completed_at timestamp without time zone
+);
+
+COMMENT ON COLUMN permission_tasks.task_id IS 'Unique task identifier (UUID)';
+COMMENT ON COLUMN permission_tasks.project_id IS 'Associated project ID';
+COMMENT ON COLUMN permission_tasks.user_id IS 'User who initiated the task';
+COMMENT ON COLUMN permission_tasks.path IS 'Project path for permission setup';
+COMMENT ON COLUMN permission_tasks.status IS 'Task status: pending/running/completed/failed/partial_success';
+COMMENT ON COLUMN permission_tasks.priority IS 'Task priority (1-10, lower is higher priority)';
+COMMENT ON COLUMN permission_tasks.progress IS 'Progress percentage (0-100)';
+COMMENT ON COLUMN permission_tasks.files_processed IS 'Number of files processed';
+COMMENT ON COLUMN permission_tasks.total_files IS 'Total number of files to process';
+COMMENT ON COLUMN permission_tasks.depth_limit IS 'Recursion depth limit used';
+COMMENT ON COLUMN permission_tasks.checkpoint_data IS 'Checkpoint data (JSON) for recovery';
+COMMENT ON COLUMN permission_tasks.checksum IS 'Task deduplication checksum';
+COMMENT ON COLUMN permission_tasks.error_message IS 'Error message if task failed';
+COMMENT ON COLUMN permission_tasks.created_at IS 'Task creation timestamp';
+COMMENT ON COLUMN permission_tasks.updated_at IS 'Task last update timestamp';
+COMMENT ON COLUMN permission_tasks.started_at IS 'Task execution start timestamp';
+COMMENT ON COLUMN permission_tasks.completed_at IS 'Task completion timestamp';
 CREATE TABLE policy_decisions (
     id integer NOT NULL,
     decision_id text NOT NULL,
@@ -1128,9 +1192,13 @@ CREATE TABLE projects (
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     is_active boolean DEFAULT true NOT NULL,
     is_shared boolean DEFAULT false NOT NULL,
-    tenant_id integer DEFAULT 1 NOT NULL
+    tenant_id integer DEFAULT 1 NOT NULL,
+    permission_status character varying(20),
+    permission_task_id character varying(36)
 );
 
+COMMENT ON COLUMN projects.permission_status IS 'Permission setup status for shared projects';
+COMMENT ON COLUMN projects.permission_task_id IS 'Associated permission task ID';
 CREATE SEQUENCE projects_id_seq
     AS integer
     START WITH 1
@@ -1943,7 +2011,7 @@ CREATE TABLE tenant_settings (
     block_sensitive_keyword boolean DEFAULT false,
     sensitive_keyword_match_mode character varying(50) DEFAULT 'word_boundary'::character varying,
     allowed_tools jsonb DEFAULT '["claude", "qwen", "openclaw", "codex", "zcode"]'::jsonb,
-    roi_assumptions jsonb DEFAULT NULL
+    roi_assumptions jsonb
 );
 
 CREATE SEQUENCE tenant_settings_id_seq
@@ -2448,6 +2516,8 @@ ALTER TABLE ONLY mapping_migration_status ALTER COLUMN id SET DEFAULT nextval('m
 
 ALTER TABLE ONLY model_gateway_config ALTER COLUMN id SET DEFAULT nextval('model_gateway_config_id_seq'::regclass);
 
+ALTER TABLE ONLY permission_checkpoints ALTER COLUMN id SET DEFAULT nextval('permission_checkpoints_id_seq'::regclass);
+
 ALTER TABLE ONLY policy_decisions ALTER COLUMN id SET DEFAULT nextval('policy_decisions_id_seq'::regclass);
 
 ALTER TABLE ONLY policy_rules ALTER COLUMN id SET DEFAULT nextval('policy_rules_id_seq'::regclass);
@@ -2693,6 +2763,12 @@ ALTER TABLE ONLY notification_preferences
 
 ALTER TABLE ONLY parse_failure_records
     ADD CONSTRAINT parse_failure_records_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY permission_checkpoints
+    ADD CONSTRAINT permission_checkpoints_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY permission_tasks
+    ADD CONSTRAINT permission_tasks_pkey PRIMARY KEY (task_id);
 
 ALTER TABLE ONLY policy_decisions
     ADD CONSTRAINT policy_decisions_pkey PRIMARY KEY (id);
@@ -3006,455 +3082,479 @@ CREATE INDEX idx_agent_runs_status ON agent_runs USING btree (status);
 
 CREATE INDEX idx_agent_runs_user_id ON agent_runs USING btree (user_id);
 
+CREATE INDEX idx_agent_sessions_daily_usage_synced ON agent_sessions USING btree (daily_usage_synced) WHERE (daily_usage_synced = false);
+
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_project ON agent_sessions USING btree (project_id);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_remote_machine_id ON agent_sessions USING btree (remote_machine_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_session_id ON agent_sessions USING btree (session_id);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_session_type ON agent_sessions USING btree (session_type);
 
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_status ON agent_sessions USING btree (status);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_tenant_id ON agent_sessions USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_tenant_updated ON agent_sessions USING btree (tenant_id, updated_at);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_tenant_user ON agent_sessions USING btree (tenant_id, user_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_tool_name ON agent_sessions USING btree (tool_name);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_user_id ON agent_sessions USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_tokens_hash ON agent_tokens USING btree (token_hash);
-
-
---
---
 
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens USING btree (machine_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_tokens_machine_pending ON agent_tokens USING btree (machine_id, pending_revoke, revoke_after);
-
-
---
---
 
 CREATE INDEX idx_agent_tokens_machine_version ON agent_tokens USING btree (machine_id, token_version);
 
+
+--
+--
+
 CREATE UNIQUE INDEX idx_agent_tokens_one_active_per_machine ON agent_tokens USING btree (machine_id) WHERE ((is_revoked = false) AND (pending_revoke = false));
-
-
---
---
 
 CREATE INDEX idx_agent_tokens_pending_revoke_timeout ON agent_tokens USING btree (revoke_after) WHERE ((pending_revoke = true) AND (is_revoked = false));
 
+
+--
+--
+
 CREATE INDEX idx_aggregation_history_status ON aggregation_history USING btree (status);
-
-
---
---
 
 CREATE INDEX idx_aggregation_history_type_date ON aggregation_history USING btree (type, start_date, end_date);
 
+
+--
+--
+
 CREATE INDEX idx_ai_agent_settings_key ON ai_agent_settings USING btree (setting_key);
-
-
---
---
 
 CREATE INDEX idx_alerts_created_at ON alerts USING btree (created_at);
 
+
+--
+--
+
 CREATE INDEX idx_alerts_history_sent_at ON alerts_history USING btree (sent_at);
-
-
---
---
 
 CREATE INDEX idx_alerts_history_tenant ON alerts_history USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_alerts_history_type ON alerts_history USING btree (alert_type);
-
-
---
---
 
 CREATE INDEX idx_alerts_read ON alerts USING btree (read);
 
+
+--
+--
+
 CREATE INDEX idx_alerts_user_id ON alerts USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_annotations_session ON annotations USING btree (session_id);
 
+
+--
+--
+
 CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store USING btree (tenant_id, provider);
-
-
---
---
 
 CREATE INDEX idx_archive_files_batch ON archive_files USING btree (execution_id, batch_id);
 
+
+--
+--
+
 CREATE INDEX idx_archive_files_checksum ON archive_files USING btree (checksum);
-
-
---
---
 
 CREATE INDEX idx_archive_files_expires ON archive_files USING btree (expires_at);
 
+
+--
+--
+
 CREATE INDEX idx_archive_files_tenant ON archive_files USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_audit_action ON audit_logs USING btree (action);
 
+
+--
+--
+
 CREATE INDEX idx_audit_logs_tenant_id ON audit_logs USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_audit_logs_tenant_timestamp ON audit_logs USING btree (tenant_id, "timestamp");
 
+
+--
+--
+
 CREATE INDEX idx_audit_logs_timestamp ON audit_logs USING btree ("timestamp");
-
-
---
---
 
 CREATE INDEX idx_audit_resource ON audit_logs USING btree (resource_type, resource_id);
 
+
+--
+--
+
 CREATE INDEX idx_audit_severity ON audit_logs USING btree (severity);
-
-
---
---
 
 CREATE INDEX idx_audit_tenant_id ON audit_logs USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_audit_timestamp ON audit_logs USING btree ("timestamp");
-
-
---
---
 
 CREATE INDEX idx_audit_user_id ON audit_logs USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_bl_mapping ON backfill_logs USING btree (mapping_id);
-
-
---
---
 
 CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence USING btree (session_id, command_id);
 
+
+--
+--
+
 CREATE INDEX idx_command_evidence_workflow_milestone ON command_execution_evidence USING btree (workflow_id, milestone_id);
-
-
---
---
 
 CREATE INDEX idx_consistency_violations_detected ON consistency_violations USING btree (detected_at);
 
+
+--
+--
+
 CREATE INDEX idx_consistency_violations_status ON consistency_violations USING btree (status);
-
-
---
---
 
 CREATE INDEX idx_consistency_violations_tenant ON consistency_violations USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_daily_messages_orphan ON daily_messages USING btree (date) WHERE (tenant_id IS NULL);
-
-
---
---
 
 CREATE INDEX idx_daily_messages_tenant_date ON daily_messages USING btree (tenant_id, date);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_date ON daily_stats USING btree (date);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_date_tool ON daily_stats USING btree (date, tool_name);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_date_tool_host ON daily_stats USING btree (date, tool_name, host_name);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_host ON daily_stats USING btree (host_name);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_orphan ON daily_stats USING btree (date) WHERE (tenant_id IS NULL);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_project ON daily_stats USING btree (project_id);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_sender ON daily_stats USING btree (sender_name);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_tenant_date ON daily_stats USING btree (tenant_id, date);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_tool ON daily_stats USING btree (tool_name);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_user_id ON daily_stats USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_email_logs_sent_at ON email_notification_logs USING btree (sent_at);
-
-
---
---
 
 CREATE INDEX idx_email_logs_status ON email_notification_logs USING btree (status);
 
+
+--
+--
+
 CREATE INDEX idx_email_logs_user_id ON email_notification_logs USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_email_logs_user_sent ON email_notification_logs USING btree (user_id, sent_at);
 
+
+--
+--
+
 CREATE INDEX idx_events_workflow_created ON workflow_events USING btree (workflow_id, created_at);
-
-
---
---
 
 CREATE INDEX idx_filter_rules_enabled ON content_filter_rules USING btree (is_enabled);
 
+
+--
+--
+
 CREATE INDEX idx_filter_rules_type ON content_filter_rules USING btree (type);
-
-
---
---
 
 CREATE INDEX idx_hourly_stats_date ON hourly_stats USING btree (date);
 
+
+--
+--
+
 CREATE INDEX idx_hourly_stats_date_hour ON hourly_stats USING btree (date, hour);
-
-
---
---
 
 CREATE INDEX idx_hourly_stats_hour ON hourly_stats USING btree (hour);
 
+
+--
+--
+
 CREATE INDEX idx_hourly_stats_orphan ON hourly_stats USING btree (date) WHERE (tenant_id IS NULL);
-
-
---
---
 
 CREATE INDEX idx_hourly_stats_tenant_date ON hourly_stats USING btree (tenant_id, date);
 
+
+--
+--
+
 CREATE INDEX idx_insights_reports_user_date ON insights_reports USING btree (user_id, start_date, end_date);
-
-
---
---
 
 CREATE INDEX idx_knowledge_team ON knowledge_base USING btree (team_id);
 
+
+--
+--
+
 CREATE INDEX idx_legal_holds_active ON legal_holds USING btree (id) WHERE (lifted_at IS NULL);
-
-
---
---
 
 CREATE INDEX idx_legal_holds_data_type ON legal_holds USING btree (data_type);
 
+
+--
+--
+
 CREATE INDEX idx_legal_holds_tenant ON legal_holds USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_login_attempts_locked_until ON login_attempts USING btree (locked_until);
 
+
+--
+--
+
 CREATE INDEX idx_machine_assignments_user_id ON machine_assignments USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_mapping_rules_active ON tool_account_mapping_rules USING btree (is_active, priority);
 
+
+--
+--
+
 CREATE INDEX idx_mapping_rules_user_id ON tool_account_mapping_rules USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_messages_agent_session_id ON daily_messages USING btree (agent_session_id);
 
+
+--
+--
+
 CREATE INDEX idx_messages_agent_session_project ON daily_messages USING btree (agent_session_id, project_path);
-
-
---
---
 
 CREATE INDEX idx_messages_conv_history ON daily_messages USING btree (agent_session_id, conversation_id, feishu_conversation_id, tool_name, host_name, sender_name, date, "timestamp", tokens_used, input_tokens, output_tokens, sender_id);
 
+
+--
+--
+
 CREATE INDEX idx_messages_conversation ON daily_messages USING btree (date, conversation_id, agent_session_id);
-
-
---
---
 
 CREATE INDEX idx_messages_date_role_sender_prefix ON daily_messages USING btree (date, role, sender_name varchar_pattern_ops);
 
+
+--
+--
+
 CREATE INDEX idx_messages_date_role_timestamp ON daily_messages USING btree (date, role, "timestamp" DESC);
-
-
---
---
 
 CREATE INDEX idx_messages_date_sender_id ON daily_messages USING btree (date, sender_id);
 
+
+--
+--
+
 CREATE INDEX idx_messages_date_tool_host ON daily_messages USING btree (date, tool_name, host_name);
-
-
---
---
 
 CREATE INDEX idx_messages_deleted ON daily_messages USING btree (deleted_at);
 
+
+--
+--
+
 CREATE INDEX idx_messages_host_name ON daily_messages USING btree (host_name);
-
-
---
---
 
 CREATE INDEX idx_messages_project_path ON daily_messages USING btree (project_path);
 
+
+--
+--
+
 CREATE INDEX idx_messages_sender_date_role ON daily_messages USING btree (sender_name, date, role);
-
-
---
---
 
 CREATE INDEX idx_messages_sender_id ON daily_messages USING btree (sender_id);
 
+
+--
+--
+
 CREATE INDEX idx_messages_sender_name ON daily_messages USING btree (sender_name) WHERE (sender_name IS NOT NULL);
-
-
---
---
 
 CREATE INDEX idx_messages_session_list_covering ON daily_messages USING btree (agent_session_id, tool_name, host_name, sender_name) INCLUDE ("timestamp", tokens_used, input_tokens, output_tokens, sender_id, date) WHERE (agent_session_id IS NOT NULL);
 
+
+--
+--
+
 CREATE INDEX idx_messages_timestamp ON daily_messages USING btree ("timestamp");
-
-
---
---
 
 CREATE INDEX idx_messages_tool_name ON daily_messages USING btree (tool_name);
 
+
+--
+--
+
 CREATE INDEX idx_messages_usage_trend_covering ON daily_messages USING btree (date, role, sender_name) INCLUDE (tokens_used) WHERE ((role)::text = 'assistant'::text);
-
-
---
---
 
 CREATE INDEX idx_messages_user_date_role_covering ON daily_messages USING btree (user_id, date, role) INCLUDE (tokens_used) WHERE ((user_id IS NOT NULL) AND ((role)::text = 'assistant'::text));
 
+
+--
+--
+
 CREATE INDEX idx_milestones_workflow_phase ON workflow_milestones USING btree (workflow_id, phase, status);
-
-
---
---
 
 CREATE INDEX idx_milestones_workflow_round ON workflow_milestones USING btree (workflow_id, dev_round);
 
+
+--
+--
+
 CREATE INDEX idx_parse_failure_created_at ON parse_failure_records USING btree (created_at);
-
-
---
---
 
 CREATE INDEX idx_parse_failure_session ON parse_failure_records USING btree (session_id);
 
+
+--
+--
+
 CREATE INDEX idx_parse_failure_timestamp ON parse_failure_records USING btree ("timestamp");
-
-
---
---
 
 CREATE INDEX idx_parse_failure_unresolved ON parse_failure_records USING btree (resolved) WHERE (resolved = false);
 
+
+--
+--
+
+CREATE INDEX idx_permission_tasks_checksum ON permission_tasks USING btree (checksum);
+
+CREATE INDEX idx_permission_tasks_priority_created ON permission_tasks USING btree (priority, created_at);
+
+
+--
+--
+
+CREATE INDEX idx_permission_tasks_project ON permission_tasks USING btree (project_id);
+
+CREATE INDEX idx_permission_tasks_status ON permission_tasks USING btree (status);
+
+
+--
+--
+
 CREATE INDEX idx_policy_decisions_fingerprint ON policy_decisions USING btree (fingerprint_hash);
-
-
---
---
 
 CREATE INDEX idx_policy_decisions_request_id ON policy_decisions USING btree (request_id);
 
+
+--
+--
+
 CREATE INDEX idx_policy_decisions_session_id ON policy_decisions USING btree (session_id);
-
-
---
---
 
 CREATE INDEX idx_policy_rules_current_enabled ON policy_rules USING btree (is_current, enabled);
 
+
+--
+--
+
 CREATE INDEX idx_policy_rules_key_current ON policy_rules USING btree (rule_key, is_current);
-
-
---
---
 
 CREATE INDEX idx_project_categories_sort_order ON project_categories USING btree (sort_order);
 
+
+--
+--
+
 CREATE INDEX idx_projects_created_by ON projects USING btree (created_by);
-
-
---
---
 
 CREATE INDEX idx_projects_is_active ON projects USING btree (is_active);
 
+
+--
+--
+
 CREATE INDEX idx_projects_path ON projects USING btree (tenant_id, path);
+
+CREATE INDEX idx_projects_permission_status ON projects USING btree (permission_status);
 
 
 --
@@ -3958,18 +4058,173 @@ CREATE UNIQUE INDEX ix_anomaly_status_anomaly_id ON anomaly_status USING btree (
 
 CREATE UNIQUE INDEX ix_anomaly_status_type_hash ON anomaly_status USING btree (anomaly_type, affected_users_hash);
 
+CREATE UNIQUE INDEX ix_anomaly_status_type_hash_tenant ON anomaly_status USING btree (anomaly_type, affected_users_hash, tenant_id);
+
+
+--
+--
+
 CREATE UNIQUE INDEX policy_decisions_decision_id_key ON policy_decisions USING btree (decision_id);
-
-
---
---
 
 CREATE UNIQUE INDEX policy_rules_rule_key_version_key ON policy_rules USING btree (rule_key, version);
 
+
+--
+--
+
 CREATE UNIQUE INDEX uq_projects_path ON projects USING btree (tenant_id, path) WHERE (is_active IS TRUE);
 
-
---
---
-
 CREATE UNIQUE INDEX uq_user_projects_user_project ON user_projects USING btree (user_id, project_id);
+
+
+--
+--
+
+CREATE TRIGGER trigger_set_token_version BEFORE INSERT ON agent_tokens FOR EACH ROW EXECUTE FUNCTION set_token_version_trigger();
+
+ALTER TABLE ONLY alerts_history
+    ADD CONSTRAINT alerts_history_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY anomaly_status
+    ADD CONSTRAINT anomaly_status_processed_by_fkey FOREIGN KEY (processed_by) REFERENCES users(id);
+
+ALTER TABLE ONLY api_key_store
+    ADD CONSTRAINT api_key_store_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id);
+
+ALTER TABLE ONLY api_key_store
+    ADD CONSTRAINT api_key_store_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+
+ALTER TABLE ONLY archive_files
+    ADD CONSTRAINT archive_files_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id);
+
+ALTER TABLE ONLY autonomous_workflows
+    ADD CONSTRAINT autonomous_workflows_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY backfill_logs
+    ADD CONSTRAINT backfill_logs_mapping_id_fkey FOREIGN KEY (mapping_id) REFERENCES user_tool_accounts(id);
+
+ALTER TABLE ONLY consistency_violations
+    ADD CONSTRAINT consistency_violations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY permission_checkpoints
+    ADD CONSTRAINT fk_permission_checkpoints_task FOREIGN KEY (task_id) REFERENCES permission_tasks(task_id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY permission_tasks
+    ADD CONSTRAINT fk_permission_tasks_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL;
+
+ALTER TABLE ONLY permission_tasks
+    ADD CONSTRAINT fk_permission_tasks_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE ONLY test_execution_evidence
+    ADD CONSTRAINT fk_test_evidence_command_execution FOREIGN KEY (command_execution_id) REFERENCES command_execution_evidence(id);
+
+ALTER TABLE ONLY user_daily_stats
+    ADD CONSTRAINT fk_user_daily_stats_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY users
+    ADD CONSTRAINT fk_users_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE SET NULL;
+
+ALTER TABLE ONLY insights_reports
+    ADD CONSTRAINT insights_reports_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+
+ALTER TABLE ONLY legal_holds
+    ADD CONSTRAINT legal_holds_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+
+ALTER TABLE ONLY machine_assignments
+    ADD CONSTRAINT machine_assignments_granted_by_fkey FOREIGN KEY (granted_by) REFERENCES users(id);
+
+ALTER TABLE ONLY machine_assignments
+    ADD CONSTRAINT machine_assignments_machine_id_fkey FOREIGN KEY (machine_id) REFERENCES remote_machines(machine_id);
+
+ALTER TABLE ONLY machine_assignments
+    ADD CONSTRAINT machine_assignments_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+
+ALTER TABLE ONLY quota_alerts
+    ADD CONSTRAINT quota_alerts_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY quota_usage
+    ADD CONSTRAINT quota_usage_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY recycle_bin
+    ADD CONSTRAINT recycle_bin_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id);
+
+ALTER TABLE ONLY recycle_bin
+    ADD CONSTRAINT recycle_bin_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+
+ALTER TABLE ONLY remote_machines
+    ADD CONSTRAINT remote_machines_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id);
+
+ALTER TABLE ONLY remote_machines
+    ADD CONSTRAINT remote_machines_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+
+ALTER TABLE ONLY retention_evidence
+    ADD CONSTRAINT retention_evidence_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id);
+
+ALTER TABLE ONLY retention_executions
+    ADD CONSTRAINT retention_executions_policy_id_fkey FOREIGN KEY (policy_id) REFERENCES retention_policies(id);
+
+ALTER TABLE ONLY retention_executions
+    ADD CONSTRAINT retention_executions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+
+ALTER TABLE ONLY retention_policies
+    ADD CONSTRAINT retention_policies_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+
+ALTER TABLE ONLY session_messages
+    ADD CONSTRAINT session_messages_session_id_fkey FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id);
+
+ALTER TABLE ONLY sessions
+    ADD CONSTRAINT sessions_new_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY sso_identities
+    ADD CONSTRAINT sso_identities_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+
+ALTER TABLE ONLY sso_providers
+    ADD CONSTRAINT sso_providers_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id);
+
+ALTER TABLE ONLY sso_sessions
+    ADD CONSTRAINT sso_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+
+ALTER TABLE ONLY tenant_keywords_version
+    ADD CONSTRAINT tenant_keywords_version_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY tenant_migrations
+    ADD CONSTRAINT tenant_migrations_migrated_by_fkey FOREIGN KEY (migrated_by) REFERENCES users(id);
+
+ALTER TABLE ONLY tenant_migrations
+    ADD CONSTRAINT tenant_migrations_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+
+ALTER TABLE ONLY tenant_period_history
+    ADD CONSTRAINT tenant_period_history_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY tenant_quotas
+    ADD CONSTRAINT tenant_quotas_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY tenant_sensitive_keywords
+    ADD CONSTRAINT tenant_sensitive_keywords_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE ONLY tenant_sensitive_keywords
+    ADD CONSTRAINT tenant_sensitive_keywords_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY tenant_settings
+    ADD CONSTRAINT tenant_settings_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY tenant_usage
+    ADD CONSTRAINT tenant_usage_new_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY tool_account_conflicts
+    ADD CONSTRAINT tool_account_conflicts_mapping_id_fkey FOREIGN KEY (mapping_id) REFERENCES user_tool_accounts(id);
+
+ALTER TABLE ONLY tool_account_conflicts
+    ADD CONSTRAINT tool_account_conflicts_resolved_by_fkey FOREIGN KEY (resolved_by) REFERENCES users(id);
+
+ALTER TABLE ONLY tool_account_mapping_rules
+    ADD CONSTRAINT tool_account_mapping_rules_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY user_tool_accounts
+    ADD CONSTRAINT user_tool_accounts_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY web_user_auth_sessions
+    ADD CONSTRAINT web_user_auth_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
+
+ALTER TABLE ONLY workflow_milestones
+    ADD CONSTRAINT workflow_milestones_workflow_id_fkey FOREIGN KEY (workflow_id) REFERENCES autonomous_workflows(workflow_id) ON DELETE CASCADE;

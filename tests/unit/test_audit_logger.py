@@ -541,7 +541,8 @@ class TestGetActionCategories:
         total_actions = sum(len(cat["actions"]) for cat in categories.values())
         # Issue #2759: Added 4 tool_account_mapping actions (57 -> 61)
         # Issue #2755: Added user_restore action (61 -> 62)
-        assert total_actions == 62, f"Expected 62 actions, got {total_actions}"
+        # Issue #2745: Added 2 shared_project_permission actions (62 -> 64)
+        assert total_actions == 64, f"Expected 64 actions, got {total_actions}"
 
     def test_get_action_categories_matches_enum_values(self):
         """Test that all action values match AuditAction enum values."""

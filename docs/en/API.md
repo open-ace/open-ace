@@ -838,6 +838,9 @@ GET /api/analytics/forecast
 
 Get usage forecast.
 
+For backward compatibility, `GET /api/analysis/forecast` remains available as a
+deprecated alias. New integrations should use the canonical endpoint above.
+
 **Query Parameters:**
 - `days` - Forecast days (default: 7)
 

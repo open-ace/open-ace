@@ -20,6 +20,7 @@ import pytest
 from flask import Flask
 
 from app.modules.workspace.session_manager import AgentSession
+from app.utils.llm_proxy_url_validator import LlmProxyValidationResult
 
 pytestmark = [
     pytest.mark.integration,
@@ -42,6 +43,11 @@ def workspace_app():
     app.config["TESTING"] = True
     app.register_blueprint(workspace_bp, url_prefix="/api/workspace")
     return app
+
+
+def _mock_validate_llm_proxy_url(url, tenant_id, provider, *, resolver=None):
+    """Mock validate_llm_proxy_url to return allowed=True."""
+    return LlmProxyValidationResult(True)
 
 
 def _mock_proxy_token(**overrides):
@@ -398,6 +404,10 @@ class TestValidAccess:
     @patch(_QUOTA_PATH)
     @patch(_SESSION_MANAGER_PATH)
     @patch(_PROXY_PATH)
+    @patch(
+        "app.utils.llm_proxy_url_validator.validate_llm_proxy_url",
+        _mock_validate_llm_proxy_url,
+    )
     def test_valid_access_succeeds(
         self, mock_get_proxy, mock_sm, mock_quota_cls, mock_http, workspace_app
     ):
@@ -454,6 +464,10 @@ class TestValidAccess:
     @patch(_QUOTA_PATH)
     @patch(_SESSION_MANAGER_PATH)
     @patch(_PROXY_PATH)
+    @patch(
+        "app.utils.llm_proxy_url_validator.validate_llm_proxy_url",
+        _mock_validate_llm_proxy_url,
+    )
     def test_valid_uuid_format_accepted(
         self, mock_get_proxy, mock_sm, mock_quota_cls, mock_http, workspace_app
     ):

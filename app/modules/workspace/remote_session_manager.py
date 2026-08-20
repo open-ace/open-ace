@@ -331,6 +331,16 @@ class RemoteSessionManager:
         if not machine:
             return None
 
+        # Issue #2597: Verify machine DB status is 'online' to prevent zombie sessions
+        # during heartbeat tolerance window (180s). The in-memory is_connected() check
+        # may return True during this window even if the agent is actually dead.
+        machine_status = machine.get("status", "")
+        if machine_status != "online":
+            logger.warning(
+                f"Machine {machine_id} DB status is '{machine_status}', not 'online' - rejecting session creation"
+            )
+            return None
+
         # Determine provider based on CLI tool
         provider = self._cli_tool_to_provider(cli_tool)
         tool_name = normalize_tool_name(cli_tool)

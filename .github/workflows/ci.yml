@@ -5,7 +5,8 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
-  # Re-triggered by the Lint Heal workflow (.github/workflows/lint-heal.yml)
+  # Re-triggered by heal workflows (for example lint-heal.yml and
+  # schema-sync-heal.yml)
   # when approving the parked runs for a healed head was not possible
   # (GITHUB_TOKEN pushes fire no CI events; dispatch does). healed_sha marks a
   # dispatch as heal-originated: PR Gate stamps only for PR runs or dispatches
@@ -17,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       healed_sha:
-        description: 'Head SHA of a Lint Heal push (set automatically; manual dispatches must leave it empty)'
+        description: 'Head SHA of an automated heal push (set automatically; manual dispatches must leave it empty)'
         required: false
         type: string
 
@@ -118,11 +119,23 @@ jobs:
           - python-version: '3.14'
             suite: compatibility-smoke
     steps:
+      # eval P1-1: each lane is a REQUIRED check, so it must always report (green)
+      # to satisfy the branch ruleset. When the suite was not selected for this
+      # change set the real steps below are skipped, which historically left the
+      # lane green with no visible reason -- a "was this actually tested?" gap that
+      # was only discoverable in the raw step logs. Make that honest and visible:
+      # emit a run-summary annotation and a job-summary line naming the skipped
+      # lane. (A truly SKIPPED badge instead of green would require de-matrixing
+      # into per-version jobs; that is deliberately out of scope for this change.)
       - name: Explain skipped lane
         if: >-
           (matrix.suite == 'python-core' && needs.changes.outputs.python_core != 'true') ||
           (matrix.suite == 'compatibility-smoke' && needs.changes.outputs.compatibility_smoke != 'true')
-        run: echo "${{ matrix.suite }} is not needed for this change set"
+        run: |
+          MSG="Lane not needed: ${{ matrix.suite }} was not selected for this change set (no matching paths changed)."
+          echo "::notice title=Lane not needed::${MSG}"
+          echo "**${{ matrix.suite }} lane skipped** — ${MSG}" >> "$GITHUB_STEP_SUMMARY"
+          echo "${MSG}"
 
       - uses: actions/checkout@v6
         if: >-
@@ -270,18 +283,28 @@ jobs:
         run: python scripts/ci.py run postgres
 
   critical-e2e:
-    name: Critical E2E (advisory)
+    # Advisory, and honestly so (eval P1-1). This job is deliberately NOT in the
+    # PR Gate's `needs`, so its result never blocks a PR merge -- E2E gates
+    # releases, not PRs. It intentionally does NOT set `continue-on-error`: a
+    # failure now surfaces as an honest red check (informational) rather than a
+    # masked green one. The previous `continue-on-error: true` + absence from the
+    # gate double-neutered it into a hidden fail-open.
+    name: Critical E2E (advisory, non-blocking)
     needs: changes
     if: >-
       needs.changes.outputs.critical_e2e == 'true' &&
       !contains(github.event.pull_request.labels.*.name, 'skip-extended-tests')
-    continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       # Keep the installed browser outside the isolated HOME used by the tests.
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
+      - name: Advisory notice
+        run: >-
+          echo "::notice title=Critical E2E is advisory::This suite does NOT gate
+          PR merge (it gates releases). A red result here is informational, not a
+          merge blocker."
       - uses: actions/checkout@v6
         with:
           submodules: false

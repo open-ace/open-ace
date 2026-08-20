@@ -838,6 +838,8 @@ GET /api/analytics/forecast
 
 获取用量预测。
 
+为保持向后兼容，`GET /api/analysis/forecast` 仍作为已弃用别名提供。新接入应使用上方的规范端点。
+
 **查询参数：**
 - `days` - 预测天数（默认：7）
 

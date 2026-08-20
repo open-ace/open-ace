@@ -46,7 +46,7 @@ def _make_workflow(**overrides):
     return base
 
 
-def _make_agent_result(text="代码审查通过"):
+def _make_agent_result(text='REVIEW_RESULT: {"verdict": "APPROVE", "blocking_findings": []}'):
     return AgentTaskResult(
         session_id="sess-1",
         response_text=text,
@@ -60,6 +60,7 @@ def _make_agent_result(text="代码审查通过"):
 
 def _make_gh():
     gh = MagicMock()
+    gh.get_current_branch.return_value = "feature-x"
     gh.get_diff_stats.return_value = {
         "commits": 1,
         "additions": 5,
@@ -90,6 +91,7 @@ def _make_orchestrator(wf):
         orch.repo = mock_repo
 
     orch.emitter = MagicMock()
+    orch._validate_autonomous_change_scope = MagicMock(return_value="")
     orch._get_gh = MagicMock()
     orch._poll_ci_status = MagicMock(return_value=[])
     orch._smart_truncate_diff = MagicMock(return_value="DIFF_TEXT")
@@ -250,7 +252,7 @@ class TestPostGithubComment:
         gh.add_issue_comment.assert_not_called()
 
     def test_long_body_capped_with_notice(self):
-        orch = _make_orchestrator(_make_workflow())
+        orch = _make_orchestrator(_make_workflow(content_language="zh"))
         gh = MagicMock()
         long_body = "B" * (GITHUB_COMMENT_MAX_CHARS + 5000)
         orch._post_github_comment(gh, 42, long_body, context="report")
