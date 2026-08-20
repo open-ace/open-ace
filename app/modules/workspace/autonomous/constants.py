@@ -120,6 +120,12 @@ AUTONOMOUS_DEV_ALLOWED_TOOLS: dict[str, list[str]] = {
 
 MERGE_POLICY_PAUSE_REASON_PREFIX = "Merge blocked by repository policy:"
 
+# Cap on acceptance-rejection-driven development rounds (#2335). A rejected
+# acceptance verdict starts a new dev round carrying the rejection as feedback;
+# after this many rounds a persistent rejection fails the workflow rather than
+# looping forever.
+MAX_ACCEPTANCE_DEV_ROUNDS = 3
+
 # ── Protected security tests (CI-repair anti-tamper, #2687) ─────────────────
 
 # Security-gate test files whose CONTENT the CI-repair path must not delete or

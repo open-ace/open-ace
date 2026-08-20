@@ -59,6 +59,7 @@ from app.modules.workspace.autonomous.constants import (  # noqa: F401
     _TRANSIENT_ORCHESTRATOR_KEYWORDS,
     AUTONOMOUS_CONTEXT,
     AUTONOMOUS_DEV_ALLOWED_TOOLS,
+    MAX_ACCEPTANCE_DEV_ROUNDS,
     MERGE_POLICY_PAUSE_REASON_PREFIX,
     PROTECTED_CI_REPAIR_TEST_FILES,
     READ_ONLY_REVIEW_UNSUPPORTED_TOOLS,
@@ -82,6 +83,7 @@ from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.phase_contract import PhaseResult, WorkflowContext
 from app.modules.workspace.autonomous.phase_host import PhaseDeps
 from app.modules.workspace.autonomous.phases import resolve_phase_handler
+from app.modules.workspace.autonomous.phases.acceptance_verification import _rejection_feedback
 from app.modules.workspace.autonomous.progress_report_i18n import (
     build_progress_payload,
     render_progress_report,
@@ -1738,12 +1740,6 @@ PHASE_STATUS_MAP = {
     "merge": "merging",
     "acceptance_verification": "verification_pending",  # #2335
 }
-
-# Cap on acceptance-rejection-driven development rounds (#2335). A rejected
-# acceptance verdict starts a new dev round carrying the rejection as feedback;
-# after this many rounds a persistent rejection fails the workflow rather than
-# looping forever.
-MAX_ACCEPTANCE_DEV_ROUNDS = 3
 
 # Acceptance verifier identity (#2335). ``verified_by`` stamps the runner
 # version + the model so a verification report records which agent produced it.
@@ -12519,6 +12515,48 @@ class AutonomousOrchestrator:
         wf = ctx.workflow
         # Check for stored user feedback (from cancel-with-feedback)
         user_feedback = wf.get("user_feedback", "")
+        # A rejected acceptance means the resumed dev round needs the verifier's
+        # failed-items as its repair target (#331: the blind round drifted
+        # off-target because the verification report never reached the dev
+        # prompt). Append them to human feedback (human opinion first) or fill
+        # the empty field; the injection is persisted via workflow_patch below
+        # because the dev prompt reads the DB field, not this local.
+        #
+        # One-shot guard: 'rejected' survives across rounds (it is only
+        # cleared by the pr_review no-changes interception or rewritten after
+        # the NEXT merge), so a bare rejected check would re-inject on every
+        # later wait tick and hijack the auto-merge passthrough into an
+        # endless report↔wait loop. Inject only on evidence of a FRESH human
+        # resume: (a) user_feedback is non-empty (both resume routes write
+        # it; resume-with-feedback requires it non-empty), or (b) the latest
+        # completed milestone is 'requirement_received' (created by the
+        # cancel-with-feedback route and by the new-requirements polling
+        # path below; the polling path immediately moves the workflow to
+        # planning, so it can never linger as the latest completed milestone
+        # of a waiting workflow — only the cancel route's can). The repair
+        # round's second tick has neither: feedback was consumed and cleared
+        # by the dev prompt and the latest completed milestone is report's
+        # round_completed.
+        rejected_acceptance = (wf.get("verification_status") or "").strip().lower() == "rejected"
+        fresh_human_resume = bool(user_feedback and user_feedback.strip())
+        # Milestone lookup only runs for rejected workflows with empty
+        # feedback; ordinary waiting ticks (the common case) skip the extra
+        # DB query.
+        if rejected_acceptance and not fresh_human_resume:
+            for ms in reversed(self.repo.list_milestones(self._workflow_id)):
+                if ms.get("status") == "completed":
+                    fresh_human_resume = ms.get("milestone_type") == "requirement_received"
+                    break
+        if rejected_acceptance and fresh_human_resume:
+            # Defensive guard for _rejection_feedback returning empty (both
+            # its branches currently return non-empty text).
+            rejection_fb = _rejection_feedback(wf, wf.get("github_pr_number"))
+            if rejection_fb:
+                user_feedback = (
+                    f"{user_feedback}\n\n{rejection_fb}"
+                    if user_feedback and user_feedback.strip()
+                    else rejection_fb
+                )
         if user_feedback and user_feedback.strip():
             # User provided feedback via cancel — resume from the cancelled phase
             # Find the most recent non-cancelled, non-wait milestone to determine phase
@@ -12551,7 +12589,20 @@ class AutonomousOrchestrator:
             return PhaseResult.completed(
                 next_phase=cancelled_phase,
                 next_status=PHASE_STATUS_MAP.get(cancelled_phase, "developing"),
-                workflow_patch={"dev_round": new_dev_round, "current_round": 0},
+                workflow_patch={
+                    "dev_round": new_dev_round,
+                    "current_round": 0,
+                    # Persist the (possibly rejection-augmented) feedback: the
+                    # dev prompt reads the DB field via _get_user_feedback_prompt.
+                    "user_feedback": user_feedback,
+                    # Drop the stale merge SHA of the rejected delivery so the
+                    # NEXT merge re-resolves fresh (acceptance only fetches the
+                    # PR's merge commit when the cached value is empty) and
+                    # drop the paused banner text (same #2491/#2658 UX hygiene
+                    # as the resume-with-feedback route).
+                    "verification_merge_sha": "",
+                    "error_message": "",
+                },
             )
 
         # Auto merge check for batch workflows
