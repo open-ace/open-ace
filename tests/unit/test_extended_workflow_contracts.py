@@ -137,6 +137,21 @@ def test_full_e2e_governance_job_wraps_full_e2e_and_feeds_nightly_gate():
     assert "scripts/e2e/envelope_merge.py" in merge_step["run"]
     assert "full-e2e-envelope-1.json" in merge_step["run"]
     assert "full-e2e-envelope-2.json" in merge_step["run"]
+    downloads = {
+        step["name"]: step["with"]
+        for step in governance["steps"]
+        if step.get("uses") == "actions/download-artifact@v7"
+    }
+    assert downloads == {
+        "Download Full E2E shard 1 artifact": {
+            "name": "full-e2e-1",
+            "path": "artifacts/full-e2e-1",
+        },
+        "Download Full E2E shard 2 artifact": {
+            "name": "full-e2e-2",
+            "path": "artifacts/full-e2e-2",
+        },
+    }
 
     nightly = jobs["nightly-summary"]
     assert "full-e2e-governance" in nightly["needs"]

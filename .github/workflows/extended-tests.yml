@@ -269,12 +269,16 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - name: Download full E2E artifacts
+      - name: Download Full E2E shard 1 artifact
         uses: actions/download-artifact@v7
         with:
-          pattern: full-e2e-*
-          path: artifacts
-          merge-multiple: false
+          name: full-e2e-1
+          path: artifacts/full-e2e-1
+      - name: Download Full E2E shard 2 artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: full-e2e-2
+          path: artifacts/full-e2e-2
       - name: Merge Full E2E shard envelopes
         run: |
           python scripts/e2e/envelope_merge.py \
