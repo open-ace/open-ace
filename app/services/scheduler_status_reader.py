@@ -114,7 +114,9 @@ class SchedulerStatusReader:
 
         # Query database
         try:
-            result = self._query_database(job_name, interval_seconds, threshold_healthy, threshold_stopped)
+            result = self._query_database(
+                job_name, interval_seconds, threshold_healthy, threshold_stopped
+            )
             result["cache_age_seconds"] = 0.0
             result["cache_hit"] = False
 
@@ -186,7 +188,8 @@ class SchedulerStatusReader:
         # Calculate heartbeat age
         heartbeat_age_seconds = None
         if heartbeat_at:
-            if hasattr(heartbeat_at, 'timestamp'):
+            # Handle timezone-aware and naive datetime objects
+            if hasattr(heartbeat_at, "tzinfo") and heartbeat_at.tzinfo is not None:
                 heartbeat_age_seconds = (now - heartbeat_at.replace(tzinfo=None)).total_seconds()
             else:
                 heartbeat_age_seconds = (now - heartbeat_at).total_seconds()
@@ -200,22 +203,26 @@ class SchedulerStatusReader:
         running = health_status in ("healthy", "stale")
 
         # Calculate next_run
-        next_run = self._calculate_next_run(
-            last_run_at, heartbeat_at, running, interval_seconds
-        )
+        next_run = self._calculate_next_run(last_run_at, heartbeat_at, running, interval_seconds)
 
         # Format timestamps
         heartbeat_str = None
         if heartbeat_at:
-            heartbeat_str = heartbeat_at.isoformat() if hasattr(heartbeat_at, 'isoformat') else str(heartbeat_at)
+            heartbeat_str = (
+                heartbeat_at.isoformat()
+                if hasattr(heartbeat_at, "isoformat")
+                else str(heartbeat_at)
+            )
 
         last_run_str = None
         if last_run_at:
-            last_run_str = last_run_at.isoformat() if hasattr(last_run_at, 'isoformat') else str(last_run_at)
+            last_run_str = (
+                last_run_at.isoformat() if hasattr(last_run_at, "isoformat") else str(last_run_at)
+            )
 
         next_run_str = None
         if next_run:
-            next_run_str = next_run.isoformat() if hasattr(next_run, 'isoformat') else str(next_run)
+            next_run_str = next_run.isoformat() if hasattr(next_run, "isoformat") else str(next_run)
 
         return {
             "running": running,
@@ -279,8 +286,10 @@ class SchedulerStatusReader:
 
         if last_run_at:
             # Based on last run time
-            if hasattr(last_run_at, 'replace'):
-                last_run_naive = last_run_at.replace(tzinfo=None) if last_run_at.tzinfo else last_run_at
+            if hasattr(last_run_at, "replace"):
+                last_run_naive = (
+                    last_run_at.replace(tzinfo=None) if last_run_at.tzinfo else last_run_at
+                )
             else:
                 last_run_naive = last_run_at
             return last_run_naive + timedelta(seconds=interval_seconds)
