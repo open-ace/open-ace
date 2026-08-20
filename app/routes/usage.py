@@ -99,19 +99,15 @@ def api_refresh_summary():
         # 非平台管理员，拒绝访问
         if user_role == "tenant_admin":
             return (
-                jsonify({
-                    "status": "error",
-                    "message": "Tenant-scoped summary refresh is automatic"
-                }),
+                jsonify(
+                    {"status": "error", "message": "Tenant-scoped summary refresh is automatic"}
+                ),
                 403,
             )
         else:
             # 普通用户或其他角色
             return (
-                jsonify({
-                    "status": "error",
-                    "message": "Platform admin access required"
-                }),
+                jsonify({"status": "error", "message": "Platform admin access required"}),
                 403,
             )
 
