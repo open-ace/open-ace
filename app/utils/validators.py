@@ -282,3 +282,63 @@ def validate_time_window(
         return False, ERROR_INVALID_TIME_WINDOW, None
 
     return True, None, value
+
+
+# ==================== Project Name Validation (Issue #2897) ====================
+
+
+def validate_project_name(name: str) -> tuple[bool, str | None]:
+    """Validate a project name.
+
+    Prevents XSS attacks and path injection by restricting allowed characters.
+    Issue #2897: Special characters in project names can cause XSS and display issues.
+
+    Args:
+        name: Project name to validate.
+
+    Returns:
+        tuple: (is_valid, error_message)
+        - On success: (True, None)
+        - On failure: (False, error_message)
+
+    Allowed characters:
+        - Letters (a-z, A-Z)
+        - Numbers (0-9)
+        - Underscore (_)
+        - Hyphen (-)
+        - Space ( )
+        - Chinese characters (\u4e00-\u9fff, \u3400-\u4dbf)
+
+    Disallowed characters that may cause issues:
+        - HTML/XML special: < > & " '
+        - Path separators: / \
+        - Other special characters: ( ) [ ] { } ; : , . ? ! @ # $ % ^ * ~ ` |
+    """
+    if not name:
+        # Name is optional, empty string is valid
+        return True, None
+
+    # Strip leading/trailing spaces to avoid storage and display issues
+    name = name.strip()
+
+    if not name:
+        return False, "Project name cannot be empty or whitespace only"
+
+    if len(name) > 255:
+        return False, "Project name must be less than 255 characters"
+
+    # Check for dangerous whitespace characters (newline, tab, etc.)
+    # Only regular space is allowed, not tabs, newlines, or other whitespace
+    if re.search(r"[\t\n\r\f\v]", name):
+        return False, "Project name cannot contain tabs or newlines"
+
+    # Allow alphanumeric, underscore, hyphen, regular space, and Chinese characters
+    # Using literal space instead of \s to avoid matching Unicode whitespace (\xa0, \u2000, etc.)
+    pattern = r"^[a-zA-Z0-9_\- \u4e00-\u9fff\u3400-\u4dbf]+$"
+    if not re.match(pattern, name):
+        return False, (
+            "Project name can only contain letters, numbers, underscores, "
+            "hyphens, spaces, and Chinese characters"
+        )
+
+    return True, None

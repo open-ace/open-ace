@@ -35,6 +35,7 @@ from app.services.permission_task_service import (
     get_permission_task_service,
 )
 from app.utils.request_context import get_current_tenant_id
+from app.utils.validators import validate_project_name
 from app.utils.workspace import (
     _is_docker_multi_user_mode,
     estimate_file_count_fast,
@@ -186,6 +187,12 @@ def api_create_project():
     description = data.get("description")
     is_shared = data.get("is_shared", False)
     create_dir = data.get("create_dir", True)
+
+    # Issue #2897: Validate project name to prevent XSS and path injection
+    if name:
+        is_valid, error_msg = validate_project_name(name)
+        if not is_valid:
+            return jsonify({"error": error_msg}), 400
 
     # Validate path
     if not path:
@@ -386,6 +393,12 @@ def api_update_project(project_id):
     name = data.get("name")
     description = data.get("description")
     is_shared = data.get("is_shared")
+
+    # Issue #2897: Validate project name to prevent XSS and path injection
+    if name is not None:
+        is_valid, error_msg = validate_project_name(name)
+        if not is_valid:
+            return jsonify({"error": error_msg}), 400
 
     # Issue #2730 + #2746: Set permissions when is_shared changes from False to True
     if is_shared is True and not project.is_shared:
