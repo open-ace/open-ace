@@ -97,38 +97,6 @@
       "summary": "failed on setup with \"file tests/issues/166/test_stream_json_mode.py, line 32"
     },
     {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "172",
-      "nodeid": "tests/issues/172/e2e_quota_enforcement.py::test_llm_proxy_fail_closed",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/172/e2e_quota_enforcement.py, line 209"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "172",
-      "nodeid": "tests/issues/172/e2e_quota_enforcement.py::test_quota_check_endpoint",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/172/e2e_quota_enforcement.py, line 91"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "172",
-      "nodeid": "tests/issues/172/e2e_quota_enforcement.py::test_quota_status_endpoint",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/172/e2e_quota_enforcement.py, line 108"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "172",
-      "nodeid": "tests/issues/172/e2e_quota_enforcement.py::test_user_daily_stats",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/172/e2e_quota_enforcement.py, line 122"
-    },
-    {
       "category": "test_body_exception",
       "exception_type": "AttributeError",
       "issue_number": "1760",
@@ -199,38 +167,6 @@
       "nodeid": "tests/issues/1831/test_orchestrator_failure_cleanup.py::TestAdvanceTimingDimension::test_transient_error_keeps_worktree",
       "outcome": "failure",
       "summary": "AssertionError: Expected '_mark_failed' to not have been called. Called 1 times."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "RuntimeError",
-      "issue_number": "1895",
-      "nodeid": "tests/issues/1895/test_redis_authentication.py::TestRedisPasswordFailClosed::test_development_allows_empty_redis_password_with_warning",
-      "outcome": "failure",
-      "summary": "RuntimeError: REDIS_PASSWORD not set in development mode. The entrypoint should auto-generate and persist this password. If running directly, set REDIS_PASSWORD explicitly."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "RuntimeError",
-      "issue_number": "1895",
-      "nodeid": "tests/issues/1895/test_redis_authentication.py::TestRedisPasswordSpecialCharacters::test_password_with_backtick_handled_correctly",
-      "outcome": "failure",
-      "summary": "RuntimeError: REDIS_PASSWORD must be at least 24 characters long (got 13); current value is too short for production"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "RuntimeError",
-      "issue_number": "1895",
-      "nodeid": "tests/issues/1895/test_redis_authentication.py::TestRedisPasswordSpecialCharacters::test_password_with_dollar_sign_handled_correctly",
-      "outcome": "failure",
-      "summary": "RuntimeError: REDIS_PASSWORD must be at least 24 characters long (got 13); current value is too short for production"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "RuntimeError",
-      "issue_number": "1895",
-      "nodeid": "tests/issues/1895/test_redis_authentication.py::TestRedisPasswordSpecialCharacters::test_password_with_exclamation_handled_correctly",
-      "outcome": "failure",
-      "summary": "RuntimeError: REDIS_PASSWORD must be at least 24 characters long (got 13); current value is too short for production"
     },
     {
       "category": "assertion_failure",
@@ -627,38 +563,6 @@
     {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
-      "issue_number": "987",
-      "nodeid": "tests/issues/987/test_prompt_truncation.py::TestPostGithubComment::test_long_body_capped_with_notice",
-      "outcome": "failure",
-      "summary": "AssertionError: assert '截断' in 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB…"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "IndexError",
-      "issue_number": "987",
-      "nodeid": "tests/issues/987/test_prompt_truncation.py::TestPrReviewPrompt::test_previous_review_content_not_reinjected_but_instruction_kept",
-      "outcome": "failure",
-      "summary": "IndexError: list index out of range"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "987",
-      "nodeid": "tests/issues/987/test_prompt_truncation.py::TestPrReviewPrompt::test_requirements_not_injected",
-      "outcome": "failure",
-      "summary": "IndexError: list index out of range"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "987",
-      "nodeid": "tests/issues/987/test_prompt_truncation.py::TestSummaryPrompt::test_last_pr_review_kept_last_fix_summary_removed",
-      "outcome": "failure",
-      "summary": "assert 0 >= 2"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
       "issue_number": "993",
       "nodeid": "tests/issues/993/test_tldr.py::TestMilestoneTldrWrite::test_pr_reviewed_milestone_carries_tldr",
       "outcome": "failure",
@@ -683,8 +587,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-19 prune 5 resolved issue-863 ip-whitelist e2e entries: four stacked layers. (a) The file is a manual e2e script whose check functions took plain args pytest misread as fixtures — checks are now script-internal _check_* steps and pytest runs the whole script in a subprocess requiring a full pass (skips without a reachable server). (b) /api/compliance/security-settings moved to /api/security-settings (governance blueprint). (c) Freshly seeded lane servers boot admin with must_change_password=1 which 403-gates authenticated calls — main() clears the seeded flag in the test DB first (165-cluster precedent). (d) Login inputs are id-based and the Security Center default tab is Content Filter — selectors realigned and every UI check switches to the Security Settings tab. Resolution evidence: run 32261407296 resolved list is exactly these 5 nodeids with new/changed/invalid/collection_errors all 0. Negative control: reverting reproduces the 5. Shrink-only.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32261407296",
+    "prune_note": "2026-08-20 prune 12 resolved entries across three clusters (85->73). 172 quota e2e (4): the file was a manual deployment diagnostic whose check functions took plain args pytest misread as fixtures; moved to manual_e2e_quota_enforcement.py out of discovery, historical path kept as a pointer+guard so the round-robin shard layout is unchanged. 1895 redis auth (4): production evolved to fail-closed - dev empty REDIS_PASSWORD now raises RuntimeError instead of warning, so the fail-open assertion was inverted and special-char passwords lengthened past the validation minimum. 987 prompt truncation (4): fixtures drifted from the phase-migrated autonomous review - agent result must be a REVIEW_RESULT JSON verdict, gh.get_current_branch/_validate_autonomous_change_scope mocked, zh content-language case constructed accordingly.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32373066502",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
