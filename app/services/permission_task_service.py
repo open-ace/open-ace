@@ -94,7 +94,7 @@ class PermissionTaskService:
     def generate_task_checksum(self, project_id: int, path: str) -> str:
         """Generate checksum for task deduplication."""
         data = f"{project_id}:{path}:{int(time.time() / 300)}"  # 5-minute window
-        return hashlib.md5(data.encode()).hexdigest()
+        return hashlib.md5(data.encode(), usedforsecurity=False).hexdigest()
 
     def check_existing_task(self, db, project_id: int) -> dict | None:
         """Check if there's an existing pending/running task for this project.
