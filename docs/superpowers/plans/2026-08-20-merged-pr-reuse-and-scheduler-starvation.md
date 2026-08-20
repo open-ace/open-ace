@@ -63,7 +63,7 @@ pr_number = existing_pr_number
 
 要点论证：
 
-1. **状态查询失败时也强制新建（fail-closed to create）是安全的**：若该分支实际仍有 OPEN PR，`gh.create_pr` 会抛 "already exists"，现有恢复逻辑（[pr_review.py L342-L394](../../../app/modules/workspace/autonomous/phases/pr_review.py#L342-L394)）通过 `_extract_pr_number_from_error` / `find_existing_pr` 找到并复用那个 OPEN PR —— 与旧行为等价。不会产生重复 PR。若编号是脏数据（分支上无任何 PR），`create_pr` 直接成功，恰好完成自愈。
+1. **状态查询失败时保留已记录编号（review 修正）**：初始草案将探测异常与"确认非 OPEN"同等对待（fail-closed to create）。独立审查（PR #2906 review round 1, opinion 3）推翻了该论证：探测失败通常意味着 gh/API 瞬时故障，此时强制 `create_pr` 会经同一故障通道必然失败——"already exists" 恢复逻辑同样依赖 gh（`find_existing_pr`），也可能同时失败，导致工作流在"保留编号即可正常推进"的场景下终态 failed。因此**仅当 `get_pr` 成功返回且状态非 OPEN 时才清空编号**；探测异常时每轮保留编号并记 warning（"already exists" 恢复兜底极罕见的"新 PR 已存在"场景）。
 2. **MERGED 后同分支新建 PR 语义正确**：branch_name 由 workflow UUID 派生（如 `auto-dev/21a26fe8-...`），重新进入的修复提交已 push 到同一分支；main 已包含旧提交，新 PR 的 diff 只含本轮修复增量（GitHub 以 merge-base 计算），正是期望行为。若合并时分支被远端删除，`_ensure_branch_and_push`（L287 调用、L102 定义）的 force push 会重建分支。
 3. **不选择在 acceptance_verification rejected 转换点清空 `github_pr_number`**：入口防御（point-of-use）覆盖所有保留旧 PR 编号重入 pr_review 的路径——验收 rejected 后 resume-with-feedback / cancel-with-feedback（orchestrator 重置 `current_round=0` 后重新走 pr_review round 1，是 #331 的实际路径），以及未来新增的任何重入路径；单一埋点、无状态泄漏。转换点清理需要枚举所有路径，易漏。（merge 阶段的 transient retry 停留在 merge phase，不重入 pr_review，不在枚举内。）
 4. **`pr_number` 局部变量**：保持现有 L314-L315 原值读取，活性检查仅影响 `existing_pr_number`（详见 1.4 的精确插入位置）——round>1 时 `pr_number` 永不为 None。
@@ -82,12 +82,21 @@ pr_number = existing_pr_number
 ```python
 existing_pr_number = wf.get("github_pr_number") or host.get_workflow_field("github_pr_number")
 if existing_pr_number:
+    probe_error = None
+    pr_state = ""
     try:
         recorded_pr = gh.get_pr(existing_pr_number)
         pr_state = (recorded_pr.get("state") or "").upper()
-    except Exception:
-        pr_state = ""
-    if pr_state != "OPEN":
+    except Exception as e:
+        probe_error = e
+    if probe_error is not None:
+        # 探测失败 ≠ 确认非 OPEN（review 修正）：保留编号，
+        # 不经同一故障通道强行 create_pr
+        logger.warning(
+            "Recorded PR #%s state probe failed (%s); keeping PR id",
+            existing_pr_number, probe_error,
+        )
+    elif pr_state != "OPEN":
         if round_num == 1:
             # 仅 round 1 创建窗口清空 → 走下方 create_pr；
             # "already exists" 恢复逻辑兜底防重复
@@ -113,7 +122,7 @@ if round_num == 1 and not existing_pr_number:
 
 1. `test_round1_reuses_open_pr`：`github_pr_number=100`，`gh.get_pr` 返回 `state=OPEN` → 断言 `create_pr` 未被调用、`pr_number==100`（回归保护）。
 2. `test_round1_creates_new_pr_when_recorded_pr_merged`：`github_pr_number=100`，`get_pr` 返回 `state=MERGED` → 断言 `create_pr` 被调用一次、`workflow_patch["github_pr_number"]` 为新编号。
-3. `test_round1_state_check_failure_falls_back_to_create`：`get_pr` 抛 `GitHubOpsError` → 断言 `create_pr` 被调用（依赖 "already exists" 恢复兜底）。
+3. `test_probe_failure_keeps_recorded_pr_id`（review 修正后语义）：`get_pr` 抛 `GitHubOpsError` → 断言 `create_pr` 未被调用、编号保留（探测失败 ≠ 确认非 OPEN，见 1.3 要点论证 #1）。
 4. `test_round_gt1_keeps_recorded_pr_even_if_merged`：round=6、`state=MERGED` → 断言 `create_pr` 未被调用、`pr_number` 保持 100、有 warning 日志。
 
 ## 二、Bug 2：`_process_workflows` 同步等待导致调度循环饥饿

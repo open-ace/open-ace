@@ -1414,13 +1414,17 @@ class AutonomousScheduler:
                     # submit (the 20s join can time out while the loop is
                     # still mid-tick). Release the registration made for this
                     # workflow — otherwise its slot/conflict keys linger until
-                    # the stale-lease reclaim (~30 min) heals them.
+                    # the stale-lease reclaim (~30 min) heals them. No
+                    # legacy_wf: the key map entry was unconditionally written
+                    # moments earlier in this same invocation, and the legacy
+                    # fallback would recompute a WAITING workflow's row keys
+                    # and release a running sibling's reservation.
                     logger.warning(
                         "Background submit for workflow %s failed (executor shut down); "
                         "releasing slot",
                         wf_id[:8],
                     )
-                    self._discard_in_progress_entry(wf_id, legacy_wf=wf)
+                    self._discard_in_progress_entry(wf_id)
                     continue
                 with self._futures_lock:
                     self._in_flight_futures[future] = wf_id

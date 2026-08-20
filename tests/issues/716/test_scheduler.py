@@ -537,6 +537,66 @@ class TestNonBlockingAdvancePath:
         # ...and the reference was reset so start() rebuilds a live one.
         assert scheduler._bg_executor is None
 
+    def test_submit_failure_releases_slot_without_touching_sibling_keys(self, caplog):
+        """A RuntimeError from executor.submit mid-tick (stop() raced the loop)
+        must release the workflow's own registration — and, for a WAITING
+        workflow (which deliberately registers an EMPTY key map), must NOT fall
+        back to the row's conflict keys: that legacy fallback would discard a
+        running batch sibling's reservation from the shared sets."""
+        scheduler = AutonomousScheduler()
+        scheduler._get_bg_executor()
+        dead = scheduler._bg_executor
+        dead.shutdown(wait=False)
+
+        # A running sibling already holds the batch-1 reservation.
+        scheduler._in_progress_ids.add("wf-sibling")
+        scheduler._in_progress_batch_ids.add("batch-1")
+        scheduler._in_progress_key_map["wf-sibling"] = ("batch-1", "/wt/1", "auto/1")
+
+        mock_repo = MagicMock()
+        mock_repo.get_queued_workflows.return_value = []
+        mock_repo.get_active_workflows.return_value = [
+            # The sibling backs its in-progress entry with a fresh lease so
+            # _reclaim_stale_in_progress leaves it alone; it's already in
+            # _in_progress_ids so selection skips it.
+            {
+                "workflow_id": "wf-sibling",
+                "status": "planning",
+                "batch_id": "batch-1",
+                "worktree_path": "/wt/1",
+                "branch_name": "auto/1",
+                "locked_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            },
+            {
+                "workflow_id": "wf-wait",
+                "status": "waiting",
+                "batch_id": "batch-1",
+                "worktree_path": "/wt/1",
+                "branch_name": "auto/1",
+            },
+        ]
+
+        with (
+            patch("app.routes.autonomous._get_repo", return_value=mock_repo),
+            patch.object(scheduler, "_get_bg_executor", return_value=dead),
+            patch.object(scheduler, "_advance_single") as advance,
+        ):
+            with caplog.at_level(logging.WARNING, logger="app.services.autonomous_scheduler"):
+                scheduler._process_workflows(wait=False)
+
+        # Submit failed → the advance never ran...
+        advance.assert_not_called()
+        # ...the waiting workflow's own registration was released...
+        assert "wf-wait" not in scheduler._in_progress_ids
+        assert "wf-wait" not in scheduler._in_progress_key_map
+        # ...with a warning explaining why...
+        assert any(
+            "wf-wait" in r.message and "releasing slot" in r.message for r in caplog.records
+        ), caplog.messages
+        # ...but the running sibling's batch reservation survived (the empty
+        # key map recorded at selection means no legacy-key fallback fired).
+        assert "batch-1" in scheduler._in_progress_batch_ids
+
     def test_wait_true_still_blocks_until_advances_finish(self):
         """The legacy wait=True semantics (used by direct callers and relied on
         by the older unit tests) are unchanged: the call returns only after
