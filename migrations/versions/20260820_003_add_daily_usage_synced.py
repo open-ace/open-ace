@@ -84,4 +84,9 @@ def downgrade() -> None:
         op.drop_index("idx_agent_sessions_daily_usage_synced", table_name="agent_sessions")
 
     if column_exists("agent_sessions", "daily_usage_synced"):
-        op.drop_column("agent_sessions", "daily_usage_synced")
+        # SQLite requires batch_alter_table for DROP COLUMN
+        if conn.dialect.name == "postgresql":
+            op.drop_column("agent_sessions", "daily_usage_synced")
+        else:
+            with op.batch_alter_table("agent_sessions") as batch_op:
+                batch_op.drop_column("daily_usage_synced")
