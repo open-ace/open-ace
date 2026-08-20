@@ -255,3 +255,63 @@ class TestTerminateSessionsBatch:
 
         assert result["success"] is False
         assert "error" in result
+
+
+class TestMachineExistsCheck:
+    """Tests for _check_machine_exists_for_session route helper (Issue #2596)."""
+
+    def test_check_machine_exists_returns_none_when_machine_exists(self):
+        """Test that check passes when machine exists."""
+        from app.routes.remote import _check_machine_exists_for_session
+
+        session_info = {
+            "session_id": "test-session-123",
+            "remote_machine_id": "test-machine-id",
+        }
+
+        with patch("app.routes.remote.get_remote_agent_manager") as mock_get_mgr:
+            mock_mgr = MagicMock()
+            mock_mgr.get_machine.return_value = {"machine_id": "test-machine-id"}
+            mock_get_mgr.return_value = mock_mgr
+
+            result = _check_machine_exists_for_session(session_info, "test_op")
+
+        assert result is None
+
+    def test_check_machine_exists_returns_409_when_machine_deregistered(self):
+        """Test that 409 is returned when machine has been deregistered."""
+        from flask import Flask
+
+        from app.routes.remote import _check_machine_exists_for_session
+
+        app = Flask(__name__)
+
+        session_info = {
+            "session_id": "test-session-456",
+            "remote_machine_id": "deregistered-machine-id",
+        }
+
+        with app.app_context():
+            with patch("app.routes.remote.get_remote_agent_manager") as mock_get_mgr:
+                mock_mgr = MagicMock()
+                mock_mgr.get_machine.return_value = None  # Machine does not exist
+                mock_get_mgr.return_value = mock_mgr
+
+                result = _check_machine_exists_for_session(session_info, "send_message")
+
+        assert result is not None
+        response, status_code = result
+        assert status_code == 409
+
+    def test_check_machine_exists_returns_none_when_no_machine_association(self):
+        """Test that check passes when session has no machine association."""
+        from app.routes.remote import _check_machine_exists_for_session
+
+        session_info = {
+            "session_id": "test-session-789",
+            # No remote_machine_id
+        }
+
+        result = _check_machine_exists_for_session(session_info, "test_op")
+
+        assert result is None
