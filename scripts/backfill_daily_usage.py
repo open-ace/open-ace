@@ -32,7 +32,7 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
 sys.path.insert(0, project_root)
 
-from app.repositories.database import Database
+from app.repositories.database import Database, is_postgresql
 from app.repositories.usage_repo import UsageRepository
 from app.utils.tool_names import normalize_tool_name
 
@@ -109,21 +109,41 @@ def aggregate_sessions_for_date(db: Database, date: str) -> list[dict[str, Any]]
     Returns:
         List of aggregated usage records by tool_name/host_name.
     """
-    query = """
-        SELECT
-            COALESCE(tool_name, 'qwen-code') as tool_name,
-            COALESCE(host_name, 'localhost') as host_name,
-            tenant_id,
-            SUM(COALESCE(total_tokens, 0)) as tokens_used,
-            SUM(COALESCE(total_input_tokens, 0)) as input_tokens,
-            SUM(COALESCE(total_output_tokens, 0)) as output_tokens,
-            COUNT(*) as request_count,
-            GROUP_CONCAT(DISTINCT model) as models_concat
-        FROM agent_sessions
-        WHERE CAST(created_at AS DATE) = ?
-          AND workspace_type IN ('local', 'remote', 'terminal')
-        GROUP BY tool_name, host_name, tenant_id
-    """
+    # Use database-compatible aggregation function
+    # PostgreSQL: string_agg(DISTINCT model, ',')
+    # SQLite: GROUP_CONCAT(DISTINCT model)
+    if is_postgresql():
+        query = """
+            SELECT
+                COALESCE(tool_name, 'qwen-code') as tool_name,
+                COALESCE(host_name, 'localhost') as host_name,
+                tenant_id,
+                SUM(COALESCE(total_tokens, 0)) as tokens_used,
+                SUM(COALESCE(total_input_tokens, 0)) as input_tokens,
+                SUM(COALESCE(total_output_tokens, 0)) as output_tokens,
+                COUNT(*) as request_count,
+                string_agg(DISTINCT model, ',') as models_concat
+            FROM agent_sessions
+            WHERE CAST(created_at AS DATE) = %s
+              AND workspace_type IN ('local', 'remote', 'terminal')
+            GROUP BY tool_name, host_name, tenant_id
+        """
+    else:
+        query = """
+            SELECT
+                COALESCE(tool_name, 'qwen-code') as tool_name,
+                COALESCE(host_name, 'localhost') as host_name,
+                tenant_id,
+                SUM(COALESCE(total_tokens, 0)) as tokens_used,
+                SUM(COALESCE(total_input_tokens, 0)) as input_tokens,
+                SUM(COALESCE(total_output_tokens, 0)) as output_tokens,
+                COUNT(*) as request_count,
+                GROUP_CONCAT(DISTINCT model) as models_concat
+            FROM agent_sessions
+            WHERE CAST(created_at AS DATE) = ?
+              AND workspace_type IN ('local', 'remote', 'terminal')
+            GROUP BY tool_name, host_name, tenant_id
+        """
 
     rows = db.fetch_all(query, (date,))
 
