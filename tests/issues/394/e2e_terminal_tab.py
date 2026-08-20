@@ -349,17 +349,23 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port):
         machine_list.first.click()
         time.sleep(0.5)
 
-        # Click Create - this triggers the intercepted start_terminal API
-        create_btn = modal.locator(".btn-primary").last
-        create_btn.click()
-        log("Phase 4", "Clicked Create - mock server will handle connection")
+        # Terminal creation now requires a selected API model in addition to
+        # the machine. Local runs can satisfy this quickly, while CI may still
+        # be loading models when the machine click returns.
+        model_select = modal.locator("select.form-select")
+        try:
+            model_select.wait_for(state="visible", timeout=15000)
+            expect(model_select).not_to_have_value("", timeout=15000)
+            log("Phase 4", f"Selected terminal model: {model_select.input_value()}")
+        except PlaywrightTimeoutError:
+            log("Phase 4", "terminal model selector did not become ready")
+            log("Phase 4", "modal text: " + modal.inner_text()[:500])
+            raise
 
-        # The terminal tab mounts asynchronously (tab switch, React mount,
-        # then a dynamic import of the @xterm/xterm chunk); slow CI runners
-        # regularly exceed any fixed sleep, so wait for xterm to actually
-        # attach. Diagnostics attach at the context level so they survive a
-        # full-page navigation, and capture every console level because the
-        # app logs its progress ([Terminal] ... / [TerminalTab] ...) as info.
+        # Diagnostics attach before Create so they capture failed start
+        # requests as well as terminal mount/connect issues. Use the context
+        # level so logs survive any full-page navigation, and capture every
+        # console level because the app logs its progress as info.
         browser_log: list[str] = []
         page.context.on(
             "console",
@@ -371,6 +377,16 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port):
             lambda req: browser_log.append(f"[requestfailed] {req.method} {req.url} {req.failure}"),
         )
 
+        # Click Create - this triggers the intercepted start_terminal API
+        create_btn = modal.locator(".btn-primary").last
+        expect(create_btn).to_be_enabled(timeout=15000)
+        create_btn.click()
+        log("Phase 4", "Clicked Create - mock server will handle connection")
+
+        # The terminal tab mounts asynchronously (tab switch, React mount,
+        # then a dynamic import of the @xterm/xterm chunk); slow CI runners
+        # regularly exceed any fixed sleep, so wait for xterm to actually
+        # attach.
         xterm_screen = page.locator(".xterm-screen")
         try:
             xterm_screen.wait_for(state="visible", timeout=30000)
