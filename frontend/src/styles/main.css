@@ -1945,6 +1945,18 @@ table .latency-row:hover td {
 }
 
 /* Audit Analysis page - same overrides (standalone page) */
+
+/* Anomaly row processed state - Issue #2744 */
+.audit-center .anomaly-row-processed {
+  --bs-table-bg: #f8fafc;
+  --bs-table-hover-bg: #f1f5f9;
+  border-left: 3px solid var(--color-success);
+}
+
+[data-theme='dark'] .audit-center .anomaly-row-processed {
+  --bs-table-bg: rgba(16, 185, 129, 0.08);
+  --bs-table-hover-bg: rgba(16, 185, 129, 0.13);
+}
 [data-theme='dark'] .audit-analysis .table {
   --bs-table-color: var(--text-primary);
   --bs-table-bg: transparent;
