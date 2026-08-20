@@ -327,7 +327,8 @@ describe('SSOSettings Accessibility', () => {
     it('should have labels properly associated with inputs', async () => {
       render(<SSOSettings />);
 
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      // Issue #2128: Updated to new label text
+      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable Global SSO Login/i });
       expect(ssoEnabledInput).toHaveAttribute('id', 'ssoEnabled');
 
       const autoProvisionInput = await screen.findByRole('checkbox', {
@@ -342,7 +343,8 @@ describe('SSOSettings Accessibility', () => {
       const { container } = render(<SSOSettings />);
 
       // Wait for checkboxes to be rendered
-      await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      // Issue #2128: Updated to new label text
+      await screen.findByRole('checkbox', { name: /Enable Global SSO Login/i });
 
       // The description span should be in the DOM after the label
       const formCheckDivs = container.querySelectorAll('.form-check');
