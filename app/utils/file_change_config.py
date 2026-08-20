@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -454,8 +454,8 @@ def _load_config_file(config_path: Path) -> dict[str, Any]:
 
     try:
         with open(config_path) as f:
-            data = yaml.safe_load(f)
-            return data if data else {}
+            data: Any = yaml.safe_load(f)
+            return data if isinstance(data, dict) else {}
     except yaml.YAMLError as e:
         logger.error(f"Error parsing config file {config_path}: {e}")
         return {}

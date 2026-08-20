@@ -147,24 +147,36 @@ export const ContentBlockRenderer: React.FC<{
             </span>
           </summary>
           <div className="mt-1 small">
-            {block.changes.map((change, i) => (
-              <div key={i} className="d-flex align-items-center mb-1">
-                <Badge
-                  variant={
-                    change.change_type === 'add'
-                      ? 'success'
-                      : change.change_type === 'delete'
-                        ? 'danger'
-                        : 'warning'
-                  }
-                  className="me-1"
-                  pill
-                >
-                  {change.change_type.toUpperCase()}
-                </Badge>
-                <code className="small">{change.path}</code>
-              </div>
-            ))}
+            {block.changes.map((change, i) => {
+              // Determine badge variant based on change_type
+              // Issue #2725: Added support for rename and copy types
+              const badgeVariant =
+                change.change_type === 'add'
+                  ? 'success'
+                  : change.change_type === 'delete'
+                    ? 'danger'
+                    : change.change_type === 'rename'
+                      ? 'info'
+                      : change.change_type === 'copy'
+                        ? 'secondary'
+                        : 'warning'; // modify
+
+              return (
+                <div key={i} className="d-flex align-items-center mb-1">
+                  <Badge variant={badgeVariant} className="me-1" pill>
+                    {change.change_type.toUpperCase()}
+                  </Badge>
+                  {change.old_path?.trim() ? (
+                    // Show "old_path -> path" format for rename/copy operations
+                    <code className="small">
+                      {change.old_path} → {change.path}
+                    </code>
+                  ) : (
+                    <code className="small">{change.path}</code>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </details>
       );
