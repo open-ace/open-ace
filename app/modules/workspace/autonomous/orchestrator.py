@@ -12560,20 +12560,31 @@ class AutonomousOrchestrator:
         if user_feedback and user_feedback.strip():
             # User provided feedback via cancel — resume from the cancelled phase
             # Find the most recent non-cancelled, non-wait milestone to determine phase
-            cancelled_phase = "development"  # default fallback
-            milestones = self.repo.list_milestones(self._workflow_id)
-            for ms in reversed(milestones):
-                status = ms.get("status", "")
-                mtype = ms.get("milestone_type", "")
-                if status == "completed" and mtype not in (
-                    "wait_started",
-                    "requirement_received",
-                    "branch_created",
-                    "repo_setup",
-                    "issue_created",
-                ):
-                    cancelled_phase = ms.get("phase", "development")
-                    break
+            # A rejected acceptance means the previous delivery ALREADY merged
+            # (acceptance only runs after a successful merge), so milestone
+            # backtracking can only land on merge/acceptance/report-side or infra
+            # milestones — every one a wrong resume target (#322: a stale
+            # worktree_restored(pr_review) skipped the repair round entirely and
+            # the workflow fell straight into the no-changes terminal). The only
+            # meaningful resume is a repair development round; force it.
+            if rejected_acceptance:
+                cancelled_phase = "development"
+            else:
+                cancelled_phase = "development"  # default fallback
+                milestones = self.repo.list_milestones(self._workflow_id)
+                for ms in reversed(milestones):
+                    status = ms.get("status", "")
+                    mtype = ms.get("milestone_type", "")
+                    if status == "completed" and mtype not in (
+                        "wait_started",
+                        "requirement_received",
+                        "branch_created",
+                        "repo_setup",
+                        "issue_created",
+                        "worktree_restored",  # infra bookkeeping, never a resume target
+                    ):
+                        cancelled_phase = ms.get("phase", "development")
+                        break
 
             new_dev_round = wf.get("dev_round", 1) + 1
             # Emit the phase_change event through the host (the commit entrypoint

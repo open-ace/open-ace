@@ -214,6 +214,31 @@ def test_timing_issue_marks_completed_with_timing_milestone():
     ), result.milestone_events
 
 
+def test_empty_branch_name_fails_loudly():
+    """An empty branch_name is a broken state (merge cleanup cleared it and
+    nothing recreated the workspace), NOT "no changes": the handler must
+    fail with a structured error instead of falling into the no-changes
+    completed terminal (which masked the breakage in #322/#329/#340)."""
+    gh = _gh()
+    host = _host()
+    deps = _deps(host, gh)
+
+    result = pr_review_phase.handle(_ctx(_workflow(branch_name="")), deps)
+
+    assert isinstance(result, PhaseResult)
+    assert result.outcome == "failed"
+    assert result.next_phase is None
+    msg = (result.structured_error or {}).get("message", "")
+    assert "empty branch_name" in msg, msg
+    # NOT the no-changes terminal.
+    assert result.next_phase != "completed"
+    assert not any(
+        ms.get("milestone_type") == "no_changes" for ms in result.milestone_events
+    ), result.milestone_events
+    host.emit_phase_change.assert_not_called()
+    host.post_github_comment.assert_not_called()
+
+
 # ── acceptance-rejected re-entry: reopen development, not completed ───────
 
 

@@ -164,6 +164,23 @@ def handle(ctx, deps) -> PhaseResult:
     force_full_rounds = host.must_run_full_review_rounds(wf)
     dev_round = wf.get("dev_round", 1)
     branch_name = wf.get("branch_name", "")
+    if not branch_name.strip():
+        # Empty branch_name is a broken state (every branch_strategy sets it in
+        # preparation; empty only happens after merge cleanup without
+        # recreation). Falling through would run `git rev-parse ''` → exit 128
+        # → the except-swallow leaves has_changes=False and the workflow
+        # terminates as no_changes — masking the breakage (#322/#329/#340).
+        # Fail loudly instead.
+        return PhaseResult.failed(
+            structured_error={
+                "message": (
+                    "pr_review entered with an empty branch_name (workspace "
+                    "cleared by merge cleanup and not recreated); refusing to "
+                    "fall into the no-changes terminal — this is a broken "
+                    "state, not 'no changes'"
+                )
+            }
+        )
     # Capture entry repo state for the push-check recovery (#2302). The worktree
     # may be on main at push time (failure→retry→reentry); recover_worktree_branch
     # needs the feature tip + main HEAD from before any in-phase switch.

@@ -122,7 +122,12 @@ def _make_workflow(**overrides):
         "cli_tool": "claude-code",
         "model": "claude-sonnet-4-6",
         "permission_mode": "auto-edit",
-        "branch_name": "",
+        # Same name preparation derives for workflow_id "test-wf-uuid" —
+        # pr_review-phase tests enter past preparation, and the handler now
+        # fails loudly on an empty branch_name (post-merge-cleanup broken
+        # state, #322/#329/#340), so the fixture must model the invariant
+        # (branch_name is always set before pr_review).
+        "branch_name": "auto-dev/test-wf-uuid",
         "branch_strategy": "new-branch",
         "workspace_type": "local",
         "remote_machine_id": "",
