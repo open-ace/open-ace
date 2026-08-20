@@ -91,31 +91,27 @@ def compute_data_fetch_status(
     """
     # Handle None results (exception during fetch)
     if results is None:
-        status = STATUS_FAILED
-        error_message = "Data fetch encountered an unexpected error"
-        result_summary = {
-            "status": STATUS_FAILED,
-            "error": "unexpected_error",
-        }
-        return status, error_message, result_summary
+        return (
+            STATUS_FAILED,
+            "Data fetch encountered an unexpected error",
+            {"status": STATUS_FAILED, "error": "unexpected_error"},
+        )
 
     # Handle skipped results (concurrent fetch already running)
     if isinstance(results, dict) and results.get("_skipped"):
-        status = STATUS_SKIPPED
-        error_message = "Concurrent data fetch already running"
-        result_summary = {"status": STATUS_SKIPPED}
-        return status, error_message, result_summary
+        return (
+            STATUS_SKIPPED,
+            "Concurrent data fetch already running",
+            {"status": STATUS_SKIPPED},
+        )
 
     # Handle empty results (no scripts available)
     if not results:
-        status = STATUS_COMPLETED
-        error_message = None
-        result_summary = {
-            "status": STATUS_COMPLETED,
-            "tools_total": 0,
-            "tools_failed": 0,
-        }
-        return status, error_message, result_summary
+        return (
+            STATUS_COMPLETED,
+            None,
+            {"status": STATUS_COMPLETED, "tools_total": 0, "tools_failed": 0},
+        )
 
     # Check per-tool results
     failed_tools = [k for k, v in results.items() if not v.get("success", False)]
@@ -124,45 +120,43 @@ def compute_data_fetch_status(
 
     # All tools failed
     if tools_failed == tools_total:
-        status = STATUS_FAILED
-        error_message = "All fetch scripts failed"
-        result_summary = {
-            "status": STATUS_FAILED,
-            "tools_total": tools_total,
-            "tools_failed": tools_failed,
-            "failed_tools": failed_tools,
-        }
-        return status, error_message, result_summary
+        return (
+            STATUS_FAILED,
+            "All fetch scripts failed",
+            {
+                "status": STATUS_FAILED,
+                "tools_total": tools_total,
+                "tools_failed": tools_failed,
+                "failed_tools": failed_tools,
+            },
+        )
 
     # Partial failure (some succeeded, some failed)
     if failed_tools:
         # Memory summary always shows partial for accuracy
-        memory_status = STATUS_PARTIAL
         memory_error = _make_structured_error_message(tools_total, tools_failed, failed_tools)
 
         # Persisted status depends on rollback switch
         if ENABLE_PARTIAL_STATUS:
             persist_status = STATUS_PARTIAL
-            persist_error = memory_error
         else:
             # Rollback mode: persist as completed but keep memory accurate
             persist_status = STATUS_COMPLETED
-            persist_error = memory_error
 
-        result_summary = {
-            "status": memory_status,  # Always accurate in memory
-            "tools_total": tools_total,
-            "tools_failed": tools_failed,
-            "failed_tools": failed_tools,
-        }
-        return persist_status, persist_error, result_summary
+        return (
+            persist_status,
+            memory_error,
+            {
+                "status": STATUS_PARTIAL,  # Always accurate in memory
+                "tools_total": tools_total,
+                "tools_failed": tools_failed,
+                "failed_tools": failed_tools,
+            },
+        )
 
     # All tools succeeded
-    status = STATUS_COMPLETED
-    error_message = None
-    result_summary = {
-        "status": STATUS_COMPLETED,
-        "tools_total": tools_total,
-        "tools_failed": 0,
-    }
-    return status, error_message, result_summary
+    return (
+        STATUS_COMPLETED,
+        None,
+        {"status": STATUS_COMPLETED, "tools_total": tools_total, "tools_failed": 0},
+    )
