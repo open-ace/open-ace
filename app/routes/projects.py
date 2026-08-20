@@ -12,6 +12,7 @@ import platform
 import pwd
 import subprocess
 
+import sqlalchemy as sa
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import (
@@ -275,6 +276,7 @@ def api_create_project():
 
     if project_id:
         # Issue #2730 + #2746: Set shared project permissions
+        permission_warning = None
         if is_shared and _is_docker_multi_user_mode():
             # Estimate file count to determine sync vs async
             file_count = estimate_file_count_fast(path)
@@ -288,7 +290,19 @@ def api_create_project():
                 )
                 if not success:
                     logger.error(f"Failed to setup shared permissions: {error_msg}")
-                    # Don't fail project creation, just log the error
+                    # Update project status to failed
+                    from app import db
+
+                    db.execute(
+                        sa.text("""
+                            UPDATE projects
+                            SET permission_status = 'failed'
+                            WHERE id = :project_id
+                        """),
+                        {"project_id": project_id},
+                    )
+                    db.commit()
+                    permission_warning = f"Permission setup failed: {error_msg}"
             else:
                 # Large project: submit async task
                 from app import db
@@ -308,16 +322,17 @@ def api_create_project():
         project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
         if project is None:
             return jsonify({"error": "Project not found"}), 404
-        return (
-            jsonify(
-                {
-                    "success": True,
-                    "project": project.to_dict(),
-                    "dir_created": dir_created,
-                }
-            ),
-            201,
-        )
+
+        response = {
+            "success": True,
+            "project": project.to_dict(),
+            "dir_created": dir_created,
+        }
+
+        if permission_warning:
+            response["permission_warning"] = permission_warning
+
+        return jsonify(response), 201
 
     return jsonify({"error": "Failed to create project"}), 500
 
@@ -570,6 +585,11 @@ def api_fix_project_permissions(project_id):
     depth_limit = data.get("depth_limit")
     force_restart = data.get("force_restart", False)
 
+    # Validate depth_limit parameter
+    if depth_limit is not None:
+        if not isinstance(depth_limit, int) or depth_limit < 1 or depth_limit > 50:
+            return jsonify({"error": "depth_limit must be an integer between 1 and 50"}), 400
+
     # Estimate file count
     file_count = estimate_file_count_fast(project.path)
 
@@ -642,6 +662,7 @@ def api_fix_project_permissions(project_id):
 
 
 @projects_bp.route("/permission-tasks/<task_id>", methods=["GET"])
+@security_annotated(reason="Task initiator or project owner/admin check")
 def api_get_permission_task_status(task_id):
     """Get permission task status.
 
@@ -652,6 +673,7 @@ def api_get_permission_task_status(task_id):
     """
     from app import db
 
+    tenant_id = get_current_tenant_id()
     service = get_permission_task_service()
     task_status = service.get_task_status(db.session, task_id)
 
@@ -662,8 +684,8 @@ def api_get_permission_task_status(task_id):
     user_id = g.user_id
     user_role = g.user.get("role")
 
-    # Get project to check ownership
-    project = project_repo.get_project_by_id(task_status["project_id"])
+    # Get project to check ownership (with tenant isolation)
+    project = project_repo.get_project_by_id(task_status["project_id"], tenant_id=tenant_id)
     if not project:
         return jsonify({"error": "Associated project not found"}), 404
 
@@ -714,6 +736,7 @@ def api_get_permission_task_status(task_id):
 
 
 @projects_bp.route("/permission-tasks/<task_id>", methods=["DELETE"])
+@security_annotated(reason="Task initiator or project owner/admin check")
 def api_cancel_permission_task(task_id):
     """Cancel a permission task.
 
@@ -724,6 +747,7 @@ def api_cancel_permission_task(task_id):
     """
     from app import db
 
+    tenant_id = get_current_tenant_id()
     service = get_permission_task_service()
 
     # Get task status first for permission check
@@ -735,8 +759,8 @@ def api_cancel_permission_task(task_id):
     user_id = g.user_id
     user_role = g.user.get("role")
 
-    # Get project to check ownership
-    project = project_repo.get_project_by_id(task_status["project_id"])
+    # Get project to check ownership (with tenant isolation)
+    project = project_repo.get_project_by_id(task_status["project_id"], tenant_id=tenant_id)
     if not project:
         return jsonify({"error": "Associated project not found"}), 404
 

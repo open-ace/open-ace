@@ -18,7 +18,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import sqlalchemy as sa
 from flask import g
@@ -370,7 +370,3 @@ def get_permission_task_service() -> PermissionTaskService:
     if _service is None:
         _service = PermissionTaskService()
     return _service
-
-
-# Import timedelta for cleanup_old_tasks
-from datetime import timedelta

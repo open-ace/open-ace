@@ -14,8 +14,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "002_add_permission_tables"
-down_revision: str | None = "001_add_permission_status"
+revision: str = "20260820_002"
+down_revision: str | None = "20260820_001"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
