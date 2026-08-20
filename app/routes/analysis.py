@@ -85,8 +85,8 @@ def _validate_date_range_or_error(start_date: str | None, end_date: str | None):
         end_date: End date string or None
 
     Returns:
-        tuple: (start_date, end_date) on success
-        tuple: (error_response, None) on validation failure
+        tuple: (start_date, end_date) on success (both may be None if input was None)
+        tuple: (error_response, None) on validation failure - error_response is Flask response
 
     Note:
         analysis.py does NOT apply defaults in the route layer.
@@ -104,7 +104,7 @@ def _validate_date_range_or_error(start_date: str | None, end_date: str | None):
             }),
             400
         )
-    # Return original values (None if both missing) - Service layer handles defaults
+    # Return parsed values (None if both were missing) - Service layer handles defaults
     if parsed_start is None:
         return None, None
     return parsed_start.strftime("%Y-%m-%d"), parsed_end.strftime("%Y-%m-%d")
@@ -124,7 +124,8 @@ def api_batch_analysis():
 
     # Issue #2738: Validate date range
     validated = _validate_date_range_or_error(start_date, end_date)
-    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+    # Check if validation failed: error response is a tuple (response, status_code)
+    if validated[0] is not None and isinstance(validated[0], tuple):
         return validated[0]
     start_date, end_date = validated
 
@@ -148,7 +149,8 @@ def api_key_metrics():
 
     # Issue #2738: Validate date range
     validated = _validate_date_range_or_error(start_date, end_date)
-    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+    # Check if validation failed: error response is a tuple (response, status_code)
+    if validated[0] is not None and isinstance(validated[0], tuple):
         return validated[0]
     start_date, end_date = validated
 
@@ -188,7 +190,8 @@ def api_daily_hourly_usage():
 
     # Issue #2738: Validate date range
     validated = _validate_date_range_or_error(start_date, end_date)
-    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+    # Check if validation failed: error response is a tuple (response, status_code)
+    if validated[0] is not None and isinstance(validated[0], tuple):
         return validated[0]
     start_date, end_date = validated
 
@@ -211,7 +214,8 @@ def api_peak_usage():
 
     # Issue #2738: Validate date range
     validated = _validate_date_range_or_error(start_date, end_date)
-    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+    # Check if validation failed: error response is a tuple (response, status_code)
+    if validated[0] is not None and isinstance(validated[0], tuple):
         return validated[0]
     start_date, end_date = validated
 
@@ -235,7 +239,8 @@ def api_user_ranking():
 
     # Issue #2738: Validate date range
     validated = _validate_date_range_or_error(start_date, end_date)
-    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+    # Check if validation failed: error response is a tuple (response, status_code)
+    if validated[0] is not None and isinstance(validated[0], tuple):
         return validated[0]
     start_date, end_date = validated
 
@@ -259,7 +264,8 @@ def api_conversation_stats():
 
     # Issue #2738: Validate date range
     validated = _validate_date_range_or_error(start_date, end_date)
-    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+    # Check if validation failed: error response is a tuple (response, status_code)
+    if validated[0] is not None and isinstance(validated[0], tuple):
         return validated[0]
     start_date, end_date = validated
 
@@ -282,7 +288,8 @@ def api_user_segmentation():
 
     # Issue #2738: Validate date range
     validated = _validate_date_range_or_error(start_date, end_date)
-    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+    # Check if validation failed: error response is a tuple (response, status_code)
+    if validated[0] is not None and isinstance(validated[0], tuple):
         return validated[0]
     start_date, end_date = validated
 
@@ -305,7 +312,8 @@ def api_tool_comparison():
 
     # Issue #2738: Validate date range
     validated = _validate_date_range_or_error(start_date, end_date)
-    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+    # Check if validation failed: error response is a tuple (response, status_code)
+    if validated[0] is not None and isinstance(validated[0], tuple):
         return validated[0]
     start_date, end_date = validated
 
@@ -330,7 +338,8 @@ def api_anomaly_detection():
 
     # Issue #2738: Validate date range
     validated = _validate_date_range_or_error(start_date, end_date)
-    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+    # Check if validation failed: error response is a tuple (response, status_code)
+    if validated[0] is not None and isinstance(validated[0], tuple):
         return validated[0]
     start_date, end_date = validated
 
@@ -357,7 +366,8 @@ def api_anomaly_trend():
 
     # Issue #2738: Validate date range
     validated = _validate_date_range_or_error(start_date, end_date)
-    if isinstance(validated, tuple) and len(validated) == 2 and validated[1] is None:
+    # Check if validation failed: error response is a tuple (response, status_code)
+    if validated[0] is not None and isinstance(validated[0], tuple):
         return validated[0]
     start_date, end_date = validated
 

@@ -8,7 +8,6 @@ Issue #2738: Added date range validation functions.
 
 import re
 from datetime import date, datetime, timezone
-from typing import Literal
 
 
 def validate_date(date_str: str) -> bool:
