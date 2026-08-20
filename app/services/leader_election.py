@@ -347,9 +347,14 @@ class LeaderElectionClient:
         """Record a run execution.
 
         Args:
-            status: 'completed', 'failed', or 'skipped'
+            status: 'completed', 'partial', 'failed', or 'skipped'
             duration_ms: Execution duration in milliseconds
-            error_message: Error message if failed
+            error_message: Error message if failed or partial
+
+        Note:
+            'partial' status indicates partial success (some tools succeeded,
+            some failed). It increments run_count like 'completed' since
+            valid work was performed. Issue #2822.
         """
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -385,6 +390,17 @@ class LeaderElectionClient:
                     (self.job_name, self.leader_id),
                 )
                 self._fail_count += 1
+            elif status == "partial":
+                # Issue #2822: partial success counts as work done
+                self.db.execute(
+                    """
+                    UPDATE scheduler_leaders
+                    SET run_count = run_count + 1, last_run_at = ?
+                    WHERE job_name = ? AND leader_id = ?
+                    """,
+                    (now, self.job_name, self.leader_id),
+                )
+                self._run_count += 1
 
             # Record in scheduler_runs
             self.db.execute(
