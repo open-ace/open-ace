@@ -6,6 +6,7 @@ Tests cover:
 - CRUD operations for mapping rules
 - Auto-mapping functionality
 - Unmapped accounts management
+- Tenant validation (Issue #2617)
 
 Related Issue: https://github.com/open-ace/open-ace/pull/1170
 """
@@ -588,3 +589,410 @@ class TestGenerateDefaultRules:
         assert response.status_code == 500
         data = json.loads(response.data)
         assert "error" in data
+
+
+class TestTenantValidation:
+    """Test tenant validation for mapping rules (Issue #2617).
+
+    Tests that tenant validation uses is_platform_admin_role for consistent
+    role checking across strict and non-strict modes.
+    """
+
+    @pytest.fixture
+    def tenant_admin_client(self, app):
+        """Create test client with tenant_admin role."""
+        test_client = app.test_client()
+
+        class TenantAdminClient:
+            def __init__(self, client):
+                self._client = client
+                self.tenant_id = 1
+
+            def _auth_patch(self):
+                return patch(
+                    "app.auth.decorators._load_user_from_token",
+                    return_value={
+                        "id": 10,
+                        "role": "tenant_admin",
+                        "username": "tenant_admin_user",
+                        "tenant_id": self.tenant_id,
+                    },
+                )
+
+            def _token_patch(self):
+                return patch(
+                    "app.auth.decorators._extract_session_token", return_value="test-token"
+                )
+
+            def get(self, *args, **kwargs):
+                with self._token_patch():
+                    with self._auth_patch():
+                        return self._client.get(*args, **kwargs)
+
+            def post(self, *args, **kwargs):
+                with self._token_patch():
+                    with self._auth_patch():
+                        return self._client.post(*args, **kwargs)
+
+            def put(self, *args, **kwargs):
+                with self._token_patch():
+                    with self._auth_patch():
+                        return self._client.put(*args, **kwargs)
+
+            def delete(self, *args, **kwargs):
+                with self._token_patch():
+                    with self._auth_patch():
+                        return self._client.delete(*args, **kwargs)
+
+        return TenantAdminClient(test_client)
+
+    @pytest.fixture
+    def platform_admin_client(self, app):
+        """Create test client with platform_admin role."""
+        test_client = app.test_client()
+
+        class PlatformAdminClient:
+            def __init__(self, client):
+                self._client = client
+
+            def _auth_patch(self):
+                return patch(
+                    "app.auth.decorators._load_user_from_token",
+                    return_value={
+                        "id": 1,
+                        "role": "platform_admin",
+                        "username": "platform_admin_user",
+                        "tenant_id": None,
+                    },
+                )
+
+            def _token_patch(self):
+                return patch(
+                    "app.auth.decorators._extract_session_token", return_value="test-token"
+                )
+
+            def get(self, *args, **kwargs):
+                with self._token_patch():
+                    with self._auth_patch():
+                        return self._client.get(*args, **kwargs)
+
+            def post(self, *args, **kwargs):
+                with self._token_patch():
+                    with self._auth_patch():
+                        return self._client.post(*args, **kwargs)
+
+            def put(self, *args, **kwargs):
+                with self._token_patch():
+                    with self._auth_patch():
+                        return self._client.put(*args, **kwargs)
+
+            def delete(self, *args, **kwargs):
+                with self._token_patch():
+                    with self._auth_patch():
+                        return self._client.delete(*args, **kwargs)
+
+        return PlatformAdminClient(test_client)
+
+    @pytest.fixture
+    def admin_client_with_tenant(self, app):
+        """Create test client with admin role and tenant_id (for strict mode testing)."""
+        test_client = app.test_client()
+
+        class AdminWithTenantClient:
+            def __init__(self, client):
+                self._client = client
+                self.tenant_id = 1
+
+            def _auth_patch(self):
+                return patch(
+                    "app.auth.decorators._load_user_from_token",
+                    return_value={
+                        "id": 5,
+                        "role": "admin",
+                        "username": "admin_user",
+                        "tenant_id": self.tenant_id,
+                    },
+                )
+
+            def _token_patch(self):
+                return patch(
+                    "app.auth.decorators._extract_session_token", return_value="test-token"
+                )
+
+            def get(self, *args, **kwargs):
+                with self._token_patch():
+                    with self._auth_patch():
+                        return self._client.get(*args, **kwargs)
+
+            def post(self, *args, **kwargs):
+                with self._token_patch():
+                    with self._auth_patch():
+                        return self._client.post(*args, **kwargs)
+
+            def put(self, *args, **kwargs):
+                with self._token_patch():
+                    with self._auth_patch():
+                        return self._client.put(*args, **kwargs)
+
+            def delete(self, *args, **kwargs):
+                with self._token_patch():
+                    with self._auth_patch():
+                        return self._client.delete(*args, **kwargs)
+
+        return AdminWithTenantClient(test_client)
+
+    # ===== Platform admin: can cross-tenant operate =====
+
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    @patch("app.routes.mapping_rules._validate_user_in_tenant")
+    def test_platform_admin_cross_tenant_allowed(
+        self, mock_validate, mock_service_class, platform_admin_client
+    ):
+        """Platform admin can operate across tenants."""
+        from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
+
+        mock_service = MagicMock()
+        result = GenerateDefaultRulesResult(
+            created=[
+                ToolAccountMappingRule(
+                    id=1,
+                    user_id=100,
+                    pattern="test-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
+                )
+            ],
+            skipped=[],
+            created_count=1,
+            skipped_count=0,
+        )
+        mock_service.create_default_rules_for_user.return_value = result
+        mock_service_class.return_value = mock_service
+
+        response = platform_admin_client.post("/api/mapping-rules/user/100/generate-default")
+        assert response.status_code == 201
+        # _validate_user_in_tenant should NOT be called for platform_admin
+        mock_validate.assert_not_called()
+
+    # ===== Tenant admin: cannot cross-tenant operate =====
+
+    @patch("app.routes.mapping_rules._validate_user_in_tenant", return_value=False)
+    def test_tenant_admin_cross_tenant_denied(self, mock_validate, tenant_admin_client):
+        """Tenant admin cannot operate across tenants."""
+        response = tenant_admin_client.post("/api/mapping-rules/user/100/generate-default")
+        assert response.status_code == 404
+        data = json.loads(response.data)
+        assert data["error"] == "User not found"
+
+    @patch("app.routes.mapping_rules._validate_user_in_tenant", return_value=True)
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_tenant_admin_same_tenant_allowed(
+        self, mock_service_class, mock_validate, tenant_admin_client
+    ):
+        """Tenant admin can operate on same-tenant users."""
+        from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
+
+        mock_service = MagicMock()
+        result = GenerateDefaultRulesResult(
+            created=[
+                ToolAccountMappingRule(
+                    id=1,
+                    user_id=100,
+                    pattern="test-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
+                )
+            ],
+            skipped=[],
+            created_count=1,
+            skipped_count=0,
+        )
+        mock_service.create_default_rules_for_user.return_value = result
+        mock_service_class.return_value = mock_service
+
+        response = tenant_admin_client.post("/api/mapping-rules/user/100/generate-default")
+        assert response.status_code == 201
+
+    # ===== Admin in strict mode: cannot cross-tenant operate =====
+
+    @patch("app.auth.permissions.get_cached_strict_mode", return_value=True)
+    @patch("app.routes.mapping_rules._validate_user_in_tenant", return_value=False)
+    def test_admin_strict_mode_cross_tenant_denied(
+        self, mock_validate, mock_strict, admin_client_with_tenant
+    ):
+        """Admin in strict mode cannot operate across tenants."""
+        response = admin_client_with_tenant.post("/api/mapping-rules/user/100/generate-default")
+        assert response.status_code == 404
+        data = json.loads(response.data)
+        assert data["error"] == "User not found"
+
+    @patch("app.auth.permissions.get_cached_strict_mode", return_value=True)
+    @patch("app.routes.mapping_rules._validate_user_in_tenant", return_value=True)
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_admin_strict_mode_same_tenant_allowed(
+        self, mock_service_class, mock_validate, mock_strict, admin_client_with_tenant
+    ):
+        """Admin in strict mode can operate on same-tenant users."""
+        from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
+
+        mock_service = MagicMock()
+        result = GenerateDefaultRulesResult(
+            created=[
+                ToolAccountMappingRule(
+                    id=1,
+                    user_id=100,
+                    pattern="test-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
+                )
+            ],
+            skipped=[],
+            created_count=1,
+            skipped_count=0,
+        )
+        mock_service.create_default_rules_for_user.return_value = result
+        mock_service_class.return_value = mock_service
+
+        response = admin_client_with_tenant.post("/api/mapping-rules/user/100/generate-default")
+        assert response.status_code == 201
+
+    # ===== Admin in non-strict mode: can cross-tenant operate =====
+
+    @patch("app.auth.permissions.get_cached_strict_mode", return_value=False)
+    @patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+    def test_admin_non_strict_mode_cross_tenant_allowed(
+        self, mock_service_class, mock_strict, admin_client_with_tenant
+    ):
+        """Admin in non-strict mode can operate across tenants."""
+        from app.models.tool_account_mapping_rule import ToolAccountMappingRule
+        from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
+
+        mock_service = MagicMock()
+        result = GenerateDefaultRulesResult(
+            created=[
+                ToolAccountMappingRule(
+                    id=1,
+                    user_id=100,
+                    pattern="test-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
+                )
+            ],
+            skipped=[],
+            created_count=1,
+            skipped_count=0,
+        )
+        mock_service.create_default_rules_for_user.return_value = result
+        mock_service_class.return_value = mock_service
+
+        response = admin_client_with_tenant.post("/api/mapping-rules/user/100/generate-default")
+        assert response.status_code == 201
+
+    # ===== GET rules: tenant validation =====
+
+    @patch("app.auth.permissions.get_cached_strict_mode", return_value=True)
+    @patch("app.routes.mapping_rules._get_tenant_scoped_user_ids", return_value=[1, 2, 3])
+    @patch("app.routes.mapping_rules.ToolAccountMappingRuleRepository")
+    def test_get_all_rules_strict_mode_admin_filtered(
+        self, mock_repo_class, mock_get_tenant, mock_strict, admin_client_with_tenant
+    ):
+        """Admin in strict mode should only see rules for own tenant users."""
+        mock_repo = MagicMock()
+        mock_rule = MagicMock()
+        mock_rule.user_id = 1
+        mock_rule.to_dict.return_value = {"id": 1, "user_id": 1, "pattern": "test-*"}
+        mock_repo.get_all.return_value = [mock_rule]
+        mock_repo_class.return_value = mock_repo
+
+        response = admin_client_with_tenant.get("/api/mapping-rules")
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert len(data) == 1
+
+    @patch("app.auth.permissions.get_cached_strict_mode", return_value=False)
+    @patch("app.routes.mapping_rules.ToolAccountMappingRuleRepository")
+    def test_get_all_rules_non_strict_mode_admin_all(
+        self, mock_repo_class, mock_strict, admin_client_with_tenant
+    ):
+        """Admin in non-strict mode should see all rules."""
+        mock_repo = MagicMock()
+        mock_rule = MagicMock()
+        mock_rule.to_dict.return_value = {"id": 1, "user_id": 100, "pattern": "test-*"}
+        mock_repo.get_all.return_value = [mock_rule]
+        mock_repo_class.return_value = mock_repo
+
+        response = admin_client_with_tenant.get("/api/mapping-rules")
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert len(data) == 1
+
+    # ===== CRUD operations: tenant validation =====
+
+    @patch("app.auth.permissions.get_cached_strict_mode", return_value=True)
+    @patch("app.routes.mapping_rules._validate_user_in_tenant", return_value=False)
+    def test_create_rule_strict_mode_admin_cross_tenant_denied(
+        self, mock_validate, mock_strict, admin_client_with_tenant
+    ):
+        """Admin in strict mode cannot create rules for cross-tenant users."""
+        response = admin_client_with_tenant.post(
+            "/api/mapping-rules",
+            data=json.dumps({"user_id": 100, "pattern": "test-*"}),
+            content_type="application/json",
+        )
+        assert response.status_code == 403
+
+    @patch("app.auth.permissions.get_cached_strict_mode", return_value=True)
+    @patch("app.routes.mapping_rules._validate_user_in_tenant", return_value=False)
+    @patch("app.routes.mapping_rules.ToolAccountMappingRuleRepository")
+    def test_update_rule_strict_mode_admin_cross_tenant_denied(
+        self, mock_repo_class, mock_validate, mock_strict, admin_client_with_tenant
+    ):
+        """Admin in strict mode cannot update rules for cross-tenant users."""
+        mock_repo = MagicMock()
+        mock_rule = MagicMock()
+        mock_rule.user_id = 100
+        mock_repo.get_by_id.return_value = mock_rule
+        mock_repo_class.return_value = mock_repo
+
+        response = admin_client_with_tenant.put(
+            "/api/mapping-rules/1",
+            data=json.dumps({"pattern": "updated-*"}),
+            content_type="application/json",
+        )
+        assert response.status_code == 404
+
+    @patch("app.auth.permissions.get_cached_strict_mode", return_value=True)
+    @patch("app.routes.mapping_rules._validate_user_in_tenant", return_value=False)
+    @patch("app.routes.mapping_rules.ToolAccountMappingRuleRepository")
+    def test_delete_rule_strict_mode_admin_cross_tenant_denied(
+        self, mock_repo_class, mock_validate, mock_strict, admin_client_with_tenant
+    ):
+        """Admin in strict mode cannot delete rules for cross-tenant users."""
+        mock_repo = MagicMock()
+        mock_rule = MagicMock()
+        mock_rule.user_id = 100
+        mock_repo.get_by_id.return_value = mock_rule
+        mock_repo_class.return_value = mock_repo
+
+        response = admin_client_with_tenant.delete("/api/mapping-rules/1")
+        assert response.status_code == 404
+
+    @patch("app.auth.permissions.get_cached_strict_mode", return_value=True)
+    @patch("app.routes.mapping_rules._validate_user_in_tenant", return_value=False)
+    def test_get_user_rules_strict_mode_admin_cross_tenant_denied(
+        self, mock_validate, mock_strict, admin_client_with_tenant
+    ):
+        """Admin in strict mode cannot get rules for cross-tenant users."""
+        response = admin_client_with_tenant.get("/api/mapping-rules/user/100")
+        assert response.status_code == 404
