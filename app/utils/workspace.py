@@ -789,7 +789,7 @@ def _log_permission_audit(
             details["error_message"] = error_message
 
         audit_logger.log_action(
-            action=AuditAction.SHARED_PROJECT_PERMISSION_SETUP_COMPLETE.value,
+            action=AuditAction.SHARED_PROJECT_PERMISSION_SETUP_COMPLETE,
             user_id=user_id,
             resource_type="project",
             resource_id=str(project_id) if project_id else None,

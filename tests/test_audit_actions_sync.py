@@ -32,7 +32,7 @@ class TestAuditActionsSynchronization:
         expected_categories = {
             "Authentication": 4,  # LOGIN, LOGOUT, LOGIN_FAILED, SESSION_EXPIRED
             "User Management": 8,  # USER_CREATE, UPDATE, DELETE, RESTORE, PASSWORD_CHANGE, PASSWORD_CHANGE_FAILED, ROLE_CHANGE, STATUS_CHANGE
-            "Permission": 2,  # PERMISSION_GRANT, REVOKE
+            "Permission": 4,  # PERMISSION_GRANT, REVOKE, SHARED_PROJECT_PERMISSION_SETUP_START, SHARED_PROJECT_PERMISSION_SETUP_COMPLETE (Issue #2745)
             "Quota": 3,  # QUOTA_UPDATE, ALERT, EXCEEDED
             "Data Access": 4,  # DATA_VIEW, EXPORT, IMPORT, DELETE
             "System": 3,  # SYSTEM_CONFIG_CHANGE, START, STOP
