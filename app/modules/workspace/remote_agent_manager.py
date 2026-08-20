@@ -49,6 +49,16 @@ MAX_TOKEN_REVOKE_TIMEOUT = 3600
 # than dropping the output chunk.
 _PERSIST_OUTPUT_MAX_RETRIES = 8
 
+# Issue #2596: Session states to terminate during machine deregistration
+SESSION_STATES_TO_TERMINATE = ['active', 'paused', 'pending', 'starting', 'stopping']
+SESSION_STATES_TERMINAL = ['completed', 'stopped', 'error', 'timeout']
+
+# Batch size for terminating sessions during deregistration
+DEREGISTER_BATCH_SIZE = 100
+
+# Maximum retries for failed batch termination compensation
+DEREGISTER_COMPENSATION_MAX_RETRIES = 3
+
 # Output batching configuration (Issue #1823)
 # Batch size for aggregated writes
 OUTPUT_BATCH_SIZE = 50
@@ -892,7 +902,67 @@ class RemoteAgentManager:
                 return None
 
     def deregister_machine(self, machine_id: str) -> bool:
-        """Remove a machine and its assignments."""
+        """Remove a machine and its assignments.
+
+        Issue #2596: Cascade terminate all active sessions before removing
+        the machine, and clean up runtime data (commands, outputs).
+
+        Uses Advisory Lock for PostgreSQL to prevent concurrent deregistration
+        of the same machine across multiple instances.
+
+        Args:
+            machine_id: UUID of the machine to deregister.
+
+        Returns:
+            True if machine was found and removed, False otherwise.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        failed_batches: list[dict[str, Any]] = []
+        sessions_terminated = 0
+        commands_deleted = 0
+        outputs_deleted = 0
+        agent_notified = False
+
+        # Step 0: Acquire Advisory Lock for PostgreSQL (prevent concurrent deregistration)
+        if is_postgresql():
+            try:
+                # Use SHA256 hash for consistent lock key across processes
+                lock_key = int(hashlib.sha256(machine_id.encode()).hexdigest()[:16], 16)
+                with self.db.connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SET LOCAL lock_timeout = '30s'")
+                    cursor.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
+            except Exception as e:
+                logger.warning("Failed to acquire advisory lock for machine %s: %s", machine_id[:8], e)
+                # Continue without lock for SQLite or if lock fails
+
+        # Step 1: Try to notify Agent about session termination
+        agent_notified = self._notify_agent_deregister(machine_id)
+
+        # Step 2: Get all non-terminal sessions for this machine
+        session_ids = self._get_sessions_to_terminate(machine_id)
+
+        if session_ids:
+            # Step 3: Terminate sessions in batches
+            for batch_idx, batch_start in enumerate(range(0, len(session_ids), DEREGISTER_BATCH_SIZE)):
+                batch = session_ids[batch_start:batch_start + DEREGISTER_BATCH_SIZE]
+                batch_result = self._terminate_sessions_batch(machine_id, batch, batch_idx)
+
+                if batch_result['success']:
+                    sessions_terminated += len(batch)
+                else:
+                    # Record failed batch
+                    failed_batches.append({
+                        'batch_index': batch_idx,
+                        'session_ids': batch,
+                        'error_message': batch_result.get('error', 'Unknown error'),
+                    })
+
+            # Step 4: Clean up runtime data (commands and outputs)
+            commands_deleted = self._cleanup_runtime_commands(machine_id)
+            outputs_deleted = self._cleanup_runtime_outputs(session_ids)
+
+        # Step 5: Delete machine-related tables (original logic)
         with self.db.connection() as conn:
             cursor = conn.cursor()
 
@@ -907,12 +977,220 @@ class RemoteAgentManager:
             success = cast("bool", cursor.rowcount > 0)
             conn.commit()
 
-        # Close active connection and cleanup rate limiter
+        # Step 6: Clean up memory state
         with self._lock:
             self._connections.pop(machine_id, None)
+            # Clean up session-related memory state for terminated sessions
+            for session_id in session_ids:
+                self._session_machines.pop(session_id, None)
+                self._output_buffers.pop(session_id, None)
+                self._buffer_offsets.pop(session_id, None)
+                self._session_end_flags[session_id] = True
+                self._last_delivered.pop(session_id, None)
+                self._output_accumulator.pop(session_id, None)
+
         self._last_heartbeat_db_write.pop(machine_id, None)
 
+        # Step 7: Record failed batches for compensation
+        if failed_batches:
+            self._record_failed_batches(machine_id, failed_batches)
+            logger.warning(
+                "Machine %s deregistered with %d failed batches, will be retried by compensation worker",
+                machine_id[:8],
+                len(failed_batches),
+            )
+
+        # Step 8: Log deregistration result (for audit)
+        logger.info(
+            "Machine %s deregistered: sessions_terminated=%d, commands_deleted=%d, outputs_deleted=%d, agent_notified=%s, failed_batches=%d",
+            machine_id[:8],
+            sessions_terminated,
+            commands_deleted,
+            outputs_deleted,
+            agent_notified,
+            len(failed_batches),
+        )
+
         return cast("bool", success)
+
+    def _notify_agent_deregister(self, machine_id: str) -> bool:
+        """Try to notify agent that sessions will be terminated.
+
+        Issue #2596: Send stop_all_sessions command to agent if online.
+
+        Returns:
+            True if notification sent successfully, False otherwise.
+        """
+        try:
+            # Check if agent is connected
+            if machine_id not in self._connections:
+                logger.info("Agent %s offline, skipping notification", machine_id[:8])
+                return False
+
+            # Send notification command
+            command = {
+                'type': 'command',
+                'command': 'stop_all_sessions',
+                'machine_id': machine_id,
+                'reason': 'machine_deregistered',
+            }
+            self.send_command(machine_id, command)
+            logger.info("Sent stop_all_sessions notification to agent %s", machine_id[:8])
+            return True
+        except Exception as e:
+            logger.warning("Failed to notify agent %s: %s", machine_id[:8], e)
+            return False
+
+    def _get_sessions_to_terminate(self, machine_id: str) -> list[str]:
+        """Get all non-terminal sessions for a machine.
+
+        Issue #2596: Query agent_sessions for sessions that need termination.
+
+        Returns:
+            List of session IDs to terminate.
+        """
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ", ".join([_param()] * len(SESSION_STATES_TO_TERMINATE))
+                cursor.execute(
+                    f"""
+                    SELECT session_id FROM agent_sessions
+                    WHERE remote_machine_id = {_param()}
+                    AND status IN ({placeholders})
+                    """,
+                    [machine_id] + SESSION_STATES_TO_TERMINATE,
+                )
+                rows = cursor.fetchall()
+                return [row["session_id"] for row in rows]
+        except Exception as e:
+            logger.error("Failed to query sessions for machine %s: %s", machine_id[:8], e)
+            return []
+
+    def _terminate_sessions_batch(
+        self, machine_id: str, session_ids: list[str], batch_index: int
+    ) -> dict[str, Any]:
+        """Terminate a batch of sessions.
+
+        Issue #2596: Update session status to 'stopped' in a transaction.
+
+        Returns:
+            Dict with 'success' and optional 'error' fields.
+        """
+        if not session_ids:
+            return {'success': True}
+
+        try:
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ", ".join([_param()] * len(session_ids))
+                cursor.execute(
+                    f"""
+                    UPDATE agent_sessions
+                    SET status = 'stopped', updated_at = {_param()}
+                    WHERE session_id IN ({placeholders})
+                    """,
+                    [now.isoformat()] + session_ids,
+                )
+                conn.commit()
+
+            logger.debug(
+                "Terminated batch %d: %d sessions for machine %s",
+                batch_index,
+                len(session_ids),
+                machine_id[:8],
+            )
+            return {'success': True}
+        except Exception as e:
+            logger.error(
+                "Failed to terminate batch %d for machine %s: %s",
+                batch_index,
+                machine_id[:8],
+                e,
+            )
+            return {'success': False, 'error': str(e)}
+
+    def _cleanup_runtime_commands(self, machine_id: str) -> int:
+        """Clean up runtime commands for a machine.
+
+        Issue #2596: Delete all pending/delivered commands for the machine.
+
+        Returns:
+            Number of commands deleted.
+        """
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"DELETE FROM remote_runtime_commands WHERE machine_id = {_param()}",
+                    (machine_id,),
+                )
+                deleted = cursor.rowcount
+                conn.commit()
+            return deleted
+        except Exception as e:
+            logger.error("Failed to cleanup commands for machine %s: %s", machine_id[:8], e)
+            return 0
+
+    def _cleanup_runtime_outputs(self, session_ids: list[str]) -> int:
+        """Clean up runtime outputs for sessions.
+
+        Issue #2596: Delete all outputs for the terminated sessions.
+
+        Returns:
+            Number of outputs deleted.
+        """
+        if not session_ids:
+            return 0
+
+        try:
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ", ".join([_param()] * len(session_ids))
+                cursor.execute(
+                    f"DELETE FROM remote_runtime_outputs WHERE session_id IN ({placeholders})",
+                    session_ids,
+                )
+                deleted = cursor.rowcount
+                conn.commit()
+            return deleted
+        except Exception as e:
+            logger.error("Failed to cleanup outputs for sessions: %s", e)
+            return 0
+
+    def _record_failed_batches(
+        self, machine_id: str, failed_batches: list[dict[str, Any]]
+    ) -> None:
+        """Record failed batches for background compensation.
+
+        Issue #2596: Insert failed batch records into deregister_failures table.
+        """
+        try:
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            with self.db.connection() as conn:
+                cursor = conn.cursor()
+                for batch in failed_batches:
+                    cursor.execute(
+                        f"""
+                        INSERT INTO deregister_failures
+                        (machine_id, batch_index, session_ids, error_message, retry_count, status, created_at, updated_at)
+                        VALUES ({_param()}, {_param()}, {_param()}, {_param()}, {_param()}, {_param()}, {_param()}, {_param()})
+                        """,
+                        (
+                            machine_id,
+                            batch['batch_index'],
+                            json.dumps(batch['session_ids']),
+                            batch.get('error_message', ''),
+                            0,
+                            'pending',
+                            now.isoformat(),
+                            now.isoformat(),
+                        ),
+                    )
+                conn.commit()
+        except Exception as e:
+            logger.error("Failed to record failed batches for machine %s: %s", machine_id[:8], e)
 
     # ==================== Token Management ====================
 

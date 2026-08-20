@@ -170,6 +170,50 @@ def _check_session_state(session_info: dict, operation: str) -> tuple | None:
     return None
 
 
+def _check_machine_exists_for_session(session_info: dict, operation: str) -> tuple | None:
+    """Check if the machine associated with a session still exists.
+
+    Issue #2596: Returns error response if the machine has been deregistered.
+
+    Args:
+        session_info: Dict with session metadata including remote_machine_id.
+        operation: Operation name for audit logging.
+
+    Returns:
+        None: Machine exists, operation allowed.
+        (jsonify, 409): Machine has been deregistered.
+    """
+    remote_machine_id = session_info.get("remote_machine_id")
+    session_id = session_info.get("session_id", "unknown")
+
+    if not remote_machine_id:
+        # Session has no machine association
+        return None
+
+    agent_mgr = get_remote_agent_manager()
+    machine = agent_mgr.get_machine(remote_machine_id)
+
+    if not machine:
+        logger.warning(
+            "Attempted %s on session %s whose machine %s has been deregistered",
+            operation,
+            session_id[:8],
+            remote_machine_id[:8],
+        )
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Remote session has ended (machine deregistered)",
+                    "session_status": "stopped",
+                }
+            ),
+            409,
+        )
+
+    return None
+
+
 # Module-level audit logger instance
 audit_logger = AuditLogger()
 
@@ -1603,6 +1647,11 @@ def send_remote_message(session_id):
         if state_error:
             return state_error
 
+    # Issue #2596: Check if machine still exists
+    machine_error = _check_machine_exists_for_session(session_info, "send_message")
+    if machine_error:
+        return machine_error
+
     data = request.get_json() or {}
     content = data.get("content", "")
     permission_mode = data.get("permission_mode")
@@ -1710,6 +1759,11 @@ def stop_remote_session(session_id):
                 "Attempted stop on unknown status session %s",
                 session_id[:8],
             )
+
+    # Issue #2596: Check if machine still exists
+    machine_error = _check_machine_exists_for_session(session_info, "stop_session")
+    if machine_error:
+        return machine_error
 
     session_mgr = get_remote_session_manager()
     success = session_mgr.stop_session(session_id)
