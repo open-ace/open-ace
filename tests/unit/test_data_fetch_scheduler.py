@@ -971,6 +971,7 @@ class TestSchedulerRunStatus:
     def test_structured_error_message_format(self):
         """Structured error message contains JSON with required fields."""
         import json
+
         from app.services import scheduler_run_status
 
         results = {"tool1": {"success": True}, "tool2": {"success": False}}
@@ -988,6 +989,7 @@ class TestSchedulerRunStatus:
     def test_rollback_with_enable_partial_false(self, monkeypatch):
         """When ENABLE_PARTIAL_STATUS=false, persisted status is completed but memory is partial."""
         import importlib
+
         import app.services.scheduler_run_status as status_module
 
         # Set environment variable before reloading module
