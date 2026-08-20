@@ -978,6 +978,13 @@ export const translations: Record<Language, Translations> = {
     ssoEnabledDesc: 'Enable SSO login for users through configured providers',
     ssoSystemSettingHint:
       'SSO enable switch has been moved to System Settings. Please configure SSO providers here.',
+    // Global SSO settings - Issue #2128
+    enableGlobalSSO: 'Enable Global SSO Login',
+    globalSSODesc: 'Control whether SSO login is available on the login page (affects all tenants)',
+    globalSSOHint:
+      'When enabled, users can sign in through configured SSO providers. This setting affects all tenants.',
+    globalSSOWarning:
+      'This setting affects all tenants. Disable with caution during security incidents.',
     autoProvisionUsers: 'Auto Provision Users',
     autoProvisionDesc: 'Automatically create user accounts on first SSO login',
     autoProvisionHint: 'Automatically create user accounts for this tenant on first SSO login',
@@ -3037,6 +3044,11 @@ export const translations: Record<Language, Translations> = {
     enableSSO: '启用 SSO',
     ssoEnabledDesc: '启用后，用户可通过配置的 SSO 提供商登录',
     ssoSystemSettingHint: 'SSO 启用开关已移至系统设置。请在此配置 SSO Provider。',
+    // Global SSO settings - Issue #2128
+    enableGlobalSSO: '启用全局 SSO 登录',
+    globalSSODesc: '控制登录页面是否显示 SSO 登录选项（影响所有租户）',
+    globalSSOHint: '启用后，用户可通过配置的 SSO 提供商登录。此设置影响所有租户。',
+    globalSSOWarning: '此设置影响所有租户。安全事件期间请谨慎禁用。',
     autoProvisionUsers: '自动创建用户',
     autoProvisionDesc: '首次 SSO 登录时自动创建用户账户',
     autoProvisionHint: '首次 SSO 登录时为此租户自动创建用户账户',
@@ -4395,6 +4407,13 @@ export const translations: Record<Language, Translations> = {
     ssoEnabledDesc: '設定済みのSSOプロバイダーを介してユーザーのSSOログインを有効化',
     ssoSystemSettingHint:
       'SSO有効化スイッチはシステム設定に移動しました。ここでSSOプロバイダーを設定してください。',
+    // Global SSO settings - Issue #2128
+    enableGlobalSSO: 'グローバルSSOログインを有効化',
+    globalSSODesc: 'ログインページでのSSOログイン利用可否を制御（全テナントに影響）',
+    globalSSOHint:
+      '有効にすると、ユーザーは設定済みのSSOプロバイダーでログインできます。この設定は全テナントに影響します。',
+    globalSSOWarning:
+      'この設定は全テナントに影響します。セキュリティインシデント時は慎重に無効化してください。',
     autoProvisionUsers: 'ユーザー自動作成',
     autoProvisionDesc: '初回SSOログイン時にユーザーアカウントを自動作成',
     autoProvisionHint: '初回SSOログイン時にこのテナントのユーザーアカウントを自動作成',
@@ -6303,6 +6322,12 @@ export const translations: Record<Language, Translations> = {
     ssoEnabledDesc: '구성된 SSO 제공업체를 통해 사용자 SSO 로그인 활성화',
     ssoSystemSettingHint:
       'SSO 활성화 스위치가 시스템 설정으로 이동되었습니다. 여기서 SSO 제공업체를 구성하세요.',
+    // Global SSO settings - Issue #2128
+    enableGlobalSSO: '글로벌 SSO 로그인 활성화',
+    globalSSODesc: '로그인 페이지에서 SSO 로그인 사용 가능 여부 제어 (모든 테넌트에 영향)',
+    globalSSOHint:
+      '활성화하면 사용자가 구성된 SSO 제공업체를 통해 로그인할 수 있습니다. 이 설정은 모든 테넌트에 영향합니다.',
+    globalSSOWarning: '이 설정은 모든 테넌트에 영향합니다. 보안 사고 시 신중하게 비활성화하세요.',
     autoProvisionUsers: '사용자 자동 생성',
     autoProvisionDesc: '첫 SSO 로그인 시 사용자 계정 자동 생성',
     autoProvisionHint: '첫 SSO 로그인 시 이 테넌트의 사용자 계정 자동 생성',
