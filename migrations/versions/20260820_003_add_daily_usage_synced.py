@@ -64,13 +64,15 @@ def upgrade() -> None:
                 postgresql_where=sa.text("daily_usage_synced = FALSE"),
             )
     else:
-        # For SQLite, create regular index
+        # SQLite also supports partial indexes (since 3.8.0, 2013)
+        # Create the same partial index for consistency
         if "idx_agent_sessions_daily_usage_synced" not in indexes:
             op.create_index(
                 "idx_agent_sessions_daily_usage_synced",
                 "agent_sessions",
                 ["daily_usage_synced"],
                 unique=False,
+                sqlite_where=sa.text("daily_usage_synced = false"),
             )
 
 
