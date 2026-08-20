@@ -1322,9 +1322,18 @@ def fetch_and_save(
                 print(f"  Permission denied for {len(denied)} user(s): {', '.join(denied)}")
             if errors:
                 print(f"  Errors for {len(errors)} user(s): {', '.join([u for u, _ in errors])}")
-            # Return structured result for caller to detect degraded state
+            # Issue #2823: Determine status using unified logic (errors > denied > no_data)
+            # - no_data: no accessible, no denied, no errors
+            # - denied: no accessible, only denied
+            # - failed: has errors (highest priority)
+            if errors:
+                status = "failed"
+            elif denied:
+                status = "denied"
+            else:
+                status = "no_data"
             print(
-                f"\nFETCH_RESULT: {json.dumps({'status': 'failed' if not denied else 'denied', 'coverage': coverage_data})}"
+                f"\n===FETCH_RESULT_START===\n{json.dumps({'protocol_version': '1.0', 'status': status, 'coverage': coverage_data, 'error': None, 'timestamp': datetime.now(timezone.utc).isoformat()}, ensure_ascii=False)}\n===FETCH_RESULT_END==="
             )
             return False
 
@@ -1413,17 +1422,26 @@ def fetch_and_save(
         except Exception as e:
             print(f"Warning: Failed to update agent session stats: {e}")
 
-    # Issue #2733: Output structured result for observability
+    # Issue #2823: Output structured result with protocol version
     if multi_user_mode:
         coverage_data["messages_imported"] = len(all_messages)
-        status = "success"
-        if coverage_data["users_denied"]:
+        # Determine status using unified logic
+        if coverage_data["users_errors"]:
             status = "degraded"
+        elif coverage_data["users_denied"]:
+            status = "degraded"
+        elif coverage_data["users_scanned"] > 0:
+            status = "completed"
+        else:
+            status = "no_data"
         result = {
+            "protocol_version": "1.0",
             "status": status,
             "coverage": coverage_data,
+            "error": None,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        print(f"\nFETCH_RESULT: {json.dumps(result)}")
+        print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
 
     return True
 

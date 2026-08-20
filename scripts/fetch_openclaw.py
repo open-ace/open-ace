@@ -23,8 +23,21 @@ from typing import Any, Optional
 try:
     import websockets
 except ImportError:
-    print("Error: websockets module not installed")
-    print("Install with: pip install websockets")
+    # Issue #2823: Output structured result instead of raw sys.exit(1)
+    result = {
+        "protocol_version": "1.0",
+        "status": "failed",
+        "coverage": {
+            "users_scanned": 0,
+            "users_denied": [],
+            "users_errors": [],
+            "files_processed": 0,
+            "messages_imported": 0,
+        },
+        "error": "websockets module not installed. Install with: pip install websockets",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
     sys.exit(1)
 
 # Add shared directory to path
@@ -373,6 +386,15 @@ async def fetch_and_save_usage(
     Returns:
         True if successful, False otherwise
     """
+    # Issue #2823: Track coverage data for observability
+    coverage_data = {
+        "users_scanned": 0,
+        "users_denied": [],
+        "users_errors": [],
+        "files_processed": 0,
+        "messages_imported": 0,
+    }
+
     # Try to load config.json for defaults
     if gateway_url is None or token is None:
         config = utils.load_config()
@@ -405,6 +427,15 @@ async def fetch_and_save_usage(
         print(
             "Please set OPENCLAW_TOKEN environment variable or configure token_env in config.json"
         )
+        # Issue #2823: Output structured result for missing config
+        result = {
+            "protocol_version": "1.0",
+            "status": "skipped",
+            "coverage": coverage_data,
+            "error": "OpenClaw token not configured",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
         return False
 
     if hostname is None:
@@ -461,9 +492,28 @@ async def fetch_and_save_usage(
                     print(f"  {date}: {tokens:,} tokens")
 
         print(f"\nSaved {saved} days of OpenClaw usage data via WebSocket API")
+        # Issue #2823: Output structured result for success
+        coverage_data["users_scanned"] = 1
+        result = {
+            "protocol_version": "1.0",
+            "status": "completed",
+            "coverage": coverage_data,
+            "error": None,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
         return True
     else:
         print("Failed to retrieve usage data via WebSocket API")
+        # Issue #2823: Output structured result for failure
+        result = {
+            "protocol_version": "1.0",
+            "status": "failed",
+            "coverage": coverage_data,
+            "error": "Failed to retrieve usage data via WebSocket API",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
         return False
 
 
@@ -1896,7 +1946,7 @@ def fetch_and_save_messages(
     import os
     import sys
     from collections import defaultdict
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     import db
 
@@ -1912,6 +1962,15 @@ def fetch_and_save_messages(
         # Try to load hostname from config
         config = utils.load_config()
         hostname = config.get("host_name", "localhost")
+
+    # Issue #2823: Track coverage data for observability
+    coverage_data = {
+        "users_scanned": 0,
+        "users_denied": [],
+        "users_errors": [],
+        "files_processed": 0,
+        "messages_imported": 0,
+    }
 
     # Aggregate across all files
     aggregated: dict[str, dict[str, Any]] = defaultdict(
@@ -1942,8 +2001,18 @@ def fetch_and_save_messages(
 
         if not user_sessions:
             print("No OpenClaw sessions directories found for any user.")
+            # Issue #2823: Output structured result for no_data
+            result = {
+                "protocol_version": "1.0",
+                "status": "no_data",
+                "coverage": coverage_data,
+                "error": None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
             return True
 
+        coverage_data["users_scanned"] = len(user_sessions)
         for system_account, sessions_path in user_sessions:
             print(f"\nProcessing user: {system_account}")
             print(f"  Scanning: {sessions_path}")
@@ -2049,6 +2118,26 @@ def fetch_and_save_messages(
             print(f"  {date}: {total:,} tokens, {stats['request_count']} requests")
 
     print(f"\nSaved {saved} days of OpenClaw usage data from session logs")
+    # Issue #2823: Output structured result with protocol version
+    coverage_data["files_processed"] = total_files
+    coverage_data["messages_imported"] = len(all_messages)
+    # Determine status using unified logic
+    if coverage_data["users_errors"]:
+        status = "degraded"
+    elif coverage_data["users_denied"]:
+        status = "degraded"
+    elif coverage_data["users_scanned"] > 0:
+        status = "completed"
+    else:
+        status = "no_data"
+    result = {
+        "protocol_version": "1.0",
+        "status": status,
+        "coverage": coverage_data,
+        "error": None,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
     return True
 
 
