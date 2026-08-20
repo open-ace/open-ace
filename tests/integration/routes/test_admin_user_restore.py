@@ -22,6 +22,12 @@ def _insert_user(tmp_db, username="testuser", email=None, tenant_id=None, delete
         email = f"{username}@example.com"
     tenant_val = tenant_id if tenant_id is not None else 1
 
+    # Ensure tenant exists for foreign key constraint
+    tmp_db.execute(
+        "INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (?, 'Default Tenant', 'default')",
+        (tenant_val,),
+    )
+
     if deleted_at:
         cursor = tmp_db.execute(
             "INSERT INTO users (username, email, password_hash, role, tenant_id, deleted_at) VALUES (?, ?, ?, ?, ?, ?)",
