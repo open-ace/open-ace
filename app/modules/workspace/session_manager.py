@@ -248,6 +248,9 @@ class AgentSession:
     # resume target. Promoted out of context JSON so a partial context write
     # can never lose it and resume never falls back to the tracking id (#1200).
     cli_session_id: str = ""
+    # Issue #2585: Mark whether usage has been synced to daily_usage table.
+    # Used for idempotent synchronization of autonomous development usage.
+    daily_usage_synced: bool = False
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -283,6 +286,7 @@ class AgentSession:
             "remote_machine_id": self.remote_machine_id,
             "paused_at": _format_dt(self.paused_at),
             "cli_session_id": self.cli_session_id,
+            "daily_usage_synced": self.daily_usage_synced,
         }
 
     @classmethod
@@ -330,6 +334,7 @@ class AgentSession:
                 datetime.fromisoformat(data["paused_at"]) if data.get("paused_at") else None
             ),
             cli_session_id=data.get("cli_session_id", ""),
+            daily_usage_synced=data.get("daily_usage_synced", False),
         )
 
     def is_expired(self) -> bool:
@@ -968,6 +973,7 @@ class SessionManager:
         "project_path",
         "user_id",
         "cli_session_id",
+        "daily_usage_synced",  # Issue #2585: Allow updating sync status
     }
 
     def update_session_fields(
@@ -2373,6 +2379,7 @@ class SessionManager:
             remote_machine_id=get_value("remote_machine_id"),
             paused_at=parse_datetime(get_value("paused_at")),
             cli_session_id=get_value("cli_session_id") or "",
+            daily_usage_synced=bool(get_value("daily_usage_synced") or False),
         )
 
     def _row_to_message(self, row: sqlite3.Row | dict) -> SessionMessage:

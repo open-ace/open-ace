@@ -76,8 +76,15 @@ def downgrade() -> None:
     if "idx_projects_permission_status" in indexes:
         op.drop_index("idx_projects_permission_status", table_name="projects")
 
-    if column_exists("projects", "permission_task_id"):
-        op.drop_column("projects", "permission_task_id")
-
-    if column_exists("projects", "permission_status"):
-        op.drop_column("projects", "permission_status")
+    # SQLite requires batch_alter_table for DROP COLUMN
+    if conn.dialect.name == "postgresql":
+        if column_exists("projects", "permission_task_id"):
+            op.drop_column("projects", "permission_task_id")
+        if column_exists("projects", "permission_status"):
+            op.drop_column("projects", "permission_status")
+    else:
+        with op.batch_alter_table("projects") as batch_op:
+            if column_exists("projects", "permission_task_id"):
+                batch_op.drop_column("permission_task_id")
+            if column_exists("projects", "permission_status"):
+                batch_op.drop_column("permission_status")
