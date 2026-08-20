@@ -100,7 +100,8 @@ class LeaderElectionClient:
         Args:
             job_name: Unique name for this job
             db: Database instance
-            strategy: "advisory", "heartbeat", or "auto" (chooses based on timeout)
+            strategy: "heartbeat" (also what "auto" resolves to). "advisory" is
+                deprecated and unsafe; it falls back to heartbeat at acquire time.
             heartbeat_interval: Seconds between heartbeat updates
             heartbeat_timeout: Seconds before heartbeat considered stale
             lock_timeout: Seconds before lock expires (fallback)

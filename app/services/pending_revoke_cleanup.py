@@ -37,7 +37,9 @@ class PendingRevokeCleanupScheduler(DistributedScheduler):
         super().__init__(
             job_name="pending_revoke_token_cleanup",
             db=db,
-            strategy="advisory",  # Short task, use advisory lock
+            # Heartbeat is the supported strategy; "advisory" is deprecated and
+            # unsafe (it fell back to heartbeat anyway -- see leader_election).
+            strategy="heartbeat",
             lock_timeout=300,  # 5 minutes max execution time
         )
         self.db = db
