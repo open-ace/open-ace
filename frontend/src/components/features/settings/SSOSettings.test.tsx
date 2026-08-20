@@ -328,8 +328,17 @@ describe('SSOSettings Accessibility', () => {
     it('should have form element with submit button', async () => {
       render(<SSOSettings />);
 
-      const saveButton = await screen.findByRole('button', { name: /Save/i });
-      expect(saveButton).toHaveAttribute('type', 'submit');
+      // Issue #2128: Now there are two Save buttons (global SSO and tenant settings)
+      // The tenant settings form has a submit-type Save button
+      // First, wait for the autoProvision checkbox to render (inside the tenant settings form)
+      await screen.findByRole('checkbox', { name: /Auto Provision Users/i });
+
+      // Find all Save buttons
+      const saveButtons = await screen.findAllByRole('button', { name: /Save/i });
+
+      // The tenant settings form's Save button should be type="submit"
+      const submitButton = saveButtons.find((btn) => btn.getAttribute('type') === 'submit');
+      expect(submitButton).toBeInTheDocument();
     });
 
     it('should have labels properly associated with inputs', async () => {
