@@ -16,6 +16,7 @@ import pwd
 import re
 import shutil
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -41,6 +42,8 @@ from app.modules.workspace.autonomous.task_isolation import (
     ensure_task_runtime_dirs,
     task_runtime_dirs,
 )
+from app.repositories.usage_repo import UsageRepository
+from app.utils.tool_names import normalize_tool_name
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only (PEP 563)
     from app.modules.workspace.autonomous.sandbox.types import ExecHandle, SandboxHandle
@@ -839,6 +842,103 @@ class AutonomousAgentRunner:
         if policy is not None and policy.wall_clock_limit > 0:
             return int(policy.wall_clock_limit)
         return explicit_timeout
+
+    def _sync_usage_to_daily_usage(
+        self,
+        session_id: str,
+        cli_tool: str,
+        tenant_id: int,
+        result: AgentTaskResult,
+    ) -> None:
+        """Sync usage data to daily_usage table for autonomous sessions.
+
+        Implements idempotent synchronization using daily_usage_synced flag
+        to prevent double-counting on retries or repeated calls.
+
+        Issue #2585: Ensure autonomous development usage is included in
+        daily_usage statistics.
+
+        Args:
+            session_id: Session identifier (persisted_session_id or session_id).
+            cli_tool: CLI tool name (claude-code, qwen-code, etc.).
+            tenant_id: Tenant ID for the session.
+            result: Agent task result containing usage data.
+        """
+        # Zero activity check: skip if no requests and no tokens
+        if (result.request_count or 0) == 0 and (result.total_tokens or 0) == 0:
+            logger.debug(
+                "Skipping daily_usage sync: zero activity (session=%s)",
+                session_id[:8],
+            )
+            return
+
+        # Idempotency check: verify not already synced
+        if self.session_manager:
+            try:
+                session = self.session_manager.get_session(session_id)
+                if session and getattr(session, "daily_usage_synced", False):
+                    logger.debug(
+                        "Skipping daily_usage sync: already synced (session=%s)",
+                        session_id[:8],
+                    )
+                    return
+            except Exception as e:
+                logger.warning(
+                    "Failed to check daily_usage_synced status: %s", e
+                )
+                # Continue to attempt sync anyway
+
+        # Perform sync
+        try:
+            repo = UsageRepository()
+            host_name = socket.gethostname()
+
+            # Normalize tool name
+            tool_name = normalize_tool_name(cli_tool)
+
+            # Prepare models_used
+            models_used = [result.model] if hasattr(result, "model") and result.model else None
+
+            # Call increment_usage (atomic UPSERT)
+            repo.increment_usage(
+                tool_name=tool_name,
+                host_name=host_name,
+                tenant_id=tenant_id,
+                tokens_used=result.total_tokens or 0,
+                input_tokens=result.total_input_tokens or 0,
+                output_tokens=result.total_output_tokens or 0,
+                cache_tokens=0,  # Cache tokens not supported in autonomous yet
+                request_count=result.request_count or 0,
+                models_used=models_used,
+            )
+
+            # Set sync flag to mark as synced (idempotency)
+            if self.session_manager:
+                try:
+                    self.session_manager.update_session_fields(
+                        session_id,
+                        {"daily_usage_synced": True},
+                        require_tenant=False,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to set daily_usage_synced flag: %s", e
+                    )
+                    # Don't fail the sync - flag is for optimization
+
+            logger.debug(
+                "Synced usage to daily_usage: session=%s tool=%s requests=%d",
+                session_id[:8],
+                tool_name,
+                result.request_count or 0,
+            )
+        except Exception as e:
+            # Non-blocking: log warning and continue
+            logger.warning(
+                "Failed to sync usage to daily_usage: session=%s error=%s",
+                session_id[:8],
+                e,
+            )
 
     @staticmethod
     def _stamp_sandbox_attribution(
@@ -2304,6 +2404,15 @@ class AutonomousAgentRunner:
                 except Exception as e:
                     logger.warning("Failed to update session record: %s", e)
 
+                # Issue #2585: Sync usage to daily_usage table for local autonomous
+                if persisted_session_id or session_id:
+                    self._sync_usage_to_daily_usage(
+                        session_id=persisted_session_id or session_id,
+                        cli_tool=cli_tool,
+                        tenant_id=wf_tenant_id,
+                        result=result,
+                    )
+
             # RemoteSessionManager owns the actual remote row's transcript,
             # usage and status lifecycle. Re-applying the result totals here
             # would double-count usage reports that the remote endpoint has
@@ -2318,6 +2427,14 @@ class AutonomousAgentRunner:
                     )
                 except Exception as e:
                     logger.warning("Failed to update remote tracking session: %s", e)
+
+                # Issue #2585: Sync usage to daily_usage table for remote autonomous
+                self._sync_usage_to_daily_usage(
+                    session_id=session_id,
+                    cli_tool=cli_tool,
+                    tenant_id=wf_tenant_id,
+                    result=result,
+                )
 
             # Close the eagerly-created workflow wrapper row when the agent never
             # produced a real CLI session id (sidebar source + executable not
