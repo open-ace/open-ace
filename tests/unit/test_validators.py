@@ -11,6 +11,7 @@ from app.utils.validators import (
     validate_email,
     validate_host_name,
     validate_password,
+    validate_project_name,
     validate_time_window,
     validate_tool_name,
     validate_username,
@@ -676,3 +677,242 @@ class TestValidateTimeWindow:
         is_valid, error_code, value = validate_time_window(11, "custom", min_val=1, max_val=10)
         assert is_valid is False
         assert error_code == "invalid_time_window"
+
+
+# ==================== Project Name Validation Tests (Issue #2897) ====================
+
+
+class TestValidateProjectName:
+    """Test validate_project_name function."""
+
+    # Valid project names
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "myproject",
+            "my-project",
+            "my_project",
+            "MyProject123",
+            "project 2024",
+            "项目名称",
+            "项目_测试",
+            "项目-测试",
+            "项目 2024",
+            "My项目2024",
+            "a",
+            "a" * 255,
+            "2024-08-20 Project",
+            "Test_Project-2024",
+        ],
+        ids=[
+            "simple",
+            "with_hyphen",
+            "with_underscore",
+            "alphanumeric",
+            "with_space",
+            "chinese",
+            "chinese_underscore",
+            "chinese_hyphen",
+            "chinese_space",
+            "mixed_ascii_cjk",
+            "single_char",
+            "max_length_255",
+            "date_and_text",
+            "all_allowed_chars",
+        ],
+    )
+    def test_valid_project_name(self, name):
+        """Valid project names should pass validation."""
+        is_valid, msg = validate_project_name(name)
+        assert is_valid is True
+        assert msg is None
+
+    # Empty name is valid (name is optional)
+    def test_empty_name_is_valid(self):
+        """Empty name should be valid (name is optional)."""
+        is_valid, msg = validate_project_name("")
+        assert is_valid is True
+        assert msg is None
+
+    def test_none_name_is_valid(self):
+        """None name should be valid (name is optional)."""
+        is_valid, msg = validate_project_name(None)
+        assert is_valid is True
+        assert msg is None
+
+    # Invalid project names - XSS and path injection
+    @pytest.mark.parametrize(
+        "name,expected_substring",
+        [
+            ("<script>alert('xss')</script>", "letters, numbers"),
+            ("测试/路径", "letters, numbers"),
+            ('"引号"测试', "letters, numbers"),
+            ("项目\\路径", "letters, numbers"),
+            ("project<path", "letters, numbers"),
+            ("project>path", "letters, numbers"),
+            ("project&path", "letters, numbers"),
+            ("project'path", "letters, numbers"),
+            ('project"path', "letters, numbers"),
+            ("project(path)", "letters, numbers"),
+            ("project[path]", "letters, numbers"),
+            ("project{path}", "letters, numbers"),
+            ("project;path", "letters, numbers"),
+            ("project:path", "letters, numbers"),
+            ("project,path", "letters, numbers"),
+            ("project.path", "letters, numbers"),
+            ("project?path", "letters, numbers"),
+            ("project!path", "letters, numbers"),
+            ("project@path", "letters, numbers"),
+            ("project#path", "letters, numbers"),
+            ("project$path", "letters, numbers"),
+            ("project%path", "letters, numbers"),
+            ("project^path", "letters, numbers"),
+            ("project*path", "letters, numbers"),
+            ("project~path", "letters, numbers"),
+            ("project`path", "letters, numbers"),
+            ("project|path", "letters, numbers"),
+            ("a" * 256, "255"),
+        ],
+        ids=[
+            "xss_script_tag",
+            "path_separator_slash_chinese",
+            "double_quotes_chinese",
+            "backslash_chinese",
+            "angle_bracket_open",
+            "angle_bracket_close",
+            "ampersand",
+            "single_quote",
+            "double_quote",
+            "parentheses",
+            "square_brackets",
+            "curly_braces",
+            "semicolon",
+            "colon",
+            "comma",
+            "dot",
+            "question_mark",
+            "exclamation_mark",
+            "at_sign",
+            "hash",
+            "dollar",
+            "percent",
+            "caret",
+            "asterisk",
+            "tilde",
+            "backtick",
+            "pipe",
+            "too_long_256_chars",
+        ],
+    )
+    def test_invalid_project_name(self, name, expected_substring):
+        """Invalid project names should fail validation."""
+        is_valid, msg = validate_project_name(name)
+        assert is_valid is False
+        assert msg is not None
+        assert expected_substring in msg
+
+    # Edge cases
+    def test_whitespace_only(self):
+        """Whitespace-only name should be invalid."""
+        is_valid, msg = validate_project_name("   ")
+        assert is_valid is False
+        assert msg is not None
+        assert "empty or whitespace" in msg
+
+    def test_leading_trailing_spaces(self):
+        """Leading/trailing spaces should be stripped; stripped name should pass."""
+        is_valid, msg = validate_project_name("  valid project  ")
+        assert is_valid is True
+        assert msg is None
+
+    def test_multiple_consecutive_spaces(self):
+        """Multiple consecutive spaces should be valid."""
+        is_valid, msg = validate_project_name("project  with   spaces")
+        assert is_valid is True
+        assert msg is None
+
+    def test_newline_in_name(self):
+        """Newline in name should be invalid."""
+        is_valid, msg = validate_project_name("project\nname")
+        assert is_valid is False
+        assert msg is not None
+
+    def test_tab_in_name(self):
+        """Tab in name should be invalid."""
+        is_valid, msg = validate_project_name("project\tname")
+        assert is_valid is False
+        assert msg is not None
+
+    def test_unicode_null_byte(self):
+        """Null byte in name should be invalid."""
+        is_valid, msg = validate_project_name("project\x00name")
+        assert is_valid is False
+        assert msg is not None
+
+    def test_unicode_nbsp_rejected(self):
+        """Unicode non-breaking space (\\xa0) should be invalid."""
+        is_valid, msg = validate_project_name("project\xa0name")
+        assert is_valid is False
+        assert msg is not None
+
+    def test_unicode_width_spaces_rejected(self):
+        """Unicode various width spaces should be invalid."""
+        for ws_char in ["\u2000", "\u2001", "\u200a", "\u3000"]:
+            is_valid, msg = validate_project_name(f"project{ws_char}name")
+            assert is_valid is False, f"Expected {repr(ws_char)} to be rejected"
+            assert msg is not None
+
+    # Security test cases
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "<script>alert('xss')</script>",
+            "<img src=x onerror=alert('xss')>",
+            "<svg onload=alert('xss')>",
+            "javascript:alert('xss')",
+            "data:text/html,<script>alert('xss')</script>",
+            "&#x3C;script&#x3E;alert('xss')&#x3C;/script&#x3E;",
+            "<SCRIPT>alert('xss')</SCRIPT>",
+            "<ScRiPt>alert('xss')</ScRiPt>",
+        ],
+        ids=[
+            "script_tag",
+            "img_onerror",
+            "svg_onload",
+            "javascript_protocol",
+            "data_url",
+            "html_entities",
+            "uppercase_script",
+            "mixed_case_script",
+        ],
+    )
+    def test_xss_attacks_blocked(self, name):
+        """XSS attack vectors should be blocked."""
+        is_valid, msg = validate_project_name(name)
+        assert is_valid is False
+        assert msg is not None
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "../../../etc/passwd",
+            "..\\..\\..\\windows\\system32",
+            "/etc/passwd",
+            "C:\\Windows\\System32",
+            "project/../../../etc/passwd",
+            "project\\..\\..\\..\\etc\\passwd",
+        ],
+        ids=[
+            "path_traversal_unix",
+            "path_traversal_windows",
+            "absolute_path_unix",
+            "absolute_path_windows",
+            "mixed_path_traversal_unix",
+            "mixed_path_traversal_windows",
+        ],
+    )
+    def test_path_injection_blocked(self, name):
+        """Path injection attack vectors should be blocked."""
+        is_valid, msg = validate_project_name(name)
+        assert is_valid is False
+        assert msg is not None

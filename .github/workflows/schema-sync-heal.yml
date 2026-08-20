@@ -1,0 +1,247 @@
+name: Schema Sync Heal
+
+# Auto-heal Schema Sync snapshot drift: when Schema Sync fails on a same-repo
+# PR after producing its authoritative regenerated-schema artifact, apply that
+# artifact back to the exact failed head and push a normal follow-up commit.
+#
+# This workflow intentionally does not rebuild snapshots itself. The failed
+# Schema Sync run already ran the CI-pinned rebuild on its PostgreSQL service;
+# this job only applies that run's artifact after strict path validation.
+
+on:
+  workflow_run:
+    workflows: [Schema Sync]
+    types: [completed]
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: schema-sync-heal-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  heal:
+    name: Apply regenerated schema snapshots
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Guard - schema-sync failed, head is still the PR tip
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          if ! schema_state="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs" \
+            --jq '.jobs[] | select(.name == "schema-sync") | .conclusion')"; then
+            echo "::warning::Could not read jobs for Schema Sync run ${RUN_ID}; skipping heal."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$schema_state" ]; then
+            echo "::warning::No job named 'schema-sync' in run ${RUN_ID}; workflow coupling has drifted."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$schema_state" != "failure" ]; then
+            echo "Schema Sync job did not fail (schema-sync=${schema_state}); nothing to heal."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          prs="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/pulls" \
+            --jq "[.[] | select(.state == \"open\")]" || true)"
+          pr="$(printf '%s' "$prs" | jq --arg sha "$HEAD_SHA" \
+            'map(select(.head.sha == $sha))[0] // .[0] // empty')"
+          pr_number="$(printf '%s' "$pr" | jq -r '.number // empty')"
+          if [ -z "$pr_number" ]; then
+            echo "No open PR is associated with head ${HEAD_SHA:0:8}; nothing to heal."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$(printf '%s' "$pr" | jq -r '.head.repo.full_name')" != "$GITHUB_REPOSITORY" ]; then
+            echo "PR #${pr_number} head lives in a fork; only same-repo branches are healed."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tip="$(printf '%s' "$pr" | jq -r '.head.sha')"
+          if [ "$tip" != "$HEAD_SHA" ]; then
+            echo "Branch moved (${tip:0:8} is the tip); the newer push's own Schema Sync run takes over."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+          echo "branch=$(printf '%s' "$pr" | jq -r '.head.ref')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v6
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          submodules: false
+
+      - name: Loop guard - do not heal twice in a row
+        id: loopguard
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          if [[ "$(git log -1 --pretty=%s)" == "chore(schema): apply regenerated schema snapshots"* ]]; then
+            echo "Head commit is already a schema snapshot heal; the remaining Schema Sync failure is not artifact-fixable."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download regenerated schema artifact
+        id: download
+        if: steps.guard.outputs.skip != 'true' && steps.loopguard.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          rm -rf regenerated-schema
+          mkdir -p regenerated-schema
+          if ! gh run download "$RUN_ID" --name regenerated-schema --dir regenerated-schema; then
+            echo "::warning::Schema Sync run ${RUN_ID} did not expose a regenerated-schema artifact; nothing to apply."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Validate and apply schema artifact
+        id: validate
+        if: >-
+          steps.guard.outputs.skip != 'true' &&
+          steps.loopguard.outputs.skip != 'true' &&
+          steps.download.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+
+          unexpected_node="$(find regenerated-schema ! -type d ! -type f -print -quit)"
+          if [ -n "$unexpected_node" ]; then
+            echo "::error::unexpected regenerated-schema artifact payload: ${unexpected_node}"
+            exit 1
+          fi
+
+          artifact_expected="$(mktemp)"
+          diff_allowed="$(mktemp)"
+          actual="$(mktemp)"
+          printf '%s\n' \
+            schema-postgres.sql \
+            schema-sqlite.sql \
+            > "$artifact_expected"
+          printf '%s\n' \
+            schema/schema-postgres.sql \
+            schema/schema-sqlite.sql \
+            > "$diff_allowed"
+          find regenerated-schema -type f -print \
+            | sed 's#^regenerated-schema/##' \
+            | sort > "$actual"
+          if ! cmp -s "$artifact_expected" "$actual"; then
+            echo "::error::unexpected regenerated-schema artifact payload"
+            echo "Expected:"
+            cat "$artifact_expected"
+            echo "Actual:"
+            cat "$actual"
+            exit 1
+          fi
+
+          cp regenerated-schema/schema-postgres.sql schema/schema-postgres.sql
+          cp regenerated-schema/schema-sqlite.sql schema/schema-sqlite.sql
+
+          changed="$(git diff --name-only | sort)"
+          unexpected_changed="$(printf '%s\n' "$changed" | grep -vxF -f "$diff_allowed" || true)"
+          if [ -n "$unexpected_changed" ]; then
+            echo "::error::unexpected files changed by schema artifact"
+            printf '%s\n' "$unexpected_changed"
+            exit 1
+          fi
+
+          if git diff --quiet -- schema/schema-postgres.sql schema/schema-sqlite.sql; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Do not execute PR-controlled validation scripts under this write-token
+          # workflow. The re-triggered Schema Sync run remains the authoritative
+          # schema validator.
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push regenerated schema snapshots and re-trigger checks
+        if: >-
+          steps.guard.outputs.skip != 'true' &&
+          steps.loopguard.outputs.skip != 'true' &&
+          steps.download.outputs.skip != 'true' &&
+          steps.validate.outputs.changed == 'true'
+        env:
+          BRANCH: ${{ steps.guard.outputs.branch }}
+          PR_NUMBER: ${{ steps.guard.outputs.pr_number }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- schema/schema-postgres.sql schema/schema-sqlite.sql
+          git commit -m "chore(schema): apply regenerated schema snapshots for #${PR_NUMBER}"
+          if ! git push origin "HEAD:$BRANCH"; then
+            echo "::warning::Branch $BRANCH moved during the heal; skipping re-trigger."
+            exit 0
+          fi
+
+          NEW_SHA="$(git rev-parse HEAD)"
+          # A GITHUB_TOKEN push may park pull_request runs for the new head in
+          # action_required. Approving them replays the normal PR pipeline and
+          # Schema Sync. If no parked runs appear, dispatch both workflows.
+          approved=0
+          RUN_IDS=""
+          for attempt in 1 2; do
+            sleep 5
+            RUN_IDS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${NEW_SHA}&status=action_required" \
+              --jq '.workflow_runs[].id' 2>/dev/null || true)"
+            if [ -n "$RUN_IDS" ]; then break; fi
+            echo "waiting for parked runs at ${NEW_SHA:0:8} (attempt $attempt)"
+          done
+          for run_id in $RUN_IDS; do
+            if gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/approve" --method POST >/dev/null 2>&1; then
+              approved=$((approved + 1))
+              echo "Approved parked run $run_id"
+            else
+              echo "::warning::Could not approve parked run $run_id"
+            fi
+          done
+          if [ "$approved" -eq 0 ]; then
+            for run_id in $RUN_IDS; do
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" --method POST >/dev/null 2>&1 || true
+            done
+            echo "No parked runs approved; cancelling leftovers and dispatching CI with healed_sha and Schema Sync with pull_request_number."
+            jq -n --arg ref "$BRANCH" --arg sha "$NEW_SHA" \
+              '{ref: $ref, inputs: {healed_sha: $sha}}' \
+              | gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/dispatches" \
+                --method POST --input -
+            jq -n --arg ref "$BRANCH" --arg sha "$NEW_SHA" --arg pr "$PR_NUMBER" \
+              '{ref: $ref, inputs: {pull_request_number: $pr}}' \
+              | gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/schema-sync.yml/dispatches" \
+                --method POST --input -
+            echo "Re-triggered CI on $BRANCH via workflow_dispatch (healed_sha=$NEW_SHA)"
+            echo "Re-triggered Schema Sync on $BRANCH via workflow_dispatch (pull_request_number=$PR_NUMBER)"
+          fi
+
+      - name: Nothing to apply
+        if: >-
+          steps.guard.outputs.skip != 'true' &&
+          steps.loopguard.outputs.skip != 'true' &&
+          (
+            steps.download.outputs.skip == 'true' ||
+            steps.validate.outputs.changed == 'false'
+          )
+        run: echo "No regenerated schema snapshot changes to push."
