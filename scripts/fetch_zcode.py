@@ -997,15 +997,21 @@ def fetch_and_save(
     # Issue #2823: Output structured result with protocol version
     coverage_data["files_processed"] = total_sessions
     coverage_data["messages_imported"] = len(all_messages)
-    # Determine status using unified logic
-    if coverage_data["users_errors"]:
-        status = "degraded"
-    elif coverage_data["users_denied"]:
-        status = "degraded"
-    elif coverage_data["users_scanned"] > 0:
-        status = "completed"
+    # Determine status using unified logic: errors > denied > no_data
+    if coverage_data["users_scanned"] > 0:
+        # At least one user succeeded
+        if coverage_data["users_errors"] or coverage_data["users_denied"]:
+            status = "degraded"
+        else:
+            status = "completed"
     else:
-        status = "no_data"
+        # No successful users
+        if coverage_data["users_errors"]:
+            status = "failed"
+        elif coverage_data["users_denied"]:
+            status = "denied"
+        else:
+            status = "no_data"
     result = {
         "protocol_version": "1.0",
         "status": status,
