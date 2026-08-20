@@ -912,7 +912,6 @@ class RemoteAgentManager:
         Returns:
             True if machine was found and removed, False otherwise.
         """
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
         failed_batches: list[dict[str, Any]] = []
         sessions_terminated = 0
         commands_deleted = 0
@@ -1150,7 +1149,7 @@ class RemoteAgentManager:
                     f"DELETE FROM remote_runtime_commands WHERE machine_id = {_param()}",
                     (machine_id,),
                 )
-                deleted = cursor.rowcount
+                deleted = cast("int", cursor.rowcount)
                 conn.commit()
             return deleted
         except Exception as e:
@@ -1176,7 +1175,7 @@ class RemoteAgentManager:
                     f"DELETE FROM remote_runtime_outputs WHERE session_id IN ({placeholders})",
                     session_ids,
                 )
-                deleted = cursor.rowcount
+                deleted = cast("int", cursor.rowcount)
                 conn.commit()
             return deleted
         except Exception as e:

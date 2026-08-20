@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Cleanup zombie sessions - sessions whose machines have been deregistered.
 
 Issue #2596: This script should be run before deploying the fix to clean up
