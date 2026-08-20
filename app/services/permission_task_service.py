@@ -10,10 +10,8 @@ Issue: #2746
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
-import subprocess
 import threading
 import time
 import uuid
@@ -21,18 +19,9 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import sqlalchemy as sa
-from flask import g
 
-from app.models.project import Project
 from app.utils.datetime_utils import ensure_utc_suffix
-from app.utils.workspace import (
-    SHARED_GROUP_NAME,
-    _is_docker_multi_user_mode,
-    ensure_shared_group,
-    estimate_file_count_fast,
-    setup_permissions_with_depth_limit,
-    verify_setgid_support,
-)
+from app.utils.workspace import estimate_file_count_fast
 
 logger = logging.getLogger(__name__)
 
@@ -353,7 +342,7 @@ class PermissionTaskService:
             )
 
             db.commit()
-            logger.debug(f"Cleaned up old permission tasks")
+            logger.debug("Cleaned up old permission tasks")
 
         except Exception as e:
             logger.error(f"Error cleaning up old tasks: {e}")

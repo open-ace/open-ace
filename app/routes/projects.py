@@ -37,8 +37,6 @@ from app.utils.workspace import (
     _is_docker_multi_user_mode,
     estimate_file_count_fast,
     setup_permissions_with_depth_limit,
-    setup_shared_project_permissions,
-    verify_setgid_support,
 )
 
 logger = logging.getLogger(__name__)

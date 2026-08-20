@@ -14,9 +14,9 @@ from app.utils.workspace import (
     SHARED_GROUP_NAME,
     add_user_to_shared_group,
     ensure_shared_group,
-    setup_shared_project_permissions,
     estimate_file_count_fast,
     setup_permissions_with_depth_limit,
+    setup_shared_project_permissions,
     verify_setgid_support,
 )
 
@@ -258,8 +258,9 @@ class TestEstimateFileCountFast:
     @patch("subprocess.run")
     def test_estimate_timeout_returns_max(self, mock_run):
         """Should return 50000 when estimation times out."""
-        from app.utils.workspace import estimate_file_count_fast
         import subprocess
+
+        from app.utils.workspace import estimate_file_count_fast
 
         mock_run.side_effect = subprocess.TimeoutExpired("find", 5)
 
