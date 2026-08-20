@@ -980,7 +980,7 @@ class CostOptimizer:
         output_ratio = (total_output / total_tokens * 100) if total_tokens > 0 else 0
 
         # Model distribution (accumulate tokens for same model across tools)
-        model_distribution = defaultdict(int)
+        model_distribution: dict[str, int] = defaultdict(int)
         for row in data["by_model"]:
             model = row.get("model") or "unknown"
             tokens = (row.get("input_tokens") or 0) + (row.get("output_tokens") or 0)
