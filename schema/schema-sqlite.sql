@@ -172,8 +172,7 @@ CREATE TABLE alerts_history (
  channels TEXT,
  status TEXT,
  sent_at TIMESTAMP,
- created_at TIMESTAMP,
- FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+ created_at TIMESTAMP
 );
 
 CREATE TABLE annotations (
@@ -200,8 +199,7 @@ CREATE TABLE anomaly_status (
  processed_at TIMESTAMP,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  anomaly_id TEXT DEFAULT '' NOT NULL,
- tenant_id integer,
- FOREIGN KEY (processed_by) REFERENCES users(id)
+ tenant_id integer
 );
 
 CREATE TABLE api_key_store (
@@ -222,9 +220,7 @@ CREATE TABLE api_key_store (
  priority integer DEFAULT 0,
  weight integer DEFAULT 100,
  resolved_ips text,
- resolved_at TIMESTAMP,
- FOREIGN KEY (created_by) REFERENCES users(id),
- FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+ resolved_at TIMESTAMP
 );
 
 CREATE TABLE archive_files (
@@ -242,8 +238,7 @@ CREATE TABLE archive_files (
  deleted_at TIMESTAMP,
  verified_at TIMESTAMP,
  verification_status TEXT,
- source_deleted INTEGER DEFAULT 0 NOT NULL,
- FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id)
+ source_deleted INTEGER DEFAULT 0 NOT NULL
 );
 
 CREATE TABLE audit_logs (
@@ -367,8 +362,7 @@ CREATE TABLE autonomous_workflows (
  verified_by text,
  verification_session_id text,
  issue_closed_by_workflow_at TIMESTAMP,
- merge_fail_dev_rounds integer DEFAULT 0,
- FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+ merge_fail_dev_rounds integer DEFAULT 0
 );
 
 CREATE TABLE backfill_logs (
@@ -379,8 +373,7 @@ CREATE TABLE backfill_logs (
  last_date TEXT,
  started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  completed_at TIMESTAMP,
- status TEXT DEFAULT 'completed',
- FOREIGN KEY (mapping_id) REFERENCES user_tool_accounts(id)
+ status TEXT DEFAULT 'completed'
 );
 
 CREATE TABLE command_execution_evidence (
@@ -443,8 +436,7 @@ CREATE TABLE consistency_violations (
  status TEXT,
  detected_at TIMESTAMP,
  repaired_at TIMESTAMP,
- created_at TIMESTAMP,
- FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+ created_at TIMESTAMP
 );
 
 CREATE TABLE content_filter_rules (
@@ -600,8 +592,7 @@ CREATE TABLE insights_reports (
  usage_summary text,
  model TEXT,
  raw_response text,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- FOREIGN KEY (user_id) REFERENCES users(id)
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE knowledge_base (
@@ -633,8 +624,7 @@ CREATE TABLE legal_holds (
  expires_at TIMESTAMP,
  lifted_by integer,
  lifted_at TIMESTAMP,
- lift_reason text,
- FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+ lift_reason text
 );
 
 CREATE TABLE login_attempts (
@@ -649,10 +639,7 @@ CREATE TABLE machine_assignments (
  user_id integer NOT NULL,
  permission text DEFAULT 'user',
  granted_by integer,
- granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- FOREIGN KEY (granted_by) REFERENCES users(id),
- FOREIGN KEY (machine_id) REFERENCES remote_machines(machine_id),
- FOREIGN KEY (user_id) REFERENCES users(id)
+ granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE mapping_migration_status (
@@ -704,6 +691,36 @@ CREATE TABLE parse_failure_records (
  last_retry_at TIMESTAMP,
  resolved INTEGER DEFAULT 0 NOT NULL,
  created_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE permission_checkpoints (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ task_id TEXT NOT NULL,
+ processed_paths text,
+ last_position TEXT,
+ snapshot_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP
+);
+
+CREATE TABLE permission_tasks (
+ task_id TEXT PRIMARY KEY NOT NULL,
+ project_id integer,
+ user_id integer,
+ path TEXT NOT NULL,
+ status TEXT NOT NULL,
+ priority integer DEFAULT 10 NOT NULL,
+ progress integer DEFAULT 0 NOT NULL,
+ files_processed integer DEFAULT 0 NOT NULL,
+ total_files integer DEFAULT 0 NOT NULL,
+ depth_limit integer,
+ checkpoint_data text,
+ checksum TEXT,
+ error_message text,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP,
+ started_at TIMESTAMP,
+ completed_at TIMESTAMP
 );
 
 CREATE TABLE policy_decisions (
@@ -785,7 +802,9 @@ CREATE TABLE projects (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  is_active INTEGER DEFAULT 1 NOT NULL,
  is_shared INTEGER DEFAULT 0 NOT NULL,
- tenant_id integer DEFAULT 1 NOT NULL
+ tenant_id integer DEFAULT 1 NOT NULL,
+ permission_status TEXT,
+ permission_task_id TEXT
 );
 
 CREATE TABLE prompt_templates (
@@ -844,8 +863,7 @@ CREATE TABLE quota_alerts (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  acknowledged INTEGER DEFAULT 0,
  acknowledged_at TIMESTAMP,
- acknowledged_by integer,
- FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+ acknowledged_by integer
 );
 
 CREATE TABLE quota_usage (
@@ -859,8 +877,7 @@ CREATE TABLE quota_usage (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  tool_name text,
     CONSTRAINT chk_quota_usage_requests_positive CHECK ((requests_used >= 0)),
-    CONSTRAINT chk_quota_usage_tokens_positive CHECK ((tokens_used >= 0)),
- FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    CONSTRAINT chk_quota_usage_tokens_positive CHECK ((tokens_used >= 0))
 );
 
 CREATE TABLE recycle_bin (
@@ -874,9 +891,7 @@ CREATE TABLE recycle_bin (
  expires_at TIMESTAMP NOT NULL,
  restored_at TIMESTAMP,
  restored_by integer,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id),
- FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 CREATE TABLE registration_tokens (
@@ -909,9 +924,7 @@ CREATE TABLE remote_machines (
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  last_heartbeat TIMESTAMP,
  legacy_mode INTEGER DEFAULT 0,
- token_revoke_timeout integer DEFAULT 300,
- FOREIGN KEY (created_by) REFERENCES users(id),
- FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+ token_revoke_timeout integer DEFAULT 300
 );
 
 CREATE TABLE remote_runtime_commands (
@@ -956,8 +969,7 @@ CREATE TABLE retention_evidence (
  policy_version integer,
  policy_config text,
  policy_source TEXT,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- FOREIGN KEY (execution_id) REFERENCES retention_executions(execution_id)
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 CREATE TABLE retention_executions (
@@ -984,9 +996,7 @@ CREATE TABLE retention_executions (
  total_batches integer,
  last_batch_status TEXT,
  max_records_override integer,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- FOREIGN KEY (policy_id) REFERENCES retention_policies(id),
- FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 CREATE TABLE retention_history (
@@ -1010,8 +1020,7 @@ CREATE TABLE retention_policies (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  created_by integer,
- updated_by integer,
- FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+ updated_by integer
 );
 
 CREATE TABLE role_permissions (
@@ -1081,8 +1090,7 @@ CREATE TABLE session_messages (
  source_timestamp TIMESTAMP,
  external_message_id text DEFAULT '' NOT NULL,
  content_blocks text,
- tenant_id integer DEFAULT 1 NOT NULL,
- FOREIGN KEY (session_id) REFERENCES agent_sessions(session_id)
+ tenant_id integer DEFAULT 1 NOT NULL
 );
 
 CREATE TABLE sessions (
@@ -1091,8 +1099,7 @@ CREATE TABLE sessions (
  user_id integer NOT NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  expires_at TIMESTAMP NOT NULL,
- is_active INTEGER DEFAULT 1,
- FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+ is_active INTEGER DEFAULT 1
 );
 
 CREATE TABLE shared_sessions (
@@ -1145,8 +1152,7 @@ CREATE TABLE sso_identities (
  provider_user_id text NOT NULL,
  provider_data text,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- last_used_at TIMESTAMP,
- FOREIGN KEY (user_id) REFERENCES users(id)
+ last_used_at TIMESTAMP
 );
 
 CREATE TABLE sso_providers (
@@ -1157,8 +1163,7 @@ CREATE TABLE sso_providers (
  tenant_id integer,
  is_active INTEGER DEFAULT 1,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE sso_sessions (
@@ -1169,8 +1174,7 @@ CREATE TABLE sso_sessions (
  access_token text,
  refresh_token text,
  expires_at TIMESTAMP,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- FOREIGN KEY (user_id) REFERENCES users(id)
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE sync_events (
@@ -1207,10 +1211,9 @@ CREATE TABLE teams (
 );
 
 CREATE TABLE tenant_keywords_version (
- tenant_id INTEGER PRIMARY KEY NOT NULL,
+ tenant_id INTEGER PRIMARY KEY AUTOINCREMENT,
  version INTEGER DEFAULT '1' NOT NULL,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 CREATE TABLE tenant_migrations (
@@ -1224,9 +1227,7 @@ CREATE TABLE tenant_migrations (
  affected_projects integer,
  batch_number integer,
  total_batches integer,
- status TEXT DEFAULT 'pending' NOT NULL,
- FOREIGN KEY (migrated_by) REFERENCES users(id),
- FOREIGN KEY (user_id) REFERENCES users(id)
+ status TEXT DEFAULT 'pending' NOT NULL
 );
 
 CREATE TABLE tenant_period_history (
@@ -1238,8 +1239,7 @@ CREATE TABLE tenant_period_history (
  requests_made INTEGER,
  reset_at TIMESTAMP NOT NULL,
  reset_by TEXT,
- created_at TIMESTAMP,
- FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+ created_at TIMESTAMP
 );
 
 CREATE TABLE tenant_plans (
@@ -1266,8 +1266,7 @@ CREATE TABLE tenant_quotas (
  max_users integer DEFAULT 100,
  max_sessions_per_user integer DEFAULT 5,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE tenant_sensitive_keywords (
@@ -1278,9 +1277,7 @@ CREATE TABLE tenant_sensitive_keywords (
  is_enabled INTEGER DEFAULT 1 NOT NULL,
  created_by integer,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- updated_at TIMESTAMP,
- FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
- FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+ updated_at TIMESTAMP
 );
 
 CREATE TABLE tenant_settings (
@@ -1301,8 +1298,7 @@ CREATE TABLE tenant_settings (
  block_sensitive_keyword INTEGER DEFAULT 0,
  sensitive_keyword_match_mode TEXT DEFAULT 'word_boundary',
  allowed_tools TEXT DEFAULT '["claude", "qwen", "openclaw", "codex", "zcode"]',
- roi_assumptions TEXT,
- FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+ roi_assumptions TEXT
 );
 
 CREATE TABLE tenant_usage (
@@ -1313,8 +1309,7 @@ CREATE TABLE tenant_usage (
  requests_made integer DEFAULT 0,
  active_users integer DEFAULT 0,
  new_users integer DEFAULT 0,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE tenants (
@@ -1369,8 +1364,7 @@ CREATE TABLE test_execution_evidence (
  workflow_id text DEFAULT '' NOT NULL,
  milestone_id text DEFAULT '' NOT NULL,
  tenant_id integer DEFAULT 1 NOT NULL,
- created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- FOREIGN KEY (command_execution_id) REFERENCES command_execution_evidence(id)
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE tool_account_conflicts (
@@ -1383,9 +1377,7 @@ CREATE TABLE tool_account_conflicts (
  resolved_at TIMESTAMP,
  resolved_by integer,
  resolution_action TEXT,
- details text,
- FOREIGN KEY (mapping_id) REFERENCES user_tool_accounts(id),
- FOREIGN KEY (resolved_by) REFERENCES users(id)
+ details text
 );
 
 CREATE TABLE tool_account_mapping_rules (
@@ -1399,8 +1391,7 @@ CREATE TABLE tool_account_mapping_rules (
  is_active INTEGER DEFAULT 1 NOT NULL,
  description TEXT,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE usage_report_rate_limits (
@@ -1449,8 +1440,7 @@ CREATE TABLE user_daily_stats (
  output_tokens integer DEFAULT 0 NOT NULL,
  cache_tokens integer DEFAULT 0 NOT NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
- FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 CREATE TABLE user_permissions (
@@ -1488,8 +1478,7 @@ CREATE TABLE user_tool_accounts (
  observed_message_count integer,
  created_by integer,
  tenant_id integer,
- version integer,
- FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+ version integer
 );
 
 CREATE TABLE users (
@@ -1514,8 +1503,7 @@ CREATE TABLE users (
  auto_mapping_enabled INTEGER DEFAULT 1,
  tenant_version integer DEFAULT 1 NOT NULL,
     CONSTRAINT chk_2332_tenant_admin_requires_tenant CHECK ((NOT (((role) = 'tenant_admin') AND (tenant_id IS NULL)))),
-    CONSTRAINT chk_2332_users_role_valid CHECK ((role IN ('platform_admin', 'tenant_admin', 'manager', 'user', 'readonly'))),
- FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE SET NULL
+    CONSTRAINT chk_2332_users_role_valid CHECK ((role IN ('platform_admin', 'tenant_admin', 'manager', 'user', 'readonly')))
 );
 
 CREATE TABLE web_user_auth_sessions (
@@ -1523,8 +1511,7 @@ CREATE TABLE web_user_auth_sessions (
  user_id integer NOT NULL,
  session_token text NOT NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- expires_at TIMESTAMP NOT NULL,
- FOREIGN KEY (user_id) REFERENCES users(id)
+ expires_at TIMESTAMP NOT NULL
 );
 
 CREATE TABLE webhook_deliveries (
@@ -1597,8 +1584,7 @@ CREATE TABLE workflow_milestones (
  phase_input_tokens integer DEFAULT 0 NOT NULL,
  phase_output_tokens integer DEFAULT 0 NOT NULL,
  phase_request_count integer DEFAULT 0 NOT NULL,
- tldr text DEFAULT '' NOT NULL,
- FOREIGN KEY (workflow_id) REFERENCES autonomous_workflows(workflow_id) ON DELETE CASCADE
+ tldr text DEFAULT '' NOT NULL
 );
 
 CREATE UNIQUE INDEX agent_approvals_request_id_key ON agent_approvals (request_id);
@@ -1925,6 +1911,14 @@ CREATE INDEX idx_parse_failure_timestamp ON parse_failure_records ("timestamp");
 
 CREATE INDEX idx_parse_failure_unresolved ON parse_failure_records (resolved) WHERE (resolved = false);
 
+CREATE INDEX idx_permission_tasks_checksum ON permission_tasks (checksum);
+
+CREATE INDEX idx_permission_tasks_priority_created ON permission_tasks (priority, created_at);
+
+CREATE INDEX idx_permission_tasks_project ON permission_tasks (project_id);
+
+CREATE INDEX idx_permission_tasks_status ON permission_tasks (status);
+
 CREATE INDEX idx_policy_decisions_fingerprint ON policy_decisions (fingerprint_hash);
 
 CREATE INDEX idx_policy_decisions_request_id ON policy_decisions (request_id);
@@ -1942,6 +1936,8 @@ CREATE INDEX idx_projects_created_by ON projects (created_by);
 CREATE INDEX idx_projects_is_active ON projects (is_active);
 
 CREATE INDEX idx_projects_path ON projects (tenant_id, path);
+
+CREATE INDEX idx_projects_permission_status ON projects (permission_status);
 
 CREATE INDEX idx_projects_tenant_created_by ON projects (tenant_id, created_by);
 

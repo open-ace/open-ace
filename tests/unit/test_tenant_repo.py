@@ -229,6 +229,44 @@ class TestTenantRepository:
         assert result.settings.sso_provider == "okta"
         assert result.settings.content_filter_enabled is False
 
+    @pytest.mark.parametrize(
+        ("postgresql", "stored_allowed_tools"),
+        [(False, "[]"), (True, [])],
+        ids=["sqlite-text", "postgresql-jsonb"],
+    )
+    def test_row_to_tenant_preserves_empty_allowed_tools(self, postgresql, stored_allowed_tools):
+        """An explicit empty tool list must not be treated as a missing value."""
+        row = self._tenant_row()
+        self.db.fetch_one.side_effect = [
+            None,
+            {
+                "allowed_tools": stored_allowed_tools,
+                "custom_branding": 1,
+            },
+        ]
+
+        with patch("app.repositories.tenant_repo.is_postgresql", return_value=postgresql):
+            result = self.repo._row_to_tenant(row)
+
+        assert result.settings.allowed_tools == []
+        assert result.settings.custom_branding is True
+
+    def test_row_to_tenant_defaults_allowed_tools_when_column_is_null(self):
+        """Legacy NULL values retain the documented default tool list."""
+        row = self._tenant_row()
+        self.db.fetch_one.side_effect = [
+            None,
+            {
+                "allowed_tools": None,
+                "custom_branding": 1,
+            },
+        ]
+
+        result = self.repo._row_to_tenant(row)
+
+        assert result.settings.allowed_tools == TenantSettings().allowed_tools
+        assert result.settings.custom_branding is True
+
     def test_row_to_tenant_fallback_to_json(self):
         """When dedicated tables return None, fall back to JSON in tenant row."""
         custom_quota = QuotaConfig(max_users=200, daily_token_limit=2000000)

@@ -246,7 +246,11 @@ filterwarnings = [
 # Coverage Configuration
 # =============================================================================
 [tool.coverage.run]
-# Phase 1: Include P0 security modules (Issue #1856)
+# Phase 1: P0 security modules (Issue #1856).
+# Phase 2 (eval §6.2 P1-3): expand to app/routes + app/services so the coverage
+# gate measures the HTTP + business-logic surface, not just the security core.
+# The CI gate is driven by the --cov flags in ci/suites.json (python-core
+# suite); keep this source list in sync with them.
 # Gradually expand: P0 → P1 → P2
 source = [
     "scripts/shared",
@@ -255,6 +259,8 @@ source = [
     "app/auth",
     "app/remote_ws_handler",
     "app/modules/sso",
+    "app/routes",
+    "app/services",
 ]
 omit = [
     "tests/*",

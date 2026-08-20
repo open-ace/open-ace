@@ -6,7 +6,7 @@
   "description": "Open ACE Frontend - Modern React/TypeScript/Vite based frontend",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/retain-release-assets.mjs --dist ../static/js/dist",
     "build:watch": "vite build --watch",
     "preview": "vite preview",
     "lint": "eslint src",
@@ -14,6 +14,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\"",
     "typecheck": "tsc --noEmit",
+    "pretest": "node --test scripts/retain-release-assets.test.mjs",
     "test": "vitest",
     "test:coverage": "vitest --coverage",
     "test:e2e": "playwright test",

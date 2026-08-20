@@ -176,12 +176,15 @@ class CostOptimizer:
         self.db = db or Database()
 
     @cached(ttl=120, key_prefix="cost", skip_args=[0])
-    def analyze(self, days: int = 30, tenant_id: int | None = None) -> list[OptimizationSuggestion]:
+    def analyze(
+        self, days: int = 30, tool_name: str | None = None, tenant_id: int | None = None
+    ) -> list[OptimizationSuggestion]:
         """
         Analyze usage and generate optimization suggestions.
 
         Args:
             days: Number of days to analyze.
+            tool_name: Optional tool name filter.
             tenant_id: Optional tenant scope (caller's tenant). Included in the
                 cache key so one tenant never reads another's aggregate.
 
@@ -196,7 +199,9 @@ class CostOptimizer:
         ).strftime("%Y-%m-%d")
 
         # Get usage data
-        usage_data = self._get_usage_data(start_date, end_date, tenant_id=tenant_id)
+        usage_data = self._get_usage_data(
+            start_date, end_date, tool_name=tool_name, tenant_id=tenant_id
+        )
 
         # Analyze different aspects
         suggestions.extend(self._analyze_model_usage(usage_data, start_date, end_date))
@@ -211,7 +216,11 @@ class CostOptimizer:
         return suggestions
 
     def _get_usage_data(
-        self, start_date: str, end_date: str, tenant_id: int | None = None
+        self,
+        start_date: str,
+        end_date: str,
+        tool_name: str | None = None,
+        tenant_id: int | None = None,
     ) -> dict[str, Any]:
         """Get comprehensive usage data.
 
@@ -221,6 +230,7 @@ class CostOptimizer:
         Args:
             start_date: Start date (YYYY-MM-DD).
             end_date: End date (YYYY-MM-DD).
+            tool_name: Optional tool name filter.
             tenant_id: Optional tenant scope.
         """
         normalized_tenant_id = _normalize_tenant_id(tenant_id)
@@ -237,6 +247,10 @@ class CostOptimizer:
         if normalized_tenant_id is not None:
             query += " AND tenant_id = ?"
             params.append(normalized_tenant_id)
+
+        if tool_name:
+            query += " AND tool_name = ?"
+            params.append(tool_name)
 
         # Single query to get all raw data
         all_data = self.db.fetch_all(query, tuple(params))
@@ -897,6 +911,7 @@ class CostOptimizer:
     def get_efficiency_report(
         self,
         days: int = 30,
+        tool_name: str | None = None,
         tenant_id: int | None = None,
         task_type: str | None = None,
         algorithm_version: str | None = None,
@@ -908,6 +923,7 @@ class CostOptimizer:
 
         Args:
             days: Number of days to analyze.
+            tool_name: Optional tool name filter.
             tenant_id: Optional tenant scope (caller's tenant). Included in the
                 cache key so one tenant never reads another's aggregate.
             task_type: Optional task type filter (GENERAL, CODE_GENERATION,
@@ -951,7 +967,7 @@ class CostOptimizer:
             datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
         ).strftime("%Y-%m-%d")
 
-        data = self._get_usage_data(start_date, end_date, tenant_id=tenant_id)
+        data = self._get_usage_data(start_date, end_date, tool_name=tool_name, tenant_id=tenant_id)
 
         total_input = data["overall"]["total_input_tokens"] or 0
         total_output = data["overall"]["total_output_tokens"] or 0

@@ -42,6 +42,26 @@ def _parse_positive_float_arg(name: str) -> tuple[float | None, str | None]:
     return parsed, None
 
 
+def _parse_tool_name() -> str | None:
+    """Parse and validate tool_name parameter.
+
+    Returns:
+        Normalized tool_name, or None if empty/not provided.
+
+    Raises:
+        ValueError: If tool_name is too long (>100 chars).
+    """
+    tool_name = request.args.get("tool_name")
+    if tool_name is None:
+        return None
+    tool_name = tool_name.strip()
+    if tool_name == "":
+        return None
+    if len(tool_name) > 100:
+        raise ValueError("tool_name must be 100 characters or fewer")
+    return tool_name
+
+
 def _get_caller_tenant() -> Optional["Tenant"]:
     """Get the caller's tenant object.
 
@@ -229,13 +249,22 @@ def get_roi_trend():
                 400,
             )
 
+        # Parse and validate tool_name parameter
+        try:
+            tool_name = _parse_tool_name()
+        except ValueError as e:
+            logger.warning(f"Invalid tool_name parameter: {e}")
+            return jsonify({"success": False, "error": str(e), "code": "INVALID_TOOL_NAME"}), 400
+
         try:
             assumptions, assumption_source = _build_roi_assumptions()
         except ValueError as e:
             return jsonify({"success": False, "error": str(e)}), 400
 
         calculator = ROICalculator(assumptions=assumptions, assumption_source=assumption_source)
-        trends = calculator.get_roi_trend(validated_months, user_id, tenant_id=_caller_tenant_id())
+        trends = calculator.get_roi_trend(
+            validated_months, user_id, tool_name=tool_name, tenant_id=_caller_tenant_id()
+        )
 
         return jsonify({"success": True, "data": [t.to_dict() for t in trends]})
     except Exception as e:
@@ -388,9 +417,16 @@ def get_cost_breakdown():
             start_date = parsed_start.strftime("%Y-%m-%d")
             end_date = parsed_end.strftime("%Y-%m-%d")
 
+        # Parse and validate tool_name parameter
+        try:
+            tool_name = _parse_tool_name()
+        except ValueError as e:
+            logger.warning(f"Invalid tool_name parameter: {e}")
+            return jsonify({"success": False, "error": str(e), "code": "INVALID_TOOL_NAME"}), 400
+
         calculator = ROICalculator()
         breakdown = calculator.get_cost_breakdown(
-            start_date, end_date, user_id, tenant_id=_caller_tenant_id()
+            start_date, end_date, user_id, tool_name=tool_name, tenant_id=_caller_tenant_id()
         )
 
         return jsonify(
@@ -543,8 +579,17 @@ def get_optimization_suggestions():
                 400,
             )
 
+        # Parse and validate tool_name parameter
+        try:
+            tool_name = _parse_tool_name()
+        except ValueError as e:
+            logger.warning(f"Invalid tool_name parameter: {e}")
+            return jsonify({"success": False, "error": str(e), "code": "INVALID_TOOL_NAME"}), 400
+
         optimizer = CostOptimizer()
-        suggestions = optimizer.analyze(validated_days, tenant_id=_caller_tenant_id())
+        suggestions = optimizer.analyze(
+            validated_days, tool_name=tool_name, tenant_id=_caller_tenant_id()
+        )
 
         return jsonify({"success": True, "data": [s.to_dict() for s in suggestions]})
     except Exception as e:
@@ -591,6 +636,7 @@ def get_efficiency_report():
 
     Query Parameters:
         days: Number of days to analyze (default: 30)
+        tool_name: Optional tool name filter
         task_type: Optional task type filter (GENERAL, CODE_GENERATION,
             DOCUMENT_ANALYSIS, CONVERSATION)
         algorithm_version: Optional algorithm version (v1.0, v2.0, auto)
@@ -621,6 +667,13 @@ def get_efficiency_report():
                 400,
             )
 
+        # Parse and validate tool_name parameter
+        try:
+            tool_name = _parse_tool_name()
+        except ValueError as e:
+            logger.warning(f"Invalid tool_name parameter: {e}")
+            return jsonify({"success": False, "error": str(e), "code": "INVALID_TOOL_NAME"}), 400
+
         # Validate task_type parameter
         valid_task_types = ["GENERAL", "CODE_GENERATION", "DOCUMENT_ANALYSIS", "CONVERSATION"]
         if task_type and task_type.upper() not in valid_task_types:
@@ -650,6 +703,7 @@ def get_efficiency_report():
         optimizer = CostOptimizer()
         report = optimizer.get_efficiency_report(
             validated_days,
+            tool_name=tool_name,
             tenant_id=_caller_tenant_id(),
             task_type=task_type,
             algorithm_version=algorithm_version,

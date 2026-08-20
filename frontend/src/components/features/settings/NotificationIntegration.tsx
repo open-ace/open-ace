@@ -202,7 +202,7 @@ export const NotificationIntegration: React.FC = () => {
           alignItems: 'center',
           gap: 6,
           fontSize: 12.5,
-          color: 'var(--color-text-secondary, #444441)',
+          color: 'var(--text-secondary)',
         }}
       >
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor(st) }} />
@@ -229,8 +229,8 @@ export const NotificationIntegration: React.FC = () => {
           border-radius: 6px;
         }
         .notification-integration .ni-channel-card {
-          background: var(--color-background-primary, #fff);
-          border: 0.5px solid var(--color-border-tertiary, #d3d1c7);
+          background: var(--bg-primary);
+          border: 0.5px solid var(--border-color);
           border-left-width: 3px;
           border-radius: 12px;
           padding: 16px 18px;
@@ -240,7 +240,7 @@ export const NotificationIntegration: React.FC = () => {
         }
         .notification-integration .ni-channel-card:hover,
         .notification-integration .ni-channel-card.ni-active {
-          background: var(--color-background-secondary, #f1efe8);
+          background: var(--bg-tertiary);
         }
         .notification-integration .ni-channel-card .ni-dot {
           display: inline-block;
@@ -256,18 +256,18 @@ export const NotificationIntegration: React.FC = () => {
           font-size: 14px;
         }
         .notification-integration .ni-detail {
-          border: 0.5px solid var(--color-border-tertiary, #d3d1c7);
+          border: 0.5px solid var(--border-color);
           border-left-width: 3px;
           border-radius: 12px;
           padding: 20px 22px;
-          background: var(--color-background-primary, #fff);
+          background: var(--bg-primary);
         }
         .notification-integration .ni-detail-header {
           display: flex;
           align-items: center;
           gap: 12px;
           padding-bottom: 14px;
-          border-bottom: 0.5px solid var(--color-border-tertiary, #d3d1c7);
+          border-bottom: 0.5px solid var(--border-color);
           margin-bottom: 16px;
         }
         .notification-integration .ni-detail-header .ni-icon {
@@ -288,7 +288,7 @@ export const NotificationIntegration: React.FC = () => {
         }
         .notification-integration .ni-detail-subtitle {
           font-size: 12.5px;
-          color: var(--color-text-secondary, #5f5e5a);
+          color: var(--text-secondary);
         }
         .notification-integration .ni-section {
           font-weight: 500;
@@ -298,7 +298,7 @@ export const NotificationIntegration: React.FC = () => {
           border-left: 3px solid #378ADD;
         }
         .notification-integration .ni-metric {
-          background: var(--color-background-secondary, #f1efe8);
+          background: var(--bg-tertiary);
           border-radius: 8px;
           padding: 12px 16px;
         }
@@ -309,12 +309,12 @@ export const NotificationIntegration: React.FC = () => {
         }
         .notification-integration .ni-boundary {
           font-size: 12.5px;
-          color: var(--color-text-secondary, #5f5e5a);
+          color: var(--text-secondary);
           line-height: 1.7;
         }
         .notification-integration .ni-hint {
           font-size: 12px;
-          color: var(--color-text-tertiary, #888780);
+          color: var(--text-tertiary);
         }
       `}</style>
 
@@ -814,7 +814,7 @@ export const NotificationIntegration: React.FC = () => {
       )}
 
       <div className="ni-boundary alert alert-light border mt-4">
-        <div style={{ fontWeight: 500, color: 'var(--color-text-primary)', marginBottom: 6 }}>
+        <div style={{ fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6 }}>
           {t('integrationBoundaryTitle', language)}
         </div>
         {t('integrationBoundaryBody', language)}

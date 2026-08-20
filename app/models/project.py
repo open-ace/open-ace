@@ -25,6 +25,9 @@ class Project:
     updated_at: datetime | None = None
     is_active: bool = True
     is_shared: bool = False
+    # Issue #2746: Permission status for shared projects
+    permission_status: str | None = None  # null/setting/success/failed
+    permission_task_id: str | None = None  # Associated permission task ID
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -39,6 +42,8 @@ class Project:
             "updated_at": ensure_utc_suffix(self.updated_at),
             "is_active": self.is_active,
             "is_shared": self.is_shared,
+            "permission_status": self.permission_status,
+            "permission_task_id": self.permission_task_id,
         }
 
     @classmethod
@@ -59,6 +64,8 @@ class Project:
             updated_at=parse_datetime(data.get("updated_at")),
             is_active=data.get("is_active", True),
             is_shared=data.get("is_shared", False),
+            permission_status=data.get("permission_status"),
+            permission_task_id=data.get("permission_task_id"),
         )
 
     def get_display_name(self) -> str:

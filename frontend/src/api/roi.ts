@@ -176,12 +176,12 @@ export const roiApi = {
 
   async getROITrend(
     months?: number,
-    userId?: number,
+    tool_name?: string,
     assumptions?: ROIAssumptions
   ): Promise<ROITrend[]> {
     const queryParams: Record<string, string> = {};
     if (months) queryParams.months = String(months);
-    if (userId) queryParams.user_id = String(userId);
+    if (tool_name) queryParams.tool_name = tool_name;
     appendAssumptions(queryParams, assumptions);
 
     const response = await apiClient.get<{ success: boolean; data: ROITrend[] }>(
@@ -225,11 +225,13 @@ export const roiApi = {
     start_date?: string;
     end_date?: string;
     user_id?: number;
+    tool_name?: string;
   }): Promise<{ breakdown: CostBreakdown[]; total_cost: number }> {
     const queryParams: Record<string, string> = {};
     if (params?.start_date) queryParams.start_date = params.start_date;
     if (params?.end_date) queryParams.end_date = params.end_date;
     if (params?.user_id) queryParams.user_id = String(params.user_id);
+    if (params?.tool_name) queryParams.tool_name = params.tool_name;
 
     const response = await apiClient.get<{
       success: boolean;
@@ -277,8 +279,13 @@ export const roiApi = {
   },
 
   // Optimization
-  async getOptimizationSuggestions(days?: number): Promise<OptimizationSuggestion[]> {
-    const queryParams: Record<string, string> = days ? { days: String(days) } : {};
+  async getOptimizationSuggestions(
+    days?: number,
+    tool_name?: string
+  ): Promise<OptimizationSuggestion[]> {
+    const queryParams: Record<string, string> = {};
+    if (days) queryParams.days = String(days);
+    if (tool_name) queryParams.tool_name = tool_name;
     const response = await apiClient.get<{ success: boolean; data: OptimizationSuggestion[] }>(
       '/api/optimization/suggestions',
       queryParams
@@ -288,11 +295,13 @@ export const roiApi = {
 
   async getEfficiencyReport(params?: {
     days?: number;
+    tool_name?: string;
     task_type?: string;
     algorithm_version?: string;
   }): Promise<EfficiencyReport> {
     const queryParams: Record<string, string> = {};
     if (params?.days) queryParams.days = String(params.days);
+    if (params?.tool_name) queryParams.tool_name = params.tool_name;
     if (params?.task_type) queryParams.task_type = params.task_type;
     if (params?.algorithm_version) queryParams.algorithm_version = params.algorithm_version;
 

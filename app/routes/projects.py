@@ -11,7 +11,9 @@ import os
 import platform
 import pwd
 import subprocess
+from datetime import datetime, timezone
 
+import sqlalchemy as sa
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import (
@@ -25,8 +27,19 @@ from app.auth.decorators import (
 from app.models.user import User
 from app.repositories.project_repo import ProjectRepository
 from app.repositories.user_repo import UserRepository
+from app.services.permission_task_service import (
+    PERMISSION_MAX_QUEUE_SIZE,
+    PERMISSION_PRIORITY_AUTO_CREATE,
+    PERMISSION_PRIORITY_MANUAL_FIX,
+    PERMISSION_SYNC_THRESHOLD,
+    get_permission_task_service,
+)
 from app.utils.request_context import get_current_tenant_id
-from app.utils.workspace import _is_docker_multi_user_mode, setup_shared_project_permissions
+from app.utils.workspace import (
+    _is_docker_multi_user_mode,
+    estimate_file_count_fast,
+    setup_permissions_with_depth_limit,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -248,15 +261,8 @@ def api_create_project():
             logger.error(f"Error creating directory: {e}")
             return jsonify({"error": "Failed to create directory"}), 500
 
-    # Issue #2730: Set shared project permissions for Docker multi-user mode
-    if is_shared and _is_docker_multi_user_mode():
-        success, error_msg = setup_shared_project_permissions(path)
-        if not success:
-            logger.error(f"Failed to setup shared permissions: {error_msg}")
-            return (
-                jsonify({"error": f"Failed to setup shared project permissions: {error_msg}"}),
-                500,
-            )
+    # Issue #2730 + #2746: Set shared project permissions for Docker multi-user mode
+    # Note: Permission setup will happen after project creation
 
     # Create project in database
     project_id = project_repo.create_project(
@@ -269,19 +275,64 @@ def api_create_project():
     )
 
     if project_id:
+        # Issue #2730 + #2746: Set shared project permissions
+        permission_warning = None
+        if is_shared and _is_docker_multi_user_mode():
+            # Estimate file count to determine sync vs async
+            file_count = estimate_file_count_fast(path)
+
+            if file_count < PERMISSION_SYNC_THRESHOLD:
+                # Small project: use optimized synchronous setup
+                success, error_msg, files_processed = setup_permissions_with_depth_limit(
+                    path,
+                    depth_limit=None,  # No depth limit for small projects
+                    timeout=60,
+                )
+                if not success:
+                    logger.error(f"Failed to setup shared permissions: {error_msg}")
+                    # Update project status to failed
+                    from app import db  # type: ignore[attr-defined]  # type: ignore[attr-defined]
+
+                    db.execute(
+                        sa.text("""
+                            UPDATE projects
+                            SET permission_status = 'failed'
+                            WHERE id = :project_id
+                        """),
+                        {"project_id": project_id},
+                    )
+                    db.commit()
+                    permission_warning = f"Permission setup failed: {error_msg}"
+            else:
+                # Large project: submit async task
+                from app import db  # type: ignore[attr-defined]  # type: ignore[attr-defined]
+
+                service = get_permission_task_service()
+                success, error_msg, task_info = service.submit_task(
+                    db.session,
+                    project_id=project_id,
+                    user_id=user_id,
+                    path=path,
+                    priority=PERMISSION_PRIORITY_AUTO_CREATE,
+                )
+
+                if success and task_info:
+                    logger.info(f"Submitted async permission task {task_info['task_id']}")
+
         project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
         if project is None:
             return jsonify({"error": "Project not found"}), 404
-        return (
-            jsonify(
-                {
-                    "success": True,
-                    "project": project.to_dict(),
-                    "dir_created": dir_created,
-                }
-            ),
-            201,
-        )
+
+        response = {
+            "success": True,
+            "project": project.to_dict(),
+            "dir_created": dir_created,
+        }
+
+        if permission_warning:
+            response["permission_warning"] = permission_warning
+
+        return jsonify(response), 201
 
     return jsonify({"error": "Failed to create project"}), 500
 
@@ -334,13 +385,40 @@ def api_update_project(project_id):
     description = data.get("description")
     is_shared = data.get("is_shared")
 
-    # Issue #2730: Set permissions when is_shared changes from False to True
+    # Issue #2730 + #2746: Set permissions when is_shared changes from False to True
     if is_shared is True and not project.is_shared:
         if _is_docker_multi_user_mode():
-            success, error_msg = setup_shared_project_permissions(project.path)
-            if not success:
-                logger.error(f"Failed to setup shared permissions: {error_msg}")
-                return jsonify({"error": f"Failed to setup shared permissions: {error_msg}"}), 500
+            # Estimate file count
+            file_count = estimate_file_count_fast(project.path)
+
+            if file_count < PERMISSION_SYNC_THRESHOLD:
+                # Small project: synchronous setup
+                success, error_msg, files_processed = setup_permissions_with_depth_limit(
+                    project.path,
+                    depth_limit=None,
+                    timeout=60,
+                )
+                if not success:
+                    logger.error(f"Failed to setup shared permissions: {error_msg}")
+                    return (
+                        jsonify({"error": f"Failed to setup shared permissions: {error_msg}"}),
+                        500,
+                    )
+            else:
+                # Large project: submit async task
+                from app import db  # type: ignore[attr-defined]  # type: ignore[attr-defined]
+
+                service = get_permission_task_service()
+                success, error_msg, task_info = service.submit_task(
+                    db.session,
+                    project_id=project_id,
+                    user_id=user_id,
+                    path=project.path,
+                    priority=PERMISSION_PRIORITY_AUTO_CREATE,
+                )
+
+                if not success:
+                    return jsonify({"error": error_msg}), 503
 
     success = project_repo.update_project(
         project_id=project_id,
@@ -471,11 +549,16 @@ def api_get_project_users(project_id):
 def api_fix_project_permissions(project_id):
     """Fix shared project directory permissions.
 
-    Issue #2730: Allows manually fixing permissions for shared projects
-    where the file system permissions may have drifted from the database state.
+    Issue #2730 + #2746: Allows manually fixing permissions for shared projects
+    with optional async mode and depth limit.
+
+    Request body (optional):
+        - async: bool - Force async mode (default: based on file count)
+        - depth_limit: int - Maximum recursion depth (default: 10)
+        - force_restart: bool - Force restart even if checkpoint exists
 
     Returns:
-        JSON response with success status or error message.
+        JSON response with success status, task info, or error message.
     """
     tenant_id = get_current_tenant_id()
     project = project_repo.get_project_by_id(project_id, tenant_id=tenant_id)
@@ -496,9 +579,204 @@ def api_fix_project_permissions(project_id):
     if not _is_docker_multi_user_mode():
         return jsonify({"error": "Permission fix is only available in Docker multi-user mode"}), 400
 
-    # Fix permissions
-    success, error_msg = setup_shared_project_permissions(project.path)
-    if success:
-        return jsonify({"success": True, "message": "Permissions fixed successfully"})
+    # Parse request parameters
+    data = request.get_json() or {}
+    force_async = data.get("async", False)
+    depth_limit = data.get("depth_limit")
+    force_restart = data.get("force_restart", False)  # noqa: F841
+
+    # Validate depth_limit parameter
+    if depth_limit is not None:
+        if not isinstance(depth_limit, int) or depth_limit < 1 or depth_limit > 50:
+            return jsonify({"error": "depth_limit must be an integer between 1 and 50"}), 400
+
+    # Estimate file count
+    file_count = estimate_file_count_fast(project.path)
+
+    # Determine execution mode
+    use_async = force_async or file_count >= PERMISSION_SYNC_THRESHOLD
+
+    if use_async:
+        # Async mode: submit background task
+        from app import db  # type: ignore[attr-defined]  # type: ignore[attr-defined]
+
+        service = get_permission_task_service()
+
+        # Check queue saturation
+        is_saturated, queue_length = service.check_queue_saturation(db.session)
+        if is_saturated:
+            return (
+                jsonify(
+                    {
+                        "error": f"Task queue is full ({queue_length}/{PERMISSION_MAX_QUEUE_SIZE}). Please retry later.",
+                    }
+                ),
+                503,
+            )
+
+        # Submit task
+        success, error_msg, task_info = service.submit_task(
+            db.session,
+            project_id=project_id,
+            user_id=user_id,
+            path=project.path,
+            priority=PERMISSION_PRIORITY_MANUAL_FIX,  # Higher priority for manual fix
+            depth_limit=depth_limit,
+        )
+
+        if success:
+            assert task_info is not None  # Type guard for mypy
+            response = {
+                "success": True,
+                "task_id": task_info["task_id"],
+                "status": "pending",
+                "estimated_files": file_count,
+                "queue_position": task_info["queue_position"],
+            }
+            return jsonify(response), 202  # Accepted
+        else:
+            return jsonify({"error": error_msg}), 503
+
     else:
-        return jsonify({"error": error_msg}), 500
+        # Sync mode: execute immediately
+        success, error_msg, files_processed = setup_permissions_with_depth_limit(
+            project.path,
+            depth_limit=depth_limit,
+            timeout=60,
+        )
+
+        if success:
+            return jsonify(
+                {
+                    "success": True,
+                    "message": "Permissions fixed successfully",
+                    "files_processed": files_processed,
+                }
+            )
+        else:
+            return jsonify({"error": error_msg}), 500
+
+
+# ============================================================================
+# Permission Task Management Endpoints (Issue #2746)
+# ============================================================================
+
+
+@projects_bp.route("/permission-tasks/<task_id>", methods=["GET"])
+@security_annotated(reason="Task initiator or project owner/admin check")
+def api_get_permission_task_status(task_id):
+    """Get permission task status.
+
+    Issue #2746: Query status of async permission setup tasks.
+
+    Returns:
+        JSON response with task status information.
+    """
+    from app import db  # type: ignore[attr-defined]  # type: ignore[attr-defined]
+
+    tenant_id = get_current_tenant_id()
+    service = get_permission_task_service()
+    task_status = service.get_task_status(db.session, task_id)
+
+    if not task_status:
+        return jsonify({"error": "Task not found"}), 404
+
+    # Permission check: only task initiator or project creator/admin can view
+    user_id = g.user_id
+    user_role = g.user.get("role")
+
+    # Get project to check ownership (with tenant isolation)
+    project = project_repo.get_project_by_id(task_status["project_id"], tenant_id=tenant_id)
+    if not project:
+        return jsonify({"error": "Associated project not found"}), 404
+
+    # Check if user has permission
+    if (
+        task_status["user_id"] != user_id
+        and project.created_by != user_id
+        and not User.is_admin_role(user_role)
+    ):
+        return jsonify({"error": "Access denied"}), 403
+
+    # Calculate estimated completion time
+    estimated_completion = None
+    if (
+        task_status["status"] == "running"
+        and task_status["total_files"] > 0
+        and task_status["progress"] > 0
+    ):
+        # Simple estimation based on current progress
+        from datetime import timedelta
+
+        elapsed_seconds = 60  # Assume 60 seconds for progress
+        remaining_progress = 100 - task_status["progress"]
+        remaining_seconds = (elapsed_seconds / task_status["progress"]) * remaining_progress
+        estimated_completion = (
+            datetime.now(timezone.utc) + timedelta(seconds=remaining_seconds)
+        ).isoformat()
+
+    response = {
+        "task_id": task_status["task_id"],
+        "project_id": task_status["project_id"],
+        "status": task_status["status"],
+        "priority": task_status["priority"],
+        "progress": task_status["progress"],
+        "files_processed": task_status["files_processed"],
+        "total_files": task_status["total_files"],
+        "depth_limit": task_status["depth_limit"],
+        "created_at": task_status["created_at"],
+        "started_at": task_status["started_at"],
+        "completed_at": task_status["completed_at"],
+        "error_message": task_status["error_message"],
+    }
+
+    if estimated_completion:
+        response["estimated_completion"] = estimated_completion
+
+    return jsonify(response)
+
+
+@projects_bp.route("/permission-tasks/<task_id>", methods=["DELETE"])
+@security_annotated(reason="Task initiator or project owner/admin check")
+def api_cancel_permission_task(task_id):
+    """Cancel a permission task.
+
+    Issue #2746: Cancel pending or running permission setup tasks.
+
+    Returns:
+        JSON response with success status or error message.
+    """
+    from app import db  # type: ignore[attr-defined]  # type: ignore[attr-defined]
+
+    tenant_id = get_current_tenant_id()
+    service = get_permission_task_service()
+
+    # Get task status first for permission check
+    task_status = service.get_task_status(db.session, task_id)
+    if not task_status:
+        return jsonify({"error": "Task not found"}), 404
+
+    # Permission check
+    user_id = g.user_id
+    user_role = g.user.get("role")
+
+    # Get project to check ownership (with tenant isolation)
+    project = project_repo.get_project_by_id(task_status["project_id"], tenant_id=tenant_id)
+    if not project:
+        return jsonify({"error": "Associated project not found"}), 404
+
+    # Check if user has permission
+    if (
+        task_status["user_id"] != user_id
+        and project.created_by != user_id
+        and not User.is_admin_role(user_role)
+    ):
+        return jsonify({"error": "Access denied"}), 403
+
+    # Cancel the task
+    success, error_msg = service.cancel_task(db.session, task_id)
+
+    if success:
+        return jsonify({"success": True, "message": "Task cancelled"})
+    else:
+        return jsonify({"error": error_msg}), 400
