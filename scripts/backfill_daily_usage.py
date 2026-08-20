@@ -22,12 +22,15 @@ Usage:
 import argparse
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timedelta
 from typing import Any
 
 # Add project root to path
-sys.path.insert(0, "/home/dwu/open-ace-01/open-ace/.worktrees/2c2193a2-c462-4ab9-adb8-beb378600e7f")
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+sys.path.insert(0, project_root)
 
 from app.repositories.database import Database
 from app.repositories.usage_repo import UsageRepository
@@ -42,9 +45,7 @@ logger = logging.getLogger(__name__)
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Backfill daily_usage from agent_sessions"
-    )
+    parser = argparse.ArgumentParser(description="Backfill daily_usage from agent_sessions")
     parser.add_argument(
         "--date",
         help="Specific date to backfill (YYYY-MM-DD)",
@@ -98,9 +99,7 @@ def check_date_has_data(repo: UsageRepository, date: str) -> bool:
         return False
 
 
-def aggregate_sessions_for_date(
-    db: Database, date: str
-) -> list[dict[str, Any]]:
+def aggregate_sessions_for_date(db: Database, date: str) -> list[dict[str, Any]]:
     """Aggregate agent_sessions data for a specific date.
 
     Args:
@@ -135,17 +134,19 @@ def aggregate_sessions_for_date(
         if row.get("models_concat"):
             models = list(set(row["models_concat"].split(",")))
 
-        results.append({
-            "tool_name": normalize_tool_name(row["tool_name"]),
-            "host_name": row["host_name"],
-            "tenant_id": row["tenant_id"],
-            "tokens_used": row["tokens_used"] or 0,
-            "input_tokens": row["input_tokens"] or 0,
-            "output_tokens": row["output_tokens"] or 0,
-            "cache_tokens": 0,  # Not tracked in agent_sessions
-            "request_count": row["request_count"] or 0,
-            "models_used": models if models else None,
-        })
+        results.append(
+            {
+                "tool_name": normalize_tool_name(row["tool_name"]),
+                "host_name": row["host_name"],
+                "tenant_id": row["tenant_id"],
+                "tokens_used": row["tokens_used"] or 0,
+                "input_tokens": row["input_tokens"] or 0,
+                "output_tokens": row["output_tokens"] or 0,
+                "cache_tokens": 0,  # Not tracked in agent_sessions
+                "request_count": row["request_count"] or 0,
+                "models_used": models if models else None,
+            }
+        )
 
     return results
 
