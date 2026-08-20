@@ -320,8 +320,10 @@ class TestRedisPasswordFailClosed:
         with pytest.raises(RuntimeError, match="REDIS_PASSWORD must be set"):
             get_redis_password()
 
-    def test_development_allows_empty_redis_password_with_warning(self, monkeypatch):
-        """In development, empty REDIS_PASSWORD should return dev password with warning."""
+    def test_development_missing_redis_password_fails_closed_with_warning(
+        self, monkeypatch, caplog
+    ):
+        """In development, missing REDIS_PASSWORD warns and fails closed (no dev fallback)."""
         from app.utils.security_env import get_redis_password
 
         # Set development environment (default)
@@ -329,9 +331,10 @@ class TestRedisPasswordFailClosed:
         # Unset password
         monkeypatch.delenv("REDIS_PASSWORD", raising=False)
 
-        # Should return dev password without raising
-        password = get_redis_password()
-        assert password == "dev-redis-password"
+        # Fail-closed: the entrypoint (not the library) owns auto-generation
+        with pytest.raises(RuntimeError, match="REDIS_PASSWORD not set in development mode"):
+            get_redis_password()
+        assert "auto-generated and persisted" in caplog.text
 
     def test_development_accepts_strong_redis_password(self, monkeypatch):
         """Strong password should be accepted in development."""
@@ -366,30 +369,30 @@ class TestRedisPasswordSpecialCharacters:
         from app.utils.security_env import get_redis_password
 
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
-        monkeypatch.setenv("REDIS_PASSWORD", "pass$word$123")
+        monkeypatch.setenv("REDIS_PASSWORD", "pass$word$1234567890123456789")
 
         password = get_redis_password()
-        assert password == "pass$word$123"
+        assert password == "pass$word$1234567890123456789"
 
     def test_password_with_exclamation_handled_correctly(self, monkeypatch):
         """Password containing ! should be accepted."""
         from app.utils.security_env import get_redis_password
 
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
-        monkeypatch.setenv("REDIS_PASSWORD", "pass!word!123")
+        monkeypatch.setenv("REDIS_PASSWORD", "pass!word!1234567890123456789")
 
         password = get_redis_password()
-        assert password == "pass!word!123"
+        assert password == "pass!word!1234567890123456789"
 
     def test_password_with_backtick_handled_correctly(self, monkeypatch):
         """Password containing backtick should be accepted."""
         from app.utils.security_env import get_redis_password
 
         monkeypatch.setenv("OPENACE_SECURITY_MODE", "production")
-        monkeypatch.setenv("REDIS_PASSWORD", "pass`word`123")
+        monkeypatch.setenv("REDIS_PASSWORD", "pass`word`1234567890123456789")
 
         password = get_redis_password()
-        assert password == "pass`word`123"
+        assert password == "pass`word`1234567890123456789"
 
     def test_password_with_special_chars_handled_correctly(self, monkeypatch):
         """Password containing multiple special characters should be accepted."""
