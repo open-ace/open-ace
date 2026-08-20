@@ -38,7 +38,7 @@ class TestDataFetchSchedulerCrossProcess:
         scheduler.configure(interval=999999, enabled=True)
 
         # Mock the is_running() method to return True
-        with patch.object(scheduler, 'is_running', return_value=True):
+        with patch.object(scheduler, "is_running", return_value=True):
             scheduler._running = True  # Set running flag
 
             status = scheduler.get_status()
@@ -57,9 +57,7 @@ class TestDataFetchSchedulerCrossProcess:
         scheduler.configure(interval=300, enabled=True)
         scheduler._running = False  # Not running locally
 
-        with patch(
-            "app.services.scheduler_status_reader.get_scheduler_status"
-        ) as mock_shared:
+        with patch("app.services.scheduler_status_reader.get_scheduler_status") as mock_shared:
             mock_shared.return_value = {
                 "running": True,
                 "worker_id": "remote-worker-123",
@@ -88,9 +86,7 @@ class TestDataFetchSchedulerCrossProcess:
         scheduler.configure(interval=300, enabled=True)
         scheduler._running = False
 
-        with patch(
-            "app.services.scheduler_status_reader.get_scheduler_status"
-        ) as mock_shared:
+        with patch("app.services.scheduler_status_reader.get_scheduler_status") as mock_shared:
             mock_shared.side_effect = Exception("Database connection failed")
 
             status = scheduler.get_status()
@@ -106,9 +102,7 @@ class TestDataFetchSchedulerCrossProcess:
         scheduler.configure(interval=600, enabled=True)
         scheduler._running = False
 
-        with patch(
-            "app.services.scheduler_status_reader.get_scheduler_status"
-        ) as mock_shared:
+        with patch("app.services.scheduler_status_reader.get_scheduler_status") as mock_shared:
             mock_shared.return_value = {
                 "running": True,
                 "worker_id": "remote-worker",
@@ -136,9 +130,7 @@ class TestDataFetchSchedulerCrossProcess:
         scheduler = DataFetchScheduler()
         scheduler.configure(interval=999999, enabled=True)
 
-        with patch(
-            "app.services.scheduler_status_reader.clear_cache"
-        ) as mock_clear:
+        with patch("app.services.scheduler_status_reader.clear_cache") as mock_clear:
             scheduler._running = False
             scheduler.start()
 
@@ -154,9 +146,7 @@ class TestDataFetchSchedulerCrossProcess:
         scheduler.configure(interval=999999, enabled=True)
         scheduler._running = True
 
-        with patch(
-            "app.services.scheduler_status_reader.clear_cache"
-        ) as mock_clear:
+        with patch("app.services.scheduler_status_reader.clear_cache") as mock_clear:
             scheduler.stop()
 
             # Should clear cache
@@ -227,9 +217,7 @@ class TestSchedulerStatusReaderIntegration:
         reader = SchedulerStatusReader()
         reader._cache = {}
 
-        old_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
-            seconds=400
-        )
+        old_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=400)
         old_time_str = old_time.isoformat()
 
         with patch.object(reader, "_query_database") as mock_query:

@@ -90,15 +90,18 @@ class SchedulerStatusReader:
             - error: str or None (if database error)
         """
         # Set default thresholds based on interval
+        # Type narrowing: after this block, thresholds are guaranteed to be int
         if threshold_healthy is None or threshold_healthy == 0:
             threshold_healthy = interval_seconds + 60
         if threshold_stopped is None or threshold_stopped == 0:
             threshold_stopped = threshold_healthy * 2
 
+        # Assert types for mypy
+        assert threshold_healthy is not None and threshold_stopped is not None
+
         # Check cache
         cache_key = job_name
         now = time.time()
-        cache_hit = False
         cache_age = None
 
         with self._cache_lock:
@@ -106,7 +109,6 @@ class SchedulerStatusReader:
                 cached_data, cached_at = self._cache[cache_key]
                 cache_age = now - cached_at
                 if cache_age < CACHE_TTL_SECONDS:
-                    cache_hit = True
                     result = cached_data.copy()
                     result["cache_age_seconds"] = cache_age
                     result["cache_hit"] = True
@@ -183,7 +185,7 @@ class SchedulerStatusReader:
         last_run_at = result.get("last_run_at")
         leader_id = result.get("leader_id")
 
-        is_expired = expires_at and expires_at < now
+        is_expired = bool(expires_at and expires_at < now)
 
         # Calculate heartbeat age
         heartbeat_age_seconds = None

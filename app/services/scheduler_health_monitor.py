@@ -319,7 +319,7 @@ class SchedulerHealthMonitor:
         """
         # Check if health_status is already computed
         if "health_status" in status:
-            return status["health_status"]
+            return str(status["health_status"])
 
         # Check if running
         running = status.get("running")

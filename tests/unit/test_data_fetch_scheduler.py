@@ -170,7 +170,7 @@ class TestDataFetchSchedulerStatus:
         now = datetime.now()
         s._last_run = now
         # Simulate running state to get local status
-        with patch.object(s, 'is_running', return_value=True):
+        with patch.object(s, "is_running", return_value=True):
             s._running = True
             status = s.get_status()
             assert status["last_run"] == now.isoformat()
@@ -180,7 +180,7 @@ class TestDataFetchSchedulerStatus:
         s = DataFetchScheduler()
         s._next_run = datetime.now().timestamp() + 300
         # Simulate running state to get local status
-        with patch.object(s, 'is_running', return_value=True):
+        with patch.object(s, "is_running", return_value=True):
             s._running = True
             status = s.get_status()
             assert status["next_run"] is not None
@@ -190,7 +190,7 @@ class TestDataFetchSchedulerStatus:
         s = DataFetchScheduler()
         s._next_run = "not_a_number"
         # Simulate running state to get local status
-        with patch.object(s, 'is_running', return_value=True):
+        with patch.object(s, "is_running", return_value=True):
             s._running = True
             status = s.get_status()
             assert status["next_run"] is None

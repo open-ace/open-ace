@@ -207,8 +207,6 @@ class DataFetchScheduler:
 
         Issue #2820: Returns cross-process status when local scheduler is not running.
         """
-        from datetime import datetime as dt
-
         # If local scheduler is running, return local status (real-time, accurate)
         if self._running:
             return self._get_local_status()
