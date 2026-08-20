@@ -407,6 +407,222 @@ class TestCostOptimizer:
         assert "recommendation_items" in report
 
 
+class TestModelDistributionAccumulation:
+    """Test model_distribution correctly accumulates tokens for same model across tools.
+
+    Issue #2739: model_distribution should accumulate, not overwrite.
+    """
+
+    def _make_optimizer(self):
+        mock_db = MagicMock()
+        opt = CostOptimizer(db=mock_db)
+        return opt, mock_db
+
+    def test_model_distribution_accumulates_same_model(self):
+        """Same model appearing in multiple rows should accumulate tokens."""
+        opt, mock_db = self._make_optimizer()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "tool-1",
+                "model": "model-a",
+                "date": "2026-01-01",
+                "input_tokens": 100,
+                "output_tokens": 20,
+            },
+            {
+                "tool_name": "tool-2",
+                "model": "model-a",
+                "date": "2026-01-01",
+                "input_tokens": 30,
+                "output_tokens": 10,
+            },
+        ]
+        report = opt.get_efficiency_report(days=30)
+        # model-a tokens should be 100+20+30+10 = 160
+        assert report["model_distribution"]["model-a"] == 160
+        assert report["total_tokens"] == 160
+
+    def test_model_distribution_accumulates_across_tools(self):
+        """Same model used by multiple tools should accumulate tokens."""
+        opt, mock_db = self._make_optimizer()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "tool-1",
+                "model": "gpt-4",
+                "date": "2026-01-01",
+                "input_tokens": 1000,
+                "output_tokens": 200,
+            },
+            {
+                "tool_name": "tool-2",
+                "model": "gpt-4",
+                "date": "2026-01-01",
+                "input_tokens": 500,
+                "output_tokens": 100,
+            },
+            {
+                "tool_name": "tool-3",
+                "model": "gpt-4",
+                "date": "2026-01-01",
+                "input_tokens": 200,
+                "output_tokens": 50,
+            },
+        ]
+        report = opt.get_efficiency_report(days=30)
+        # gpt-4 tokens: (1000+200) + (500+100) + (200+50) = 2050
+        assert report["model_distribution"]["gpt-4"] == 2050
+        assert report["total_tokens"] == 2050
+
+    def test_model_distribution_handles_empty_model(self):
+        """Empty/None model should be grouped under 'unknown' and accumulate."""
+        opt, mock_db = self._make_optimizer()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "tool-1",
+                "model": None,
+                "date": "2026-01-01",
+                "input_tokens": 100,
+                "output_tokens": 20,
+            },
+            {
+                "tool_name": "tool-2",
+                "model": "",
+                "date": "2026-01-01",
+                "input_tokens": 50,
+                "output_tokens": 10,
+            },
+        ]
+        report = opt.get_efficiency_report(days=30)
+        # Both None and "" should be grouped as "unknown" and accumulated
+        assert report["model_distribution"]["unknown"] == 180
+        assert report["total_tokens"] == 180
+
+    def test_model_distribution_different_models_separate(self):
+        """Different models should be tracked separately."""
+        opt, mock_db = self._make_optimizer()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "tool-1",
+                "model": "model-a",
+                "date": "2026-01-01",
+                "input_tokens": 100,
+                "output_tokens": 20,
+            },
+            {
+                "tool_name": "tool-2",
+                "model": "model-b",
+                "date": "2026-01-01",
+                "input_tokens": 50,
+                "output_tokens": 10,
+            },
+        ]
+        report = opt.get_efficiency_report(days=30)
+        assert report["model_distribution"]["model-a"] == 120
+        assert report["model_distribution"]["model-b"] == 60
+        assert report["total_tokens"] == 180
+
+    def test_model_distribution_order_independence(self):
+        """Result should be independent of input row order."""
+        opt, mock_db = self._make_optimizer()
+
+        # First order
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "t1",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 100,
+                "output_tokens": 20,
+            },
+            {
+                "tool_name": "t2",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 30,
+                "output_tokens": 10,
+            },
+            {"tool_name": "t3", "model": "m2", "date": "d", "input_tokens": 50, "output_tokens": 5},
+        ]
+        report1 = opt.get_efficiency_report(days=30)
+
+        # Reset cache by creating new optimizer
+        opt2, mock_db2 = self._make_optimizer()
+        mock_db2.fetch_all.return_value = [
+            {"tool_name": "t3", "model": "m2", "date": "d", "input_tokens": 50, "output_tokens": 5},
+            {
+                "tool_name": "t2",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 30,
+                "output_tokens": 10,
+            },
+            {
+                "tool_name": "t1",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 100,
+                "output_tokens": 20,
+            },
+        ]
+        report2 = opt2.get_efficiency_report(days=30)
+
+        assert report1["model_distribution"] == report2["model_distribution"]
+        assert report1["model_distribution"]["m1"] == 160
+        assert report2["model_distribution"]["m1"] == 160
+
+    def test_model_distribution_consistency_with_total_tokens(self):
+        """Distribution sum should equal total_tokens."""
+        opt, mock_db = self._make_optimizer()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "t1",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 100,
+                "output_tokens": 20,
+            },
+            {
+                "tool_name": "t2",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 30,
+                "output_tokens": 10,
+            },
+            {"tool_name": "t3", "model": "m2", "date": "d", "input_tokens": 50, "output_tokens": 5},
+        ]
+        report = opt.get_efficiency_report(days=30)
+
+        distribution_sum = sum(report["model_distribution"].values())
+        assert (
+            distribution_sum == report["total_tokens"]
+        ), f"Distribution sum {distribution_sum} != total_tokens {report['total_tokens']}"
+
+    def test_unique_models_count(self):
+        """unique_models should equal number of distinct model keys."""
+        opt, mock_db = self._make_optimizer()
+        mock_db.fetch_all.return_value = [
+            {
+                "tool_name": "t1",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 100,
+                "output_tokens": 20,
+            },
+            {
+                "tool_name": "t2",
+                "model": "m1",
+                "date": "d",
+                "input_tokens": 30,
+                "output_tokens": 10,
+            },
+            {"tool_name": "t3", "model": "m2", "date": "d", "input_tokens": 50, "output_tokens": 5},
+        ]
+        report = opt.get_efficiency_report(days=30)
+
+        assert report["unique_models"] == len(report["model_distribution"])
+        assert report["unique_models"] == 2
+
+
 class TestEfficiencyReportAPIValidation:
     """Test API parameter validation for efficiency report endpoint."""
 

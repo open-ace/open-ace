@@ -16,6 +16,7 @@ Task Types:
 """
 
 import logging
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -978,12 +979,13 @@ class CostOptimizer:
         avg_tokens_per_request = total_tokens / total_requests if total_requests > 0 else 0
         output_ratio = (total_output / total_tokens * 100) if total_tokens > 0 else 0
 
-        # Model distribution
-        model_distribution = {}
+        # Model distribution (accumulate tokens for same model across tools)
+        model_distribution: dict[str, int] = defaultdict(int)
         for row in data["by_model"]:
             model = row.get("model") or "unknown"
             tokens = (row.get("input_tokens") or 0) + (row.get("output_tokens") or 0)
-            model_distribution[model] = tokens
+            model_distribution[model] += tokens
+        model_distribution = dict(model_distribution)
 
         # ===== New fields: efficiency score, cost, waste, recommendations =====
 
