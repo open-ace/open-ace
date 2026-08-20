@@ -799,10 +799,12 @@ def handle(ctx, deps) -> PhaseResult:
     infra_error_kind = None
     if agent_out.get("infra_error"):
         infra_retry_count = _prior_infra_retry_count(wf, merge_sha, snap_hash) + 1
-        # The parse-failure kind is set by _parse_verifier_output and never
-        # overwritten downstream (every later stage that sets infra_error guards
-        # on `not agent_out.get("infra_error")`), so it reliably describes THIS
-        # attempt's infra_error.
+        # infra_error_kind is set only by _parse_verifier_output's parse-failure
+        # path, which also returns verdicts=[] and snapshot=None. So whenever a
+        # kind is present the per-verdict loop above is empty (its verdict-level
+        # infra_error assignments never fire) and the snapshot/probe sites are
+        # skipped (None snapshot) or guarded by `not infra_error` — the kind can
+        # never go stale relative to THIS attempt's final infra_error.
         infra_error_kind = agent_out.get("infra_error_kind")
     report = {
         "merge_sha": merge_sha,

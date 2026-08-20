@@ -229,3 +229,31 @@ def test_unrecoverable_garbage_still_returns_none():
     # heuristic must never fabricate a verdict out of noise.
     text = '```json\n{this is "not: json at "all }{ }"\n```'
     assert _extract(text) is None
+
+
+def test_parse_verifier_output_tags_unparseable_kind():
+    # Producer side of the #2867 deterministic-retry contract: when extraction
+    # fails, _parse_verifier_output must return infra_error_kind ==
+    # "unparseable_output" — the exact string acceptance_verification's early
+    # cap keys on. Anchors the cross-file literal so a rename on one side is
+    # caught by a test rather than by a stuck prod workflow.
+    from unittest.mock import MagicMock
+
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._artifact_text = MagicMock(return_value="prose only, no json object at all")
+    out = orch._parse_verifier_output(MagicMock())
+    assert out["infra_error"] == "verification agent output was not valid JSON"
+    assert out["infra_error_kind"] == "unparseable_output"
+    assert out["verdicts"] == []
+
+    # And the success path stays clean: a recoverable batch parses with no
+    # infra_error / kind, so the cap logic never engages on a real verdict.
+    orch._artifact_text = MagicMock(
+        return_value='{"verdicts": [{"item": "进入"设置"页", "verdict": "confirmed"}], "snapshot": null}'
+    )
+    good = orch._parse_verifier_output(MagicMock())
+    assert good.get("infra_error") is None
+    assert good.get("infra_error_kind") is None
+    assert good["verdicts"][0]["verdict"] == "confirmed"
