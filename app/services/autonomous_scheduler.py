@@ -312,6 +312,13 @@ class AutonomousScheduler:
         self._reap_completed_futures()
         if self._bg_executor is not None:
             self._bg_executor.shutdown(wait=False)
+            # Reset so a later start() on this singleton rebuilds a live
+            # executor. _get_bg_executor only rebuilds on None/cap-change, so
+            # without this reset a stop()→start() cycle would submit to the
+            # dead executor forever (RuntimeError swallowed by _run_loop's
+            # except → the loop spins advancing nothing, a silent outage).
+            self._bg_executor = None
+            self._bg_executor_cap = 0
         logger.info(
             "Autonomous scheduler stopped (%d active attempts interrupted)", len(orchestrators)
         )
@@ -1206,8 +1213,11 @@ class AutonomousScheduler:
         returns immediately; completed futures are reaped later via
         ``_reap_completed_futures``. Slot accounting is identical on both
         paths: selected workflows are registered in ``_in_progress_ids``
-        before submission, so the background executor never holds more work
-        than the concurrency cap. NOTE: the ``wait=False`` path currently has
+        before submission, so the background executor holds no more work than
+        the concurrency cap — except when the stale-lease reclaim
+        (``_reclaim_stale_in_progress``) drops a memory entry whose future is
+        still executing, which intentionally supersedes the memory cap when
+        the DB lease breaks. NOTE: the ``wait=False`` path currently has
         a single caller (``_run_loop``); a second concurrent caller would need
         the selection+registration lock blocks merged into one critical
         section to keep the "read-then-register" window race-free.
@@ -1397,7 +1407,21 @@ class AutonomousScheduler:
             executor = self._get_bg_executor()
             for wf in to_process:
                 wf_id = wf.get("workflow_id", "")
-                future = executor.submit(self._advance_single, wf_id)
+                try:
+                    future = executor.submit(self._advance_single, wf_id)
+                except RuntimeError:
+                    # stop() shut the executor down between selection and this
+                    # submit (the 20s join can time out while the loop is
+                    # still mid-tick). Release the registration made for this
+                    # workflow — otherwise its slot/conflict keys linger until
+                    # the stale-lease reclaim (~30 min) heals them.
+                    logger.warning(
+                        "Background submit for workflow %s failed (executor shut down); "
+                        "releasing slot",
+                        wf_id[:8],
+                    )
+                    self._discard_in_progress_entry(wf_id, legacy_wf=wf)
+                    continue
                 with self._futures_lock:
                     self._in_flight_futures[future] = wf_id
 

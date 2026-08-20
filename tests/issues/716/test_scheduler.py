@@ -456,7 +456,8 @@ class TestNonBlockingAdvancePath:
             assert "wf-slow" not in scheduler._in_progress_ids
         finally:
             # Drain the executor so the test leaves no worker threads behind.
-            scheduler._bg_executor.shutdown(wait=True) if scheduler._bg_executor else None
+            if scheduler._bg_executor:
+                scheduler._bg_executor.shutdown(wait=True)
 
     def test_reap_completed_futures_logs_errors(self, caplog):
         """An exception escaping _advance_single on the background path must
@@ -495,21 +496,46 @@ class TestNonBlockingAdvancePath:
             # Reaped: a second reap is a no-op.
             assert scheduler._in_flight_futures == {}
         finally:
-            scheduler._bg_executor.shutdown(wait=True) if scheduler._bg_executor else None
+            if scheduler._bg_executor:
+                scheduler._bg_executor.shutdown(wait=True)
 
-    def test_stop_reaps_and_shuts_down_background_executor(self):
+    def test_stop_reaps_and_shuts_down_background_executor(self, caplog):
         """stop() must reap completed background advances (so their errors are
         logged) and release the executor without waiting for in-flight work
         (in-flight advances were already told to shut down via
-        prepare_for_shutdown)."""
+        prepare_for_shutdown). It must also RESET the executor reference so a
+        later start() on the same singleton rebuilds a live executor instead
+        of submitting to the dead one forever (silent-outage restart bug)."""
         scheduler = AutonomousScheduler()
         scheduler._get_bg_executor()
         executor = scheduler._bg_executor
-        scheduler._stop_event.set()
-        scheduler.stop()
 
+        # Seed one completed-but-unreaped failing future, as a tick that was
+        # interrupted between completion and reaping would leave behind.
+        def boom(workflow_id):
+            raise RuntimeError(f"boom {workflow_id}")
+
+        future = executor.submit(boom, "wf-boom")
+        with scheduler._futures_lock:
+            scheduler._in_flight_futures[future] = "wf-boom"
+        # Wait for completion; result() re-raises the boom — that's expected.
+        with pytest.raises(RuntimeError, match="boom wf-boom"):
+            future.result(timeout=5)
+
+        scheduler._stop_event.set()
+        with caplog.at_level(logging.ERROR, logger="app.services.autonomous_scheduler"):
+            scheduler.stop()
+
+        # The completed future's error surfaced and the tracking dict drained.
+        assert any(
+            "wf-boom" in r.message and "boom" in r.message for r in caplog.records
+        ), caplog.messages
+        assert scheduler._in_flight_futures == {}
+        # The old executor is dead...
         with pytest.raises(RuntimeError):
             executor.submit(lambda: None)
+        # ...and the reference was reset so start() rebuilds a live one.
+        assert scheduler._bg_executor is None
 
     def test_wait_true_still_blocks_until_advances_finish(self):
         """The legacy wait=True semantics (used by direct callers and relied on

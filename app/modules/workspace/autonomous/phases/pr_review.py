@@ -318,20 +318,34 @@ def handle(ctx, deps) -> PhaseResult:
     # If that PR was already merged, every later round — and the merge phase —
     # operates on the merged PR's headRefOid and the merge resolution computes
     # no new commit ("Merge resolution made no commit; refusing unchanged
-    # push", workflow #331). A non-OPEN recorded PR is therefore treated as
-    # absent on the round-1 creation window so a fresh PR is created; the
-    # "already exists" recovery below still guards against duplicates when the
-    # state probe failed while an OPEN PR exists. On later rounds the number is
-    # kept (downstream reads expect a non-None pr_number) and only a warning is
-    # logged — the main reachable path there is a human merging the PR
-    # mid-review.
+    # push", workflow #331). A confirmed non-OPEN recorded PR is therefore
+    # treated as absent on the round-1 creation window so a fresh PR is
+    # created; the "already exists" recovery below still guards against
+    # duplicates when the state probe failed while an OPEN PR exists. On later
+    # rounds the number is kept (downstream reads expect a non-None
+    # pr_number) and only a warning is logged — the main reachable path there
+    # is a human merging the PR mid-review.
     if existing_pr_number:
+        probe_error: Exception | None = None
+        pr_state = ""
         try:
             recorded_pr = gh.get_pr(existing_pr_number)
             pr_state = (recorded_pr.get("state") or "").upper()
-        except Exception:
-            pr_state = ""
-        if pr_state != "OPEN":
+        except Exception as e:
+            probe_error = e
+        if probe_error is not None:
+            # A FAILED probe (transient gh/API error) is not evidence the PR
+            # is non-OPEN: nulling the number here would attempt a doomed
+            # create_pr through the same flaky gh and could fail the workflow
+            # outright where keeping the recorded PR proceeds normally. Keep
+            # the id on every round and let the "already exists" recovery
+            # handle the rare case where a fresh PR genuinely exists.
+            logger.warning(
+                "Recorded PR #%s state probe failed (%s); keeping PR id",
+                existing_pr_number,
+                probe_error,
+            )
+        elif pr_state != "OPEN":
             if round_num == 1:
                 logger.warning(
                     "Recorded PR #%s state=%r is not OPEN; creating a fresh PR",

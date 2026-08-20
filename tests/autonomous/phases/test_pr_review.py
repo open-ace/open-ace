@@ -584,3 +584,22 @@ def test_later_round_keeps_recorded_pr_id_when_not_open():
     gh.create_pr.assert_not_called()
     # The recorded PR number is not rewritten to a fresh PR.
     assert "github_pr_number" not in result.workflow_patch
+
+
+@pytest.mark.regression
+@pytest.mark.issue(331)
+def test_probe_failure_keeps_recorded_pr_id():
+    """A FAILED state probe (transient gh/API error) is not evidence that the
+    recorded PR is non-OPEN: nulling the number would attempt a doomed
+    create_pr through the same flaky gh and could fail the workflow outright.
+    The recorded number is kept on every round and no PR is created."""
+    gh = _gh()
+    gh.get_pr.side_effect = Exception("gh: rate limit exceeded")
+    host = _host(review_is_approved=True)
+    deps = _deps(host, gh)
+
+    result = pr_review_phase.handle(_ctx(_workflow(current_round=0, max_pr_review_rounds=1)), deps)
+
+    gh.create_pr.assert_not_called()
+    # The recorded PR number is not rewritten to a fresh PR.
+    assert "github_pr_number" not in result.workflow_patch
