@@ -701,6 +701,7 @@ class ROICalculator:
         self,
         months: int = 6,
         user_id: int | None = None,
+        tool_name: str | None = None,
         tenant_id: int | None = None,
     ) -> list[ROIMetrics]:
         """
@@ -712,6 +713,7 @@ class ROICalculator:
         Args:
             months: Number of months to analyze.
             user_id: Optional user ID filter.
+            tool_name: Optional tool name filter.
             tenant_id: Optional tenant scope (caller's tenant).
 
         Returns:
@@ -751,6 +753,10 @@ class ROICalculator:
             query += " AND user_id = ?"
             params.append(user_id)
 
+        if tool_name:
+            query += " AND tool_name = ?"
+            params.append(tool_name)
+
         query += f" GROUP BY {month_expr} ORDER BY month"
 
         rows = self.db.fetch_all(query, params)
@@ -774,6 +780,10 @@ class ROICalculator:
         if user_id:
             model_query += " AND user_id = ?"
             model_params.append(user_id)
+
+        if tool_name:
+            model_query += " AND tool_name = ?"
+            model_params.append(tool_name)
 
         model_query += f" GROUP BY {month_expr}, tool_name, models_used"
 
@@ -1086,6 +1096,7 @@ class ROICalculator:
         start_date: str,
         end_date: str,
         user_id: int | None = None,
+        tool_name: str | None = None,
         tenant_id: int | None = None,
     ) -> list[CostBreakdown]:
         """
@@ -1095,6 +1106,7 @@ class ROICalculator:
             start_date: Start date.
             end_date: End date.
             user_id: Optional user ID filter.
+            tool_name: Optional tool name filter.
             tenant_id: Optional tenant scope (caller's tenant).
 
         Returns:
@@ -1118,6 +1130,10 @@ class ROICalculator:
         if user_id:
             query += " AND user_id = ?"
             params.append(user_id)
+
+        if tool_name:
+            query += " AND tool_name = ?"
+            params.append(tool_name)
 
         query += " GROUP BY tool_name, models_used ORDER BY SUM(input_tokens + output_tokens) DESC"
 
