@@ -189,7 +189,7 @@ class SchedulerStatusReader:
         heartbeat_age_seconds = None
         if heartbeat_at:
             # Handle timezone-aware and naive datetime objects
-            if hasattr(heartbeat_at, "tzinfo") and heartbeat_at.tzinfo is not None:
+            if heartbeat_at.tzinfo is not None:
                 heartbeat_age_seconds = (now - heartbeat_at.replace(tzinfo=None)).total_seconds()
             else:
                 heartbeat_age_seconds = (now - heartbeat_at).total_seconds()
@@ -286,10 +286,8 @@ class SchedulerStatusReader:
 
         if last_run_at:
             # Based on last run time
-            if hasattr(last_run_at, "replace"):
-                last_run_naive = (
-                    last_run_at.replace(tzinfo=None) if last_run_at.tzinfo else last_run_at
-                )
+            if last_run_at.tzinfo:
+                last_run_naive = last_run_at.replace(tzinfo=None)
             else:
                 last_run_naive = last_run_at
             return last_run_naive + timedelta(seconds=interval_seconds)

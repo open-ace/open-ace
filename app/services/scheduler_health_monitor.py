@@ -348,7 +348,9 @@ class SchedulerHealthMonitor:
         health_status = self._get_scheduler_health_status(status)
         return health_status in ("healthy", "stale")  # stale is still "healthy" in basic check
 
-    def _create_scheduler_alert(self, name: str, status: dict, severity: str = "critical", is_stale: bool = False):
+    def _create_scheduler_alert(
+        self, name: str, status: dict, severity: str = "critical", is_stale: bool = False
+    ):
         """Create a system alert for a scheduler issue.
 
         Args:
