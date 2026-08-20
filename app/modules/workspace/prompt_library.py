@@ -22,6 +22,7 @@ from app.repositories.database import (
     get_database_url,
     is_postgresql,
 )
+from app.utils.datetime_utils import ensure_utc_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,8 @@ class PromptTemplate:
             "is_public": self.is_public,
             "is_featured": self.is_featured,
             "use_count": self.use_count,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": ensure_utc_suffix(self.created_at),
+            "updated_at": ensure_utc_suffix(self.updated_at),
         }
 
     @classmethod
