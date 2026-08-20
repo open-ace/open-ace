@@ -72,12 +72,12 @@ def downgrade() -> None:
     conn = op.get_bind()
     inspector = sa.inspect(conn)
     indexes = [idx["name"] for idx in inspector.get_indexes("projects")]
-    
+
     if "idx_projects_permission_status" in indexes:
         op.drop_index("idx_projects_permission_status", table_name="projects")
-    
+
     if column_exists("projects", "permission_task_id"):
         op.drop_column("projects", "permission_task_id")
-    
+
     if column_exists("projects", "permission_status"):
         op.drop_column("projects", "permission_status")
