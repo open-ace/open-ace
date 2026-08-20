@@ -67,7 +67,7 @@ def _parse_fetch_result(output: str) -> dict[str, Any]:
 
     if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
         # Extract content between markers
-        content = output[start_idx + len(start_marker):end_idx].strip()
+        content = output[start_idx + len(start_marker) : end_idx].strip()
         try:
             result: dict[str, Any] = json.loads(content)
             # Validate required fields
@@ -86,8 +86,8 @@ def _parse_fetch_result(output: str) -> dict[str, Any]:
     match = re.search(r"FETCH_RESULT:\s*(\{.*?\})\s*$", output, re.MULTILINE)
     if match:
         try:
-            result: dict[str, Any] = json.loads(match.group(1))
-            return result
+            legacy_result: dict[str, Any] = json.loads(match.group(1))
+            return legacy_result
         except json.JSONDecodeError:
             pass
     return {}

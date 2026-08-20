@@ -37,7 +37,9 @@ except ImportError:
         "error": "websockets module not installed. Install with: pip install websockets",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-    print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
+    print(
+        f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+    )
     sys.exit(1)
 
 # Add shared directory to path
@@ -435,7 +437,9 @@ async def fetch_and_save_usage(
             "error": "OpenClaw token not configured",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
+        print(
+            f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+        )
         return False
 
     if hostname is None:
@@ -501,7 +505,9 @@ async def fetch_and_save_usage(
             "error": None,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
+        print(
+            f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+        )
         return True
     else:
         print("Failed to retrieve usage data via WebSocket API")
@@ -513,7 +519,9 @@ async def fetch_and_save_usage(
             "error": "Failed to retrieve usage data via WebSocket API",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
+        print(
+            f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+        )
         return False
 
 
@@ -2009,7 +2017,9 @@ def fetch_and_save_messages(
                 "error": None,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
+            print(
+                f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+            )
             return True
 
         coverage_data["users_scanned"] = len(user_sessions)
@@ -2143,7 +2153,9 @@ def fetch_and_save_messages(
         "error": None,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-    print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
+    print(
+        f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+    )
     return True
 
 

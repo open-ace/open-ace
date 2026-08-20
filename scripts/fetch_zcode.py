@@ -911,7 +911,9 @@ def fetch_and_save(
                 "error": None,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
+            print(
+                f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+            )
             return False
         coverage_data["users_scanned"] = len(db_targets)
         print(f"Found {len(db_targets)} users with ZCode data:")
@@ -929,7 +931,9 @@ def fetch_and_save(
                 "error": None,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
+            print(
+                f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+            )
             return False
         coverage_data["users_scanned"] = 1
         db_targets = [(None, db_path)]
@@ -1019,7 +1023,9 @@ def fetch_and_save(
         "error": None,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-    print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
+    print(
+        f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+    )
 
     return True
 

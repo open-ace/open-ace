@@ -192,16 +192,16 @@ class TestFetchQwenNoDataScenario:
 
     def test_no_data_output_format(self):
         """Verify fetch_qwen outputs correct no_data format."""
-        from pathlib import Path
-
         # Import fetch_qwen to verify output format logic
         # This is a structural test - the actual logic is tested by integration
         import importlib.util
+        from pathlib import Path
 
         spec = importlib.util.spec_from_file_location(
             "fetch_qwen", Path(__file__).resolve().parents[2] / "scripts" / "fetch_qwen.py"
         )
         fetch_qwen = importlib.util.module_from_spec(spec)
+        _ = fetch_qwen  # Module loaded for structure verification
 
         # We verify the module can be loaded and has expected structure
         # The actual output format is verified by syntax check above

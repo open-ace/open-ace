@@ -1183,7 +1183,9 @@ def fetch_and_save(
                 "error": None,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
+            print(
+                f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+            )
             return False
 
         coverage_data["users_scanned"] = len(user_sessions)
@@ -1212,7 +1214,9 @@ def fetch_and_save(
                 "error": None,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
+            print(
+                f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+            )
             return False
 
         coverage_data["users_scanned"] = 1
@@ -1297,7 +1301,9 @@ def fetch_and_save(
         "error": None,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-    print(f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END===")
+    print(
+        f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+    )
 
     return True
 
