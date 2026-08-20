@@ -203,6 +203,20 @@ def _is_stale_lease_rejection(err_str: str) -> bool:
     return any(kw in combined for kw in _FORCE_WITH_LEASE_REFRESH_KEYWORDS)
 
 
+_MISSING_REMOTE_REF_FETCH_KEYWORDS = (
+    "couldn't find remote ref",
+    "could not find remote ref",
+    "couldn't find remote branch",
+    "could not find remote branch",
+)
+
+
+def _is_missing_remote_ref_fetch_error(err_str: str) -> bool:
+    """Whether a targeted fetch proved the remote branch no longer exists."""
+    combined = f"{err_str}".lower()
+    return any(kw in combined for kw in _MISSING_REMOTE_REF_FETCH_KEYWORDS)
+
+
 # Failure markers used to locate the real error lines inside a long pre-commit /
 # pytest / mypy log. The tail-only approach drops errors that sit in the middle
 # of the output (e.g. mypy failing while later hooks keep printing).
@@ -2771,6 +2785,18 @@ class GitHubOps:
             try:
                 self._run_git(["fetch", remote, target])
             except GitHubOpsError as fetch_err:
+                if _is_missing_remote_ref_fetch_error(str(fetch_err)):
+                    plain_push_args = ["push", remote]
+                    if branch:
+                        plain_push_args.append(branch)
+                    logger.warning(
+                        "force-with-lease stale lease for %s but remote ref is "
+                        "absent; plain-pushing validated auto-dev branch to "
+                        "recreate it",
+                        target,
+                    )
+                    self._run_git(plain_push_args)
+                    return
                 logger.warning("lease-refresh fetch failed: %s", fetch_err)
                 raise e from fetch_err
             self._run_git(args)
