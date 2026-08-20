@@ -21,8 +21,8 @@ if TYPE_CHECKING:
 
 
 # revision identifiers, used by Alembic.
-revision: str = "20260820_004_add_deregister_failures_table"
-down_revision: str | None = "20260820_003_add_daily_usage_synced"
+revision: str = "20260820_004"
+down_revision: str | None = "20260820_003"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
