@@ -27,7 +27,7 @@ class TestDataFetchSchedulerCrossProcess:
                 scheduler = DataFetchScheduler._instance
                 if scheduler._running:
                     scheduler.stop()
-            except Exception:
+            except Exception:  # allow-swallow: cleanup
                 pass
         DataFetchScheduler._instance = None
         SchedulerStatusReader._instance = None
