@@ -138,3 +138,94 @@ def test_truncated_object_with_no_complete_element_returns_none():
     # Cut off before ANY complete verdict — nothing safe to recover.
     text = '```json\n{"verdicts": [{"item": "a", "verdict": "conf'
     assert _extract(text) is None
+
+
+# --- Unescaped inner ASCII double quotes (#2867). glm reproduces the Chinese
+# acceptance criteria verbatim; when a checklist item quotes a UI label the
+# inner 「"..."」 quotes land unescaped, so strict json.loads raises and the
+# whole (actually-passing) verdict batch was misjudged as an infra failure.
+# The parser must escape structurally-inner quotes and recover the verdicts,
+# while still returning None (fail-closed) when nothing valid can be recovered.
+
+
+def test_unescaped_inner_quotes_in_string_value_recovered():
+    # An item value that quotes a UI label: the inner quotes are unescaped.
+    text = (
+        "```json\n"
+        '{"verdicts": [{"item": "`platform_admin` 可以看到并进入"租户管理"。", '
+        '"verdict": "confirmed"}], "snapshot": null}\n'
+        "```"
+    )
+    result = _extract(text)
+    assert result is not None
+    assert result["verdicts"][0]["verdict"] == "confirmed"
+    # The inner label is preserved intact in the recovered value.
+    assert '"租户管理"' in result["verdicts"][0]["item"]
+    assert result["snapshot"] is None
+
+
+def test_2756_style_full_batch_recovers_all_confirmed():
+    # Mirrors the #2756 raw output: 5/5 confirmed, several items quoting labels
+    # with unescaped inner quotes, terse evidence refs, prose preface + fence.
+    items = [
+        '{"item": "`platform_admin` 可以看到并进入"租户管理"。", "verdict": "confirmed", '
+        '"evidence": [{"ref": "app/routes/tenant.py:42", "note": "route guarded"}], '
+        '"rationale": "读到 admin 分支"}',
+        '{"item": "普通用户访问"租户管理"返回 403。", "verdict": "confirmed", '
+        '"evidence": [{"ref": "app/routes/tenant.py:55", "note": "403 path"}], '
+        '"rationale": "deny 分支"}',
+        '{"item": "列表按 "tenant_id" 过滤。", "verdict": "confirmed", '
+        '"evidence": [{"ref": "app/repositories/tenant.py:8", "note": "where tenant_id"}], '
+        '"rationale": "SQL where"}',
+        '{"item": "创建时写入 "tenant_id"。", "verdict": "confirmed", '
+        '"evidence": [{"ref": "app/repositories/tenant.py:20", "note": "insert col"}], '
+        '"rationale": "insert"}',
+        '{"item": "前端菜单显示"租户管理"入口。", "verdict": "confirmed", '
+        '"evidence": [{"ref": "web/src/Nav.tsx:12", "note": "menu item"}], '
+        '"rationale": "nav"}',
+    ]
+    text = (
+        "I verified the merged changes against the acceptance snapshot.\n"
+        "```json\n"
+        '{"verdicts": [' + ", ".join(items) + '], "snapshot": null}\n'
+        "```"
+    )
+    result = _extract(text)
+    assert result is not None
+    verdicts = result["verdicts"]
+    assert len(verdicts) == 5
+    assert all(v["verdict"] == "confirmed" for v in verdicts)
+
+
+def test_unescaped_inner_quotes_combined_with_trailing_comma():
+    # fence + prose preface + trailing comma + unescaped inner quotes together.
+    text = (
+        "Result below:\n"
+        "```json\n"
+        '{"verdicts": [{"item": "进入"设置"页", "verdict": "confirmed",},], "snapshot": null,}\n'
+        "```"
+    )
+    result = _extract(text)
+    assert result is not None
+    assert result["verdicts"][0]["verdict"] == "confirmed"
+    assert '"设置"' in result["verdicts"][0]["item"]
+    assert result["snapshot"] is None
+
+
+def test_unescaped_inner_quotes_unfenced_prose_wrapped():
+    # Same defect but unfenced, wrapped in prose on both sides.
+    text = (
+        "Here is my assessment: "
+        '{"verdicts": [{"item": "点击"保存"按钮生效", "verdict": "confirmed"}], "snapshot": null}'
+        " Done."
+    )
+    result = _extract(text)
+    assert result is not None
+    assert '"保存"' in result["verdicts"][0]["item"]
+
+
+def test_unrecoverable_garbage_still_returns_none():
+    # A brace-y blob that is not recoverable JSON must still fail closed — the
+    # heuristic must never fabricate a verdict out of noise.
+    text = '```json\n{this is "not: json at "all }{ }"\n```'
+    assert _extract(text) is None

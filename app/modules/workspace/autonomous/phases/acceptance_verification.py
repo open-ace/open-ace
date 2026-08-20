@@ -43,6 +43,12 @@ from app.utils.config import is_acceptance_verification_enabled
 
 VERIFIED_BY = "acceptance-verifier-v1"
 MAX_VERIFIER_INFRA_RETRIES = 3
+# A deterministic parse failure (agent output that cannot be parsed) that
+# repeats identically is not a transient hiccup — re-running just reproduces the
+# same unparseable form. Cap consecutive repeats of that kind here so the
+# workflow reaches human review after 2 attempts instead of burning the full
+# transient-retry budget on a certain-to-fail retry (#2867).
+DETERMINISTIC_PARSE_MAX_RETRIES = 2
 
 logger = logging.getLogger(__name__)
 
@@ -519,6 +525,29 @@ def _prior_infra_retry_count(wf: dict, merge_sha: str, snap_hash: str) -> int:
         return 0
 
 
+def _prior_infra_error_kind(wf: dict, merge_sha: str, snap_hash: str) -> str | None:
+    """Return the prior attempt's ``infra_error_kind`` for the current pair.
+
+    Used to detect a deterministic parse failure repeating identically across
+    consecutive attempts (#2867). Returns ``None`` when the prior report is for
+    a different merge/snapshot pair, was not an infra failure, or carried no
+    kind (older reports predating the field).
+    """
+    raw = wf.get("verification_report")
+    if not raw:
+        return None
+    try:
+        report = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    except Exception:
+        return None
+    if not isinstance(report, dict) or not report.get("infra_error"):
+        return None
+    if report.get("merge_sha") != merge_sha or report.get("issue_acceptance_hash") != snap_hash:
+        return None
+    kind = report.get("infra_error_kind")
+    return kind if isinstance(kind, str) and kind else None
+
+
 def _acceptance_milestone(*, workflow_id, dev_round, attempt, status, report) -> dict:
     """Build the acceptance-verification milestone row.
 
@@ -767,8 +796,14 @@ def handle(ctx, deps) -> PhaseResult:
     # (S5); fall back to the static runner tag otherwise.
     verified_by = agent_out.get("verified_by") or VERIFIED_BY
     infra_retry_count = 0
+    infra_error_kind = None
     if agent_out.get("infra_error"):
         infra_retry_count = _prior_infra_retry_count(wf, merge_sha, snap_hash) + 1
+        # The parse-failure kind is set by _parse_verifier_output and never
+        # overwritten downstream (every later stage that sets infra_error guards
+        # on `not agent_out.get("infra_error")`), so it reliably describes THIS
+        # attempt's infra_error.
+        infra_error_kind = agent_out.get("infra_error_kind")
     report = {
         "merge_sha": merge_sha,
         "issue_acceptance_hash": snap_hash,
@@ -797,6 +832,7 @@ def handle(ctx, deps) -> PhaseResult:
         ],
         "status": status,
         "infra_error": agent_out.get("infra_error") or None,
+        "infra_error_kind": infra_error_kind,
         "infra_retry_count": infra_retry_count,
         "verified_at": _now_iso(),
     }
@@ -821,7 +857,18 @@ def handle(ctx, deps) -> PhaseResult:
         status=status,
         report=report,
     )
-    if agent_out.get("infra_error") and infra_retry_count < MAX_VERIFIER_INFRA_RETRIES:
+    # A deterministic parse failure that repeats identically across consecutive
+    # attempts is certain to keep failing, so cap it below the transient budget
+    # (#2867). The first occurrence still gets one retry (a genuine one-off is
+    # possible); the second consecutive same-kind failure stops early.
+    effective_max = MAX_VERIFIER_INFRA_RETRIES
+    deterministic_repeat = (
+        infra_error_kind == "unparseable_output"
+        and _prior_infra_error_kind(wf, merge_sha, snap_hash) == "unparseable_output"
+    )
+    if deterministic_repeat:
+        effective_max = DETERMINISTIC_PARSE_MAX_RETRIES
+    if agent_out.get("infra_error") and infra_retry_count < effective_max:
         # Infrastructure failures are not acceptance evidence and must not
         # create a terminal milestone. Keep the workflow in its current phase
         # so the scheduler can retry automatically; the attempt report remains
@@ -833,12 +880,16 @@ def handle(ctx, deps) -> PhaseResult:
             }
         )
     if agent_out.get("infra_error"):
+        exhausted_msg = (
+            "Acceptance verifier produced unparseable output "
+            f"{infra_retry_count}x; awaiting review"
+            if deterministic_repeat
+            else "Acceptance verifier infrastructure retries exhausted; awaiting review"
+        )
         return PhaseResult.pause(
             workflow_patch={
                 **common_patch,
-                "error_message": (
-                    "Acceptance verifier infrastructure retries exhausted; awaiting review"
-                ),
+                "error_message": exhausted_msg,
             },
             milestone_events=[milestone],
             structured_error={"message": "verifier-infrastructure-exhausted", "report": report},
