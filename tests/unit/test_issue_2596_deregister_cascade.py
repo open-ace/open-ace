@@ -97,8 +97,25 @@ class TestDeregisterCompensationWorker:
 @pytest.fixture
 def app_context():
     """Create a Flask application context for testing."""
+    import os
+
     from app import create_app
+    from app.repositories.database import Database
+
+    # Ensure we use a test database, not the production one
+    # Set DATABASE_URL to use an in-memory database for testing
+    original_db_url = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
     app = create_app()
     with app.app_context():
+        # Verify we're using the test database
+        db = Database()
+        print(f"Test database URL: {db.db_url}")
         yield
+
+    # Restore original database URL
+    if original_db_url:
+        os.environ["DATABASE_URL"] = original_db_url
+    else:
+        os.environ.pop("DATABASE_URL", None)
