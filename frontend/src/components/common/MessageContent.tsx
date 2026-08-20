@@ -166,7 +166,7 @@ export const ContentBlockRenderer: React.FC<{
                   <Badge variant={badgeVariant} className="me-1" pill>
                     {change.change_type.toUpperCase()}
                   </Badge>
-                  {change.old_path ? (
+                  {change.old_path?.trim() ? (
                     // Show "old_path -> path" format for rename/copy operations
                     <code className="small">
                       {change.old_path} → {change.path}

@@ -12,15 +12,15 @@ from datetime import datetime, timezone
 import pytest
 
 from shared.file_change_parser import (
+    CpParser,
     FileChangeParserRegistry,
     FileChangeRecord,
     MkdirParser,
     MvParser,
-    CpParser,
     ParserContext,
+    _contains_wildcard,
     append_file_change_blocks,
     extract_file_changes,
-    _contains_wildcard,
 )
 
 

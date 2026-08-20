@@ -503,7 +503,12 @@ class MvParser(FileChangeParser):
                 old_path=abs_src,
                 change_type="rename",
                 timestamp=context.timestamp,
-                is_directory=False,  # mv doesn't require flags for directories
+                # is_directory is set to False because:
+                # - mv command doesn't require flags (like -r) to move directories
+                # - We cannot reliably determine if the source is a directory from
+                #   the command string alone without filesystem access
+                # - The frontend can still display the change appropriately regardless
+                is_directory=False,
                 session_id=context.session_id,
                 tool_use_id=context.tool_use_id,
                 source=self.source,
