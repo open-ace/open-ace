@@ -874,8 +874,10 @@ class TestSchedulerRunStatus:
 
     def test_compute_status_partial_failure(self):
         """Partial failure -> partial."""
+        from app.services import scheduler_run_status
+
         results = {"tool1": {"success": True}, "tool2": {"success": False}}
-        status, error_msg, summary = self.compute_data_fetch_status(results)
+        status, error_msg, summary = scheduler_run_status.compute_data_fetch_status(results)
 
         assert status == "partial"
         assert "Partial failure" in error_msg
@@ -885,6 +887,8 @@ class TestSchedulerRunStatus:
 
     def test_compute_status_partial_boundary_single_failure(self):
         """5 tools with 1 failure -> partial (not failed)."""
+        from app.services import scheduler_run_status
+
         results = {
             "tool1": {"success": True},
             "tool2": {"success": True},
@@ -892,7 +896,7 @@ class TestSchedulerRunStatus:
             "tool4": {"success": True},
             "tool5": {"success": False},
         }
-        status, error_msg, summary = self.compute_data_fetch_status(results)
+        status, error_msg, summary = scheduler_run_status.compute_data_fetch_status(results)
 
         assert status == "partial"
         assert summary["status"] == "partial"
@@ -900,6 +904,8 @@ class TestSchedulerRunStatus:
 
     def test_compute_status_partial_boundary_most_failed(self):
         """5 tools with 4 failures -> partial (not failed)."""
+        from app.services import scheduler_run_status
+
         results = {
             "tool1": {"success": True},
             "tool2": {"success": False},
@@ -907,7 +913,7 @@ class TestSchedulerRunStatus:
             "tool4": {"success": False},
             "tool5": {"success": False},
         }
-        status, error_msg, summary = self.compute_data_fetch_status(results)
+        status, error_msg, summary = scheduler_run_status.compute_data_fetch_status(results)
 
         assert status == "partial"
         assert summary["status"] == "partial"
@@ -915,7 +921,9 @@ class TestSchedulerRunStatus:
 
     def test_compute_status_none_results(self):
         """None results -> failed."""
-        status, error_msg, summary = self.compute_data_fetch_status(None)
+        from app.services import scheduler_run_status
+
+        status, error_msg, summary = scheduler_run_status.compute_data_fetch_status(None)
 
         assert status == "failed"
         assert "unexpected error" in error_msg.lower()
@@ -923,7 +931,9 @@ class TestSchedulerRunStatus:
 
     def test_compute_status_empty_results(self):
         """Empty results -> completed."""
-        status, error_msg, summary = self.compute_data_fetch_status({})
+        from app.services import scheduler_run_status
+
+        status, error_msg, summary = scheduler_run_status.compute_data_fetch_status({})
 
         assert status == "completed"
         assert error_msg is None
@@ -932,9 +942,10 @@ class TestSchedulerRunStatus:
 
     def test_compute_status_skipped_results(self):
         """Skipped results -> skipped."""
+        from app.services import scheduler_run_status
+
         results = {"_skipped": True}
-        status, error_msg, summary = self.compute_data_fetch_status(results)
-        status, error_msg, summary = compute_data_fetch_status(results)
+        status, error_msg, summary = scheduler_run_status.compute_data_fetch_status(results)
 
         assert status == "skipped"
         assert "Concurrent" in error_msg
@@ -942,25 +953,28 @@ class TestSchedulerRunStatus:
 
     def test_validate_status_valid(self):
         """Valid status values."""
-        # Using class-level import: self.validate_status
+        from app.services import scheduler_run_status
 
-        assert validate_status("completed") is True
-        assert validate_status("partial") is True
-        assert validate_status("failed") is True
-        assert validate_status("skipped") is True
+        assert scheduler_run_status.validate_status("completed") is True
+        assert scheduler_run_status.validate_status("partial") is True
+        assert scheduler_run_status.validate_status("failed") is True
+        assert scheduler_run_status.validate_status("skipped") is True
 
     def test_validate_status_invalid(self):
         """Invalid status values."""
-        assert self.validate_status("unknown") is False
-        assert self.validate_status("") is False
-        assert self.validate_status("PARTIAL") is False
+        from app.services import scheduler_run_status
+
+        assert scheduler_run_status.validate_status("unknown") is False
+        assert scheduler_run_status.validate_status("") is False
+        assert scheduler_run_status.validate_status("PARTIAL") is False
 
     def test_structured_error_message_format(self):
         """Structured error message contains JSON with required fields."""
         import json
+        from app.services import scheduler_run_status
 
         results = {"tool1": {"success": True}, "tool2": {"success": False}}
-        status, error_msg, summary = self.compute_data_fetch_status(results)
+        status, error_msg, summary = scheduler_run_status.compute_data_fetch_status(results)
 
         # Parse JSON from error message
         error_data = json.loads(error_msg)
