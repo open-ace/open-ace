@@ -21,22 +21,21 @@ class TestUsageService:
 
     def test_get_today_usage_empty(self):
         svc, mock_repo = self._make_service()
-        mock_repo.get_usage_rows_by_date.return_value = []
+        mock_repo.get_today_session_usage.return_value = []
         result = svc.get_today_usage()
         assert result == []
 
     def test_get_today_usage_with_data(self):
         svc, mock_repo = self._make_service()
-        mock_repo.get_usage_rows_by_date.return_value = [
+        mock_repo.get_today_session_usage.return_value = [
             {
                 "tool_name": "qwen-code",
                 "tokens_used": 1000,
                 "input_tokens": 800,
                 "output_tokens": 200,
-                "cache_tokens": 50,
                 "request_count": 10,
                 "host_name": "h1",
-                "models_used": '["qwen-max"]',
+                "model": "qwen-max",
             }
         ]
         result = svc.get_today_usage()
@@ -47,26 +46,24 @@ class TestUsageService:
 
     def test_get_today_usage_merges_tools(self):
         svc, mock_repo = self._make_service()
-        mock_repo.get_usage_rows_by_date.return_value = [
+        mock_repo.get_today_session_usage.return_value = [
             {
                 "tool_name": "qwen-code",
                 "tokens_used": 1000,
                 "input_tokens": 800,
                 "output_tokens": 200,
-                "cache_tokens": 0,
                 "request_count": 5,
                 "host_name": "h1",
-                "models_used": None,
+                "model": None,
             },
             {
                 "tool_name": "qwen-code-cli",
                 "tokens_used": 500,
                 "input_tokens": 400,
                 "output_tokens": 100,
-                "cache_tokens": 0,
                 "request_count": 3,
                 "host_name": "h1",
-                "models_used": None,
+                "model": None,
             },
         ]
         result = svc.get_today_usage()
