@@ -353,6 +353,18 @@ class TenantService:
                 error_type="validation",
             )
 
+        # Issue #2128: 软废弃警告 - sso_enabled 和 sso_provider 字段已迁移到全局设置
+        deprecated_fields = {"sso_enabled", "sso_provider"}
+        used_deprecated = [k for k in filtered_updates if k in deprecated_fields]
+        if used_deprecated:
+            logger.warning(
+                "Issue #2128: Tenant-level SSO settings are deprecated: tenant_id=%s, fields=%s. "
+                "Use system-level sso_enabled (via /api/system/settings) and register SSO providers instead. "
+                "These fields will be removed in a future version.",
+                tenant_id,
+                used_deprecated,
+            )
+
         # Issue #2790: 验证 sensitive_keyword_match_mode 枚举值
         if "sensitive_keyword_match_mode" in filtered_updates:
             mode = filtered_updates["sensitive_keyword_match_mode"]

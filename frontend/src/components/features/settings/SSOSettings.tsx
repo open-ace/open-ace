@@ -471,32 +471,44 @@ export const SSOSettings: React.FC = () => {
         </Card>
       )}
 
-      {/* SSO Configuration Form */}
+      {/* Global SSO Setting - Issue #2128 */}
+      <Card className="mb-4">
+        <div className="d-flex align-items-center mb-3">
+          <i className="bi bi-globe fs-4 me-2 text-primary" />
+          <h5 className="mb-0">{t('enableGlobalSSO', language)}</h5>
+        </div>
+        <div className="form-check form-switch mb-2">
+          <input
+            className="form-check-input"
+            type="checkbox"
+            id="ssoEnabled"
+            aria-describedby="globalSSODesc"
+            checked={ssoEnabled}
+            onChange={(e) => setSsoEnabled(e.target.checked)}
+          />
+          <label className="form-check-label" htmlFor="ssoEnabled">
+            {t('enableGlobalSSO', language)}
+          </label>
+          <span id="globalSSODesc" className="visually-hidden">
+            {t('globalSSODesc', language)}
+          </span>
+        </div>
+        <small className="text-muted d-block mb-2">
+          <i className="bi bi-info-circle me-1" />
+          {t('globalSSOHint', language)}
+        </small>
+        {ssoEnabled && (
+          <div className="alert alert-warning py-2 mb-0" role="alert">
+            <i className="bi bi-exclamation-triangle me-1" />
+            {t('globalSSOWarning', language)}
+          </div>
+        )}
+      </Card>
+
+      {/* Tenant-level SSO Settings */}
       <Card title={t('ssoConfiguration', language)} className="mb-4">
         <form className="sso-form" onSubmit={handleSaveSettings}>
           <div className="row g-3">
-            <div className="col-md-6">
-              <div className="form-check form-switch">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  id="ssoEnabled"
-                  aria-describedby="ssoEnabledDesc"
-                  checked={ssoEnabled}
-                  onChange={(e) => setSsoEnabled(e.target.checked)}
-                />
-                <label className="form-check-label" htmlFor="ssoEnabled">
-                  {t('enableSSO', language)}
-                </label>
-                <span id="ssoEnabledDesc" className="visually-hidden">
-                  {t('ssoEnabledDesc', language)}
-                </span>
-              </div>
-              <small className="text-muted d-block mt-1">
-                <i className="bi bi-info-circle me-1" />
-                {t('ssoSystemSettingHint', language)}
-              </small>
-            </div>
             <div className="col-md-6">
               <div className="form-check form-switch">
                 <input
