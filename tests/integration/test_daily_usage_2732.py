@@ -2,10 +2,10 @@
 
 import pytest
 
-from app.repositories.usage_repo import UsageRepository
-from app.repositories.database import Database
-from app.modules.workspace.usage_sink import DailyUsageSink
 from app.modules.workspace.usage_evidence import UsageEvidence
+from app.modules.workspace.usage_sink import DailyUsageSink
+from app.repositories.database import Database
+from app.repositories.usage_repo import UsageRepository
 
 
 class TestDailyUsageIssue2732:
