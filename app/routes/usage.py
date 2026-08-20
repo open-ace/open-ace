@@ -4,9 +4,10 @@ Open ACE - AI Computing Explorer - Usage Routes
 API routes for usage data operations.
 """
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import auth_required, require_tenant_scope
+from app.auth.permissions import is_platform_admin_role
 from app.services.summary_service import SummaryService
 from app.services.usage_service import UsageService
 from app.utils.helpers import get_days_ago, get_today
@@ -45,14 +46,26 @@ def api_summary():
     end_date = request.args.get("end")
     tenant_id = get_current_tenant_id()
 
-    # No date parameters -> use pre-aggregated usage_summary table (fast) only
-    # for global scope. Tenant-scoped users query the tenant-aware repo path.
-    if not start_date and not end_date and tenant_id is None:
-        # Check if summary needs refresh and refresh if stale
-        if summary_service.needs_refresh():
-            summary_service.refresh_summary()
+    # Issue #2821: 预聚合路径选择逻辑
+    # - 平台管理员始终可访问全局预聚合路径（无论 tenant_id 是否为空）
+    # - 全局范围用户（tenant_id is None）也走预聚合路径
+    # - 租户范围用户（tenant_id 非空且非平台管理员）走查询路径
+    if not start_date and not end_date:
+        if is_platform_admin_role(g.user_role) or tenant_id is None:
+            # 预聚合路径：使用 summary_service.get_summary()
+            # Check if summary needs refresh and refresh if stale
+            if summary_service.needs_refresh():
+                summary_service.refresh_summary()
 
-        summary = summary_service.get_summary(host_name=host)
+            summary = summary_service.get_summary(host_name=host)
+        else:
+            # 查询路径：使用 usage_service.get_usage_summary()
+            summary = usage_service.get_usage_summary(
+                host_name=host,
+                start_date=start_date,
+                end_date=end_date,
+                tenant_id=tenant_id,
+            )
     else:
         summary = usage_service.get_usage_summary(
             host_name=host,
@@ -66,18 +79,75 @@ def api_summary():
 
 @usage_bp.route("/summary/refresh", methods=["POST"])
 def api_refresh_summary():
-    """Refresh summary data from daily_messages table."""
+    """Refresh summary data from daily_messages table.
+
+    Issue #2821: 使用基于角色的授权判断，而非 tenant_id is not None。
+    平台管理员（无论 tenant_id 是否为空）都可执行全局刷新。
+    """
     host = request.args.get("host")
-    if get_current_tenant_id() is not None:
-        return (
-            jsonify({"status": "error", "message": "Tenant-scoped summary refresh is automatic"}),
-            403,
-        )
+
+    # Issue #2821: 使用基于角色的授权判断
+    # 平台管理员（无论 tenant_id 是否为空）都可执行全局刷新
+    user_role = getattr(g, "user_role", None)
+
+    if not is_platform_admin_role(user_role):
+        # 非平台管理员，拒绝访问
+        if user_role == "tenant_admin":
+            return (
+                jsonify({
+                    "status": "error",
+                    "message": "Tenant-scoped summary refresh is automatic"
+                }),
+                403,
+            )
+        else:
+            # 普通用户或其他角色
+            return (
+                jsonify({
+                    "status": "error",
+                    "message": "Platform admin access required"
+                }),
+                403,
+            )
+
+    # 平台管理员：执行刷新
     success = summary_service.refresh_summary(host_name=host)
+
     if success:
+        # Issue #2821: 平台管理员带 tenant_id 执行全局刷新时，记录审计日志
+        user_tenant_id = getattr(g, "tenant_id", None)
+        if user_tenant_id is not None:
+            _log_summary_refresh_audit(user_tenant_id, host)
+
         return jsonify({"status": "success", "message": "Summary refreshed"})
     else:
         return jsonify({"status": "error", "message": "Failed to refresh summary"}), 500
+
+
+def _log_summary_refresh_audit(actor_tenant_id: int, host: str | None) -> None:
+    """记录平台管理员执行全局摘要刷新的审计日志。
+
+    Issue #2821: 平台管理员带 tenant_id 执行全局刷新时记录审计。
+
+    Args:
+        actor_tenant_id: 平台管理员的 tenant_id
+        host: 刷新的 host 参数（如有）
+    """
+    import logging
+
+    from app.auth.decorators import _log_cross_tenant_operation
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        _log_cross_tenant_operation(
+            actor_user_id=g.user_id,
+            actor_tenant_id=actor_tenant_id,
+            target_tenant_id=None,  # 全局操作
+            action=f"POST /api/summary/refresh (host={host or 'all'})",
+        )
+    except Exception as e:
+        logger.warning("Failed to log summary refresh audit: %s", e)
 
 
 @usage_bp.route("/today")
@@ -147,15 +217,24 @@ def api_tools():
 
 @usage_bp.route("/hosts")
 def api_hosts():
-    """Get list of all hosts from pre-aggregated summary table."""
+    """Get list of all hosts from pre-aggregated summary table.
+
+    Issue #2821: 主机列表路径选择
+    - 平台管理员始终可访问全局主机列表
+    - 全局范围用户也访问全局主机列表
+    - 租户范围用户使用租户过滤
+    """
     tenant_id = get_current_tenant_id()
     # Ensure summary is up to date
     if summary_service.needs_refresh():
         summary_service.refresh_summary()
 
-    if tenant_id is None:
+    # Issue #2821: 使用基于角色的路径选择
+    if is_platform_admin_role(g.user_role) or tenant_id is None:
+        # 平台管理员或全局范围 → 全局主机列表
         hosts = summary_service.get_all_hosts()
     else:
+        # 租户范围 → 租户过滤
         hosts = usage_service.get_all_hosts(tenant_id=tenant_id)
     return jsonify(hosts)
 
