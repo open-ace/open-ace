@@ -794,17 +794,18 @@ def _summarize_attempt_records(
                 if record.get("outcome") not in ("passed", "rerun")
             ]
             failed = failed_records[-1] if failed_records else decision
+            exception_class = str(failed.get("exception_class") or "")
+            message = str(failed.get("message") or "")
             failure = {
                 "phase": failed.get("phase", "call"),
-                "exception_class": failed.get("exception_class"),
-                "message": failed.get("message"),
-                "timeout": "timeout"
-                in f"{failed.get('exception_class', '')} {failed.get('message', '')}".lower(),
+                "exception_class": exception_class,
+                "message": message,
+                "timeout": "timeout" in f"{exception_class} {message}".lower(),
             }
             summary["category"] = classify_failure(failure, server_evidence)
             summary["fingerprint"] = fingerprint_failure(failure)
-            summary["exception_class"] = failed.get("exception_class")
-            summary["message"] = failed.get("message")
+            summary["exception_class"] = exception_class or None
+            summary["message"] = message or None
         outcomes.append(summary)
     return outcomes
 

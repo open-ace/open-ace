@@ -409,6 +409,32 @@ def test_write_run_envelope_summarizes_attempts(tmp_path, monkeypatch):
     assert failed["total_duration_seconds"] == 2.5
 
 
+def test_summarize_attempts_handles_missing_exception_class():
+    outcomes = run_extended_tests._summarize_attempt_records(
+        [
+            {
+                "nodeid": "tests/e2e/ui/test_work_page_loads.py::test_work_page_loads",
+                "attempt": 1,
+                "phase": "call",
+                "outcome": "failed",
+                "duration_seconds": 2.5,
+                "exception_class": None,
+                "message": "work layout was missing",
+            }
+        ],
+        {"readiness_achieved": True, "exit": {"abnormal": False}},
+    )
+
+    assert len(outcomes) == 1
+    outcome = outcomes[0]
+    assert outcome["nodeid"] == "tests/e2e/ui/test_work_page_loads.py::test_work_page_loads"
+    assert outcome["final_outcome"] == "fail"
+    assert outcome["category"] == "test_body_exception"
+    assert outcome["fingerprint"]
+    assert outcome["exception_class"] is None
+    assert outcome["message"] == "work layout was missing"
+
+
 def test_setup_phase_failure_is_not_summarized_as_pass(tmp_path, monkeypatch):
     attempts = tmp_path / "attempts.jsonl"
     attempts.write_text(
