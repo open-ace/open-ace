@@ -107,6 +107,9 @@ class RemoteAgent:
         # Session sync service
         self._session_sync = SessionSyncService(self._http_send, self.config)
 
+        # Issue #2594: Validate hostname configuration
+        self._validate_hostname_config()
+
     def _restore_terminal_sessions(self) -> None:
         """Restore terminal session info from persisted files."""
         if not os.path.exists(self._terminal_info_dir):
@@ -2721,6 +2724,36 @@ class RemoteAgent:
             r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)" r"(\.[A-Za-z0-9-]{1,63}(?<!-))*$"
         )
         return bool(hostname_pattern.match(hostname))
+
+    def _validate_hostname_config(self) -> None:
+        """Validate hostname configuration and warn if non-IP format.
+
+        Issue #2594: Warn users that non-IP hostname will force relay mode.
+        This helps users understand the connectivity implications.
+        """
+        hostname = self.config.hostname
+        if not hostname or hostname == "localhost":
+            return
+
+        # Check if it's an IP address
+        try:
+            socket.inet_pton(socket.AF_INET, hostname)
+            return  # IPv4 - no warning needed
+        except OSError:
+            pass
+        try:
+            socket.inet_pton(socket.AF_INET6, hostname)
+            return  # IPv6 - no warning needed
+        except OSError:
+            pass
+
+        # Non-IP format - warn user about relay mode implication
+        logger.warning(
+            "Configured hostname '%s' is not an IP address. "
+            "Backend will use relay mode for all terminal connections. "
+            "To enable direct connections when possible, consider configuring an IP address instead.",
+            hostname,
+        )
 
     def _apply_cli_settings(
         self,
