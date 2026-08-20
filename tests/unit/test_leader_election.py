@@ -19,7 +19,6 @@ from app.services.leader_election import (
     check_scheduler_tables_exist,
     generate_leader_id,
     get_owner_info,
-    job_name_to_lock_key,
 )
 
 
@@ -112,21 +111,6 @@ class TestLeaderElectionHelpers:
         owner = get_owner_info()
         assert ":" in owner
         assert len(owner) > 0
-
-    def test_job_name_to_lock_key_consistent(self):
-        """Test lock key is consistent for same job name."""
-        key1 = job_name_to_lock_key("test_job")
-        key2 = job_name_to_lock_key("test_job")
-
-        assert key1 == key2
-        assert isinstance(key1, int)
-
-    def test_job_name_to_lock_key_different(self):
-        """Test lock keys are different for different job names."""
-        key1 = job_name_to_lock_key("job1")
-        key2 = job_name_to_lock_key("job2")
-
-        assert key1 != key2
 
 
 class TestSchedulerTablesExist:
@@ -262,13 +246,11 @@ class TestLeaderElectionClient:
 
         client.release_leadership()
 
-    def test_auto_strategy_selection(self, db):
-        """Test auto strategy selection based on timeout."""
-        # Short timeout -> advisory
+    def test_auto_strategy_always_selects_heartbeat(self, db):
+        """auto resolves to heartbeat regardless of timeout (advisory is deprecated)."""
         client_short = LeaderElectionClient("short_job", db, strategy="auto", lock_timeout=60)
-        assert client_short.strategy == "advisory"
+        assert client_short.strategy == "heartbeat"
 
-        # Long timeout -> heartbeat
         client_long = LeaderElectionClient("long_job", db, strategy="auto", lock_timeout=3600)
         assert client_long.strategy == "heartbeat"
 
@@ -306,36 +288,42 @@ class TestLeaderElectionConcurrency:
         # (This test is probabilistic, but in practice only one should succeed at a time)
 
 
-# Skip advisory lock tests on SQLite (not supported)
-@pytest.mark.skipif(
-    not pytest.importorskip("app.repositories.database").Database().is_postgresql,
-    reason="Advisory locks require PostgreSQL",
-)
-class TestAdvisoryLock:
-    """Tests for PostgreSQL advisory locks."""
+class TestAdvisoryDeprecation:
+    """The deprecated advisory strategy transparently uses heartbeat.
 
-    def test_advisory_lock_basic(self, db):
-        """Test basic advisory lock functionality."""
-        client = LeaderElectionClient("test_advisory", db, strategy="advisory")
+    Advisory locks used to be a PostgreSQL-only path; the heartbeat fallback
+    runs on every backend, so these tests are no longer skipped on SQLite.
+    """
+
+    def test_advisory_falls_back_to_heartbeat(self, db):
+        """strategy='advisory' acquires via heartbeat and flips its strategy."""
+        client = LeaderElectionClient("test_advisory_fallback", db, strategy="advisory")
 
         acquired = client.try_acquire_leadership()
-        assert acquired is True
+        try:
+            assert acquired is True
+            assert client.is_leader()
+            # The advisory request is redirected to the correct heartbeat path.
+            assert client.strategy == "heartbeat"
+        finally:
+            client.release_leadership()
 
-        # Advisory lock is released on transaction commit
-        # No explicit release needed
+    def test_advisory_provides_real_mutual_exclusion(self, db):
+        """Two 'advisory' clients: exactly one wins (real exclusion via heartbeat).
 
-    def test_advisory_lock_conflict(self, db):
-        """Test that advisory locks prevent concurrent execution."""
-        job_name = "test_advisory_conflict"
+        Regression for the advisory-lock lifetime bug: the old path released its
+        transaction-scoped lock before the critical section, so both clients
+        could "acquire". The heartbeat fallback gives genuine mutual exclusion.
+        """
+        job_name = "test_advisory_exclusion"
+        client1 = LeaderElectionClient(job_name, db, strategy="advisory", lock_timeout=60)
+        client2 = LeaderElectionClient(job_name, db, strategy="advisory", lock_timeout=60)
 
-        client1 = LeaderElectionClient(job_name, db, strategy="advisory")
-        client2 = LeaderElectionClient(job_name, db, strategy="advisory")
-
-        # First client acquires
         acquired1 = client1.try_acquire_leadership()
-
-        # Second client should fail (within same transaction)
         acquired2 = client2.try_acquire_leadership()
-
-        # Only one should succeed
-        assert acquired1 != acquired2 or not acquired1
+        try:
+            assert acquired1 is True
+            assert acquired2 is False
+        finally:
+            client1.release_leadership()
+            client2.release_leadership()

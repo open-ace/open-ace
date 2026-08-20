@@ -1,25 +1,27 @@
 """
 Open ACE - Distributed Leader Election
 
-Provides leader election mechanisms for distributed scheduler coordination.
-Supports two strategies:
+Provides leader election for distributed scheduler coordination via the
+Heartbeat strategy: a ``scheduler_leaders`` row with periodic heartbeat
+updates, supporting leader expiration and failover. This is the mechanism
+every caller uses and the only one here that provides mutual exclusion
+spanning a caller's critical section.
 
-Strategy A (Advisory Lock): For short tasks (< 5 minutes)
-- Uses PostgreSQL session-level advisory locks
-- Lock held within transaction scope
-- Automatically released on commit/rollback/connection close
-
-Strategy B (Heartbeat): For long tasks (> 5 minutes)
-- Uses scheduler_leaders table with periodic heartbeat updates
-- Supports leader expiration and failover
-- Requires manual release or expiration timeout
+Deprecated -- Advisory Lock strategy (``strategy="advisory"``):
+    This strategy is unsafe and no longer used. It relied on
+    ``pg_try_advisory_xact_lock``, a transaction-scoped lock that the
+    connection pool releases (via rollback) as soon as the acquiring
+    ``SELECT`` returns -- i.e. before the caller runs its critical section --
+    so it never actually excluded a second leader. Selecting it now logs a
+    warning and transparently falls back to the Heartbeat strategy.
+    (For a correct session-level advisory lock held on a dedicated
+    connection, see ``app.services.scheduler_guard.SchedulerExecutionGuard``.)
 
 Issue #2187
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import socket
@@ -73,21 +75,15 @@ def get_owner_info() -> str:
     return f"{socket.gethostname()}:{os.getpid()}"
 
 
-def job_name_to_lock_key(job_name: str) -> int:
-    """Convert job_name to advisory lock key (64-bit integer).
-
-    Uses SHA-256 hash and takes first 8 bytes to ensure consistent mapping.
-    """
-    hash_bytes = hashlib.sha256(job_name.encode()).digest()[:8]
-    return int.from_bytes(hash_bytes, byteorder="big", signed=True)
-
-
 class LeaderElectionClient:
     """Client for distributed leader election.
 
-    Supports two strategies:
-    - Advisory Lock (strategy="advisory"): For short tasks, lock held in transaction
-    - Heartbeat (strategy="heartbeat"): For long tasks, periodic heartbeat updates
+    Strategy:
+    - Heartbeat (strategy="heartbeat", also what "auto" resolves to):
+      periodic heartbeat updates on the scheduler_leaders table, with leader
+      expiration and failover. Provides real mutual exclusion.
+    - Advisory (strategy="advisory"): deprecated and unsafe; transparently
+      falls back to Heartbeat at acquire time (see module docstring).
     """
 
     def __init__(
@@ -114,10 +110,13 @@ class LeaderElectionClient:
         self.leader_id = generate_leader_id()
         self.owner_info = get_owner_info()
 
-        # Determine strategy
+        # Determine strategy. "auto" always resolves to heartbeat: it is the
+        # only mechanism here that provides real mutual exclusion (the advisory
+        # strategy is deprecated -- see module docstring). An explicit
+        # strategy="advisory" is still accepted for backward compatibility and
+        # falls back to heartbeat at acquire time.
         if strategy == "auto":
-            # Auto-select based on lock timeout
-            self.strategy = "heartbeat" if lock_timeout > 300 else "advisory"
+            self.strategy = "heartbeat"
         else:
             self.strategy = strategy
 
@@ -127,7 +126,6 @@ class LeaderElectionClient:
 
         # State tracking
         self._is_leader = False
-        self._lock_key = job_name_to_lock_key(job_name)
         self._heartbeat_thread: threading.Thread | None = None
         self._stop_heartbeat = threading.Event()
         self._lock = threading.Lock()
@@ -154,44 +152,31 @@ class LeaderElectionClient:
         timeout = timeout or self.lock_timeout
 
         if self.strategy == "advisory":
-            return self._try_acquire_advisory_lock()
+            return self._try_acquire_advisory_lock(timeout)
         else:
             return self._try_acquire_heartbeat_lock(timeout)
 
-    def _try_acquire_advisory_lock(self) -> bool:
-        """Try to acquire advisory lock (Strategy A).
+    def _try_acquire_advisory_lock(self, timeout: int) -> bool:
+        """Deprecated advisory-lock path; falls back to the heartbeat strategy.
 
-        Uses PostgreSQL session-level advisory lock.
-        Lock is held for the duration of the transaction.
+        The previous implementation used ``pg_try_advisory_xact_lock``, whose
+        lock is released the moment the acquiring statement's transaction ends
+        (the connection pool rolls back before returning the connection). That
+        happened before the caller ran its critical section, so it provided no
+        mutual exclusion at all. Selecting the advisory strategy now logs a
+        warning and switches to the heartbeat strategy, which is correct.
+
+        For a correct session-level advisory lock held on a dedicated
+        connection, use ``app.services.scheduler_guard.SchedulerExecutionGuard``.
+        See the module docstring and Issue #2187.
         """
-        if not self.db.is_postgresql:
-            # SQLite doesn't support advisory locks, fall back to heartbeat
-            logger.warning(
-                f"Advisory lock not supported on SQLite, using heartbeat for {self.job_name}"
-            )
-            self.strategy = "heartbeat"
-            return self._try_acquire_heartbeat_lock(self.lock_timeout)
-
-        try:
-            # Check if lock is available
-            result = self.db.fetch_one(
-                "SELECT pg_try_advisory_xact_lock(?) AS acquired",
-                (self._lock_key,),
-            )
-
-            if result and result.get("acquired"):
-                self._is_leader = True
-                logger.info(f"Advisory lock acquired: job={self.job_name}, key={self._lock_key}")
-                return True
-            else:
-                self._skip_count += 1
-                logger.debug(f"Advisory lock not acquired (held by another): job={self.job_name}")
-                return False
-
-        except Exception as e:
-            logger.error(f"Failed to acquire advisory lock: {e}")
-            self._fail_count += 1
-            return False
+        logger.warning(
+            "LeaderElectionClient: strategy='advisory' is deprecated and unsafe; "
+            "falling back to heartbeat for job=%s",
+            self.job_name,
+        )
+        self.strategy = "heartbeat"
+        return self._try_acquire_heartbeat_lock(timeout)
 
     def _try_acquire_heartbeat_lock(self, timeout: int) -> bool:
         """Try to acquire leadership via heartbeat mechanism (Strategy B).
@@ -300,20 +285,17 @@ class LeaderElectionClient:
 
             self._stop_heartbeat_thread()
 
-            if self.strategy == "heartbeat":
-                try:
-                    self.db.execute(
-                        "DELETE FROM scheduler_leaders WHERE job_name = ? AND leader_id = ?",
-                        (self.job_name, self.leader_id),
-                    )
-                    logger.info(f"Leadership released: job={self.job_name}")
-                except Exception as e:
-                    logger.error(f"Failed to release leadership: {e}")
-            else:
-                # Advisory lock is released automatically on transaction commit
-                logger.info(
-                    f"Advisory lock will be released on transaction commit: job={self.job_name}"
+            # Leadership is always held via the heartbeat strategy (the
+            # deprecated advisory strategy falls back to it), so releasing
+            # deletes this leader's scheduler_leaders row.
+            try:
+                self.db.execute(
+                    "DELETE FROM scheduler_leaders WHERE job_name = ? AND leader_id = ?",
+                    (self.job_name, self.leader_id),
                 )
+                logger.info(f"Leadership released: job={self.job_name}")
+            except Exception as e:
+                logger.error(f"Failed to release leadership: {e}")
 
             self._is_leader = False
 
