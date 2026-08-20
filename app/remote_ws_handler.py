@@ -161,8 +161,12 @@ def _is_private_ip(ws_url: str) -> bool:
         # IPv6 addresses don't have brackets in parsed.hostname
         if ":" in host:
             # IPv6 link-local (fe80::/10)
-            if host.lower().startswith("fe8") or host.lower().startswith("fe9") or \
-               host.lower().startswith("fea") or host.lower().startswith("feb"):
+            if (
+                host.lower().startswith("fe8")
+                or host.lower().startswith("fe9")
+                or host.lower().startswith("fea")
+                or host.lower().startswith("feb")
+            ):
                 return True
             # IPv6 unique local (fc00::/7)
             if host.lower().startswith("fc") or host.lower().startswith("fd"):
