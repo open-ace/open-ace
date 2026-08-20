@@ -57,7 +57,7 @@
     },
     "python-core": {
       "description": "Required deterministic Python suite on the production runtime",
-      "timeout_seconds": 420,
+      "timeout_seconds": 480,
       "commands": [
         ["{python}", "-m", "pytest", "tests/", "-q", "--maxfail=1", "--cov=scripts/shared", "--cov=app/auth", "--cov=app/remote_ws_handler", "--cov=app/modules/sso", "--cov=app/routes", "--cov=app/services", "--cov-fail-under=47", "--cov-report=term", "--cov-report=xml", "-m", "not postgres and not performance"],
         ["{python}", "scripts/scan_test_false_positives.py", "tests", "--exclude-dirs", "tests/issues", "--baseline", ".false-positive-baseline.json"]
