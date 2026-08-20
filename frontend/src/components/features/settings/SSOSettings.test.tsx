@@ -35,10 +35,14 @@ vi.mock('@/i18n', () => ({
     const translations: Record<string, string> = {
       ssoSettings: 'SSO Settings',
       ssoConfiguration: 'SSO Configuration',
-      enableSSO: 'Enable SSO',
-      ssoEnabledDesc: 'Enable SSO login for users through configured providers',
-      ssoSystemSettingHint:
-        'SSO enable switch has been moved to System Settings. Please configure SSO providers here.',
+      // Issue #2128: Global SSO settings
+      enableGlobalSSO: 'Enable Global SSO Login',
+      globalSSODesc:
+        'Control whether SSO login is available on the login page (affects all tenants)',
+      globalSSOHint:
+        'When enabled, users can sign in through configured SSO providers. This setting affects all tenants.',
+      globalSSOWarning:
+        'This setting affects all tenants. Disable with caution during security incidents.',
       autoProvisionUsers: 'Auto Provision Users',
       autoProvisionDesc: 'Automatically create user accounts on first SSO login',
       autoProvisionHint: 'Automatically create user accounts for this tenant on first SSO login',
@@ -47,6 +51,7 @@ vi.mock('@/i18n', () => ({
       save: 'Save',
       loading: 'Loading...',
       settingsSaved: 'Settings saved successfully',
+      saveFailed: 'Failed to save settings',
       registeredProviders: 'Registered Providers',
       noProvidersRegistered: 'No SSO providers registered',
       availableProviders: 'Available Providers',
@@ -201,12 +206,14 @@ describe('SSOSettings Accessibility', () => {
   });
 
   describe('aria-describedby attributes', () => {
-    it('should have aria-describedby on SSO Enable checkbox', async () => {
+    it('should have aria-describedby on Global SSO Enable checkbox', async () => {
       render(<SSOSettings />);
 
-      // Wait for component to load
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
-      expect(ssoEnabledInput).toHaveAttribute('aria-describedby', 'ssoEnabledDesc');
+      // Wait for component to load - Issue #2128: Now uses enableGlobalSSO
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
+      expect(ssoEnabledInput).toHaveAttribute('aria-describedby', 'globalSSODesc');
     });
 
     it('should have aria-describedby on Auto Provision checkbox', async () => {
@@ -222,7 +229,9 @@ describe('SSOSettings Accessibility', () => {
     it('should reference valid description element IDs', async () => {
       render(<SSOSettings />);
 
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
       const ssoDescId = ssoEnabledInput.getAttribute('aria-describedby');
       const ssoDescElement = document.getElementById(ssoDescId || '');
       expect(ssoDescElement).toBeInTheDocument();
@@ -237,11 +246,12 @@ describe('SSOSettings Accessibility', () => {
   });
 
   describe('Visually hidden description elements', () => {
-    it('should have SSO description element with visually-hidden class', async () => {
+    it('should have Global SSO description element with visually-hidden class', async () => {
       render(<SSOSettings />);
 
+      // Issue #2128: Updated to global SSO description
       const ssoDescElement = await screen.findByText(
-        /Enable SSO login for users through configured providers/i
+        /Control whether SSO login is available on the login page/i
       );
       expect(ssoDescElement).toHaveClass('visually-hidden');
     });
@@ -259,11 +269,12 @@ describe('SSOSettings Accessibility', () => {
       const { container } = render(<SSOSettings />);
 
       // Wait for checkboxes to be rendered
-      await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      await screen.findByRole('checkbox', { name: /Enable Global SSO Login/i });
 
-      const ssoDescElement = container.querySelector('#ssoEnabledDesc');
+      // Issue #2128: Updated to globalSSODesc
+      const ssoDescElement = container.querySelector('#globalSSODesc');
       expect(ssoDescElement).toBeInTheDocument();
-      expect(ssoDescElement?.id).toBe('ssoEnabledDesc');
+      expect(ssoDescElement?.id).toBe('globalSSODesc');
 
       const autoDescElement = container.querySelector('#autoProvisionDesc');
       expect(autoDescElement).toBeInTheDocument();
@@ -275,7 +286,9 @@ describe('SSOSettings Accessibility', () => {
     it('should render checkboxes with correct initial state', async () => {
       render(<SSOSettings />);
 
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
       expect(ssoEnabledInput).not.toBeChecked();
 
       const autoProvisionInput = await screen.findByRole('checkbox', {
@@ -284,10 +297,12 @@ describe('SSOSettings Accessibility', () => {
       expect(autoProvisionInput).not.toBeChecked();
     });
 
-    it('should toggle SSO checkbox on click', async () => {
+    it('should toggle Global SSO checkbox on click', async () => {
       render(<SSOSettings />);
 
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
       fireEvent.click(ssoEnabledInput);
       expect(ssoEnabledInput).toBeChecked();
 
@@ -313,14 +328,26 @@ describe('SSOSettings Accessibility', () => {
     it('should have form element with submit button', async () => {
       render(<SSOSettings />);
 
-      const saveButton = await screen.findByRole('button', { name: /Save/i });
-      expect(saveButton).toHaveAttribute('type', 'submit');
+      // Issue #2128: Now there are two Save buttons (global SSO and tenant settings)
+      // The tenant settings form has a submit-type Save button
+      // First, wait for the autoProvision checkbox to render (inside the tenant settings form)
+      await screen.findByRole('checkbox', { name: /Auto Provision Users/i });
+
+      // Find all Save buttons
+      const saveButtons = await screen.findAllByRole('button', { name: /Save/i });
+
+      // The tenant settings form's Save button should be type="submit"
+      const submitButton = saveButtons.find((btn) => btn.getAttribute('type') === 'submit');
+      expect(submitButton).toBeInTheDocument();
     });
 
     it('should have labels properly associated with inputs', async () => {
       render(<SSOSettings />);
 
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      // Issue #2128: Updated to new label text
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
       expect(ssoEnabledInput).toHaveAttribute('id', 'ssoEnabled');
 
       const autoProvisionInput = await screen.findByRole('checkbox', {
@@ -335,7 +362,8 @@ describe('SSOSettings Accessibility', () => {
       const { container } = render(<SSOSettings />);
 
       // Wait for checkboxes to be rendered
-      await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      // Issue #2128: Updated to new label text
+      await screen.findByRole('checkbox', { name: /Enable Global SSO Login/i });
 
       // The description span should be in the DOM after the label
       const formCheckDivs = container.querySelectorAll('.form-check');
