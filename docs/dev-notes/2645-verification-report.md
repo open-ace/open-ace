@@ -125,6 +125,39 @@
 - 类型检查: 通过
 - 手动验证: 全部通过
 
+## Merge 阶段 CI 修复
+
+### 问题描述
+PR #2917 在合并阶段检测到 frontend CI 失败：
+- **失败命令**: `npm run lint`
+- **错误**: `eslint src` 返回 exit code 1
+- **根本原因**: `Workspace.tsx` 文件中的三元运算符格式不符合 prettier 规范
+
+### 修复过程
+1. **安装依赖**: `npm install`（node_modules 不存在）
+2. **运行 lint**: 发现 1 个 error 在 `Workspace.tsx:1589:30`
+3. **修复格式**: 使用 `npm run format` 自动修复 prettier 问题
+4. **验证修复**: 重新运行 `npm run lint`，结果为 0 errors, 31 warnings
+
+### 修复内容
+**文件**: `frontend/src/components/features/Workspace.tsx`
+**修改**: 将三元运算符格式从多行改为单行，符合 prettier 规范
+
+```diff
+-      const defaultSettings = remoteParams?.workspaceType !== 'remote'
+-        ? { permissionMode: 'ask' }
+-        : undefined;
++      const defaultSettings =
++        remoteParams?.workspaceType !== 'remote' ? { permissionMode: 'ask' } : undefined;
+```
+
+### 验证结果
+- ✅ `npm run lint`: 0 errors, 31 warnings（通过）
+- ✅ `npm run typecheck`: 通过
+- ✅ `npm test`: 918 tests passed
+- ✅ Python 文件格式检查: black、isort、语法检查全部通过
+- ✅ 后端单元测试: 56 passed（3 个失败与本次改动无关）
+
 ## 结论
 
 ✅ **所有必测项全部通过，修改满足Issue #2645的所有需求。**

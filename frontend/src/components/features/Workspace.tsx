@@ -1586,9 +1586,8 @@ export const Workspace: React.FC = () => {
 
       // Issue #2645: Add default permission mode for new local sessions
       // "ask" mode ensures user confirmation for tool calls (safe default)
-      const defaultSettings = remoteParams?.workspaceType !== 'remote'
-        ? { permissionMode: 'ask' }
-        : undefined;
+      const defaultSettings =
+        remoteParams?.workspaceType !== 'remote' ? { permissionMode: 'ask' } : undefined;
 
       const effectiveUrl = getEffectiveUrl(
         restoreSessionId ?? remoteParams?.sessionId ?? undefined,
