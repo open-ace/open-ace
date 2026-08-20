@@ -271,11 +271,12 @@ class TestHandleTerminalWs:
     @patch("app.modules.workspace.terminal_store.terminal_info_store")
     def test_successful_bridge(self, mock_store, mock_bridge, mock_handshake, mock_send_close):
         handler = self._make_handler(query_string="token=my-token")
+        # Issue #2594: Use public IP to ensure direct connection path
         mock_store.find_by_terminal_id.return_value = (
             "machine-123",
             {
                 "token": "my-token",
-                "original_ws_url": "ws://remote:42000/terminal/abc/ws",
+                "original_ws_url": "ws://8.8.8.8:42000/terminal/abc/ws",
                 "original_token": "remote-token",
             },
         )
@@ -287,7 +288,7 @@ class TestHandleTerminalWs:
         mock_bridge.assert_called_once_with(
             self.UUID,
             handler.socket,
-            "ws://remote:42000/terminal/abc/ws",
+            "ws://8.8.8.8:42000/terminal/abc/ws",
             "remote-token",
         )
         assert handler.close_connection is True
@@ -310,11 +311,12 @@ class TestHandleTerminalWs:
     ):
         mock_bridge.side_effect = Exception("bridge crash")
         handler = self._make_handler(query_string="token=my-token")
+        # Issue #2594: Use public IP to ensure direct connection path
         mock_store.find_by_terminal_id.return_value = (
             "machine-123",
             {
                 "token": "my-token",
-                "original_ws_url": "ws://remote:42000/ws",
+                "original_ws_url": "ws://8.8.8.8:42000/ws",
                 "original_token": "rt",
             },
         )
