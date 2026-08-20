@@ -5,7 +5,8 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
-  # Re-triggered by the Lint Heal workflow (.github/workflows/lint-heal.yml)
+  # Re-triggered by heal workflows (for example lint-heal.yml and
+  # schema-sync-heal.yml)
   # when approving the parked runs for a healed head was not possible
   # (GITHUB_TOKEN pushes fire no CI events; dispatch does). healed_sha marks a
   # dispatch as heal-originated: PR Gate stamps only for PR runs or dispatches
@@ -17,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       healed_sha:
-        description: 'Head SHA of a Lint Heal push (set automatically; manual dispatches must leave it empty)'
+        description: 'Head SHA of an automated heal push (set automatically; manual dispatches must leave it empty)'
         required: false
         type: string
 
