@@ -340,10 +340,7 @@ class TestIncrementUsageIssue2585:
         # Verify the record was created with zero values
         with repo.db.connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT * FROM daily_usage WHERE tool_name = ?",
-                ("test-tool-zero",)
-            )
+            cursor.execute("SELECT * FROM daily_usage WHERE tool_name = ?", ("test-tool-zero",))
             row = cursor.fetchone()
             assert row is not None
             assert row["request_count"] == 0

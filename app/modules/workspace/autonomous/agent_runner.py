@@ -883,9 +883,7 @@ class AutonomousAgentRunner:
                     )
                     return
             except Exception as e:
-                logger.warning(
-                    "Failed to check daily_usage_synced status: %s", e
-                )
+                logger.warning("Failed to check daily_usage_synced status: %s", e)
                 # Continue to attempt sync anyway
 
         # Perform sync
@@ -921,9 +919,7 @@ class AutonomousAgentRunner:
                         require_tenant=False,
                     )
                 except Exception as e:
-                    logger.warning(
-                        "Failed to set daily_usage_synced flag: %s", e
-                    )
+                    logger.warning("Failed to set daily_usage_synced flag: %s", e)
                     # Don't fail the sync - flag is for optimization
 
             logger.debug(
