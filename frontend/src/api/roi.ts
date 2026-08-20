@@ -279,7 +279,10 @@ export const roiApi = {
   },
 
   // Optimization
-  async getOptimizationSuggestions(days?: number, tool_name?: string): Promise<OptimizationSuggestion[]> {
+  async getOptimizationSuggestions(
+    days?: number,
+    tool_name?: string
+  ): Promise<OptimizationSuggestion[]> {
     const queryParams: Record<string, string> = {};
     if (days) queryParams.days = String(days);
     if (tool_name) queryParams.tool_name = tool_name;
