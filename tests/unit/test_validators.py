@@ -752,7 +752,7 @@ class TestValidateProjectName:
             ("project>path", "letters, numbers"),
             ("project&path", "letters, numbers"),
             ("project'path", "letters, numbers"),
-            ("project\"path", "letters, numbers"),
+            ('project"path', "letters, numbers"),
             ("project(path)", "letters, numbers"),
             ("project[path]", "letters, numbers"),
             ("project{path}", "letters, numbers"),
