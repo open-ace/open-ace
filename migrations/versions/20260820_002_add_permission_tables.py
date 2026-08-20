@@ -27,6 +27,26 @@ def table_exists(table_name: str) -> bool:
     return table_name in inspector.get_table_names()
 
 
+def column_exists(table_name: str, column_name: str) -> bool:
+    """Check if a column exists in a table."""
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    if not table_exists(table_name):
+        return False
+    columns = [col["name"] for col in inspector.get_columns(table_name)]
+    return column_name in columns
+
+
+def index_exists(table_name: str, index_name: str) -> bool:
+    """Check if an index exists on a table."""
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    if not table_exists(table_name):
+        return False
+    indexes = [idx["name"] for idx in inspector.get_indexes(table_name)]
+    return index_name in indexes
+
+
 def upgrade() -> None:
     """Create permission_tasks and permission_checkpoints tables."""
     # Create permission_tasks table if not exists
@@ -255,16 +275,23 @@ def downgrade() -> None:
     # Drop permission_checkpoints table if exists
     if table_exists("permission_checkpoints"):
         with op.batch_alter_table("permission_checkpoints") as batch_op:
-            batch_op.drop_constraint("fk_permission_checkpoints_task", type_="foreignkey")
+            if index_exists("permission_checkpoints", "fk_permission_checkpoints_task"):
+                batch_op.drop_constraint("fk_permission_checkpoints_task", type_="foreignkey")
         op.drop_table("permission_checkpoints")
 
     # Drop permission_tasks table if exists
     if table_exists("permission_tasks"):
-        op.drop_index("idx_permission_tasks_priority_created", table_name="permission_tasks")
-        op.drop_index("idx_permission_tasks_checksum", table_name="permission_tasks")
-        op.drop_index("idx_permission_tasks_project", table_name="permission_tasks")
-        op.drop_index("idx_permission_tasks_status", table_name="permission_tasks")
+        if index_exists("permission_tasks", "idx_permission_tasks_priority_created"):
+            op.drop_index("idx_permission_tasks_priority_created", table_name="permission_tasks")
+        if index_exists("permission_tasks", "idx_permission_tasks_checksum"):
+            op.drop_index("idx_permission_tasks_checksum", table_name="permission_tasks")
+        if index_exists("permission_tasks", "idx_permission_tasks_project"):
+            op.drop_index("idx_permission_tasks_project", table_name="permission_tasks")
+        if index_exists("permission_tasks", "idx_permission_tasks_status"):
+            op.drop_index("idx_permission_tasks_status", table_name="permission_tasks")
         with op.batch_alter_table("permission_tasks") as batch_op:
-            batch_op.drop_constraint("fk_permission_tasks_user", type_="foreignkey")
-            batch_op.drop_constraint("fk_permission_tasks_project", type_="foreignkey")
+            if index_exists("permission_tasks", "fk_permission_tasks_user"):
+                batch_op.drop_constraint("fk_permission_tasks_user", type_="foreignkey")
+            if index_exists("permission_tasks", "fk_permission_tasks_project"):
+                batch_op.drop_constraint("fk_permission_tasks_project", type_="foreignkey")
         op.drop_table("permission_tasks")
