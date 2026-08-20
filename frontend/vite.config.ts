@@ -39,7 +39,11 @@ export default defineConfig(({ command }) => ({
   build: {
     // 输出目录 - 构建到父目录的 static/js/dist 目录
     outDir: '../static/js/dist',
-    emptyOutDir: true,
+    // Keep the previous release's content-hashed assets until the post-build
+    // retention step has written the new release state. This prevents an
+    // already-open SPA from losing lazy chunks during a deployment.
+    emptyOutDir: false,
+    manifest: true,
 
     // 仅本地开发服务器生成 source map；生产构建关闭以避免源码泄露
     sourcemap: command === 'serve',

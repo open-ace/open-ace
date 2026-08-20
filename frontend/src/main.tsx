@@ -8,6 +8,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
+import { ChunkLoadErrorBoundary } from './components/common/ChunkLoadErrorBoundary';
 
 // Import Bootstrap and Bootstrap Icons locally (no external CDN)
 import 'bootstrap/dist/css/bootstrap.min.css';
@@ -24,9 +25,11 @@ if (rootElement) {
   const root = ReactDOM.createRoot(rootElement);
   root.render(
     <React.StrictMode>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <ChunkLoadErrorBoundary>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </ChunkLoadErrorBoundary>
     </React.StrictMode>
   );
 } else {
