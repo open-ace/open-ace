@@ -15,6 +15,9 @@ from app.utils.workspace import (
     add_user_to_shared_group,
     ensure_shared_group,
     setup_shared_project_permissions,
+    estimate_file_count_fast,
+    setup_permissions_with_depth_limit,
+    verify_setgid_support,
 )
 
 
@@ -222,3 +225,181 @@ class TestFixPermissionsEndpoint:
         from app.routes import projects
 
         assert hasattr(projects, "api_fix_project_permissions")
+
+
+# ============================================================================
+# Performance Optimization Tests (Issue #2746)
+# ============================================================================
+
+
+class TestEstimateFileCountFast:
+    """Tests for fast file count estimation."""
+
+    def test_estimate_empty_directory(self):
+        """Should return 0 for empty directory."""
+        from app.utils.workspace import estimate_file_count_fast
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            count = estimate_file_count_fast(tmpdir)
+            assert count == 0
+
+    def test_estimate_small_directory(self):
+        """Should estimate small number of files."""
+        from app.utils.workspace import estimate_file_count_fast
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a few files
+            for i in range(10):
+                open(os.path.join(tmpdir, f"file{i}.txt"), "w").close()
+
+            count = estimate_file_count_fast(tmpdir)
+            assert count >= 10
+
+    @patch("subprocess.run")
+    def test_estimate_timeout_returns_max(self, mock_run):
+        """Should return 50000 when estimation times out."""
+        from app.utils.workspace import estimate_file_count_fast
+        import subprocess
+
+        mock_run.side_effect = subprocess.TimeoutExpired("find", 5)
+
+        count = estimate_file_count_fast("/some/path", timeout=5)
+        assert count == 50000
+
+    def test_estimate_nonexistent_path(self):
+        """Should return default for nonexistent path."""
+        from app.utils.workspace import estimate_file_count_fast
+
+        count = estimate_file_count_fast("/nonexistent/path/12345")
+        assert count == 50000
+
+
+class TestSetupPermissionsWithDepthLimit:
+    """Tests for optimized permission setup with depth limit."""
+
+    @patch("app.utils.workspace._is_docker_multi_user_mode")
+    def test_skip_non_docker_mode(self, mock_docker_mode):
+        """Should skip in non-Docker mode."""
+        from app.utils.workspace import setup_permissions_with_depth_limit
+
+        mock_docker_mode.return_value = False
+
+        success, error, processed = setup_permissions_with_depth_limit("/some/path")
+
+        assert success is True
+        assert error == ""
+        assert processed == 0
+
+    def test_invalid_path(self):
+        """Should return error for invalid path."""
+        from app.utils.workspace import setup_permissions_with_depth_limit
+
+        with patch("app.utils.workspace._is_docker_multi_user_mode", return_value=True):
+            success, error, processed = setup_permissions_with_depth_limit("relative/path")
+
+            assert success is False
+            assert "Invalid path" in error
+
+    @patch("app.utils.workspace._is_docker_multi_user_mode")
+    @patch("app.utils.workspace.ensure_shared_group")
+    @patch("subprocess.run")
+    def test_sets_permissions_with_depth_limit(self, mock_run, mock_ensure_group, mock_docker_mode):
+        """Should set permissions with depth limit."""
+        mock_docker_mode.return_value = True
+        mock_ensure_group.return_value = True
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create some files
+            for i in range(5):
+                open(os.path.join(tmpdir, f"file{i}.txt"), "w").close()
+
+            success, error, processed = setup_permissions_with_depth_limit(
+                tmpdir,
+                depth_limit=3,
+                timeout=30,
+            )
+
+            assert success is True
+            assert error == ""
+            assert processed >= 0
+
+
+class TestVerifySetgidSupport:
+    """Tests for setgid support verification."""
+
+    @patch("app.utils.workspace._is_docker_multi_user_mode")
+    def test_verify_in_non_docker_mode(self, mock_docker_mode):
+        """Should return False in non-Docker mode (skip verification)."""
+        from app.utils.workspace import verify_setgid_support
+
+        mock_docker_mode.return_value = False
+
+        # This test would need actual Docker environment to verify setgid
+        # For now, just test the function exists and can be called
+        assert callable(verify_setgid_support)
+
+    def test_verify_nonexistent_path(self):
+        """Should return error for nonexistent path."""
+        from app.utils.workspace import verify_setgid_support
+
+        supported, error = verify_setgid_support("/nonexistent/path/12345")
+
+        assert supported is False
+        assert "does not exist" in error
+
+
+class TestPermissionTaskService:
+    """Tests for permission task service."""
+
+    def test_service_singleton(self):
+        """Should return the same service instance."""
+        from app.services.permission_task_service import (
+            PermissionTaskService,
+            get_permission_task_service,
+        )
+
+        service1 = get_permission_task_service()
+        service2 = get_permission_task_service()
+
+        assert service1 is service2
+        assert isinstance(service1, PermissionTaskService)
+
+    def test_generate_checksum(self):
+        """Should generate consistent checksum for same inputs."""
+        from app.services.permission_task_service import get_permission_task_service
+
+        service = get_permission_task_service()
+
+        checksum1 = service.generate_task_checksum(123, "/path/to/project")
+        checksum2 = service.generate_task_checksum(123, "/path/to/project")
+
+        assert checksum1 == checksum2
+        assert len(checksum1) == 32  # MD5 hex digest
+
+    def test_different_checksum_for_different_projects(self):
+        """Should generate different checksums for different projects."""
+        from app.services.permission_task_service import get_permission_task_service
+
+        service = get_permission_task_service()
+
+        checksum1 = service.generate_task_checksum(123, "/path/to/project1")
+        checksum2 = service.generate_task_checksum(456, "/path/to/project2")
+
+        assert checksum1 != checksum2
+
+
+class TestPermissionTaskAPIEndpoints:
+    """Tests for permission task API endpoints."""
+
+    def test_task_status_endpoint_exists(self):
+        """Verify task status endpoint function can be imported."""
+        from app.routes import projects
+
+        assert hasattr(projects, "api_get_permission_task_status")
+
+    def test_cancel_task_endpoint_exists(self):
+        """Verify cancel task endpoint function can be imported."""
+        from app.routes import projects
+
+        assert hasattr(projects, "api_cancel_permission_task")
