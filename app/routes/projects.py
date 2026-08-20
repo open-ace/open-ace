@@ -7,7 +7,6 @@ API routes for project management operations.
 """
 
 import logging
-from datetime import datetime, timezone
 import os
 import platform
 import pwd
@@ -295,13 +294,11 @@ def api_create_project():
                     from app import db  # type: ignore[attr-defined]  # type: ignore[attr-defined]
 
                     db.execute(
-                        sa.text(
-                            """
+                        sa.text("""
                             UPDATE projects
                             SET permission_status = 'failed'
                             WHERE id = :project_id
-                        """
-                        ),
+                        """),
                         {"project_id": project_id},
                     )
                     db.commit()
@@ -628,6 +625,7 @@ def api_fix_project_permissions(project_id):
         )
 
         if success:
+            assert task_info is not None  # Type guard for mypy
             response = {
                 "success": True,
                 "task_id": task_info["task_id"],
