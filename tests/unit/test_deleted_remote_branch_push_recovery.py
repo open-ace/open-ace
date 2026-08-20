@@ -4,6 +4,8 @@ import pytest
 
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2870)]
+
 
 def _result(returncode: int, stderr: str = "", stdout: str = "") -> MagicMock:
     return MagicMock(returncode=returncode, stdout=stdout, stderr=stderr)
