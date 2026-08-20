@@ -1143,6 +1143,72 @@ def test_wait_no_injection_when_latest_completed_is_wait_started(monkeypatch):
     assert not result.workflow_patch.get("user_feedback")
 
 
+def test_wait_rejected_resume_forces_development(monkeypatch):
+    """#322: a rejected-acceptance resume must force a repair development
+    round — milestone backtracking is the wrong decision mechanism here
+    (acceptance only runs after merge, so the latest completed milestone is
+    merge/acceptance/report-side or infra bookkeeping; #322's stale
+    worktree_restored(pr_review) skipped the repair round entirely and the
+    workflow fell straight into the no-changes terminal)."""
+    result = _run_wait_resume(
+        monkeypatch,
+        milestones=[
+            {
+                "phase": "development",
+                "milestone_type": "dev_completed",
+                "status": "completed",
+            },
+            {
+                "phase": "pr_review",
+                "milestone_type": "worktree_restored",
+                "status": "completed",
+            },
+            {
+                "phase": "merge",
+                "milestone_type": "cleaned_up",
+                "status": "completed",
+            },
+        ],
+        verification_status="rejected",
+        verification_report=_REJECTED_REPORT,
+        github_pr_number=2902,
+        user_feedback="Resume: fix the rejected acceptance items.",
+    )
+
+    assert result.outcome == "completed"
+    assert result.next_phase == "development"
+    assert result.next_status == "developing"
+    assert result.workflow_patch.get("dev_round") == 2
+
+
+def test_wait_non_rejected_backtracking_skips_worktree_restored(monkeypatch):
+    """Non-rejected resume keeps the milestone backtracking, but infra
+    bookkeeping (worktree_restored) is never a resume target: backtracking
+    past it lands on the real work milestone (development) instead of the
+    stale pr_review phase it was recorded under."""
+    result = _run_wait_resume(
+        monkeypatch,
+        milestones=[
+            {
+                "phase": "development",
+                "milestone_type": "dev_completed",
+                "status": "completed",
+            },
+            {
+                "phase": "pr_review",
+                "milestone_type": "worktree_restored",
+                "status": "completed",
+            },
+        ],
+        verification_status="confirmed",
+        user_feedback="please continue",
+    )
+
+    assert result.outcome == "completed"
+    assert result.next_phase == "development"  # not pr_review
+    assert result.next_status == "developing"
+
+
 @pytest.mark.parametrize(
     "comments,pr_number,expected",
     [
