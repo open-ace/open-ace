@@ -307,13 +307,17 @@ def get_mapping_stats():
 
     Issue #2180: Tenant admin sees only their tenant's stats.
     Issue #2374: Changed to fail-closed pattern for consistency.
+    Issue #2617: Use is_platform_admin_role for consistent role checking.
     """
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
 
     service = ToolAccountAutoMappingService()
 
-    if user_role == "tenant_admin":
+    # Validate user belongs to caller's tenant (non-platform admins only).
+    # Platform-level roles have global access (platform_admin always, admin only in non-strict mode).
+    # Issue #2286: Centralized role check via is_platform_admin_role.
+    if not is_platform_admin_role(user_role):
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         stats = service.get_mapping_stats(tenant_id=user_tenant_id)
@@ -332,6 +336,7 @@ def run_auto_mapping():
     Issue #2180: Tenant admin can only run for their tenant.
     Issue #2374: Changed to fail-closed pattern for consistency.
     Issue #2760: Return detailed stats to distinguish zero-result reasons.
+    Issue #2617: Use is_platform_admin_role for consistent role checking.
     """
     data = request.get_json() or {}
     dry_run = data.get("dry_run", False)
@@ -342,7 +347,10 @@ def run_auto_mapping():
     service = ToolAccountAutoMappingService()
 
     # Issue #2760: Use new method with detailed stats
-    if user_role == "tenant_admin":
+    # Validate user belongs to caller's tenant (non-platform admins only).
+    # Platform-level roles have global access (platform_admin always, admin only in non-strict mode).
+    # Issue #2286: Centralized role check via is_platform_admin_role.
+    if not is_platform_admin_role(user_role):
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         stats = service.run_auto_mapping_with_stats(dry_run=dry_run, tenant_id=user_tenant_id)
@@ -370,6 +378,7 @@ def test_match():
     """Test if a tool_account matches any rules.
 
     Issue #2374: Added tenant isolation for tenant_admin.
+    Issue #2617: Use is_platform_admin_role for consistent role checking.
     """
     data = request.get_json()
     if not data:
@@ -385,7 +394,10 @@ def test_match():
     service = ToolAccountAutoMappingService()
 
     # Issue #2374: Pass tenant_id for tenant_admin to prevent cross-tenant matching
-    if user_role == "tenant_admin":
+    # Validate user belongs to caller's tenant (non-platform admins only).
+    # Platform-level roles have global access (platform_admin always, admin only in non-strict mode).
+    # Issue #2286: Centralized role check via is_platform_admin_role.
+    if not is_platform_admin_role(user_role):
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         result = service.auto_map_account(
@@ -416,13 +428,17 @@ def get_unmapped_accounts():
 
     Issue #2180: Tenant admin sees only their tenant's unmapped accounts.
     Issue #2374: Changed to fail-closed pattern for consistency.
+    Issue #2617: Use is_platform_admin_role for consistent role checking.
     """
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
 
     repo = UserToolAccountRepository()
 
-    if user_role == "tenant_admin":
+    # Validate user belongs to caller's tenant (non-platform admins only).
+    # Platform-level roles have global access (platform_admin always, admin only in non-strict mode).
+    # Issue #2286: Centralized role check via is_platform_admin_role.
+    if not is_platform_admin_role(user_role):
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         unmapped = repo.get_unmapped_tool_accounts(tenant_id=user_tenant_id)
@@ -443,6 +459,7 @@ def suggest_mapping(sender_name: str):
     """Get suggested mapping for an unmapped account.
 
     Issue #2374: Added tenant isolation for tenant_admin.
+    Issue #2617: Use is_platform_admin_role for consistent role checking.
     """
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
@@ -450,7 +467,10 @@ def suggest_mapping(sender_name: str):
     service = ToolAccountAutoMappingService()
 
     # Issue #2374: Pass tenant_id for tenant_admin to prevent cross-tenant matching
-    if user_role == "tenant_admin":
+    # Validate user belongs to caller's tenant (non-platform admins only).
+    # Platform-level roles have global access (platform_admin always, admin only in non-strict mode).
+    # Issue #2286: Centralized role check via is_platform_admin_role.
+    if not is_platform_admin_role(user_role):
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         result = service.auto_map_account(sender_name, tenant_id=user_tenant_id)
@@ -484,6 +504,7 @@ def manual_map_account(sender_name: str):
     Manually map an unmapped account to a user.
 
     Issue #2180: Validate user belongs to caller's tenant.
+    Issue #2617: Use is_platform_admin_role for consistent role checking.
     """
     data = request.get_json()
     if not data:
@@ -496,9 +517,10 @@ def manual_map_account(sender_name: str):
     user_role = g.user.get("role")
     user_tenant_id = g.user.get("tenant_id")
 
-    # Validate user belongs to caller's tenant (tenant admin only).
-    # Issue #2286: 'admin' and 'platform_admin' have global access regardless of tenant_id.
-    if user_role == "tenant_admin":
+    # Validate user belongs to caller's tenant (non-platform admins only).
+    # Platform-level roles have global access (platform_admin always, admin only in non-strict mode).
+    # Issue #2286: Centralized role check via is_platform_admin_role.
+    if not is_platform_admin_role(user_role):
         if user_tenant_id is None:
             return jsonify({"error": "Tenant admin must have tenant_id"}), 403
         if not _validate_user_in_tenant(user_id, user_tenant_id):
