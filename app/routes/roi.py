@@ -398,12 +398,55 @@ def get_optimization_cost_trend():
 
 @roi_bp.route("/optimization/efficiency", methods=["GET"])
 def get_efficiency_report():
-    """Get efficiency analysis report."""
+    """Get efficiency analysis report.
+
+    Query Parameters:
+        days: Number of days to analyze (default: 30)
+        task_type: Optional task type filter (GENERAL, CODE_GENERATION,
+            DOCUMENT_ANALYSIS, CONVERSATION)
+        algorithm_version: Optional algorithm version (v1.0, v2.0, auto)
+            - auto: Use A/B test grouping based on tenant_id
+            - v1.0: Legacy algorithm
+            - v2.0: Parameterized algorithm with task-type awareness
+    """
     try:
         days = request.args.get("days", default=30, type=int)
+        task_type = request.args.get("task_type", default=None, type=str)
+        algorithm_version = request.args.get("algorithm_version", default=None, type=str)
+
+        # Validate task_type parameter
+        valid_task_types = ["GENERAL", "CODE_GENERATION", "DOCUMENT_ANALYSIS", "CONVERSATION"]
+        if task_type and task_type.upper() not in valid_task_types:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"Invalid task_type. Must be one of: {', '.join(valid_task_types)}",
+                    }
+                ),
+                400,
+            )
+
+        # Validate algorithm_version parameter
+        valid_versions = ["v1.0", "v2.0", "auto"]
+        if algorithm_version and algorithm_version not in valid_versions:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"Invalid algorithm_version. Must be one of: {', '.join(valid_versions)}",
+                    }
+                ),
+                400,
+            )
 
         optimizer = CostOptimizer()
-        report = optimizer.get_efficiency_report(days, tenant_id=_caller_tenant_id())
+        report = optimizer.get_efficiency_report(
+            days,
+            tenant_id=_caller_tenant_id(),
+            task_type=task_type,
+            algorithm_version=algorithm_version,
+        )
 
         return jsonify({"success": True, "data": report})
     except Exception as e:

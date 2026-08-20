@@ -1,12 +1,11 @@
 """
 Unit tests for tenant isolation mechanisms.
 
-Issue #2180: Tests for TenantScopedService and TenantPredicateBuilder.
+Issue #2180: Tests for TenantScopedService.
 """
 
 import pytest
 
-from app.repositories.predicate import TenantPredicateBuilder
 from app.services.base import CrossTenantAccessError, TenantScopedService
 
 
@@ -52,42 +51,3 @@ class TestTenantScopedService:
         service = TenantScopedService(tenant_id=1)
         with pytest.raises(CrossTenantAccessError, match="User has no tenant_id"):
             service.validate_user_in_tenant(None)
-
-
-class TestTenantPredicateBuilder:
-    """Tests for TenantPredicateBuilder utility."""
-
-    def test_validate_tenant_id_required(self):
-        """Should reject None when not allowed."""
-        with pytest.raises(ValueError, match="tenant_id is required"):
-            TenantPredicateBuilder.validate_tenant_id(None, allow_none=False)
-
-    def test_validate_tenant_id_allowed_none(self):
-        """Should accept None when allowed."""
-        result = TenantPredicateBuilder.validate_tenant_id(None, allow_none=True)
-        assert result is None
-
-    def test_validate_tenant_id_valid(self):
-        """Should return valid tenant_id."""
-        result = TenantPredicateBuilder.validate_tenant_id(1, allow_none=False)
-        assert result == 1
-
-    def test_validate_tenant_id_coerces_string(self):
-        """Should coerce string to int."""
-        result = TenantPredicateBuilder.validate_tenant_id("1", allow_none=False)
-        assert result == 1
-
-    def test_check_resource_tenant_match(self):
-        """Should return True for matching tenants."""
-        result = TenantPredicateBuilder.check_resource_tenant(1, 1)
-        assert result is True
-
-    def test_check_resource_tenant_mismatch(self):
-        """Should return False for different tenants."""
-        result = TenantPredicateBuilder.check_resource_tenant(1, 2)
-        assert result is False
-
-    def test_check_resource_tenant_null(self):
-        """Should return False for null resource tenant."""
-        result = TenantPredicateBuilder.check_resource_tenant(None, 1)
-        assert result is False

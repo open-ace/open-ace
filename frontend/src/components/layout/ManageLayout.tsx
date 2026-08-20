@@ -33,14 +33,23 @@ import { useAuth } from '@/hooks';
 import { t } from '@/i18n';
 import { ModeSwitcher } from '@/components/common';
 import { Header } from './Header';
-import { isAdmin } from '@/utils/permissions';
+import { isAdmin, canManageAllTenants } from '@/utils/permissions';
 
+/**
+ * Navigation item configuration.
+ *
+ * Permission markers:
+ * - adminOnly: Accessible by any admin role (admin, platform_admin, tenant_admin)
+ * - platformAdminOnly: Accessible only by platform-level admins (admin, platform_admin)
+ *   Used for global/跨租户 features like tenant management
+ */
 interface NavItem {
   id: string;
   label: string;
   icon: string;
   path: string;
   adminOnly?: boolean;
+  platformAdminOnly?: boolean;
   featureFlag?: 'policy' | 'model_gateway' | 'run_timeline' | 'autonomous';
 }
 
@@ -146,7 +155,7 @@ const navSections: NavSection[] = [
         label: 'tenantManagement',
         icon: 'bi-building',
         path: '/manage/tenants',
-        adminOnly: true,
+        platformAdminOnly: true, // Global tenant list - platform admin only
       },
     ],
   },
@@ -399,11 +408,13 @@ export const ManageLayout: React.FC<ManageLayoutProps> = ({ children }) => {
                 >
                   {section.items.map((item) => {
                     const isAdminCheck = item.adminOnly && !isAdmin(user);
+                    const isPlatformAdminCheck =
+                      item.platformAdminOnly && !canManageAllTenants(user);
                     const isFeatureDisabled =
                       (item.featureFlag === 'policy' && !policyEnabled) ||
                       (item.featureFlag === 'model_gateway' && !modelGatewayEnabled);
                     // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
-                    const isDisabled = isAdminCheck || isFeatureDisabled;
+                    const isDisabled = isAdminCheck || isPlatformAdminCheck || isFeatureDisabled;
                     return (
                       <li key={item.id}>
                         <Link

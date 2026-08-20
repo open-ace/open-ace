@@ -67,6 +67,36 @@ def check(condition, description):
         print(f"    [FAIL] {description}")
 
 
+def _clear_seeded_password_gate():
+    """Clear admin's must_change_password flag in the test DB (no-op otherwise).
+
+    Only touches an sqlite DB under the current HOME (.open-ace/ace.db) when
+    the flag is still set for the seeded admin — i.e. a freshly initialized
+    lane server. Dev databases where the password was already changed are
+    unaffected.
+    """
+    import sqlite3
+
+    db_path = os.path.join(os.path.expanduser("~"), ".open-ace", "ace.db")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(users)")]
+        if "must_change_password" not in cols:
+            return
+        cur = conn.execute(
+            "UPDATE users SET must_change_password=0 "
+            "WHERE username='admin' AND must_change_password=1"
+        )
+        conn.commit()
+        if cur.rowcount:
+            print("    [SETUP] Cleared seeded admin must_change_password flag")
+        conn.close()
+    except sqlite3.Error:
+        pass
+
+
 def api_login(session, username="admin", password="admin123"):
     r = session.post(
         f"{BASE_URL}/api/auth/login", json={"username": username, "password": password}
@@ -77,7 +107,7 @@ def api_login(session, username="admin", password="admin123"):
 
 def api_get_ip_whitelist(session):
     """Get current IP whitelist via API."""
-    r = session.get(f"{BASE_URL}/api/compliance/security-settings")
+    r = session.get(f"{BASE_URL}/api/security-settings")
     if r.status_code == 200:
         return r.json().get("ip_whitelist", [])
     return []
@@ -86,13 +116,13 @@ def api_get_ip_whitelist(session):
 def api_set_ip_whitelist(session, ip_list):
     """Set IP whitelist via API."""
     r = session.put(
-        f"{BASE_URL}/api/compliance/security-settings",
+        f"{BASE_URL}/api/security-settings",
         json={"ip_whitelist": ip_list},
     )
     return r.status_code == 200
 
 
-def test_api_ip_whitelist(session):
+def _check_api_ip_whitelist(session):
     """Test IP whitelist API endpoints directly."""
     print("\n[API] Testing IP whitelist endpoints...")
 
@@ -115,20 +145,15 @@ def test_api_ip_whitelist(session):
     print(f"    Restored original whitelist: {original_list}")
 
 
-def test_ui_ip_whitelist_newline(page, session):
-    """Test that IP whitelist textarea allows newline input (Issue #863)."""
-    print("\n[UI] Testing IP whitelist newline input...")
+def _open_security_settings_tab(page):
+    """Load Security Center and switch to the Security Settings tab.
 
-    # First, set a single IP via API for test setup
-    original_list = api_get_ip_whitelist(session)
-    api_set_ip_whitelist(session, ["192.168.1.1"])
-
-    # Navigate to Security Center
+    The default tab is Content Filter; the IP whitelist textarea only
+    exists on the Security Settings tab (one textarea there), so every
+    UI check must switch explicitly.
+    """
     page.goto(f"{BASE_URL}/manage/security", wait_until="domcontentloaded", timeout=30000)
-    pause(2)
-    shot(page, "01_security_center_loaded")
-
-    # Click on Security Settings tab (default tab, should be already visible)
+    pause(1)
     try:
         page.click("text=Security Settings", timeout=5000)
     except Exception:
@@ -137,6 +162,17 @@ def test_ui_ip_whitelist_newline(page, session):
         except Exception:
             page.click("text=セキュリティ設定", timeout=5000)
     pause(1)
+
+
+def _check_ui_ip_whitelist_newline(page, session):
+    """Test that IP whitelist textarea allows newline input (Issue #863)."""
+    print("\n[UI] Testing IP whitelist newline input...")
+
+    # First, set a single IP via API for test setup
+    original_list = api_get_ip_whitelist(session)
+    api_set_ip_whitelist(session, ["192.168.1.1"])
+
+    _open_security_settings_tab(page)
     shot(page, "02_security_settings_tab")
 
     # Find the IP whitelist textarea
@@ -173,11 +209,8 @@ def test_ui_ip_whitelist_newline(page, session):
 
     shot(page, "03_after_newline_input")
 
-    # Click Save button
-    try:
-        save_btn = page.locator("button:has-text('Save')").first
-    except Exception:
-        save_btn = page.locator("button:has-text('保存')").first
+    # Click Save button (language-robust union selector)
+    save_btn = page.locator("button:has-text('Save'), button:has-text('保存')").first
     save_btn.click()
     pause(2)
     shot(page, "04_after_save")
@@ -201,15 +234,13 @@ def test_ui_ip_whitelist_newline(page, session):
     api_set_ip_whitelist(session, original_list)
 
 
-def test_ui_ip_whitelist_dedupe(page, session):
+def _check_ui_ip_whitelist_dedupe(page, session):
     """Test that duplicate IPs are removed on save."""
     print("\n[UI] Testing IP whitelist dedupe...")
 
     original_list = api_get_ip_whitelist(session)
 
-    # Navigate to Security Center
-    page.goto(f"{BASE_URL}/manage/security", wait_until="domcontentloaded", timeout=30000)
-    pause(1)
+    _open_security_settings_tab(page)
 
     # Find textarea and clear it
     textarea = page.locator("textarea").first
@@ -237,15 +268,13 @@ def test_ui_ip_whitelist_dedupe(page, session):
     api_set_ip_whitelist(session, original_list)
 
 
-def test_ui_ip_whitelist_trim(page, session):
+def _check_ui_ip_whitelist_trim(page, session):
     """Test that leading/trailing spaces are trimmed on save."""
     print("\n[UI] Testing IP whitelist trim...")
 
     original_list = api_get_ip_whitelist(session)
 
-    # Navigate to Security Center
-    page.goto(f"{BASE_URL}/manage/security", wait_until="domcontentloaded", timeout=30000)
-    pause(1)
+    _open_security_settings_tab(page)
 
     # Find textarea and input IP with spaces
     textarea = page.locator("textarea").first
@@ -272,15 +301,13 @@ def test_ui_ip_whitelist_trim(page, session):
     api_set_ip_whitelist(session, original_list)
 
 
-def test_ui_ip_whitelist_empty_lines(page, session):
+def _check_ui_ip_whitelist_empty_lines(page, session):
     """Test that empty lines are filtered out on save."""
     print("\n[UI] Testing IP whitelist empty line filter...")
 
     original_list = api_get_ip_whitelist(session)
 
-    # Navigate to Security Center
-    page.goto(f"{BASE_URL}/manage/security", wait_until="domcontentloaded", timeout=30000)
-    pause(1)
+    _open_security_settings_tab(page)
 
     # Find textarea and input IPs with empty lines
     textarea = page.locator("textarea").first
@@ -314,12 +341,17 @@ def main():
     print(f"BASE_URL: {BASE_URL}")
     print(f"HEADLESS: {HEADLESS}")
 
+    # A freshly seeded lane server boots admin with must_change_password=1,
+    # which gates every authenticated endpoint behind 403 password_change_
+    # required (the 165-cluster lane-setup precedent clears the same flag).
+    _clear_seeded_password_gate()
+
     # API session for direct endpoint testing
     session = requests.Session()
     api_login(session)
 
     # Test API endpoints first
-    test_api_ip_whitelist(session)
+    _check_api_ip_whitelist(session)
 
     # UI tests with Playwright
     with sync_playwright() as p:
@@ -330,17 +362,17 @@ def main():
         # Login via UI
         print("\n[UI] Logging in as admin...")
         page.goto(f"{BASE_URL}/login", wait_until="domcontentloaded", timeout=30000)
-        page.fill("input[name='username']", "admin")
-        page.fill("input[name='password']", "admin123")
+        page.fill("#username", "admin")
+        page.fill("#password", "admin123")
         page.click("button[type='submit']")
         pause(2)
         shot(page, "00_login")
 
         # Run UI tests
-        test_ui_ip_whitelist_newline(page, session)
-        test_ui_ip_whitelist_dedupe(page, session)
-        test_ui_ip_whitelist_trim(page, session)
-        test_ui_ip_whitelist_empty_lines(page, session)
+        _check_ui_ip_whitelist_newline(page, session)
+        _check_ui_ip_whitelist_dedupe(page, session)
+        _check_ui_ip_whitelist_trim(page, session)
+        _check_ui_ip_whitelist_empty_lines(page, session)
 
         browser.close()
 
@@ -355,6 +387,36 @@ def main():
             print(f"  - {e}")
 
     sys.exit(0 if failed == 0 else 1)
+
+
+def test_e2e_ip_whitelist_script():
+    """Run the manual e2e script in a subprocess and require a full pass.
+
+    The check functions above are script-internal steps driven by main()
+    (requests.Session + Playwright); pytest cannot supply those fixtures.
+    The subprocess inherits the environment (the issues lane exports
+    BASE_URL for the live server) and the script exits 0 only when every
+    check passes. Skipped when no server is reachable (bare local runs).
+    """
+    import subprocess
+
+    import pytest
+    import requests as _requests
+
+    try:
+        _requests.get(f"{BASE_URL}/login", timeout=5)
+    except _requests.RequestException:
+        pytest.skip(f"server not reachable at {BASE_URL}; run via the issues lane")
+
+    proc = subprocess.run(
+        [sys.executable, os.path.abspath(__file__)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    tail = f"stdout tail:\n{proc.stdout[-1500:]}\nstderr tail:\n{proc.stderr[-1500:]}"
+    assert proc.returncode == 0, f"e2e script failed:\n{tail}"
+    assert ", 0 failed" in proc.stdout, f"e2e script incomplete:\n{tail}"
 
 
 if __name__ == "__main__":

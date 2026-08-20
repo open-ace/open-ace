@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from app.utils.datetime_utils import ensure_utc_suffix, parse_utc
+
 
 class UserRole(Enum):
     """User role enumeration."""
@@ -69,8 +71,8 @@ class User:
             "email": self.email,
             "role": self.role,
             "is_active": self.is_active,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "last_login": self.last_login.isoformat() if self.last_login else None,
+            "created_at": ensure_utc_suffix(self.created_at),
+            "last_login": ensure_utc_suffix(self.last_login),
             "tenant_id": self.tenant_id,
             "daily_token_quota": self.daily_token_quota,
             "monthly_token_quota": self.monthly_token_quota,
@@ -90,12 +92,8 @@ class User:
             password_hash=data.get("password_hash", ""),
             role=data.get("role", "user"),
             is_active=data.get("is_active", True),
-            created_at=(
-                datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
-            ),
-            last_login=(
-                datetime.fromisoformat(data["last_login"]) if data.get("last_login") else None
-            ),
+            created_at=parse_utc(data.get("created_at")),
+            last_login=parse_utc(data.get("last_login")),
             tenant_id=data.get("tenant_id"),
             daily_token_quota=data.get("daily_token_quota"),
             monthly_token_quota=data.get("monthly_token_quota"),

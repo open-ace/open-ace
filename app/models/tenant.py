@@ -10,6 +10,9 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from app.utils.datetime_utils import ensure_utc_suffix
+from app.utils.helpers import parse_db_datetime
+
 logger = logging.getLogger(__name__)
 
 
@@ -190,12 +193,10 @@ class Tenant:
             "contact_name": self.contact_name,
             "quota": self.quota.to_dict(),
             "settings": self.settings.to_dict(),
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "trial_ends_at": self.trial_ends_at.isoformat() if self.trial_ends_at else None,
-            "subscription_ends_at": (
-                self.subscription_ends_at.isoformat() if self.subscription_ends_at else None
-            ),
+            "created_at": ensure_utc_suffix(self.created_at),
+            "updated_at": ensure_utc_suffix(self.updated_at),
+            "trial_ends_at": ensure_utc_suffix(self.trial_ends_at),
+            "subscription_ends_at": ensure_utc_suffix(self.subscription_ends_at),
             "user_count": self.user_count,
             "total_tokens_used": self.total_tokens_used,
             "total_requests_made": self.total_requests_made,
@@ -218,20 +219,10 @@ class Tenant:
             contact_name=data.get("contact_name"),
             quota=QuotaConfig.from_dict(quota_data) if quota_data else QuotaConfig(),
             settings=TenantSettings.from_dict(settings_data) if settings_data else TenantSettings(),
-            created_at=(
-                datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
-            ),
-            updated_at=(
-                datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
-            ),
-            trial_ends_at=(
-                datetime.fromisoformat(data["trial_ends_at"]) if data.get("trial_ends_at") else None
-            ),
-            subscription_ends_at=(
-                datetime.fromisoformat(data["subscription_ends_at"])
-                if data.get("subscription_ends_at")
-                else None
-            ),
+            created_at=parse_db_datetime(data.get("created_at")),
+            updated_at=parse_db_datetime(data.get("updated_at")),
+            trial_ends_at=parse_db_datetime(data.get("trial_ends_at")),
+            subscription_ends_at=parse_db_datetime(data.get("subscription_ends_at")),
             user_count=data.get("user_count", 0),
             total_tokens_used=data.get("total_tokens_used", 0),
             total_requests_made=data.get("total_requests_made", 0),

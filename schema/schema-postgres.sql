@@ -1796,6 +1796,12 @@ CREATE SEQUENCE teams_id_seq
     CACHE 1;
 
 ALTER SEQUENCE teams_id_seq OWNED BY teams.id;
+CREATE TABLE tenant_keywords_version (
+    tenant_id integer NOT NULL,
+    version bigint DEFAULT '1'::bigint NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
 CREATE TABLE tenant_migrations (
     id integer NOT NULL,
     user_id integer NOT NULL,
@@ -1899,6 +1905,26 @@ CREATE SEQUENCE tenant_quotas_id_seq
     CACHE 1;
 
 ALTER SEQUENCE tenant_quotas_id_seq OWNED BY tenant_quotas.id;
+CREATE TABLE tenant_sensitive_keywords (
+    id integer NOT NULL,
+    tenant_id integer NOT NULL,
+    keyword text NOT NULL,
+    normalized_keyword text NOT NULL,
+    is_enabled boolean DEFAULT true NOT NULL,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp without time zone
+);
+
+CREATE SEQUENCE tenant_sensitive_keywords_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE tenant_sensitive_keywords_id_seq OWNED BY tenant_sensitive_keywords.id;
 CREATE TABLE tenant_settings (
     id integer NOT NULL,
     tenant_id integer NOT NULL,
@@ -1915,7 +1941,9 @@ CREATE TABLE tenant_settings (
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     block_sensitive_keyword boolean DEFAULT false,
-    sensitive_keyword_match_mode character varying(50) DEFAULT 'word_boundary'::character varying
+    sensitive_keyword_match_mode character varying(50) DEFAULT 'word_boundary'::character varying,
+    allowed_tools jsonb DEFAULT '["claude", "qwen", "openclaw", "codex", "zcode"]'::jsonb,
+    roi_assumptions jsonb
 );
 
 CREATE SEQUENCE tenant_settings_id_seq
@@ -2488,6 +2516,8 @@ ALTER TABLE ONLY tenant_plans ALTER COLUMN id SET DEFAULT nextval('tenant_plans_
 
 ALTER TABLE ONLY tenant_quotas ALTER COLUMN id SET DEFAULT nextval('tenant_quotas_id_seq'::regclass);
 
+ALTER TABLE ONLY tenant_sensitive_keywords ALTER COLUMN id SET DEFAULT nextval('tenant_sensitive_keywords_id_seq'::regclass);
+
 ALTER TABLE ONLY tenant_settings ALTER COLUMN id SET DEFAULT nextval('tenant_settings_id_seq'::regclass);
 
 ALTER TABLE ONLY tenant_usage ALTER COLUMN id SET DEFAULT nextval('tenant_usage_new_id_seq'::regclass);
@@ -2808,6 +2838,9 @@ ALTER TABLE ONLY teams
 ALTER TABLE ONLY teams
     ADD CONSTRAINT teams_team_id_key UNIQUE (team_id);
 
+ALTER TABLE ONLY tenant_keywords_version
+    ADD CONSTRAINT tenant_keywords_version_pkey PRIMARY KEY (tenant_id);
+
 ALTER TABLE ONLY tenant_migrations
     ADD CONSTRAINT tenant_migrations_pkey PRIMARY KEY (id);
 
@@ -2828,6 +2861,9 @@ ALTER TABLE ONLY tenant_quotas
 
 ALTER TABLE ONLY tenant_quotas
     ADD CONSTRAINT tenant_quotas_tenant_id_key UNIQUE (tenant_id);
+
+ALTER TABLE ONLY tenant_sensitive_keywords
+    ADD CONSTRAINT tenant_sensitive_keywords_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY tenant_settings
     ADD CONSTRAINT tenant_settings_pkey PRIMARY KEY (id);
@@ -2879,6 +2915,9 @@ ALTER TABLE ONLY remote_runtime_outputs
 
 ALTER TABLE ONLY smtp_settings
     ADD CONSTRAINT uq_smtp_settings_single PRIMARY KEY (id);
+
+ALTER TABLE ONLY tenant_sensitive_keywords
+    ADD CONSTRAINT uq_tenant_keyword UNIQUE (tenant_id, normalized_keyword);
 
 ALTER TABLE ONLY tenant_usage
     ADD CONSTRAINT uq_tenant_usage_tenant_date_new UNIQUE (tenant_id, date);
@@ -3710,6 +3749,14 @@ CREATE INDEX idx_teams_owner ON teams USING btree (owner_id);
 --
 
 CREATE INDEX idx_teams_sync_source ON teams USING btree ((((settings)::jsonb ->> 'sync_source'::text)));
+
+CREATE INDEX idx_tenant_keywords_enabled ON tenant_sensitive_keywords USING btree (tenant_id, is_enabled) WHERE (is_enabled = true);
+
+
+--
+--
+
+CREATE INDEX idx_tenant_keywords_tenant ON tenant_sensitive_keywords USING btree (tenant_id);
 
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations USING btree (status);
 

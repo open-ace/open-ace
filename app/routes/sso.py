@@ -1452,8 +1452,11 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
             # explicitly opts in. Default behaviour is to provision a fresh user
             # rather than risk binding an IdP-asserted (unverified) email onto an
             # existing account — especially a privileged one.
+            # Issue #2755: Explicitly exclude soft-deleted users
             if auth_result.user.email and _allow_email_linking(provider_name):
-                existing_user = user_repo.get_user_by_email(auth_result.user.email)
+                existing_user = user_repo.get_user_by_email(
+                    auth_result.user.email, include_deleted=False
+                )
                 if existing_user:
                     user_id = existing_user.get("id")
                     linked_by_email = True  # an actual binding happened

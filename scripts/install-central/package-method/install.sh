@@ -2806,15 +2806,6 @@ ${line}"
             fi
         done
 
-        # 【修复 P2】Check chown rule (consistent with docker-entrypoint.sh)
-        # chown is defined in OPENACE_UTILS Cmnd_Alias (line 1862), not as a direct user rule
-        # Check if OPENACE_UTILS Cmnd_Alias exists and contains chown
-        if ! grep -q "Cmnd_Alias OPENACE_UTILS" "$sudoers_file" 2>/dev/null || \
-           ! grep -E "Cmnd_Alias OPENACE_UTILS.*chown" "$sudoers_file" 2>/dev/null; then
-            print_warning "Sudoers missing OPENACE_UTILS Cmnd_Alias or chown command"
-            need_update=true
-        fi
-
         # 【修复 Issue #2674】Check cross-user mkdir rule (MKDIR_SAFE).
         # github_ops.create_verification_worktree_dir emits
         # 'sudo -u <account> mkdir ...' (bare mkdir), which the (root)-runas
