@@ -136,25 +136,22 @@ def upgrade() -> None:
         ),
     )
 
-    # Add foreign key constraint to projects
-    op.create_foreign_key(
-        "fk_permission_tasks_project",
-        "permission_tasks",
-        "projects",
-        ["project_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
-
-    # Add foreign key constraint to users
-    op.create_foreign_key(
-        "fk_permission_tasks_user",
-        "permission_tasks",
-        "users",
-        ["user_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
+    # Add foreign key constraints using batch operations for SQLite compatibility
+    with op.batch_alter_table("permission_tasks") as batch_op:
+        batch_op.create_foreign_key(
+            "fk_permission_tasks_project",
+            "projects",
+            ["project_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
+        batch_op.create_foreign_key(
+            "fk_permission_tasks_user",
+            "users",
+            ["user_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
 
     # Create indexes for permission_tasks
     op.create_index(
@@ -233,25 +230,22 @@ def upgrade() -> None:
         ),
     )
 
-    # Add foreign key constraint to permission_tasks
-    op.create_foreign_key(
-        "fk_permission_checkpoints_task",
-        "permission_checkpoints",
-        "permission_tasks",
-        ["task_id"],
-        ["task_id"],
-        ondelete="CASCADE",
-    )
+    # Add foreign key constraint using batch operations for SQLite compatibility
+    with op.batch_alter_table("permission_checkpoints") as batch_op:
+        batch_op.create_foreign_key(
+            "fk_permission_checkpoints_task",
+            "permission_tasks",
+            ["task_id"],
+            ["task_id"],
+            ondelete="CASCADE",
+        )
 
 
 def downgrade() -> None:
     """Drop permission_tasks and permission_checkpoints tables."""
     # Drop permission_checkpoints table
-    op.drop_constraint(
-        "fk_permission_checkpoints_task",
-        "permission_checkpoints",
-        type_="foreignkey",
-    )
+    with op.batch_alter_table("permission_checkpoints") as batch_op:
+        batch_op.drop_constraint("fk_permission_checkpoints_task", type_="foreignkey")
     op.drop_table("permission_checkpoints")
 
     # Drop permission_tasks table
@@ -259,14 +253,7 @@ def downgrade() -> None:
     op.drop_index("idx_permission_tasks_checksum", table_name="permission_tasks")
     op.drop_index("idx_permission_tasks_project", table_name="permission_tasks")
     op.drop_index("idx_permission_tasks_status", table_name="permission_tasks")
-    op.drop_constraint(
-        "fk_permission_tasks_user",
-        "permission_tasks",
-        type_="foreignkey",
-    )
-    op.drop_constraint(
-        "fk_permission_tasks_project",
-        "permission_tasks",
-        type_="foreignkey",
-    )
+    with op.batch_alter_table("permission_tasks") as batch_op:
+        batch_op.drop_constraint("fk_permission_tasks_user", type_="foreignkey")
+        batch_op.drop_constraint("fk_permission_tasks_project", type_="foreignkey")
     op.drop_table("permission_tasks")
