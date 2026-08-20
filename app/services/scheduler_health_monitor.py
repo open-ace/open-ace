@@ -276,19 +276,65 @@ class SchedulerHealthMonitor:
     def _check_scheduler_health(self, name: str, status: dict):
         """Check individual scheduler health and create alert if needed.
 
+        Issue #2820: Uses health status classification (healthy/stale/stopped/unknown).
+
         Args:
             name: Scheduler name.
             status: Scheduler status dict.
         """
-        is_healthy = self._is_scheduler_healthy(status)
+        health_status = self._get_scheduler_health_status(status)
 
-        if not is_healthy:
+        if health_status == "stopped":
+            # Generate critical alert for stopped scheduler
             if name not in self._alert_created_for:
-                self._create_scheduler_alert(name, status)
+                self._create_scheduler_alert(name, status, severity="critical")
                 self._alert_created_for.add(name)
-        else:
-            # Clear alert flag when scheduler is healthy again
+
+        elif health_status == "stale":
+            # Generate warning alert for stale scheduler
+            stale_key = f"{name}:stale"
+            if stale_key not in self._alert_created_for:
+                self._create_scheduler_alert(name, status, severity="warning", is_stale=True)
+                self._alert_created_for.add(stale_key)
+            # Clear the stopped alert flag if it exists
             self._alert_created_for.discard(name)
+
+        elif health_status == "healthy":
+            # Clear alert flags when scheduler is healthy again
+            self._alert_created_for.discard(name)
+            self._alert_created_for.discard(f"{name}:stale")
+
+        # Unknown status: don't generate alerts (can't determine health)
+
+    def _get_scheduler_health_status(self, status: dict) -> str:
+        """Determine scheduler health status.
+
+        Issue #2820: Returns health status classification.
+
+        Args:
+            status: Scheduler status dict.
+
+        Returns:
+            "healthy" | "stale" | "stopped" | "unknown"
+        """
+        # Check if health_status is already computed
+        if "health_status" in status:
+            return str(status["health_status"])
+
+        # Check if running
+        running = status.get("running")
+        if running == "unknown":
+            return "unknown"
+        if not running:
+            return "stopped"
+
+        # Check heartbeat freshness if available
+        heartbeat_ok = status.get("heartbeat_ok")
+        if heartbeat_ok is not None:
+            return "healthy" if heartbeat_ok else "stale"
+
+        # If no heartbeat info, check based on running flag
+        return "healthy" if running else "stopped"
 
     def _is_scheduler_healthy(self, status: dict) -> bool:
         """Determine if a scheduler is healthy.
@@ -299,35 +345,43 @@ class SchedulerHealthMonitor:
         Returns:
             True if healthy, False otherwise.
         """
-        # Check if running
-        if not status.get("running", False):
-            return False
+        health_status = self._get_scheduler_health_status(status)
+        return health_status in ("healthy", "stale")  # stale is still "healthy" in basic check
 
-        # Check heartbeat freshness if available
-        heartbeat_ok = status.get("heartbeat_ok")
-        if heartbeat_ok is not None:
-            return bool(heartbeat_ok)
-
-        # If no heartbeat info, just check running flag
-        return True
-
-    def _create_scheduler_alert(self, name: str, status: dict):
-        """Create a system alert for a stopped scheduler.
+    def _create_scheduler_alert(
+        self, name: str, status: dict, severity: str = "critical", is_stale: bool = False
+    ):
+        """Create a system alert for a scheduler issue.
 
         Args:
             name: Scheduler name.
             status: Scheduler status dict.
+            severity: Alert severity ("critical" or "warning").
+            is_stale: Whether this is a stale (suspected) issue.
         """
         try:
             from app.modules.governance.alert_notifier import create_system_alert
 
+            if is_stale:
+                title = f"Scheduler Stale: {name}"
+                message = (
+                    f"The {name} scheduler heartbeat is stale. "
+                    f"Possible causes: worker stopped, network partition, or high load. "
+                    f"Status: {status}"
+                )
+            else:
+                title = f"Scheduler Stopped: {name}"
+                message = (
+                    f"The {name} scheduler has stopped running. "
+                    f"Please check the system logs. Status: {status}"
+                )
+
             create_system_alert(
-                title=f"Scheduler Stopped: {name}",
-                message=f"The {name} scheduler has stopped running. "
-                f"Please check the system logs. Status: {status}",
-                severity="critical",
+                title=title,
+                message=message,
+                severity=severity,
             )
-            logger.warning(f"Created alert for stopped scheduler: {name}")
+            logger.warning(f"Created {severity} alert for scheduler {name} (stale={is_stale})")
 
         except Exception as e:
             logger.error(f"Failed to create scheduler alert: {e}")
