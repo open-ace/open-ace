@@ -31,7 +31,13 @@ from app.modules.workspace.agent_token import (
     generate_registration_token,
     hash_token,
 )
-from app.repositories.database import DB_PATH, Database, adapt_boolean_value, is_postgresql
+from app.repositories.database import (
+    DB_PATH,
+    Database,
+    _param,
+    adapt_boolean_value,
+    is_postgresql,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +56,8 @@ MAX_TOKEN_REVOKE_TIMEOUT = 3600
 _PERSIST_OUTPUT_MAX_RETRIES = 8
 
 # Issue #2596: Session states to terminate during machine deregistration
-SESSION_STATES_TO_TERMINATE = ['active', 'paused', 'pending', 'starting', 'stopping']
-SESSION_STATES_TERMINAL = ['completed', 'stopped', 'error', 'timeout']
+SESSION_STATES_TO_TERMINATE = ["active", "paused", "pending", "starting", "stopping"]
+SESSION_STATES_TERMINAL = ["completed", "stopped", "error", "timeout"]
 
 # Batch size for terminating sessions during deregistration
 DEREGISTER_BATCH_SIZE = 100
@@ -107,10 +113,6 @@ def _is_unique_violation(exc: Exception) -> bool:
     if pgcode == "23505":
         return True
     return type(exc).__name__ == "UniqueViolation"
-
-
-def _param() -> str:
-    return "?" if not is_postgresql() else "%s"
 
 
 def _params(count: int) -> str:
@@ -938,7 +940,9 @@ class RemoteAgentManager:
                     lock_acquired = True
                     logger.debug("Acquired advisory lock for machine %s", machine_id[:8])
             except Exception as e:
-                logger.warning("Failed to acquire advisory lock for machine %s: %s", machine_id[:8], e)
+                logger.warning(
+                    "Failed to acquire advisory lock for machine %s: %s", machine_id[:8], e
+                )
                 # Continue without lock for SQLite or if lock fails
                 # Another concurrent deregistration may still be in progress
 
@@ -951,19 +955,23 @@ class RemoteAgentManager:
 
             if session_ids:
                 # Step 3: Terminate sessions in batches
-                for batch_idx, batch_start in enumerate(range(0, len(session_ids), DEREGISTER_BATCH_SIZE)):
-                    batch = session_ids[batch_start:batch_start + DEREGISTER_BATCH_SIZE]
+                for batch_idx, batch_start in enumerate(
+                    range(0, len(session_ids), DEREGISTER_BATCH_SIZE)
+                ):
+                    batch = session_ids[batch_start : batch_start + DEREGISTER_BATCH_SIZE]
                     batch_result = self._terminate_sessions_batch(machine_id, batch, batch_idx)
 
-                    if batch_result['success']:
+                    if batch_result["success"]:
                         sessions_terminated += len(batch)
                     else:
                         # Record failed batch
-                        failed_batches.append({
-                            'batch_index': batch_idx,
-                            'session_ids': batch,
-                            'error_message': batch_result.get('error', 'Unknown error'),
-                        })
+                        failed_batches.append(
+                            {
+                                "batch_index": batch_idx,
+                                "session_ids": batch,
+                                "error_message": batch_result.get("error", "Unknown error"),
+                            }
+                        )
 
                 # Step 4: Clean up runtime data (commands and outputs)
                 commands_deleted = self._cleanup_runtime_commands(machine_id)
@@ -976,7 +984,9 @@ class RemoteAgentManager:
                 cursor.execute(
                     f"DELETE FROM machine_assignments WHERE machine_id = {_param()}", (machine_id,)
                 )
-                cursor.execute(f"DELETE FROM agent_tokens WHERE machine_id = {_param()}", (machine_id,))
+                cursor.execute(
+                    f"DELETE FROM agent_tokens WHERE machine_id = {_param()}", (machine_id,)
+                )
                 cursor.execute(
                     f"DELETE FROM remote_machines WHERE machine_id = {_param()}", (machine_id,)
                 )
@@ -1029,7 +1039,9 @@ class RemoteAgentManager:
                         cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_key,))
                         logger.debug("Released advisory lock for machine %s", machine_id[:8])
                 except Exception as e:
-                    logger.warning("Failed to release advisory lock for machine %s: %s", machine_id[:8], e)
+                    logger.warning(
+                        "Failed to release advisory lock for machine %s: %s", machine_id[:8], e
+                    )
 
     def _notify_agent_deregister(self, machine_id: str) -> bool:
         """Try to notify agent that sessions will be terminated.
@@ -1047,10 +1059,10 @@ class RemoteAgentManager:
 
             # Send notification command
             command = {
-                'type': 'command',
-                'command': 'stop_all_sessions',
-                'machine_id': machine_id,
-                'reason': 'machine_deregistered',
+                "type": "command",
+                "command": "stop_all_sessions",
+                "machine_id": machine_id,
+                "reason": "machine_deregistered",
             }
             self.send_command(machine_id, command)
             logger.info("Sent stop_all_sessions notification to agent %s", machine_id[:8])
@@ -1096,7 +1108,7 @@ class RemoteAgentManager:
             Dict with 'success' and optional 'error' fields.
         """
         if not session_ids:
-            return {'success': True}
+            return {"success": True}
 
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -1109,7 +1121,7 @@ class RemoteAgentManager:
                     SET status = 'stopped', updated_at = {_param()}
                     WHERE session_id IN ({placeholders})
                     """,
-                    [now.isoformat()] + session_ids,
+                    [now] + session_ids,
                 )
                 conn.commit()
 
@@ -1119,7 +1131,7 @@ class RemoteAgentManager:
                 len(session_ids),
                 machine_id[:8],
             )
-            return {'success': True}
+            return {"success": True}
         except Exception as e:
             logger.error(
                 "Failed to terminate batch %d for machine %s: %s",
@@ -1127,7 +1139,7 @@ class RemoteAgentManager:
                 machine_id[:8],
                 e,
             )
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
 
     def _cleanup_runtime_commands(self, machine_id: str) -> int:
         """Clean up runtime commands for a machine.
@@ -1177,9 +1189,7 @@ class RemoteAgentManager:
             logger.error("Failed to cleanup outputs for sessions: %s", e)
             return 0
 
-    def _record_failed_batches(
-        self, machine_id: str, failed_batches: list[dict[str, Any]]
-    ) -> None:
+    def _record_failed_batches(self, machine_id: str, failed_batches: list[dict[str, Any]]) -> None:
         """Record failed batches for background compensation.
 
         Issue #2596: Insert failed batch records into deregister_failures table.
@@ -1197,13 +1207,13 @@ class RemoteAgentManager:
                         """,
                         (
                             machine_id,
-                            batch['batch_index'],
-                            json.dumps(batch['session_ids']),
-                            batch.get('error_message', ''),
+                            batch["batch_index"],
+                            json.dumps(batch["session_ids"]),
+                            batch.get("error_message", ""),
                             0,
-                            'pending',
-                            now.isoformat(),
-                            now.isoformat(),
+                            "pending",
+                            now,
+                            now,
                         ),
                     )
                 conn.commit()

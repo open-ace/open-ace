@@ -21,17 +21,14 @@ from typing import Any
 
 import gevent
 
-from app.repositories.database import Database, is_postgresql
-
-
-def _param() -> str:
-    """Return parameter placeholder for current database."""
-    return "?" if not is_postgresql() else "%s"
+from app.repositories.database import Database, _param
 
 logger = logging.getLogger(__name__)
 
 # Configuration
-COMPENSATION_CHECK_INTERVAL = int(os.getenv("DEREGISTER_COMPENSATION_INTERVAL_SEC", "300"))  # 5 minutes
+COMPENSATION_CHECK_INTERVAL = int(
+    os.getenv("DEREGISTER_COMPENSATION_INTERVAL_SEC", "300")
+)  # 5 minutes
 COMPENSATION_MAX_RETRIES = 3
 COMPENSATION_BACKOFF_BASE = 60  # 1 minute base, doubles each retry
 
@@ -84,16 +81,14 @@ class DeregisterCompensationWorker:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 # Get all pending failures ordered by creation time
-                cursor.execute(
-                    f"""
+                cursor.execute(f"""
                     SELECT id, machine_id, batch_index, session_ids, error_message,
                            retry_count, created_at
                     FROM deregister_failures
                     WHERE status = 'pending' OR status = 'retrying'
                     ORDER BY created_at ASC
                     LIMIT 100
-                    """
-                )
+                    """)
                 failures = cursor.fetchall()
 
             if not failures:
@@ -122,7 +117,11 @@ class DeregisterCompensationWorker:
 
         # Parse session IDs
         try:
-            session_ids = json.loads(session_ids_json) if isinstance(session_ids_json, str) else session_ids_json
+            session_ids = (
+                json.loads(session_ids_json)
+                if isinstance(session_ids_json, str)
+                else session_ids_json
+            )
         except json.JSONDecodeError:
             logger.error("Invalid session_ids JSON for failure %d", failure_id)
             self._mark_failure_resolved(failure_id, "Invalid session_ids JSON")
@@ -146,7 +145,7 @@ class DeregisterCompensationWorker:
                 created_at = created_at.replace(tzinfo=None)
 
             # Exponential backoff: 1min, 5min, 15min
-            backoff_seconds = COMPENSATION_BACKOFF_BASE * (2 ** retry_count)
+            backoff_seconds = COMPENSATION_BACKOFF_BASE * (2**retry_count)
             next_retry_time = created_at + timedelta(seconds=backoff_seconds)
             now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -192,7 +191,7 @@ class DeregisterCompensationWorker:
                     WHERE session_id IN ({placeholders})
                     AND status NOT IN ('completed', 'stopped', 'error')
                     """,
-                    [now.isoformat()] + session_ids,
+                    [now] + session_ids,
                 )
                 conn.commit()
             return True
@@ -212,7 +211,7 @@ class DeregisterCompensationWorker:
                     SET status = 'resolved', error_message = {_param()}, updated_at = {_param()}
                     WHERE id = {_param()}
                     """,
-                    (message, now.isoformat(), failure_id),
+                    (message, now, failure_id),
                 )
                 conn.commit()
         except Exception as e:
@@ -230,7 +229,7 @@ class DeregisterCompensationWorker:
                     SET status = 'failed', updated_at = {_param()}
                     WHERE id = {_param()}
                     """,
-                    (now.isoformat(), failure_id),
+                    (now, failure_id),
                 )
                 conn.commit()
 
@@ -254,7 +253,7 @@ class DeregisterCompensationWorker:
                     SET retry_count = {_param()}, status = 'retrying', updated_at = {_param()}
                     WHERE id = {_param()}
                     """,
-                    (current_count + 1, now.isoformat(), failure_id),
+                    (current_count + 1, now, failure_id),
                 )
                 conn.commit()
         except Exception as e:

@@ -80,7 +80,7 @@ class ZombieSessionCleaner:
 
         # Process in batches
         for batch_start in range(0, len(zombie_sessions), self.batch_size):
-            batch = zombie_sessions[batch_start:batch_start + self.batch_size]
+            batch = zombie_sessions[batch_start : batch_start + self.batch_size]
             batch_stats = self._process_batch(batch)
             stats["sessions_updated"] += batch_stats["sessions_updated"]
             stats["commands_deleted"] += batch_stats["commands_deleted"]
@@ -106,6 +106,7 @@ class ZombieSessionCleaner:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 # Check if there's a cleanup_history table
+                # Note: We create the table in _record_cleanup_complete if it doesn't exist
                 cursor.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='cleanup_history'"
                 )
@@ -169,7 +170,7 @@ class ZombieSessionCleaner:
                         SET status = 'stopped', updated_at = {_param()}
                         WHERE session_id IN ({placeholders})
                         """,
-                        [now.isoformat()] + session_ids,
+                        [now] + session_ids,
                     )
                     stats["sessions_updated"] = cursor.rowcount
 
