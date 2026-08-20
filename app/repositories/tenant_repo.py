@@ -708,7 +708,9 @@ class TenantRepository:
 
                     settings = TenantSettings(
                         allowed_tools=(
-                            allowed_tools if allowed_tools else TenantSettings().allowed_tools
+                            allowed_tools
+                            if allowed_tools is not None
+                            else TenantSettings().allowed_tools
                         ),
                         content_filter_enabled=bool(settings_row.get("content_filter_enabled", 1)),
                         audit_log_enabled=bool(settings_row.get("audit_log_enabled", 1)),
