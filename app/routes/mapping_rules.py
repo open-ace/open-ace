@@ -14,7 +14,6 @@ from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required
 from app.auth.permissions import is_platform_admin_role, is_platform_level_role
-from app.models.user import User
 from app.repositories.tool_account_mapping_rule_repo import ToolAccountMappingRuleRepository
 from app.repositories.user_repo import UserRepository
 from app.repositories.user_tool_account_repo import UserToolAccountRepository

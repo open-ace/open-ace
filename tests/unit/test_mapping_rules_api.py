@@ -601,8 +601,6 @@ class TestTenantValidation:
     @pytest.fixture
     def tenant_admin_client(self, app):
         """Create test client with tenant_admin role."""
-        from flask import g
-
         test_client = app.test_client()
 
         class TenantAdminClient:
