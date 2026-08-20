@@ -1159,6 +1159,15 @@ def fetch_and_save(
 
     all_messages: list[dict[str, Any]] = []
 
+    # Issue #2823: Track coverage data for observability
+    coverage_data = {
+        "users_scanned": 0,
+        "users_denied": [],
+        "users_errors": [],
+        "files_processed": 0,
+        "messages_imported": 0,
+    }
+
     # Multi-user mode: scan all users' codex directories
     if multi_user_mode:
         print("Multi-user mode: scanning all users' codex directories...")
@@ -1166,8 +1175,20 @@ def fetch_and_save(
 
         if not user_sessions:
             print("No codex session directories found for any user.")
+            # Issue #2823: Output structured result for empty state
+            result = {
+                "protocol_version": "1.0",
+                "status": "no_data",
+                "coverage": coverage_data,
+                "error": None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            print(
+                f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+            )
             return False
 
+        coverage_data["users_scanned"] = len(user_sessions)
         print(f"Found {len(user_sessions)} users with codex data:")
         for system_account, sessions_path in user_sessions:
             print(f"  - {system_account}: {sessions_path}")
@@ -1185,8 +1206,20 @@ def fetch_and_save(
         sessions_dir = find_codex_session_dir()
         if not sessions_dir:
             print("Error: Cannot find Codex sessions directory (~/.codex/sessions).")
+            # Issue #2823: Output structured result for empty state
+            result = {
+                "protocol_version": "1.0",
+                "status": "no_data",
+                "coverage": coverage_data,
+                "error": None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            print(
+                f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+            )
             return False
 
+        coverage_data["users_scanned"] = 1
         total_files = _process_sessions_dir(
             sessions_dir, hostname, None, aggregated, all_messages, recent
         )
@@ -1242,6 +1275,35 @@ def fetch_and_save(
             update_agent_sessions_stats(all_messages)
         except Exception as e:
             print(f"Warning: Failed to update agent session stats: {e}")
+
+    # Issue #2823: Output structured result with protocol version
+    coverage_data["files_processed"] = total_files
+    coverage_data["messages_imported"] = len(all_messages)
+    # Determine status using unified logic: errors > denied > no_data
+    if coverage_data["users_scanned"] > 0:
+        # At least one user succeeded
+        if coverage_data["users_errors"] or coverage_data["users_denied"]:
+            status = "degraded"
+        else:
+            status = "completed"
+    else:
+        # No successful users
+        if coverage_data["users_errors"]:
+            status = "failed"
+        elif coverage_data["users_denied"]:
+            status = "denied"
+        else:
+            status = "no_data"
+    result = {
+        "protocol_version": "1.0",
+        "status": status,
+        "coverage": coverage_data,
+        "error": None,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    print(
+        f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+    )
 
     return True
 

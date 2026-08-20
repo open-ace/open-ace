@@ -34,6 +34,7 @@ The mocking follows tests/autonomous/test_repo_drift_validation.py: patch
 
 from __future__ import annotations
 
+import json
 import threading
 from unittest.mock import MagicMock, patch
 
@@ -964,6 +965,182 @@ def test_wait_phase_returns_phase_result_not_inline_commit(monkeypatch):
     # does NOT) — assert the planning payload actually fires.
     assert captured_phase_changes, "_do_wait did not emit phase_change"
     assert {"phase": "planning", "dev_round": 2} in captured_phase_changes
+
+
+# ── _do_wait rejection-feedback injection (#331) ────────────────────────────
+
+_REJECTED_REPORT = json.dumps(
+    {
+        "status": "rejected",
+        "gates": [
+            {
+                "item": "call-chain:tenant_repo",
+                "verdict": "rejected",
+                "rationale": "no production caller wires tenant_repo",
+            }
+        ],
+    }
+)
+
+
+def _run_wait_resume(monkeypatch, milestones=None, **wf_overrides) -> PhaseResult:
+    """Drive _do_wait's feedback-resume branch with the given workflow fields.
+
+    milestones default to [] (empty) so the resume targets the default
+    "development" phase; pass milestone dicts (oldest→newest, matching
+    list_milestones' ASC ordering) to shape the one-shot guard's evidence.
+    gh is stubbed so any fall-through polling sees no comments.
+    """
+    wf = _active_workflow(
+        phase="wait",
+        status="waiting",
+        dev_round=1,
+        github_issue_number=42,
+        github_pr_number=None,
+        branch_name="auto-dev/wf-test",
+    )
+    wf.update(wf_overrides)
+    orch = _make_orchestrator(wf)
+
+    gh = MagicMock()
+    gh.list_issue_comments.return_value = []
+    monkeypatch.setattr(orch, "_get_gh", lambda: gh)
+    orch.repo.list_milestones.return_value = milestones or []
+
+    ctx = orch._build_workflow_context(orch.workflow)
+    deps = orch._build_phase_deps()
+    return orch._do_wait(ctx, deps)
+
+
+def test_wait_injects_rejection_feedback_on_resume(monkeypatch):
+    """#331: a rejected acceptance + empty user_feedback (cancel-without-
+    feedback variant, evidenced by the requirement_received milestone)
+    resumes development with the verifier's failed-items injected AND
+    persisted via workflow_patch (the dev prompt reads the DB field)."""
+    result = _run_wait_resume(
+        monkeypatch,
+        milestones=[
+            {
+                "phase": "wait",
+                "milestone_type": "requirement_received",
+                "status": "completed",
+            }
+        ],
+        verification_status="rejected",
+        verification_report=_REJECTED_REPORT,
+        github_pr_number=2851,
+        user_feedback="",
+    )
+
+    assert result.outcome == "completed"
+    assert result.next_phase == "development"
+    assert result.next_status == "developing"
+    assert result.workflow_patch.get("dev_round") == 2
+    assert result.workflow_patch.get("current_round") == 0
+    feedback = result.workflow_patch.get("user_feedback") or ""
+    assert "call-chain:tenant_repo" in feedback, feedback
+    assert "REJECTED" in feedback and "2851" in feedback
+    # Stale merge SHA of the rejected delivery must be dropped so the NEXT
+    # merge re-resolves fresh (acceptance only fetches the PR merge commit
+    # when the cached value is empty — otherwise it replays the old verdict
+    # on the new delivery); paused banner text cleared (#2491/#2658 hygiene).
+    assert result.workflow_patch.get("verification_merge_sha") == ""
+    assert result.workflow_patch.get("error_message") == ""
+
+
+def test_wait_appends_rejection_feedback_to_human_feedback(monkeypatch):
+    """Human feedback is preserved FIRST; the verifier's failed items are
+    appended after it (append semantics, not overwrite)."""
+    result = _run_wait_resume(
+        monkeypatch,
+        verification_status="rejected",
+        verification_report=_REJECTED_REPORT,
+        github_pr_number=2851,
+        user_feedback="use sqlite",
+    )
+
+    assert result.outcome == "completed"
+    assert result.next_phase == "development"
+    feedback = result.workflow_patch.get("user_feedback") or ""
+    assert "use sqlite" in feedback and "call-chain:tenant_repo" in feedback
+    assert feedback.index("use sqlite") < feedback.index("call-chain:tenant_repo")
+
+
+@pytest.mark.parametrize("verification_status", [None, "confirmed"])
+def test_wait_no_injection_when_not_rejected(monkeypatch, verification_status):
+    """Without a rejected verification nothing is injected: empty feedback
+    stays empty, so the legacy auto_merge+PR passthrough to merge still fires
+    (contrast: the rejected case is rerouted to a development resume)."""
+    result = _run_wait_resume(
+        monkeypatch,
+        verification_status=verification_status,
+        verification_report=_REJECTED_REPORT,
+        github_pr_number=2851,
+        user_feedback="",
+    )
+
+    assert result.outcome == "completed"
+    assert result.next_phase == "merge"  # legacy passthrough, not a resume
+    assert not result.workflow_patch.get("user_feedback")
+
+
+def test_wait_no_reinjection_on_repair_round_second_tick(monkeypatch):
+    """One-shot guard (v6, review round 5 critical): the repair round's second
+    wait tick — feedback consumed+cleared, latest completed milestone is
+    report's round_completed, stale 'rejected' status, PR present — must NOT
+    re-inject: the auto-merge passthrough to merge stays intact instead of
+    looping report↔wait forever."""
+    result = _run_wait_resume(
+        monkeypatch,
+        milestones=[
+            {
+                "phase": "wait",
+                "milestone_type": "requirement_received",
+                "status": "completed",
+            },
+            {
+                "phase": "report",
+                "milestone_type": "round_completed",
+                "status": "completed",
+            },
+        ],
+        verification_status="rejected",
+        verification_report=_REJECTED_REPORT,
+        github_pr_number=2851,
+        user_feedback="",
+    )
+
+    assert result.outcome == "completed"
+    assert result.next_phase == "merge"  # auto-merge passthrough restored
+    assert not result.workflow_patch.get("user_feedback")
+
+
+def test_wait_no_injection_when_latest_completed_is_wait_started(monkeypatch):
+    """A plain waiting round (no human intervention): latest completed
+    milestone is wait_started, feedback empty — nothing injects even with a
+    stale 'rejected' status; the workflow keeps waiting."""
+    result = _run_wait_resume(
+        monkeypatch,
+        milestones=[
+            {
+                "phase": "report",
+                "milestone_type": "round_completed",
+                "status": "completed",
+            },
+            {
+                "phase": "wait",
+                "milestone_type": "wait_started",
+                "status": "completed",
+            },
+        ],
+        verification_status="rejected",
+        verification_report=_REJECTED_REPORT,
+        github_pr_number=None,
+        user_feedback="",
+    )
+
+    assert result.outcome == "wait"
+    assert not result.workflow_patch.get("user_feedback")
 
 
 @pytest.mark.parametrize(
