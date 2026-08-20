@@ -15,7 +15,6 @@ import json
 import logging
 import os
 import threading
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -81,7 +80,7 @@ class DeregisterCompensationWorker:
             with self.db.connection() as conn:
                 cursor = conn.cursor()
                 # Get all pending failures ordered by creation time
-                cursor.execute(f"""
+                cursor.execute("""
                     SELECT id, machine_id, batch_index, session_ids, error_message,
                            retry_count, created_at
                     FROM deregister_failures

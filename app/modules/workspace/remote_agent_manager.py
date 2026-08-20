@@ -31,13 +31,7 @@ from app.modules.workspace.agent_token import (
     generate_registration_token,
     hash_token,
 )
-from app.repositories.database import (
-    DB_PATH,
-    Database,
-    _param,
-    adapt_boolean_value,
-    is_postgresql,
-)
+from app.repositories.database import DB_PATH, Database, _param, adapt_boolean_value, is_postgresql
 
 logger = logging.getLogger(__name__)
 
