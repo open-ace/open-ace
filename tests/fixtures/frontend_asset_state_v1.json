@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "current": {
+    "build_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "assets": [
+      "AutonomousDev.aaaaaaaa.js",
+      "index.bbbbbbbb.js"
+    ]
+  },
+  "previous": {
+    "build_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "assets": [
+      "AutonomousDev.dddddddd.js"
+    ]
+  }
+}
