@@ -291,7 +291,7 @@ def api_create_project():
                 if not success:
                     logger.error(f"Failed to setup shared permissions: {error_msg}")
                     # Update project status to failed
-                    from app import db  # type: ignore[attr-defined]
+                    from app import db  # type: ignore[attr-defined]  # type: ignore[attr-defined]
 
                     db.execute(
                         sa.text(
@@ -307,7 +307,7 @@ def api_create_project():
                     permission_warning = f"Permission setup failed: {error_msg}"
             else:
                 # Large project: submit async task
-                from app import db  # type: ignore[attr-defined]
+                from app import db  # type: ignore[attr-defined]  # type: ignore[attr-defined]
 
                 service = get_permission_task_service()
                 success, error_msg, task_info = service.submit_task(
@@ -408,7 +408,7 @@ def api_update_project(project_id):
                     )
             else:
                 # Large project: submit async task
-                from app import db  # type: ignore[attr-defined]
+                from app import db  # type: ignore[attr-defined]  # type: ignore[attr-defined]
 
                 service = get_permission_task_service()
                 success, error_msg, task_info = service.submit_task(
@@ -600,7 +600,7 @@ def api_fix_project_permissions(project_id):
 
     if use_async:
         # Async mode: submit background task
-        from app import db  # type: ignore[attr-defined]
+        from app import db  # type: ignore[attr-defined]  # type: ignore[attr-defined]
 
         service = get_permission_task_service()
 
@@ -673,7 +673,7 @@ def api_get_permission_task_status(task_id):
     Returns:
         JSON response with task status information.
     """
-    from app import db  # type: ignore[attr-defined]
+    from app import db  # type: ignore[attr-defined]  # type: ignore[attr-defined]
 
     tenant_id = get_current_tenant_id()
     service = get_permission_task_service()
@@ -747,7 +747,7 @@ def api_cancel_permission_task(task_id):
     Returns:
         JSON response with success status or error message.
     """
-    from app import db  # type: ignore[attr-defined]
+    from app import db  # type: ignore[attr-defined]  # type: ignore[attr-defined]
 
     tenant_id = get_current_tenant_id()
     service = get_permission_task_service()
