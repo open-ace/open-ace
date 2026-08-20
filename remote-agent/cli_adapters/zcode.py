@@ -192,13 +192,20 @@ class ZCodeAdapter(BaseCLIAdapter):
 
         Issue #2591: Default to "build" (requires permission) instead of "yolo"
         to ensure tool call permission prompts are shown to users.
+
+        Issue #2645: Unified permission mode semantics:
+        - "ask": Safe mode, requires confirmation (maps to "build")
+        - "auto": Safe automatic mode (maps to "edit")
+        - "bypass"/"full-auto": Dangerous mode (maps to "yolo")
+        - None/"default": Safe default (maps to "build")
         """
         mode_map = {
-            "bypass": "yolo",
-            "full-auto": "yolo",
-            "auto": "build",
+            "ask": "build",  # Safe mode: require confirmation
+            "auto": "edit",  # Safe automatic: auto-edit without full bypass
             "auto-edit": "edit",
             "plan": "plan",
+            "bypass": "yolo",  # Dangerous: full autonomy
+            "full-auto": "yolo",  # Dangerous: full autonomy
         }
         return mode_map.get(permission_mode or "", "build")
 

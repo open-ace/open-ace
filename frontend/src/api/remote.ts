@@ -8,6 +8,18 @@ import { apiClient } from './client';
 
 // ==================== Types ====================
 
+/**
+ * Permission mode for CLI tool calls.
+ *
+ * Issue #2645: Unified permission mode semantics across all CLI adapters.
+ *
+ * - "ask": Safe mode, requires user confirmation for tool calls
+ * - "auto": Safe automatic mode, auto-accepts edits with some limits
+ * - "bypass": Dangerous mode, full autonomy (use with caution)
+ * - "default": Rely on CLI default behavior
+ */
+export type PermissionMode = 'ask' | 'auto' | 'bypass' | 'default';
+
 export interface RemoteMachine {
   id: number;
   machine_id: string;
@@ -142,7 +154,7 @@ export interface CreateRemoteSessionRequest {
   model?: string;
   title?: string;
   ha_pool_token?: string;
-  permission_mode?: string; // Issue #2591: Permission mode for tool calls
+  permission_mode?: PermissionMode; // Issue #2645: Typed permission mode
 }
 
 export interface SessionModelsResponse {
