@@ -15,7 +15,7 @@ import signal
 import socket
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -244,6 +244,22 @@ class AutonomousScheduler:
         # _reclaim_stale_in_progress).
         self._in_progress_key_map: dict[str, tuple[str | None, str, str]] = {}
         self._in_progress_lock = threading.Lock()
+        # Non-blocking advance path (#331 follow-up, scheduler starvation): a
+        # single _advance_single call can run tens of minutes (agent runs +
+        # CI polling). Waiting for it inside _process_workflows parked the
+        # whole _run_loop — promotion/auto-resume/reclaim/cleanup all stalled
+        # and new batches starved for the duration (observed 49-min gap,
+        # 2026-08-20 18:19→19:08). _run_loop therefore submits via a
+        # persistent background executor and returns immediately; completed
+        # futures are reaped (and their errors logged) on later ticks.
+        self._bg_executor: ThreadPoolExecutor | None = None
+        self._bg_executor_cap: int = 0
+        self._in_flight_futures: dict[Future, str] = {}  # future -> workflow_id
+        # Guards _in_flight_futures: normally only the _run_loop thread
+        # touches it, but stop() may call _reap_completed_futures() from
+        # another thread even when the loop join timed out and the loop is
+        # still running — the lock keeps that concurrent access safe.
+        self._futures_lock = threading.Lock()
         self._running_orchestrators: dict[str, AutonomousOrchestrator] = {}
         self._orchestrator_lock = threading.Lock()
         # #2022 P6: RemoteSessionManager shared with the periodic reaper so a
@@ -289,9 +305,70 @@ class AutonomousScheduler:
             self._thread.join(timeout=20)
             if self._thread.is_alive():
                 logger.warning("Autonomous scheduler did not drain before shutdown timeout")
+        # Reap errors from already-finished background advances, then release
+        # the executor without waiting: in-flight advances were already asked
+        # to shut down via prepare_for_shutdown above (same semantics as the
+        # join-timeout path above).
+        self._reap_completed_futures()
+        if self._bg_executor is not None:
+            self._bg_executor.shutdown(wait=False)
         logger.info(
             "Autonomous scheduler stopped (%d active attempts interrupted)", len(orchestrators)
         )
+
+    def _get_bg_executor(self) -> ThreadPoolExecutor:
+        """Return the persistent advance executor, rebuilding it if the
+        concurrency cap changed since it was created.
+
+        ``get_max_concurrent_workflows()`` re-parses the config on every call,
+        so an operator can raise/lower the cap at runtime. The rebuild is safe
+        without draining: the system-wide concurrency ceiling is enforced by
+        the ``_in_progress_ids`` accounting (every submission — running or
+        queued, on the old or the new executor — is registered there before
+        its slot is counted as taken), not by any single executor's
+        max_workers. A lowered cap simply yields ``max(0, ...)`` free slots
+        until the excess advances drain.
+        """
+        cap = get_max_concurrent_workflows()
+        if self._bg_executor is None or self._bg_executor_cap != cap:
+            old = self._bg_executor
+            old_cap = self._bg_executor_cap
+            self._bg_executor = ThreadPoolExecutor(
+                max_workers=max(1, cap),
+                thread_name_prefix="auto-wf-bg",
+            )
+            self._bg_executor_cap = cap
+            if old is not None:
+                # In-flight workers finish their current task and exit; queued
+                # work items (there should be none — see the slot accounting
+                # above) are not cancelled.
+                old.shutdown(wait=False)
+                logger.info(
+                    "Rebuilt advance executor for new concurrency cap %d (was %d)",
+                    cap,
+                    old_cap,
+                )
+        return self._bg_executor
+
+    def _reap_completed_futures(self) -> None:
+        """Log errors from completed background advances and drop them.
+
+        Mirrors the error-logging duty of the legacy ``as_completed`` loop:
+        without this, an exception escaping ``_advance_single`` on the
+        background path would vanish silently. Iterates over a lock-held
+        snapshot so a concurrent ``stop()``-thread reap can't hit
+        ``dictionary changed size during iteration``; ``f.result()`` on a
+        ``done()`` future never blocks, so the call is safe outside the lock.
+        """
+        with self._futures_lock:
+            completed = [(f, wf_id) for f, wf_id in self._in_flight_futures.items() if f.done()]
+            for f, _wf_id in completed:
+                del self._in_flight_futures[f]
+        for future, wf_id in completed:
+            try:
+                future.result()
+            except Exception as e:
+                logger.error("Workflow %s future error: %s", wf_id[:8], e)
 
     def get_running_orchestrator(self, workflow_id: str):
         """Get the currently running orchestrator for a workflow, if any."""
@@ -620,7 +697,13 @@ class AutonomousScheduler:
         last_reap_monotonic = time.monotonic()
         while not self._stop_event.is_set():
             try:
-                self._process_workflows()
+                # Non-blocking submit: one advance() can run tens of minutes
+                # (agent runs + CI polling); waiting for it here would park
+                # promotion/auto-resume/reclaim/cleanup and starve new batches
+                # for the whole duration (observed 49-min gap on 2026-08-20).
+                # Completed futures are reaped on the next tick.
+                self._process_workflows(wait=False)
+                self._reap_completed_futures()
                 # #2022 P6: periodically reap stuck 'running' sandbox rows the
                 # scheduler is not driving. Bounded by _SANDBOX_REAP_INTERVAL
                 # so the hot 10s poll loop does not hit the DB each cycle.
@@ -1110,12 +1193,24 @@ class AutonomousScheduler:
             logger.warning("per-user cap lookup failed for user %s: %s", user_id, exc)
         return DEFAULT_MAX_SESSIONS
 
-    def _process_workflows(self):
+    def _process_workflows(self, *, wait: bool = True):
         """Find and process active workflows using thread pool for concurrency.
 
         For batch workflows, ensures only one workflow per batch is processed at a time.
         Additionally, ensures only one workflow per project_path is processed at a time
         to prevent git conflicts when multiple workflows share the same project directory.
+
+        ``wait=True`` (default) blocks until every submitted advance finishes —
+        the legacy semantics the unit tests rely on. ``wait=False`` (used by
+        ``_run_loop``) submits to the persistent background executor and
+        returns immediately; completed futures are reaped later via
+        ``_reap_completed_futures``. Slot accounting is identical on both
+        paths: selected workflows are registered in ``_in_progress_ids``
+        before submission, so the background executor never holds more work
+        than the concurrency cap. NOTE: the ``wait=False`` path currently has
+        a single caller (``_run_loop``); a second concurrent caller would need
+        the selection+registration lock blocks merged into one critical
+        section to keep the "read-then-register" window race-free.
         """
         from app.routes.autonomous import _get_repo
 
@@ -1274,24 +1369,37 @@ class AutonomousScheduler:
                 if branch and not is_waiting:
                     self._in_progress_branches.add(branch)
 
-        with ThreadPoolExecutor(
-            max_workers=min(get_max_concurrent_workflows(), len(to_process)),
-            thread_name_prefix="auto-wf",
-        ) as executor:
-            futures = {
-                executor.submit(self._advance_single, wf.get("workflow_id", "")): wf
-                for wf in to_process
-            }
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    wf = futures[future]
-                    logger.error(
-                        "Workflow %s future error: %s",
-                        wf.get("workflow_id", "")[:8],
-                        e,
-                    )
+        if wait:
+            with ThreadPoolExecutor(
+                max_workers=min(get_max_concurrent_workflows(), len(to_process)),
+                thread_name_prefix="auto-wf",
+            ) as executor:
+                futures = {
+                    executor.submit(self._advance_single, wf.get("workflow_id", "")): wf
+                    for wf in to_process
+                }
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        wf = futures[future]
+                        logger.error(
+                            "Workflow %s future error: %s",
+                            wf.get("workflow_id", "")[:8],
+                            e,
+                        )
+        else:
+            # Fire-and-forget: submit to the persistent executor and return.
+            # _in_progress_ids was populated above under _in_progress_lock, so
+            # the next selection pass already sees these slots as taken; the
+            # error logging for these futures happens in
+            # _reap_completed_futures on a later tick (or at stop()).
+            executor = self._get_bg_executor()
+            for wf in to_process:
+                wf_id = wf.get("workflow_id", "")
+                future = executor.submit(self._advance_single, wf_id)
+                with self._futures_lock:
+                    self._in_flight_futures[future] = wf_id
 
 
 def _cleanup_orphan_processes():

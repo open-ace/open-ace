@@ -67,6 +67,11 @@ def _gh(*, commits: int = 1, branch: str = "feature-x") -> MagicMock:
         "files": 1,
     }
     gh.git_push.return_value = None
+    # The default workflow fixture records PR #1234; the pr_review liveness
+    # check probes the recorded PR's state, so the default probe must be OPEN
+    # to keep the reuse semantics the older tests were written against.
+    gh.get_pr.return_value = {"number": 1234, "state": "OPEN"}
+    gh.create_pr.return_value = {"number": 5001, "url": "https://x/pull/5001"}
     return gh
 
 
@@ -525,3 +530,57 @@ def test_ensure_branch_and_push_skips_commit_when_worktree_clean():
     gh.git_add_all.assert_not_called()
     gh.git_commit.assert_not_called()
     gh.git_push.assert_called_once()
+
+
+# ── merged-PR reuse regression (#331) ─────────────────────────────────────
+
+
+@pytest.mark.regression
+@pytest.mark.issue(331)
+def test_round1_creates_new_pr_when_recorded_pr_merged():
+    """An acceptance-verification rejection resets current_round to 0 but keeps
+    the OLD github_pr_number on the row. If that PR is already MERGED, reusing
+    it makes the second review pass — and the merge phase — operate on the
+    merged PR's head, so the merge resolution computes no new commit and fails
+    ("Merge resolution made no commit; refusing unchanged push", #331). A
+    non-OPEN recorded PR on the round-1 creation window must therefore be
+    treated as absent: a fresh PR is created and the new number/url land in
+    workflow_patch."""
+    gh = _gh()
+    gh.get_pr.return_value = {"number": 1234, "state": "MERGED"}
+    host = _host(review_is_approved=True)
+    deps = _deps(host, gh)
+
+    result = pr_review_phase.handle(_ctx(_workflow(current_round=0, max_pr_review_rounds=1)), deps)
+
+    # A fresh PR replaced the merged one...
+    gh.create_pr.assert_called_once()
+    assert result.workflow_patch.get("github_pr_number") == 5001
+    assert result.workflow_patch.get("github_pr_url") == "https://x/pull/5001"
+    # ...and the pr_created milestone records the FRESH number.
+    pr_created = [
+        c
+        for c in host.create_milestone_idempotent.call_args_list
+        if c.kwargs.get("milestone_type") == "pr_created"
+    ]
+    assert pr_created, host.create_milestone_idempotent.call_args_list
+    assert pr_created[0].kwargs.get("github_pr_number") == 5001
+
+
+@pytest.mark.regression
+@pytest.mark.issue(331)
+def test_later_round_keeps_recorded_pr_id_when_not_open():
+    """On rounds > 1 downstream code expects a non-None pr_number, so a
+    non-OPEN recorded PR is kept (warning logged) instead of forcing a fresh
+    creation mid-review — the reachable path is a human merging the PR
+    mid-review. No new PR is created and the recorded number survives."""
+    gh = _gh()
+    gh.get_pr.return_value = {"number": 1234, "state": "MERGED"}
+    host = _host(review_is_approved=True)
+    deps = _deps(host, gh)
+
+    result = pr_review_phase.handle(_ctx(_workflow(current_round=2, max_pr_review_rounds=3)), deps)
+
+    gh.create_pr.assert_not_called()
+    # The recorded PR number is not rewritten to a fresh PR.
+    assert "github_pr_number" not in result.workflow_patch
