@@ -52,9 +52,7 @@ class TestCreateRemoteSessionDBStatusCheck:
                     "app.modules.workspace.remote_session_manager.APIKeyProxyService",
                     return_value=mock_api_key_proxy,
                 ):
-                    from app.modules.workspace.remote_session_manager import (
-                        RemoteSessionManager,
-                    )
+                    from app.modules.workspace.remote_session_manager import RemoteSessionManager
 
                     mgr = RemoteSessionManager()
                     mgr._agent_manager = mock_agent_manager
@@ -214,6 +212,6 @@ class TestCreateRemoteSessionDBStatusCheck:
                 project_path="/test/project",
             )
 
-            assert result is None, (
-                f"Expected rejection when DB status is offline (connected={connected_state})"
-            )
+            assert (
+                result is None
+            ), f"Expected rejection when DB status is offline (connected={connected_state})"
