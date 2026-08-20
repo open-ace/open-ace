@@ -74,9 +74,24 @@ export interface SessionMessageMetadata {
   [key: string]: unknown;
 }
 
+/**
+ * File change detail for file_change content block.
+ *
+ * Issue #2725: Added rename and copy change types with old_path support.
+ *
+ * change_type mapping:
+ *   - 'add': New file/directory created (backend 'create')
+ *   - 'modify': Existing file modified
+ *   - 'delete': File/directory deleted
+ *   - 'rename': File moved/renamed (backend 'rename')
+ *   - 'copy': File copied (backend 'copy')
+ *
+ * old_path is only present for 'rename' and 'copy' operations.
+ */
 export interface FileChangeDetail {
   path: string;
-  change_type: 'add' | 'modify' | 'delete';
+  change_type: 'add' | 'modify' | 'delete' | 'rename' | 'copy';
+  old_path?: string; // Only present for rename and copy operations
   content?: string;
 }
 

@@ -394,13 +394,431 @@ class EditParser(FileChangeParser):
         return "edit"
 
 
+def _contains_wildcard(path: str) -> bool:
+    """Check if a path contains shell wildcard characters.
+
+    Wildcards: *, ?, [...]
+    The parser cannot resolve shell-expanded paths, so such paths should be rejected.
+
+    Args:
+        path: The path to check.
+
+    Returns:
+        True if the path contains wildcards, False otherwise.
+    """
+    return bool(re.search(r"[\*\?\[\]]", path))
+
+
+class MvParser(FileChangeParser):
+    """Parser for mv shell commands.
+
+    Issue #2725: Add support for mv (rename/move) command parsing.
+
+    Handles:
+        - Simple rename: mv old.txt new.txt
+        - Directory move: mv src_dir dest_dir
+        - Multi-source move: mv a.txt b.txt dest/
+
+    Output: FileChangeRecord with change_type='rename' and old_path set.
+    """
+
+    def can_parse(self, tool_name: str, tool_input: dict) -> bool:
+        if tool_name != "Bash":
+            return False
+        command = tool_input.get("command", "")
+        return bool(re.search(r"\bmv\b", command))
+
+    def parse(
+        self, tool_name: str, tool_input: dict, context: ParserContext
+    ) -> list[FileChangeRecord]:
+        command = tool_input.get("command", "")
+        sources, destination = self._extract_paths(command)
+
+        if not sources or not destination:
+            return []
+
+        records = []
+        for idx, src_path in enumerate(sources):
+            # Skip paths with wildcards - cannot resolve shell-expanded paths
+            if _contains_wildcard(src_path):
+                logger.warning(f"MvParser: Skipping path with wildcards: {src_path}")
+                continue
+            if _contains_wildcard(destination):
+                logger.warning(f"MvParser: Skipping due to wildcard in destination: {destination}")
+                continue
+
+            abs_src = self._resolve_path(src_path, context.project_path)
+            if not abs_src:
+                continue
+
+            # Security check on source path (old_path)
+            if not self._is_safe_path(abs_src, context.project_path):
+                continue
+
+            # Determine target path
+            # For multi-source moves, destination is a directory
+            # Target path = destination + source filename
+            if len(sources) > 1:
+                src_basename = os.path.basename(src_path)
+                target_path = os.path.join(destination, src_basename)
+            else:
+                target_path = destination
+
+            abs_dest = self._resolve_path(target_path, context.project_path)
+            if not abs_dest:
+                continue
+
+            # Security check on destination path
+            if not self._is_safe_path(abs_dest, context.project_path):
+                continue
+
+            record = FileChangeRecord(
+                id=f"{context.session_id}:{context.tool_use_id}:{idx}",
+                path=abs_dest,
+                old_path=abs_src,
+                change_type="rename",
+                timestamp=context.timestamp,
+                # is_directory is set to False because:
+                # - mv command doesn't require flags (like -r) to move directories
+                # - We cannot reliably determine if the source is a directory from
+                #   the command string alone without filesystem access
+                # - The frontend can still display the change appropriately regardless
+                is_directory=False,
+                session_id=context.session_id,
+                tool_use_id=context.tool_use_id,
+                source=self.source,
+                tool_name=tool_name,
+            )
+            records.append(record)
+        return records
+
+    @property
+    def source(self) -> str:
+        return "bash_mv"
+
+    def _extract_paths(self, command: str) -> tuple[list[str], str | None]:
+        """Extract source paths and destination from mv command.
+
+        Returns:
+            Tuple of (list of source paths, destination path or None).
+        """
+        cmd = command.strip()
+        mv_match = re.match(r"\bmv\b\s*", cmd)
+        if not mv_match:
+            return [], None
+        cmd = cmd[mv_match.end() :]
+
+        # Skip common options: -f, -i, -n, -v, --backup, -b, -S, -t, -T, -u, -Z
+        while cmd:
+            # Skip short options like -f, -iv, etc.
+            opt_match = re.match(r"-[finvubTS]+\s*", cmd)
+            if opt_match:
+                cmd = cmd[opt_match.end() :]
+                continue
+            # Skip long options like --backup, --target-directory, etc.
+            long_opt_match = re.match(r"--[a-zA-Z-]+(?:=\S+)?\s*", cmd)
+            if long_opt_match:
+                cmd = cmd[long_opt_match.end() :]
+                continue
+            # Stop at -- (end of options)
+            if cmd.startswith("-- "):
+                cmd = cmd[3:]
+                break
+            break
+
+        paths = []
+        while cmd:
+            cmd = cmd.strip()
+            if not cmd:
+                break
+            # Handle double-quoted paths
+            if cmd.startswith('"'):
+                match = re.match(r'"([^"]+)"\s*', cmd)
+                if match:
+                    paths.append(match.group(1))
+                    cmd = cmd[match.end() :]
+                    continue
+            # Handle single-quoted paths
+            if cmd.startswith("'"):
+                match = re.match(r"'([^']+)'\s*", cmd)
+                if match:
+                    paths.append(match.group(1))
+                    cmd = cmd[match.end() :]
+                    continue
+            # Handle unquoted paths
+            match = re.match(r"([^\s]+)\s*", cmd)
+            if match:
+                path = match.group(1)
+                if not path.startswith("-"):
+                    paths.append(path)
+                cmd = cmd[match.end() :]
+                continue
+            break
+
+        if len(paths) < 2:
+            return paths, None
+
+        # Last path is destination, rest are sources
+        destination = paths[-1]
+        sources = paths[:-1]
+        return sources, destination
+
+    def _resolve_path(self, path: str, project_path: str) -> str | None:
+        if not path:
+            return None
+        path = os.path.expandvars(path)
+        path = os.path.expanduser(path)
+        if os.path.isabs(path):
+            return os.path.normpath(path)
+        return os.path.normpath(os.path.join(project_path, path))
+
+    def _is_safe_path(self, path: str, project_path: str) -> bool:
+        try:
+            abs_path = os.path.realpath(path)
+            abs_project = os.path.realpath(project_path)
+            if not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project:
+                return False
+            dangerous_chars = ["$", "`", "|", ";", "&", "<", ">"]
+            return not any(char in path for char in dangerous_chars)
+        except Exception:
+            return False
+
+
+class CpParser(FileChangeParser):
+    """Parser for cp shell commands.
+
+    Issue #2725: Add support for cp (copy) command parsing.
+
+    Handles:
+        - Simple copy: cp src.txt dest.txt
+        - Recursive copy: cp -r src_dir dest_dir
+        - Archive copy: cp -a src dest (includes -r)
+        - Multi-source copy: cp a.txt b.txt dest/
+
+    Output: FileChangeRecord with change_type='copy', old_path set, and
+            is_directory determined by -r/-R/-a flags.
+    """
+
+    def can_parse(self, tool_name: str, tool_input: dict) -> bool:
+        if tool_name != "Bash":
+            return False
+        command = tool_input.get("command", "")
+        return bool(re.search(r"\bcp\b", command))
+
+    def parse(
+        self, tool_name: str, tool_input: dict, context: ParserContext
+    ) -> list[FileChangeRecord]:
+        command = tool_input.get("command", "")
+        sources, destination = self._extract_paths(command)
+
+        if not sources or not destination:
+            return []
+
+        is_recursive = self._is_recursive_flag(command)
+
+        records = []
+        for idx, src_path in enumerate(sources):
+            # Skip paths with wildcards - cannot resolve shell-expanded paths
+            if _contains_wildcard(src_path):
+                logger.warning(f"CpParser: Skipping path with wildcards: {src_path}")
+                continue
+            if _contains_wildcard(destination):
+                logger.warning(f"CpParser: Skipping due to wildcard in destination: {destination}")
+                continue
+
+            abs_src = self._resolve_path(src_path, context.project_path)
+            if not abs_src:
+                continue
+
+            # Security check on source path (old_path)
+            if not self._is_safe_path(abs_src, context.project_path):
+                continue
+
+            # Determine target path
+            # For multi-source copies, destination is a directory
+            # Target path = destination + source filename
+            if len(sources) > 1:
+                src_basename = os.path.basename(src_path)
+                target_path = os.path.join(destination, src_basename)
+            else:
+                target_path = destination
+
+            abs_dest = self._resolve_path(target_path, context.project_path)
+            if not abs_dest:
+                continue
+
+            # Security check on destination path
+            if not self._is_safe_path(abs_dest, context.project_path):
+                continue
+
+            record = FileChangeRecord(
+                id=f"{context.session_id}:{context.tool_use_id}:{idx}",
+                path=abs_dest,
+                old_path=abs_src,
+                change_type="copy",
+                timestamp=context.timestamp,
+                is_directory=is_recursive,
+                session_id=context.session_id,
+                tool_use_id=context.tool_use_id,
+                source=self.source,
+                tool_name=tool_name,
+            )
+            records.append(record)
+        return records
+
+    @property
+    def source(self) -> str:
+        return "bash_cp"
+
+    def _extract_paths(self, command: str) -> tuple[list[str], str | None]:
+        """Extract source paths and destination from cp command.
+
+        Returns:
+            Tuple of (list of source paths, destination path or None).
+        """
+        cmd = command.strip()
+        cp_match = re.match(r"\bcp\b\s*", cmd)
+        if not cp_match:
+            return [], None
+        cmd = cmd[cp_match.end() :]
+
+        # Skip common options: -r, -R, -a, -f, -i, -p, -v, -l, -s, -u, -x, -Z
+        while cmd:
+            # Skip short options like -r, -rf, -av, etc.
+            opt_match = re.match(r"-[rRaflipsuvxZ]+\s*", cmd)
+            if opt_match:
+                cmd = cmd[opt_match.end() :]
+                continue
+            # Skip long options like --recursive, --archive, etc.
+            long_opt_match = re.match(r"--[a-zA-Z-]+(?:=\S+)?\s*", cmd)
+            if long_opt_match:
+                cmd = cmd[long_opt_match.end() :]
+                continue
+            # Stop at -- (end of options)
+            if cmd.startswith("-- "):
+                cmd = cmd[3:]
+                break
+            break
+
+        paths = []
+        while cmd:
+            cmd = cmd.strip()
+            if not cmd:
+                break
+            # Handle double-quoted paths
+            if cmd.startswith('"'):
+                match = re.match(r'"([^"]+)"\s*', cmd)
+                if match:
+                    paths.append(match.group(1))
+                    cmd = cmd[match.end() :]
+                    continue
+            # Handle single-quoted paths
+            if cmd.startswith("'"):
+                match = re.match(r"'([^']+)'\s*", cmd)
+                if match:
+                    paths.append(match.group(1))
+                    cmd = cmd[match.end() :]
+                    continue
+            # Handle unquoted paths
+            match = re.match(r"([^\s]+)\s*", cmd)
+            if match:
+                path = match.group(1)
+                if not path.startswith("-"):
+                    paths.append(path)
+                cmd = cmd[match.end() :]
+                continue
+            break
+
+        if len(paths) < 2:
+            return paths, None
+
+        # Last path is destination, rest are sources
+        destination = paths[-1]
+        sources = paths[:-1]
+        return sources, destination
+
+    def _is_recursive_flag(self, command: str) -> bool:
+        """Check if command has recursive/archive flags.
+
+        Returns True if -r, -R, -a, or --recursive is present.
+        -a (archive) implies -r.
+        """
+        # Check for -r or -R (possibly combined with other flags like -rf)
+        if re.search(r"-[a-zA-Z]*r[a-zA-Z]*\b", command):
+            return True
+        if re.search(r"-[a-zA-Z]*R[a-zA-Z]*\b", command):
+            return True
+        # Check for -a (archive, includes -r)
+        if re.search(r"-[a-zA-Z]*a[a-zA-Z]*\b", command):
+            return True
+        # Check for --recursive long option
+        return bool(re.search(r"--recursive\b", command))
+
+    def _resolve_path(self, path: str, project_path: str) -> str | None:
+        if not path:
+            return None
+        path = os.path.expandvars(path)
+        path = os.path.expanduser(path)
+        if os.path.isabs(path):
+            return os.path.normpath(path)
+        return os.path.normpath(os.path.join(project_path, path))
+
+    def _is_safe_path(self, path: str, project_path: str) -> bool:
+        try:
+            abs_path = os.path.realpath(path)
+            abs_project = os.path.realpath(project_path)
+            if not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project:
+                return False
+            dangerous_chars = ["$", "`", "|", ";", "&", "<", ">"]
+            return not any(char in path for char in dangerous_chars)
+        except Exception:
+            return False
+
+
 # Register default parsers
 def _register_default_parsers() -> None:
+    """Register default file change parsers.
+
+    Parsers are registered based on configuration. Each parser can be
+    enabled/disabled via config/file_change_parser.yaml.
+
+    Registered parsers:
+        - MkdirParser: mkdir commands (create directories)
+        - RmParser: rm commands (delete files/directories)
+        - WriteFileParser: write_file/Write tool calls
+        - EditParser: edit tool calls
+        - MvParser: mv commands (rename/move files) - Issue #2725
+        - CpParser: cp commands (copy files) - Issue #2725
+    """
     registry = FileChangeParserRegistry
-    registry.register(MkdirParser())
-    registry.register(RmParser())
-    registry.register(WriteFileParser())
-    registry.register(EditParser())
+
+    # Try to load configuration, fall back to enabling all parsers on error
+    try:
+        from app.utils.file_change_config import get_file_change_parser_config
+
+        config = get_file_change_parser_config(use_cache=False)
+
+        if config.parsers.mkdir.enabled:
+            registry.register(MkdirParser())
+        if config.parsers.rm.enabled:
+            registry.register(RmParser())
+        if config.parsers.write_file.enabled:
+            registry.register(WriteFileParser())
+        if config.parsers.edit.enabled:
+            registry.register(EditParser())
+        if config.parsers.mv.enabled:
+            registry.register(MvParser())
+        if config.parsers.cp.enabled:
+            registry.register(CpParser())
+    except Exception as e:
+        # Fall back to registering all parsers if config loading fails
+        logger.warning(f"Failed to load parser config, registering all parsers: {e}")
+        registry.register(MkdirParser())
+        registry.register(RmParser())
+        registry.register(WriteFileParser())
+        registry.register(EditParser())
+        registry.register(MvParser())
+        registry.register(CpParser())
 
 
 _register_default_parsers()
@@ -414,6 +832,13 @@ __all__ = [
     "ParserContext",
     "FileChangeParser",
     "FileChangeParserRegistry",
+    "MkdirParser",
+    "RmParser",
+    "WriteFileParser",
+    "EditParser",
+    "MvParser",
+    "CpParser",
+    "_contains_wildcard",
 ]
 
 

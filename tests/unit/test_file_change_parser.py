@@ -2,6 +2,7 @@
 Unit tests for file change parser.
 
 Issue #2589: File change panel configuration for detecting file/folder operations.
+Issue #2725: Add mv and cp command parser support.
 """
 
 import os
@@ -10,14 +11,17 @@ from datetime import datetime, timezone
 
 import pytest
 
-from shared.file_change_parser import (
+from scripts.shared.file_change_parser import (
+    CpParser,
     EditParser,
     FileChangeParserRegistry,
     FileChangeRecord,
     MkdirParser,
+    MvParser,
     ParserContext,
     RmParser,
     WriteFileParser,
+    _contains_wildcard,
     append_file_change_blocks,
     extract_file_changes,
 )
@@ -477,3 +481,467 @@ class TestExtractFileChanges:
 
         changes = extract_file_changes({}, context)
         assert changes is None
+
+
+class TestContainsWildcard:
+    """Tests for _contains_wildcard helper function."""
+
+    def test_no_wildcard(self):
+        """Test paths without wildcards return False."""
+        assert _contains_wildcard("path/to/file.txt") is False
+        assert _contains_wildcard("/absolute/path") is False
+        assert _contains_wildcard("simple") is False
+
+    def test_asterisk_wildcard(self):
+        """Test asterisk wildcard is detected."""
+        assert _contains_wildcard("*.txt") is True
+        assert _contains_wildcard("path/*.txt") is True
+        assert _contains_wildcard("file*.log") is True
+
+    def test_question_mark_wildcard(self):
+        """Test question mark wildcard is detected."""
+        assert _contains_wildcard("file?.txt") is True
+        assert _contains_wildcard("path/file?") is True
+
+    def test_bracket_wildcard(self):
+        """Test bracket wildcard is detected."""
+        assert _contains_wildcard("file[0-9].txt") is True
+        assert _contains_wildcard("[abc].txt") is True
+
+
+class TestMvParser:
+    """Tests for MvParser - Issue #2725."""
+
+    def setup_method(self):
+        """Clear registry before each test."""
+        FileChangeParserRegistry.clear()
+        FileChangeParserRegistry.register(MvParser())
+
+    def test_can_parse_bash_mv(self):
+        """Test that parser recognizes mv in Bash commands."""
+        parser = MvParser()
+        assert parser.can_parse("Bash", {"command": "mv old.txt new.txt"}) is True
+        assert parser.can_parse("Bash", {"command": "mv -f old.txt new.txt"}) is True
+        assert parser.can_parse("Bash", {"command": "ls -la"}) is False
+        assert parser.can_parse("Write", {"file_path": "/tmp/test.txt"}) is False
+
+    def test_extract_paths_simple_rename(self):
+        """Test extracting paths from simple mv command."""
+        parser = MvParser()
+        sources, dest = parser._extract_paths("mv old.txt new.txt")
+        assert sources == ["old.txt"]
+        assert dest == "new.txt"
+
+    def test_extract_paths_with_options(self):
+        """Test extracting paths from mv with options."""
+        parser = MvParser()
+        sources, dest = parser._extract_paths("mv -f old.txt new.txt")
+        assert sources == ["old.txt"]
+        assert dest == "new.txt"
+
+    def test_extract_paths_multi_source(self):
+        """Test extracting paths from multi-source mv command."""
+        parser = MvParser()
+        sources, dest = parser._extract_paths("mv a.txt b.txt dest/")
+        assert sources == ["a.txt", "b.txt"]
+        assert dest == "dest/"
+
+    def test_extract_paths_quoted(self):
+        """Test extracting paths with quotes."""
+        parser = MvParser()
+        sources, dest = parser._extract_paths('mv "path with spaces" dest')
+        assert sources == ["path with spaces"]
+        assert dest == "dest"
+
+    def test_parse_simple_rename(self):
+        """Test that parse creates FileChangeRecord for rename."""
+        parser = MvParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test-session",
+                tool_use_id="tool-123",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            records = parser.parse("Bash", {"command": "mv old.txt new.txt"}, context)
+
+            assert len(records) == 1
+            assert records[0].change_type == "rename"
+            assert records[0].old_path is not None
+            assert "old.txt" in records[0].old_path
+            assert "new.txt" in records[0].path
+            assert records[0].source == "bash_mv"
+
+    def test_parse_multi_source_moves(self):
+        """Test multi-source mv generates correct target paths."""
+        parser = MvParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test-session",
+                tool_use_id="tool-123",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            records = parser.parse("Bash", {"command": "mv a.txt b.txt dest/"}, context)
+
+            assert len(records) == 2
+            # First file
+            assert records[0].old_path is not None
+            assert "a.txt" in records[0].old_path
+            assert "dest" in records[0].path and "a.txt" in records[0].path
+            # Second file
+            assert records[1].old_path is not None
+            assert "b.txt" in records[1].old_path
+            assert "dest" in records[1].path and "b.txt" in records[1].path
+
+    def test_parse_wildcard_rejected(self):
+        """Test that wildcard paths are rejected."""
+        parser = MvParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test-session",
+                tool_use_id="tool-123",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            # Wildcard in source
+            records = parser.parse("Bash", {"command": "mv *.txt dest/"}, context)
+            assert len(records) == 0
+
+    def test_parse_source_escape_rejected(self):
+        """Test that source path escaping project is rejected."""
+        parser = MvParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test-session",
+                tool_use_id="tool-123",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            # Source path escapes project
+            records = parser.parse("Bash", {"command": "mv /etc/passwd ./safe"}, context)
+            assert len(records) == 0
+
+    def test_parse_dest_escape_rejected(self):
+        """Test that destination path escaping project is rejected."""
+        parser = MvParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test-session",
+                tool_use_id="tool-123",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            # Destination path escapes project
+            records = parser.parse("Bash", {"command": "mv ./safe /tmp/out"}, context)
+            assert len(records) == 0
+
+    def test_is_safe_path_valid(self):
+        """Test that paths within project are safe."""
+        parser = MvParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            assert parser._is_safe_path(os.path.join(tmpdir, "foo"), tmpdir) is True
+
+    def test_is_safe_path_escape(self):
+        """Test that paths escaping project are unsafe."""
+        parser = MvParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            assert parser._is_safe_path("/etc/passwd", tmpdir) is False
+
+
+class TestCpParser:
+    """Tests for CpParser - Issue #2725."""
+
+    def setup_method(self):
+        """Clear registry before each test."""
+        FileChangeParserRegistry.clear()
+        FileChangeParserRegistry.register(CpParser())
+
+    def test_can_parse_bash_cp(self):
+        """Test that parser recognizes cp in Bash commands."""
+        parser = CpParser()
+        assert parser.can_parse("Bash", {"command": "cp src.txt dest.txt"}) is True
+        assert parser.can_parse("Bash", {"command": "cp -r src_dir dest_dir"}) is True
+        assert parser.can_parse("Bash", {"command": "ls -la"}) is False
+        assert parser.can_parse("Write", {"file_path": "/tmp/test.txt"}) is False
+
+    def test_extract_paths_simple_copy(self):
+        """Test extracting paths from simple cp command."""
+        parser = CpParser()
+        sources, dest = parser._extract_paths("cp src.txt dest.txt")
+        assert sources == ["src.txt"]
+        assert dest == "dest.txt"
+
+    def test_extract_paths_with_options(self):
+        """Test extracting paths from cp with options."""
+        parser = CpParser()
+        sources, dest = parser._extract_paths("cp -r src_dir dest_dir")
+        assert sources == ["src_dir"]
+        assert dest == "dest_dir"
+
+    def test_extract_paths_multi_source(self):
+        """Test extracting paths from multi-source cp command."""
+        parser = CpParser()
+        sources, dest = parser._extract_paths("cp a.txt b.txt dest/")
+        assert sources == ["a.txt", "b.txt"]
+        assert dest == "dest/"
+
+    def test_is_recursive_flag(self):
+        """Test detection of recursive flags."""
+        parser = CpParser()
+        assert parser._is_recursive_flag("cp -r src dest") is True
+        assert parser._is_recursive_flag("cp -R src dest") is True
+        assert parser._is_recursive_flag("cp -a src dest") is True
+        assert parser._is_recursive_flag("cp --recursive src dest") is True
+        assert parser._is_recursive_flag("cp -rf src dest") is True
+        assert parser._is_recursive_flag("cp src dest") is False
+
+    def test_parse_simple_copy(self):
+        """Test that parse creates FileChangeRecord for copy."""
+        parser = CpParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test-session",
+                tool_use_id="tool-123",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            records = parser.parse("Bash", {"command": "cp src.txt dest.txt"}, context)
+
+            assert len(records) == 1
+            assert records[0].change_type == "copy"
+            assert records[0].old_path is not None
+            assert "src.txt" in records[0].old_path
+            assert "dest.txt" in records[0].path
+            assert records[0].is_directory is False
+            assert records[0].source == "bash_cp"
+
+    def test_parse_recursive_copy(self):
+        """Test that recursive copy sets is_directory=True."""
+        parser = CpParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test-session",
+                tool_use_id="tool-123",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            records = parser.parse("Bash", {"command": "cp -r src_dir dest_dir"}, context)
+
+            assert len(records) == 1
+            assert records[0].is_directory is True
+
+    def test_parse_archive_copy(self):
+        """Test that archive copy (-a) sets is_directory=True."""
+        parser = CpParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test-session",
+                tool_use_id="tool-123",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            records = parser.parse("Bash", {"command": "cp -a src dest"}, context)
+
+            assert len(records) == 1
+            assert records[0].is_directory is True
+
+    def test_parse_multi_source_copies(self):
+        """Test multi-source cp generates correct target paths."""
+        parser = CpParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test-session",
+                tool_use_id="tool-123",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            records = parser.parse("Bash", {"command": "cp a.txt b.txt dest/"}, context)
+
+            assert len(records) == 2
+            # First file
+            assert "a.txt" in records[0].old_path
+            assert "dest" in records[0].path and "a.txt" in records[0].path
+            # Second file
+            assert "b.txt" in records[1].old_path
+            assert "dest" in records[1].path and "b.txt" in records[1].path
+
+    def test_parse_wildcard_rejected(self):
+        """Test that wildcard paths are rejected."""
+        parser = CpParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test-session",
+                tool_use_id="tool-123",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            records = parser.parse("Bash", {"command": "cp *.txt dest/"}, context)
+            assert len(records) == 0
+
+    def test_parse_source_escape_rejected(self):
+        """Test that source path escaping project is rejected."""
+        parser = CpParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test-session",
+                tool_use_id="tool-123",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+            records = parser.parse("Bash", {"command": "cp /etc/passwd ./safe"}, context)
+            assert len(records) == 0
+
+    def test_is_safe_path_valid(self):
+        """Test that paths within project are safe."""
+        parser = CpParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            assert parser._is_safe_path(os.path.join(tmpdir, "foo"), tmpdir) is True
+
+    def test_is_safe_path_escape(self):
+        """Test that paths escaping project are unsafe."""
+        parser = CpParser()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            assert parser._is_safe_path("/etc/passwd", tmpdir) is False
+
+
+class TestMvCpParserIntegration:
+    """Integration tests for MvParser and CpParser with Registry."""
+
+    def setup_method(self):
+        """Clear registry before each test."""
+        FileChangeParserRegistry.clear()
+
+    def test_registry_calls_mv_parser(self):
+        """Test that Registry correctly invokes MvParser."""
+        FileChangeParserRegistry.register(MvParser())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test",
+                tool_use_id="tool-1",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+
+            records = FileChangeParserRegistry.parse(
+                "Bash", {"command": "mv old.txt new.txt"}, context
+            )
+
+            assert len(records) == 1
+            assert records[0].change_type == "rename"
+
+    def test_registry_calls_cp_parser(self):
+        """Test that Registry correctly invokes CpParser."""
+        FileChangeParserRegistry.register(CpParser())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test",
+                tool_use_id="tool-1",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+
+            records = FileChangeParserRegistry.parse(
+                "Bash", {"command": "cp src.txt dest.txt"}, context
+            )
+
+            assert len(records) == 1
+            assert records[0].change_type == "copy"
+
+    def test_append_file_change_blocks_with_mv(self):
+        """Test append_file_change_blocks works with mv command."""
+        FileChangeParserRegistry.register(MvParser())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test",
+                tool_use_id="tool-1",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+
+            blocks = [
+                {"type": "tool_use", "name": "Bash", "input": {"command": "mv old.txt new.txt"}}
+            ]
+
+            append_file_change_blocks(blocks, context)
+
+            assert len(blocks) == 2
+            assert blocks[1]["type"] == "file_change"
+            assert blocks[1]["status"] == "pending"
+            assert len(blocks[1]["changes"]) >= 1
+            assert blocks[1]["changes"][0]["change_type"] == "rename"
+
+    def test_append_file_change_blocks_with_cp(self):
+        """Test append_file_change_blocks works with cp command."""
+        FileChangeParserRegistry.register(CpParser())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test",
+                tool_use_id="tool-1",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+
+            blocks = [
+                {"type": "tool_use", "name": "Bash", "input": {"command": "cp src.txt dest.txt"}}
+            ]
+
+            append_file_change_blocks(blocks, context)
+
+            assert len(blocks) == 2
+            assert blocks[1]["type"] == "file_change"
+            assert blocks[1]["changes"][0]["change_type"] == "copy"
+
+    def test_extract_file_changes_with_mv(self):
+        """Test extract_file_changes works with mv command."""
+        FileChangeParserRegistry.register(MvParser())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test",
+                tool_use_id="tool-1",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+
+            tool_use = {
+                "type": "tool_use",
+                "name": "Bash",
+                "input": {"command": "mv old.txt new.txt"},
+            }
+
+            changes = extract_file_changes(tool_use, context)
+
+            assert changes is not None
+            assert len(changes) >= 1
+            assert changes[0]["change_type"] == "rename"
+            assert changes[0]["old_path"] is not None
+
+    def test_extract_file_changes_with_cp(self):
+        """Test extract_file_changes works with cp command."""
+        FileChangeParserRegistry.register(CpParser())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context = ParserContext(
+                session_id="test",
+                tool_use_id="tool-1",
+                project_path=tmpdir,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+
+            tool_use = {
+                "type": "tool_use",
+                "name": "Bash",
+                "input": {"command": "cp src.txt dest.txt"},
+            }
+
+            changes = extract_file_changes(tool_use, context)
+
+            assert changes is not None
+            assert len(changes) >= 1
+            assert changes[0]["change_type"] == "copy"
+            assert changes[0]["old_path"] is not None
