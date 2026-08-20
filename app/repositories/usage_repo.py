@@ -213,6 +213,58 @@ class UsageRepository:
         """
         return self.db.fetch_all(query, tuple(params))
 
+    def get_today_session_usage(
+        self,
+        date: str,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """Get today's usage from agent_sessions table.
+
+        Issue #2842: Dashboard today's usage shows empty because local WebUI
+        sessions don't sync to daily_usage table. This method queries
+        agent_sessions directly to get real-time usage data.
+
+        Args:
+            date: Date string (YYYY-MM-DD).
+            tenant_id: Optional tenant ID filter.
+
+        Returns:
+            List[Dict]: Aggregated usage by tool_name.
+        """
+        try:
+            conditions = ["CAST(created_at AS DATE) = ?"]
+            params: list = [date]
+            normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+            if normalized_tenant_id is not None:
+                conditions.append("tenant_id = ?")
+                params.append(normalized_tenant_id)
+
+            where_clause = " AND ".join(conditions)
+
+            # Query agent_sessions for today's sessions
+            # Use COALESCE for tool_name to handle NULL values
+            rows = self.db.fetch_all(
+                f"""
+                SELECT
+                    COALESCE(tool_name, 'unknown') as tool_name,
+                    SUM(COALESCE(total_tokens, 0)) as tokens_used,
+                    SUM(COALESCE(total_input_tokens, 0)) as input_tokens,
+                    SUM(COALESCE(total_output_tokens, 0)) as output_tokens,
+                    SUM(COALESCE(request_count, 0)) as request_count
+                FROM agent_sessions
+                WHERE {where_clause}
+                  AND workspace_type IN ('local', 'remote', 'terminal')
+                GROUP BY COALESCE(tool_name, 'unknown')
+                """,
+                tuple(params),
+            )
+
+            return rows if rows else []
+        except Exception as e:
+            logger.warning("Failed to get today session usage: %s", e)
+            return []
+
     def get_usage_by_date(
         self,
         date: str,

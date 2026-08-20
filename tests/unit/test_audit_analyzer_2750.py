@@ -809,8 +809,8 @@ class TestDetectAnomaliesOrchestration:
             end = datetime(2026, 7, 1)
             result = analyzer.detect_anomalies(start_time=start, end_time=end)
 
-            m1.assert_called_once_with(start, end)
-            m2.assert_called_once_with(start, end)
-            m3.assert_called_once_with(start, end)
-            m4.assert_called_once_with(start, end)
+            m1.assert_called_once_with(start, end, tenant_id=None)
+            m2.assert_called_once_with(start, end, tenant_id=None)
+            m3.assert_called_once_with(start, end, tenant_id=None)
+            m4.assert_called_once_with(start, end, tenant_id=None)
             assert result == []
