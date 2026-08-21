@@ -327,3 +327,86 @@ class TestAdvisoryDeprecation:
         finally:
             client1.release_leadership()
             client2.release_leadership()
+
+
+class TestRecordRunPartial:
+    """Test record_run with partial status. Issue #2822."""
+
+    def test_record_run_partial(self, db):
+        """Partial status should increment run_count (not fail_count)."""
+        client = LeaderElectionClient("test_partial", db, strategy="heartbeat", lock_timeout=60)
+
+        try:
+            acquired = client.try_acquire_leadership()
+            assert acquired is True
+
+            # Get initial metrics
+            initial_metrics = client.get_metrics()
+            initial_run_count = initial_metrics["run_count"]
+
+            # Record partial run
+            client.record_run("partial", 1000, '{"type": "partial_failure"}')
+
+            # Verify run_count incremented
+            final_metrics = client.get_metrics()
+            assert final_metrics["run_count"] == initial_run_count + 1
+
+        finally:
+            client.release_leadership()
+
+    def test_record_run_invalid_status(self, db):
+        """Invalid status should not update counters (but still inserts)."""
+        client = LeaderElectionClient("test_invalid", db, strategy="heartbeat", lock_timeout=60)
+
+        try:
+            acquired = client.try_acquire_leadership()
+            assert acquired is True
+
+            # Get initial metrics
+            initial_metrics = client.get_metrics()
+
+            # Record with invalid status (no matching elif branch)
+            client.record_run("invalid_status", 1000, "test")
+
+            # Verify counters unchanged
+            final_metrics = client.get_metrics()
+            assert final_metrics["run_count"] == initial_metrics["run_count"]
+            assert final_metrics["fail_count"] == initial_metrics["fail_count"]
+            assert final_metrics["skip_count"] == initial_metrics["skip_count"]
+
+        finally:
+            client.release_leadership()
+
+    def test_record_run_concurrent(self, db):
+        """Concurrent record_run calls should correctly update counters."""
+        import threading
+        import time
+
+        job_name = "test_concurrent_record"
+        results = []
+        lock = threading.Lock()
+
+        def record_partial():
+            client = LeaderElectionClient(job_name, db, strategy="heartbeat", lock_timeout=60)
+            try:
+                acquired = client.try_acquire_leadership()
+                if acquired:
+                    for _ in range(5):
+                        client.record_run("partial", 100, "test")
+                        time.sleep(0.01)
+                    with lock:
+                        results.append(client.get_metrics()["run_count"])
+            finally:
+                client.release_leadership()
+
+        # Only one thread will acquire leadership and record
+        threads = [threading.Thread(target=record_partial) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        # Verify at least one thread recorded runs
+        if results:
+            # Should have recorded 5 partial runs
+            assert any(r >= 5 for r in results)

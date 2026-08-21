@@ -104,6 +104,16 @@ def get_param_placeholder() -> str:
     return "%s" if is_postgresql() else "?"
 
 
+def _param() -> str:
+    """
+    Alias for get_param_placeholder for convenience.
+
+    Returns:
+        str: Parameter placeholder ('%s' for PostgreSQL, '?' for SQLite).
+    """
+    return get_param_placeholder()
+
+
 def adapt_sql(query: str) -> str:
     """
     Adapt SQL query for the current database.

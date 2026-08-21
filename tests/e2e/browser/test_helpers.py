@@ -7,6 +7,7 @@
 
 import logging
 import os
+from urllib.parse import urlparse
 
 from playwright.sync_api import Page
 
@@ -86,11 +87,23 @@ def dismiss_force_change_password_modal(page: Page, new_password: str = "Admin12
         # 没有弹窗，正常情况
         pass
     else:
-        # 弹窗内三个密码输入框通过 aria-label 定位（更稳定，不受 i18n 影响）
-        # Issue #2312: 使用 aria-label 定位，避免依赖 placeholder/label 文本
-        current_pw_input = page.get_by_role("textbox", name="current-password")
-        new_pw_input = page.get_by_role("textbox", name="new-password")
-        confirm_pw_input = page.get_by_role("textbox", name="confirm-password")
+        # Prefer aria-label, but keep placeholder/text fallbacks for packaged
+        # frontend builds whose accessibility tree exposes the placeholder.
+        current_pw_input = modal.locator(
+            '[aria-label="current-password"], '
+            'input[placeholder="Enter current password"], '
+            'input[placeholder="输入当前密码"]'
+        ).first
+        new_pw_input = modal.locator(
+            '[aria-label="new-password"], '
+            'input[placeholder="Enter new password"], '
+            'input[placeholder="输入新密码"]'
+        ).first
+        confirm_pw_input = modal.locator(
+            '[aria-label="confirm-password"], '
+            'input[placeholder="Confirm password"], '
+            'input[placeholder="确认密码"]'
+        ).first
 
         # 填写改密表单
         current_pw_input.fill(PASSWORD)
@@ -132,6 +145,30 @@ def dismiss_force_change_password_modal(page: Page, new_password: str = "Admin12
         except PlaywrightTimeoutError:
             # 最后兜底：等待页面稳定
             page.wait_for_timeout(3000)
+
+
+def wait_for_authenticated_session(page: Page):
+    """Wait until the browser session and frontend auth state can see the user."""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    try:
+        page.wait_for_function(
+            """async () => {
+                const response = await fetch('/api/auth/check', { credentials: 'include' });
+                if (!response.ok) return false;
+                const data = await response.json();
+                return Boolean(data.authenticated && data.user && data.user.role);
+            }""",
+            timeout=15000,
+        )
+    except PlaywrightTimeoutError as exc:
+        save_screenshot(page, "login", "auth_check_failed")
+        raise AssertionError("Authenticated session was not visible to /api/auth/check") from exc
+
+    # Login.tsx and useAuth both update React state asynchronously. Give the
+    # route guard one tick after the backend session is visible, otherwise a
+    # direct /manage goto can be redirected to /work by a stale null user.
+    page.wait_for_timeout(750)
 
 
 def login(page: Page):
@@ -202,6 +239,7 @@ def login(page: Page):
 
     # 处理强制修改密码弹窗（默认 admin 用户首次登录后会出现）
     dismiss_force_change_password_modal(page)
+    wait_for_authenticated_session(page)
 
 
 def navigate_to(page: Page, path: str):
@@ -210,7 +248,26 @@ def navigate_to(page: Page, path: str):
 
     避免使用 networkidle，改用 domcontentloaded 和元素等待
     """
-    page.goto(f"{BASE_URL}{path}", wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+    for attempt in range(2):
+        page.goto(f"{BASE_URL}{path}", wait_until="domcontentloaded", timeout=PAGE_LOAD_TIMEOUT_MS)
+
+        if path.startswith("/manage"):
+            try:
+                page.wait_for_url(lambda url: "/manage" in url, timeout=15000)
+            except Exception:
+                pass
+            page.wait_for_timeout(1000)
+            current_path = urlparse(page.url).path
+            if current_path.startswith("/manage"):
+                break
+            if attempt == 0:
+                wait_for_authenticated_session(page)
+                continue
+            save_screenshot(page, "navigation", "manage_redirected")
+            raise AssertionError(
+                f"Expected to stay in Manage mode at {path}, but current URL is {page.url}"
+            )
+        break
 
     # 等待骨架屏消失（如果存在）
     try:

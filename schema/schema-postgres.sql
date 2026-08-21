@@ -136,9 +136,11 @@ CREATE TABLE agent_sessions (
     tenant_id integer DEFAULT 1 NOT NULL,
     tenant_version integer DEFAULT 1 NOT NULL,
     total_cache_read_tokens integer DEFAULT 0 NOT NULL,
-    total_cache_write_tokens integer DEFAULT 0 NOT NULL
+    total_cache_write_tokens integer DEFAULT 0 NOT NULL,
+    daily_usage_synced boolean DEFAULT false NOT NULL
 );
 
+COMMENT ON COLUMN agent_sessions.daily_usage_synced IS 'Whether usage has been synced to daily_usage table';
 CREATE SEQUENCE agent_sessions_id_seq
     AS integer
     START WITH 1
@@ -761,6 +763,27 @@ CREATE SEQUENCE daily_usage_id_seq
     CACHE 1;
 
 ALTER SEQUENCE daily_usage_id_seq OWNED BY daily_usage.id;
+CREATE TABLE deregister_failures (
+    id integer NOT NULL,
+    machine_id text NOT NULL,
+    batch_index integer NOT NULL,
+    session_ids text NOT NULL,
+    error_message text,
+    retry_count integer DEFAULT 0 NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE SEQUENCE deregister_failures_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE deregister_failures_id_seq OWNED BY deregister_failures.id;
 CREATE TABLE dingtalk_settings (
     app_key character varying(255),
     app_secret_enc text,
@@ -2496,6 +2519,8 @@ ALTER TABLE ONLY daily_messages ALTER COLUMN id SET DEFAULT nextval('daily_messa
 
 ALTER TABLE ONLY daily_usage ALTER COLUMN id SET DEFAULT nextval('daily_usage_id_seq'::regclass);
 
+ALTER TABLE ONLY deregister_failures ALTER COLUMN id SET DEFAULT nextval('deregister_failures_id_seq'::regclass);
+
 ALTER TABLE ONLY dingtalk_settings ALTER COLUMN id SET DEFAULT nextval('dingtalk_settings_id_seq'::regclass);
 
 ALTER TABLE ONLY email_notification_logs ALTER COLUMN id SET DEFAULT nextval('email_notification_logs_id_seq'::regclass);
@@ -2719,6 +2744,9 @@ ALTER TABLE ONLY daily_messages
 
 ALTER TABLE ONLY daily_usage
     ADD CONSTRAINT daily_usage_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY deregister_failures
+    ADD CONSTRAINT deregister_failures_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY dingtalk_settings
     ADD CONSTRAINT dingtalk_settings_pkey PRIMARY KEY (id);
@@ -3080,237 +3108,253 @@ CREATE INDEX idx_agent_runs_status ON agent_runs USING btree (status);
 
 CREATE INDEX idx_agent_runs_user_id ON agent_runs USING btree (user_id);
 
+CREATE INDEX idx_agent_sessions_daily_usage_synced ON agent_sessions USING btree (daily_usage_synced) WHERE (daily_usage_synced = false);
+
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_project ON agent_sessions USING btree (project_id);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_remote_machine_id ON agent_sessions USING btree (remote_machine_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_session_id ON agent_sessions USING btree (session_id);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_session_type ON agent_sessions USING btree (session_type);
 
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_status ON agent_sessions USING btree (status);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_tenant_id ON agent_sessions USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_tenant_updated ON agent_sessions USING btree (tenant_id, updated_at);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_tenant_user ON agent_sessions USING btree (tenant_id, user_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_sessions_tool_name ON agent_sessions USING btree (tool_name);
-
-
---
---
 
 CREATE INDEX idx_agent_sessions_user_id ON agent_sessions USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_tokens_hash ON agent_tokens USING btree (token_hash);
-
-
---
---
 
 CREATE INDEX idx_agent_tokens_machine ON agent_tokens USING btree (machine_id);
 
+
+--
+--
+
 CREATE INDEX idx_agent_tokens_machine_pending ON agent_tokens USING btree (machine_id, pending_revoke, revoke_after);
-
-
---
---
 
 CREATE INDEX idx_agent_tokens_machine_version ON agent_tokens USING btree (machine_id, token_version);
 
+
+--
+--
+
 CREATE UNIQUE INDEX idx_agent_tokens_one_active_per_machine ON agent_tokens USING btree (machine_id) WHERE ((is_revoked = false) AND (pending_revoke = false));
-
-
---
---
 
 CREATE INDEX idx_agent_tokens_pending_revoke_timeout ON agent_tokens USING btree (revoke_after) WHERE ((pending_revoke = true) AND (is_revoked = false));
 
+
+--
+--
+
 CREATE INDEX idx_aggregation_history_status ON aggregation_history USING btree (status);
-
-
---
---
 
 CREATE INDEX idx_aggregation_history_type_date ON aggregation_history USING btree (type, start_date, end_date);
 
+
+--
+--
+
 CREATE INDEX idx_ai_agent_settings_key ON ai_agent_settings USING btree (setting_key);
-
-
---
---
 
 CREATE INDEX idx_alerts_created_at ON alerts USING btree (created_at);
 
+
+--
+--
+
 CREATE INDEX idx_alerts_history_sent_at ON alerts_history USING btree (sent_at);
-
-
---
---
 
 CREATE INDEX idx_alerts_history_tenant ON alerts_history USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_alerts_history_type ON alerts_history USING btree (alert_type);
-
-
---
---
 
 CREATE INDEX idx_alerts_read ON alerts USING btree (read);
 
+
+--
+--
+
 CREATE INDEX idx_alerts_user_id ON alerts USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_annotations_session ON annotations USING btree (session_id);
 
+
+--
+--
+
 CREATE INDEX idx_api_key_store_tenant_provider ON api_key_store USING btree (tenant_id, provider);
-
-
---
---
 
 CREATE INDEX idx_archive_files_batch ON archive_files USING btree (execution_id, batch_id);
 
+
+--
+--
+
 CREATE INDEX idx_archive_files_checksum ON archive_files USING btree (checksum);
-
-
---
---
 
 CREATE INDEX idx_archive_files_expires ON archive_files USING btree (expires_at);
 
+
+--
+--
+
 CREATE INDEX idx_archive_files_tenant ON archive_files USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_audit_action ON audit_logs USING btree (action);
 
+
+--
+--
+
 CREATE INDEX idx_audit_logs_tenant_id ON audit_logs USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_audit_logs_tenant_timestamp ON audit_logs USING btree (tenant_id, "timestamp");
 
+
+--
+--
+
 CREATE INDEX idx_audit_logs_timestamp ON audit_logs USING btree ("timestamp");
-
-
---
---
 
 CREATE INDEX idx_audit_resource ON audit_logs USING btree (resource_type, resource_id);
 
+
+--
+--
+
 CREATE INDEX idx_audit_severity ON audit_logs USING btree (severity);
-
-
---
---
 
 CREATE INDEX idx_audit_tenant_id ON audit_logs USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_audit_timestamp ON audit_logs USING btree ("timestamp");
-
-
---
---
 
 CREATE INDEX idx_audit_user_id ON audit_logs USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_bl_mapping ON backfill_logs USING btree (mapping_id);
-
-
---
---
 
 CREATE INDEX idx_command_evidence_session_command ON command_execution_evidence USING btree (session_id, command_id);
 
+
+--
+--
+
 CREATE INDEX idx_command_evidence_workflow_milestone ON command_execution_evidence USING btree (workflow_id, milestone_id);
-
-
---
---
 
 CREATE INDEX idx_consistency_violations_detected ON consistency_violations USING btree (detected_at);
 
+
+--
+--
+
 CREATE INDEX idx_consistency_violations_status ON consistency_violations USING btree (status);
-
-
---
---
 
 CREATE INDEX idx_consistency_violations_tenant ON consistency_violations USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_daily_messages_orphan ON daily_messages USING btree (date) WHERE (tenant_id IS NULL);
-
-
---
---
 
 CREATE INDEX idx_daily_messages_tenant_date ON daily_messages USING btree (tenant_id, date);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_date ON daily_stats USING btree (date);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_date_tool ON daily_stats USING btree (date, tool_name);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_date_tool_host ON daily_stats USING btree (date, tool_name, host_name);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_host ON daily_stats USING btree (host_name);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_orphan ON daily_stats USING btree (date) WHERE (tenant_id IS NULL);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_project ON daily_stats USING btree (project_id);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_sender ON daily_stats USING btree (sender_name);
-
-
---
---
 
 CREATE INDEX idx_daily_stats_tenant_date ON daily_stats USING btree (tenant_id, date);
 
+
+--
+--
+
 CREATE INDEX idx_daily_stats_tool ON daily_stats USING btree (tool_name);
 
-
---
---
-
 CREATE INDEX idx_daily_stats_user_id ON daily_stats USING btree (user_id);
+
+
+--
+--
+
+CREATE INDEX idx_deregister_failures_created ON deregister_failures USING btree (created_at);
+
+CREATE INDEX idx_deregister_failures_machine ON deregister_failures USING btree (machine_id);
+
+
+--
+--
+
+CREATE INDEX idx_deregister_failures_status ON deregister_failures USING btree (status);
 
 CREATE INDEX idx_email_logs_sent_at ON email_notification_logs USING btree (sent_at);
 

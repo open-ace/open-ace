@@ -123,7 +123,7 @@ def update_feishu_config():
 
             # Audit log for Feishu config save (do not log app_secret)
             audit_logger.log_action(
-                action=AuditAction.FEISHU_CONFIG_SAVE.value,
+                action=AuditAction.FEISHU_CONFIG_SAVE,
                 user_id=user_id,
                 resource_type="feishu_config",
                 resource_name=app_id,
@@ -203,7 +203,7 @@ def delete_feishu_config():
 
         # Audit log for Feishu config delete (do not log app_secret)
         audit_logger.log_action(
-            action=AuditAction.FEISHU_CONFIG_DELETE.value,
+            action=AuditAction.FEISHU_CONFIG_DELETE,
             user_id=user_id,
             resource_type="feishu_config",
             resource_name=config.get("app_id"),

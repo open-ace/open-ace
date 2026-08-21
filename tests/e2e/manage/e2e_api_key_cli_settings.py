@@ -23,6 +23,8 @@ import time
 # Add project root
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
+REPO_ROOT = os.path.dirname(os.path.dirname(PROJECT_ROOT))
+sys.path.insert(0, REPO_ROOT)
 
 import requests
 from playwright.sync_api import expect, sync_playwright
@@ -79,6 +81,7 @@ def api_login():
 def api_list_keys(token):
     r = requests.get(
         f"{BASE_URL}/api/api-keys",
+        params={"tenant_id": 1},
         cookies={"session_token": token},
     )
     assert r.status_code == 200
@@ -158,8 +161,12 @@ def test_api_key_cli_settings():  # allow-no-assert: smoke test - visual verific
             test_key_name = f"E2E_Test_{int(time.time())}"
             log_step("Form", f"Key name: {test_key_name}")
 
-            # Select provider (Anthropic) - use .form-select class
-            page.select_option(".form-select", value="anthropic")
+            modal = page.locator(".modal.show")
+            modal.wait_for(state="visible", timeout=5000)
+
+            # Select provider (Anthropic) inside the Add dialog. The page also
+            # has non-modal selects, so scope this to the active modal.
+            modal.locator("select.form-select").first.select_option(value="anthropic")
             pause(0.5)
 
             # Fill key name - exact placeholder match
@@ -171,9 +178,7 @@ def test_api_key_cli_settings():  # allow-no-assert: smoke test - visual verific
             pause(0.5)
 
             # Fill base URL - exact placeholder match with (optional)
-            page.fill(
-                "input[placeholder='Enter base URL (optional)']", "https://api.z.ai/api/anthropic"
-            )
+            modal.locator("input").nth(2).fill("https://api.z.ai/api/anthropic")
             pause(0.5)
 
             # ── Step 4: Select CLI Tools ──────────────────────

@@ -97,7 +97,8 @@ CREATE TABLE agent_sessions (
  tenant_id integer DEFAULT 1 NOT NULL,
  tenant_version integer DEFAULT 1 NOT NULL,
  total_cache_read_tokens integer DEFAULT 0 NOT NULL,
- total_cache_write_tokens integer DEFAULT 0 NOT NULL
+ total_cache_write_tokens integer DEFAULT 0 NOT NULL,
+ daily_usage_synced INTEGER DEFAULT 0 NOT NULL
 );
 
 CREATE TABLE agent_tokens (
@@ -518,6 +519,18 @@ CREATE TABLE daily_usage (
     CONSTRAINT chk_daily_usage_output_tokens_positive CHECK ((output_tokens >= 0)),
     CONSTRAINT chk_daily_usage_request_count_positive CHECK ((request_count >= 0)),
     CONSTRAINT chk_daily_usage_tokens_positive CHECK ((tokens_used >= 0))
+);
+
+CREATE TABLE deregister_failures (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ machine_id text NOT NULL,
+ batch_index integer NOT NULL,
+ session_ids text NOT NULL,
+ error_message text,
+ retry_count integer DEFAULT 0 NOT NULL,
+ status text DEFAULT 'pending' NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 CREATE TABLE dingtalk_settings (
@@ -1703,6 +1716,8 @@ CREATE INDEX idx_agent_runs_status ON agent_runs (status);
 
 CREATE INDEX idx_agent_runs_user_id ON agent_runs (user_id);
 
+CREATE INDEX idx_agent_sessions_daily_usage_synced ON agent_sessions (daily_usage_synced) WHERE (daily_usage_synced = false);
+
 CREATE INDEX idx_agent_sessions_project ON agent_sessions (project_id);
 
 CREATE INDEX idx_agent_sessions_remote_machine_id ON agent_sessions (remote_machine_id);
@@ -1818,6 +1833,12 @@ CREATE INDEX idx_daily_stats_tenant_date ON daily_stats (tenant_id, date);
 CREATE INDEX idx_daily_stats_tool ON daily_stats (tool_name);
 
 CREATE INDEX idx_daily_stats_user_id ON daily_stats (user_id);
+
+CREATE INDEX idx_deregister_failures_created ON deregister_failures (created_at);
+
+CREATE INDEX idx_deregister_failures_machine ON deregister_failures (machine_id);
+
+CREATE INDEX idx_deregister_failures_status ON deregister_failures (status);
 
 CREATE INDEX idx_email_logs_sent_at ON email_notification_logs (sent_at);
 

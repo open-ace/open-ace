@@ -887,6 +887,15 @@ def fetch_and_save(
 
     all_messages: list[dict[str, Any]] = []
 
+    # Issue #2823: Track coverage data for observability
+    coverage_data = {
+        "users_scanned": 0,
+        "users_denied": [],
+        "users_errors": [],
+        "files_processed": 0,
+        "messages_imported": 0,
+    }
+
     # Discover ZCode DBs to scan.
     db_targets: list[tuple[str | None, Path]] = []
     if multi_user_mode:
@@ -894,7 +903,19 @@ def fetch_and_save(
         db_targets = find_all_zcode_db_paths()
         if not db_targets:
             print("No ZCode databases found for any user.")
+            # Issue #2823: Output structured result for empty state
+            result = {
+                "protocol_version": "1.0",
+                "status": "no_data",
+                "coverage": coverage_data,
+                "error": None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            print(
+                f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+            )
             return False
+        coverage_data["users_scanned"] = len(db_targets)
         print(f"Found {len(db_targets)} users with ZCode data:")
         for system_account, db_path in db_targets:
             print(f"  - {system_account}: {db_path}")
@@ -902,7 +923,19 @@ def fetch_and_save(
         db_path = find_zcode_db_path()
         if not db_path:
             print("Error: Cannot find ZCode DB (~/.zcode/cli/db/db.sqlite).")
+            # Issue #2823: Output structured result for empty state
+            result = {
+                "protocol_version": "1.0",
+                "status": "no_data",
+                "coverage": coverage_data,
+                "error": None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            print(
+                f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+            )
             return False
+        coverage_data["users_scanned"] = 1
         db_targets = [(None, db_path)]
 
     total_sessions = 0
@@ -964,6 +997,35 @@ def fetch_and_save(
             update_agent_sessions_stats(all_messages)
         except Exception as e:
             print(f"Warning: Failed to update agent session stats: {e}")
+
+    # Issue #2823: Output structured result with protocol version
+    coverage_data["files_processed"] = total_sessions
+    coverage_data["messages_imported"] = len(all_messages)
+    # Determine status using unified logic: errors > denied > no_data
+    if coverage_data["users_scanned"] > 0:
+        # At least one user succeeded
+        if coverage_data["users_errors"] or coverage_data["users_denied"]:
+            status = "degraded"
+        else:
+            status = "completed"
+    else:
+        # No successful users
+        if coverage_data["users_errors"]:
+            status = "failed"
+        elif coverage_data["users_denied"]:
+            status = "denied"
+        else:
+            status = "no_data"
+    result = {
+        "protocol_version": "1.0",
+        "status": status,
+        "coverage": coverage_data,
+        "error": None,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    print(
+        f"\n===FETCH_RESULT_START===\n{json.dumps(result, ensure_ascii=False)}\n===FETCH_RESULT_END==="
+    )
 
     return True
 

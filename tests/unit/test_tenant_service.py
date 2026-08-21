@@ -197,3 +197,72 @@ class TestTenantService:
         mock_repo.get_usage.return_value = []
         result = svc.get_tenant_stats(1)
         assert result is not None
+
+    # Issue #2128: 软废弃警告测试
+    def test_update_settings_deprecated_sso_enabled_warning(self, caplog):
+        """Test that using deprecated sso_enabled field logs a warning."""
+        import logging
+
+        caplog.set_level(logging.WARNING)
+
+        svc, mock_repo, _ = self._make_service()
+        mock_tenant = MagicMock()
+        mock_tenant._last_settings_update = None
+        mock_tenant.settings.to_dict.return_value = {"sso_enabled": False}
+        mock_repo.get_by_id.return_value = mock_tenant
+        mock_repo.update.return_value = True
+
+        result = svc.update_settings(1, {"sso_enabled": True})
+
+        # Request should still succeed (backward compatibility)
+        assert result.success is True
+
+        # But warning should be logged
+        assert any("Issue #2128" in record.message for record in caplog.records)
+        assert any("deprecated" in record.message.lower() for record in caplog.records)
+        assert any("sso_enabled" in record.message for record in caplog.records)
+
+    def test_update_settings_deprecated_sso_provider_warning(self, caplog):
+        """Test that using deprecated sso_provider field logs a warning."""
+        import logging
+
+        caplog.set_level(logging.WARNING)
+
+        svc, mock_repo, _ = self._make_service()
+        mock_tenant = MagicMock()
+        mock_tenant._last_settings_update = None
+        mock_tenant.settings.to_dict.return_value = {"sso_provider": None}
+        mock_repo.get_by_id.return_value = mock_tenant
+        mock_repo.update.return_value = True
+
+        result = svc.update_settings(1, {"sso_provider": "google"})
+
+        # Request should still succeed (backward compatibility)
+        assert result.success is True
+
+        # But warning should be logged
+        assert any("Issue #2128" in record.message for record in caplog.records)
+        assert any("deprecated" in record.message.lower() for record in caplog.records)
+        assert any("sso_provider" in record.message for record in caplog.records)
+
+    def test_update_settings_non_deprecated_fields_no_warning(self, caplog):
+        """Test that using non-deprecated fields does not log a warning."""
+        import logging
+
+        caplog.set_level(logging.WARNING)
+
+        svc, mock_repo, _ = self._make_service()
+        mock_tenant = MagicMock()
+        mock_tenant._last_settings_update = None
+        mock_tenant.settings.to_dict.return_value = {"auto_provision_users": False}
+        mock_repo.get_by_id.return_value = mock_tenant
+        mock_repo.update.return_value = True
+
+        result = svc.update_settings(1, {"auto_provision_users": True})
+
+        # Request should succeed
+        assert result.success is True
+
+        # No deprecation warning should be logged
+        assert not any("Issue #2128" in record.message for record in caplog.records)
+        assert not any("deprecated" in record.message.lower() for record in caplog.records)

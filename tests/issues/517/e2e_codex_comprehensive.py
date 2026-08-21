@@ -220,19 +220,39 @@ def test_adapter_resume_args():
 
 
 def test_adapter_permission_modes():
-    """Codex adapter maps permission modes correctly."""
+    """Codex adapter maps permission modes correctly.
+
+    Issue #2645: Security fix for permission mode mapping.
+    - "ask"/"plan": Safe mode with approval prompts
+    - "auto": Safe automatic mode (NO dangerous bypass)
+    - "bypass": Dangerous mode with full bypass
+    """
     adapter = _get_codex_adapter()
 
-    # Plan mode
+    # Ask mode (safe)
+    args = adapter.build_start_args(session_id="s", project_path="/tmp", permission_mode="ask")
+    assert "--ask-for-approval" in args
+    assert "untrusted" in args
+    assert "--dangerously-bypass-approvals-and-sandbox" not in args
+    print(f"    Ask mode: {args}")
+
+    # Plan mode (alias for ask, safe)
     args = adapter.build_start_args(session_id="s", project_path="/tmp", permission_mode="plan")
     assert "--ask-for-approval" in args
     assert "untrusted" in args
+    assert "--dangerously-bypass-approvals-and-sandbox" not in args
     print(f"    Plan mode: {args}")
 
-    # Auto mode
+    # Auto mode (safe, no dangerous flags)
     args = adapter.build_start_args(session_id="s", project_path="/tmp", permission_mode="auto")
+    assert "--dangerously-bypass-approvals-and-sandbox" not in args
+    assert "--ask-for-approval" not in args  # Should not have any permission flags
+    print(f"    Auto mode (safe): {args}")
+
+    # Bypass mode (dangerous)
+    args = adapter.build_start_args(session_id="s", project_path="/tmp", permission_mode="bypass")
     assert "--dangerously-bypass-approvals-and-sandbox" in args
-    print(f"    Auto mode: {args}")
+    print(f"    Bypass mode (dangerous): {args}")
 
 
 def test_adapter_single_shot():

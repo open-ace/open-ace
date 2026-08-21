@@ -1267,19 +1267,20 @@ def any_admin_required(f=None):
 def _log_cross_tenant_operation(
     actor_user_id: int,
     actor_tenant_id: int | None,
-    target_tenant_id: int,
+    target_tenant_id: int | None,
     action: str,
 ) -> None:
     """
-    Log platform admin cross-tenant operation for audit.
+    Log platform admin cross-tenant or global operation for audit.
 
     Args:
         actor_user_id: Platform admin user ID
         actor_tenant_id: Platform admin's tenant ID (can be None)
-        target_tenant_id: Target tenant ID being accessed
+        target_tenant_id: Target tenant ID being accessed, or None for global operations
         action: The action being performed (e.g., "GET /api/tenants/123")
 
     Issue #2179: Audit logging for cross-tenant operations
+    Issue #2821: Extended to support global operations (target_tenant_id=None)
     """
     try:
         from flask import request
@@ -1298,12 +1299,16 @@ def _log_cross_tenant_operation(
 
         audit_action = method_action_map.get(request.method, AuditAction.ADMIN_CROSS_TENANT_ACCESS)
 
+        # Issue #2821: 区分跨租户操作和全局操作
+        resource_type = "tenant" if target_tenant_id is not None else "global"
+        resource_id = str(target_tenant_id) if target_tenant_id is not None else "global"
+
         audit_logger.log_action(
             audit_action,
             user_id=actor_user_id,
             severity="info",
-            resource_type="tenant",
-            resource_id=str(target_tenant_id),
+            resource_type=resource_type,
+            resource_id=resource_id,
             tenant_id=target_tenant_id,
             details={
                 "actor_tenant_id": actor_tenant_id,
@@ -1314,10 +1319,17 @@ def _log_cross_tenant_operation(
             },
         )
 
-        logger.info(
-            f"Platform admin {actor_user_id} (tenant: {actor_tenant_id}) "
-            f"accessed tenant {target_tenant_id}: {action}"
-        )
+        # Issue #2821: 日志消息区分跨租户操作和全局操作
+        if target_tenant_id is not None:
+            logger.info(
+                f"Platform admin {actor_user_id} (tenant: {actor_tenant_id}) "
+                f"accessed tenant {target_tenant_id}: {action}"
+            )
+        else:
+            logger.info(
+                f"Platform admin {actor_user_id} (tenant: {actor_tenant_id}) "
+                f"performed global operation: {action}"
+            )
     except Exception as e:
         logger.warning(f"Failed to log cross-tenant operation: {e}")
 

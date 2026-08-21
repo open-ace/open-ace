@@ -59,6 +59,7 @@ from app.modules.workspace.autonomous.constants import (  # noqa: F401
     _TRANSIENT_ORCHESTRATOR_KEYWORDS,
     AUTONOMOUS_CONTEXT,
     AUTONOMOUS_DEV_ALLOWED_TOOLS,
+    MAX_ACCEPTANCE_DEV_ROUNDS,
     MERGE_POLICY_PAUSE_REASON_PREFIX,
     PROTECTED_CI_REPAIR_TEST_FILES,
     READ_ONLY_REVIEW_UNSUPPORTED_TOOLS,
@@ -82,6 +83,7 @@ from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.phase_contract import PhaseResult, WorkflowContext
 from app.modules.workspace.autonomous.phase_host import PhaseDeps
 from app.modules.workspace.autonomous.phases import resolve_phase_handler
+from app.modules.workspace.autonomous.phases.acceptance_verification import _rejection_feedback
 from app.modules.workspace.autonomous.progress_report_i18n import (
     build_progress_payload,
     render_progress_report,
@@ -1739,12 +1741,6 @@ PHASE_STATUS_MAP = {
     "acceptance_verification": "verification_pending",  # #2335
 }
 
-# Cap on acceptance-rejection-driven development rounds (#2335). A rejected
-# acceptance verdict starts a new dev round carrying the rejection as feedback;
-# after this many rounds a persistent rejection fails the workflow rather than
-# looping forever.
-MAX_ACCEPTANCE_DEV_ROUNDS = 3
-
 # Acceptance verifier identity (#2335). ``verified_by`` stamps the runner
 # version + the model so a verification report records which agent produced it.
 VERIFIER_RUNNER_VERSION = "acceptance-verifier-v1"
@@ -2289,8 +2285,67 @@ def _extract_verifier_json(text: str) -> dict | None:
             try:
                 parsed = _json.loads(cleaned)
             except Exception:
-                return None
+                # Last resort (#2867): glm reproduces the Chinese acceptance
+                # criteria verbatim, so a checklist item that quotes a UI label
+                # lands with UNESCAPED inner ASCII double quotes (…进入"租户管理"。).
+                # Escape structurally-inner quotes, then re-strip trailing commas
+                # and parse strictly. Still fail-closed: an unrecoverable blob
+                # raises and returns None (never a fabricated verdict).
+                requoted = _strip_trailing_commas(_escape_inner_string_quotes(candidate))
+                try:
+                    parsed = _json.loads(requoted)
+                except Exception:
+                    return None
         return parsed if isinstance(parsed, dict) else None
+
+    def _escape_inner_string_quotes(s: str) -> str:
+        # Repair a JSON candidate whose string VALUES contain unescaped ASCII
+        # double quotes (#2867). A string token's real closing quote is the one
+        # followed — past whitespace — by a structural delimiter (``:`` ``,``
+        # ``}`` ``]``) or end-of-input; any other in-string ``"`` is an inner
+        # quote the model forgot to escape, so we backslash-escape it. This is a
+        # heuristic: a value that itself ends a quoted run right before a real
+        # delimiter (…said "yes", ok) can still be misread, but that produces
+        # invalid JSON downstream (→ None, fail-closed), never a wrong verdict.
+        out: list[str] = []
+        in_str = False
+        escaped = False
+        n = len(s)
+        i = 0
+        while i < n:
+            ch = s[i]
+            if not in_str:
+                out.append(ch)
+                if ch == '"':
+                    in_str = True
+                i += 1
+                continue
+            # inside a string
+            if escaped:
+                out.append(ch)
+                escaped = False
+                i += 1
+                continue
+            if ch == "\\":
+                out.append(ch)
+                escaped = True
+                i += 1
+                continue
+            if ch == '"':
+                j = i + 1
+                while j < n and s[j] in " \t\r\n":
+                    j += 1
+                nxt = s[j] if j < n else ""
+                if nxt in ("", ":", ",", "}", "]"):
+                    out.append(ch)  # real closing quote
+                    in_str = False
+                else:
+                    out.append('\\"')  # unescaped inner quote → escape it
+                i += 1
+                continue
+            out.append(ch)
+            i += 1
+        return "".join(out)
 
     def _strip_trailing_commas(s: str) -> str:
         out: list[str] = []
@@ -9113,6 +9168,11 @@ class AutonomousOrchestrator:
                 "verdicts": [],
                 "snapshot": None,
                 "infra_error": "verification agent output was not valid JSON",
+                # Deterministic failure (#2867): the agent emitted output that
+                # cannot be parsed. Re-running it usually reproduces the same
+                # unparseable form, so the phase caps consecutive repeats of this
+                # kind below the transient-retry budget instead of burning it.
+                "infra_error_kind": "unparseable_output",
             }
         if not isinstance(parsed, dict):
             return {
@@ -9616,10 +9676,21 @@ class AutonomousOrchestrator:
 
         if not issue_number and requirements_text:
             # Create issue from text
+            # For new project scenarios, extract owner/repo from repo_url
+            # so create_issue can target the repository explicitly.
+            issue_repo = None
+            project_repo_url = wf.get("project_repo_url", "")
+            if project_repo_url:
+                # Extract owner/repo from URL like https://github.com/owner/repo
+                match = re.search(r"github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", project_repo_url)
+                if match:
+                    issue_repo = match.group(1)
+
             try:
                 issue_data = gh.create_issue(
                     title=wf.get("title") or f"Autonomous Dev: {requirements_text[:60]}",
                     body=requirements_text,
+                    repo=issue_repo,
                 )
                 issue_number = issue_data.get("number")
                 # The issue number is an irreversible external-resource id: a
@@ -12455,23 +12526,76 @@ class AutonomousOrchestrator:
         wf = ctx.workflow
         # Check for stored user feedback (from cancel-with-feedback)
         user_feedback = wf.get("user_feedback", "")
+        # A rejected acceptance means the resumed dev round needs the verifier's
+        # failed-items as its repair target (#331: the blind round drifted
+        # off-target because the verification report never reached the dev
+        # prompt). Append them to human feedback (human opinion first) or fill
+        # the empty field; the injection is persisted via workflow_patch below
+        # because the dev prompt reads the DB field, not this local.
+        #
+        # One-shot guard: 'rejected' survives across rounds (it is only
+        # cleared by the pr_review no-changes interception or rewritten after
+        # the NEXT merge), so a bare rejected check would re-inject on every
+        # later wait tick and hijack the auto-merge passthrough into an
+        # endless report↔wait loop. Inject only on evidence of a FRESH human
+        # resume: (a) user_feedback is non-empty (both resume routes write
+        # it; resume-with-feedback requires it non-empty), or (b) the latest
+        # completed milestone is 'requirement_received' (created by the
+        # cancel-with-feedback route and by the new-requirements polling
+        # path below; the polling path immediately moves the workflow to
+        # planning, so it can never linger as the latest completed milestone
+        # of a waiting workflow — only the cancel route's can). The repair
+        # round's second tick has neither: feedback was consumed and cleared
+        # by the dev prompt and the latest completed milestone is report's
+        # round_completed.
+        rejected_acceptance = (wf.get("verification_status") or "").strip().lower() == "rejected"
+        fresh_human_resume = bool(user_feedback and user_feedback.strip())
+        # Milestone lookup only runs for rejected workflows with empty
+        # feedback; ordinary waiting ticks (the common case) skip the extra
+        # DB query.
+        if rejected_acceptance and not fresh_human_resume:
+            for ms in reversed(self.repo.list_milestones(self._workflow_id)):
+                if ms.get("status") == "completed":
+                    fresh_human_resume = ms.get("milestone_type") == "requirement_received"
+                    break
+        if rejected_acceptance and fresh_human_resume:
+            # Defensive guard for _rejection_feedback returning empty (both
+            # its branches currently return non-empty text).
+            rejection_fb = _rejection_feedback(wf, wf.get("github_pr_number"))
+            if rejection_fb:
+                user_feedback = (
+                    f"{user_feedback}\n\n{rejection_fb}"
+                    if user_feedback and user_feedback.strip()
+                    else rejection_fb
+                )
         if user_feedback and user_feedback.strip():
             # User provided feedback via cancel — resume from the cancelled phase
             # Find the most recent non-cancelled, non-wait milestone to determine phase
-            cancelled_phase = "development"  # default fallback
-            milestones = self.repo.list_milestones(self._workflow_id)
-            for ms in reversed(milestones):
-                status = ms.get("status", "")
-                mtype = ms.get("milestone_type", "")
-                if status == "completed" and mtype not in (
-                    "wait_started",
-                    "requirement_received",
-                    "branch_created",
-                    "repo_setup",
-                    "issue_created",
-                ):
-                    cancelled_phase = ms.get("phase", "development")
-                    break
+            # A rejected acceptance means the previous delivery ALREADY merged
+            # (acceptance only runs after a successful merge), so milestone
+            # backtracking can only land on merge/acceptance/report-side or infra
+            # milestones — every one a wrong resume target (#322: a stale
+            # worktree_restored(pr_review) skipped the repair round entirely and
+            # the workflow fell straight into the no-changes terminal). The only
+            # meaningful resume is a repair development round; force it.
+            if rejected_acceptance:
+                cancelled_phase = "development"
+            else:
+                cancelled_phase = "development"  # default fallback
+                milestones = self.repo.list_milestones(self._workflow_id)
+                for ms in reversed(milestones):
+                    status = ms.get("status", "")
+                    mtype = ms.get("milestone_type", "")
+                    if status == "completed" and mtype not in (
+                        "wait_started",
+                        "requirement_received",
+                        "branch_created",
+                        "repo_setup",
+                        "issue_created",
+                        "worktree_restored",  # infra bookkeeping, never a resume target
+                    ):
+                        cancelled_phase = ms.get("phase", "development")
+                        break
 
             new_dev_round = wf.get("dev_round", 1) + 1
             # Emit the phase_change event through the host (the commit entrypoint
@@ -12487,7 +12611,20 @@ class AutonomousOrchestrator:
             return PhaseResult.completed(
                 next_phase=cancelled_phase,
                 next_status=PHASE_STATUS_MAP.get(cancelled_phase, "developing"),
-                workflow_patch={"dev_round": new_dev_round, "current_round": 0},
+                workflow_patch={
+                    "dev_round": new_dev_round,
+                    "current_round": 0,
+                    # Persist the (possibly rejection-augmented) feedback: the
+                    # dev prompt reads the DB field via _get_user_feedback_prompt.
+                    "user_feedback": user_feedback,
+                    # Drop the stale merge SHA of the rejected delivery so the
+                    # NEXT merge re-resolves fresh (acceptance only fetches the
+                    # PR's merge commit when the cached value is empty) and
+                    # drop the paused banner text (same #2491/#2658 UX hygiene
+                    # as the resume-with-feedback route).
+                    "verification_merge_sha": "",
+                    "error_message": "",
+                },
             )
 
         # Auto merge check for batch workflows

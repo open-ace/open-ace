@@ -245,6 +245,7 @@ export const NewSessionModal: React.FC<NewSessionModalProps> = ({
         machine_id: selectedMachineId,
         project_path: projectPath,
         ha_pool_token: haPoolToken,
+        permission_mode: 'ask', // Issue #2645: Safe default, requires confirmation for tool calls
       });
 
       onClose();

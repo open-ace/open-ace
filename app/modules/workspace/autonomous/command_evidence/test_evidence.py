@@ -188,6 +188,33 @@ _ERRORS_PATTERNS = [
     re.compile(r"errors?[:：\s]+(\d+)", re.IGNORECASE),
 ]
 
+# pytest footer summary line recognition (#2735). pytest's authoritative counts
+# only ever appear on a standalone line wrapped in `=` and ending in
+# `in <sec>s` — e.g. `=== 1 failed, 6 passed, 2 skipped in 2.10s ===`. Nested
+# backend errors inside SKIPPED reasons (e.g. `port 5432 failed: FATAL ...`)
+# never sit on such a line, so anchoring count extraction to the footer removes
+# the ambiguity of reading a port/line number embedded in natural-language
+# error text as a test count. Language-agnostic: it keys on line structure
+# (`=` delimiters + `in Xs`), not on any pass/fail token.
+_PYTEST_FOOTER_LINE_RE = re.compile(r"^\s*=+\s*(.+?)\s*=+\s*$", re.MULTILINE)
+_PYTEST_FOOTER_IN_SEC_RE = re.compile(r"\bin\s+[\d.]+s\b")
+
+
+def _count_target(excerpt: str) -> str:
+    """Return the footer-summary lines, else the whole excerpt.
+
+    Anchors counting to pytest's authoritative summary line (#2735). For
+    simplified single-line callers that omit the `=` delimiters (and
+    header/footer echo cases), fall back to the full excerpt to stay
+    conservative.
+    """
+    footers = [
+        m.group(1)
+        for m in _PYTEST_FOOTER_LINE_RE.finditer(excerpt)
+        if _PYTEST_FOOTER_IN_SEC_RE.search(m.group(1))
+    ]
+    return "\n".join(footers) if footers else excerpt
+
 
 def _extract_count(excerpt: str, patterns: list[re.Pattern[str]]) -> int | None:
     """Return the strongest count any pattern matched, or None.
@@ -239,10 +266,11 @@ def _verdict_from_counts(
 
 def _parse_pytest(excerpt: str, exit_code: int | None, command_text: str) -> ParsedTestResult:
     """Parse pytest (and unittest) output into structured counts + scope."""
-    passed = _extract_count(excerpt, _PASSED_PATTERNS)
-    failed = _extract_count(excerpt, _FAILED_PATTERNS)
-    skipped = _extract_count(excerpt, _SKIPPED_PATTERNS)
-    errors = _extract_count(excerpt, _ERRORS_PATTERNS)
+    target = _count_target(excerpt)
+    passed = _extract_count(target, _PASSED_PATTERNS)
+    failed = _extract_count(target, _FAILED_PATTERNS)
+    skipped = _extract_count(target, _SKIPPED_PATTERNS)
+    errors = _extract_count(target, _ERRORS_PATTERNS)
 
     # unittest "OK (N tests)" / "FAILED (failures=N)" have no "passed" token;
     # synthesize a pass count so a clean unittest run is not stuck inconclusive.

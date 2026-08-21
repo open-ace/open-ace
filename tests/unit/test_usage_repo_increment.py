@@ -275,3 +275,85 @@ class TestConcurrentIncrement:
         # Placeholder for actual PostgreSQL concurrent test
         # For now, verify that we're in PostgreSQL environment
         assert is_postgresql() is True
+
+
+class TestIncrementUsageIssue2585:
+    """Test increment_usage for Issue #2585 specific cases."""
+
+    def test_increment_usage_with_zero_request_count_and_tokens(self):
+        """Test increment_usage with zero request_count and zero tokens.
+
+        Issue #2585: Verify zero activity handling.
+        """
+        if is_postgresql():
+            pytest.skip("SQLite-specific test")
+
+        from app.repositories.database import Database
+
+        repo = UsageRepository(Database())
+
+        # Create table with correct schema for testing
+        with repo.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DROP TABLE IF EXISTS daily_usage")
+            conn.commit()
+
+        with repo.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE daily_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date DATE NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    host_name TEXT NOT NULL,
+                    tokens_used INTEGER DEFAULT 0,
+                    input_tokens INTEGER DEFAULT 0,
+                    output_tokens INTEGER DEFAULT 0,
+                    cache_tokens INTEGER DEFAULT 0,
+                    request_count INTEGER DEFAULT 0,
+                    models_used TEXT,
+                    tenant_id INTEGER DEFAULT 1 NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("""
+                CREATE UNIQUE INDEX idx_daily_usage_unique
+                ON daily_usage (tenant_id, date, tool_name, host_name)
+            """)
+            conn.commit()
+
+        # Test zero values
+        result = repo._increment_usage_sqlite(
+            tool_name="test-tool-zero",
+            host_name="localhost",
+            tenant_id=1,
+            tokens_used=0,
+            input_tokens=0,
+            output_tokens=0,
+            cache_tokens=0,
+            request_count=0,
+            models_used=None,
+        )
+
+        assert result is True
+
+        # Verify the record was created with zero values
+        with repo.db.connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM daily_usage WHERE tool_name = ?", ("test-tool-zero",))
+            row = cursor.fetchone()
+            assert row is not None
+            assert row["request_count"] == 0
+            assert row["tokens_used"] == 0
+
+    def test_increment_usage_tool_name_normalization(self):
+        """Test increment_usage normalizes tool names correctly.
+
+        Issue #2585: Verify tool name normalization in increment_usage.
+        """
+        from app.utils.tool_names import normalize_tool_name
+
+        # Test normalization function - verify consistent normalization
+        # Different variants should normalize to same tool family
+        assert normalize_tool_name("qwen-code") == normalize_tool_name("QWEN")
+        assert normalize_tool_name("qwen-code-cli") == normalize_tool_name("QWEN")

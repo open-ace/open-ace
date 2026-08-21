@@ -208,6 +208,14 @@ _MISSING_REMOTE_REF_FETCH_KEYWORDS = (
     "could not find remote ref",
     "couldn't find remote branch",
     "could not find remote branch",
+    # zh_CN locale: the production server's git localizes the missing-ref
+    # fetch failure as "致命错误：无法找到远程引用 <ref>" (#322/#340: the
+    # English-only list skipped the plain-push recovery and the workflow
+    # burned all 6 transient retries on a deterministic failure).
+    # _is_missing_remote_ref_fetch_error lowercases the message; Chinese
+    # characters are unaffected by .lower().
+    "无法找到远程引用",
+    "无法找到远程分支",
 )
 
 
@@ -1009,7 +1017,11 @@ class GitHubOps:
 
         # `gh repo create` rejects -R (unlike issue/pr subcommands), so disable
         # repo-scoped binding; it creates a new repo and needs no existing one.
-        result = self._run_gh(args, repo_scoped=False)
+        # api_only=True: repo creation is a pure GitHub API call that needs no
+        # local repo access, so when a bot token is configured and the command
+        # would otherwise sudo (cross-user), run gh as the service user to keep
+        # GH_TOKEN from being stripped by sudo env_reset (Issue #2909).
+        result = self._run_gh(args, repo_scoped=False, api_only=True)
         # gh repo create doesn't support --json; parse URL from stdout
         output = result.stdout.strip()
         repo_url = output.split("\n")[-1].strip()
@@ -1042,14 +1054,38 @@ class GitHubOps:
 
     # ── Issue Operations ────────────────────────────────────────────
 
-    def create_issue(self, title: str, body: str = "", labels: list[str] | None = None) -> dict:
-        """Create a GitHub issue."""
+    def create_issue(
+        self,
+        title: str,
+        body: str = "",
+        labels: list[str] | None = None,
+        repo: str | None = None,
+    ) -> dict:
+        """Create a GitHub issue.
+
+        Args:
+            title: Issue title
+            body: Issue body
+            labels: Optional labels to apply
+            repo: Optional target repo in 'owner/repo' format (for new project scenarios)
+        """
         args = ["issue", "create", "--title", title, "--body", body or ""]
         if labels:
             for label in labels:
                 args.extend(["--label", label])
 
-        result = self._run_gh(args)
+        # When repo is provided, explicitly target that repository.
+        # This is needed for new project scenarios where the local directory
+        # doesn't have a git origin configured yet.
+        if repo:
+            args.extend(["--repo", repo])
+
+        # api_only=True: avoid sudo path clearing GH_TOKEN (#2949)
+        # Issue creation is a pure GitHub API call that needs no local repo
+        # access, so when a bot token is configured and the command would
+        # otherwise sudo (cross-user), run gh as the service user to keep
+        # GH_TOKEN from being stripped by sudo env_reset.
+        result = self._run_gh(args, api_only=True)
         # gh issue create doesn't support --json; parse URL from stdout
         output = result.stdout.strip()
         issue_url = output.split("\n")[-1].strip()
