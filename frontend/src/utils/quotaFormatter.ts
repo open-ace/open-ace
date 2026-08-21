@@ -218,3 +218,125 @@ export function getMaxQuotaDisplay(quotaType: QuotaType): string {
   }
   return `Max: ${formatNumberAsString(MAX_REQUEST_QUOTA)}`;
 }
+
+/**
+ * Calculate available quota based on tenant remaining and current user allocation
+ *
+ * @param quotaType - Type of quota
+ * @param remaining - Tenant remaining quota
+ * @param current - Current user allocated quota (needs to be added back for editing)
+ * @returns Available quota value
+ */
+export function calculateAvailableQuota(
+  quotaType: QuotaType,
+  remaining: number,
+  current: number
+): number {
+  // Determine max value based on quota type
+  const max =
+    quotaType === QuotaType.DAILY_TOKEN || quotaType === QuotaType.MONTHLY_TOKEN
+      ? MAX_TOKEN_QUOTA
+      : MAX_REQUEST_QUOTA;
+
+  // Calculate available: remaining + current (add back current allocation for editing)
+  // Cap at max, floor at 0
+  return Math.max(0, Math.min(remaining + current, max));
+}
+
+/**
+ * Format available quota hint text
+ *
+ * @param available - Available quota value
+ * @param quotaType - Type of quota
+ * @param hasQuotaStats - Whether quota stats are available (determines fallback behavior)
+ * @param language - Language for display (default: 'zh')
+ * @returns Formatted hint string
+ */
+export function formatAvailableQuotaHint(
+  available: number,
+  quotaType: QuotaType,
+  hasQuotaStats: boolean = true,
+  language: 'zh' | 'en' = 'zh'
+): string {
+  // Determine max value and whether it's token quota
+  const isToken = quotaType === QuotaType.DAILY_TOKEN || quotaType === QuotaType.MONTHLY_TOKEN;
+  const max = isToken ? MAX_TOKEN_QUOTA : MAX_REQUEST_QUOTA;
+
+  // Fallback: show only max when quota stats are not available
+  if (!hasQuotaStats) {
+    if (isToken) {
+      return `Max: ${max}M`;
+    }
+    return `Max: ${formatNumberAsString(max)}`;
+  }
+
+  // Full hint with available and max
+  if (isToken) {
+    const availableStr = available.toFixed(2);
+    return language === 'zh'
+      ? `可用: ${availableStr}M (上限: ${max}M)`
+      : `Available: ${availableStr}M (Max: ${max}M)`;
+  }
+
+  const availableStr = formatNumberAsString(available);
+  const maxStr = formatNumberAsString(max);
+  return language === 'zh'
+    ? `可用: ${availableStr} (上限: ${maxStr})`
+    : `Available: ${availableStr} (Max: ${maxStr})`;
+}
+
+/**
+ * Get available quota hint for input field
+ * Combines calculateAvailableQuota and formatAvailableQuotaHint
+ *
+ * @param quotaType - Type of quota
+ * @param quotaStats - Quota statistics (can be null/undefined)
+ * @param currentQuota - Current user quota (can be undefined)
+ * @param language - Language for display (optional, default: 'zh')
+ * @returns Formatted hint string
+ */
+export function getAvailableQuotaHint(
+  quotaType: QuotaType,
+  quotaStats:
+    | {
+        remaining: {
+          daily_token?: number;
+          monthly_token?: number;
+          daily_request?: number;
+          monthly_request?: number;
+        };
+      }
+    | null
+    | undefined,
+  currentQuota: number | undefined,
+  language?: 'zh' | 'en'
+): string {
+  // Extract remaining value based on quota type
+  let remaining = 0;
+  if (quotaStats?.remaining) {
+    switch (quotaType) {
+      case QuotaType.DAILY_TOKEN:
+        remaining = quotaStats.remaining.daily_token ?? 0;
+        break;
+      case QuotaType.MONTHLY_TOKEN:
+        remaining = quotaStats.remaining.monthly_token ?? 0;
+        break;
+      case QuotaType.DAILY_REQUEST:
+        remaining = quotaStats.remaining.daily_request ?? 0;
+        break;
+      case QuotaType.MONTHLY_REQUEST:
+        remaining = quotaStats.remaining.monthly_request ?? 0;
+        break;
+    }
+  }
+
+  // Current quota defaults to 0 if undefined
+  const current = currentQuota ?? 0;
+
+  // Calculate available quota
+  const available = calculateAvailableQuota(quotaType, remaining, current);
+
+  // Format and return hint
+  const hasQuotaStats = quotaStats !== null && quotaStats !== undefined;
+  return formatAvailableQuotaHint(available, quotaType, hasQuotaStats, language ?? 'zh');
+}
