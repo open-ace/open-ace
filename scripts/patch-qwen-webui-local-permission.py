@@ -31,29 +31,37 @@ INDEX_HTML = "/usr/lib/node_modules/qwen-code-webui/dist/static/index.html"
 CACHE_BUST = "v=local-perm-20260818"
 
 # Exact minified fragments for processStreamLine function (verified against qwen-code-webui@0.2.40).
-# Original: only handles claude_json, error, aborted
+# Original: handles claude_json, permission_request, error, aborted, heartbeat
+# Note: Uses M.useCallback, n (parsed JSON), u (callback function) in actual bundle
 OLD_PROCESS = (
-    "processStreamLine:(0,_.useCallback)((e,t)=>{try{let r=JSON.parse(e);"
-    "if(r.type===`claude_json`&&r.data){let e=r.data;n(e,t)}"
-    "else if(r.type===`error`){let e={type:`error`,subtype:`stream_error`,message:r.error||`Unknown error`,timestamp:Date.now()};t.addMessage(e)}"
-    "else if(r.type===`aborted`){let e={type:`system`,subtype:`abort`,message:`Operation was aborted by user`,timestamp:Date.now()};t.addMessage(e),t.setCurrentAssistantMessage(null)}}"
-    "catch(e){console.error(`Failed to parse stream line:`,e)}},[n])"
+    "processStreamLine:(0,M.useCallback)((e,t)=>{try{let n=JSON.parse(e);"
+    "if(n.type===`claude_json`&&n.data){let e=n.data;u(e,t),t.onPermissionOrphanCleanup&&t.onPermissionOrphanCleanup()}"
+    "else if(n.type===`permission_request`){if(t.onPermissionRequest){if(!n.permissionId||!n.toolName){console.warn(`Invalid permission_request: missing permissionId or toolName`);return}"
+    "t.onPermissionRequest({permissionId:n.permissionId,toolName:n.toolName,toolInput:n.toolInput||{},suggestions:n.suggestions||[],autoApproveMs:n.autoApproveMs,confirmationType:n.confirmationType,questions:n.questions})}}"
+    "else if(n.type===`error`){let e={type:`error`,subtype:`stream_error`,message:n.error||`Unknown error`,timestamp:Date.now()};t.addMessage(e),t.onStreamError?.(n.error||`Unknown error`)}"
+    "else if(n.type===`aborted`){let e={type:`system`,subtype:`abort`,message:`Operation was aborted by user`,timestamp:Date.now()};t.addMessage(e),t.setCurrentAssistantMessage(null)}"
+    "else n.type===`heartbeat`&&console.debug(`[Keepalive] Heartbeat received at`,new Date().toISOString())}"
+    "catch(e){console.error(`Failed to parse stream line:`,e)}},[u])"
 )
 
 # New: adds control_request handling before the catch block
+# control_request format: {"type":"control_request","request_id":"...","request":{"subtype":"can_use_tool",...}}
+# Uses onPermissionRequest (not onPermissionError) which exists in the actual bundle
 NEW_PROCESS = (
-    "processStreamLine:(0,_.useCallback)((e,t)=>{try{let r=JSON.parse(e);"
-    "if(r.type===`claude_json`&&r.data){let e=r.data;n(e,t)}"
-    "else if(r.type===`error`){let e={type:`error`,subtype:`stream_error`,message:r.error||`Unknown error`,timestamp:Date.now()};t.addMessage(e)}"
-    "else if(r.type===`aborted`){let e={type:`system`,subtype:`abort`,message:`Operation was aborted by user`,timestamp:Date.now()};t.addMessage(e),t.setCurrentAssistantMessage(null)}"
-    "else if(r.type===`control_request`&&r.request&&t.onPermissionError){"
-    "let e=r.request,n=r.request_id||``;"
+    "processStreamLine:(0,M.useCallback)((e,t)=>{try{let n=JSON.parse(e);"
+    "if(n.type===`claude_json`&&n.data){let e=n.data;u(e,t),t.onPermissionOrphanCleanup&&t.onPermissionOrphanCleanup()}"
+    "else if(n.type===`permission_request`){if(t.onPermissionRequest){if(!n.permissionId||!n.toolName){console.warn(`Invalid permission_request: missing permissionId or toolName`);return}"
+    "t.onPermissionRequest({permissionId:n.permissionId,toolName:n.toolName,toolInput:n.toolInput||{},suggestions:n.suggestions||[],autoApproveMs:n.autoApproveMs,confirmationType:n.confirmationType,questions:n.questions})}}"
+    "else if(n.type===`control_request`&&n.request&&t.onPermissionRequest){"
+    "let e=n.request,r=n.request_id||``;"
     "if(e.subtype===`can_use_tool`&&e.tool_name){"
-    "t.onPermissionError(e.tool_name,e.permission_suggestions?.map(s=>s.rule)||[],e.tool_use_id||``,n)"
+    "t.onPermissionRequest({permissionId:r,toolName:e.tool_name,toolInput:e.tool_input||{},suggestions:e.permission_suggestions||[],autoApproveMs:e.auto_approve_ms,confirmationType:e.confirmation_type,questions:e.questions||[]})"
     "}"
     "}"
-    "}"
-    "catch(e){console.error(`Failed to parse stream line:`,e)}},[n])"
+    "else if(n.type===`error`){let e={type:`error`,subtype:`stream_error`,message:n.error||`Unknown error`,timestamp:Date.now()};t.addMessage(e),t.onStreamError?.(n.error||`Unknown error`)}"
+    "else if(n.type===`aborted`){let e={type:`system`,subtype:`abort`,message:`Operation was aborted by user`,timestamp:Date.now()};t.addMessage(e),t.setCurrentAssistantMessage(null)}"
+    "else n.type===`heartbeat`&&console.debug(`[Keepalive] Heartbeat received at`,new Date().toISOString())}"
+    "catch(e){console.error(`Failed to parse stream line:`,e)}},[u])"
 )
 
 
