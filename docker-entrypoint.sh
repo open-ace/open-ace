@@ -18,19 +18,31 @@ require_root_for_multi_user() {
     if [ "$(id -u)" != "0" ]; then
         echo "ERROR: multi-user workspace mode requires root to create system users."
         echo "       The image defaults to the non-root open-ace user (uid 1000)."
-        echo "       To run multi-user mode, start the container as root AND set"
-        echo "       OPENACE_ALLOW_ROOT_MULTI_USER=1, e.g.:"
-        echo "         docker run --user 0 -e OPENACE_ALLOW_ROOT_MULTI_USER=1 ..."
-        echo "       or set runAsUser: 0 in your manifest. Otherwise keep"
-        echo "       single-user mode (the default)."
+        echo ""
+        echo "EASY FIX: Use the multi-user compose overlay:"
+        echo "         docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d"
+        echo ""
+        echo "MANUAL FIX: Start the container as root AND set:"
+        echo "         docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \\"
+        echo "           -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \\"
+        echo "           -e OPENACE_CONFIG_DIR=/home/open-ace/.open-ace ..."
+        echo ""
+        echo "Or keep single-user mode (the default):"
+        echo "  - If set via environment: unset WORKSPACE_MULTI_USER_MODE"
+        echo "  - If set via config.json: set 'multi_user_mode': false"
         exit 1
     fi
     if [ "${OPENACE_ALLOW_ROOT_MULTI_USER}" != "1" ]; then
         echo "ERROR: multi-user workspace mode is running as root but the explicit"
         echo "       opt-in OPENACE_ALLOW_ROOT_MULTI_USER=1 is not set."
-        echo "       Set OPENACE_ALLOW_ROOT_MULTI_USER=1 (and run as uid 0) to"
-        echo "       acknowledge that multi-user mode requires root, or keep"
-        echo "       single-user mode (the default, non-root)."
+        echo ""
+        echo "EASY FIX: Use the multi-user compose overlay:"
+        echo "         docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d"
+        echo ""
+        echo "MANUAL FIX: Set OPENACE_ALLOW_ROOT_MULTI_USER=1 when running as root:"
+        echo "         docker run --user 0 -e OPENACE_ALLOW_ROOT_MULTI_USER=1 ..."
+        echo ""
+        echo "Or keep single-user mode (the default, non-root)."
         exit 1
     fi
 }
