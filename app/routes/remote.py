@@ -4248,6 +4248,8 @@ def create_remote_directory(machine_id):
     if not machine:
         return jsonify({"error": "Machine not found"}), 404
 
+    # Check if agent is online (accept "online", "idle", and "busy" as active states)
+    # "busy" means the machine has active sessions but is still connected
     if machine.get("status") not in ("online", "idle", "busy"):
         return (
             jsonify(
