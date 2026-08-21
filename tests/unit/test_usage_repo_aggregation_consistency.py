@@ -400,8 +400,7 @@ class TestRequestTrendByToolConsistency:
 
         # Verify sorting (by date, then by tool)
         # Check dates are sorted ascending (dates may repeat for different tools)
-        unique_dates = sorted(set(row["date"] for row in result))
-        dates_in_result = [row["date"] for row in result]
+        unique_dates = sorted({row["date"] for row in result})
 
         # Extract unique dates to verify overall date ordering
         prev_unique_date_idx = -1
