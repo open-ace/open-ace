@@ -25,6 +25,8 @@ export interface FrontendErrorPayload {
   commitSha: string;
   timestamp: number;
   userAgent: string;
+  // Issue #2953: Additional context for debugging
+  context?: Record<string, unknown>;
 }
 
 // Deduplication cache
@@ -302,13 +304,15 @@ function sendWithBeacon(payload: FrontendErrorPayload): boolean {
 
 /**
  * Main error reporting function
+ * Issue #2953: Added context parameter for additional debugging information
  */
 export function reportFrontendError(params: {
   error: Error;
   errorInfo?: { componentStack?: string };
   category: ErrorCategory;
+  context?: Record<string, unknown>;
 }): string {
-  const { error, errorInfo, category } = params;
+  const { error, errorInfo, category, context } = params;
 
   // Generate error ID
   const errorId = generateErrorId();
@@ -326,6 +330,8 @@ export function reportFrontendError(params: {
     commitSha: (typeof __COMMIT_SHA__ !== 'undefined' && __COMMIT_SHA__) || 'dev',
     timestamp: Date.now(),
     userAgent: navigator.userAgent,
+    // Issue #2953: Add context if provided
+    context,
   };
 
   // Sanitize
