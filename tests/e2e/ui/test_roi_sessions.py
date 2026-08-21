@@ -16,8 +16,8 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 )
 
-from playwright.async_api import async_playwright
-from playwright.async_api import expect
+from playwright.async_api import async_playwright, expect
+
 from tests.e2e.ui.async_helpers import login_as
 
 # Test configuration

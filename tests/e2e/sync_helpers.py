@@ -22,14 +22,14 @@ def login_as(
     user_input = page.locator(
         "#username, input[name='username'], input[autocomplete='username']"
     ).first
-    pass_input = page.locator(
-        "#password, input[name='password'], input[type='password']"
-    ).first
+    pass_input = page.locator("#password, input[name='password'], input[type='password']").first
 
     user_input.wait_for(state="visible", timeout=timeout)
     user_input.fill(username)
     pass_input.fill(password)
-    page.locator("button[type='submit'], button:has-text('Login'), button:has-text('登录')").first.click()
+    page.locator(
+        "button[type='submit'], button:has-text('Login'), button:has-text('登录')"
+    ).first.click()
     page.wait_for_url(lambda url: "/login" not in url, timeout=timeout)
 
 

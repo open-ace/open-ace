@@ -16,8 +16,8 @@ import os
 import time
 
 import pytest
-from playwright.async_api import async_playwright
-from playwright.async_api import expect
+from playwright.async_api import async_playwright, expect
+
 from tests.e2e.ui.async_helpers import login_as
 
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
@@ -52,9 +52,9 @@ async def test_analysis_page():  # allow-no-assert: smoke test - visual verifica
             start_time = time.time()
             await page.goto(f"{BASE_URL}/manage/analysis/conversation-history")
             await page.wait_for_load_state("networkidle", timeout=15000)
-            await expect(
-                page.get_by_role("heading", name="Conversation History")
-            ).to_be_visible(timeout=15000)
+            await expect(page.get_by_role("heading", name="Conversation History")).to_be_visible(
+                timeout=15000
+            )
             await page.wait_for_selector(
                 "main, .manage-content, .conversation-history", timeout=15000
             )
@@ -75,7 +75,9 @@ async def test_analysis_page():  # allow-no-assert: smoke test - visual verifica
             print("\n[Step 5] Testing Timeline button...")
 
             # Find the first Timeline button in the table
-            timeline_buttons = page.locator('button:has-text("Timeline"), button:has-text("时间线")')
+            timeline_buttons = page.locator(
+                'button:has-text("Timeline"), button:has-text("时间线")'
+            )
             button_count = await timeline_buttons.count()
 
             if button_count > 0:

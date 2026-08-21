@@ -9,6 +9,7 @@ import sys
 import time
 
 from playwright.async_api import async_playwright
+
 from tests.e2e.ui.async_helpers import login_as, open_work_or_assert_unconfigured
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")

@@ -27,14 +27,12 @@ async def open_work_or_assert_unconfigured(page, base_url: str) -> bool:
     await page.goto(f"{base_url}/work")
     await page.wait_for_load_state("domcontentloaded")
     await page.wait_for_selector("main, .work-layout", timeout=15000)
-    config_unavailable = await page.evaluate(
-        """async () => {
+    config_unavailable = await page.evaluate("""async () => {
             const response = await fetch('/api/workspace/config', { credentials: 'include' });
             if (!response.ok) return false;
             const config = await response.json();
             return !config.enabled || !(config.url || config.web_url || config.workspace_url);
-        }"""
-    )
+        }""")
     if config_unavailable:
         return True
     unconfigured = page.get_by_text("Workspace not configured")

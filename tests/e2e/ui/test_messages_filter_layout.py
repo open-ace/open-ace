@@ -13,6 +13,7 @@ import os
 
 import pytest
 from playwright.async_api import async_playwright, expect
+
 from tests.e2e.ui.async_helpers import login_as
 
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"

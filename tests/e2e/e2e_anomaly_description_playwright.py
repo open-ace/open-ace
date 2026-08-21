@@ -170,7 +170,10 @@ def test_overview_page_descriptions(page):  # allow-no-assert: smoke test - visu
     page.goto(f"{BASE_URL}/manage/analysis")
     pause(3)
     if "/manage/analysis/trend" in page.url:
-        check(True, "Legacy Analysis overview redirects to Trend; dedicated anomaly page covers descriptions")
+        check(
+            True,
+            "Legacy Analysis overview redirects to Trend; dedicated anomaly page covers descriptions",
+        )
         shot(page, "05-overview-redirect")
         return
     # Overview table renders <td colSpan="4"> description cells when anomalies exist
@@ -183,7 +186,10 @@ def test_overview_page_descriptions(page):  # allow-no-assert: smoke test - visu
     if desc_cell.count() > 0:
         check(True, f"Overview table has description cells (colspan=4): {desc_cell.count()}")
     else:
-        check(True, "Legacy overview anomaly description rows not present; dedicated page covers current UI")
+        check(
+            True,
+            "Legacy overview anomaly description rows not present; dedicated page covers current UI",
+        )
     shot(page, "05-overview-descriptions")
 
 

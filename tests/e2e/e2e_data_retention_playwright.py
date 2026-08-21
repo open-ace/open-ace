@@ -25,6 +25,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.insert(0, PROJECT_ROOT)
 
 from playwright.sync_api import expect, sync_playwright
+
 from tests.e2e.sync_helpers import login_as
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")

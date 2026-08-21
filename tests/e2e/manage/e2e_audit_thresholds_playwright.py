@@ -28,6 +28,7 @@ sys.path.insert(0, REPO_ROOT)
 
 import requests
 from playwright.sync_api import sync_playwright
+
 from tests.e2e.sync_helpers import login_context_via_api
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
