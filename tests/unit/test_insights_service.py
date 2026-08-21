@@ -425,15 +425,15 @@ class TestInsightsServiceCallApi:
             insights_repo=MagicMock(),
         )
 
-    @patch("app.services.insights_service.requests")
-    def test_call_ai_api_success(self, mock_requests):
+    @patch("app.services.insights_service.safe_request")
+    def test_call_ai_api_success(self, mock_safe_request):
         svc = self._make_service()
         mock_response = MagicMock()
         mock_response.json.return_value = {
             "choices": [{"message": {"content": '{"overall_score": 7}'}}]
         }
         mock_response.raise_for_status.return_value = None
-        mock_requests.post.return_value = mock_response
+        mock_safe_request.return_value = mock_response
 
         result = svc._call_ai_api(
             api_key="test-key",
@@ -444,13 +444,13 @@ class TestInsightsServiceCallApi:
         )
         assert result == '{"overall_score": 7}'
 
-    @patch("app.services.insights_service.requests")
-    def test_call_ai_api_empty_content(self, mock_requests):
+    @patch("app.services.insights_service.safe_request")
+    def test_call_ai_api_empty_content(self, mock_safe_request):
         svc = self._make_service()
         mock_response = MagicMock()
         mock_response.json.return_value = {"choices": [{"message": {"content": ""}}]}
         mock_response.raise_for_status.return_value = None
-        mock_requests.post.return_value = mock_response
+        mock_safe_request.return_value = mock_response
 
         with pytest.raises(ValueError, match="empty content"):
             svc._call_ai_api(
@@ -461,10 +461,10 @@ class TestInsightsServiceCallApi:
                 user_prompt="user",
             )
 
-    @patch("app.services.insights_service.requests")
-    def test_call_ai_api_http_error(self, mock_requests):
+    @patch("app.services.insights_service.safe_request")
+    def test_call_ai_api_http_error(self, mock_safe_request):
         svc = self._make_service()
-        mock_requests.post.side_effect = Exception("HTTP error")
+        mock_safe_request.side_effect = Exception("HTTP error")
 
         with pytest.raises(Exception, match="HTTP error"):
             svc._call_ai_api(
@@ -475,13 +475,13 @@ class TestInsightsServiceCallApi:
                 user_prompt="user",
             )
 
-    @patch("app.services.insights_service.requests")
-    def test_call_ai_api_sends_correct_payload(self, mock_requests):
+    @patch("app.services.insights_service.safe_request")
+    def test_call_ai_api_sends_correct_payload(self, mock_safe_request):
         svc = self._make_service()
         mock_response = MagicMock()
         mock_response.json.return_value = {"choices": [{"message": {"content": "result"}}]}
         mock_response.raise_for_status.return_value = None
-        mock_requests.post.return_value = mock_response
+        mock_safe_request.return_value = mock_response
 
         svc._call_ai_api(
             api_key="key",
@@ -493,7 +493,7 @@ class TestInsightsServiceCallApi:
             max_tokens=2048,
         )
 
-        call_args = mock_requests.post.call_args
+        call_args = mock_safe_request.call_args
         assert call_args[1]["headers"]["Authorization"] == "Bearer key"
         payload = call_args[1]["json"]
         assert payload["model"] == "glm-5"

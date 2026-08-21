@@ -2,12 +2,12 @@
 
 import logging
 
-import requests
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.notification_settings_repository import get_notification_settings_repository
+from app.utils.outbound_url_guard import OutboundUrlBlockedError, safe_request
 
 logger = logging.getLogger(__name__)
 notification_integrations_bp = Blueprint("notification_integrations", __name__)
@@ -153,7 +153,9 @@ def test_dingtalk_config():
     if not app_key or not app_secret:
         return jsonify({"success": False, "message": "AppKey and AppSecret are required"}), 400
     try:
-        response = requests.post(
+        # Issue #2237: Use safe_request to avoid gevent RecursionError and get SSRF protection
+        response = safe_request(
+            "POST",
             "https://api.dingtalk.com/v1.0/oauth2/accessToken",
             json={"appKey": app_key, "appSecret": app_secret},
             timeout=5,
@@ -170,6 +172,9 @@ def test_dingtalk_config():
                 ),
             }
         )
-    except requests.RequestException:
+    except OutboundUrlBlockedError as e:
+        logger.error("DingTalk connection test blocked by SSRF protection: %s", e)
+        return jsonify({"success": False, "message": f"Request blocked by security policy: {e}"}), 403
+    except Exception:
         logger.warning("DingTalk connection test failed", exc_info=True)
         return jsonify({"success": False, "message": "DingTalk connection test failed"}), 502

@@ -10,7 +10,7 @@ import logging
 import os
 from typing import cast
 
-import requests
+from app.utils.outbound_url_guard import OutboundUrlBlockedError, safe_request
 
 from app.repositories.database import CONFIG_DIR
 from app.repositories.insights_repo import InsightsReportRepository
@@ -481,7 +481,8 @@ Please ensure:
             "response_format": {"type": "json_object"},
         }
 
-        response = requests.post(url, headers=headers, json=payload, timeout=300)
+        # Issue #2237: Use safe_request to avoid gevent RecursionError and get SSRF protection
+        response = safe_request("POST", url, headers=headers, json=payload, timeout=300)
         response.raise_for_status()
 
         data = response.json()
