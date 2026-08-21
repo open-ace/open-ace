@@ -430,6 +430,7 @@ def test_dns_rebinding_to_private_ip_blocked():
 # ── Issue #2236: DeepSeek API Integration Tests ───────────────────────────────────
 
 
+@pytest.mark.security
 def test_deepseek_api_url_validation():
     """Test that DeepSeek API URL is validated correctly (Issue #2236)."""
     # Mock DNS to return a public IP for api.deepseek.com
@@ -622,34 +623,25 @@ def test_safe_request_blocks_metadata_endpoint():
 # ── Issue #2236: Performance Tests ───────────────────────────────────────────────
 
 
-def test_ip_literal_skips_dns_resolution():
-    """Test that IP literal URLs skip DNS resolution (Issue #2236).
+def test_ip_literal_url_validation():
+    """Test that IP literal URLs are validated directly without DNS resolution (Issue #2236).
 
     This is a performance optimization. IP literal URLs should be validated
-    directly without DNS resolution.
+    directly without calling the DNS resolver.
     """
-    from app.utils.outbound_url_guard import safe_request
-
-    # Mock the session.request
-    mock_session = MagicMock()
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_session.request.return_value = mock_response
+    from app.utils.outbound_url_guard import _PinnedIPAdapter
 
     # Create a resolver that should never be called
-    resolver_call_count = 0
-
     def tracking_resolver(host, port, type=socket.SOCK_STREAM):
-        nonlocal resolver_call_count
-        resolver_call_count += 1
         raise AssertionError("Resolver should not be called for IP literal URLs")
 
-    with patch("app.utils.outbound_url_guard.requests.Session") as mock_session_class:
-        mock_session_class.return_value = mock_session
+    # Create an adapter with the tracking resolver
+    adapter = _PinnedIPAdapter(allowed_ips=[], resolver=tracking_resolver)
 
-        # Call safe_request with an IP literal URL
-        # Should succeed without calling the resolver
-        safe_request("GET", "https://8.8.8.8/test", resolver=tracking_resolver)
+    # Test with a public IP literal URL
+    # Should succeed without calling the resolver
+    adapter._check_resolved_ip("https://8.8.8.8/test")  # Should not raise
 
-        # Verify the resolver was never called
-        assert resolver_call_count == 0
+    # Test with a private IP literal URL (should raise, but still not call resolver)
+    with pytest.raises(OutboundUrlBlockedError, match="non-public IP"):
+        adapter._check_resolved_ip("https://10.0.0.1/test")
