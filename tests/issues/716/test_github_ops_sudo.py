@@ -210,13 +210,39 @@ class TestRunGhSudo:
 class TestRunGhRepoScoped:
     """repo create/view reject -R; repo_scoped=False omits it (review feedback)."""
 
+    @patch.object(GitHubOps, "_get_env", return_value={"GH_TOKEN": "ghp_test"})
     @patch.object(GitHubOps, "_resolve_owner_repo", return_value="open-ace/open-ace")
     @patch.object(GitHubOps, "_needs_sudo", return_value=True)
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
-    def test_create_repo_no_dash_r(self, mock_run, _needs, _resolve):
-        # `gh repo create` does not accept -R; even when a remote resolves, the
-        # command must run plain gh under sudo (previously the unconditional -R
-        # would regress to "unknown shorthand flag: 'R'").
+    def test_create_repo_no_dash_r_with_token(self, mock_run, _needs, _resolve, _env):
+        # `gh repo create` does not accept -R. With api_only=True (Issue #2909),
+        # when a bot token is configured, create_repo runs gh as the service
+        # user (no sudo) so GH_TOKEN survives; -R is still omitted.
+        mock_run.return_value = _completed(
+            stdout="https://github.com/open-ace/new-repo\n✓ Created repository"
+        )
+        gh = GitHubOps("/tmp/repo", system_account="alice")
+
+        gh.create_repo("new-repo", private=True)
+
+        gh_cmd = mock_run.call_args.args[0]
+        assert gh_cmd[0] == "gh"  # no sudo prefix
+        assert "sudo" not in gh_cmd
+        assert "-R" not in gh_cmd
+        assert "repo" in gh_cmd and "create" in gh_cmd
+        # GH_TOKEN must be present in the subprocess environment.
+        assert mock_run.call_args.kwargs.get("env", {}).get("GH_TOKEN") == "ghp_test"
+        # cwd is dropped on the api_as_service path (service user may lack
+        # access to the owner's repo directory).
+        assert "cwd" not in mock_run.call_args.kwargs
+
+    @patch.object(GitHubOps, "_get_env", return_value=None)
+    @patch.object(GitHubOps, "_resolve_owner_repo", return_value="open-ace/open-ace")
+    @patch.object(GitHubOps, "_needs_sudo", return_value=True)
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_create_repo_no_dash_r_no_token_fallback_sudo(self, mock_run, _needs, _resolve, _env):
+        # Without a bot token, api_as_service is False, so create_repo falls
+        # back to the sudo path (preserving pre-#2909 behavior).
         mock_run.return_value = _completed(
             stdout="https://github.com/open-ace/new-repo\n✓ Created repository"
         )
