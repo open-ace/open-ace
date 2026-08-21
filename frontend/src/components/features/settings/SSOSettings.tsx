@@ -14,9 +14,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
-import { useAuth } from '@/hooks';
+import { useAdminTenant } from '@/hooks';
 import { t } from '@/i18n';
-import { canManageAllTenants } from '@/utils/permissions';
 import {
   Card,
   Button,
@@ -39,7 +38,6 @@ import {
   type RegisterProviderRequest,
   type SSOProviderDetail,
   type UpdateProviderRequest,
-  type Tenant,
 } from '@/api';
 
 const PREDEFINED_PROVIDERS = [
@@ -52,18 +50,19 @@ const PREDEFINED_PROVIDERS = [
 
 export const SSOSettings: React.FC = () => {
   const language = useLanguage();
-  const { user } = useAuth();
   const { success, error: toastError } = useToast();
 
-  // Admin tenant selection
-  const isAdmin = canManageAllTenants(user);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
-  const selectedTenantIdRef = useRef<number | null>(null);
-  const [isLoadingTenants, setIsLoadingTenants] = useState(false);
-
-  // Compute effective tenant ID
-  const effectiveTenantId = isAdmin ? selectedTenantId : user?.tenant_id;
+  // Admin tenant selection (Issue #2841)
+  const {
+    tenants,
+    selectedTenantId,
+    selectTenant,
+    clearSelection,
+    effectiveTenantId,
+    isLoading: isLoadingTenants,
+    error: tenantLoadError,
+    retry: retryTenantLoad,
+  } = useAdminTenant();
 
   const [registeredProviders, setRegisteredProviders] = useState<SSOProvider[]>([]);
   const [predefinedProviders, setPredefinedProviders] = useState<PredefinedProvider[]>([]);
@@ -116,35 +115,6 @@ export const SSOSettings: React.FC = () => {
     userinfo_url: '',
     issuer_url: '',
   });
-
-  // Fetch tenants list for admin users
-  useEffect(() => {
-    if (!isAdmin) return;
-
-    setIsLoadingTenants(true);
-    tenantApi
-      .listTenants({ status: 'active', limit: 100 })
-      .then((result) => {
-        setTenants(result.tenants);
-        // Use ref to check, avoid triggering useEffect again
-        if (result.tenants.length > 0 && !selectedTenantIdRef.current) {
-          selectedTenantIdRef.current = result.tenants[0].id;
-          setSelectedTenantId(result.tenants[0].id);
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to fetch tenants:', err);
-        toastError(t('failedToLoadTenants', language));
-      })
-      .finally(() => {
-        setIsLoadingTenants(false);
-      });
-  }, [isAdmin, language, toastError]);
-
-  // Sync ref with state
-  useEffect(() => {
-    selectedTenantIdRef.current = selectedTenantId;
-  }, [selectedTenantId]);
 
   // Fetch providers and tenant settings
   const fetchProviders = React.useCallback(async () => {
@@ -448,8 +418,20 @@ export const SSOSettings: React.FC = () => {
   };
 
   // Loading state for tenant list (admin only)
-  if (isAdmin && isLoadingTenants) {
-    return <Loading size="lg" text={t('loading', language)} />;
+  // Handle tenant loading
+  if (isLoadingTenants) {
+    return (
+      <Loading size="lg" text={t('loadingTenants', language) || 'Loading tenant information...'} />
+    );
+  }
+
+  // Handle tenant load error
+  if (tenantLoadError) {
+    return (
+      <div className="sso-settings">
+        <ErrorDisplay message={tenantLoadError} onRetry={retryTenantLoad} />
+      </div>
+    );
   }
 
   // No effective tenant - show appropriate message
@@ -457,17 +439,17 @@ export const SSOSettings: React.FC = () => {
     return (
       <div className="sso-settings">
         <h2>{t('ssoSettings', language)}</h2>
-        {isAdmin && tenants.length === 0 && (
+        {tenants.length === 0 && (
           <EmptyState
             icon="bi-building"
             title={t('noTenantsAvailable', language)}
             description={t('ssoRequiresTenant', language)}
           />
         )}
-        {!isAdmin && (
+        {tenants.length > 0 && (
           <EmptyState
             icon="bi-building"
-            title={t('noTenantConfigured', language)}
+            title={t('selectTenantFirst', language) || 'Please select a tenant'}
             description={t('ssoRequiresTenant', language)}
           />
         )}
@@ -493,15 +475,25 @@ export const SSOSettings: React.FC = () => {
             <i className="bi bi-arrow-clockwise me-1" />
             {t('refresh', language)}
           </Button>
-          <Button variant="primary" size="sm" onClick={handleOpenCreate}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleOpenCreate}
+            disabled={!effectiveTenantId}
+            title={
+              !effectiveTenantId
+                ? t('selectTenantFirst', language) || 'Please select a tenant first'
+                : undefined
+            }
+          >
             <i className="bi bi-plus-lg me-1" />
             {t('addProvider', language)}
           </Button>
         </div>
       </div>
 
-      {/* Tenant Selector (Admin only) */}
-      {isAdmin && tenants.length > 0 && (
+      {/* Tenant Selector - Show when there are tenants to choose from */}
+      {tenants.length > 0 && (
         <Card className="mb-3">
           <div className="d-flex align-items-center gap-3">
             <label className="form-label mb-0 fw-semibold">
@@ -514,9 +506,19 @@ export const SSOSettings: React.FC = () => {
                 label: t.name,
               }))}
               value={String(selectedTenantId ?? '')}
-              onChange={(value) => setSelectedTenantId(Number(value))}
+              onChange={(value) => selectTenant(Number(value))}
               className="flex-grow-1"
             />
+            {selectedTenantId && (
+              <Button
+                variant="outline-secondary"
+                size="sm"
+                onClick={clearSelection}
+                title={t('clearSelection', language) || 'Clear Selection'}
+              >
+                <i className="bi bi-x-lg" />
+              </Button>
+            )}
             <small className="text-muted ms-2">{t('tenantSelectionHint', language)}</small>
           </div>
         </Card>
