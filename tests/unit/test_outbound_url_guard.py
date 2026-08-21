@@ -1,11 +1,14 @@
 """Unit tests for outbound URL SSRF protection."""
 
+import os
 import socket
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.utils.outbound_url_guard import (
     OutboundUrlBlockedError,
+    _get_proxies,
     assert_public_http_url,
     validate_public_http_url,
 )
@@ -197,3 +200,136 @@ def test_rejects_double_encoded_hostname():
 
     assert not result.allowed
     assert "percent" in result.error.lower()
+
+
+# ── Proxy configuration tests (Issue #2237) ─────────────────────────────────────
+
+
+def test_get_proxies_returns_none_when_no_env_vars():
+    """Test that _get_proxies returns None when no proxy env vars are set."""
+    with patch.dict(os.environ, {}, clear=True):
+        # Remove all proxy-related env vars
+        for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
+            os.environ.pop(key, None)
+        result = _get_proxies()
+        assert result is None
+
+
+def test_get_proxies_returns_proxies_from_uppercase_env():
+    """Test that _get_proxies reads HTTP_PROXY and HTTPS_PROXY env vars."""
+    with patch.dict(
+        os.environ,
+        {
+            "HTTP_PROXY": "http://proxy.example.com:8080",
+            "HTTPS_PROXY": "http://proxy.example.com:8080",
+        },
+        clear=True,
+    ):
+        result = _get_proxies()
+        assert result == {
+            "http": "http://proxy.example.com:8080",
+            "https": "http://proxy.example.com:8080",
+        }
+
+
+def test_get_proxies_returns_proxies_from_lowercase_env():
+    """Test that _get_proxies reads http_proxy and https_proxy env vars."""
+    with patch.dict(
+        os.environ,
+        {
+            "http_proxy": "http://proxy.example.com:8080",
+            "https_proxy": "http://proxy.example.com:8080",
+        },
+        clear=True,
+    ):
+        result = _get_proxies()
+        assert result == {
+            "http": "http://proxy.example.com:8080",
+            "https": "http://proxy.example.com:8080",
+        }
+
+
+def test_get_proxies_prioritizes_uppercase_env():
+    """Test that uppercase env vars take precedence over lowercase."""
+    with patch.dict(
+        os.environ,
+        {
+            "HTTP_PROXY": "http://upper.example.com:8080",
+            "http_proxy": "http://lower.example.com:8080",
+        },
+        clear=True,
+    ):
+        result = _get_proxies()
+        assert result == {"http": "http://upper.example.com:8080"}
+
+
+def test_get_proxies_returns_partial_proxies():
+    """Test that _get_proxies works when only one proxy is configured."""
+    with patch.dict(os.environ, {"HTTPS_PROXY": "http://proxy.example.com:8080"}, clear=True):
+        result = _get_proxies()
+        assert result == {"https": "http://proxy.example.com:8080"}
+
+
+def test_safe_request_uses_env_proxies(monkeypatch):
+    """Test that safe_request uses proxy from environment variables."""
+    import requests
+
+    from app.utils.outbound_url_guard import safe_request
+
+    # Mock the session.request to capture proxies argument
+    mock_session = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_session.request.return_value = mock_response
+
+    # Set proxy env vars
+    monkeypatch.setenv("HTTP_PROXY", "http://test-proxy.example.com:8080")
+    monkeypatch.setenv("HTTPS_PROXY", "http://test-proxy.example.com:8080")
+
+    # Mock resolver to return a public IP
+    def mock_resolver(host, port, type=socket.SOCK_STREAM):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", port))]
+
+    with patch("app.utils.outbound_url_guard.requests.Session") as mock_session_class:
+        mock_session_class.return_value = mock_session
+        # Call safe_request
+        safe_request("GET", "https://example.com/test", resolver=mock_resolver)
+
+        # Verify that proxies from env were used
+        call_args = mock_session.request.call_args
+        assert "proxies" in call_args[1]
+        assert call_args[1]["proxies"] == {
+            "http": "http://test-proxy.example.com:8080",
+            "https": "http://test-proxy.example.com:8080",
+        }
+
+
+def test_safe_request_disables_proxy_when_no_env_vars(monkeypatch):
+    """Test that safe_request disables proxy when no env vars are set."""
+    import requests
+
+    from app.utils.outbound_url_guard import safe_request
+
+    # Mock the session.request to capture proxies argument
+    mock_session = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_session.request.return_value = mock_response
+
+    # Clear all proxy env vars
+    for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
+        monkeypatch.delenv(key, raising=False)
+
+    # Mock resolver to return a public IP
+    def mock_resolver(host, port, type=socket.SOCK_STREAM):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", port))]
+
+    with patch("app.utils.outbound_url_guard.requests.Session") as mock_session_class:
+        mock_session_class.return_value = mock_session
+        # Call safe_request
+        safe_request("GET", "https://example.com/test", resolver=mock_resolver)
+
+        # Verify that proxies were disabled
+        call_args = mock_session.request.call_args
+        assert "proxies" in call_args[1]
+        assert call_args[1]["proxies"] == {"http": None, "https": None}

@@ -10,12 +10,12 @@ import logging
 import os
 import subprocess
 
-import requests
 from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 from app.repositories.ai_agent_settings_repo import AiAgentSettingsRepo
+from app.utils.outbound_url_guard import OutboundUrlBlockedError, safe_request
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,9 @@ def api_validate_github_token():
         # 【安全加固 Issue #1514】fallback触发WARNING告警（而非INFO）
         logger.warning("gh CLI not found, attempting fallback to GitHub API (功能可能受限)")
         try:
-            response = requests.get(
+            # Issue #2237: Use safe_request to avoid gevent RecursionError and get SSRF protection
+            response = safe_request(
+                "GET",
                 "https://api.github.com/user",
                 headers={"Authorization": f"token {token}"},
                 timeout=15,
@@ -156,18 +158,13 @@ def api_validate_github_token():
                 return jsonify(
                     {"valid": False, "error": f"gh CLI not found, fallback API failed: {error_msg}"}
                 )
-        except requests.Timeout:
-            logger.warning("Fallback API timed out")
-            return jsonify({"valid": False, "error": "gh CLI not found, fallback API timed out"})
-        except requests.RequestException as e:
+        except OutboundUrlBlockedError as e:
+            logger.error("GitHub API request blocked by SSRF protection: %s", e)
+            return jsonify({"valid": False, "error": f"Request blocked by security policy: {e}"})
+        except Exception as e:
             logger.warning("Fallback API request failed: %s", e)
             return jsonify(
                 {"valid": False, "error": f"gh CLI not found, fallback API failed: {str(e)}"}
-            )
-        except Exception as e:
-            logger.error("Fallback API unexpected error: %s", e)
-            return jsonify(
-                {"valid": False, "error": f"gh CLI not found, fallback failed: {str(e)}"}
             )
     except Exception as e:
         logger.error("Token validation error: %s", e)

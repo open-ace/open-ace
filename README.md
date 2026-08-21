@@ -162,6 +162,22 @@ docker compose up -d --build
 
 > 也可在 Docker daemon 配置 `registry-mirrors`（Docker Desktop / OrbStack 的镜像加速设置），效果相同但作用于全局。
 
+#### 🌐 代理配置
+
+如果你的环境需要通过代理访问外部 API（如 OpenAI、GitHub 等），请设置以下环境变量：
+
+```bash
+export HTTP_PROXY=http://proxy.example.com:8080
+export HTTPS_PROXY=http://proxy.example.com:8080
+```
+
+Open ACE 会自动使用这些代理配置进行出站请求。
+
+**注意事项**：
+- 支持标准环境变量：`HTTP_PROXY`、`HTTPS_PROXY`（大小写均可）
+- 配置后会应用于所有出站 HTTP/HTTPS 请求
+- 不配置代理时，系统默认禁用代理查找（避免 gevent RecursionError）
+
 ### 方式二：源码安装
 
 ```bash
