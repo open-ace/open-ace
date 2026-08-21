@@ -408,7 +408,10 @@ def test_dns_rebinding_detection_at_connect_time():
 
     # The adapter should allow different public IPs (CDN scenario) but log a warning
     # This test verifies it doesn't raise an error for different public IPs
-    adapter._check_resolved_ip("https://example.com/test")  # Should not raise
+    try:
+        adapter._check_resolved_ip("https://example.com/test")
+    except Exception as e:
+        pytest.fail(f"Should not raise exception for different public IPs: {e}")
 
 
 @pytest.mark.security
@@ -509,7 +512,10 @@ def test_cdn_ip_rotation_allows_different_public_ips():
     )
 
     # Should not raise an error (CDN scenario)
-    adapter._check_resolved_ip("https://api.deepseek.com/v1/chat")
+    try:
+        adapter._check_resolved_ip("https://api.deepseek.com/v1/chat")
+    except Exception as e:
+        pytest.fail(f"Should not raise exception for CDN IP rotation: {e}")
 
 
 @pytest.mark.security
