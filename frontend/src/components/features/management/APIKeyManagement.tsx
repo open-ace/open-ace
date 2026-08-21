@@ -30,7 +30,6 @@ import {
   EmptyState,
   Badge,
   PageRefreshControl,
-  useToast,
 } from '@/components/common';
 import type { BadgeVariant } from '@/components/common';
 import { createMatcherConfig } from '@/utils';
@@ -146,7 +145,6 @@ const defaultZcodeSettings = `{
 
 export const APIKeyManagement: React.FC = () => {
   const language = useLanguage();
-  const toast = useToast();
 
   // Admin tenant selection (Issue #2841)
   const {

@@ -7,6 +7,8 @@
  * Issue #2841: Platform admin tenant selector default behavior optimization
  */
 
+/* global performance */
+
 import { create } from 'zustand';
 import { useAppStore } from '@/store';
 import { tenantApi, type Tenant } from '@/api';
@@ -51,7 +53,7 @@ interface AdminTenantActions {
   selectTenant: (tenantId: number) => void;
   clearSelection: () => void;
   retry: () => Promise<void>;
-  cleanup: (userId: number) => void;
+  cleanup: (userId: string) => void;
   reset: () => void;
 
   // Internal actions
@@ -210,7 +212,7 @@ export const useAdminTenantStore = create<AdminTenantState & AdminTenantActions>
 
     // Validate tenant exists and is active
     const tenant = state.tenants.find((t) => t.id === tenantId);
-    if (!tenant || tenant.status !== 'active') {
+    if (tenant?.status !== 'active') {
       console.warn(`[AdminTenantStore] Cannot select inactive or non-existent tenant ${tenantId}`);
       return;
     }

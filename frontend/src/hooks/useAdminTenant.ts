@@ -140,11 +140,11 @@ export function useAdminTenant(): UseAdminTenantReturn {
   // Calculate effective tenant ID
   // For non-admins: use user's tenant_id
   // For admins: use selectedTenantId
-  const effectiveTenantId = isAdmin ? selectedTenantId : user?.tenant_id ?? null;
+  const effectiveTenantId = isAdmin ? selectedTenantId : (user?.tenant_id ?? null);
 
   return {
     tenants: isAdmin ? tenants : [],
-    selectedTenantId: isAdmin ? selectedTenantId : user?.tenant_id ?? null,
+    selectedTenantId: isAdmin ? selectedTenantId : (user?.tenant_id ?? null),
     isLoading: isAdmin && isLoading,
     error: isAdmin ? error : null,
     selectTenant: handleSelectTenant,

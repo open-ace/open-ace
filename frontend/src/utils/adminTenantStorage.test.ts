@@ -6,7 +6,7 @@
 
 /* global DOMException */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import {
   getDeploymentId,
   getStorageKey,
@@ -45,29 +45,28 @@ Object.defineProperty(window, 'localStorage', {
   value: localStorageMock,
 });
 
-// Mock import.meta.env
-vi.mock('import.meta', () => ({
-  env: {
-    VITE_DEPLOYMENT_ID: 'test-deployment',
-  },
-}));
-
 describe('AdminTenantStorage', () => {
   beforeEach(() => {
     localStorageMock.clear();
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   describe('getDeploymentId', () => {
     it('should return environment variable when set', () => {
+      vi.stubEnv('VITE_DEPLOYMENT_ID', 'test-deployment');
       const id = getDeploymentId();
       expect(id).toBe('test-deployment');
     });
 
     it('should fallback to hostname when environment variable not set', () => {
-      // This test would require mocking import.meta.env differently
-      // For now, we test with the mocked value
+      // Unset the env var to test fallback
+      vi.stubEnv('VITE_DEPLOYMENT_ID', undefined);
       const id = getDeploymentId();
+      // Should fallback to hostname:port
       expect(id).toBeDefined();
       expect(typeof id).toBe('string');
     });
@@ -79,7 +78,8 @@ describe('AdminTenantStorage', () => {
       expect(key).toMatch(/^open-ace-admin-tenant-.*-123$/);
     });
 
-    it('should include deployment ID', () => {
+    it('should include deployment ID when set', () => {
+      vi.stubEnv('VITE_DEPLOYMENT_ID', 'test-deployment');
       const key = getStorageKey('456');
       expect(key).toContain('test-deployment');
     });
