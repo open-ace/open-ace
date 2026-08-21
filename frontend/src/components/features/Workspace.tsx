@@ -1062,7 +1062,8 @@ export const Workspace: React.FC = () => {
           urlModel || urlUseWebUI !== null || urlPermissionMode
             ? {
                 model: urlModel ?? undefined,
-                useWebUI: urlUseWebUI === 'true' ? true : urlUseWebUI === 'false' ? false : undefined,
+                useWebUI:
+                  urlUseWebUI === 'true' ? true : urlUseWebUI === 'false' ? false : undefined,
                 permissionMode: urlPermissionMode ?? undefined,
               }
             : undefined;
