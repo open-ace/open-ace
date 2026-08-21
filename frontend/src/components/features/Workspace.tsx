@@ -1595,6 +1595,27 @@ export const Workspace: React.FC = () => {
     }
   }, [tabs, tabsInitialized, config, setTabs, updateStoredTab]);
 
+  // Update URL when active tab changes (Issue #2899)
+  const updateUrlWithActiveTab = useCallback((tab: WorkspaceTab | null) => {
+    const url = new URL(window.location.href);
+
+    if (tab?.sessionId) {
+      url.searchParams.set('sessionId', tab.sessionId);
+      if (tab.encodedProjectName) {
+        url.searchParams.set('encodedProjectName', tab.encodedProjectName);
+      }
+      if (tab.toolName) {
+        url.searchParams.set('toolName', tab.toolName);
+      }
+    } else {
+      url.searchParams.delete('sessionId');
+      url.searchParams.delete('encodedProjectName');
+      url.searchParams.delete('toolName');
+    }
+
+    window.history.replaceState({}, '', url.toString());
+  }, []);
+
   // Create a new tab
   const createNewTab = useCallback(
     (
@@ -1729,7 +1750,14 @@ export const Workspace: React.FC = () => {
         createNewTab();
       }
     },
-    [tabs.length, activeTabId, removeStoredTab, createNewTab, setStoredActiveTabId, updateUrlWithActiveTab]
+    [
+      tabs.length,
+      activeTabId,
+      removeStoredTab,
+      createNewTab,
+      setStoredActiveTabId,
+      updateUrlWithActiveTab,
+    ]
   );
 
   // Close a tab
@@ -1799,30 +1827,6 @@ export const Workspace: React.FC = () => {
     setRemoteCloseTabId(null);
   }, []);
 
-  // Update URL when active tab changes (Issue #2899)
-  const updateUrlWithActiveTab = useCallback(
-    (tab: WorkspaceTab | null) => {
-      const url = new URL(window.location.href);
-
-      if (tab?.sessionId) {
-        url.searchParams.set('sessionId', tab.sessionId);
-        if (tab.encodedProjectName) {
-          url.searchParams.set('encodedProjectName', tab.encodedProjectName);
-        }
-        if (tab.toolName) {
-          url.searchParams.set('toolName', tab.toolName);
-        }
-      } else {
-        url.searchParams.delete('sessionId');
-        url.searchParams.delete('encodedProjectName');
-        url.searchParams.delete('toolName');
-      }
-
-      window.history.replaceState({}, '', url.toString());
-    },
-    []
-  );
-
   // Switch to a tab
   const switchTab = useCallback(
     (tabId: string) => {
@@ -1871,7 +1875,14 @@ export const Workspace: React.FC = () => {
         }
       }, 100);
     },
-    [activeTabId, tabs, setStoredActiveTabId, clearTabNotification, userWebUI, updateUrlWithActiveTab]
+    [
+      activeTabId,
+      tabs,
+      setStoredActiveTabId,
+      clearTabNotification,
+      userWebUI,
+      updateUrlWithActiveTab,
+    ]
   );
 
   // Rename a tab
