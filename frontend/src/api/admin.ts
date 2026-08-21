@@ -181,10 +181,7 @@ export const adminApi = {
     return apiClient.delete<{ success: boolean }>(`/api/admin/users/${userId}`);
   },
 
-  async restoreUser(
-    userId: number,
-    data?: RestoreUserRequest
-  ): Promise<RestoreUserResponse> {
+  async restoreUser(userId: number, data?: RestoreUserRequest): Promise<RestoreUserResponse> {
     return apiClient.post<RestoreUserResponse>(`/api/admin/users/${userId}/restore`, data);
   },
 

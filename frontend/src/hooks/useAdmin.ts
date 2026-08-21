@@ -68,13 +68,8 @@ export function useRestoreUser() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      userId,
-      data,
-    }: {
-      userId: number;
-      data?: RestoreUserRequest;
-    }) => adminApi.restoreUser(userId, data),
+    mutationFn: ({ userId, data }: { userId: number; data?: RestoreUserRequest }) =>
+      adminApi.restoreUser(userId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
     },
