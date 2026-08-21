@@ -512,7 +512,7 @@ export const SSOSettings: React.FC = () => {
         </Card>
       )}
 
-{/* Global SSO Setting - Issue #2128 */}
+      {/* Global SSO Setting - Issue #2128 */}
       <Card className="mb-4">
         <div className="d-flex align-items-center mb-3">
           <i className="bi bi-globe fs-4 me-2 text-primary" />

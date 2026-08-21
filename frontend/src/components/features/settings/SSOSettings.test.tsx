@@ -209,12 +209,12 @@ describe('SSOSettings Accessibility', () => {
   });
 
   describe('aria-describedby attributes', () => {
-    it('should have aria-describedby on SSO Enable checkbox', async () => {
+    it('should have aria-describedby on global SSO Enable checkbox', async () => {
       render(<SSOSettings />);
 
-      // Wait for component to load
+      // Issue #2128: The global SSO Enable checkbox
       const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
-      expect(ssoEnabledInput).toHaveAttribute('aria-describedby', 'ssoEnabledDesc');
+      expect(ssoEnabledInput).toHaveAttribute('aria-describedby', 'globalSSODesc');
     });
 
     it('should have aria-describedby on Auto Provision checkbox', async () => {
@@ -365,7 +365,8 @@ describe('SSOSettings Accessibility', () => {
 
       // The description span should be in the DOM after the label
       const formCheckDivs = container.querySelectorAll('.form-check');
-      expect(formCheckDivs.length).toBe(2);
+      // Issue #2128: Now there are 3 form-check elements (global SSO + tenant settings)
+      expect(formCheckDivs.length).toBe(3);
 
       formCheckDivs.forEach((div) => {
         const input = div.querySelector('input');
