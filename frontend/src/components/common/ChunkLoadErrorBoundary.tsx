@@ -1,4 +1,6 @@
 import React from 'react';
+import { reportFrontendError } from '@utils/errorReporter';
+import { isChunkLoadError } from './isChunkLoadError';
 
 interface ChunkLoadErrorBoundaryProps {
   children: React.ReactNode;
@@ -7,22 +9,6 @@ interface ChunkLoadErrorBoundaryProps {
 
 interface ChunkLoadErrorBoundaryState {
   error: Error | null;
-}
-
-/**
- * Return true only for browser errors that specifically identify a failed
- * JavaScript chunk or dynamic import. Generic network errors must not turn
- * ordinary API failures into full-page reload prompts.
- */
-export function isChunkLoadError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  if (error.name === 'ChunkLoadError') return true;
-  return [
-    /Loading (?:CSS )?chunk [^ ]+ failed/i,
-    /Failed to fetch dynamically imported module/i,
-    /Importing a module script failed/i,
-    /error loading dynamically imported module/i,
-  ].some((pattern) => pattern.test(error.message));
 }
 
 /**
@@ -36,8 +22,39 @@ export class ChunkLoadErrorBoundary extends React.Component<
 > {
   public override state: ChunkLoadErrorBoundaryState = { error: null };
 
+  // Instance property to store errorId (avoiding re-render)
+  private errorId: string | null = null;
+
   public static getDerivedStateFromError(error: Error): ChunkLoadErrorBoundaryState {
     return { error };
+  }
+
+  public override componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
+    try {
+      // Report error
+      this.errorId = reportFrontendError({
+        error,
+        errorInfo: { componentStack: errorInfo.componentStack },
+        category: isChunkLoadError(error) ? 'chunk-load' : 'render-runtime',
+      });
+    } catch (e) {
+      // Swallow all exceptions to prevent infinite loop
+      try {
+        // Use fallback logging
+        const errorLogs = (window as any).__errorLogs__ || [];
+        errorLogs.push({
+          timestamp: Date.now(),
+          args: ['[ErrorReporter] Failed to report', e],
+        });
+        if (errorLogs.length > 50) {
+          errorLogs.shift();
+        }
+        (window as any).__errorLogs__ = errorLogs;
+      } catch {
+        // Completely swallow
+      }
+      this.errorId = 'fallback';
+    }
   }
 
   private readonly reloadPage = (): void => {
@@ -53,6 +70,8 @@ export class ChunkLoadErrorBoundary extends React.Component<
     if (!error) return this.props.children;
 
     const chunkFailure = isChunkLoadError(error);
+    const displayErrorId = this.errorId || 'pending';
+
     return (
       <main
         className="min-vh-100 d-flex align-items-center justify-content-center bg-light p-4"
@@ -63,10 +82,13 @@ export class ChunkLoadErrorBoundary extends React.Component<
           <h1 className="h4">
             {chunkFailure ? 'A new version of Open ACE is available' : 'Open ACE could not render'}
           </h1>
-          <p className="text-muted mb-4">
+          <p className="text-muted mb-2">
             {chunkFailure
               ? 'This page is still using files from an older version. Reload to continue safely.'
               : 'An unexpected display error occurred. Reload the page to try again.'}
+          </p>
+          <p className="text-muted small mb-4">
+            Error ID: <code className="user-select-all">{displayErrorId}</code>
           </p>
           <button className="btn btn-primary" type="button" onClick={this.reloadPage}>
             Reload page
