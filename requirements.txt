@@ -30,7 +30,7 @@ psycogreen>=1.0.0,<2.0.0
 
 # Report generation
 openpyxl>=3.1.0,<4.0.0
-jinja2>=3.0.0,<4.0.0
+jinja2>=3.1.6,<4.0.0
 
 # Caching
 cachetools>=5.5.0,<8.0.0
