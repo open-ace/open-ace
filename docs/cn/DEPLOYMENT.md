@@ -588,6 +588,39 @@ ps aux | grep python
 chmod -R 755 ~/.open-ace/
 ```
 
+### code-server 安装验证
+
+**用途**：code-server 用于本地工作区会话模式下的"打开 VS Code"功能。当用户在本地工作区点击"打开 VS Code"按钮时，系统会启动 code-server 提供 Web 版 VS Code 编辑器。
+
+**验证安装**：
+
+```bash
+# 在 Docker 容器中验证
+docker run --rm <image> which code-server
+docker run --rm <image> code-server --version
+```
+
+**常见问题**：
+
+| 错误信息 | 原因 | 解决方案 |
+|---------|------|----------|
+| `code-server is not installed` | 镜像版本过旧或未正确构建 | 重新构建 Docker 镜像 |
+| `code-server: command not found` | PATH 问题 | 检查 `/usr/bin/code-server` 是否存在 |
+| 安装失败 | 网络问题 | 检查网络连接，考虑使用代理 |
+
+**历史修复记录**：
+
+| Issue/PR | 日期 | 修复内容 |
+|----------|------|----------|
+| #2245 / #2250 | 2026-08-05 | 首次添加 code-server 安装 |
+| #2358 | 2026-08-06 | 修正验证路径（/usr/local/bin → /usr/bin） |
+| #2498 | 2026-08-11 | 移除无效的 `--prefix` 参数 |
+
+**安装方式**：
+- 使用官方安装脚本：`https://code-server.dev/install.sh`
+- Debian 环境下使用 deb 包安装到 `/usr/bin/code-server`
+- 超时设置：连接 15 秒，执行 300 秒
+
 ## 安全注意事项
 
 1. **安全模式**：必须显式设置 `OPENACE_SECURITY_MODE`（Issue #2185）
