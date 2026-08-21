@@ -172,9 +172,7 @@ class TestCreateRepoTokenNoLeak:
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_error_message_excludes_token(self, mock_run, _needs, _env):
         """GitHubOpsError from a failed gh repo create must not embed GH_TOKEN."""
-        mock_run.return_value = _completed(
-            stdout="", returncode=4, stderr="gh auth login required"
-        )
+        mock_run.return_value = _completed(stdout="", returncode=4, stderr="gh auth login required")
         gh = GitHubOps("/workspace/alice/project", system_account="alice")
 
         try:
