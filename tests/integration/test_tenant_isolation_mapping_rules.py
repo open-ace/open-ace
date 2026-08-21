@@ -303,7 +303,7 @@ class TestTenantIsolationForGenerateDefaultRules:
         concurrently, verifying no cross-tenant rule creation occurs.
         """
         import threading
-        from collections import defaultdict
+        from contextlib import ExitStack
 
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
         from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
@@ -318,81 +318,80 @@ class TestTenantIsolationForGenerateDefaultRules:
         }
         mock_user_repo.get_user_by_id.side_effect = lambda uid: tenant_user_map.get(uid)
 
-        results = defaultdict(list)
-        errors = []
+        # Each tenant admin's identity is resolved from the request's Bearer
+        # token — thread-safe, because it travels with the request via Flask's
+        # per-thread request proxy. The auth helper is patched ONCE on the main
+        # thread below (fixed for the whole concurrent section), NOT per worker.
+        # A per-thread `with patch(...)` on a module-global auth helper is racy:
+        # one thread's context-manager __exit__ restores the real function while
+        # another thread's request is still in flight, so that request is
+        # silently unauthenticated and the target user 404s (#2265 mock.patch-in-
+        # threads leak; surfaced on py3.10 by the #2868 full-suite lane).
+        identities = {
+            f"tenant-{tid}": {
+                "id": 10 + tid,
+                "role": "tenant_admin",
+                "username": f"tenant_admin_{tid}",
+                "tenant_id": tid,
+            }
+            for tid in (1, 2)
+        }
+        default_result = GenerateDefaultRulesResult(
+            created=[
+                ToolAccountMappingRule(
+                    id=1,
+                    user_id=1,
+                    pattern="user-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
+                )
+            ],
+            skipped=[],
+            created_count=1,
+            skipped_count=0,
+        )
+
+        # Pre-seed the buckets so results[tid] is never created concurrently.
+        results: dict[int, list] = {1: [], 2: []}
+        errors: list[str] = []
 
         def generate_rules_for_tenant(tenant_id, user_id):
-            """Generate rules for a user in a specific tenant."""
+            """Authenticate as the tenant's admin (via Bearer token) and generate."""
             try:
-                test_client = app.test_client()
-
-                with patch("app.auth.decorators._extract_session_token", return_value="test-token"):
-                    with patch(
-                        "app.auth.decorators._load_user_from_token",
-                        return_value={
-                            "id": 10 + tenant_id,
-                            "role": "tenant_admin",
-                            "username": f"tenant_admin_{tenant_id}",
-                            "tenant_id": tenant_id,
-                        },
-                    ):
-                        with patch(
-                            "app.routes.mapping_rules.ToolAccountAutoMappingService"
-                        ) as mock_service:
-                            mock_service_instance = MagicMock()
-                            result = GenerateDefaultRulesResult(
-                                created=[
-                                    ToolAccountMappingRule(
-                                        id=tenant_id * 100 + user_id,
-                                        user_id=user_id,
-                                        pattern=f"user{user_id}-*",
-                                        match_type="prefix",
-                                        priority=10,
-                                        is_auto=True,
-                                        is_active=True,
-                                    )
-                                ],
-                                skipped=[],
-                                created_count=1,
-                                skipped_count=0,
-                            )
-                            mock_service_instance.create_default_rules_for_user.return_value = (
-                                result
-                            )
-                            mock_service.return_value = mock_service_instance
-
-                            response = test_client.post(
-                                f"/api/mapping-rules/user/{user_id}/generate-default",
-                                content_type="application/json",
-                            )
-
-                            results[tenant_id].append(
-                                {
-                                    "user_id": user_id,
-                                    "status": response.status_code,
-                                }
-                            )
-            except (
-                Exception
-            ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
+                response = app.test_client().post(
+                    f"/api/mapping-rules/user/{user_id}/generate-default",
+                    headers={"Authorization": f"Bearer tenant-{tenant_id}"},
+                    content_type="application/json",
+                )
+                results[tenant_id].append({"user_id": user_id, "status": response.status_code})
+            except Exception as e:  # allow-swallow: collected and asserted below
                 errors.append(str(e))
 
-        # Create threads for concurrent operations
-        threads = []
-        for tenant_id in [1, 2]:
-            for user_id in range(1, 3):
-                t = threading.Thread(
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch(
+                    "app.auth.decorators._load_user_from_token",
+                    side_effect=lambda token: identities.get(token),
+                )
+            )
+            mock_service = stack.enter_context(
+                patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+            )
+            mock_service.return_value.create_default_rules_for_user.return_value = default_result
+
+            threads = [
+                threading.Thread(
                     target=generate_rules_for_tenant, args=(tenant_id, tenant_id * 10 + user_id)
                 )
-                threads.append(t)
-
-        # Start all threads
-        for t in threads:
-            t.start()
-
-        # Wait for all threads to complete
-        for t in threads:
-            t.join(timeout=5)
+                for tenant_id in (1, 2)
+                for user_id in range(1, 3)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=5)
 
         # Verify no errors occurred
         assert len(errors) == 0, f"Errors during concurrent execution: {errors}"
@@ -405,8 +404,10 @@ class TestTenantIsolationForGenerateDefaultRules:
                     f"returned status {r['status']}"
                 )
 
-        # Verify each tenant admin operated on correct users
+        # Verify each tenant admin operated only on its own users (isolation).
         assert len(results) == 2, f"Expected 2 tenants in results, got {len(results)}"
+        assert {r["user_id"] for r in results[1]} == {11, 12}
+        assert {r["user_id"] for r in results[2]} == {21, 22}
 
 
 class TestTenantIsolationForOtherOperations:
