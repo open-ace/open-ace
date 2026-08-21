@@ -30,6 +30,11 @@ from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
+import urllib3
+import urllib3.connection
+import urllib3.connectionpool
+import urllib3.poolmanager
+import urllib3.util.ssl_
 from requests.adapters import HTTPAdapter
 
 from app.repositories.database import (
@@ -306,29 +311,291 @@ def _utcnow_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-class _PinnedWebhookAdapter(HTTPAdapter):
-    """HTTPAdapter that refuses to connect to any IP outside the allowlist.
+class _PinnedHTTPSConnection(urllib3.connection.HTTPSConnection):
+    """HTTPS Connection that uses original hostname for TLS SNI.
 
-    Defense in depth on top of ``_pin_host_to_url``: even if a proxy or future
-    urllib3 change re-introduces a resolution step, this adapter blocks any
-    dial whose target IP literal is not on the verified allowlist.
+    When the URL hostname is an IP (for IP pinning), this connection ensures
+    TLS SNI uses the original domain name instead of the IP.
+
+    Issue #2883: Fix TLS SNI for pinned IP webhooks.
     """
 
-    def __init__(self, *args: Any, allowed_ips: list[str], **kwargs: Any):
-        super().__init__(*args, **kwargs)
-        self._allowed_ips = set(allowed_ips)
+    def __init__(
+        self,
+        host: str,
+        port: int | None = None,
+        *,
+        original_hostname: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the connection with original hostname for TLS SNI.
 
-    def get_connection(self, url, proxies=None):
+        Args:
+            host: The host to connect to (typically the pinned IP).
+            port: The port number.
+            original_hostname: The original hostname to use for TLS SNI.
+            **kwargs: Additional arguments passed to parent class.
+        """
+        self._original_hostname = original_hostname
+        super().__init__(host, port, **kwargs)
+
+    def connect(self) -> None:
+        """Connect to the server, using original hostname for TLS SNI."""
+        # Override server_hostname for TLS SNI before connecting
+        # In urllib3 2.x, we need to set this before the SSL handshake
+        if self._original_hostname:
+            # Temporarily set host to original hostname for TLS SNI
+            # This is safe because the actual socket connection will use
+            # the IP address (which is set via the connection parameters)
+            original_host = self.host
+            try:
+                self.host = self._original_hostname
+                super().connect()
+            finally:
+                # Restore the original host
+                self.host = original_host
+        else:
+            super().connect()
+
+
+class _PinnedHTTPSConnectionPool(urllib3.HTTPSConnectionPool):
+    """HTTPS ConnectionPool that creates connections with correct TLS SNI.
+
+    Issue #2883: Fix TLS SNI for pinned IP webhooks.
+    """
+
+    ConnectionCls = _PinnedHTTPSConnection
+
+    def __init__(
+        self,
+        host: str,
+        port: int | None = None,
+        *,
+        original_hostname: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the pool with original hostname for TLS SNI.
+
+        Args:
+            host: The host to connect to (typically the pinned IP).
+            port: The port number.
+            original_hostname: The original hostname to use for TLS SNI.
+            **kwargs: Additional arguments passed to parent class.
+        """
+        self._original_hostname = original_hostname
+        super().__init__(host, port, **kwargs)
+
+    def _new_conn(self) -> _PinnedHTTPSConnection:
+        """Create a new connection with correct TLS SNI hostname."""
+        # Create connection with original hostname
+        # Build connection kwargs from pool attributes
+        conn_kwargs = {
+            "host": self.host,
+            "port": self.port,
+            "original_hostname": self._original_hostname,
+            "timeout": self.timeout,
+        }
+        # Add optional attributes if they exist
+        if hasattr(self, "source_address"):
+            conn_kwargs["source_address"] = self.source_address
+        if hasattr(self, "socket_options"):
+            conn_kwargs["socket_options"] = self.socket_options
+
+        conn = self.ConnectionCls(**conn_kwargs)
+
+        # Set additional attributes from pool
+        if hasattr(self, "_tunnel_host"):
+            conn._tunnel_host = getattr(self, "_tunnel_host", None)
+        if hasattr(self, "_tunnel_port"):
+            conn._tunnel_port = getattr(self, "_tunnel_port", None)
+
+        return conn
+
+
+class _PinnedPoolManager(urllib3.PoolManager):
+    """PoolManager that creates pinned connection pools with correct TLS SNI.
+
+    Issue #2883: Fix TLS SNI for pinned IP webhooks.
+    """
+
+    def __init__(
+        self,
+        *,
+        original_hostname: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the pool manager with original hostname.
+
+        Args:
+            original_hostname: The original hostname to use for TLS SNI.
+            **kwargs: Additional arguments passed to parent class.
+        """
+        self._original_hostname = original_hostname
+        super().__init__(**kwargs)
+
+    def _new_pool(
+        self,
+        scheme: str,
+        host: str,
+        port: int,
+        request_context: dict[str, Any] | None = None,
+    ) -> urllib3.connectionpool.ConnectionPool:
+        """Create a new connection pool with original hostname.
+
+        For HTTPS pools, pass the original hostname for TLS SNI.
+        """
+        if request_context is None:
+            request_context = {}
+
+        if scheme == "https":
+            # Create HTTPS pool with original hostname
+            # Remove 'host' and 'port' from request_context if present
+            # (they're passed as positional args and would cause duplicate)
+            pool_kwargs = {
+                k: v for k, v in request_context.items()
+                if k not in ("host", "port")
+            }
+            return _PinnedHTTPSConnectionPool(
+                host,
+                port,
+                original_hostname=self._original_hostname,
+                **pool_kwargs,
+            )
+        else:
+            # For HTTP, use default behavior
+            return super()._new_pool(scheme, host, port, request_context)
+
+
+class _PinnedWebhookAdapter(HTTPAdapter):
+    """HTTPAdapter that enforces IP pinning with correct TLS SNI.
+
+    Issue #2883: Fix TLS SNI for pinned IP webhooks.
+
+    This adapter ensures:
+    1. TCP connections are made only to pre-validated IPs (no DNS rebinding).
+    2. TLS SNI uses the original domain name (not the pinned IP).
+    3. Certificate hostname verification uses the original domain name.
+    4. HTTP Host header uses the original domain name.
+    """
+
+    def __init__(
+        self,
+        *args: Any,
+        allowed_ips: list[str],
+        original_hostname: str,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the adapter with IP allowlist and original hostname.
+
+        Args:
+            allowed_ips: List of allowed IP addresses.
+            original_hostname: The original hostname for TLS SNI.
+            *args: Additional positional arguments.
+            **kwargs: Additional keyword arguments.
+        """
+        # Set these BEFORE calling super().__init__() because
+        # HTTPAdapter.__init__ calls init_poolmanager()
+        self._allowed_ips = set(allowed_ips)
+        self._original_hostname = original_hostname
+        super().__init__(*args, **kwargs)
+
+    def init_poolmanager(
+        self,
+        connections: int,
+        maxsize: int,
+        block: bool = False,
+        **pool_kwargs: Any,
+    ) -> None:
+        """Initialize the pool manager with original hostname for TLS SNI.
+
+        Also injects assert_hostname for certificate hostname verification.
+        """
+        # Store pool_connections list
+        self._pool_connections = []
+
+        # Inject assert_hostname for certificate verification
+        pool_kwargs["assert_hostname"] = self._original_hostname
+
+        # Create custom pool manager with original hostname
+        self.poolmanager = _PinnedPoolManager(
+            num_pools=connections,
+            maxsize=maxsize,
+            block=block,
+            original_hostname=self._original_hostname,
+            **pool_kwargs,
+        )
+
+    def get_connection(self, url: str, proxies: dict[str, str] | None = None) -> Any:
+        """Get a connection, asserting the target IP is pinned."""
         self._assert_pinned(url)
         return super().get_connection(url, proxies=proxies)
 
-    def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
+    def get_connection_with_tls_context(
+        self,
+        request: Any,
+        verify: bool | str,
+        proxies: dict[str, str] | None = None,
+        cert: Any = None,
+    ) -> Any:
+        """Get a connection with TLS context, asserting the target IP is pinned."""
         self._assert_pinned(request.url)
-        return super().get_connection_with_tls_context(  # type: ignore[call-arg]
-            request, verify, proxies=proxies, cert=cert
+        # Use our custom pool manager which handles TLS SNI
+        return self._get_connection(request.url, verify, proxies, cert)
+
+    def _get_connection(
+        self,
+        url: str,
+        verify: bool | str,
+        proxies: dict[str, str] | None = None,
+        cert: Any = None,
+    ) -> Any:
+        """Get a connection from the pool manager.
+
+        Args:
+            url: The URL to connect to.
+            verify: Whether to verify TLS certificates.
+            proxies: Proxy configuration (ignored for pinned connections).
+            cert: Client certificate.
+
+        Returns:
+            A connection object.
+        """
+        # Parse URL to extract scheme, host, port
+        parsed = urlparse(url)
+        scheme = parsed.scheme
+        host = parsed.hostname or ""
+        port = parsed.port
+
+        if not port:
+            port = 443 if scheme == "https" else 80
+
+        # Debug logging for connection
+        logger.debug(
+            "Webhook connection: host=%s, port=%s, original_hostname=%s, verify=%s",
+            host,
+            port,
+            self._original_hostname,
+            verify,
         )
 
+        # Get connection from pool manager
+        # The pool manager will create pools with correct TLS SNI
+        pool = self.poolmanager.connection_from_url(url)
+
+        # Get connection from pool
+        conn = pool._get_conn()
+
+        return conn
+
     def _assert_pinned(self, url: str) -> None:
+        """Assert that the URL host is in the allowed IP list.
+
+        Args:
+            url: The URL to check.
+
+        Raises:
+            ValueError: If the host is not in the allowed IP list.
+        """
         host = (urlparse(url).hostname or "").strip("[]")
         if host not in self._allowed_ips:
             raise ValueError(f"Webhook request would reach unpinned or rebound IP: {host!r}")
@@ -854,19 +1121,51 @@ class AlertNotifier:
         # already carries it from get_notification_preferences.
         outbound_url = self._prepare_webhook_url(webhook_url, prefs.dingtalk_webhook_secret)
         pinned_url = _pin_host_to_url(outbound_url, pinned_ips[0])
+
+        # Extract original hostname for TLS SNI (Issue #2883)
+        original_hostname = urlparse(outbound_url).hostname
+        if not original_hostname:
+            logger.warning(
+                "Cannot extract original hostname from outbound_url: %s",
+                _redact_webhook_credentials(outbound_url),
+            )
+            return DeliveryResult(retriable=False, error_type="invalid_url")
+
         headers = {
             "User-Agent": "Open-ACE Alert Webhook",
-            "Host": urlparse(outbound_url).hostname,
+            "Host": original_hostname,
             "Content-Type": "application/json",
         }
         # Sign generic payloads so receivers can verify authenticity.
         signature = self._sign_webhook_body(body)
         if signature is not None:
             headers["X-OpenACE-Signature"] = signature
+
+        # Debug logging for TLS SNI
+        logger.debug(
+            "Webhook delivery: pinned_ip=%s, original_hostname=%s, url=%s",
+            pinned_ips[0],
+            original_hostname,
+            _redact_webhook_credentials(outbound_url),
+        )
+
         session = requests.Session()
         try:
-            session.mount("https://", _PinnedWebhookAdapter(allowed_ips=pinned_ips))
-            session.mount("http://", _PinnedWebhookAdapter(allowed_ips=pinned_ips))
+            # Issue #2883: Pass original_hostname for TLS SNI
+            session.mount(
+                "https://",
+                _PinnedWebhookAdapter(
+                    allowed_ips=pinned_ips,
+                    original_hostname=original_hostname,
+                ),
+            )
+            session.mount(
+                "http://",
+                _PinnedWebhookAdapter(
+                    allowed_ips=pinned_ips,
+                    original_hostname=original_hostname,
+                ),
+            )
             response = session.post(
                 pinned_url,
                 data=body,
