@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { validateStoredState, migrate, isValidWorkspaceTab } from './index';
-import type { PersistedState, WorkspaceTab } from './index';
+import type { WorkspaceTab } from './index';
 
 describe('Store Validation (Issue #2953)', () => {
   beforeEach(() => {
@@ -146,7 +146,9 @@ describe('Store Validation (Issue #2953)', () => {
 
     it('should validate boolean fields', () => {
       expect(validateStoredState({ sidebarCollapsed: true }).sidebarCollapsed).toBe(true);
-      expect(validateStoredState({ enableTabNotifications: false }).enableTabNotifications).toBe(false);
+      expect(validateStoredState({ enableTabNotifications: false }).enableTabNotifications).toBe(
+        false
+      );
       expect(validateStoredState({ sidebarCollapsed: 'yes' }).sidebarCollapsed).toBeUndefined();
     });
   });
