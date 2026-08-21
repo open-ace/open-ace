@@ -657,6 +657,8 @@ export const Workspace: React.FC = () => {
             // Switch to the target tab
             setActiveTabId(targetTab.id);
             useAppStore.getState().setWorkspaceActiveTabId(targetTab.id);
+            // Sync URL with active tab (Issue #2899)
+            updateUrlWithActiveTab(targetTab);
 
             // Send focus message to iframe after tab switch
             setTimeout(() => {
@@ -1139,15 +1141,15 @@ export const Workspace: React.FC = () => {
       }
 
       // Clear the restore parameters after using it
-      searchParams.delete('sessionId');
+      // Issue #2899: Keep sessionId in URL for browser back/forward and refresh
+      // Only clear one-time parameters (restoreSession, resumeHint)
       searchParams.delete('restoreSession');
-      searchParams.delete('encodedProjectName');
-      searchParams.delete('toolName');
+      searchParams.delete('resumeHint');
+      // Clear other params that should not persist after navigation
       searchParams.delete('workspaceType');
       searchParams.delete('machineId');
       searchParams.delete('machineName');
       searchParams.delete('terminalId');
-      searchParams.delete('resumeHint');
       setSearchParams(searchParams, { replace: true });
     } else if (storedTabs.length > 0) {
       // Case 2: Restore from store - regenerate URLs for each tab
@@ -1270,6 +1272,28 @@ export const Workspace: React.FC = () => {
     setStoredActiveTabId,
   ]);
 
+  // Listen for browser back/forward (Issue #2899)
+  useEffect(() => {
+    if (!tabsInitialized || tabs.length === 0) return;
+
+    const handlePopState = () => {
+      const url = new URL(window.location.href);
+      const sessionId = url.searchParams.get('sessionId');
+
+      if (sessionId) {
+        // Find the corresponding tab and switch to it
+        const tab = tabs.find((t) => t.sessionId === sessionId);
+        if (tab && tab.id !== activeTabId) {
+          setActiveTabId(tab.id);
+          setStoredActiveTabId(tab.id);
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [tabs, activeTabId, tabsInitialized, setActiveTabId, setStoredActiveTabId]);
+
   // Handle URL parameter for creating new tab
   useEffect(() => {
     const newTab = searchParams.get('newTab');
@@ -1364,6 +1388,9 @@ export const Workspace: React.FC = () => {
               }
               setActiveTabId(tabId);
               setStoredActiveTabId(tabId);
+              // Sync URL with terminal tab (Issue #2899)
+              // Terminal tab has no sessionId, so URL will have sessionId cleared
+              updateUrlWithActiveTab(newTab);
 
               // Poll for terminal status until WebSocket proxy is ready
               pollTerminalProxy(tabId, terminalId, machineId);
@@ -1646,6 +1673,8 @@ export const Workspace: React.FC = () => {
       setStoredActiveTabId(newTab.id);
       // Issue #1470: Update tabsOrder in store
       setStoredTabsOrder((prev) => [...prev, newTab.id]);
+      // Sync URL with new tab (Issue #2899)
+      updateUrlWithActiveTab(newTab);
 
       // Mark as loading
       setLoadingTabs((prev) => new Set(prev).add(newTab.id));
@@ -1658,6 +1687,7 @@ export const Workspace: React.FC = () => {
       setStoredActiveTabId,
       clearTabNotification,
       setStoredTabsOrder,
+      updateUrlWithActiveTab,
     ]
   );
 
@@ -1684,7 +1714,11 @@ export const Workspace: React.FC = () => {
         if (activeTabId === tabId && newTabs.length > 0) {
           const closedIndex = prev.findIndex((tab) => tab.id === tabId);
           const newActiveIndex = Math.min(closedIndex, newTabs.length - 1);
-          setActiveTabId(newTabs[newActiveIndex].id);
+          const newActiveTab = newTabs[newActiveIndex];
+          setActiveTabId(newActiveTab.id);
+          setStoredActiveTabId(newActiveTab.id);
+          // Sync URL with active tab (Issue #2899)
+          updateUrlWithActiveTab(newActiveTab);
         }
         return newTabs;
       });
@@ -1695,7 +1729,7 @@ export const Workspace: React.FC = () => {
         createNewTab();
       }
     },
-    [tabs.length, activeTabId, removeStoredTab, createNewTab]
+    [tabs.length, activeTabId, removeStoredTab, createNewTab, setStoredActiveTabId, updateUrlWithActiveTab]
   );
 
   // Close a tab
@@ -1765,13 +1799,40 @@ export const Workspace: React.FC = () => {
     setRemoteCloseTabId(null);
   }, []);
 
+  // Update URL when active tab changes (Issue #2899)
+  const updateUrlWithActiveTab = useCallback(
+    (tab: WorkspaceTab | null) => {
+      const url = new URL(window.location.href);
+
+      if (tab?.sessionId) {
+        url.searchParams.set('sessionId', tab.sessionId);
+        if (tab.encodedProjectName) {
+          url.searchParams.set('encodedProjectName', tab.encodedProjectName);
+        }
+        if (tab.toolName) {
+          url.searchParams.set('toolName', tab.toolName);
+        }
+      } else {
+        url.searchParams.delete('sessionId');
+        url.searchParams.delete('encodedProjectName');
+        url.searchParams.delete('toolName');
+      }
+
+      window.history.replaceState({}, '', url.toString());
+    },
+    []
+  );
+
   // Switch to a tab
   const switchTab = useCallback(
     (tabId: string) => {
       const previousTabId = activeTabId;
+      const tab = tabs.find((t) => t.id === tabId);
       setActiveTabId(tabId);
       // Update store (Issue #65)
       setStoredActiveTabId(tabId);
+      // Sync URL with active tab (Issue #2899)
+      updateUrlWithActiveTab(tab ?? null);
 
       // Clear notification state for the tab we're leaving
       if (previousTabId && previousTabId !== tabId) {
@@ -1810,7 +1871,7 @@ export const Workspace: React.FC = () => {
         }
       }, 100);
     },
-    [activeTabId, setStoredActiveTabId, clearTabNotification, userWebUI]
+    [activeTabId, tabs, setStoredActiveTabId, clearTabNotification, userWebUI, updateUrlWithActiveTab]
   );
 
   // Rename a tab
@@ -2876,6 +2937,9 @@ export const Workspace: React.FC = () => {
               };
               addStoredTab(storeTab);
               setStoredActiveTabId(tabId);
+              // Sync URL with terminal tab (Issue #2899)
+              // Terminal tab has no sessionId, so URL will have sessionId cleared
+              updateUrlWithActiveTab(newTab);
 
               // Poll for terminal status until WebSocket proxy is ready
               pollTerminalProxy(tabId, terminalId, params.machineId);
