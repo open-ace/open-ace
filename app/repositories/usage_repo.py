@@ -1210,6 +1210,10 @@ class UsageRepository:
         """
         Get request count trend data aggregated by date and tool.
 
+        A "request" is defined as an AI assistant response message (role='assistant'),
+        representing a completed user-to-AI interaction. This aligns with
+        get_today_request_stats() and get_request_stats_by_user() for data consistency.
+
         Args:
             start_date: Start date string (YYYY-MM-DD).
             end_date: End date string (YYYY-MM-DD).
@@ -1221,28 +1225,45 @@ class UsageRepository:
 
         Note:
             Issue #1852: Added tenant_id parameter for tenant filtering.
+            Issue #2077: Added NULL user_id fallback via sender_name matching.
+            Issue #2752: Changed data source from daily_usage to daily_messages.
+            Issue #2951: Unified data source with get_today_request_stats() and
+                         get_request_stats_by_user() for consistency.
         """
-        conditions = ["date >= ?", "date <= ?"]
+        # Base conditions: date range and role filter
+        # role='assistant' is hardcoded (not parameterized) to match other methods
+        conditions = ["dm.date >= ?", "dm.date <= ?", "dm.role = 'assistant'"]
         params: list[Any] = [start_date, end_date]
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if normalized_tenant_id is not None:
-            conditions.append("tenant_id = ?")
-            params.append(normalized_tenant_id)
+            # Issue #2077: Add NULL user_id fallback via sender_name matching.
+            # When user_id is NULL (e.g., from save_messages_batch which doesn't write user_id),
+            # fall back to matching sender_name against the tenant's users' system_account.
+            # sender_name format: {system_account}-{hostname}-{tool}
+            conditions.append(
+                f"({self._tenant_user_condition('dm.user_id')} "
+                f"OR (dm.user_id IS NULL AND EXISTS ("
+                f"SELECT 1 FROM users u WHERE u.tenant_id = ? "
+                f"AND (dm.sender_name LIKE (u.system_account || '-%%') "
+                f"OR dm.sender_name = u.username))))"
+            )
+            # Two tenant_id parameters: one for user_id IN subquery, one for EXISTS subquery
+            params.extend([normalized_tenant_id, normalized_tenant_id])
 
         if host_name:
-            conditions.append("host_name = ?")
+            conditions.append("dm.host_name = ?")
             params.append(host_name)
 
         query = f"""
             SELECT
-                date,
-                tool_name,
-                SUM(request_count) as requests
-            FROM daily_usage
+                dm.date,
+                dm.tool_name,
+                COUNT(*) as requests
+            FROM daily_messages dm
             WHERE {" AND ".join(conditions)}
-            GROUP BY date, tool_name
-            ORDER BY date ASC, tool_name ASC
+            GROUP BY dm.date, dm.tool_name
+            ORDER BY dm.date ASC, dm.tool_name ASC
         """
 
         rows = self.db.fetch_all(query, tuple(params))
