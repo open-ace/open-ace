@@ -1463,7 +1463,18 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
 
             # Create new user if not found
             if not user_id:
-                user_id = _create_user_from_sso(auth_result.user, provider_name)
+                try:
+                    user_id = _create_user_from_sso(auth_result.user, provider_name)
+                except _AutoProvisionDenied:
+                    # Issue #2893: Return explicit error when auto-provisioning is denied
+                    return jsonify(
+                        {
+                            "success": False,
+                            "error": "auto_provision_disabled",
+                            "message": "Automatic user provisioning is disabled for this organization. "
+                            "Please contact your administrator.",
+                        }
+                    ), 403
 
             # Link identity
             if user_id:
@@ -2082,6 +2093,12 @@ def unlink_identity(user_id: int, provider_name: str):
         return jsonify({"error": "Failed to unlink identity"}), 500
 
 
+class _AutoProvisionDenied(Exception):
+    """Raised when SSO auto-provisioning is denied by tenant policy (Issue #2893)."""
+
+    pass
+
+
 def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
     """
     Create a local user from SSO user info.
@@ -2092,6 +2109,9 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
 
     Returns:
         Optional[int]: New user ID or None.
+
+    Raises:
+        _AutoProvisionDenied: When tenant has auto_provision_users=False.
 
     Issue #1826 F3: Explicit tenant_id passing with policy configuration.
     Issue #2174 F6: Fail-closed tenant resolution with priority chain.
@@ -2163,14 +2183,31 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
         try:
             tenant_repo = TenantRepository()
             tenant = tenant_repo.get_by_id(tenant_id)
-            if tenant and hasattr(tenant, "settings"):
-                auto_provision = getattr(tenant.settings, "auto_provision_users", False)
-                if not auto_provision:
-                    logger.warning(
-                        f"SSO auto-provision disabled for tenant {tenant_id}: "
-                        f"provider={provider_name}, username={username}"
-                    )
-                    return None
+            if not tenant:
+                # Fail closed: tenant not found, deny auto-provision
+                logger.error(
+                    f"Tenant {tenant_id} not found during SSO auto-provision check. "
+                    f"Denying auto-provision for safety (fail-closed)."
+                )
+                return None
+            if not hasattr(tenant, "settings"):
+                # Fail closed: tenant exists but settings missing, deny auto-provision
+                logger.error(
+                    f"Tenant {tenant_id} missing settings attribute. "
+                    f"Denying auto-provision for safety (fail-closed)."
+                )
+                return None
+            auto_provision = getattr(tenant.settings, "auto_provision_users", False)
+            if not auto_provision:
+                logger.warning(
+                    f"SSO auto-provision disabled for tenant {tenant_id}: "
+                    f"provider={provider_name}"
+                )
+                raise _AutoProvisionDenied(
+                    f"auto_provision_users is disabled for tenant {tenant_id}"
+                )
+        except _AutoProvisionDenied:
+            raise  # Re-raise policy denial to caller
         except Exception as e:
             # Fail closed: if we can't read settings, deny auto-provision
             logger.error(
