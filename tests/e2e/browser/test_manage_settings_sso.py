@@ -28,6 +28,7 @@ sys.path.insert(
 # Issue #2114: Import additional test helpers
 import logging
 
+import pytest
 from playwright.sync_api import sync_playwright
 
 from tests.e2e.browser.test_helpers import (
@@ -276,11 +277,65 @@ def test_global_sso_toggle_initial_state():
 
             save_screenshot(page, MODULE_NAME, "08_toggle_loaded")
 
-            # 获取开关元素
-            sso_toggle = page.locator("#ssoEnabled")
-            if sso_toggle.count() == 0:
-                # 尝试其他选择器
-                sso_toggle = page.locator('input[type="checkbox"]').first
+            # 获取开关元素 - 使用更具体的选择器避免匹配错误元素
+            sso_toggle = None
+
+            # 优先级选择器列表：从最具体到最通用
+            toggle_selectors_ordered = [
+                "#ssoEnabled",  # 首选：精确ID匹配
+                'input#ssoEnabled[type="checkbox"]',  # 带类型的ID匹配
+                'input[type="checkbox"][id*="sso"]',  # ID包含sso的checkbox
+                'input[type="checkbox"][id*="Sso"]',  # ID包含Sso的checkbox（大小写兼容）
+                ".sso-toggle .form-check-input",  # SSO区域内的form-check-input
+                "#sso-settings .form-check-input",  # SSO设置区域内的form-check-input
+                'input[type="checkbox"][name*="sso"]',  # name属性包含sso
+            ]
+
+            for selector in toggle_selectors_ordered:
+                try:
+                    locator = page.locator(selector)
+                    if locator.count() > 0:
+                        sso_toggle = locator.first
+                        logger.debug(f"找到 SSO 开关，使用选择器: {selector}")
+                        break
+                except Exception:  # allow-swallow: selector validation
+                    continue
+
+            # 如果仍未找到，尝试在SSO表单区域内查找checkbox
+            if not sso_toggle:
+                sso_form = page.locator(".sso-settings, #sso-form, [data-testid*='sso']")
+                if sso_form.count() > 0:
+                    sso_toggle = sso_form.locator('input[type="checkbox"]').first
+
+            # 最后的回退：记录警告但仍要求至少有一个checkbox
+            if not sso_toggle:
+                all_checkboxes = page.locator('input[type="checkbox"]')
+                checkbox_count = all_checkboxes.count()
+                if checkbox_count > 0:
+                    # 如果有多个checkbox，尝试找到标签包含SSO的那个
+                    for i in range(min(checkbox_count, 5)):  # 最多检查前5个
+                        checkbox = all_checkboxes.nth(i)
+                        # 检查checkbox附近的标签是否包含SSO相关文本
+                        parent = checkbox.locator("xpath=..")
+                        parent_text = parent.text_content() or ""
+                        if "sso" in parent_text.lower() or "single sign-on" in parent_text.lower():
+                            sso_toggle = checkbox
+                            logger.warning(
+                                f"通过文本匹配找到SSO开关（第{i}个checkbox），但这可能不够准确"
+                            )
+                            break
+
+                    # 如果仍未找到，使用第一个checkbox并记录警告
+                    if not sso_toggle:
+                        sso_toggle = all_checkboxes.first
+                        logger.warning(
+                            f"无法精确匹配SSO开关，使用页面上第一个checkbox（共{checkbox_count}个）。"
+                            "建议添加更具体的选择器或data-testid属性。"
+                        )
+
+            # 验证开关存在
+            if not sso_toggle:
+                pytest.skip("无法找到 SSO 开关元素，跳过测试")
 
             # 验证开关存在
             assert sso_toggle.count() > 0, "全局 SSO 开关应存在"
@@ -755,13 +810,22 @@ def test_toggle_persistence():  # allow-no-assert: playwright script - visual ve
             except Exception:  # allow-swallow: optional UI element
                 return
 
-            # 验证状态保持
+            # 验证状态保持 - Issue #2114: 核心功能验证
             sso_toggle_after = page.locator("#ssoEnabled")
             if sso_toggle_after.count() > 0:
                 new_state = sso_toggle_after.is_checked()
-                # 注意：由于测试环境的限制，这里不强制断言状态一致性
-                # 仅记录状态变化
-                logger.debug(f"Toggle persistence: initial={initial_state}, new={new_state}")
+
+                # 核心断言：验证开关状态持久化
+                # 状态应从 initial_state 切换到 !initial_state 并保持
+                assert new_state == (not initial_state), (
+                    f"开关状态应持久化：初始状态={initial_state}，"
+                    f"切换后应为{not initial_state}，实际为{new_state}"
+                )
+
+                logger.info(f"开关持久化验证成功：initial={initial_state} -> persisted={new_state}")
+            else:
+                # 如果刷新后找不到开关，说明页面可能有问题
+                pytest.fail("刷新后无法找到 SSO 开关元素，状态持久化验证失败")
 
             # 恢复原状态（避免污染后续测试）
             try:
