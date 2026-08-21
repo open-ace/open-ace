@@ -2143,8 +2143,6 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
     Issue #2174 F6: Fail-closed tenant resolution with priority chain.
     Issue #2893: Check auto_provision_users setting before creating user.
     """
-    from flask import g
-
     from app.repositories.tenant_repo import TenantRepository
 
     # Issue #2174 F6: Tenant resolution priority chain
