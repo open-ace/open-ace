@@ -208,6 +208,14 @@ _MISSING_REMOTE_REF_FETCH_KEYWORDS = (
     "could not find remote ref",
     "couldn't find remote branch",
     "could not find remote branch",
+    # zh_CN locale: the production server's git localizes the missing-ref
+    # fetch failure as "致命错误：无法找到远程引用 <ref>" (#322/#340: the
+    # English-only list skipped the plain-push recovery and the workflow
+    # burned all 6 transient retries on a deterministic failure).
+    # _is_missing_remote_ref_fetch_error lowercases the message; Chinese
+    # characters are unaffected by .lower().
+    "无法找到远程引用",
+    "无法找到远程分支",
 )
 
 
@@ -1009,7 +1017,11 @@ class GitHubOps:
 
         # `gh repo create` rejects -R (unlike issue/pr subcommands), so disable
         # repo-scoped binding; it creates a new repo and needs no existing one.
-        result = self._run_gh(args, repo_scoped=False)
+        # api_only=True: repo creation is a pure GitHub API call that needs no
+        # local repo access, so when a bot token is configured and the command
+        # would otherwise sudo (cross-user), run gh as the service user to keep
+        # GH_TOKEN from being stripped by sudo env_reset (Issue #2909).
+        result = self._run_gh(args, repo_scoped=False, api_only=True)
         # gh repo create doesn't support --json; parse URL from stdout
         output = result.stdout.strip()
         repo_url = output.split("\n")[-1].strip()

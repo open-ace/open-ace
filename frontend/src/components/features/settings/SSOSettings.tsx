@@ -71,9 +71,12 @@ export const SSOSettings: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   // SSO settings state (sso_enabled is system-level, autoProvision is tenant-level)
-  const [ssoEnabled, setSsoEnabled] = useState(false);
+  // Use three-state for ssoEnabled: null = loading, true/false = loaded
+  const [ssoEnabled, setSsoEnabled] = useState<boolean | null>(null);
+  const [ssoLoadError, setSsoLoadError] = useState<string | null>(null);
   const [autoProvision, setAutoProvision] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const isMountedRef = useRef(true);
 
   const [showModal, setShowModal] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
@@ -165,17 +168,31 @@ export const SSOSettings: React.FC = () => {
     }
   }, [effectiveTenantId]);
 
+  // Cleanup ref on unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Fetch system-level SSO setting
   useEffect(() => {
     systemApi
       .getSSOEnabled()
       .then(({ sso_enabled }) => {
-        setSsoEnabled(sso_enabled);
+        if (isMountedRef.current) {
+          setSsoEnabled(sso_enabled);
+          setSsoLoadError(null);
+        }
       })
       .catch((err) => {
         console.error('Failed to fetch system settings:', err);
+        if (isMountedRef.current) {
+          setSsoLoadError(t('failedToLoadSSOSettings', language));
+        }
       });
-  }, []);
+  }, [language]);
 
   // Fetch tenant settings
   useEffect(() => {
@@ -227,6 +244,12 @@ export const SSOSettings: React.FC = () => {
       return;
     }
 
+    // Prevent saving if SSO setting is not loaded yet
+    if (ssoEnabled === null) {
+      toastError(t('ssoSettingNotLoaded', language));
+      return;
+    }
+
     setIsSaving(true);
     try {
       // Save system-level SSO setting
@@ -235,10 +258,28 @@ export const SSOSettings: React.FC = () => {
       await tenantApi.updateSettings(effectiveTenantId, {
         auto_provision_users: autoProvision,
       });
+
+      // Read-after-write verification: verify the saved value matches
+      const { sso_enabled: verifiedValue } = await systemApi.getSSOEnabled();
+      if (verifiedValue !== ssoEnabled) {
+        // Value mismatch - restore server value and show error
+        setSsoEnabled(verifiedValue);
+        toastError(t('ssoSettingVerificationFailed', language));
+        return;
+      }
+
       success(t('settingsSaved', language));
     } catch (err) {
       console.error('Failed to save SSO settings:', err);
       toastError(t('saveFailed', language));
+
+      // On error, re-fetch the current value from server
+      try {
+        const { sso_enabled: serverValue } = await systemApi.getSSOEnabled();
+        setSsoEnabled(serverValue);
+      } catch {
+        // Ignore re-fetch errors
+      }
     } finally {
       setIsSaving(false);
     }
@@ -471,7 +512,7 @@ export const SSOSettings: React.FC = () => {
         </Card>
       )}
 
-      {/* Global SSO Setting - Issue #2128 */}
+{/* Global SSO Setting - Issue #2128 */}
       <Card className="mb-4">
         <div className="d-flex align-items-center mb-3">
           <i className="bi bi-globe fs-4 me-2 text-primary" />
@@ -483,7 +524,8 @@ export const SSOSettings: React.FC = () => {
             type="checkbox"
             id="ssoEnabled"
             aria-describedby="globalSSODesc"
-            checked={ssoEnabled}
+            checked={ssoEnabled ?? false}
+            disabled={ssoEnabled === null || isSaving}
             onChange={(e) => setSsoEnabled(e.target.checked)}
           />
           <label className="form-check-label" htmlFor="ssoEnabled">
@@ -501,6 +543,12 @@ export const SSOSettings: React.FC = () => {
           <div className="alert alert-warning py-2 mb-2" role="alert">
             <i className="bi bi-exclamation-triangle me-1" />
             {t('globalSSOWarning', language)}
+          </div>
+        )}
+        {ssoLoadError && (
+          <div className="alert alert-warning mt-2 py-1 px-2 small">
+            <i className="bi bi-exclamation-triangle me-1" />
+            {ssoLoadError}
           </div>
         )}
         <div className="mt-2">
@@ -521,6 +569,7 @@ export const SSOSettings: React.FC = () => {
               }
             }}
             loading={isSaving}
+            disabled={ssoEnabled === null}
           >
             <i className="bi bi-check-lg me-1" />
             {t('save', language)}
@@ -528,10 +577,47 @@ export const SSOSettings: React.FC = () => {
         </div>
       </Card>
 
-      {/* Tenant-level SSO Settings */}
+      {/* SSO Configuration Form */}
       <Card title={t('ssoConfiguration', language)} className="mb-4">
         <form className="sso-form" onSubmit={handleSaveSettings}>
           <div className="row g-3">
+            <div className="col-md-6">
+              <div className="form-check form-switch">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="ssoEnabled"
+                  name="system_sso_enabled"
+                  autoComplete="off"
+                  aria-describedby="ssoEnabledDesc"
+                  checked={ssoEnabled ?? false}
+                  disabled={ssoEnabled === null || isSaving}
+                  onChange={(e) => setSsoEnabled(e.target.checked)}
+                />
+                <label className="form-check-label" htmlFor="ssoEnabled">
+                  {t('enableSSO', language)}
+                  {ssoEnabled === null && (
+                    <span className="ms-2 text-muted">
+                      <i className="bi bi-arrow-repeat spinner-border spinner-border-sm" />
+                      {t('loading', language)}
+                    </span>
+                  )}
+                </label>
+                <span id="ssoEnabledDesc" className="visually-hidden">
+                  {t('ssoEnabledDesc', language)}
+                </span>
+              </div>
+              {ssoLoadError && (
+                <div className="alert alert-warning mt-2 py-1 px-2 small">
+                  <i className="bi bi-exclamation-triangle me-1" />
+                  {ssoLoadError}
+                </div>
+              )}
+              <small className="text-muted d-block mt-1">
+                <i className="bi bi-info-circle me-1" />
+                {t('ssoSystemSettingHint', language)}
+              </small>
+            </div>
             <div className="col-md-6">
               <div className="form-check form-switch">
                 <input

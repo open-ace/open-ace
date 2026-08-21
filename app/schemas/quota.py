@@ -345,6 +345,8 @@ def validate_tenant_allocation(
     # Calculate currently allocated quota (excluding current user)
     # Each quota field handles NULL values independently using conditional aggregation
     # Token quotas are stored in M units
+    # Filter by deleted_at IS NULL to exclude soft-deleted users
+    # This ensures consistency with get_all_users() which uses the same filter
     allocated_row = db.fetch_one(
         f"""
         SELECT
@@ -355,6 +357,7 @@ def validate_tenant_allocation(
         FROM users
         WHERE tenant_id = ?
           AND {adapt_boolean_condition('is_active', True)}
+          AND deleted_at IS NULL
           AND (id IS NULL OR id != ?)
     """,
         (tenant_id, user_id or 0),

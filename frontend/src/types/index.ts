@@ -334,6 +334,7 @@ export interface ButtonProps extends BaseComponentProps {
   loading?: boolean;
   onClick?: (e?: React.MouseEvent<HTMLButtonElement>) => void;
   type?: 'button' | 'submit' | 'reset';
+  form?: string;
   children: React.ReactNode;
   icon?: React.ReactNode;
   fullWidth?: boolean;

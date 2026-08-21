@@ -160,7 +160,9 @@ class ApiClient {
             const contentType = response.headers.get('content-type');
             if (contentType?.includes('application/json')) {
               const errorData = await response.json();
-              error.message = errorData.error ?? errorData.message ?? error.message;
+              // Prioritize message (specific) over error (generic)
+              // e.g., "Tenant daily request quota exceeded" over "Tenant quota exceeded"
+              error.message = errorData.message ?? errorData.error ?? error.message;
               error.code = errorData.code;
               error.details = errorData.details;
             } else {

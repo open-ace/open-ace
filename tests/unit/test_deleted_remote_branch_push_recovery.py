@@ -4,7 +4,7 @@ import pytest
 
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
 
-pytestmark = [pytest.mark.regression, pytest.mark.issue(2870)]
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2870), pytest.mark.issue(2930)]
 
 
 def _result(returncode: int, stderr: str = "", stdout: str = "") -> MagicMock:
@@ -44,6 +44,43 @@ class TestDeletedRemoteBranchPushRecovery:
         assert "push" in cmds[2]
         assert "auto-dev/abc12345" in cmds[2]
         assert "--force-with-lease" not in cmds[2]
+
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_stale_info_with_zh_cn_missing_remote_ref_plain_pushes(self, mock_run, caplog):
+        """#2930: the production server runs git under a zh_CN locale, where the
+        missing-ref fetch failure is localized ("致命错误：无法找到远程引用").
+        The English-only keyword list skipped the plain-push recovery, so the
+        workflow burned all transient retries on a deterministic failure (#322,
+        #340). The zh_CN message must take the same recovery path."""
+        import logging
+
+        push_fail = _result(
+            1,
+            stderr=(
+                "To https://github.com/open-ace/open-ace.git\n"
+                " ! [rejected] auto-dev/abc12345 -> auto-dev/abc12345 (stale info)\n"
+            ),
+        )
+        fetch_missing = _result(
+            128,
+            stderr="致命错误：无法找到远程引用 auto-dev/abc12345\n",
+        )
+        plain_push_ok = _result(
+            0, stderr=" * [new branch] auto-dev/abc12345 -> auto-dev/abc12345\n"
+        )
+        mock_run.side_effect = [push_fail, fetch_missing, plain_push_ok]
+
+        with caplog.at_level(logging.WARNING, logger="app.modules.workspace.autonomous.github_ops"):
+            self.gh.git_push(branch="auto-dev/abc12345", force_with_lease=True)
+
+        cmds = [call_args[0][0] for call_args in mock_run.call_args_list]
+        assert "fetch" in cmds[1]
+        assert "auto-dev/abc12345" in cmds[1]
+        assert "push" in cmds[2]
+        assert "auto-dev/abc12345" in cmds[2]
+        assert "--force-with-lease" not in cmds[2]
+        # The recovery branch (not a bypass) produced the plain push.
+        assert "plain-pushing validated auto-dev branch to recreate it" in caplog.text
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_stale_info_with_fetch_success_keeps_force_with_lease_retry(self, mock_run):
