@@ -201,7 +201,7 @@ class TestTLSHandshakeWithMockedSocket:
             with patch("ssl.SSLContext.wrap_socket", capturing_wrap):
                 try:
                     conn.connect()
-                except Exception:
+                except Exception:  # allow-swallow: test framework error handling
                     # Ignore connection errors, we just want to capture the parameter
                     pass
 

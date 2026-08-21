@@ -193,7 +193,7 @@ class TestRealTLSHandshake:
                 with patch("ssl.SSLContext.wrap_socket", capture_wrap_socket):
                     try:
                         _ = notifier._post_webhook_secure(_create_test_alert(), prefs)
-                    except Exception:
+                    except Exception:  # allow-swallow: test framework error handling
                         pass
 
                 # Verify SNI was the original domain name, not IP
