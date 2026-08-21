@@ -161,6 +161,7 @@ class TestCreateRemoteDirectoryRoute(unittest.TestCase):
     def test_machine_idle_creates_directory(self):
         """Test that idle status (machine available for new sessions) allows directory creation."""
         mgr = MagicMock()
+        mgr.check_user_access.return_value = True
         mgr.get_machine.return_value = {"status": "idle"}
         mgr.send_command.return_value = True
         mgr.get_browse_result.return_value = {
@@ -183,6 +184,7 @@ class TestCreateRemoteDirectoryRoute(unittest.TestCase):
     def test_machine_busy_creates_directory(self):
         """Test that busy status (machine with active sessions) still allows directory creation."""
         mgr = MagicMock()
+        mgr.check_user_access.return_value = True
         mgr.get_machine.return_value = {"status": "busy"}
         mgr.send_command.return_value = True
         mgr.get_browse_result.return_value = {
