@@ -16,9 +16,9 @@
 #### 2. DNS rebinding 防护测试（通过）
 - `test_dns_rebinding_detection_at_connect_time` - ✅ 验证连接时 DNS rebinding 检测
 - `test_dns_rebinding_to_private_ip_blocked` - ✅ 验证私有 IP 阻止
-- `test_safe_request_blocks_private_network_ssr` - ✅ 验证私有网络阻止
-- `test_safe_request_blocks_loopback` - ✅ 验证 loopback 阻止
-- `test_safe_request_blocks_metadata_endpoint` - ✅ 验证元数据端点阻止
+- `test_safe_request_blocks_non_public_ips[10.0.0.1]` - ✅ 验证私有网络阻止
+- `test_safe_request_blocks_non_public_ips[127.0.0.1]` - ✅ 验证 loopback 阻止
+- `test_safe_request_blocks_non_public_ips[169.254.169.254]` - ✅ 验证元数据端点阻止
 
 #### 3. DeepSeek API 特定测试（通过）
 - `test_deepseek_api_url_validation` - ✅ 验证 DeepSeek API URL 解析为公网 IP
@@ -26,8 +26,8 @@
 
 #### 4. CDN 和边缘场景测试（通过）
 - `test_cdn_ip_rotation_allows_different_public_ips` - ✅ 验证 CDN IP 轮换允许
-- `test_dns_resolution_failure_handling` - ✅ 验证 DNS 解析失败处理
-- `test_dns_resolution_timeout_handling` - ✅ 验证 DNS 解析超时处理
+- `test_dns_resolution_error_handling[DNS resolution failed]` - ✅ 验证 DNS 解析失败处理
+- `test_dns_resolution_error_handling[DNS resolution timeout]` - ✅ 验证 DNS 解析超时处理
 - `test_adapter_unmount_from_shared_session` - ✅ 验证适配器从共享会话卸载
 
 ### 测试执行结果

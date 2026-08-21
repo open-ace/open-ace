@@ -519,31 +519,22 @@ def test_cdn_ip_rotation_allows_different_public_ips():
 
 
 @pytest.mark.security
-def test_dns_resolution_failure_handling():
-    """Test that DNS resolution failures are handled gracefully (Issue #2236)."""
+@pytest.mark.parametrize("error_msg", [
+    "DNS resolution failed",
+    "DNS resolution timeout",
+])
+def test_dns_resolution_error_handling(error_msg):
+    """Test that DNS resolution errors are handled gracefully (Issue #2236).
+
+    This parameterized test covers both failure and timeout scenarios.
+    """
     from app.utils.outbound_url_guard import _PinnedIPAdapter
 
     # Create a resolver that raises an error
-    def failing_resolver(host, port, type=socket.SOCK_STREAM):
-        raise OSError("DNS resolution failed")
+    def error_resolver(host, port, type=socket.SOCK_STREAM):
+        raise OSError(error_msg)
 
-    adapter = _PinnedIPAdapter(allowed_ips=[], resolver=failing_resolver)
-
-    # Should raise OutboundUrlBlockedError with clear message
-    with pytest.raises(OutboundUrlBlockedError, match="DNS resolution failed"):
-        adapter._check_resolved_ip("https://example.com/test")
-
-
-@pytest.mark.security
-def test_dns_resolution_timeout_handling():
-    """Test that DNS resolution timeouts are handled gracefully (Issue #2236)."""
-    from app.utils.outbound_url_guard import _PinnedIPAdapter
-
-    # Create a resolver that raises a timeout error
-    def timeout_resolver(host, port, type=socket.SOCK_STREAM):
-        raise OSError("DNS resolution timeout")
-
-    adapter = _PinnedIPAdapter(allowed_ips=[], resolver=timeout_resolver)
+    adapter = _PinnedIPAdapter(allowed_ips=[], resolver=error_resolver)
 
     # Should raise OutboundUrlBlockedError with clear message
     with pytest.raises(OutboundUrlBlockedError, match="DNS resolution failed"):
@@ -585,45 +576,25 @@ def test_adapter_unmount_from_shared_session():
 
 
 @pytest.mark.security
-def test_safe_request_blocks_private_network_ssr():
-    """Test that safe_request blocks requests to private networks (Issue #2236)."""
+@pytest.mark.parametrize("ip_addr,description", [
+    ("10.0.0.1", "private network"),
+    ("127.0.0.1", "loopback"),
+    ("169.254.169.254", "metadata endpoint"),
+])
+def test_safe_request_blocks_non_public_ips(ip_addr, description):
+    """Test that safe_request blocks requests to non-public IPs (Issue #2236).
+
+    This parameterized test covers private networks, loopback addresses, and metadata endpoints.
+    """
     from app.utils.outbound_url_guard import safe_request
 
-    # Mock resolver to return a private IP
-    def private_resolver(host, port, type=socket.SOCK_STREAM):
-        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", port))]
+    # Mock resolver to return a non-public IP
+    def non_public_resolver(host, port, type=socket.SOCK_STREAM):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip_addr, port))]
 
     # Should raise OutboundUrlBlockedError
     with pytest.raises(OutboundUrlBlockedError, match="non-public"):
-        safe_request("GET", "https://example.com/test", resolver=private_resolver)
-
-
-@pytest.mark.security
-def test_safe_request_blocks_loopback():
-    """Test that safe_request blocks requests to loopback addresses (Issue #2236)."""
-    from app.utils.outbound_url_guard import safe_request
-
-    # Mock resolver to return a loopback IP
-    def loopback_resolver(host, port, type=socket.SOCK_STREAM):
-        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
-
-    # Should raise OutboundUrlBlockedError
-    with pytest.raises(OutboundUrlBlockedError, match="non-public"):
-        safe_request("GET", "https://example.com/test", resolver=loopback_resolver)
-
-
-@pytest.mark.security
-def test_safe_request_blocks_metadata_endpoint():
-    """Test that safe_request blocks requests to metadata endpoints (Issue #2236)."""
-    from app.utils.outbound_url_guard import safe_request
-
-    # Mock resolver to return metadata IP
-    def metadata_resolver(host, port, type=socket.SOCK_STREAM):
-        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", port))]
-
-    # Should raise OutboundUrlBlockedError
-    with pytest.raises(OutboundUrlBlockedError, match="non-public"):
-        safe_request("GET", "https://metadata.google.internal/test", resolver=metadata_resolver)
+        safe_request("GET", "https://example.com/test", resolver=non_public_resolver)
 
 
 # ── Issue #2236: Performance Tests ───────────────────────────────────────────────
