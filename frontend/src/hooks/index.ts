@@ -139,3 +139,10 @@ export {
   AUDIT_CATEGORIES_FALLBACK,
 } from './useAuditActions';
 export type { AuditActionItem, AuditCategory, AuditActionsResponse } from '@/types';
+
+// Safe workspace state hook (Issue #2953)
+export {
+  useSafeWorkspaceState,
+  validateActiveTabId,
+  validateTabsOrder,
+} from './useSafeWorkspaceState';

@@ -3,7 +3,8 @@
   "baseline_runbook": "docs/TEST_LAYERS.md#baseline",
   "toolchain": {
     "production_python": "3.11",
-    "compatibility_python": ["3.10", "3.14"],
+    "min_python": "3.10",
+    "compatibility_python": ["3.12", "3.14"],
     "node": "20",
     "runner": "ubuntu-24.04"
   },
@@ -18,7 +19,8 @@
     "legacy-pr",
     "package",
     "postgres",
-    "python-core"
+    "python-core",
+    "python-min"
   ],
   "suites": {
     "default-collection": {
@@ -61,6 +63,14 @@
       "commands": [
         ["{python}", "-m", "pytest", "tests/", "-q", "--maxfail=1", "--cov=scripts/shared", "--cov=app/auth", "--cov=app/remote_ws_handler", "--cov=app/modules/sso", "--cov=app/routes", "--cov=app/services", "--cov-fail-under=47", "--cov-report=term", "--cov-report=xml", "-m", "not postgres and not performance"],
         ["{python}", "scripts/scan_test_false_positives.py", "tests", "--exclude-dirs", "tests/issues", "--baseline", ".false-positive-baseline.json"]
+      ]
+    },
+    "python-min": {
+      "description": "compileall + full unit suite on the minimum supported Python (catches version-specific regressions on the oldest interpreter; #2868)",
+      "timeout_seconds": 420,
+      "commands": [
+        ["{python}", "-m", "compileall", "-q", "app", "scripts", "cli.py", "server.py"],
+        ["{python}", "-m", "pytest", "tests/unit/", "-q", "--maxfail=1", "-m", "not postgres and not performance"]
       ]
     },
     "compatibility-smoke": {

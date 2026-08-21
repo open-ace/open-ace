@@ -180,7 +180,7 @@ def select_pr_suites(changed_files: list[str]) -> list[str]:
     """Select coarse, fail-safe PR lanes from repository-relative paths."""
     clean = sorted({path.strip().lstrip("./") for path in changed_files if path.strip()})
     if not clean:
-        return ["default-collection", "issue-collection", "legacy-pr", "python-core"]
+        return ["default-collection", "issue-collection", "legacy-pr", "python-core", "python-min"]
 
     policy_change = any(matches(path, POLICY_PATTERNS) for path in clean)
     docs_only = all(matches(path, DOC_PATTERNS) for path in clean)
@@ -189,7 +189,17 @@ def select_pr_suites(changed_files: list[str]) -> list[str]:
 
     # Collection is cheap (~2s) and catches legacy imports broken by product
     # changes, so both baselines accompany every non-documentation PR.
-    selected = {"default-collection", "issue-collection", "legacy-pr", "python-core"}
+    # python-min runs the full unit suite on the minimum supported interpreter
+    # for every code change (#2868): version-specific regressions surface on the
+    # oldest Python first (e.g. datetime.fromisoformat rejecting 'Z' before
+    # 3.11), and it is unit-only so it stays fast and deterministic.
+    selected = {
+        "default-collection",
+        "issue-collection",
+        "legacy-pr",
+        "python-core",
+        "python-min",
+    }
     if policy_change:
         selected.update(load_config()["pr_suites"])
         return sorted(selected)
