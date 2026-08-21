@@ -25,6 +25,9 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 )
 
+# Issue #2114: Import additional test helpers
+import logging
+
 from playwright.sync_api import sync_playwright
 
 from tests.e2e.browser.test_helpers import (
@@ -35,9 +38,6 @@ from tests.e2e.browser.test_helpers import (
     navigate_to,
     save_screenshot,
 )
-
-# Issue #2114: Import additional test helpers
-import logging
 
 logger = logging.getLogger(__name__)
 
