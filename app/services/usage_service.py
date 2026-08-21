@@ -101,21 +101,67 @@ class UsageService:
         end_date: str | None = None,
         tenant_id: int | None = None,
     ) -> dict[str, dict]:
-        """
-        Get usage summary for all tools.
+        """Get usage summary for all tools, merging daily_messages and agent_sessions.
+
+        Issue #2938: /api/summary previously only queried daily_messages, missing
+        local WebUI session data. Now merges daily_messages (CLI fetch scripts,
+        excluding session_sync dual-write) with agent_sessions (WebUI local/remote/
+        terminal sessions).
 
         Args:
             host_name: Optional host name filter.
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            tenant_id: Optional tenant ID filter.
 
         Returns:
             Dict[str, Dict]: Summary data keyed by tool name.
         """
-        return self.usage_repo.get_summary_by_tool(
+        dm_summary = self.usage_repo.get_summary_by_tool(
             host_name=host_name,
             start_date=start_date,
             end_date=end_date,
             tenant_id=tenant_id,
         )
+
+        session_summary = self.usage_repo.get_session_summary_by_tool(
+            start_date=start_date,
+            end_date=end_date,
+            host_name=host_name,
+            tenant_id=tenant_id,
+        )
+
+        merged: dict[str, dict] = {}
+        for source in (dm_summary, session_summary):
+            for tool, data in source.items():
+                if tool not in merged:
+                    merged[tool] = {
+                        "days_count": 0,
+                        "total_tokens": 0,
+                        "avg_tokens": 0,
+                        "total_requests": 0,
+                        "total_input_tokens": 0,
+                        "total_output_tokens": 0,
+                        "first_date": None,
+                        "last_date": None,
+                    }
+                m = merged[tool]
+                m["total_tokens"] += data["total_tokens"] or 0
+                m["total_requests"] += data["total_requests"] or 0
+                m["total_input_tokens"] += data["total_input_tokens"] or 0
+                m["total_output_tokens"] += data["total_output_tokens"] or 0
+                m["days_count"] += data["days_count"] or 0
+                if data.get("first_date"):
+                    if not m["first_date"] or data["first_date"] < m["first_date"]:
+                        m["first_date"] = data["first_date"]
+                if data.get("last_date"):
+                    if not m["last_date"] or data["last_date"] > m["last_date"]:
+                        m["last_date"] = data["last_date"]
+
+        for m in merged.values():
+            m["avg_tokens"] = round(m["total_tokens"] / max(m["days_count"], 1), 2)
+
+        return merged
 
     @cached(ttl=60, key_prefix="usage", skip_args=[0])
     def get_tool_usage(
