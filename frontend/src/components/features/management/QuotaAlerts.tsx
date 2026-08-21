@@ -31,6 +31,7 @@ import {
 } from '@/components/common';
 import { useConfirm } from '@/components/common';
 import { formatTokens, formatDateTime, formatNumber, createMatcherConfig } from '@/utils';
+import { parseApiError } from '@/utils/error';
 import { QuotaType, TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
 import {
   parseAndValidateQuota,
@@ -297,11 +298,77 @@ export const QuotaAlerts: React.FC = () => {
       handleCloseQuotaModal();
     } catch (err) {
       console.error('Failed to update quota:', err);
-      const errorMessage =
-        err && typeof err === 'object' && 'message' in err
-          ? String((err as { message: string }).message)
-          : t('error', language);
-      toast.error(t('error', language), errorMessage);
+      const errorDetail = parseApiError(err);
+
+      // Build detailed error message
+      let detailedMessage = errorDetail.message;
+
+      // If details available, add specific information
+      if (errorDetail.details && typeof errorDetail.details === 'object') {
+        const details = errorDetail.details as {
+          quota_type?: string;
+          tenant_limit?: number;
+          currently_allocated?: number;
+          available?: Record<string, number>;
+          suggestion?: string;
+        };
+
+        const detailParts: string[] = [];
+
+        if (details.quota_type) {
+          const quotaTypeMap: Record<string, string> = {
+            daily_request: language === 'zh' ? '每日请求配额' : 'Daily request quota',
+            daily_token: language === 'zh' ? '每日Token配额' : 'Daily token quota',
+            monthly_request: language === 'zh' ? '每月请求配额' : 'Monthly request quota',
+            monthly_token: language === 'zh' ? '每月Token配额' : 'Monthly token quota',
+          };
+          const quotaTypeLabel = quotaTypeMap[details.quota_type] || details.quota_type;
+          detailParts.push(
+            language === 'zh' ? `类型: ${quotaTypeLabel}` : `Type: ${quotaTypeLabel}`
+          );
+        }
+
+        if (details.tenant_limit !== undefined) {
+          detailParts.push(
+            language === 'zh'
+              ? `租户限额: ${details.tenant_limit.toLocaleString()}`
+              : `Tenant limit: ${details.tenant_limit.toLocaleString()}`
+          );
+        }
+
+        if (details.currently_allocated !== undefined) {
+          detailParts.push(
+            language === 'zh'
+              ? `已分配: ${details.currently_allocated.toLocaleString()}`
+              : `Allocated: ${details.currently_allocated.toLocaleString()}`
+          );
+        }
+
+        if (
+          details.available &&
+          details.quota_type &&
+          details.available[details.quota_type] !== undefined
+        ) {
+          const availableValue = details.available[details.quota_type];
+          detailParts.push(
+            language === 'zh'
+              ? `可用余量: ${availableValue.toLocaleString()}`
+              : `Available: ${availableValue.toLocaleString()}`
+          );
+        }
+
+        if (details.suggestion) {
+          detailParts.push(
+            language === 'zh' ? `建议: ${details.suggestion}` : `Suggestion: ${details.suggestion}`
+          );
+        }
+
+        if (detailParts.length > 0) {
+          detailedMessage += '\n' + detailParts.join('\n');
+        }
+      }
+
+      toast.error(t('error', language), detailedMessage);
     }
   };
 
