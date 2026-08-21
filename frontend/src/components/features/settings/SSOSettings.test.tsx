@@ -253,7 +253,9 @@ describe('SSOSettings Accessibility', () => {
       render(<SSOSettings />);
 
       // Issue #2128: The global SSO Enable checkbox
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
       expect(ssoEnabledInput).toHaveAttribute('aria-describedby', 'globalSSODesc');
     });
 
@@ -270,7 +272,9 @@ describe('SSOSettings Accessibility', () => {
     it('should reference valid description element IDs', async () => {
       render(<SSOSettings />);
 
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
       const ssoDescId = ssoEnabledInput.getAttribute('aria-describedby');
       const ssoDescElement = document.getElementById(ssoDescId || '');
       expect(ssoDescElement).toBeInTheDocument();
@@ -289,7 +293,7 @@ describe('SSOSettings Accessibility', () => {
       render(<SSOSettings />);
 
       const ssoDescElement = await screen.findByText(
-        /Enable SSO login for users through configured providers/i
+        /Control whether SSO login is available on the login page/i
       );
       expect(ssoDescElement).toHaveClass('visually-hidden');
     });
@@ -307,11 +311,11 @@ describe('SSOSettings Accessibility', () => {
       const { container } = render(<SSOSettings />);
 
       // Wait for checkboxes to be rendered
-      await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      await screen.findByRole('checkbox', { name: /Enable Global SSO Login/i });
 
-      const ssoDescElement = container.querySelector('#ssoEnabledDesc');
+      const ssoDescElement = container.querySelector('#globalSSODesc');
       expect(ssoDescElement).toBeInTheDocument();
-      expect(ssoDescElement?.id).toBe('ssoEnabledDesc');
+      expect(ssoDescElement?.id).toBe('globalSSODesc');
 
       const autoDescElement = container.querySelector('#autoProvisionDesc');
       expect(autoDescElement).toBeInTheDocument();
@@ -323,7 +327,9 @@ describe('SSOSettings Accessibility', () => {
     it('should render checkboxes with correct initial state', async () => {
       render(<SSOSettings />);
 
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
       expect(ssoEnabledInput).not.toBeChecked();
 
       const autoProvisionInput = await screen.findByRole('checkbox', {
@@ -335,7 +341,9 @@ describe('SSOSettings Accessibility', () => {
     it('should toggle SSO checkbox on click', async () => {
       render(<SSOSettings />);
 
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
       fireEvent.click(ssoEnabledInput);
       expect(ssoEnabledInput).toBeChecked();
 
@@ -386,7 +394,9 @@ describe('SSOSettings Accessibility', () => {
     it('should have labels properly associated with inputs', async () => {
       render(<SSOSettings />);
 
-      const ssoEnabledInput = await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      const ssoEnabledInput = await screen.findByRole('checkbox', {
+        name: /Enable Global SSO Login/i,
+      });
       expect(ssoEnabledInput).toHaveAttribute('id', 'ssoEnabled');
 
       const autoProvisionInput = await screen.findByRole('checkbox', {
@@ -401,12 +411,12 @@ describe('SSOSettings Accessibility', () => {
       const { container } = render(<SSOSettings />);
 
       // Wait for checkboxes to be rendered
-      await screen.findByRole('checkbox', { name: /Enable SSO/i });
+      await screen.findByRole('checkbox', { name: /Enable Global SSO Login/i });
 
       // The description span should be in the DOM after the label
       const formCheckDivs = container.querySelectorAll('.form-check');
-      // Issue #2128: Now there are 3 form-check elements (global SSO + tenant settings)
-      expect(formCheckDivs.length).toBe(3);
+      // Issue #2128: Now there are 2 form-check elements (global SSO + auto provision)
+      expect(formCheckDivs.length).toBe(2);
 
       formCheckDivs.forEach((div) => {
         const input = div.querySelector('input');
