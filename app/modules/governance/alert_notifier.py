@@ -336,26 +336,11 @@ class _PinnedHTTPSConnection(urllib3.connection.HTTPSConnection):
             original_hostname: The original hostname to use for TLS SNI.
             **kwargs: Additional arguments passed to parent class.
         """
-        self._original_hostname = original_hostname
+        # Use server_hostname parameter for TLS SNI (urllib3 2.x native support)
+        # This is the safe way to set SNI without modifying self.host
+        if original_hostname:
+            kwargs["server_hostname"] = original_hostname
         super().__init__(host, port, **kwargs)
-
-    def connect(self) -> None:
-        """Connect to the server, using original hostname for TLS SNI."""
-        # Override server_hostname for TLS SNI before connecting
-        # In urllib3 2.x, we need to set this before the SSL handshake
-        if self._original_hostname:
-            # Temporarily set host to original hostname for TLS SNI
-            # This is safe because the actual socket connection will use
-            # the IP address (which is set via the connection parameters)
-            original_host = self.host
-            try:
-                self.host = self._original_hostname
-                super().connect()
-            finally:
-                # Restore the original host
-                self.host = original_host
-        else:
-            super().connect()
 
 
 class _PinnedHTTPSConnectionPool(urllib3.HTTPSConnectionPool):
@@ -386,28 +371,33 @@ class _PinnedHTTPSConnectionPool(urllib3.HTTPSConnectionPool):
         super().__init__(host, port, **kwargs)
 
     def _new_conn(self) -> _PinnedHTTPSConnection:
-        """Create a new connection with correct TLS SNI hostname."""
+        """Create a new connection with correct TLS SNI hostname.
+
+        Note: This overrides an internal urllib3 API. The attributes used here
+        (source_address, socket_options, _tunnel_host, _tunnel_port) are stable
+        in urllib3 2.x as of version 2.0.0. We use getattr with None defaults
+        to gracefully handle cases where attributes might not be set.
+
+        Issue #2883: Required to pass original_hostname through the connection stack.
+        """
         # Create connection with original hostname
         # Build connection kwargs from pool attributes
+        # Use getattr to safely access attributes that might not be initialized
         conn_kwargs = {
             "host": self.host,
             "port": self.port,
             "original_hostname": self._original_hostname,
             "timeout": self.timeout,
+            "source_address": getattr(self, "source_address", None),
+            "socket_options": getattr(self, "socket_options", None),
         }
-        # Add optional attributes if they exist
-        if hasattr(self, "source_address"):
-            conn_kwargs["source_address"] = self.source_address
-        if hasattr(self, "socket_options"):
-            conn_kwargs["socket_options"] = self.socket_options
 
         conn = self.ConnectionCls(**conn_kwargs)
 
-        # Set additional attributes from pool
-        if hasattr(self, "_tunnel_host"):
-            conn._tunnel_host = getattr(self, "_tunnel_host", None)
-        if hasattr(self, "_tunnel_port"):
-            conn._tunnel_port = getattr(self, "_tunnel_port", None)
+        # Set proxy tunnel attributes if present
+        # These are used for CONNECT proxy support
+        conn._tunnel_host = getattr(self, "_tunnel_host", None)
+        conn._tunnel_port = getattr(self, "_tunnel_port", None)
 
         return conn
 
@@ -451,10 +441,7 @@ class _PinnedPoolManager(urllib3.PoolManager):
             # Create HTTPS pool with original hostname
             # Remove 'host' and 'port' from request_context if present
             # (they're passed as positional args and would cause duplicate)
-            pool_kwargs = {
-                k: v for k, v in request_context.items()
-                if k not in ("host", "port")
-            }
+            pool_kwargs = {k: v for k, v in request_context.items() if k not in ("host", "port")}
             return _PinnedHTTPSConnectionPool(
                 host,
                 port,

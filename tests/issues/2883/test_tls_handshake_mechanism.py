@@ -61,8 +61,8 @@ class TestTLSHandshakeMechanism:
 
         # Connection should have the IP as host
         assert conn.host == "93.184.216.34"
-        # But should have original hostname stored
-        assert conn._original_hostname == "example.com"
+        # But should have server_hostname set for TLS SNI
+        assert conn.server_hostname == "example.com"
 
     def test_pinned_connection_pool_creates_correct_connection(self):
         """Verify that _PinnedHTTPSConnectionPool creates connections with correct TLS SNI (Issue #2883)."""
@@ -77,8 +77,8 @@ class TestTLSHandshakeMechanism:
 
         # Verify connection type
         assert isinstance(conn, _PinnedHTTPSConnection)
-        # Verify original hostname is passed
-        assert conn._original_hostname == "example.com"
+        # Verify server_hostname is set for TLS SNI
+        assert conn.server_hostname == "example.com"
 
     def test_pinned_pool_manager_creates_https_pool(self):
         """Verify that _PinnedPoolManager creates HTTPS pools with correct settings (Issue #2883)."""
@@ -146,25 +146,28 @@ class TestTLSHandshakeMechanism:
             original_hostname="example.com",
         )
 
-        # Mock the parent connect method
-        original_host_values = []
-
-        def mock_super_connect(self):
-            original_host_values.append(self.host)
-            # Simulate successful connection
-            self.sock = MagicMock()
-
-        with patch.object(
-            urllib3.connection.HTTPSConnection,
-            "connect",
-            mock_super_connect,
-        ):
-            conn.connect()
-
-        # Should have temporarily used original hostname for TLS
-        assert "example.com" in original_host_values
-        # After connect, host should be restored
+        # With the new implementation, server_hostname is set during __init__
+        # via the server_hostname parameter of HTTPSConnection
+        # No need to temporarily modify self.host
+        assert conn.server_hostname == "example.com"
         assert conn.host == "93.184.216.34"
+
+        # Verify that connect() uses the correct server_hostname
+        # by mocking the connection to avoid real network calls
+        with patch.object(conn, "_new_conn") as mock_new_conn:
+            # Create a mock socket
+            mock_sock = MagicMock()
+            mock_new_conn.return_value = mock_sock
+
+            # Also mock ssl.SSLContext.wrap_socket to capture server_hostname
+            with patch("ssl.SSLContext.wrap_socket") as mock_wrap:
+                mock_wrap.return_value = MagicMock()
+
+                conn.connect()
+
+                # Verify wrap_socket was called with correct server_hostname
+                call_kwargs = mock_wrap.call_args[1]
+                assert call_kwargs.get("server_hostname") == "example.com"
 
 
 class TestTLSHandshakeWithMockedSocket:

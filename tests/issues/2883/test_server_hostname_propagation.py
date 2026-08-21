@@ -83,7 +83,8 @@ class TestServerHostnamePropagation:
 
         # Should be our custom connection
         assert isinstance(conn, _PinnedHTTPSConnection)
-        assert conn._original_hostname == "example.com"
+        # server_hostname is set via HTTPSConnection's server_hostname parameter
+        assert conn.server_hostname == "example.com"
         assert conn.host == "93.184.216.34"
 
     def test_full_stack_propagates_original_hostname(self):
@@ -100,7 +101,8 @@ class TestServerHostnamePropagation:
 
         # Verify connection has correct hostname
         assert isinstance(conn, _PinnedHTTPSConnection)
-        assert conn._original_hostname == "example.com"
+        # server_hostname is set via HTTPSConnection's server_hostname parameter
+        assert conn.server_hostname == "example.com"
         assert conn.host == "93.184.216.34"
 
     def test_post_webhook_secure_passes_original_hostname(self, tmp_path):
