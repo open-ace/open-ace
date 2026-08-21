@@ -5,11 +5,18 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { useAdminTenantStore } from './adminTenantStore';
 import type { User } from '@/types';
 import type { Tenant } from '@/api';
 
-// Mock dependencies
+// Global user state for mock
+let mockCurrentUser: User | null = null;
+
+// Helper to set mock user
+const setMockUser = (user: User | null) => {
+  mockCurrentUser = user;
+};
+
+// Mock dependencies - all mocks must be defined before any imports
 vi.mock('@/utils/permissions', () => ({
   canManageAllTenants: vi.fn((user: User | null) => {
     return user?.role === 'platform_admin' || user?.role === 'admin';
@@ -37,38 +44,42 @@ vi.mock('@/utils/adminTenantStorage', () => ({
   }),
 }));
 
-// Mock useAppStore - need to return a function that works with getState() calls
-const mockUser: User = {
-  id: '123',
-  username: 'testuser',
-  email: 'test@example.com',
-  role: 'platform_admin',
-  tenant_id: 1,
-  createdAt: '2026-01-01',
-};
+// Mock useAppStore - provide getState that uses global mockCurrentUser
+vi.mock('@/store', () => {
+  const mockAppStore = vi.fn(() => ({
+    user: mockCurrentUser,
+  }));
+  // getState returns current mock user state
+  (mockAppStore as any).getState = () => ({ user: mockCurrentUser });
+  return {
+    useAppStore: mockAppStore,
+  };
+});
 
-let currentUser: User | null = mockUser;
-
-const mockAppStore = vi.fn(() => ({
-  user: currentUser,
-}));
-
-// Add getState method to the mock
-(mockAppStore as any).getState = () => ({ user: currentUser });
-
-vi.mock('@/store', () => ({
-  useAppStore: mockAppStore,
-}));
-
-// Import mocked modules
+// Import after mocks are defined
+import { useAdminTenantStore } from './adminTenantStore';
 import { tenantApi } from '@/api';
 import * as storage from '@/utils/adminTenantStorage';
 
 const mockTenantApi = vi.mocked(tenantApi);
 const mockStorage = vi.mocked(storage);
 
+// Helper to create test user
+const createTestUser = (role: User['role'] = 'platform_admin'): User => ({
+  id: '123',
+  username: 'testuser',
+  email: 'test@example.com',
+  role,
+  tenant_id: 1,
+  createdAt: '2026-01-01',
+});
+
 // Helper to create tenant
-const createTenant = (id: number, slug: string, status: 'active' | 'suspended' = 'active'): Tenant => ({
+const createTenant = (
+  id: number,
+  slug: string,
+  status: 'active' | 'suspended' = 'active'
+): Tenant => ({
   id,
   name: `Tenant ${id}`,
   slug,
@@ -89,19 +100,21 @@ describe('AdminTenantStore', () => {
       abortController: null,
       isInitialized: false,
     });
-    currentUser = mockUser;
+    // Reset mock user to platform admin by default
+    setMockUser(createTestUser());
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    setMockUser(null);
   });
 
   describe('initialize', () => {
     it('should not initialize for non-platform-admin users', async () => {
-      currentUser = { ...mockUser, role: 'user' };
+      const user = createTestUser('user');
       const { initialize } = useAdminTenantStore.getState();
 
-      await initialize(currentUser);
+      await initialize(user);
 
       const state = useAdminTenantStore.getState();
       expect(state.tenants).toEqual([]);
@@ -109,12 +122,13 @@ describe('AdminTenantStore', () => {
     });
 
     it('should load tenant list for platform-admin users', async () => {
+      const user = createTestUser();
       const tenants = [createTenant(1, 'default'), createTenant(2, 'tenant-2')];
       mockTenantApi.listTenants.mockResolvedValueOnce({ tenants, count: 2 });
       mockStorage.loadSelection.mockReturnValue(null);
 
       const { initialize } = useAdminTenantStore.getState();
-      await initialize(currentUser);
+      await initialize(user);
 
       const state = useAdminTenantStore.getState();
       expect(state.tenants).toEqual(tenants);
@@ -123,49 +137,53 @@ describe('AdminTenantStore', () => {
     });
 
     it('should restore previous selection from localStorage', async () => {
+      const user = createTestUser();
       const tenants = [createTenant(1, 'default'), createTenant(2, 'tenant-2')];
       mockTenantApi.listTenants.mockResolvedValueOnce({ tenants, count: 2 });
       mockStorage.loadSelection.mockReturnValue(2);
       mockStorage.isTenantAccessible.mockReturnValue(true);
 
       const { initialize } = useAdminTenantStore.getState();
-      await initialize(currentUser);
+      await initialize(user);
 
       const state = useAdminTenantStore.getState();
       expect(state.selectedTenantId).toBe(2);
     });
 
     it('should select default tenant when no previous selection', async () => {
+      const user = createTestUser();
       const tenants = [createTenant(2, 'tenant-2'), createTenant(1, 'default')];
       mockTenantApi.listTenants.mockResolvedValueOnce({ tenants, count: 2 });
       mockStorage.loadSelection.mockReturnValue(null);
       mockStorage.findDefaultTenant.mockReturnValue(tenants[1]);
 
       const { initialize } = useAdminTenantStore.getState();
-      await initialize(currentUser);
+      await initialize(user);
 
       const state = useAdminTenantStore.getState();
       expect(state.selectedTenantId).toBe(1);
     });
 
     it('should keep null when no default tenant exists', async () => {
+      const user = createTestUser();
       const tenants = [createTenant(2, 'tenant-2')];
       mockTenantApi.listTenants.mockResolvedValueOnce({ tenants, count: 1 });
       mockStorage.loadSelection.mockReturnValue(null);
       mockStorage.findDefaultTenant.mockReturnValue(null);
 
       const { initialize } = useAdminTenantStore.getState();
-      await initialize(currentUser);
+      await initialize(user);
 
       const state = useAdminTenantStore.getState();
       expect(state.selectedTenantId).toBeNull();
     });
 
     it('should set error state on load failure', async () => {
+      const user = createTestUser();
       mockTenantApi.listTenants.mockRejectedValueOnce(new Error('Network error'));
 
       const { initialize } = useAdminTenantStore.getState();
-      await initialize(currentUser);
+      await initialize(user);
 
       const state = useAdminTenantStore.getState();
       expect(state.error).toBe('加载租户列表失败，请检查网络连接后重试');
@@ -173,12 +191,13 @@ describe('AdminTenantStore', () => {
     });
 
     it('should call clearOtherUsersData on first login', async () => {
+      const user = createTestUser();
       const tenants = [createTenant(1, 'default')];
       mockTenantApi.listTenants.mockResolvedValueOnce({ tenants, count: 1 });
       mockStorage.loadSelection.mockReturnValue(null);
 
       const { initialize } = useAdminTenantStore.getState();
-      await initialize(currentUser);
+      await initialize(user);
 
       expect(mockStorage.clearOtherUsersData).toHaveBeenCalledWith('123');
     });
@@ -186,13 +205,14 @@ describe('AdminTenantStore', () => {
 
   describe('selectTenant', () => {
     it('should update state and localStorage', async () => {
+      const user = createTestUser();
       // Setup: Load tenants first
       const tenants = [createTenant(1, 'default'), createTenant(2, 'tenant-2')];
       mockTenantApi.listTenants.mockResolvedValueOnce({ tenants, count: 2 });
       mockStorage.loadSelection.mockReturnValue(null);
 
       const { initialize, selectTenant } = useAdminTenantStore.getState();
-      await initialize(currentUser);
+      await initialize(user);
 
       // Select tenant
       selectTenant(2);
@@ -203,12 +223,13 @@ describe('AdminTenantStore', () => {
     });
 
     it('should not select inactive tenant', async () => {
+      const user = createTestUser();
       const tenants = [createTenant(1, 'default'), createTenant(2, 'tenant-2', 'suspended')];
       mockTenantApi.listTenants.mockResolvedValueOnce({ tenants, count: 2 });
       mockStorage.loadSelection.mockReturnValue(null);
 
       const { initialize, selectTenant } = useAdminTenantStore.getState();
-      await initialize(currentUser);
+      await initialize(user);
 
       // Try to select inactive tenant
       selectTenant(2);
@@ -221,12 +242,13 @@ describe('AdminTenantStore', () => {
 
   describe('clearSelection', () => {
     it('should clear state and localStorage', async () => {
+      const user = createTestUser();
       const tenants = [createTenant(1, 'default')];
       mockTenantApi.listTenants.mockResolvedValueOnce({ tenants, count: 1 });
       mockStorage.loadSelection.mockReturnValue(null);
 
       const { initialize, clearSelection } = useAdminTenantStore.getState();
-      await initialize(currentUser);
+      await initialize(user);
 
       clearSelection();
 
@@ -238,11 +260,12 @@ describe('AdminTenantStore', () => {
 
   describe('retry', () => {
     it('should re-initialize after failure', async () => {
+      const user = createTestUser();
       // First call fails
       mockTenantApi.listTenants.mockRejectedValueOnce(new Error('Network error'));
 
       const { initialize, retry } = useAdminTenantStore.getState();
-      await initialize(currentUser);
+      await initialize(user);
 
       const errorState = useAdminTenantStore.getState();
       expect(errorState.error).toBeTruthy();
@@ -262,12 +285,13 @@ describe('AdminTenantStore', () => {
 
   describe('reset', () => {
     it('should reset store to initial state', async () => {
+      const user = createTestUser();
       const tenants = [createTenant(1, 'default')];
       mockTenantApi.listTenants.mockResolvedValueOnce({ tenants, count: 1 });
       mockStorage.loadSelection.mockReturnValue(null);
 
       const { initialize, reset } = useAdminTenantStore.getState();
-      await initialize(currentUser);
+      await initialize(user);
 
       reset();
 

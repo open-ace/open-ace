@@ -16,6 +16,14 @@ vi.mock('@/store', () => ({
 }));
 
 vi.mock('@/hooks', () => ({
+  useAdminTenant: () => ({
+    selectedTenantId: 1,
+    isLoading: false,
+    error: null,
+    selectTenant: vi.fn(),
+    clearSelection: vi.fn(),
+    retry: vi.fn(),
+  }),
   useMachines: vi.fn(() => ({
     data: {
       machines: [

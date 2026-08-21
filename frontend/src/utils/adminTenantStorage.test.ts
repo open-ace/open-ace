@@ -4,7 +4,9 @@
  * Issue #2841: Platform admin tenant selector default behavior optimization
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+/* global DOMException */
+
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import {
   getDeploymentId,
   getStorageKey,
@@ -18,17 +20,16 @@ import {
 } from './adminTenantStorage';
 import type { Tenant } from '@/api';
 
-// Mock import.meta.env
-vi.mock('import.meta', () => ({
-  env: {
-    VITE_DEPLOYMENT_ID: 'test-deployment',
-  },
-}));
-
 describe('AdminTenantStorage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    // Stub environment variable for each test
+    vi.stubEnv('VITE_DEPLOYMENT_ID', 'test-deployment');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   describe('getDeploymentId', () => {
@@ -223,9 +224,18 @@ describe('AdminTenantStorage', () => {
   describe('clearOtherUsersData', () => {
     it('should clear other users data but keep current user data', () => {
       // Set up data for multiple users
-      localStorage.setItem(getStorageKey('123'), JSON.stringify({ version: 1, selectedTenantId: 1 }));
-      localStorage.setItem(getStorageKey('456'), JSON.stringify({ version: 1, selectedTenantId: 2 }));
-      localStorage.setItem(getStorageKey('789'), JSON.stringify({ version: 1, selectedTenantId: 3 }));
+      localStorage.setItem(
+        getStorageKey('123'),
+        JSON.stringify({ version: 1, selectedTenantId: 1 })
+      );
+      localStorage.setItem(
+        getStorageKey('456'),
+        JSON.stringify({ version: 1, selectedTenantId: 2 })
+      );
+      localStorage.setItem(
+        getStorageKey('789'),
+        JSON.stringify({ version: 1, selectedTenantId: 3 })
+      );
 
       clearOtherUsersData('456');
 
