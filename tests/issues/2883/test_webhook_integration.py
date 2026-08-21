@@ -13,11 +13,7 @@ from urllib.parse import urlparse
 
 import pytest
 
-from app.modules.governance.alert_notifier import (
-    Alert,
-    AlertNotifier,
-    NotificationPreference,
-)
+from app.modules.governance.alert_notifier import Alert, AlertNotifier, NotificationPreference
 
 
 def _create_test_alert(severity: str = "warning") -> Alert:
