@@ -107,6 +107,7 @@ vi.mock('@/components/common', () => ({
     disabled,
     variant,
     size,
+    ariaLabel,
   }: {
     children: React.ReactNode;
     onClick?: () => void;
@@ -115,12 +116,14 @@ vi.mock('@/components/common', () => ({
     disabled?: boolean;
     variant?: string;
     size?: string;
+    ariaLabel?: string;
   }) => (
     <button
       type={type || 'button'}
       onClick={onClick}
       disabled={disabled || loading}
       className={`btn btn-${variant || 'primary'} ${size ? `btn-${size}` : ''}`}
+      aria-label={ariaLabel}
     >
       {loading ? 'Loading...' : children}
     </button>
@@ -329,16 +332,25 @@ describe('SSOSettings Accessibility', () => {
       render(<SSOSettings />);
 
       // Issue #2128: Now there are two Save buttons (global SSO and tenant settings)
-      // The tenant settings form has a submit-type Save button
-      // First, wait for the autoProvision checkbox to render (inside the tenant settings form)
-      await screen.findByRole('checkbox', { name: /Auto Provision Users/i });
-
-      // Find all Save buttons
-      const saveButtons = await screen.findAllByRole('button', { name: /Save/i });
+      // Find the tenant settings Save button by its aria-label
+      const tenantSaveButton = await screen.findByRole('button', {
+        name: /Save tenant SSO settings/i,
+      });
 
       // The tenant settings form's Save button should be type="submit"
-      const submitButton = saveButtons.find((btn) => btn.getAttribute('type') === 'submit');
-      expect(submitButton).toBeInTheDocument();
+      expect(tenantSaveButton).toBeInTheDocument();
+      expect(tenantSaveButton).toHaveAttribute('type', 'submit');
+    });
+
+    it('should have global SSO save button', async () => {
+      render(<SSOSettings />);
+
+      // Issue #2128: Check for global SSO Save button
+      const globalSaveButton = await screen.findByRole('button', {
+        name: /Save global SSO setting/i,
+      });
+
+      expect(globalSaveButton).toBeInTheDocument();
     });
 
     it('should have labels properly associated with inputs', async () => {

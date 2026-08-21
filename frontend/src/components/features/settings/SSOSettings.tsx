@@ -507,6 +507,7 @@ export const SSOSettings: React.FC = () => {
           <Button
             variant="primary"
             size="sm"
+            ariaLabel="Save global SSO setting"
             onClick={async () => {
               setIsSaving(true);
               try {
@@ -558,6 +559,7 @@ export const SSOSettings: React.FC = () => {
             <Button
               variant="primary"
               type="submit"
+              ariaLabel="Save tenant SSO settings"
               loading={isSaving}
               disabled={!effectiveTenantId}
             >
