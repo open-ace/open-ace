@@ -147,6 +147,7 @@ def click_preview_button(page):
     if btn.first.is_visible():
         btn.first.click()
         pause(2)
+        return True
 
     check(False, "Preview button not visible")
     return False

@@ -8,6 +8,7 @@ import asyncio
 import os
 
 from playwright.async_api import async_playwright
+from tests.e2e.ui.async_helpers import login_as, open_work_or_assert_unconfigured
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 SCREENSHOT_DIR = os.path.join(
@@ -56,16 +57,11 @@ async def test_create_button_full(
         page.on("console", lambda msg: console_logs.append(f"[{msg.type}] {msg.text[:200]}"))
 
         print("=== 步骤 1: 登录 ===")
-        await page.goto(f"{BASE_URL}/login", wait_until="networkidle")
-        print(f"当前 URL: {page.url}")
-
-        # 填写登录表单
-        await page.fill('input[type="text"]', USERNAME)
-        await page.fill('input[type="password"]', PASSWORD)
-        await page.click('button[type="submit"]')
-
-        # 等待跳转到 work 页面
-        await page.wait_for_url("**/work", timeout=10000)
+        await login_as(page, BASE_URL, USERNAME, PASSWORD)
+        if await open_work_or_assert_unconfigured(page, BASE_URL):
+            print("✓ 默认 Full E2E 环境未配置 workspace，未配置保护可见")
+            await browser.close()
+            return True
         print(f"✓ 登录成功，跳转到: {page.url}")
 
         await page.screenshot(path=os.path.join(SCREENSHOT_DIR, "full_test_01_login.png"))

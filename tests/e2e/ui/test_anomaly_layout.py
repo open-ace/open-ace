@@ -85,7 +85,7 @@ def test_anomaly_detection_layout(
 
             # Step 2: Navigate directly to Anomaly Detection page
             print("\n[Step 2] Navigating to Anomaly Detection page...")
-            page.goto(f"{BASE_URL}manage/analysis/anomaly")
+            page.goto(f"{BASE_URL}/manage/analysis/anomaly")
             page.wait_for_load_state("networkidle")
             time.sleep(3)
             print(f"✓ Anomaly Detection page loaded, current URL: {page.url}")

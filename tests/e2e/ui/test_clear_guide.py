@@ -9,6 +9,7 @@ import sys
 import time
 
 from playwright.async_api import async_playwright
+from tests.e2e.ui.async_helpers import login_as, open_work_or_assert_unconfigured
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,8 +34,9 @@ def log_message(msg):
 async def test_clear_guide(
     ui_screenshot_dir,
 ):  # allow-no-assert: smoke test - visual verification only
-    global SCREENSHOT_DIR
+    global LOG_FILE, SCREENSHOT_DIR
     SCREENSHOT_DIR = ui_screenshot_dir
+    LOG_FILE = os.path.join(SCREENSHOT_DIR, "create_button_log.txt")
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
     with open(LOG_FILE, "w") as f:
@@ -61,11 +63,11 @@ async def test_clear_guide(
 
         # === 登录 ===
         log_message("=== 登录 ===")
-        await page.goto(f"{BASE_URL}/login", wait_until="networkidle")
-        await page.fill('input[type="text"]', USERNAME)
-        await page.fill('input[type="password"]', PASSWORD)
-        await page.click('button[type="submit"]')
-        await page.wait_for_url("**/work", timeout=10000)
+        await login_as(page, BASE_URL, USERNAME, PASSWORD)
+        if await open_work_or_assert_unconfigured(page, BASE_URL):
+            log_message("✓ 默认 Full E2E 环境未配置 workspace，未配置保护可见")
+            await browser.close()
+            return True
         log_message("✓ 登录成功")
 
         # === 打开 Add Project Modal ===

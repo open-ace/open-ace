@@ -606,16 +606,6 @@ def start_server_if_needed(
     if args.server == "reuse":
         raise RuntimeError(f"No healthy Open ACE server found at {args.base_url}")
 
-    initialize_database(env)
-    configure_server_address(env, args.base_url)
-    parsed = urlsplit(args.base_url)
-    host = parsed.hostname
-    port = parsed.port
-    if host is None or port is None:
-        raise ValueError(f"Base URL must include a host and port: {args.base_url}")
-    if can_connect(host, port):
-        raise RuntimeError(f"Port {port} is in use, but {health_url(args.base_url)} is not healthy")
-
     # Issue #2185: Set security mode for test server
     env.setdefault("OPENACE_SECURITY_MODE", "development")
     env.setdefault("FLASK_ENV", "testing")
@@ -627,7 +617,18 @@ def start_server_if_needed(
     env.setdefault("SCHEDULER_HEALTH_MONITOR_ENABLED", "false")
     env.setdefault("DATA_FETCH_ENABLED", "false")
     env.setdefault("HEADLESS", "true")
+    env.setdefault("OPENACE_DEFAULT_ADMIN_MUST_CHANGE_PASSWORD", "false")
     env["BASE_URL"] = args.base_url
+
+    initialize_database(env)
+    configure_server_address(env, args.base_url)
+    parsed = urlsplit(args.base_url)
+    host = parsed.hostname
+    port = parsed.port
+    if host is None or port is None:
+        raise ValueError(f"Base URL must include a host and port: {args.base_url}")
+    if can_connect(host, port):
+        raise RuntimeError(f"Port {port} is in use, but {health_url(args.base_url)} is not healthy")
 
     print(f"Starting Open ACE test server for {args.base_url}")
     log_path = PROJECT_ROOT / "test-results" / f"open-ace-server-{args.category}.log"
@@ -826,12 +827,21 @@ def _run_standalone_targets(
 ) -> list[dict[str, object]]:
     from scripts.e2e.common import failure_fingerprint
 
+    def output_tail(value: str | bytes | None, limit: int = 4000) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            value = value.decode(errors="replace")
+        return value[-limit:]
+
     results: list[dict[str, object]] = []
     for item_id in target_ids:
         script_path = _standalone_script_path(item_id)
         attempt_durations: dict[int, float] = {}
         first_attempt_outcome = "fail"
         final_failure: tuple[str, str, int | None] | None = None
+        final_stdout = ""
+        final_stderr = ""
         passed = False
         for attempt in range(1, reruns + 2):
             started = time.time()
@@ -854,7 +864,9 @@ def _run_standalone_targets(
                         f"{script_path} exited with code {completed.returncode}",
                         completed.returncode,
                     )
-            except subprocess.TimeoutExpired:
+                    final_stdout = output_tail(completed.stdout)
+                    final_stderr = output_tail(completed.stderr)
+            except subprocess.TimeoutExpired as exc:
                 duration = round(time.time() - started, 3)
                 attempt_durations[attempt] = duration
                 final_failure = (
@@ -862,6 +874,8 @@ def _run_standalone_targets(
                     f"{script_path} timed out after {timeout_seconds}s",
                     None,
                 )
+                final_stdout = output_tail(getattr(exc, "stdout", None))
+                final_stderr = output_tail(getattr(exc, "stderr", None))
                 passed = False
             if attempt == 1:
                 first_attempt_outcome = "pass" if passed else "fail"
@@ -889,6 +903,10 @@ def _run_standalone_targets(
             result["message"] = message
             if return_code is not None:
                 result["return_code"] = return_code
+            if final_stdout:
+                result["stdout_tail"] = final_stdout
+            if final_stderr:
+                result["stderr_tail"] = final_stderr
         results.append(result)
     return results
 

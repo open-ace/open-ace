@@ -232,42 +232,31 @@ def test_global_toast_renders_at_root(
 def test_delete_uses_confirm_modal_not_native_dialog(
     page,
 ):  # allow-no-assert: smoke test - visual verification only
-    """Delete opens a styled ConfirmModal, never a native window.confirm.
+    """A destructive action opens a styled ConfirmModal, never window.confirm.
 
-    If no SMTP config exists the Delete button is hidden, so we seed a dummy
-    config first (ensure_smtp_config) to guarantee the path is exercised. A
-    global native-dialog sentinel (registered in run_tests) FAILS the test if
-    any window.confirm/alert fires — proving the migration removed the native
-    dialog — and we assert a Bootstrap .modal-dialog appears and Cancel
-    dismisses it without deleting.
+    The legacy SMTP settings route now redirects to Notification Integration,
+    so use the current Data Retention "Run Cleanup" destructive action and
+    cancel the modal before any cleanup executes.
     """
-    print("\n[TEST] Delete opens ConfirmModal (not native dialog)...")
-    page.goto(f"{BASE_URL}/manage/settings/smtp")
+    print("\n[TEST] Destructive action opens ConfirmModal (not native dialog)...")
+    page.goto(f"{BASE_URL}/manage/compliance")
     pause(2)
 
-    del_btn = page.locator("button").filter(has_text="删除")
-    if not del_btn.first.is_visible():
-        del_btn = page.locator("button").filter(has_text="Delete")
+    retention_tab = page.locator("button, .nav-link").filter(has_text="数据保留")
+    if not retention_tab.first.is_visible():
+        retention_tab = page.locator("button, .nav-link").filter(has_text="Data Retention")
+    if retention_tab.first.is_visible():
+        retention_tab.first.click()
+        pause(1)
 
-    if not del_btn.first.is_visible():
-        # No config -> no Delete button. Seed one so the ConfirmModal path and
-        # the native-dialog sentinel actually run instead of being skipped.
-        if ensure_smtp_config():
-            print("    [SEED] created a dummy SMTP config to exercise the Delete flow")
-            page.goto(f"{BASE_URL}/manage/settings/smtp")
-            pause(2)
-            del_btn = page.locator("button").filter(has_text="删除")
-            if not del_btn.first.is_visible():
-                del_btn = page.locator("button").filter(has_text="Delete")
-
-    if not del_btn.first.is_visible():
-        check(False, "Delete button still absent after seeding; cannot exercise ConfirmModal")
+    destructive_btn = page.locator("button").filter(has_text="运行清理")
+    if not destructive_btn.first.is_visible():
+        destructive_btn = page.locator("button").filter(has_text="Run Cleanup")
+    if not destructive_btn.first.is_visible():
+        check(False, "Run Cleanup button absent; cannot exercise ConfirmModal")
         return
 
-    # A global dialog sentinel is registered in run_tests(): if the migration
-    # regressed and Delete triggered a native window.confirm, that handler sets
-    # native_dialog_fired and dismisses it. Here we just open the confirm.
-    del_btn.first.click()
+    destructive_btn.first.click()
 
     modal = page.locator(".modal-dialog, .modal-content")
     try:
@@ -275,7 +264,7 @@ def test_delete_uses_confirm_modal_not_native_dialog(
         modal_visible = True
     except Exception:  # allow-swallow: UI element may not exist
         modal_visible = False
-    check(modal_visible, "ConfirmModal (.modal-dialog) opened by Delete")
+    check(modal_visible, "ConfirmModal (.modal-dialog) opened by destructive action")
     check(not native_dialog_fired["value"], "No native window.confirm dialog fired")
 
     if modal_visible:

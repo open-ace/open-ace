@@ -20,6 +20,13 @@ if script_dir not in sys.path:
 from shared import db
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
 def create_default_tenant(
     name: str = "Default",
     slug: str = "default",
@@ -131,7 +138,12 @@ def create_default_admin(
         print(f"Admin user '{username}' already exists")
         return (True, False)
 
-    # Create admin user with must_change_password = True (force password change on first login)
+    must_change_password = _env_flag("OPENACE_DEFAULT_ADMIN_MUST_CHANGE_PASSWORD", True)
+
+    # Create admin user with must_change_password = True by default. Extended
+    # E2E sets OPENACE_DEFAULT_ADMIN_MUST_CHANGE_PASSWORD=false so smoke tests
+    # can exercise protected pages without every legacy script reimplementing
+    # the forced-password-change flow.
     # Issue #2286: Use platform_admin role to match the new multi-tenant role model (#2179).
     # The legacy 'admin' role is not recognized by @platform_admin_required decorator.
     result = db.create_user_with_is_active(
@@ -142,7 +154,7 @@ def create_default_admin(
         daily_token_quota=10,  # 10M tokens (stored in M units)
         daily_request_quota=10000,
         is_active=True,
-        must_change_password=True,  # Force password change on first login
+        must_change_password=must_change_password,
         system_account=system_account,
         tenant_id=tenant_id,
     )

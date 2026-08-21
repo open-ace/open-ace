@@ -11,6 +11,7 @@ import os
 
 import pytest
 from playwright.async_api import async_playwright, expect
+from tests.e2e.ui.async_helpers import login_as
 
 # Test configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
@@ -34,13 +35,7 @@ async def test_sender_dropdown_zindex_and_translation():
 
             # Step 1: Login
             print("\n[Step 1] Logging in...")
-            await page.goto(f"{BASE_URL}/login")
-            await page.fill("#username", USERNAME)
-            await page.fill("#password", PASSWORD)
-            await page.click('button[type="submit"]')
-
-            # Wait for redirect to dashboard
-            await page.wait_for_url(f"{BASE_URL}/", timeout=15000)
+            await login_as(page, BASE_URL, USERNAME, PASSWORD)
             print("✓ Login successful")
 
             # Step 2: Navigate to Messages page
@@ -54,25 +49,30 @@ async def test_sender_dropdown_zindex_and_translation():
 
             # Step 3: Find sender dropdown
             print("\n[Step 3] Finding sender dropdown...")
-            sender_label = page.locator('small:has-text("Sender:")')
-            await expect(sender_label).to_be_visible()
+            main = page.locator("main")
+            sender_label = main.get_by_text("Sender", exact=True)
+            await expect(sender_label.first).to_be_visible()
             print("✓ Sender label visible")
 
             # Find the searchable select near Sender label
-            sender_dropdown = page.locator(".searchable-select").nth(0)  # First searchable select
-            await expect(sender_dropdown).to_be_visible()
+            sender_dropdown = main.locator(".searchable-select").first
+            if await sender_dropdown.count() == 0:
+                sender_dropdown = main.locator('button:has-text("All Senders")').first
+            await expect(sender_dropdown.first).to_be_visible()
             print("✓ Sender dropdown found")
 
             # Step 4: Click to open dropdown
             print("\n[Step 4] Opening sender dropdown...")
-            dropdown_button = sender_dropdown.locator("button")
+            dropdown_button = sender_dropdown.locator("button").first
+            if await dropdown_button.count() == 0:
+                dropdown_button = sender_dropdown.first
             await dropdown_button.click()
             await page.wait_for_timeout(500)
             print("✓ Dropdown opened")
 
             # Step 5: Check dropdown content - should NOT show 'dashboardFilterAllSenders'
             print("\n[Step 5] Checking dropdown content...")
-            dropdown_menu = sender_dropdown.locator(".position-absolute")
+            dropdown_menu = main.get_by_role("listbox").first
 
             # Check if dropdown is visible
             await expect(dropdown_menu).to_be_visible()

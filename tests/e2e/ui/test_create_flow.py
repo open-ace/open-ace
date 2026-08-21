@@ -8,6 +8,7 @@ import os
 import time
 
 from playwright.async_api import async_playwright
+from tests.e2e.ui.async_helpers import login_as, open_work_or_assert_unconfigured
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 PROJECT_ROOT = os.path.dirname(
@@ -42,11 +43,11 @@ async def test_create_flow(
         page.on("console", on_console)
 
         print("\n=== 登录 ===")
-        await page.goto(f"{BASE_URL}/login", wait_until="networkidle")
-        await page.fill('input[type="text"]', USERNAME)
-        await page.fill('input[type="password"]', PASSWORD)
-        await page.click('button[type="submit"]')
-        await page.wait_for_url("**/work", timeout=10000)
+        await login_as(page, BASE_URL, USERNAME, PASSWORD)
+        if await open_work_or_assert_unconfigured(page, BASE_URL):
+            print("✓ 默认 Full E2E 环境未配置 workspace，未配置保护可见")
+            await browser.close()
+            return True
 
         print("\n=== 打开 Add Project Modal ===")
         await page.wait_for_selector("iframe", timeout=15000)
