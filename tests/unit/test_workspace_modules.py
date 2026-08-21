@@ -268,7 +268,7 @@ class TestPromptLibrary:
         def _seed():
             try:
                 prompt_library.seed_default_templates()
-            except Exception as e:  # noqa: BLE001 - benign under SQLite contention
+            except Exception as e:  # allow-swallow: idempotent
                 errors.append(e)
 
         threads = [threading.Thread(target=_seed) for _ in range(8)]
