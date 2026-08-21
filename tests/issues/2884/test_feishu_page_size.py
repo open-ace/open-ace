@@ -12,8 +12,7 @@ and find-by-department-users endpoints. This test module verifies:
 
 from __future__ import annotations
 
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import requests
