@@ -227,7 +227,9 @@ def test_registered_providers_table_content():
             # 获取第一行的所有单元格
             cells = first_row.locator("td")
             cell_count = cells.count()
-            assert cell_count >= 3, f"表格行应至少包含 3 列（名称、类型、状态），实际列数: {cell_count}"
+            assert (
+                cell_count >= 3
+            ), f"表格行应至少包含 3 列（名称、类型、状态），实际列数: {cell_count}"
 
             # 验证状态徽章（绿色表示 Enabled）
             status_badge = first_row.locator(".badge.badge-success, .badge.bg-success")
@@ -475,7 +477,7 @@ def test_provider_detail_modal():
             view_btn_selectors = [
                 'button:has-text("View")',
                 'button:has-text("查看")',
-                'button:has(.bi-eye)',
+                "button:has(.bi-eye)",
                 'button:has(i[class*="eye"])',
             ]
 
@@ -521,7 +523,7 @@ def test_provider_detail_modal():
             close_btn_selectors = [
                 'button:has-text("Close")',
                 'button:has-text("关闭")',
-                'button.close',
+                "button.close",
                 'button[aria-label*="close"]',
             ]
 
@@ -611,7 +613,7 @@ def test_tenant_selector_data_refresh():
             # 检查是否存在租户选择器
             tenant_selector_selectors = [
                 "select",
-                '.tenant-selector',
+                ".tenant-selector",
                 '[data-testid="tenant-selector"]',
             ]
 
@@ -753,9 +755,7 @@ def test_toggle_persistence():
                 new_state = sso_toggle_after.is_checked()
                 # 注意：由于测试环境的限制，这里不强制断言状态一致性
                 # 仅记录状态变化
-                logger.debug(
-                    f"Toggle persistence: initial={initial_state}, new={new_state}"
-                )
+                logger.debug(f"Toggle persistence: initial={initial_state}, new={new_state}")
 
             # 恢复原状态（避免污染后续测试）
             try:
