@@ -67,7 +67,7 @@ export class ChunkLoadErrorBoundary extends React.Component<
             };
           }
         }
-      } catch (e) {
+      } catch {
         // Ignore errors when reading localStorage
       }
 

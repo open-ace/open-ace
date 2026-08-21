@@ -84,10 +84,7 @@ export const useSafeWorkspaceState = (): SafeWorkspaceState => {
  * @param tabs - Array of tabs to check against
  * @returns The valid active tab ID, or first tab's ID if invalid, or empty string if no tabs
  */
-export const validateActiveTabId = (
-  activeTabId: string,
-  tabs: WorkspaceTab[]
-): string => {
+export const validateActiveTabId = (activeTabId: string, tabs: WorkspaceTab[]): string => {
   if (tabs.length === 0) return '';
   if (tabs.find((t) => t.id === activeTabId)) return activeTabId;
   // Fall back to first tab

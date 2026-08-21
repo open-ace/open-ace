@@ -161,7 +161,11 @@ export const Workspace: React.FC = () => {
   const setStoredTabsOrder = useSetWorkspaceTabsOrder(); // Issue #1470
 
   // Issue #2953: Use centralized validation hook for safe workspace state
-  const { tabs: safeStoredTabs, tabsOrder: safeStoredTabsOrder, activeTabId: safeStoredActiveTabId } = useSafeWorkspaceState();
+  const {
+    tabs: safeStoredTabs,
+    tabsOrder: safeStoredTabsOrder,
+    activeTabId: safeStoredActiveTabId,
+  } = useSafeWorkspaceState();
 
   // Issue #1470: Compute ordered tabs for visual display (Tab Bar only)
   // Issue #2953: Use Map and Set for performance optimization and defensive handling
@@ -1092,11 +1096,13 @@ export const Workspace: React.FC = () => {
             existingTab.settings,
             remoteParams
           );
-          initialTabs = [{
-            ...existingTab,
-            url: effectiveUrl ?? '',
-            token: userWebUI?.token ?? '',
-          }];
+          initialTabs = [
+            {
+              ...existingTab,
+              url: effectiveUrl ?? '',
+              token: userWebUI?.token ?? '',
+            },
+          ];
         } else {
           // No existing tab, create new one
           // Build settings from URL params
@@ -1105,7 +1111,8 @@ export const Workspace: React.FC = () => {
             urlModel || urlUseWebUI !== null || urlPermissionMode
               ? {
                   model: urlModel ?? undefined,
-                  useWebUI: urlUseWebUI === 'true' ? true : urlUseWebUI === 'false' ? false : undefined,
+                  useWebUI:
+                    urlUseWebUI === 'true' ? true : urlUseWebUI === 'false' ? false : undefined,
                   permissionMode: urlPermissionMode ?? undefined,
                 }
               : undefined;
@@ -1175,7 +1182,9 @@ export const Workspace: React.FC = () => {
                 toolName: urlToolName ?? undefined,
                 settings: urlSettings,
                 workspaceType:
-                  urlWorkspaceType && urlWorkspaceType !== 'terminal' ? urlWorkspaceType : undefined,
+                  urlWorkspaceType && urlWorkspaceType !== 'terminal'
+                    ? urlWorkspaceType
+                    : undefined,
                 machineId: urlMachineId ?? undefined,
                 machineName: urlMachineName ?? undefined,
                 createdAt: Date.now(),

@@ -257,10 +257,9 @@ const migrate = (persistedState: unknown, version: number): PersistedState => {
     ...defaultState,
     ...validated,
     // Ensure workspaceTabsOrder defaults to order of existing tabs if missing
-    workspaceTabsOrder: validated.workspaceTabsOrder ??
-      (Array.isArray(validated.workspaceTabs)
-        ? validated.workspaceTabs.map(t => t.id)
-        : []),
+    workspaceTabsOrder:
+      validated.workspaceTabsOrder ??
+      (Array.isArray(validated.workspaceTabs) ? validated.workspaceTabs.map((t) => t.id) : []),
   };
 };
 

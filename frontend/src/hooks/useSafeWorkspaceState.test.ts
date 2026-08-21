@@ -40,9 +40,7 @@ describe('useSafeWorkspaceState Hook (Issue #2953)', () => {
     });
 
     it('should return empty array when tabsOrder is empty', () => {
-      const tabs: WorkspaceTab[] = [
-        { id: 'tab-1', title: 'Tab 1', createdAt: Date.now() },
-      ];
+      const tabs: WorkspaceTab[] = [{ id: 'tab-1', title: 'Tab 1', createdAt: Date.now() }];
       expect(validateTabsOrder([], tabs)).toEqual([]);
     });
 
