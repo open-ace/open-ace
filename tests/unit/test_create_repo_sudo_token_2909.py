@@ -177,7 +177,7 @@ class TestCreateRepoTokenNoLeak:
 
         try:
             gh.create_repo("new-repo", private=True)
-            assert False, "Should have raised GitHubOpsError"
+            raise AssertionError("Should have raised GitHubOpsError")
         except GitHubOpsError as exc:
             assert "ghp_faketoken_2909" not in str(exc)
 
