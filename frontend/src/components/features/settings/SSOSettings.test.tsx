@@ -50,7 +50,8 @@ vi.mock('@/i18n', () => ({
       saveFailed: 'Failed to save settings',
       failedToLoadSSOSettings: 'Failed to load SSO settings. Please refresh the page.',
       ssoSettingNotLoaded: 'SSO setting is still loading. Please wait.',
-      ssoSettingVerificationFailed: 'SSO setting verification failed. The saved value does not match. Please try again.',
+      ssoSettingVerificationFailed:
+        'SSO setting verification failed. The saved value does not match. Please try again.',
       registeredProviders: 'Registered Providers',
       noProvidersRegistered: 'No SSO providers registered',
       availableProviders: 'Available Providers',
