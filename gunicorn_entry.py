@@ -15,8 +15,9 @@ import sys
 # ============================================================================
 # Must be the first thing before any urllib3 or related imports
 try:
-    import gevent.monkey
     import ssl
+
+    import gevent.monkey
 
     gevent.monkey.patch_all()
     # Mark that patching is done for verification in gunicorn_worker

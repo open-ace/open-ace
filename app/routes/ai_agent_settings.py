@@ -166,11 +166,6 @@ def api_validate_github_token():
             return jsonify(
                 {"valid": False, "error": f"gh CLI not found, fallback API failed: {str(e)}"}
             )
-        except Exception as e:
-            logger.error("Fallback API unexpected error: %s", e)
-            return jsonify(
-                {"valid": False, "error": f"gh CLI not found, fallback failed: {str(e)}"}
-            )
     except Exception as e:
         logger.error("Token validation error: %s", e)
         return jsonify({"valid": False, "error": "Validation failed"})

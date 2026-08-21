@@ -10,12 +10,11 @@ import logging
 import os
 from typing import cast
 
-from app.utils.outbound_url_guard import OutboundUrlBlockedError, safe_request
-
 from app.repositories.database import CONFIG_DIR
 from app.repositories.insights_repo import InsightsReportRepository
 from app.repositories.message_repo import MessageRepository
 from app.repositories.user_repo import UserRepository
+from app.utils.outbound_url_guard import safe_request
 
 logger = logging.getLogger(__name__)
 

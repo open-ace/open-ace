@@ -219,22 +219,34 @@ def test_get_proxies_returns_proxies_from_uppercase_env():
     """Test that _get_proxies reads HTTP_PROXY and HTTPS_PROXY env vars."""
     with patch.dict(
         os.environ,
-        {"HTTP_PROXY": "http://proxy.example.com:8080", "HTTPS_PROXY": "http://proxy.example.com:8080"},
+        {
+            "HTTP_PROXY": "http://proxy.example.com:8080",
+            "HTTPS_PROXY": "http://proxy.example.com:8080",
+        },
         clear=True,
     ):
         result = _get_proxies()
-        assert result == {"http": "http://proxy.example.com:8080", "https": "http://proxy.example.com:8080"}
+        assert result == {
+            "http": "http://proxy.example.com:8080",
+            "https": "http://proxy.example.com:8080",
+        }
 
 
 def test_get_proxies_returns_proxies_from_lowercase_env():
     """Test that _get_proxies reads http_proxy and https_proxy env vars."""
     with patch.dict(
         os.environ,
-        {"http_proxy": "http://proxy.example.com:8080", "https_proxy": "http://proxy.example.com:8080"},
+        {
+            "http_proxy": "http://proxy.example.com:8080",
+            "https_proxy": "http://proxy.example.com:8080",
+        },
         clear=True,
     ):
         result = _get_proxies()
-        assert result == {"http": "http://proxy.example.com:8080", "https": "http://proxy.example.com:8080"}
+        assert result == {
+            "http": "http://proxy.example.com:8080",
+            "https": "http://proxy.example.com:8080",
+        }
 
 
 def test_get_proxies_prioritizes_uppercase_env():

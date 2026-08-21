@@ -174,7 +174,10 @@ def test_dingtalk_config():
         )
     except OutboundUrlBlockedError as e:
         logger.error("DingTalk connection test blocked by SSRF protection: %s", e)
-        return jsonify({"success": False, "message": f"Request blocked by security policy: {e}"}), 403
+        return (
+            jsonify({"success": False, "message": f"Request blocked by security policy: {e}"}),
+            403,
+        )
     except Exception:
         logger.warning("DingTalk connection test failed", exc_info=True)
         return jsonify({"success": False, "message": "DingTalk connection test failed"}), 502
