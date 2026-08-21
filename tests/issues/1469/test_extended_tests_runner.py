@@ -209,6 +209,49 @@ def test_selection_json_uses_exact_targets_and_skips_standalone_for_pytest(tmp_p
     assert "standalone::tests/e2e/e2e_autonomous_models_error_playwright.py" not in cmd
 
 
+def test_selection_json_shards_nodeids_and_standalone_entries_together(tmp_path):
+    selection = tmp_path / "selection.json"
+    selected = [
+        "tests/e2e/browser/test_login.py::test_login_page_loads",
+        "standalone::tests/e2e/e2e_autonomous_models_error_playwright.py",
+        "tests/e2e/browser/test_navigation.py::test_menu_navigation",
+    ]
+    selection.write_text(
+        __import__("json").dumps({"normal": selected, "advisory": []}) + "\n",
+        encoding="utf-8",
+    )
+    first = run_extended_tests.parse_args(
+        [
+            "--category",
+            "e2e",
+            "--selection-json",
+            str(selection),
+            "--split-total",
+            "2",
+            "--split-group",
+            "1",
+        ]
+    )
+    second = run_extended_tests.parse_args(
+        [
+            "--category",
+            "e2e",
+            "--selection-json",
+            str(selection),
+            "--split-total",
+            "2",
+            "--split-group",
+            "2",
+        ]
+    )
+
+    first_targets = run_extended_tests.resolved_targets(first)
+    second_targets = run_extended_tests.resolved_targets(second)
+    assert set(first_targets).isdisjoint(second_targets)
+    assert set(first_targets) | set(second_targets) == set(selected)
+    assert any(target.startswith("standalone::") for target in first_targets + second_targets)
+
+
 def test_execution_needs_server_uses_selected_item_capabilities(tmp_path, monkeypatch):
     selection = tmp_path / "selection.json"
     selection.write_text(
@@ -351,7 +394,9 @@ def test_write_run_envelope_summarizes_attempts(tmp_path, monkeypatch):
     assert payload["commit_sha"] == "deadbeef"
     assert payload["contract_key"] == "contract-v1"
     assert payload["duration_minutes"] == 2.5
-    assert payload["job_conclusion"] == "failure"
+    assert payload["job_conclusion"] == "success"
+    assert payload["return_code"] == 1
+    assert payload["error"] is None
     assert payload["artifacts"]["attempts_jsonl"] == str(attempts)
     assert payload["server"]["readiness_achieved"] is True
     assert [item["nodeid"] for item in payload["outcomes"]] == [
@@ -364,6 +409,32 @@ def test_write_run_envelope_summarizes_attempts(tmp_path, monkeypatch):
     assert failed["fingerprint"]
     assert failed["duration_seconds"] == 2.5
     assert failed["total_duration_seconds"] == 2.5
+
+
+def test_summarize_attempts_handles_missing_exception_class():
+    outcomes = run_extended_tests._summarize_attempt_records(
+        [
+            {
+                "nodeid": "tests/e2e/ui/test_work_page_loads.py::test_work_page_loads",
+                "attempt": 1,
+                "phase": "call",
+                "outcome": "failed",
+                "duration_seconds": 2.5,
+                "exception_class": None,
+                "message": "work layout was missing",
+            }
+        ],
+        {"readiness_achieved": True, "exit": {"abnormal": False}},
+    )
+
+    assert len(outcomes) == 1
+    outcome = outcomes[0]
+    assert outcome["nodeid"] == "tests/e2e/ui/test_work_page_loads.py::test_work_page_loads"
+    assert outcome["final_outcome"] == "fail"
+    assert outcome["category"] == "test_body_exception"
+    assert outcome["fingerprint"]
+    assert outcome["exception_class"] is None
+    assert outcome["message"] == "work layout was missing"
 
 
 def test_setup_phase_failure_is_not_summarized_as_pass(tmp_path, monkeypatch):
@@ -495,6 +566,38 @@ def test_write_run_envelope_includes_standalone_outcomes(tmp_path, monkeypatch):
         "standalone::tests/e2e/e2e_autonomous_models_error_playwright.py"
     )
     assert payload["server"]["readiness_achieved"] is None
+
+
+def test_standalone_targets_retry_and_preserve_attempt_evidence(monkeypatch):
+    responses = iter(
+        [
+            subprocess.CompletedProcess([], returncode=1),
+            subprocess.CompletedProcess([], returncode=0),
+        ]
+    )
+    monkeypatch.setattr(
+        run_extended_tests.subprocess, "run", lambda *args, **kwargs: next(responses)
+    )
+    monkeypatch.setattr(run_extended_tests.time, "sleep", lambda _seconds: None)
+
+    outcomes = run_extended_tests._run_standalone_targets(
+        ["standalone::tests/e2e/e2e_autonomous_models_error_playwright.py"],
+        env={},
+        timeout_seconds=10,
+        reruns=1,
+    )
+
+    assert outcomes == [
+        {
+            "nodeid": "standalone::tests/e2e/e2e_autonomous_models_error_playwright.py",
+            "attempts": 2,
+            "first_attempt_outcome": "fail",
+            "final_outcome": "pass",
+            "duration_seconds": 0.0,
+            "total_duration_seconds": 0.0,
+            "attempt_durations_seconds": {1: 0.0, 2: 0.0},
+        }
+    ]
 
 
 def test_dry_run_envelope_reports_success(tmp_path):

@@ -123,7 +123,7 @@ async def test_dashboard_first_load(
             dashboard_start = time.time()
 
             # Navigate and wait for network idle
-            await page.goto(f"{BASE_URL}manage/dashboard", wait_until="domcontentloaded")
+            await page.goto(f"{BASE_URL}/manage/dashboard", wait_until="domcontentloaded")
             dom_time = time.time() - dashboard_start
             print(f"  DOM loaded: {dom_time:.3f}s")
 

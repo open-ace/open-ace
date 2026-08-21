@@ -257,13 +257,19 @@ def discover_test_files(targets: list[str]) -> list[str]:
 def resolved_targets(args: argparse.Namespace) -> list[str]:
     if args.selection_json:
         selected = load_selection_targets(args.selection_json)
-        standalone = [item for item in selected if item.startswith("standalone::")]
-        pytest_targets = [item for item in selected if not item.startswith("standalone::")]
-        if standalone and args.split_total > 1:
-            raise ValueError("--selection-json with standalone targets cannot be sharded")
         if args.split_total == 1:
-            return pytest_targets + standalone
-        return apply_split(pytest_targets, args.split_total, args.split_group)
+            return selected
+        if args.split_total < 1:
+            raise ValueError("--split-total must be >= 1")
+        if args.split_group < 1 or args.split_group > args.split_total:
+            raise ValueError("--split-group must be between 1 and --split-total")
+        # Keep selector nodeids intact. Sharding files would re-expand a
+        # nodeid selection and make standalone entries impossible to govern.
+        return [
+            target
+            for index, target in enumerate(sorted(selected))
+            if index % args.split_total == args.split_group - 1
+        ]
     targets = select_targets(args)
     return apply_split(targets, args.split_total, args.split_group)
 
@@ -600,16 +606,6 @@ def start_server_if_needed(
     if args.server == "reuse":
         raise RuntimeError(f"No healthy Open ACE server found at {args.base_url}")
 
-    initialize_database(env)
-    configure_server_address(env, args.base_url)
-    parsed = urlsplit(args.base_url)
-    host = parsed.hostname
-    port = parsed.port
-    if host is None or port is None:
-        raise ValueError(f"Base URL must include a host and port: {args.base_url}")
-    if can_connect(host, port):
-        raise RuntimeError(f"Port {port} is in use, but {health_url(args.base_url)} is not healthy")
-
     # Issue #2185: Set security mode for test server
     env.setdefault("OPENACE_SECURITY_MODE", "development")
     env.setdefault("FLASK_ENV", "testing")
@@ -621,7 +617,18 @@ def start_server_if_needed(
     env.setdefault("SCHEDULER_HEALTH_MONITOR_ENABLED", "false")
     env.setdefault("DATA_FETCH_ENABLED", "false")
     env.setdefault("HEADLESS", "true")
+    env.setdefault("OPENACE_DEFAULT_ADMIN_MUST_CHANGE_PASSWORD", "false")
     env["BASE_URL"] = args.base_url
+
+    initialize_database(env)
+    configure_server_address(env, args.base_url)
+    parsed = urlsplit(args.base_url)
+    host = parsed.hostname
+    port = parsed.port
+    if host is None or port is None:
+        raise ValueError(f"Base URL must include a host and port: {args.base_url}")
+    if can_connect(host, port):
+        raise RuntimeError(f"Port {port} is in use, but {health_url(args.base_url)} is not healthy")
 
     print(f"Starting Open ACE test server for {args.base_url}")
     log_path = PROJECT_ROOT / "test-results" / f"open-ace-server-{args.category}.log"
@@ -788,17 +795,18 @@ def _summarize_attempt_records(
                 if record.get("outcome") not in ("passed", "rerun")
             ]
             failed = failed_records[-1] if failed_records else decision
+            exception_class = str(failed.get("exception_class") or "")
+            message = str(failed.get("message") or "")
             failure = {
                 "phase": failed.get("phase", "call"),
-                "exception_class": failed.get("exception_class"),
-                "message": failed.get("message"),
-                "timeout": "timeout"
-                in f"{failed.get('exception_class', '')} {failed.get('message', '')}".lower(),
+                "exception_class": exception_class,
+                "message": message,
+                "timeout": "timeout" in f"{exception_class} {message}".lower(),
             }
             summary["category"] = classify_failure(failure, server_evidence)
             summary["fingerprint"] = fingerprint_failure(failure)
-            summary["exception_class"] = failed.get("exception_class")
-            summary["message"] = failed.get("message")
+            summary["exception_class"] = exception_class or None
+            summary["message"] = message or None
         outcomes.append(summary)
     return outcomes
 
@@ -815,56 +823,91 @@ def _run_standalone_targets(
     *,
     env: dict[str, str],
     timeout_seconds: int,
+    reruns: int,
 ) -> list[dict[str, object]]:
     from scripts.e2e.common import failure_fingerprint
+
+    def output_tail(value: str | bytes | None, limit: int = 4000) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            value = value.decode(errors="replace")
+        return value[-limit:]
 
     results: list[dict[str, object]] = []
     for item_id in target_ids:
         script_path = _standalone_script_path(item_id)
-        started = time.time()
-        try:
-            completed = subprocess.run(
-                [sys.executable, script_path],
-                cwd=PROJECT_ROOT,
-                env=env,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=timeout_seconds,
+        attempt_durations: dict[int, float] = {}
+        first_attempt_outcome = "fail"
+        final_failure: tuple[str, str, int | None] | None = None
+        final_stdout = ""
+        final_stderr = ""
+        passed = False
+        for attempt in range(1, reruns + 2):
+            started = time.time()
+            try:
+                completed = subprocess.run(
+                    [sys.executable, script_path],
+                    cwd=PROJECT_ROOT,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=timeout_seconds,
+                )
+                duration = round(time.time() - started, 3)
+                attempt_durations[attempt] = duration
+                passed = completed.returncode == 0
+                if not passed:
+                    final_failure = (
+                        "StandaloneExitError",
+                        f"{script_path} exited with code {completed.returncode}",
+                        completed.returncode,
+                    )
+                    final_stdout = output_tail(completed.stdout)
+                    final_stderr = output_tail(completed.stderr)
+            except subprocess.TimeoutExpired as exc:
+                duration = round(time.time() - started, 3)
+                attempt_durations[attempt] = duration
+                final_failure = (
+                    "TimeoutExpired",
+                    f"{script_path} timed out after {timeout_seconds}s",
+                    None,
+                )
+                final_stdout = output_tail(getattr(exc, "stdout", None))
+                final_stderr = output_tail(getattr(exc, "stderr", None))
+                passed = False
+            if attempt == 1:
+                first_attempt_outcome = "pass" if passed else "fail"
+            if passed:
+                break
+            if attempt <= reruns:
+                time.sleep(5)
+
+        result: dict[str, object] = {
+            "nodeid": item_id,
+            "attempts": len(attempt_durations),
+            "first_attempt_outcome": first_attempt_outcome,
+            "final_outcome": "pass" if passed else "fail",
+            "duration_seconds": max(attempt_durations.values(), default=0.0),
+            "total_duration_seconds": round(sum(attempt_durations.values()), 3),
+            "attempt_durations_seconds": attempt_durations,
+        }
+        if not passed and final_failure is not None:
+            exception_class, message, return_code = final_failure
+            result["category"] = (
+                "timeout" if exception_class == "TimeoutExpired" else "test_body_exception"
             )
-            duration = round(time.time() - started, 3)
-            passed = completed.returncode == 0
-            result: dict[str, object] = {
-                "nodeid": item_id,
-                "attempts": 1,
-                "first_attempt_outcome": "pass" if passed else "fail",
-                "final_outcome": "pass" if passed else "fail",
-                "duration_seconds": duration,
-            }
-            if not passed:
-                message = f"{script_path} exited with code {completed.returncode}"
-                result["category"] = "test_body_exception"
-                result["fingerprint"] = failure_fingerprint("StandaloneExitError", message)
-                result["exception_class"] = "StandaloneExitError"
-                result["message"] = message
-                result["return_code"] = completed.returncode
-            results.append(result)
-        except subprocess.TimeoutExpired:
-            duration = round(time.time() - started, 3)
-            message = f"{script_path} timed out after {timeout_seconds}s"
-            results.append(
-                {
-                    "nodeid": item_id,
-                    "attempts": 1,
-                    "first_attempt_outcome": "fail",
-                    "final_outcome": "fail",
-                    "duration_seconds": duration,
-                    "category": "timeout",
-                    "fingerprint": failure_fingerprint("TimeoutExpired", message),
-                    "exception_class": "TimeoutExpired",
-                    "message": message,
-                }
-            )
+            result["fingerprint"] = failure_fingerprint(exception_class, message)
+            result["exception_class"] = exception_class
+            result["message"] = message
+            if return_code is not None:
+                result["return_code"] = return_code
+            if final_stdout:
+                result["stdout_tail"] = final_stdout
+            if final_stderr:
+                result["stderr_tail"] = final_stderr
+        results.append(result)
     return results
 
 
@@ -927,7 +970,9 @@ def _write_run_envelope(
         "duration_minutes": round(duration_seconds / 60.0, 3),
         "commit_sha": _current_head_sha(),
         "contract_key": _current_contract_key(),
-        "job_conclusion": "success" if return_code == 0 else "failure",
+        # Test failures are observed outcomes for governance to reconcile. Only
+        # runner exceptions make the execution itself incomplete or invalid.
+        "job_conclusion": "failure" if error_message else "success",
         "return_code": return_code,
         "error": error_message,
         "python": f"{sys.version_info.major}.{sys.version_info.minor}",
@@ -983,6 +1028,7 @@ def main(argv: list[str] | None = None) -> int:
                 standalone_selected,
                 env=env,
                 timeout_seconds=args.timeout or 240,
+                reruns=args.reruns,
             )
             if any(item.get("final_outcome") != "pass" for item in standalone_outcomes):
                 return_code = return_code or 1
