@@ -33,6 +33,9 @@ export type {
   UpdateQuotaRequest,
   QuotaUsage,
   FeishuSyncResult,
+  RestoreUserRequest,
+  RestoreUserResponse,
+  SoftDeletedUserConflict,
 } from './admin';
 export { governanceApi } from './governance';
 export type {

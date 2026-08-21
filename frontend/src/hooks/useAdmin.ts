@@ -19,6 +19,7 @@ import type {
   AuditThresholds,
   CreatePolicyRuleRequest,
   PolicyRule,
+  RestoreUserRequest,
 } from '@/api';
 
 // User Management Hooks
@@ -72,7 +73,7 @@ export function useRestoreUser() {
       data,
     }: {
       userId: number;
-      data?: import('@/api').RestoreUserRequest;
+      data?: RestoreUserRequest;
     }) => adminApi.restoreUser(userId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
