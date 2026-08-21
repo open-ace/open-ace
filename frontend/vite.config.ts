@@ -11,6 +11,12 @@ export default defineConfig(({ command }) => ({
   // 公共基础路径 - 匹配输出目录
   base: '/static/js/dist/',
 
+  // 全局常量定义
+  define: {
+    __BUILD_VERSION__: JSON.stringify(process.env.npm_package_version || 'unknown'),
+    __COMMIT_SHA__: JSON.stringify(process.env.GIT_COMMIT_SHA || process.env.GITHUB_SHA || 'dev'),
+  },
+
   // React 插件 + Preload 插件
   plugins: [
     react(),
