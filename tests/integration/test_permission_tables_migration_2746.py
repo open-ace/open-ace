@@ -344,3 +344,53 @@ class TestPermissionTablesDataPreservation:
         # Note: SQLite foreign key constraints are not reflected in inspector
         # in the same way as PostgreSQL. This test verifies the tables are created.
         # The actual FK behavior is tested in integration tests with real data.
+    def test_data_preservation_after_downgrade(self, db_engine_with_data):
+        """Test that data in projects and users tables is preserved after downgrade."""
+        import importlib
+
+        migration_module = importlib.import_module(
+            "migrations.versions.20260820_002_add_permission_tables"
+        )
+
+        # Run upgrade
+        with db_engine_with_data.connect() as conn:
+            run_migration_upgrade(conn, migration_module)
+            conn.commit()
+
+        # Verify permission tables were created
+        inspector = sa.inspect(db_engine_with_data)
+        tables_before = inspector.get_table_names()
+        assert "permission_tasks" in tables_before
+        assert "permission_checkpoints" in tables_before
+
+        # Verify original data still exists
+        with db_engine_with_data.connect() as conn:
+            result = conn.execute(sa.text("SELECT COUNT(*) FROM projects"))
+            project_count = result.scalar()
+            assert project_count == 1, "Project data should exist"
+
+            result = conn.execute(sa.text("SELECT COUNT(*) FROM users"))
+            user_count = result.scalar()
+            assert user_count == 1, "User data should exist"
+
+        # Run downgrade
+        with db_engine_with_data.connect() as conn:
+            run_migration_downgrade(conn, migration_module)
+            conn.commit()
+
+        # Verify permission tables were removed
+        inspector = sa.inspect(db_engine_with_data)
+        tables_after = inspector.get_table_names()
+        assert "permission_tasks" not in tables_after
+        assert "permission_checkpoints" not in tables_after
+
+        # Verify original data still preserved after downgrade
+        with db_engine_with_data.connect() as conn:
+            result = conn.execute(sa.text("SELECT COUNT(*) FROM projects"))
+            project_count = result.scalar()
+            assert project_count == 1, "Project data should be preserved after downgrade"
+
+            result = conn.execute(sa.text("SELECT COUNT(*) FROM users"))
+            user_count = result.scalar()
+            assert user_count == 1, "User data should be preserved after downgrade"
+

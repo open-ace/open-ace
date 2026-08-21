@@ -338,3 +338,42 @@ class TestDailyUsageSyncedDefault:
             )
             row = result.fetchone()
             assert row[0] == 5, "Request count should be preserved"
+
+
+    def test_downgrade_preserves_existing_data(self, db_engine_with_data):
+        """Test that data is preserved during downgrade."""
+        import importlib
+
+        migration_module = importlib.import_module(
+            "migrations.versions.20260820_003_add_daily_usage_synced"
+        )
+
+        # Run upgrade first
+        with db_engine_with_data.connect() as conn:
+            run_migration_upgrade(conn, migration_module)
+            conn.commit()
+
+        # Verify data exists after upgrade
+        with db_engine_with_data.connect() as conn:
+            result = conn.execute(sa.text("SELECT COUNT(*) FROM agent_sessions"))
+            count_before = result.scalar()
+            assert count_before == 2
+
+        # Run downgrade
+        with db_engine_with_data.connect() as conn:
+            run_migration_downgrade(conn, migration_module)
+            conn.commit()
+
+        # Verify data is still preserved after downgrade
+        with db_engine_with_data.connect() as conn:
+            result = conn.execute(sa.text("SELECT COUNT(*) FROM agent_sessions"))
+            count_after = result.scalar()
+            assert count_after == 2, "Data should be preserved after downgrade"
+
+            # Verify request_count is still correct
+            result = conn.execute(
+                sa.text("SELECT request_count FROM agent_sessions WHERE session_id = 'sess-1'")
+            )
+            row = result.fetchone()
+            assert row[0] == 5, "Request count should be preserved after downgrade"
+

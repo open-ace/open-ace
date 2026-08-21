@@ -311,3 +311,33 @@ class TestPermissionStatusDataPreservation:
             row = result.fetchone()
             assert row[0] is None, "permission_status should be NULL for existing rows"
             assert row[1] is None, "permission_task_id should be NULL for existing rows"
+    def test_downgrade_preserves_existing_data(self, db_engine_with_data):
+        """Test that data is preserved during downgrade."""
+        import importlib
+
+        migration_module = importlib.import_module(
+            "migrations.versions.20260820_001_add_permission_status_to_projects"
+        )
+
+        # Run upgrade first
+        with db_engine_with_data.connect() as conn:
+            run_migration_upgrade(conn, migration_module)
+            conn.commit()
+
+        # Verify data exists after upgrade
+        with db_engine_with_data.connect() as conn:
+            result = conn.execute(sa.text("SELECT COUNT(*) FROM projects"))
+            count_before = result.scalar()
+            assert count_before == 2
+
+        # Run downgrade
+        with db_engine_with_data.connect() as conn:
+            run_migration_downgrade(conn, migration_module)
+            conn.commit()
+
+        # Verify data is still preserved after downgrade
+        with db_engine_with_data.connect() as conn:
+            result = conn.execute(sa.text("SELECT COUNT(*) FROM projects"))
+            count_after = result.scalar()
+            assert count_after == 2, "Data should be preserved after downgrade"
+
