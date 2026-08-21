@@ -125,7 +125,28 @@ class RemoteAgentManager:
     polling commands, command responses, session-machine bindings, and SSE
     output replay are persisted so active remote-session control APIs do not
     depend on hitting the same web process.
+
+    Machine Status Lifecycle (Issue #2537):
+        Registration: machine starts in 'online' state (transient)
+        First heartbeat: 'online' -> 'idle' (no active sessions) or 'busy' (active sessions)
+        Ongoing heartbeats: 'idle' <-> 'busy' based on active_sessions count
+        Timeout/disconnect: 'idle'/'busy' -> 'offline'
+        Re-registration (offline): old machine record merged with new machine_id
+
+        Conflict Detection: hostname re-registration is rejected if existing machine
+        is in any online state ('online', 'idle', or 'busy'). Only 'offline' machines
+        can be merged on re-registration.
     """
+
+    # Machine status constants (Issue #2537)
+    _STATUS_ONLINE = "online"  # Registration transient state
+    _STATUS_IDLE = "idle"  # Online with no active sessions
+    _STATUS_BUSY = "busy"  # Online with active sessions
+    _STATUS_OFFLINE = "offline"  # Disconnected or timed out
+
+    # Online status set for conflict detection (Issue #2537)
+    # Any machine in these states should block re-registration with same hostname
+    _ONLINE_STATUSES = frozenset({_STATUS_ONLINE, _STATUS_IDLE, _STATUS_BUSY})
 
     HEARTBEAT_TIMEOUT_SECONDS = 180  # 3 minutes without heartbeat = offline
     HEARTBEAT_CHECK_INTERVAL = 60  # Check every 60 seconds
@@ -703,6 +724,18 @@ class RemoteAgentManager:
 
         Returns:
             Dict with machine info or None if token invalid.
+            On hostname conflict, returns dict with 'error' key and details:
+            - error: "hostname_conflict"
+            - message: Human-readable conflict description
+            - conflicting_machine_id: ID of conflicting machine
+            - conflicting_status: Status of conflicting machine
+
+        Machine Status Lifecycle (Issue #2537):
+            After registration, machine starts in 'online' state (transient).
+            First heartbeat transitions to 'idle' (no sessions) or 'busy' (active sessions).
+            Re-registration with same hostname:
+            - If existing machine is online/idle/busy: returns 409 conflict
+            - If existing machine is offline: merges old record with new machine_id
         """
         # Consume the one-time registration token (DB-based)
         token_info = self._consume_registration_token(registration_token)
@@ -730,16 +763,34 @@ class RemoteAgentManager:
                     )
                     existing = cursor.fetchall()
 
-                    online_match = [r for r in existing if r["status"] == "online"]
+                    # Issue #2537: Conflict detection - cover all online statuses
+                    # Conservative approach: only allow merge for explicit offline status
+                    # Treat any other status (including NULL/unknown) as online conflict
+                    online_match = [r for r in existing if r["status"] != self._STATUS_OFFLINE]
                     if online_match:
                         conn.rollback()
+                        conflict = online_match[0]
+                        logger.warning(
+                            "Hostname conflict rejected: hostname=%s "
+                            "conflicting_machine_id=%s status=%s",
+                            hostname,
+                            conflict["machine_id"][:8],
+                            conflict["status"],
+                        )
                         return {
                             "error": "hostname_conflict",
-                            "message": f"Hostname '{hostname}' is already registered and online. "
-                            f"Contact an admin to resolve the conflict.",
+                            "message": (
+                                f"Hostname '{hostname}' is already registered and active "
+                                f"(status: {conflict['status']}). "
+                                f"Machine ID: {conflict['machine_id'][:8]}. "
+                                f"Contact an admin to resolve the conflict."
+                            ),
+                            "conflicting_machine_id": conflict["machine_id"],
+                            "conflicting_status": conflict["status"],
                         }
 
-                    offline_match = [r for r in existing if r["status"] == "offline"]
+                    # Offline merge: only match explicit offline status
+                    offline_match = [r for r in existing if r["status"] == self._STATUS_OFFLINE]
                     if offline_match:
                         old_machine_id = offline_match[0]["machine_id"]
                         merged = True
