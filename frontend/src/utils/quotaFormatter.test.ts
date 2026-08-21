@@ -422,6 +422,16 @@ describe('quotaFormatter - available quota functions', () => {
         expect(result).toBe('Available: 1,500,000 (Max: 2,147,483,647)');
       });
 
+      it('should return English hint for ja language (fallback)', () => {
+        const result = formatAvailableQuotaHint(100, QuotaType.DAILY_TOKEN, true, 'ja');
+        expect(result).toBe(`Available: 100.00M (Max: ${MAX_TOKEN_QUOTA}M)`);
+      });
+
+      it('should return English hint for ko language (fallback)', () => {
+        const result = formatAvailableQuotaHint(1000000, QuotaType.DAILY_REQUEST, true, 'ko');
+        expect(result).toBe('Available: 1,000,000 (Max: 2,147,483,647)');
+      });
+
       it('should return English fallback when language is en and hasQuotaStats is false', () => {
         const result = formatAvailableQuotaHint(100, QuotaType.DAILY_TOKEN, false, 'en');
         expect(result).toBe(`Max: ${MAX_TOKEN_QUOTA}M`);
@@ -482,7 +492,12 @@ describe('quotaFormatter - available quota functions', () => {
 
       it('should handle quotaStats.remaining.daily_token as undefined', () => {
         const quotaStats = {
-          remaining: { daily_token: undefined as any, monthly_token: 0, daily_request: 0, monthly_request: 0 },
+          remaining: {
+            daily_token: undefined as any,
+            monthly_token: 0,
+            daily_request: 0,
+            monthly_request: 0,
+          },
         };
         const result = getAvailableQuotaHint(QuotaType.DAILY_TOKEN, quotaStats, 100, 'zh');
         expect(result).toContain('100.00M'); // 0 (from undefined) + 100 = 100
@@ -495,12 +510,7 @@ describe('quotaFormatter - available quota functions', () => {
       });
 
       it('should handle both quotaStats and currentQuota as undefined/null', () => {
-        const result = getAvailableQuotaHint(
-          QuotaType.DAILY_TOKEN,
-          undefined,
-          undefined,
-          'zh'
-        );
+        const result = getAvailableQuotaHint(QuotaType.DAILY_TOKEN, undefined, undefined, 'zh');
         expect(result).toBe(`Max: ${MAX_TOKEN_QUOTA}M`);
       });
     });

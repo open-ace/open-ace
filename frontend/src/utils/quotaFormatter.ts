@@ -256,7 +256,7 @@ export function formatAvailableQuotaHint(
   available: number,
   quotaType: QuotaType,
   hasQuotaStats: boolean = true,
-  language: 'zh' | 'en' = 'zh'
+  language: 'en' | 'zh' | 'ja' | 'ko' = 'zh'
 ): string {
   // Determine max value and whether it's token quota
   const isToken = quotaType === QuotaType.DAILY_TOKEN || quotaType === QuotaType.MONTHLY_TOKEN;
@@ -271,18 +271,23 @@ export function formatAvailableQuotaHint(
   }
 
   // Full hint with available and max
+  // For ja/ko languages, fallback to English format
   if (isToken) {
     const availableStr = available.toFixed(2);
-    return language === 'zh'
-      ? `可用: ${availableStr}M (上限: ${max}M)`
-      : `Available: ${availableStr}M (Max: ${max}M)`;
+    if (language === 'zh') {
+      return `可用: ${availableStr}M (上限: ${max}M)`;
+    }
+    // en, ja, ko all use English format
+    return `Available: ${availableStr}M (Max: ${max}M)`;
   }
 
   const availableStr = formatNumberAsString(available);
   const maxStr = formatNumberAsString(max);
-  return language === 'zh'
-    ? `可用: ${availableStr} (上限: ${maxStr})`
-    : `Available: ${availableStr} (Max: ${maxStr})`;
+  if (language === 'zh') {
+    return `可用: ${availableStr} (上限: ${maxStr})`;
+  }
+  // en, ja, ko all use English format
+  return `Available: ${availableStr} (Max: ${maxStr})`;
 }
 
 /**
@@ -309,7 +314,7 @@ export function getAvailableQuotaHint(
     | null
     | undefined,
   currentQuota: number | undefined,
-  language?: 'zh' | 'en'
+  language?: 'en' | 'zh' | 'ja' | 'ko'
 ): string {
   // Extract remaining value based on quota type
   let remaining = 0;
