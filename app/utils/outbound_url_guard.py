@@ -288,6 +288,25 @@ def resolve_public_addresses(
     return original_host, result.resolved_addresses, parsed.port, path_and_query
 
 
+def _get_proxies() -> dict[str, str] | None:
+    """Get proxy configuration from environment variables.
+
+    Returns proxy dict if HTTP_PROXY/HTTPS_PROXY are set, otherwise None.
+    Supports both uppercase and lowercase environment variable names.
+    """
+    http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+    https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+
+    if http_proxy or https_proxy:
+        proxies: dict[str, str] = {}
+        if http_proxy:
+            proxies["http"] = http_proxy
+        if https_proxy:
+            proxies["https"] = https_proxy
+        return proxies
+    return None
+
+
 def safe_request(
     method: str,
     url: str,
@@ -320,7 +339,10 @@ def safe_request(
     # Explicitly disable proxy lookup to match the working code path in
     # llm_proxy_handler. In gevent-gunicorn workers, urllib3 proxy resolution
     # can interact badly with monkey-patched ssl, causing RecursionError.
-    kwargs.setdefault("proxies", {"http": None, "https": None})  # type: ignore[dict-item]
+    # Support proxy configuration via environment variables (HTTP_PROXY/HTTPS_PROXY).
+    env_proxies = _get_proxies()
+    default_proxies = {"http": None, "https": None}
+    kwargs.setdefault("proxies", env_proxies or default_proxies)  # type: ignore[dict-item]
 
     own_session = False
     if session is None:

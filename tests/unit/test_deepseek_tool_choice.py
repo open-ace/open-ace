@@ -11,10 +11,12 @@ import pytest
 from flask import Flask
 
 from app.routes.remote import remote_bp
+from app.utils.llm_proxy_url_validator import LlmProxyValidationResult
 
 _PROXY_PATH = "app.routes.remote.get_api_key_proxy_service"
 _QUOTA_PATH = "app.modules.governance.quota_manager.QuotaManager"
 _HTTP_PATH = "requests.request"
+_VALIDATE_URL_PATH = "app.utils.llm_proxy_url_validator.validate_llm_proxy_url"
 
 
 @pytest.fixture
@@ -56,14 +58,20 @@ def _mock_upstream_response(status_code=200, content=b'{"ok":true}'):
     return resp
 
 
+def _mock_validate_llm_proxy_url(url, tenant_id, provider, *, resolver=None):
+    """Mock validate_llm_proxy_url to return allowed=True."""
+    return LlmProxyValidationResult(True)
+
+
 class TestDeepSeekToolChoiceStripping:
     """Test tool_choice stripping for DeepSeek models."""
 
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
+    @patch(_VALIDATE_URL_PATH, side_effect=_mock_validate_llm_proxy_url)
     def test_strips_tool_choice_for_deepseek_model(
-        self, mock_get_proxy, mock_quota_cls, mock_http, remote_app
+        self, mock_validate_url, mock_get_proxy, mock_quota_cls, mock_http, remote_app
     ):
         """Test that tool_choice is stripped for DeepSeek models."""
         # Setup mocks
@@ -114,8 +122,9 @@ class TestDeepSeekToolChoiceStripping:
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
+    @patch(_VALIDATE_URL_PATH, side_effect=_mock_validate_llm_proxy_url)
     def test_preserves_tool_choice_for_non_deepseek(
-        self, mock_get_proxy, mock_quota_cls, mock_http, remote_app
+        self, mock_validate_url, mock_get_proxy, mock_quota_cls, mock_http, remote_app
     ):
         """Test that tool_choice is preserved for non-DeepSeek models."""
         # Setup mocks
@@ -166,7 +175,10 @@ class TestDeepSeekToolChoiceStripping:
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
-    def test_no_tool_choice_unchanged(self, mock_get_proxy, mock_quota_cls, mock_http, remote_app):
+    @patch(_VALIDATE_URL_PATH, side_effect=_mock_validate_llm_proxy_url)
+    def test_no_tool_choice_unchanged(
+        self, mock_validate_url, mock_get_proxy, mock_quota_cls, mock_http, remote_app
+    ):
         """Test that request without tool_choice is unchanged."""
         # Setup mocks
         mock_proxy = MagicMock()
@@ -214,7 +226,10 @@ class TestDeepSeekToolChoiceStripping:
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
-    def test_deepseek_case_insensitive(self, mock_get_proxy, mock_quota_cls, mock_http, remote_app):
+    @patch(_VALIDATE_URL_PATH, side_effect=_mock_validate_llm_proxy_url)
+    def test_deepseek_case_insensitive(
+        self, mock_validate_url, mock_get_proxy, mock_quota_cls, mock_http, remote_app
+    ):
         """Test that DeepSeek detection is case-insensitive."""
         # Setup mocks
         mock_proxy = MagicMock()
