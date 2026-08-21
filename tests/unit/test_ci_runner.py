@@ -5,8 +5,11 @@ import subprocess
 from pathlib import Path
 from unittest.mock import Mock, call
 
+import yaml
 from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
+from packaging.version import Version
 
 try:
     import tomllib
@@ -19,6 +22,30 @@ assert SPEC and SPEC.loader
 ci = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ci)
 
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+
+
+def _requires_python_spec() -> SpecifierSet:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    return SpecifierSet(project["project"]["requires-python"])
+
+
+def _min_supported_python() -> str:
+    """Return the lowest supported interpreter as a 'major.minor' string."""
+    lowers = [
+        Version(s.version) for s in _requires_python_spec() if s.operator in (">=", "==", "~=")
+    ]
+    assert lowers, "requires-python must declare a lower bound"
+    low = min(lowers)
+    return f"{low.major}.{low.minor}"
+
+
+def _test_matrix() -> dict[str, dict]:
+    """Map 'major.minor' -> matrix include entry for the ci.yml `test` job."""
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text())
+    include = workflow["jobs"]["test"]["strategy"]["matrix"]["include"]
+    return {str(entry["python-version"]): entry for entry in include}
+
 
 def test_docs_only_change_selects_no_runtime_suite():
     assert ci.select_pr_suites(["docs/TEST_LAYERS.md", "README.md"]) == []
@@ -30,7 +57,59 @@ def test_backend_change_selects_production_python_suite():
         "issue-collection",
         "legacy-pr",
         "python-core",
+        "python-min",
     ]
+
+
+def test_min_supported_python_runs_the_full_unit_suite():
+    """#2868: the OLDEST supported interpreter must run the FULL unit suite.
+
+    A version-specific regression surfaces on the lowest interpreter first
+    (e.g. datetime.fromisoformat rejecting a 'Z' suffix before 3.11). The old
+    matrix ran only a hand-picked 7-file smoke on 3.10, so #2868's failing unit
+    test (test_models_session) was not covered and the break sailed through the
+    PR AND the post-merge main push. Assert the min lane runs `python-min`,
+    which runs `pytest tests/unit/` (the WHOLE tree) + compileall.
+    """
+    matrix = _test_matrix()
+    min_py = _min_supported_python()
+    assert min_py in matrix, f"min supported python {min_py} missing from ci test matrix"
+    assert matrix[min_py]["suite"] == "python-min", (
+        f"min supported python {min_py} must run the python-min suite, "
+        f"got {matrix[min_py].get('suite')!r}"
+    )
+
+    import json
+
+    suites = json.loads((ROOT / "ci" / "suites.json").read_text())["suites"]
+    commands = suites["python-min"]["commands"]
+    flat = [tuple(c) for c in commands]
+    assert any(
+        c[:3] == ("{python}", "-m", "compileall") for c in flat
+    ), "python-min must compileall"
+    pytest_cmd = next((c for c in flat if c[:3] == ("{python}", "-m", "pytest")), None)
+    assert pytest_cmd is not None, "python-min must run pytest"
+    # The WHOLE unit tree, not a hand-picked subset — that is the #2868 fix.
+    assert (
+        "tests/unit/" in pytest_cmd
+    ), f"python-min must run the full tests/unit/, got {pytest_cmd}"
+
+
+def test_backend_change_runs_the_min_version_unit_lane():
+    """End-to-end of the #2868 fix: an app/** change selects python-min, and the
+    matrix runs python-min on the minimum supported interpreter -- so the full
+    unit suite actually executes on py-min for source changes (on the PR and on
+    the post-merge push to main)."""
+    selected = ci.select_pr_suites(["app/models/session.py"])
+    assert "python-min" in selected
+    assert _test_matrix()[_min_supported_python()]["suite"] == "python-min"
+
+
+def test_every_matrix_python_is_supported():
+    """No matrix lane may target an interpreter outside requires-python."""
+    spec = _requires_python_spec()
+    for key in _test_matrix():
+        assert Version(key) in spec, f"ci test matrix targets unsupported python {key}"
 
 
 def test_frontend_change_selects_frontend_and_critical_e2e():
