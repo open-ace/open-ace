@@ -350,6 +350,452 @@ class TestUsageRepoAggregationConsistency:
         assert user_total_requests["bob"] == 2
 
 
+class TestRequestTrendByToolConsistency:
+    """Tests for get_request_trend_by_tool consistency (Issue #2951).
+
+    Tests cover:
+    1. Basic functionality: date range query returns correct data
+    2. Role filtering: only role='assistant' is counted
+    3. Tenant filtering: NULL user_id fallback via sender_name
+    4. Data consistency: total requests match get_today_request_stats
+    5. Tool name normalization in aggregation
+    6. Cross-date range queries
+    """
+
+    def test_basic_trend_query(self, tmp_db):
+        """Test basic date range query returns correct data.
+
+        Verifies that get_request_trend_by_tool returns correctly
+        grouped data by date and tool.
+        """
+        repo = UsageRepository(db=tmp_db)
+
+        # Insert messages for multiple dates and tools
+        dates = ["2026-08-19", "2026-08-20", "2026-08-21"]
+        tools = ["claude", "codex"]
+
+        for date in dates:
+            for tool in tools:
+                for i in range(3):
+                    tmp_db.execute(
+                        """
+                        INSERT INTO daily_messages
+                        (date, role, tokens_used, sender_name, tool_name, host_name, user_id)
+                        VALUES (?, 'assistant', 100, ?, ?, 'host', 1)
+                        """,
+                        (date, f"user1-host-{tool}-{i}", tool),
+                    )
+
+        result = repo.get_request_trend_by_tool("2026-08-19", "2026-08-21")
+
+        # Verify correct number of rows (3 dates * 2 tools = 6)
+        assert len(result) == 6
+
+        # Verify data structure
+        for row in result:
+            assert "date" in row
+            assert "tool" in row
+            assert "requests" in row
+            assert row["requests"] == 3  # 3 messages per tool per date
+
+        # Verify sorting (by date, then by tool)
+        # Check dates are sorted ascending (dates may repeat for different tools)
+        unique_dates = sorted({row["date"] for row in result})
+
+        # Extract unique dates to verify overall date ordering
+        prev_unique_date_idx = -1
+        for row in result:
+            date = row["date"]
+            date_idx = unique_dates.index(date)
+            assert date_idx >= prev_unique_date_idx, "Dates should be in ascending order"
+
+        # Check tools are sorted ascending within each date
+        tools_by_date = {}
+        for row in result:
+            if row["date"] not in tools_by_date:
+                tools_by_date[row["date"]] = []
+            tools_by_date[row["date"]].append(row["tool"])
+
+        for tools_list in tools_by_date.values():
+            assert tools_list == sorted(tools_list), "Tools should be sorted within each date"
+
+    def test_role_filter_excludes_user_messages(self, tmp_db):
+        """Test that role='user' messages are excluded from trend statistics.
+
+        Issue #2951 requirement: only role='assistant' should be counted.
+        """
+        repo = UsageRepository(db=tmp_db)
+
+        # Insert assistant messages (should be counted)
+        for i in range(3):
+            tmp_db.execute(
+                """
+                INSERT INTO daily_messages
+                (date, role, tokens_used, sender_name, tool_name, host_name, user_id)
+                VALUES (?, 'assistant', 100, ?, 'claude', 'host', 1)
+                """,
+                ("2026-08-21", f"user1-host-claude-{i}"),
+            )
+
+        # Insert user messages (should be excluded)
+        for i in range(5):
+            tmp_db.execute(
+                """
+                INSERT INTO daily_messages
+                (date, role, tokens_used, sender_name, tool_name, host_name, user_id)
+                VALUES (?, 'user', 50, ?, 'claude', 'host', 1)
+                """,
+                ("2026-08-21", f"user1-host-claude-user-{i}"),
+            )
+
+        result = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21")
+
+        # Verify only assistant messages are counted
+        assert len(result) == 1
+        assert result[0]["requests"] == 3
+
+    def test_tenant_filter_normal_user_id(self, tmp_db):
+        """Test tenant filtering with normal user_id.
+
+        Verifies that when user_id is present, tenant filtering works correctly.
+        """
+        # Create tenants and users
+        tmp_db.execute("""
+            INSERT INTO tenants (id, name, slug, quota)
+            VALUES (1, 'Tenant A', 'tenant-a', '{}')
+            """)
+        tmp_db.execute("""
+            INSERT INTO tenants (id, name, slug, quota)
+            VALUES (2, 'Tenant B', 'tenant-b', '{}')
+            """)
+        tmp_db.execute("""
+            INSERT INTO users (id, username, system_account, tenant_id)
+            VALUES (101, 'alice', 'alice-host', 1)
+            """)
+        tmp_db.execute("""
+            INSERT INTO users (id, username, system_account, tenant_id)
+            VALUES (102, 'bob', 'bob-host', 2)
+            """)
+
+        # Insert messages for tenant 1
+        for i in range(3):
+            tmp_db.execute(
+                """
+                INSERT INTO daily_messages
+                (date, role, tokens_used, sender_name, tool_name, host_name, user_id)
+                VALUES (?, 'assistant', 100, ?, 'claude', 'host', 101)
+                """,
+                ("2026-08-21", f"alice-host-claude-{i}"),
+            )
+
+        # Insert messages for tenant 2
+        for i in range(2):
+            tmp_db.execute(
+                """
+                INSERT INTO daily_messages
+                (date, role, tokens_used, sender_name, tool_name, host_name, user_id)
+                VALUES (?, 'assistant', 100, ?, 'codex', 'host', 102)
+                """,
+                ("2026-08-21", f"bob-host-codex-{i}"),
+            )
+
+        repo = UsageRepository(db=tmp_db)
+
+        # Test tenant 1 filtering
+        result_tenant1 = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21", tenant_id=1)
+        assert len(result_tenant1) == 1
+        assert result_tenant1[0]["requests"] == 3
+        assert result_tenant1[0]["tool"] == "claude"
+
+        # Test tenant 2 filtering
+        result_tenant2 = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21", tenant_id=2)
+        assert len(result_tenant2) == 1
+        assert result_tenant2[0]["requests"] == 2
+        assert result_tenant2[0]["tool"] == "codex"
+
+        # Test admin (no tenant filter)
+        result_all = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21")
+        assert len(result_all) == 2
+        total_all = sum(r["requests"] for r in result_all)
+        assert total_all == 5
+
+    def test_tenant_filter_null_user_id_like_fallback(self, tmp_db):
+        """Test tenant filtering with NULL user_id - LIKE fallback.
+
+        Issue #2077/2951: When user_id IS NULL, fallback to sender_name LIKE matching.
+
+        This tests the sender_name LIKE (system_account || '-%%') fallback path.
+        """
+        # Create tenant and users
+        tmp_db.execute("""
+            INSERT INTO tenants (id, name, slug, quota)
+            VALUES (1, 'Test Tenant', 'test-tenant', '{}')
+            """)
+        tmp_db.execute("""
+            INSERT INTO users (id, username, system_account, tenant_id)
+            VALUES (201, 'user3', 'system_account-001', 1)
+            """)
+
+        # Insert messages with NULL user_id but matching sender_name (LIKE pattern)
+        # sender_name format: {system_account}-{hostname}-{tool}
+        for i in range(3):
+            tmp_db.execute(
+                """
+                INSERT INTO daily_messages
+                (date, role, tokens_used, sender_name, tool_name, host_name, user_id)
+                VALUES (?, 'assistant', 100, ?, 'claude', 'host', NULL)
+                """,
+                ("2026-08-21", f"system_account-001-host-claude-{i}"),
+            )
+
+        # Insert message from another tenant (should be excluded)
+        tmp_db.execute("""
+            INSERT INTO users (id, username, system_account, tenant_id)
+            VALUES (202, 'other_user', 'other-system', 2)
+            """)
+        tmp_db.execute("""
+            INSERT INTO tenants (id, name, slug, quota)
+            VALUES (2, 'Other Tenant', 'other-tenant', '{}')
+            """)
+        tmp_db.execute(
+            """
+            INSERT INTO daily_messages
+            (date, role, tokens_used, sender_name, tool_name, host_name, user_id)
+            VALUES (?, 'assistant', 100, ?, 'codex', 'host', NULL)
+            """,
+            ("2026-08-21", "other-system-host-codex-1"),
+        )
+
+        repo = UsageRepository(db=tmp_db)
+        result = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21", tenant_id=1)
+
+        # Verify NULL user_id messages are correctly attributed via LIKE fallback
+        assert len(result) == 1
+        assert result[0]["requests"] == 3
+        assert result[0]["tool"] == "claude"
+
+    def test_tenant_filter_null_user_id_username_fallback(self, tmp_db):
+        """Test tenant filtering with NULL user_id - username fallback.
+
+        Issue #2077/2951: When user_id IS NULL, fallback to sender_name = username.
+
+        This tests the sender_name = username fallback path.
+        """
+        # Create tenant and user
+        tmp_db.execute("""
+            INSERT INTO tenants (id, name, slug, quota)
+            VALUES (1, 'Test Tenant', 'test-tenant', '{}')
+            """)
+        tmp_db.execute("""
+            INSERT INTO users (id, username, system_account, tenant_id)
+            VALUES (301, 'alice', 'alice-system', 1)
+            """)
+
+        # Insert messages with NULL user_id but sender_name = username
+        for i in range(2):
+            tmp_db.execute(
+                """
+                INSERT INTO daily_messages
+                (date, role, tokens_used, sender_name, tool_name, host_name, user_id)
+                VALUES (?, 'assistant', 100, ?, 'claude', 'host', NULL)
+                """,
+                ("2026-08-21", "alice"),  # sender_name directly equals username
+            )
+
+        repo = UsageRepository(db=tmp_db)
+        result = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21", tenant_id=1)
+
+        # Verify NULL user_id messages are correctly attributed via username fallback
+        assert len(result) == 1
+        assert result[0]["requests"] == 2
+
+    def test_trend_today_consistency(self, tmp_db):
+        """Test that trend total matches today's stats.
+
+        Issue #2951 core requirement:
+        get_request_trend_by_tool(today, today) total == get_today_request_stats total
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # Insert messages for multiple tools
+        tools = ["claude", "codex", "qwen"]
+        for tool in tools:
+            for i in range(5):
+                tmp_db.execute(
+                    """
+                    INSERT INTO daily_messages
+                    (date, role, tokens_used, sender_name, tool_name, host_name, user_id)
+                    VALUES (?, 'assistant', 100, ?, ?, 'host', 1)
+                    """,
+                    (today, f"user1-host-{tool}-{i}", tool),
+                )
+
+        # Insert user messages (should be excluded)
+        tmp_db.execute(
+            """
+            INSERT INTO daily_messages
+            (date, role, tokens_used, sender_name, tool_name, host_name, user_id)
+            VALUES (?, 'user', 50, ?, 'claude', 'host', 1)
+            """,
+            (today, "user1-host-claude-control"),
+        )
+
+        repo = UsageRepository(db=tmp_db)
+
+        # Get trend data for today
+        trend_data = repo.get_request_trend_by_tool(today, today)
+        trend_total = sum(r["requests"] for r in trend_data)
+
+        # Get today's stats
+        today_stats = repo.get_today_request_stats()
+
+        # CORE ASSERTION: trend total must equal today's total
+        assert (
+            trend_total == today_stats["total_requests"]
+        ), f"Trend total ({trend_total}) != today total ({today_stats['total_requests']})"
+
+        # Verify tool breakdown consistency
+        trend_by_tool = {r["tool"]: r["requests"] for r in trend_data}
+        for tool, count in today_stats["by_tool"].items():
+            assert tool in trend_by_tool, f"Tool {tool} missing from trend data"
+            assert (
+                trend_by_tool[tool] == count
+            ), f"Tool {tool}: trend={trend_by_tool[tool]}, today={count}"
+
+    def test_empty_data_returns_empty_list(self, tmp_db):
+        """Test that empty dataset returns empty list."""
+        repo = UsageRepository(db=tmp_db)
+
+        result = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21")
+
+        assert result == []
+
+    def test_multi_tool_aggregation(self, tmp_db):
+        """Test that multiple tools are correctly aggregated separately."""
+        repo = UsageRepository(db=tmp_db)
+
+        tools = ["claude", "codex", "qwen", "gemini"]
+        counts = [5, 3, 2, 1]
+
+        for tool, count in zip(tools, counts):
+            for i in range(count):
+                tmp_db.execute(
+                    """
+                    INSERT INTO daily_messages
+                    (date, role, tokens_used, sender_name, tool_name, host_name, user_id)
+                    VALUES (?, 'assistant', 100, ?, ?, 'host', 1)
+                    """,
+                    ("2026-08-21", f"user1-host-{tool}-{i}", tool),
+                )
+
+        result = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21")
+
+        # Verify correct number of tools
+        assert len(result) == len(tools)
+
+        # Verify each tool count
+        result_by_tool = {r["tool"]: r["requests"] for r in result}
+        for tool, count in zip(tools, counts):
+            assert result_by_tool[tool] == count
+
+    def test_host_name_filter(self, tmp_db):
+        """Test host_name filtering."""
+        repo = UsageRepository(db=tmp_db)
+
+        # Insert messages for different hosts
+        hosts = ["host1", "host2"]
+        for host in hosts:
+            for i in range(3):
+                tmp_db.execute(
+                    """
+                    INSERT INTO daily_messages
+                    (date, role, tokens_used, sender_name, tool_name, host_name, user_id)
+                    VALUES (?, 'assistant', 100, ?, 'claude', ?, 1)
+                    """,
+                    ("2026-08-21", f"user1-{host}-claude-{i}", host),
+                )
+
+        # Test filtering by host1
+        result_host1 = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21", host_name="host1")
+        assert len(result_host1) == 1
+        assert result_host1[0]["requests"] == 3
+
+        # Test filtering by host2
+        result_host2 = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21", host_name="host2")
+        assert len(result_host2) == 1
+        assert result_host2[0]["requests"] == 3
+
+        # Test no filter (all hosts)
+        result_all = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21")
+        assert len(result_all) == 1
+        assert result_all[0]["requests"] == 6
+
+    def test_cross_date_range_query(self, tmp_db):
+        """Test cross-date range query returns correct data.
+
+        Verifies that date grouping works correctly across multiple dates.
+        """
+        repo = UsageRepository(db=tmp_db)
+
+        dates = ["2026-08-19", "2026-08-20", "2026-08-21"]
+        tools = ["claude", "codex"]
+
+        for date in dates:
+            for tool in tools:
+                count = dates.index(date) + 1  # Different counts per date
+                for i in range(count):
+                    tmp_db.execute(
+                        """
+                        INSERT INTO daily_messages
+                        (date, role, tokens_used, sender_name, tool_name, host_name, user_id)
+                        VALUES (?, 'assistant', 100, ?, ?, 'host', 1)
+                        """,
+                        (date, f"user1-host-{tool}-{date}-{i}", tool),
+                    )
+
+        result = repo.get_request_trend_by_tool("2026-08-19", "2026-08-21")
+
+        # Verify correct total rows (3 dates * 2 tools = 6)
+        assert len(result) == 6
+
+        # Verify counts per date
+        for row in result:
+            expected_count = dates.index(row["date"]) + 1
+            assert row["requests"] == expected_count
+
+    def test_tool_name_normalization(self, tmp_db):
+        """Test that tool name variants are correctly normalized.
+
+        Issue #2951: verify normalize_tool_name is applied in result aggregation.
+        """
+        repo = UsageRepository(db=tmp_db)
+
+        # Insert messages with tool name variants
+        variants = [
+            ("qwen-code", 5),  # Alias for "qwen"
+            ("QWEN", 3),  # Case variation -> "qwen"
+            ("qwen-code-cli", 2),  # Another alias for "qwen"
+        ]
+
+        for tool_name, count in variants:
+            for i in range(count):
+                tmp_db.execute(
+                    """
+                    INSERT INTO daily_messages
+                    (date, role, tokens_used, sender_name, tool_name, host_name, user_id)
+                    VALUES (?, 'assistant', 100, ?, ?, 'host', 1)
+                    """,
+                    ("2026-08-21", f"user1-host-{tool_name}-{i}", tool_name),
+                )
+
+        result = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21")
+
+        # All variants should be merged into 'qwen'
+        assert len(result) == 1
+        assert result[0]["tool"] == "qwen"
+        assert result[0]["requests"] == 10  # 5 + 3 + 2
+
+
 class TestRequestStatsMetaField:
     """Tests for _meta field in request statistics API (Issue #2773).
 
