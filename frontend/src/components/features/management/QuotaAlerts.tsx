@@ -340,8 +340,8 @@ export const QuotaAlerts: React.FC = () => {
       const submitData: UpdateQuotaRequest = {
         daily_token_quota: formData.daily_token_quota ?? undefined,
         monthly_token_quota: formData.monthly_token_quota ?? undefined,
-        daily_request_quota: formData.daily_request_quota,
-        monthly_request_quota: formData.monthly_request_quota,
+        daily_request_quota: formData.daily_request_quota ?? undefined,
+        monthly_request_quota: formData.monthly_request_quota ?? undefined,
       };
       await updateQuota.mutateAsync({ userId: editingUser.id, data: submitData });
       toast.success(t('quotaUpdated', language), t('quotaUpdatedDesc', language));
