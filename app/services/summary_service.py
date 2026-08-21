@@ -197,8 +197,10 @@ class SummaryService:
             session_global_results = self.db.fetch_all(session_global_query, ())
 
             return self._merge_aggregates(
-                per_host_results + global_results
-                + session_per_host_results + session_global_results
+                per_host_results
+                + global_results
+                + session_per_host_results
+                + session_global_results
             )
 
     def _merge_aggregates(self, rows: list[dict]) -> list[dict]:
