@@ -34,7 +34,7 @@ export class ChunkLoadErrorBoundary extends React.Component<
       // Report error
       this.errorId = reportFrontendError({
         error,
-        errorInfo: { componentStack: errorInfo.componentStack },
+        errorInfo: { componentStack: errorInfo.componentStack || undefined },
         category: isChunkLoadError(error) ? 'chunk-load' : 'render-runtime',
       });
     } catch (e) {

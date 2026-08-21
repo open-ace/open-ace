@@ -50,3 +50,9 @@ declare module '*.css' {
   const content: string;
   export default content;
 }
+
+/**
+ * Global build variables (injected by Vite)
+ */
+declare const __BUILD_VERSION__: string | undefined;
+declare const __COMMIT_SHA__: string | undefined;

@@ -12,7 +12,8 @@ export { SearchableSelect } from './SearchableSelect';
 export { Pagination } from './Pagination';
 export { FeatureRouteGuard } from './FeatureRouteGuard';
 export { PlatformAdminGuard } from './PlatformAdminGuard';
-export { ChunkLoadErrorBoundary, isChunkLoadError } from './ChunkLoadErrorBoundary';
+export { ChunkLoadErrorBoundary } from './ChunkLoadErrorBoundary';
+export { isChunkLoadError } from './isChunkLoadError';
 
 // New Phase 5 components
 export { Modal, ConfirmModal } from './Modal';

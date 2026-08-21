@@ -123,15 +123,6 @@ function sanitizePath(path: string): string {
 }
 
 /**
- * Truncate text to specified number of lines
- */
-function truncateLines(text: string, maxLines: number): string {
-  const lines = text.split('\n');
-  if (lines.length <= maxLines) return text;
-  return lines.slice(0, maxLines).join('\n') + '\n... (truncated)';
-}
-
-/**
  * Truncate component stack (preserve last component name)
  */
 export function truncateComponentStack(stack: string, maxLines: number = 10): string {

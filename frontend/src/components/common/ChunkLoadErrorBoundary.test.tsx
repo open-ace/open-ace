@@ -2,7 +2,8 @@ import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ChunkLoadErrorBoundary, isChunkLoadError } from './ChunkLoadErrorBoundary';
+import { ChunkLoadErrorBoundary } from './ChunkLoadErrorBoundary';
+import { isChunkLoadError } from './isChunkLoadError';
 
 const consoleError = console.error;
 const preventWindowError = (event: Event): void => event.preventDefault();
