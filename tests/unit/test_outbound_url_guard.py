@@ -519,10 +519,13 @@ def test_cdn_ip_rotation_allows_different_public_ips():
 
 
 @pytest.mark.security
-@pytest.mark.parametrize("error_msg", [
-    "DNS resolution failed",
-    "DNS resolution timeout",
-])
+@pytest.mark.parametrize(
+    "error_msg",
+    [
+        "DNS resolution failed",
+        "DNS resolution timeout",
+    ],
+)
 def test_dns_resolution_error_handling(error_msg):
     """Test that DNS resolution errors are handled gracefully (Issue #2236).
 
@@ -576,11 +579,14 @@ def test_adapter_unmount_from_shared_session():
 
 
 @pytest.mark.security
-@pytest.mark.parametrize("ip_addr,description", [
-    ("10.0.0.1", "private network"),
-    ("127.0.0.1", "loopback"),
-    ("169.254.169.254", "metadata endpoint"),
-])
+@pytest.mark.parametrize(
+    "ip_addr,description",
+    [
+        ("10.0.0.1", "private network"),
+        ("127.0.0.1", "loopback"),
+        ("169.254.169.254", "metadata endpoint"),
+    ],
+)
 def test_safe_request_blocks_non_public_ips(ip_addr, description):
     """Test that safe_request blocks requests to non-public IPs (Issue #2236).
 
