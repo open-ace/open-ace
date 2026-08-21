@@ -4,10 +4,10 @@ Frontend Error Reporting API
 Receives error reports from the frontend and logs them.
 """
 
-from collections import defaultdict
-from datetime import datetime, timedelta
 import logging
 import threading
+from collections import defaultdict
+from datetime import datetime, timedelta
 
 from flask import Blueprint, jsonify, request
 
@@ -40,9 +40,7 @@ def check_rate_limit(ip: str) -> bool:
 
     with _rate_limit_lock:
         # Always clean up expired entries for current IP
-        _rate_limit_cache[ip] = [
-            t for t in _rate_limit_cache[ip] if t > window_start
-        ]
+        _rate_limit_cache[ip] = [t for t in _rate_limit_cache[ip] if t > window_start]
 
         # Periodic cleanup when cache is too large
         if len(_rate_limit_cache) > MAX_CACHE_ENTRIES:
