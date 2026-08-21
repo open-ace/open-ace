@@ -23,6 +23,7 @@ Coverage:
 
 from __future__ import annotations
 
+import json
 import threading
 from unittest.mock import MagicMock
 
@@ -205,6 +206,220 @@ def test_timing_issue_marks_completed_with_timing_milestone():
     deps = _deps(host, gh)
 
     result = pr_review_phase.handle(_ctx(_workflow(github_pr_number=None)), deps)
+
+    assert result.outcome == "completed"
+    assert result.next_phase == "completed"
+    assert any(
+        ms.get("milestone_type") == "timing_issue" for ms in result.milestone_events
+    ), result.milestone_events
+
+
+def test_empty_branch_name_fails_loudly():
+    """An empty branch_name is a broken state (merge cleanup cleared it and
+    nothing recreated the workspace), NOT "no changes": the handler must
+    fail with a structured error instead of falling into the no-changes
+    completed terminal (which masked the breakage in #322/#329/#340)."""
+    gh = _gh()
+    host = _host()
+    deps = _deps(host, gh)
+
+    result = pr_review_phase.handle(_ctx(_workflow(branch_name="")), deps)
+
+    assert isinstance(result, PhaseResult)
+    assert result.outcome == "failed"
+    assert result.next_phase is None
+    msg = (result.structured_error or {}).get("message", "")
+    assert "empty branch_name" in msg, msg
+    # NOT the no-changes terminal.
+    assert result.next_phase != "completed"
+    assert not any(
+        ms.get("milestone_type") == "no_changes" for ms in result.milestone_events
+    ), result.milestone_events
+    host.emit_phase_change.assert_not_called()
+    host.post_github_comment.assert_not_called()
+
+
+# ── acceptance-rejected re-entry: reopen development, not completed ───────
+
+
+def _gh_ancestor() -> MagicMock:
+    """gh fake whose branch IS an ancestor of main (timing-issue shape)."""
+    gh = _gh()
+    gh._run_git.side_effect = lambda args, check=True: (
+        MagicMock(stdout="", returncode=0)
+        if args[:2] == ["merge-base", "--is-ancestor"]
+        else _run_git(args, check)
+    )
+    return gh
+
+
+_REJECTED_REPORT = json.dumps(
+    {
+        "status": "rejected",
+        "gates": [
+            {
+                "item": "call-chain:tenant_repo",
+                "verdict": "rejected",
+                "rationale": "no production caller wires tenant_repo",
+            }
+        ],
+    }
+)
+
+
+def test_timing_issue_with_rejected_verification_reopens_development():
+    """#331: branch behind main + a recorded rejected acceptance + a PR number
+    means the previous delivery already merged — reopen development with the
+    failed items as feedback instead of the timing-issue completed terminal."""
+    gh = _gh_ancestor()
+    host = _host()
+    host.dev_round_cap_remaining.return_value = 2
+    deps = _deps(host, gh)
+    wf = _workflow(
+        github_pr_number=2851,
+        verification_status="rejected",
+        verification_report=_REJECTED_REPORT,
+        dev_round=1,
+    )
+
+    result = pr_review_phase.handle(_ctx(wf), deps)
+
+    assert result.outcome == "completed"
+    assert result.next_phase == "development"
+    assert result.next_status == "developing"
+    patch = result.workflow_patch
+    assert patch.get("dev_round") == 2
+    assert patch.get("current_round") == 0
+    assert patch.get("verification_status") is None  # single auto-reopen guard
+    # Stale merge SHA dropped so acceptance re-resolves the NEXT merge instead
+    # of replaying the rejected verdict on the previous delivery.
+    assert patch.get("verification_merge_sha") == ""
+    assert "call-chain:tenant_repo" in (patch.get("user_feedback") or "")
+    reopened = [
+        ms
+        for ms in result.milestone_events
+        if ms.get("milestone_type") == "acceptance_rejected_reopened"
+    ]
+    assert len(reopened) == 1, result.milestone_events
+    assert reopened[0].get("dev_round") == 2
+    assert "2851" in reopened[0].get("title", "")
+    # Handler emits its own phase_change (development), never completed.
+    emitted = [c.args[0] for c in host.emit_phase_change.call_args_list]
+    assert {"phase": "development", "dev_round": 2, "resumed": True} in emitted
+    assert all(e.get("phase") != "completed" for e in emitted)
+    host.post_github_comment.assert_not_called()
+    gh.create_pr.assert_not_called()
+
+
+def test_reopen_respects_dev_round_cap_and_fails():
+    """A persistent rejection past MAX_ACCEPTANCE_DEV_ROUNDS fails the workflow
+    (#2335 semantics) instead of looping or silently completing."""
+    gh = _gh_ancestor()
+    host = _host()
+    host.dev_round_cap_remaining.return_value = 0
+    deps = _deps(host, gh)
+    wf = _workflow(
+        github_pr_number=2851,
+        verification_status="rejected",
+        verification_report=_REJECTED_REPORT,
+        dev_round=3,
+    )
+
+    result = pr_review_phase.handle(_ctx(wf), deps)
+
+    assert result.outcome == "failed"
+    msg = (result.structured_error or {}).get("message", "")
+    assert "dev-round cap" in msg and "2851" in msg
+    assert any(
+        ms.get("milestone_type") == "acceptance_rejected_cap_exhausted"
+        for ms in result.milestone_events
+    ), result.milestone_events
+    emitted = [c.args[0] for c in host.emit_phase_change.call_args_list]
+    assert all(e.get("phase") != "completed" for e in emitted)
+    host.post_github_comment.assert_not_called()
+
+
+def test_reopen_with_unparseable_report_uses_default_feedback():
+    """An unparseable/missing verification report still reopens development —
+    the default feedback text points the dev round at the issue comment."""
+    gh = _gh_ancestor()
+    host = _host()
+    host.dev_round_cap_remaining.return_value = 2
+    deps = _deps(host, gh)
+    wf = _workflow(
+        github_pr_number=2851,
+        verification_status="rejected",
+        verification_report="{broken json",
+        dev_round=1,
+    )
+
+    result = pr_review_phase.handle(_ctx(wf), deps)
+
+    assert result.outcome == "completed"
+    assert result.next_phase == "development"
+    feedback = result.workflow_patch.get("user_feedback") or ""
+    assert "REJECTED" in feedback and "2851" in feedback and feedback.strip()
+
+
+@pytest.mark.parametrize("verification_status", [None, "confirmed", "indeterminate"])
+def test_reopen_omitted_when_verification_not_rejected(verification_status):
+    """Only 'rejected' reroutes the timing-issue path; anything else keeps the
+    Issue #1552 completed terminal (indeterminate is human-guarded)."""
+    gh = _gh_ancestor()
+    host = _host()
+    deps = _deps(host, gh)
+    wf = _workflow(github_pr_number=1234, verification_status=verification_status)
+
+    result = pr_review_phase.handle(_ctx(wf), deps)
+
+    assert result.outcome == "completed"
+    assert result.next_phase == "completed"
+    assert any(
+        ms.get("milestone_type") == "timing_issue" for ms in result.milestone_events
+    ), result.milestone_events
+    host.dev_round_cap_remaining.assert_not_called()
+
+
+def test_reopen_reads_pr_and_status_from_host_fallback():
+    """The reopen trigger's PR number / verification status fall back to the
+    host's live DB read when the wf snapshot omits them (v2 review defence)."""
+    gh = _gh_ancestor()
+    host = _host()
+    host.dev_round_cap_remaining.return_value = 2
+    host.get_workflow_field.side_effect = {
+        "github_pr_number": 2851,
+        "verification_status": "rejected",
+    }.get
+    deps = _deps(host, gh)
+    wf = _workflow(
+        github_pr_number=None,
+        verification_status=None,
+        verification_report=_REJECTED_REPORT,
+        dev_round=1,
+    )
+
+    result = pr_review_phase.handle(_ctx(wf), deps)
+
+    assert result.outcome == "completed"
+    assert result.next_phase == "development"
+    assert result.next_status == "developing"
+    assert result.workflow_patch.get("dev_round") == 2
+    assert "call-chain:tenant_repo" in (result.workflow_patch.get("user_feedback") or "")
+
+
+def test_reopen_requires_recorded_pr():
+    """Without a recorded PR number the reopen trigger's third condition fails
+    and the existing timing-issue completed terminal is preserved."""
+    gh = _gh_ancestor()
+    host = _host()  # get_workflow_field defaults to None
+    deps = _deps(host, gh)
+    wf = _workflow(
+        github_pr_number=None,
+        verification_status="rejected",
+        verification_report=_REJECTED_REPORT,
+    )
+
+    result = pr_review_phase.handle(_ctx(wf), deps)
 
     assert result.outcome == "completed"
     assert result.next_phase == "completed"

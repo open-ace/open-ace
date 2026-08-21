@@ -23,7 +23,7 @@ import time
 
 from playwright.sync_api import expect, sync_playwright
 
-BASE_URL = "http://localhost:19888"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"

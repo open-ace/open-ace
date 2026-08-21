@@ -33,6 +33,10 @@ logger = logging.getLogger(__name__)
 FEISHU_PROVIDER_NAME = "feishu"
 FEISHU_ROOT_DEPARTMENT_ID = "0"
 FEISHU_PLACEHOLDER_EMAIL_DOMAIN = "feishu.local"
+# Feishu Contact v3 API enforces page_size <= 50 for the department-children
+# and find-by-department-users endpoints. Using a single constant prevents the
+# two call sites from drifting apart (issue #2884).
+FEISHU_DIRECTORY_PAGE_SIZE = 50
 # Provenance marker written to users.system_account for auto-provisioned users
 # so they can be distinguished from human-created accounts.
 FEISHU_PROVISIONED_SYSTEM_ACCOUNT = "feishu_org_sync"
@@ -648,7 +652,7 @@ class FeishuOrgSyncService:
         while True:
             params = {
                 "department_id_type": "open_department_id",
-                "page_size": 100,
+                "page_size": FEISHU_DIRECTORY_PAGE_SIZE,
             }
             if page_token:
                 params["page_token"] = page_token
@@ -707,7 +711,7 @@ class FeishuOrgSyncService:
                 "department_id": department_id,
                 "department_id_type": "open_department_id",
                 "user_id_type": "open_id",
-                "page_size": 100,
+                "page_size": FEISHU_DIRECTORY_PAGE_SIZE,
             }
             if page_token:
                 params["page_token"] = page_token
@@ -788,25 +792,57 @@ class FeishuOrgSyncService:
             json=json_payload,
             timeout=15,
         )
+        # Try to parse the Feishu JSON body before raising on HTTP errors so that
+        # 4xx responses carrying a Feishu error code (e.g. field validation
+        # failure with code=99992402) surface as a descriptive FeishuApiError
+        # instead of a bare "400 Client Error". The JSON parse is wrapped in
+        # try/except so a non-JSON response still falls through to the generic
+        # raise_for_status path below.
+        payload: dict[str, Any] | None = None
+        try:
+            payload = response.json()
+        except (ValueError, TypeError):
+            pass
+
+        if payload is not None and isinstance(payload, dict):
+            code = payload.get("code")
+            if code is not None and code != 0:
+                # Auth-fail retry path (WP-3): invalidate cached token and retry
+                # once with a freshly-exchanged token.
+                if (
+                    not retried
+                    and code in FEISHU_AUTH_ERROR_CODES
+                    and token
+                    and self._active_app_id
+                    and self._active_app_secret
+                ):
+                    self._invalidate_tenant_access_token(self._active_app_id)
+                    fresh = self._get_tenant_access_token(
+                        self._active_app_id, self._active_app_secret
+                    )
+                    return self._request_json_once(
+                        method, url, fresh, params, json_payload, retried=True
+                    )
+                msg = payload.get("msg") or payload.get("message") or "unknown error"
+                # Attach the sanitized field description when available (e.g.
+                # "the max value is 50") so the error message is actionable.
+                details = payload.get("details")
+                if isinstance(details, list) and details:
+                    first = details[0]
+                    if isinstance(first, dict):
+                        field_desc = first.get("description") or first.get("msg")
+                        if field_desc:
+                            msg = f"{msg} [{field_desc}]"
+                raise FeishuApiError(code, msg)
+            if code == 0:
+                return payload.get("data") or {}
+
+        # No Feishu-style JSON body (or code was absent/zero without data) —
+        # fall back to the generic HTTP error.
         response.raise_for_status()
-        payload = response.json()
-        code = payload.get("code")
-        if code == 0:
-            return payload.get("data") or {}
-        if (
-            not retried
-            and code in FEISHU_AUTH_ERROR_CODES
-            and token
-            and self._active_app_id
-            and self._active_app_secret
-        ):
-            self._invalidate_tenant_access_token(self._active_app_id)
-            fresh = self._get_tenant_access_token(self._active_app_id, self._active_app_secret)
-            return self._request_json_once(method, url, fresh, params, json_payload, retried=True)
-        # Surface only code/msg (never the whole payload) so transient errors are
-        # debuggable without echoing request bodies into logs/exceptions.
-        msg = payload.get("msg") or payload.get("message") or "unknown error"
-        raise FeishuApiError(code, msg)
+        # If raise_for_status did not raise (HTTP 2xx) but we have no parsed
+        # payload, return an empty dict rather than crashing on a None access.
+        return {}
 
     @staticmethod
     def _extract_items(data: dict[str, Any], keys: tuple[str, ...]) -> list[dict[str, Any]]:
@@ -891,14 +927,23 @@ class FeishuOrgSyncService:
         to avoid full table scan.
         """
         # Use WHERE clause to filter at database level
-        # This leverages the idx_teams_feishu_sync partial index
-        # Note: Using JSON_EXTRACT for SQLite compatibility (Issue #2174)
-        # PostgreSQL supports settings->>'sync_source', but SQLite requires json_extract
-        query = """
-            SELECT team_id, name, settings
-            FROM teams
-            WHERE json_extract(settings, '$.sync_source') = ?
-        """
+        # This leverages the idx_teams_sync_source index
+        # Issue #2885: Branch by database dialect — PostgreSQL has no json_extract().
+        # The settings column is TEXT, so PostgreSQL requires ::jsonb cast before
+        # using the ->> operator. This matches the index expression in migration
+        # 20260731_003_add_teams_sync_source_indexes.
+        if self.db.is_postgresql:
+            query = """
+                SELECT team_id, name, settings
+                FROM teams
+                WHERE settings::jsonb->>'sync_source' = ?
+            """
+        else:
+            query = """
+                SELECT team_id, name, settings
+                FROM teams
+                WHERE json_extract(settings, '$.sync_source') = ?
+            """
         rows = self.db.fetch_all(query, (FEISHU_PROVIDER_NAME,))
 
         synced: dict[str, dict[str, Any]] = {}

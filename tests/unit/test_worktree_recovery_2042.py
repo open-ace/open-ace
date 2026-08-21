@@ -327,3 +327,206 @@ def test_ensure_worktree_never_uses_origin_main_for_missing_branch():
     create_call = [c for c in add_calls if "-b" in c][0]
     assert create_call[-1] == "base-sha-verified"
     assert "origin/main" not in create_call
+
+
+# ── post-merge-cleanup resume recreates the workspace (#322/#329/#340) ──────
+
+
+def _cleared_wf(**overrides) -> dict:
+    """A worktree-strategy workflow resumed AFTER merge cleanup: the merged
+    delivery's cleanup cleared worktree_path/branch_name (the workflow was
+    "done"), and a rejected-acceptance / new-requirements resume brought it
+    back into a workspace-consuming phase."""
+    wf = {
+        "workflow_id": "wf-2042",
+        "branch_strategy": "worktree",
+        "project_path": "/private/tmp/repo",
+        "worktree_path": "",
+        "branch_name": "",
+        "current_phase": "development",
+        "github_pr_number": 42,
+        "user_id": None,
+        "preferred_worktree_path": "/private/tmp/repo/.worktrees/wf-2042",
+    }
+    wf.update(overrides)
+    return wf
+
+
+@pytest.mark.parametrize("phase", ["development", "pr_review"])
+def test_ensure_worktree_recreates_cleared_workspace(phase):
+    """Empty worktree_path in a workspace-consuming phase recreates the
+    worktree (NOT a no-op returning the main checkout): `worktree add -b` at
+    the preferred path from the verified PR head, fields written back, and a
+    worktree_restored milestone recorded."""
+    orch = _make_orch()
+    _set_evidence(
+        orch,
+        MagicMock(
+            resolve_verified_pr_head=MagicMock(
+                return_value=_make_evidence(Verdict.CONFIRMED, "pr-head-sha")
+            ),
+            verify_commit_available=MagicMock(
+                return_value=_make_evidence(Verdict.CONFIRMED, "pr-head-sha")
+            ),
+        ),
+    )
+    wf = _cleared_wf(current_phase=phase)
+    canonical = "/private/tmp/repo/.worktrees/wf-2042"
+    main_gh = MagicMock()
+    main_gh.path_exists_as_user.return_value = False
+    not_found = MagicMock(returncode=1)  # branch gone locally + remotely
+    main_gh._run_git.side_effect = [
+        MagicMock(),  # fetch origin main
+        not_found,  # local branch missing
+        not_found,  # remote branch missing
+        MagicMock(),  # worktree add -b <branch> <path> <head>
+    ]
+    fake_gh_cls = MagicMock(side_effect=lambda _p, **_kw: main_gh)
+    with (
+        patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", fake_gh_cls),
+        patch("os.path.realpath", side_effect=lambda p: p),
+    ):
+        result = orch._ensure_worktree(wf)
+
+    assert result == canonical
+    add_calls = [
+        c.args[0]
+        for c in main_gh._run_git.call_args_list
+        if c.args and c.args[0] and c.args[0][0:2] == ["worktree", "add"]
+    ]
+    assert add_calls, "expected a worktree add call"
+    create_call = [c for c in add_calls if "-b" in c][0]
+    # branch_name was cleared by cleanup → re-derived from workflow_id
+    assert create_call == ["worktree", "add", "-b", "auto-dev/wf-2042", canonical, "pr-head-sha"]
+    orch._update_workflow.assert_called_once_with(
+        {"worktree_path": canonical, "branch_name": "auto-dev/wf-2042"}
+    )
+    ms_kwargs = orch._create_milestone.call_args.kwargs
+    assert ms_kwargs["milestone_type"] == "worktree_restored"
+    assert ms_kwargs["status"] == "completed"
+
+
+def test_ensure_worktree_recreates_cleared_workspace_derives_path_without_preferred():
+    """No surviving preferred_worktree_path → the preferred-path helper still
+    derives the conventional {project_path}/.worktrees/{workflow_id} spot."""
+    orch = _make_orch()
+    _set_evidence(
+        orch,
+        MagicMock(
+            resolve_verified_pr_head=MagicMock(
+                return_value=_make_evidence(Verdict.CONFIRMED, "pr-head-sha")
+            ),
+            verify_commit_available=MagicMock(
+                return_value=_make_evidence(Verdict.CONFIRMED, "pr-head-sha")
+            ),
+        ),
+    )
+    wf = _cleared_wf(preferred_worktree_path="")
+    canonical = "/private/tmp/repo/.worktrees/wf-2042"
+    main_gh = MagicMock()
+    main_gh.path_exists_as_user.return_value = False
+    not_found = MagicMock(returncode=1)
+    main_gh._run_git.side_effect = [
+        MagicMock(),  # fetch origin main
+        not_found,  # local branch missing
+        not_found,  # remote branch missing
+        MagicMock(),  # worktree add -b
+    ]
+    fake_gh_cls = MagicMock(side_effect=lambda _p, **_kw: main_gh)
+    with (
+        patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", fake_gh_cls),
+        patch("os.path.realpath", side_effect=lambda p: p),
+    ):
+        result = orch._ensure_worktree(wf)
+
+    assert result == canonical
+    orch._update_workflow.assert_called_once_with(
+        {"worktree_path": canonical, "branch_name": "auto-dev/wf-2042"}
+    )
+
+
+def test_ensure_worktree_attaches_surviving_branch_when_worktree_cleared():
+    """Cleanup partial failure (worktree cleared, branch survives) → attach
+    the surviving branch (`worktree add <path> <branch>`, NOT -b); the #1999
+    guard verifies the attached HEAD matches the verified head."""
+    orch = _make_orch()
+    _set_evidence(
+        orch,
+        MagicMock(
+            resolve_verified_pr_head=MagicMock(
+                return_value=_make_evidence(Verdict.CONFIRMED, "verified-head-abc")
+            ),
+            verify_commit_available=MagicMock(
+                return_value=_make_evidence(Verdict.CONFIRMED, "verified-head-abc")
+            ),
+        ),
+    )
+    wf = _cleared_wf(branch_name="auto-dev/survivor")
+    canonical = "/private/tmp/repo/.worktrees/wf-2042"
+    main_gh = MagicMock()
+    main_gh.path_exists_as_user.return_value = False
+    found = MagicMock(returncode=0)  # branch survives
+    main_gh._run_git.side_effect = [
+        MagicMock(),  # fetch origin main
+        found,  # local branch exists
+        found,  # remote branch exists
+        MagicMock(),  # worktree add <canonical> <branch> (attach)
+    ]
+    wt_gh = MagicMock()
+    wt_gh.get_current_commit.return_value = "verified-head-abc"  # guard passes
+
+    def fake_gh_ctor(path, **kw):
+        return wt_gh if path.endswith("wf-2042") else main_gh
+
+    fake_gh_cls = MagicMock(side_effect=fake_gh_ctor)
+    with (
+        patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", fake_gh_cls),
+        patch("os.path.realpath", side_effect=lambda p: p),
+    ):
+        result = orch._ensure_worktree(wf)
+
+    assert result == canonical
+    add_calls = [
+        c.args[0]
+        for c in main_gh._run_git.call_args_list
+        if c.args and c.args[0] and c.args[0][0:2] == ["worktree", "add"]
+    ]
+    assert add_calls == [["worktree", "add", canonical, "auto-dev/survivor"]]
+    orch._update_workflow.assert_called_once_with(
+        {"worktree_path": canonical, "branch_name": "auto-dev/survivor"}
+    )
+
+
+@pytest.mark.parametrize(
+    "phase",
+    ["wait", "merge", "planning", "report", "acceptance_verification", "preparation"],
+)
+def test_ensure_worktree_noop_for_non_workspace_phases_when_cleared(phase):
+    """Phases that never touch the workspace keep the historical no-op when
+    worktree_path is cleared after merge cleanup (e.g. a retried merge must
+    NOT rebuild the worktree): returns project_path, no git calls at all."""
+    orch = _make_orch()
+    wf = _cleared_wf(current_phase=phase)
+    main_gh = MagicMock()
+    fake_gh_cls = MagicMock(side_effect=lambda _p, **_kw: main_gh)
+    with patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", fake_gh_cls):
+        result = orch._ensure_worktree(wf)
+
+    assert result == "/private/tmp/repo"
+    main_gh._run_git.assert_not_called()
+    orch._update_workflow.assert_not_called()
+    orch._create_milestone.assert_not_called()
+
+
+def test_ensure_worktree_noop_when_not_worktree_strategy():
+    """Non-worktree strategies never recreate: empty path in development
+    still returns project_path (branch-strategy workflows work in place)."""
+    orch = _make_orch()
+    wf = _cleared_wf(branch_strategy="new-branch")
+    main_gh = MagicMock()
+    fake_gh_cls = MagicMock(side_effect=lambda _p, **_kw: main_gh)
+    with patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", fake_gh_cls):
+        result = orch._ensure_worktree(wf)
+
+    assert result == "/private/tmp/repo"
+    main_gh._run_git.assert_not_called()

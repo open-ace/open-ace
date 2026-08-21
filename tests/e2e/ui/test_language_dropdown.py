@@ -8,7 +8,7 @@ import time
 
 from playwright.sync_api import expect, sync_playwright
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
@@ -27,7 +27,7 @@ def test_language_dropdown():  # allow-no-assert: smoke test - visual verificati
 
         # Step 1: 访问登录页
         print("\n1. 访问登录页...")
-        page.goto(BASE_URL + "login")
+        page.goto(f"{BASE_URL}/login")
         page.wait_for_load_state("networkidle")
         time.sleep(2)
 

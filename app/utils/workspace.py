@@ -176,6 +176,7 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
 
     # 创建用户（通过 wrapper 或 sudo）
     # Issue #1855: 优先使用安全 wrapper，wrapper 内部做参数校验和审计日志
+    # Issue #2894: wrapper 脚本需要 root 权限（锁文件、系统用户创建等）
     if _is_wrapper_available(OPENACE_USERADD_WRAPPER):
         cmd = [OPENACE_USERADD_WRAPPER, system_account]
         if uid is not None:
@@ -184,7 +185,7 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
             f"Creating system user via wrapper: {system_account}"
             + (f" (UID: {uid})" if uid else "")
         )
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = run_as_root_if_needed(cmd)
     else:
         # Fallback: 使用传统 useradd 命令（需要 sudo）
         cmd = ["useradd", "-m", "-s", "/bin/bash"]
@@ -221,11 +222,10 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
                 os.makedirs(directory, mode=0o755, exist_ok=True)
             except PermissionError:
                 # Issue #1855: 优先使用安全 wrapper
+                # Issue #2894: wrapper 脚本需要 root 权限
                 if _is_wrapper_available(OPENACE_MKDIR_WRAPPER):
-                    result = subprocess.run(
+                    result = run_as_root_if_needed(
                         [OPENACE_MKDIR_WRAPPER, system_account, directory],
-                        capture_output=True,
-                        text=True,
                     )
                     if result.returncode != 0:
                         logger.warning(f"Cannot create {directory} via wrapper: {result.stderr}")
@@ -247,13 +247,10 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
 
         # 设置所有权（通过 wrapper 或 sudo）
         # Issue #1855: 优先使用安全 wrapper，wrapper 内部做路径校验和审计日志
+        # Issue #2894: wrapper 脚本需要 root 权限
         for directory in [workspace_dir, qwen_dir]:
             if _is_wrapper_available(OPENACE_CHOWN_WRAPPER):
-                result = subprocess.run(
-                    [OPENACE_CHOWN_WRAPPER, f"{uid}:{gid}", directory],
-                    capture_output=True,
-                    text=True,
-                )
+                result = run_as_root_if_needed([OPENACE_CHOWN_WRAPPER, f"{uid}:{gid}", directory])
                 if result.returncode != 0:
                     logger.warning(f"Cannot chown {directory} via wrapper: {result.stderr}")
             else:

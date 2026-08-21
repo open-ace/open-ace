@@ -413,6 +413,13 @@ def get_sso_enabled():
 
     Public endpoint - no authentication required.
     Used by login page to determine whether to show SSO login options.
+
+    Issue #2128: This is a GLOBAL setting stored in config.json under
+    system_settings.sso_enabled. It affects all tenants - when enabled,
+    the login page will display SSO login buttons for all configured providers.
+
+    Returns:
+        JSON response with sso_enabled boolean. Default is False if not configured.
     """
     from app.utils.config import is_sso_enabled
 

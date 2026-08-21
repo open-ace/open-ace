@@ -42,18 +42,52 @@ def _parse_fetch_result(output: str) -> dict[str, Any]:
 
     Issue #2733: Extract structured coverage data so the scheduler
     can detect degraded fetch results.
+    Issue #2823: Enhanced parsing with marker-delimited format and field validation.
+
+    Supports two formats:
+    1. New format (protocol version 1.0):
+       ===FETCH_RESULT_START===
+       {"protocol_version": "1.0", "status": "...", "coverage": {...}, ...}
+       ===FETCH_RESULT_END===
+    2. Legacy format:
+       FETCH_RESULT: {"status": "...", "coverage": {...}}
 
     Args:
         output: The stdout from the fetch script
 
     Returns:
-        dict with 'status' and 'coverage' keys, or empty dict if not found
+        dict with 'status', 'coverage', 'protocol_version' keys, or empty dict if not found
     """
+    # Try new marker-delimited format first (Issue #2823)
+    start_marker = "===FETCH_RESULT_START==="
+    end_marker = "===FETCH_RESULT_END==="
+
+    start_idx = output.find(start_marker)
+    end_idx = output.find(end_marker)
+
+    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+        # Extract content between markers
+        content = output[start_idx + len(start_marker) : end_idx].strip()
+        try:
+            result: dict[str, Any] = json.loads(content)
+            # Validate required fields
+            if "status" not in result:
+                logger.warning("FETCH_RESULT missing 'status' field")
+                result["status"] = "unknown"
+            if "coverage" not in result:
+                logger.warning("FETCH_RESULT missing 'coverage' field")
+                result["coverage"] = {}
+            return result
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse FETCH_RESULT JSON: {e}")
+            # Fall through to legacy format
+
+    # Try legacy format (Issue #2733)
     match = re.search(r"FETCH_RESULT:\s*(\{.*?\})\s*$", output, re.MULTILINE)
     if match:
         try:
-            result: dict[str, Any] = json.loads(match.group(1))
-            return result
+            legacy_result: dict[str, Any] = json.loads(match.group(1))
+            return legacy_result
         except json.JSONDecodeError:
             pass
     return {}

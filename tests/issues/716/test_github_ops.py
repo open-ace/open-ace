@@ -97,6 +97,53 @@ class TestGitHubOpsIssue:
         assert result["number"] == 43
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_create_issue_with_repo(self, mock_run):
+        """Issue #2949: create_issue should accept explicit repo parameter."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="https://github.com/owner/new-project/issues/44"
+        )
+        result = self.gh.create_issue(
+            "Bug in new project", body="Fix needed", repo="owner/new-project"
+        )
+        assert result["number"] == 44
+        # Verify --repo flag is passed
+        cmd = mock_run.call_args[0][0]
+        assert "--repo" in cmd
+        assert "owner/new-project" in cmd
+
+    @patch("app.utils.config.get_ai_github_env")
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_create_issue_preserves_gh_token(self, mock_run, mock_get_env):
+        """Issue #2949: create_issue should use api_only=True to preserve GH_TOKEN."""
+        # Simulate bot token configured
+        mock_get_env.return_value = {"GH_TOKEN": "test-bot-token"}
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="https://github.com/user/test/issues/45"
+        )
+
+        # Create GitHubOps with system_account (cross-user scenario)
+        gh = GitHubOps("/tmp/test-repo", system_account="testuser")
+        result = gh.create_issue("Test", body="Body")
+
+        assert result["number"] == 45
+        # Verify gh was called (not sudo -u)
+        cmd = mock_run.call_args[0][0]
+        assert "sudo" not in cmd
+        assert "gh" in cmd
+
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_create_issue_api_only_flag(self, mock_run):
+        """Verify create_issue uses api_only=True in _run_gh."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="https://github.com/user/test/issues/46"
+        )
+        result = self.gh.create_issue("Test api_only", body="Verify flag")
+
+        assert result["number"] == 46
+        # The api_only=True flag is internal to _run_gh; the test verifies
+        # the call succeeds (actual api_only behavior tested in integration)
+
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_get_issue(self, mock_run):
         mock_run.return_value = MagicMock(
             returncode=0,

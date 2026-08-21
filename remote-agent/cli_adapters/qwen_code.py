@@ -85,8 +85,25 @@ class QwenCodeAdapter(BaseCLIAdapter):
             if session_id:
                 logger.debug("Full session_id: %s", session_id)
             args.extend(["--resume", session_id])
+
+        # Issue #2645: Map permission_mode to Qwen CLI --approval-mode flags.
+        # Qwen CLI supports: "suggest", "auto", "yolo" (per tests/issues/166)
+        # - "ask": Safe mode, suggests actions for confirmation ("suggest")
+        # - "auto": Safe automatic mode ("auto")
+        # - "bypass": Dangerous mode, full autonomy ("yolo")
         if permission_mode:
-            args.extend(["--approval-mode", permission_mode])
+            approval_mode_map = {
+                "ask": "suggest",  # Safe: suggest actions, require confirmation
+                "auto": "auto",  # Safe automatic: auto-execute with some limits
+                "bypass": "yolo",  # Dangerous: full autonomy, no prompts
+                "full-auto": "yolo",  # Alias for bypass
+                # Legacy aliases for backward compatibility
+                "auto-edit": "yolo",
+                "suggest": "suggest",
+            }
+            cli_mode = approval_mode_map.get(permission_mode, permission_mode)
+            args.extend(["--approval-mode", cli_mode])
+
         if model:
             args.extend(["--model", model])
         if allowed_tools:

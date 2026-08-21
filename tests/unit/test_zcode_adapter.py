@@ -143,9 +143,11 @@ def test_zcode_build_resume_args(cli_adapters_pkg):
 @pytest.mark.parametrize(
     "mode,expected",
     [
-        ("bypass", "yolo"),
-        ("full-auto", "yolo"),
-        ("auto", "build"),
+        # Issue #2645: Updated permission mode semantics
+        ("ask", "build"),  # Safe mode: require confirmation
+        ("bypass", "yolo"),  # Dangerous: full autonomy
+        ("full-auto", "yolo"),  # Dangerous: full autonomy
+        ("auto", "edit"),  # Safe automatic: auto-edit without full bypass
         ("auto-edit", "edit"),
         ("plan", "plan"),
         # Issue #2591: Default changed from "yolo" to "build" for permission prompts

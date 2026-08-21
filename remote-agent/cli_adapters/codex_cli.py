@@ -94,7 +94,11 @@ class CodexCLIAdapter(BaseCLIAdapter):
             session_id: Session identifier (used for resume).
             project_path: Working directory for the session.
             model: Model name to use.
-            permission_mode: Approval mode - "default", "plan", or "auto".
+            permission_mode: Approval mode - "ask", "auto", "bypass", or None.
+                "ask": Safe mode, requires approval for untrusted operations.
+                "auto": Safe automatic mode, relies on CLI default behavior.
+                "bypass": Dangerous mode, bypasses all approvals and sandbox.
+                None/"default": Relies on CLI default behavior.
             allowed_tools: Not directly used by Codex CLI currently.
             resume: Whether to resume an existing session.
         """
@@ -103,13 +107,22 @@ class CodexCLIAdapter(BaseCLIAdapter):
         if model:
             args.extend(["--model", model])
 
-        # Map permission_mode to Codex approval flags
+        # Map permission_mode to Codex approval flags.
+        # Issue #2645: Security fix - "auto" should be safe, not dangerous.
+        # - "ask": Safe mode with approval prompts (--ask-for-approval untrusted)
+        # - "auto": Safe automatic mode (no flags, rely on CLI default)
+        # - "bypass": Dangerous mode (--dangerously-bypass-approvals-and-sandbox)
         if permission_mode:
-            if permission_mode == "plan":
+            if permission_mode == "ask":
+                # Safe mode: ask for approval on untrusted operations
                 args.extend(["--ask-for-approval", "untrusted"])
-            elif permission_mode == "auto":
+            elif permission_mode == "plan":
+                # Alias for "ask" mode for backward compatibility
+                args.extend(["--ask-for-approval", "untrusted"])
+            elif permission_mode == "bypass":
+                # Dangerous mode: bypass all approvals and sandbox
                 args.append("--dangerously-bypass-approvals-and-sandbox")
-            # "default" -> no extra flag
+            # "auto" or "default" -> no extra flag (safe, rely on CLI default)
 
         # Codex supports `codex resume <SESSION_ID>` for restoring sessions
         if resume and session_id:

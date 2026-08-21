@@ -184,7 +184,11 @@ class TestClaudeCodeAdapterPermissionMode:
         assert args[idx + 1] == "acceptEdits"
         assert "--dangerously-skip-permissions" not in args
 
-    def test_auto_uses_auto_mode(self):
+    def test_auto_uses_accept_edits_mode(self):
+        """Test that 'auto' mode uses acceptEdits for safe automatic editing.
+
+        Issue #2645: 'auto' now maps to acceptEdits (safe) instead of auto.
+        """
         from cli_adapters.claude_code import ClaudeCodeAdapter
 
         adapter = ClaudeCodeAdapter()
@@ -192,6 +196,24 @@ class TestClaudeCodeAdapterPermissionMode:
             session_id="sess-123",
             project_path="/tmp/project",
             permission_mode="auto",
+        )
+        assert "--permission-mode" in args
+        idx = args.index("--permission-mode")
+        assert args[idx + 1] == "acceptEdits"
+        assert "--dangerously-skip-permissions" not in args
+
+    def test_ask_uses_auto_mode(self):
+        """Test that 'ask' mode uses auto for safe prompting.
+
+        Issue #2645: 'ask' maps to --permission-mode auto for safe confirmation.
+        """
+        from cli_adapters.claude_code import ClaudeCodeAdapter
+
+        adapter = ClaudeCodeAdapter()
+        args = adapter.build_start_args(
+            session_id="sess-123",
+            project_path="/tmp/project",
+            permission_mode="ask",
         )
         assert "--permission-mode" in args
         idx = args.index("--permission-mode")
