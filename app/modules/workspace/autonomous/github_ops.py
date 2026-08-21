@@ -1054,14 +1054,38 @@ class GitHubOps:
 
     # ── Issue Operations ────────────────────────────────────────────
 
-    def create_issue(self, title: str, body: str = "", labels: list[str] | None = None) -> dict:
-        """Create a GitHub issue."""
+    def create_issue(
+        self,
+        title: str,
+        body: str = "",
+        labels: list[str] | None = None,
+        repo: str | None = None,
+    ) -> dict:
+        """Create a GitHub issue.
+
+        Args:
+            title: Issue title
+            body: Issue body
+            labels: Optional labels to apply
+            repo: Optional target repo in 'owner/repo' format (for new project scenarios)
+        """
         args = ["issue", "create", "--title", title, "--body", body or ""]
         if labels:
             for label in labels:
                 args.extend(["--label", label])
 
-        result = self._run_gh(args)
+        # When repo is provided, explicitly target that repository.
+        # This is needed for new project scenarios where the local directory
+        # doesn't have a git origin configured yet.
+        if repo:
+            args.extend(["--repo", repo])
+
+        # api_only=True: avoid sudo path clearing GH_TOKEN (#2949)
+        # Issue creation is a pure GitHub API call that needs no local repo
+        # access, so when a bot token is configured and the command would
+        # otherwise sudo (cross-user), run gh as the service user to keep
+        # GH_TOKEN from being stripped by sudo env_reset.
+        result = self._run_gh(args, api_only=True)
         # gh issue create doesn't support --json; parse URL from stdout
         output = result.stdout.strip()
         issue_url = output.split("\n")[-1].strip()
