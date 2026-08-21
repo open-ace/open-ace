@@ -44,7 +44,7 @@ export interface WorkspaceTab {
  * 2. Sensitive (exclude from partialize and handle specially)
  * Issue #2953: Added explicit type for safety
  */
-interface PersistedState {
+export interface PersistedState {
   theme: Theme;
   language: Language;
   sidebarCollapsed: boolean;
