@@ -146,3 +146,6 @@ export {
   validateActiveTabId,
   validateTabsOrder,
 } from './useSafeWorkspaceState';
+
+// Admin tenant selection hook (Issue #2841)
+export { useAdminTenant } from './useAdminTenant';
