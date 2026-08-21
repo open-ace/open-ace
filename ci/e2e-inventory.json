@@ -673,6 +673,22 @@
       "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
+      "path": "tests/e2e/sync_helpers.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "shared synchronous Playwright helpers: never collects nodeids itself"
+    },
+    {
       "path": "tests/e2e/manage/e2e_api_key_cli_settings.py",
       "mode": "standalone-automated",
       "owner": "e2e-governance",
@@ -1377,6 +1393,22 @@
       "cadence": "nightly",
       "collects": false,
       "notes": "shared fixtures/helpers: never collects nodeids itself"
+    },
+    {
+      "path": "tests/e2e/ui/async_helpers.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2491,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "shared async Playwright helpers: never collects nodeids itself"
     },
     {
       "path": "tests/e2e/ui/demo_create_project.py",
