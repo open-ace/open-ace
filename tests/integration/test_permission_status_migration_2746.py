@@ -14,10 +14,9 @@ from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
-from alembic import op
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import create_engine, MetaData
+from sqlalchemy import create_engine
 
 # Ensure project root is on path
 project_root = str(Path(__file__).resolve().parent.parent.parent)
