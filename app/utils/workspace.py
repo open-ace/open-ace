@@ -225,7 +225,7 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
                 # Issue #2894: wrapper 脚本需要 root 权限
                 if _is_wrapper_available(OPENACE_MKDIR_WRAPPER):
                     result = run_as_root_if_needed(
-                        [OPENACE_MKDIR_WRAPPER, system_account, directory]
+                        [OPENACE_MKDIR_WRAPPER, system_account, directory],
                     )
                     if result.returncode != 0:
                         logger.warning(f"Cannot create {directory} via wrapper: {result.stderr}")
