@@ -24,6 +24,9 @@ from app.modules.governance.alert_notifier import (
     _PinnedWebhookAdapter,
 )
 
+# Issue and regression markers for test discovery
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2883)]
+
 
 class SilentHandler(BaseHTTPRequestHandler):
     """HTTP handler that doesn't log."""

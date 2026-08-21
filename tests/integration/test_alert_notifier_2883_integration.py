@@ -15,6 +15,9 @@ import pytest
 
 from app.modules.governance.alert_notifier import Alert, AlertNotifier, NotificationPreference
 
+# Issue and regression markers for test discovery
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2883)]
+
 
 def _create_test_alert(severity: str = "warning") -> Alert:
     """Create a test alert."""
