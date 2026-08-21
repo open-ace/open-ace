@@ -20,10 +20,11 @@ import hmac
 import logging
 import os
 import re
-import threading
+import time
 from http.cookies import SimpleCookie
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+from gevent.lock import RLock
 from gevent.pywsgi import WSGIHandler
 
 import app.ws_frame as ws_frame
@@ -94,6 +95,32 @@ class _RawSocketRelayWrapper:
         return self._closed
 
 
+def _is_ip_address(host: str) -> bool:
+    """Check if a string is an IP address format (IPv4 or IPv6).
+
+    Args:
+        host: String to check (may include brackets for IPv6 in URLs)
+
+    Returns:
+        True if the string is an IP address format, False otherwise
+    """
+    # Remove brackets for IPv6 addresses in URLs (e.g., [fe80::1])
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+
+    # IPv4 pattern: simple check for numeric dot-separated format
+    ipv4_pattern = r"^(\d{1,3}\.){3}\d{1,3}$"
+    if re.match(ipv4_pattern, host):
+        return True
+
+    # IPv6: check if contains colons (simplified check)
+    # Full IPv6 validation would be more complex
+    if ":" in host:
+        return True
+
+    return False
+
+
 def _is_private_ip(ws_url: str) -> bool:
     """Check if a WebSocket URL points to a private IP address.
 
@@ -102,14 +129,55 @@ def _is_private_ip(ws_url: str) -> bool:
     - 172.16.0.0 - 172.31.255.255 (172.16-31.x.x)
     - 192.168.0.0 - 192.168.255.255 (192.168.x.x)
     - 127.0.0.0 - 127.255.255.255 (loopback)
-    """
-    import re
-    from urllib.parse import urlparse
+    - IPv6 link-local (fe80::/10)
+    - IPv6 unique local (fc00::/7)
+    - IPv6 loopback (::1)
 
+    For non-IP hostname formats, returns True (conservative strategy: treat as relay-needed).
+    This avoids DNS resolution overhead and ensures private network hostnames
+    like "agent92" are correctly handled via relay.
+
+    Args:
+        ws_url: WebSocket URL to check
+
+    Returns:
+        True if the URL points to a private address or is a hostname (non-IP),
+        False if it's a public IP
+    """
     try:
         parsed = urlparse(ws_url)
         host = parsed.hostname or ""
-        # Check for private IP patterns
+
+        # Issue #2594: Non-IP hostname should be treated as needing relay
+        # This is a conservative strategy that avoids DNS resolution blocking
+        if not _is_ip_address(host):
+            logger.info(
+                "Non-IP hostname detected, defaulting to relay mode: %s",
+                host,
+            )
+            return True
+
+        # Check for IPv6 private addresses
+        # IPv6 addresses don't have brackets in parsed.hostname
+        if ":" in host:
+            # IPv6 link-local (fe80::/10)
+            if (
+                host.lower().startswith("fe8")
+                or host.lower().startswith("fe9")
+                or host.lower().startswith("fea")
+                or host.lower().startswith("feb")
+            ):
+                return True
+            # IPv6 unique local (fc00::/7)
+            if host.lower().startswith("fc") or host.lower().startswith("fd"):
+                return True
+            # IPv6 loopback (::1)
+            if host == "::1":
+                return True
+            # Other IPv6 addresses - conservatively treat as public for now
+            return False
+
+        # Check for private IPv4 patterns
         private_patterns = [
             r"^10\.",  # 10.x.x.x
             r"^172\.(1[6-9]|2[0-9]|3[01])\.",  # 172.16-31.x.x
@@ -228,20 +296,96 @@ def _needs_relay(ws_url: str) -> bool:
     return not _can_reach_directly(ws_url)
 
 
+def _normalize_cache_key(ws_url: str) -> str:
+    """Normalize cache key by converting hostname to lowercase.
+
+    IP addresses are preserved as-is since they don't have case sensitivity.
+    This prevents duplicate cache entries for the same hostname with different cases.
+
+    Args:
+        ws_url: WebSocket URL to normalize
+
+    Returns:
+        Normalized URL suitable for cache key
+    """
+    try:
+        parsed = urlparse(ws_url)
+        host = parsed.hostname or ""
+
+        # Only normalize hostnames (non-IP), preserve IP addresses
+        if not _is_ip_address(host):
+            # Extract the original hostname from netloc
+            # netloc format: [user:pass@]host[:port]
+            netloc = parsed.netloc
+            # For IPv6, hostname is already without brackets
+            # For hostnames, we need to lower case them in the netloc
+            netloc_lower = netloc.lower()
+            # Rebuild URL with lowercase netloc
+            normalized = urlunparse(parsed._replace(netloc=netloc_lower))
+            return normalized
+
+        return ws_url
+    except Exception:
+        return ws_url
+
+
 # Cache reachability results to avoid repeated TCP probes per ws_url.
 # This mitigates SSRF via repeated probe requests.
-_reachability_cache: dict[str, bool] = {}
-_reachability_cache_lock = threading.Lock()
+# Structure: {ws_url: (result: bool, timestamp: float)}
+_reachability_cache: dict[str, tuple[bool, float]] = {}
+_reachability_cache_lock = RLock()
+
+# Cache TTL in seconds (configurable via environment variable)
+CACHE_TTL_SECONDS = int(os.environ.get("REACHABILITY_CACHE_TTL_SECONDS", "300"))
 
 
 def _needs_relay_cached(ws_url: str) -> bool:
-    """Cached version of _needs_relay to avoid repeated TCP probes."""
+    """Cached version of _needs_relay with TTL support.
+
+    Checks cache TTL and expires stale entries on access (lazy cleanup).
+    Uses gevent-friendly RLock to avoid blocking the entire thread.
+
+    Args:
+        ws_url: WebSocket URL to check
+
+    Returns:
+        True if relay is needed, False otherwise
+    """
+    # Normalize cache key (handle hostname case sensitivity)
+    cache_key = _normalize_cache_key(ws_url)
+
     with _reachability_cache_lock:
-        if ws_url in _reachability_cache:
-            return _reachability_cache[ws_url]
+        cached = _reachability_cache.get(cache_key)
+        if cached is not None:
+            result, timestamp = cached
+            # Check if cache entry has expired
+            if time.time() - timestamp < CACHE_TTL_SECONDS:
+                logger.debug(
+                    "Reachability cache hit for %s: %s",
+                    cache_key,
+                    result,
+                )
+                return result
+            else:
+                # Cache expired - remove stale entry
+                logger.debug(
+                    "Reachability cache expired for %s (TTL=%ds)",
+                    cache_key,
+                    CACHE_TTL_SECONDS,
+                )
+                del _reachability_cache[cache_key]
+
+    # Cache miss or expired - compute result
     result = _needs_relay(ws_url)
+
     with _reachability_cache_lock:
-        _reachability_cache[ws_url] = result
+        _reachability_cache[cache_key] = (result, time.time())
+        logger.info(
+            "Reachability cached for %s: %s",
+            cache_key,
+            result,
+        )
+
     return result
 
 
@@ -516,11 +660,51 @@ class RemoteWSHandler(WSGIHandler):
         # Check if relay connection exists (for private network machines).
         from app.modules.workspace.terminal_relay_store import terminal_relay_store
 
-        # Use add_pending_browser for ALL relay paths to ensure _active_bridges
-        # tracking is consistent and concurrent access is prevented.
-        if terminal_relay_store.has_relay(terminal_id) or _needs_relay_cached(
-            info.get("original_ws_url") or info.get("ws_url", "")
-        ):
+        # Issue #2594: Check if relay exists first (priority)
+        # If relay already exists, use it directly without re-evaluating reachability
+        if terminal_relay_store.has_relay(terminal_id):
+            from gevent.event import Event
+
+            bridge_done_event = Event()
+            added = terminal_relay_store.add_pending_browser(
+                terminal_id, self.socket, bridge_done_event
+            )
+            if added:
+                # Relay exists but not yet bridged - should not happen in normal flow
+                logger.warning(
+                    "Terminal WS handler: relay exists but add_pending_browser returned True for terminal %s",
+                    terminal_id[:8],
+                )
+                terminal_relay_store.remove_pending_browser(terminal_id, self.socket)
+                ws_frame.send_close(self.socket, 1011, "Relay state error")
+                self.close_connection = True
+                return
+            else:
+                # Bridge was started - wait for completion
+                try:
+                    bridge_done_event.wait()
+                except Exception:
+                    pass
+                self.close_connection = True
+            return
+
+        # Check if relay is needed via reachability test
+        ws_url = info.get("original_ws_url") or info.get("ws_url", "")
+        if _needs_relay_cached(ws_url):
+            from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
+
+            # Issue #2594: Check if agent is online before waiting for relay
+            # If agent is offline, fail fast instead of waiting 30 seconds
+            remote_agent_manager = get_remote_agent_manager()
+            if not remote_agent_manager.is_connected(machine_id):
+                logger.warning(
+                    "Terminal WS handler: agent offline for terminal %s, cannot establish relay",
+                    terminal_id[:8],
+                )
+                ws_frame.send_close(self.socket, 1011, "Agent offline")
+                self.close_connection = True
+                return
+
             from gevent.event import Event
 
             bridge_done_event = Event()

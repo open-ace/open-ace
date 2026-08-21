@@ -112,6 +112,14 @@ class DataFetchScheduler:
             f"DataFetchScheduler started (implementation: {self._implementation}, interval: {self._interval}s)"
         )
 
+        # Issue #2820: Clear cache to ensure immediate status visibility
+        try:
+            from app.services.scheduler_status_reader import clear_cache
+
+            clear_cache("data_fetch")
+        except Exception as e:
+            logger.warning(f"Failed to clear cache after start: {e}")
+
     def _start_threading(self):
         """Start using threading backend."""
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
@@ -178,6 +186,14 @@ class DataFetchScheduler:
         self._running = False
         logger.info("DataFetchScheduler stopped")
 
+        # Issue #2820: Clear cache to ensure immediate status visibility
+        try:
+            from app.services.scheduler_status_reader import clear_cache
+
+            clear_cache("data_fetch")
+        except Exception as e:
+            logger.warning(f"Failed to clear cache after stop: {e}")
+
     def is_running(self) -> bool:
         """Check if the scheduler is running."""
         if self._implementation == "apscheduler":
@@ -187,7 +203,19 @@ class DataFetchScheduler:
         return self._running and self._thread is not None and self._thread.is_alive()
 
     def get_status(self) -> dict:
-        """Get scheduler status."""
+        """Get scheduler status.
+
+        Issue #2820: Returns cross-process status when local scheduler is not running.
+        """
+        # If local scheduler is running, return local status (real-time, accurate)
+        if self._running:
+            return self._get_local_status()
+
+        # Local scheduler not running: read from shared storage (cross-process)
+        return self._get_shared_status()
+
+    def _get_local_status(self) -> dict:
+        """Get local process status (when scheduler is running in this process)."""
         from datetime import datetime as dt
 
         next_run_str = None
@@ -218,7 +246,49 @@ class DataFetchScheduler:
             "heartbeat_age_seconds": heartbeat_age,
             "heartbeat_ok": heartbeat_ok,
             "last_result_summary": self._last_result_summary,
+            "worker_id": None,  # Not available in local status
+            "health_status": "healthy" if heartbeat_ok else "stale",
+            "cache_age_seconds": None,
+            "cache_hit": None,
         }
+
+    def _get_shared_status(self) -> dict:
+        """Get shared status from database (when scheduler is running in another process).
+
+        Issue #2820: Read from scheduler_leaders table for cross-process visibility.
+        """
+        try:
+            from app.services.scheduler_status_reader import get_scheduler_status
+
+            status = get_scheduler_status("data_fetch", self._interval)
+
+            # Merge with local configuration
+            status["enabled"] = self._enabled
+            status["interval"] = self._interval
+            status["implementation"] = self._implementation
+            status["last_result_summary"] = None  # Not available cross-process
+
+            return status
+
+        except Exception as e:
+            logger.error(f"Failed to get shared scheduler status: {e}")
+            return {
+                "running": "unknown",
+                "enabled": self._enabled,
+                "interval": self._interval,
+                "implementation": self._implementation,
+                "last_run": None,
+                "next_run": None,
+                "heartbeat": None,
+                "heartbeat_age_seconds": None,
+                "heartbeat_ok": None,
+                "last_result_summary": None,
+                "worker_id": None,
+                "health_status": "unknown",
+                "cache_age_seconds": None,
+                "cache_hit": None,
+                "error": "database_unavailable",
+            }
 
     def _run_loop(self):
         """Main scheduler loop."""
@@ -247,6 +317,7 @@ class DataFetchScheduler:
         from app.repositories.database import Database
         from app.routes.fetch import run_fetch_scripts
         from app.services.leader_election import LeaderElectionClient
+        from app.services.scheduler_run_status import compute_data_fetch_status
 
         # Acquire distributed lock for this job
         db = Database()
@@ -266,75 +337,14 @@ class DataFetchScheduler:
 
         try:
             results = run_fetch_scripts()
-            logger.info(
-                "Scheduled data fetch finished: {}".format(
-                    "errored"
-                    if results is None
-                    else (
-                        "skipped"
-                        if results.get("_skipped")
-                        else (
-                            "empty"
-                            if not results
-                            else (
-                                "all_failed"
-                                if all(not v.get("success", False) for v in results.values())
-                                else "completed"
-                            )
-                        )
-                    )
-                )
-            )
 
-            if results is None:
-                # Unexpected error in run_fetch_scripts() itself
-                status = "failed"
-                error_message = "Data fetch encountered an unexpected error"
-                self._last_result_summary = {"status": "failed", "error": "unexpected_error"}
-            elif isinstance(results, dict) and results.get("_skipped"):
-                # Concurrent fetch already running
-                status = "skipped"
-                error_message = "Concurrent data fetch already running"
-                self._last_result_summary = {"status": "skipped"}
-            elif not results:
-                # No scripts available to run - not an error
-                status = "completed"
-                error_message = None
-                self._last_result_summary = {
-                    "status": "completed",
-                    "tools_total": 0,
-                    "tools_failed": 0,
-                }
-            else:
-                # Check per-tool results
-                failed_tools = [k for k, v in results.items() if not v.get("success", False)]
+            # Compute status using unified logic (Issue #2822)
+            status, error_message, result_summary = compute_data_fetch_status(results)
+            self._last_result_summary = result_summary
 
-                if len(failed_tools) == len(results):
-                    status = "failed"
-                    error_message = "All fetch scripts failed"
-                    self._last_result_summary = {
-                        "status": "failed",
-                        "tools_total": len(results),
-                        "tools_failed": len(failed_tools),
-                        "failed_tools": failed_tools,
-                    }
-                elif failed_tools:
-                    status = "completed"
-                    error_message = f"Partial failure: {', '.join(failed_tools)}"
-                    self._last_result_summary = {
-                        "status": "partial",
-                        "tools_total": len(results),
-                        "tools_failed": len(failed_tools),
-                        "failed_tools": failed_tools,
-                    }
-                else:
-                    status = "completed"
-                    error_message = None
-                    self._last_result_summary = {
-                        "status": "completed",
-                        "tools_total": len(results),
-                        "tools_failed": 0,
-                    }
+            # Log the result
+            log_status = result_summary.get("status", status)
+            logger.info(f"Scheduled data fetch finished: {log_status}")
 
         except Exception as e:
             status = "failed"

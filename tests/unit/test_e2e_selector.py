@@ -9,6 +9,7 @@ quarantine is OUTSIDE the PR/nightly closure) and the N3 cell
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -251,3 +252,36 @@ class TestClosure:
         assert [i.id for i in items] == ["standalone::tests/e2e/remote/e2e_x.py"]
         selection = selector.select("weekly", items)
         assert selection.advisory == ["standalone::tests/e2e/remote/e2e_x.py"]
+
+    def test_standalone_files_do_not_also_expand_manifest_nodeids(self):
+        inventory = {
+            "schema_name": "openace-e2e-inventory",
+            "schema_version": 1,
+            "entries": [
+                {
+                    "path": "tests/e2e/remote/e2e_x.py",
+                    "mode": "standalone-automated",
+                    "home_lane": "nightly",
+                    "executor": "standalone",
+                    "entry_ids": ["standalone::tests/e2e/remote/e2e_x.py"],
+                },
+            ],
+        }
+        items = selector.build_items(
+            inventory,
+            {"entries": {}},
+            {"entries": {}},
+            ["tests/e2e/remote/e2e_x.py::test_helper"],
+        )
+        assert [i.id for i in items] == ["standalone::tests/e2e/remote/e2e_x.py"]
+
+    def test_legacy_manage_scripts_use_their_standalone_entry_points(self):
+        inventory = json.loads((ROOT / "ci" / "e2e-inventory.json").read_text(encoding="utf-8"))
+        entries = {entry["path"]: entry for entry in inventory["entries"]}
+        for path in (
+            "tests/e2e/manage/e2e_api_key_cli_settings.py",
+            "tests/e2e/manage/e2e_audit_thresholds_playwright.py",
+        ):
+            assert entries[path]["mode"] == "standalone-automated"
+            assert entries[path]["executor"] == "standalone"
+            assert entries[path]["collects"] is False

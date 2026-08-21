@@ -71,6 +71,7 @@ import logging
 from app.modules.workspace.autonomous.constants import (
     AUTONOMOUS_CONTEXT,
     AUTONOMOUS_DEV_ALLOWED_TOOLS,
+    MAX_ACCEPTANCE_DEV_ROUNDS,
     READ_ONLY_REVIEW_UNSUPPORTED_TOOLS,
     REVIEW_ALLOWED_TOOLS,
     _extract_pr_number_from_error,
@@ -80,6 +81,7 @@ from app.modules.workspace.autonomous.constants import (
     _zcode_planning_mode,
 )
 from app.modules.workspace.autonomous.phase_contract import PhaseResult
+from app.modules.workspace.autonomous.phases.acceptance_verification import _rejection_feedback
 
 NAME = "pr_review"
 
@@ -162,6 +164,23 @@ def handle(ctx, deps) -> PhaseResult:
     force_full_rounds = host.must_run_full_review_rounds(wf)
     dev_round = wf.get("dev_round", 1)
     branch_name = wf.get("branch_name", "")
+    if not branch_name.strip():
+        # Empty branch_name is a broken state (every branch_strategy sets it in
+        # preparation; empty only happens after merge cleanup without
+        # recreation). Falling through would run `git rev-parse ''` → exit 128
+        # → the except-swallow leaves has_changes=False and the workflow
+        # terminates as no_changes — masking the breakage (#322/#329/#340).
+        # Fail loudly instead.
+        return PhaseResult.failed(
+            structured_error={
+                "message": (
+                    "pr_review entered with an empty branch_name (workspace "
+                    "cleared by merge cleanup and not recreated); refusing to "
+                    "fall into the no-changes terminal — this is a broken "
+                    "state, not 'no changes'"
+                )
+            }
+        )
     # Capture entry repo state for the push-check recovery (#2302). The worktree
     # may be on main at push time (failure→retry→reentry); recover_worktree_branch
     # needs the feature tip + main HEAD from before any in-phase switch.
@@ -225,6 +244,83 @@ def handle(ctx, deps) -> PhaseResult:
 
     if not has_changes:
         # No code changes produced — skip PR, post to issue, and mark completed
+        # — except when the branch is behind main because the PREVIOUS delivery
+        # already merged (acceptance rejected, then a human resume produced no
+        # new commits). That is "delivery landed, acceptance unfinished", not
+        # the Issue #1552 creation race: reopen development with the rejection
+        # as the repair target instead of terminating as completed (#331).
+        pr_number = wf.get("github_pr_number") or host.get_workflow_field("github_pr_number")
+        rejected_verification = (
+            wf.get("verification_status") or host.get_workflow_field("verification_status") or ""
+        ).strip().lower() == "rejected"
+        if is_timing_issue and pr_number and rejected_verification:
+            new_dev_round = dev_round + 1
+            if host.dev_round_cap_remaining(wf) > 0:
+                feedback = _rejection_feedback(wf, pr_number)
+                host.emit_phase_change(
+                    {"phase": "development", "dev_round": new_dev_round, "resumed": True}
+                )
+                return PhaseResult.completed(
+                    next_phase="development",
+                    next_status="developing",
+                    workflow_patch={
+                        "dev_round": new_dev_round,
+                        "current_round": 0,
+                        "verification_status": None,  # single auto-reopen guard
+                        # Drop the stale merge SHA so acceptance_verification
+                        # re-resolves the NEXT merge (L617 only fetches when
+                        # empty) instead of replaying/verifying the previous
+                        # rejected delivery.
+                        "verification_merge_sha": "",
+                        "user_feedback": feedback,
+                        "error_message": "",
+                    },
+                    milestone_events=[
+                        {
+                            "phase": "pr_review",
+                            "dev_round": new_dev_round,
+                            "milestone_type": "acceptance_rejected_reopened",
+                            "status": "completed",
+                            "title": (
+                                f"PR #{pr_number} merged but acceptance rejected; "
+                                f"reopening development round {new_dev_round}"
+                            ),
+                            "result_summary": (
+                                "Branch fully merged into main while acceptance "
+                                "is rejected; reopening development with the "
+                                "failed-items feedback."
+                            ),
+                        }
+                    ],
+                )
+            # Persistent rejection past the dev-round cap: per #2335 the
+            # workflow fails rather than looping forever (or silently
+            # completing with the failed gates unresolved). PhaseResult.failed()
+            # does not accept milestone_events, so construct the dataclass
+            # directly; the failed branch overwrites workflow_patch's
+            # error_message with structured_error["message"], so the detailed
+            # message only rides in structured_error.
+            fail_msg = (
+                f"Acceptance rejected after {dev_round} development rounds "
+                f"(dev-round cap {MAX_ACCEPTANCE_DEV_ROUNDS} exhausted); "
+                f"PR #{pr_number} is merged but failed gates remain unresolved"
+            )
+            return PhaseResult(
+                outcome="failed",
+                milestone_events=[
+                    {
+                        "phase": "pr_review",
+                        "dev_round": dev_round,
+                        "milestone_type": "acceptance_rejected_cap_exhausted",
+                        "status": "failed",
+                        "title": (
+                            f"Acceptance rejection persisted past dev-round cap (PR #{pr_number})"
+                        ),
+                    }
+                ],
+                structured_error={"message": fail_msg},
+            )
+
         issue_number = wf.get("github_issue_number")
 
         # Distinguish timing issue from no changes (Issue #1552)

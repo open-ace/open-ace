@@ -39,6 +39,7 @@ export const Button: React.FC<ButtonProps> = ({
   loading = false,
   onClick,
   type = 'button',
+  form,
   children,
   icon,
   fullWidth = false,
@@ -58,6 +59,7 @@ export const Button: React.FC<ButtonProps> = ({
     <button
       type={type}
       id={id}
+      form={form}
       data-testid={testId}
       title={title}
       aria-label={ariaLabel ?? title}

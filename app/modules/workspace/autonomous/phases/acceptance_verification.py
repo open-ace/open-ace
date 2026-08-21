@@ -385,6 +385,31 @@ def feedback_prefill_from_report(report: dict) -> str:
     return "\n".join(lines)
 
 
+_MAX_FEEDBACK_CHARS = 4000
+
+
+def _rejection_feedback(wf: dict, pr_number) -> str:
+    """Dev-round repair target derived from the last rejected verification."""
+    raw = wf.get("verification_report") or ""
+    try:
+        report = json.loads(raw) if raw else {}
+    except (TypeError, ValueError):
+        report = {}
+    prefill = feedback_prefill_from_report(report) if isinstance(report, dict) else ""
+    delivery = f"PR #{pr_number}" if pr_number else "the previous delivery"
+    if prefill:
+        body = (
+            f"Acceptance verification REJECTED the previous delivery ({delivery}). "
+            f"Fix these failed items in this development round:\n\n{prefill}"
+        )
+    else:
+        body = (
+            f"Acceptance verification REJECTED the previous delivery ({delivery}). "
+            "Review the verification report comment on the issue and fix the failed items."
+        )
+    return body[:_MAX_FEEDBACK_CHARS]
+
+
 def _acceptance_summary(status: str, report: dict) -> str:
     """Human-readable one-line summary for the milestone card.
 

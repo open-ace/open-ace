@@ -200,6 +200,8 @@ export const translations: Record<Language, Translations> = {
     workspaceNotConfiguredHelp: 'Please contact administrator to configure workspace URL',
     workspaceUnavailable: 'Workspace unavailable',
     workspaceUnavailableHelp: 'Please log in to access your workspace',
+    sessionNotFound: 'Session does not exist or has been deleted',
+    projectNotFound: 'Project path does not exist',
     security: 'Security',
 
     // Mode - Dual-track system
@@ -978,11 +980,22 @@ export const translations: Record<Language, Translations> = {
     ssoEnabledDesc: 'Enable SSO login for users through configured providers',
     ssoSystemSettingHint:
       'SSO enable switch has been moved to System Settings. Please configure SSO providers here.',
+    // Global SSO settings - Issue #2128
+    enableGlobalSSO: 'Enable Global SSO Login',
+    globalSSODesc: 'Control whether SSO login is available on the login page (affects all tenants)',
+    globalSSOHint:
+      'When enabled, users can sign in through configured SSO providers. This setting affects all tenants.',
+    globalSSOWarning:
+      'This setting affects all tenants. Disable with caution during security incidents.',
     autoProvisionUsers: 'Auto Provision Users',
     autoProvisionDesc: 'Automatically create user accounts on first SSO login',
     autoProvisionHint: 'Automatically create user accounts for this tenant on first SSO login',
     disabled: 'Disabled',
     saveFailed: 'Failed to save settings',
+    failedToLoadSSOSettings: 'Failed to load SSO settings. Please refresh the page.',
+    ssoSettingNotLoaded: 'SSO setting is still loading. Please wait.',
+    ssoSettingVerificationFailed:
+      'SSO setting verification failed. The saved value does not match. Please try again.',
     tenantIdRequired: 'Tenant ID is required',
     noTenantConfigured: 'No Tenant Configured',
     ssoRequiresTenant:
@@ -2279,6 +2292,8 @@ export const translations: Record<Language, Translations> = {
     workspaceNotConfiguredHelp: '请联系管理员配置工作区 URL',
     workspaceUnavailable: '工作区不可用',
     workspaceUnavailableHelp: '请登录后访问您的工作区',
+    sessionNotFound: '会话不存在或已被删除',
+    projectNotFound: '项目路径不存在',
     security: '安全',
 
     // Mode - Dual-track system
@@ -3037,11 +3052,19 @@ export const translations: Record<Language, Translations> = {
     enableSSO: '启用 SSO',
     ssoEnabledDesc: '启用后，用户可通过配置的 SSO 提供商登录',
     ssoSystemSettingHint: 'SSO 启用开关已移至系统设置。请在此配置 SSO Provider。',
+    // Global SSO settings - Issue #2128
+    enableGlobalSSO: '启用全局 SSO 登录',
+    globalSSODesc: '控制登录页面是否显示 SSO 登录选项（影响所有租户）',
+    globalSSOHint: '启用后，用户可通过配置的 SSO 提供商登录。此设置影响所有租户。',
+    globalSSOWarning: '此设置影响所有租户。安全事件期间请谨慎禁用。',
     autoProvisionUsers: '自动创建用户',
     autoProvisionDesc: '首次 SSO 登录时自动创建用户账户',
     autoProvisionHint: '首次 SSO 登录时为此租户自动创建用户账户',
     disabled: '已禁用',
     saveFailed: '保存设置失败',
+    failedToLoadSSOSettings: '加载 SSO 设置失败。请刷新页面。',
+    ssoSettingNotLoaded: 'SSO 设置正在加载中。请稍候。',
+    ssoSettingVerificationFailed: 'SSO 设置验证失败。保存的值与服务器不一致。请重试。',
     tenantIdRequired: '需要租户 ID',
     noTenantConfigured: '未配置租户',
     ssoRequiresTenant: 'SSO 需要租户。请联系管理员为您的账户设置租户。',
@@ -4395,6 +4418,13 @@ export const translations: Record<Language, Translations> = {
     ssoEnabledDesc: '設定済みのSSOプロバイダーを介してユーザーのSSOログインを有効化',
     ssoSystemSettingHint:
       'SSO有効化スイッチはシステム設定に移動しました。ここでSSOプロバイダーを設定してください。',
+    // Global SSO settings - Issue #2128
+    enableGlobalSSO: 'グローバルSSOログインを有効化',
+    globalSSODesc: 'ログインページでのSSOログイン利用可否を制御（全テナントに影響）',
+    globalSSOHint:
+      '有効にすると、ユーザーは設定済みのSSOプロバイダーでログインできます。この設定は全テナントに影響します。',
+    globalSSOWarning:
+      'この設定は全テナントに影響します。セキュリティインシデント時は慎重に無効化してください。',
     autoProvisionUsers: 'ユーザー自動作成',
     autoProvisionDesc: '初回SSOログイン時にユーザーアカウントを自動作成',
     autoProvisionHint: '初回SSOログイン時にこのテナントのユーザーアカウントを自動作成',
@@ -4445,6 +4475,10 @@ export const translations: Record<Language, Translations> = {
     providerUpdated: 'プロバイダーが正常に更新されました',
     updatedAt: '更新日時',
     saveFailed: '設定保存失敗',
+    failedToLoadSSOSettings: 'SSO設定の読み込みに失敗しました。ページを更新してください。',
+    ssoSettingNotLoaded: 'SSO設定を読み込んでいます。しばらくお待ちください。',
+    ssoSettingVerificationFailed:
+      'SSO設定の検証に失敗しました。保存された値が一致しません。もう一度お試しください。',
     tenantIdRequired: 'テナントID必須',
     noTenantConfigured: 'テナント未設定',
     ssoRequiresTenant:
@@ -6303,11 +6337,21 @@ export const translations: Record<Language, Translations> = {
     ssoEnabledDesc: '구성된 SSO 제공업체를 통해 사용자 SSO 로그인 활성화',
     ssoSystemSettingHint:
       'SSO 활성화 스위치가 시스템 설정으로 이동되었습니다. 여기서 SSO 제공업체를 구성하세요.',
+    // Global SSO settings - Issue #2128
+    enableGlobalSSO: '글로벌 SSO 로그인 활성화',
+    globalSSODesc: '로그인 페이지에서 SSO 로그인 사용 가능 여부 제어 (모든 테넌트에 영향)',
+    globalSSOHint:
+      '활성화하면 사용자가 구성된 SSO 제공업체를 통해 로그인할 수 있습니다. 이 설정은 모든 테넌트에 영향합니다.',
+    globalSSOWarning: '이 설정은 모든 테넌트에 영향합니다. 보안 사고 시 신중하게 비활성화하세요.',
     autoProvisionUsers: '사용자 자동 생성',
     autoProvisionDesc: '첫 SSO 로그인 시 사용자 계정 자동 생성',
     autoProvisionHint: '첫 SSO 로그인 시 이 테넌트의 사용자 계정 자동 생성',
     disabled: '비활성화',
     saveFailed: '설정 저장 실패',
+    failedToLoadSSOSettings: 'SSO 설정을 불러오지 못했습니다. 페이지를 새로고침하세요.',
+    ssoSettingNotLoaded: 'SSO 설정을 불러오는 중입니다. 잠시 기다려주세요.',
+    ssoSettingVerificationFailed:
+      'SSO 설정 검증에 실패했습니다. 저장된 값이 일치하지 않습니다. 다시 시도하세요.',
     tenantIdRequired: '테넌트 ID 필요',
     noTenantConfigured: '테넌트 미설정',
     ssoRequiresTenant:

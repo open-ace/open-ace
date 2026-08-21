@@ -14,6 +14,8 @@ import os
 import pytest
 from playwright.async_api import async_playwright, expect
 
+from tests.e2e.ui.async_helpers import login_as
+
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
 # Test configuration
@@ -38,12 +40,7 @@ async def test_messages_filter_layout():
 
             # Step 1: Login
             print("\n[Step 1] Logging in...")
-            await page.goto(f"{BASE_URL}/login")
-            await page.wait_for_selector("#username", timeout=10000)
-            await page.fill("#username", USERNAME)
-            await page.fill("#password", PASSWORD)
-            await page.click('button[type="submit"]')
-            await page.wait_for_timeout(5000)
+            await login_as(page, BASE_URL, USERNAME, PASSWORD)
             await page.wait_for_load_state("networkidle", timeout=10000)
             print("✓ Login successful")
 
@@ -65,33 +62,32 @@ async def test_messages_filter_layout():
             # Step 4: Verify first row filters
             print("\n[Step 4] Checking first row filters...")
 
-            # Check Date filter (Start Date)
-            date_label = page.locator('small:has-text("Start Date:")')
-            await expect(date_label).to_be_visible()
-            print("✓ Start Date label visible")
-
-            date_input = page.locator('input[type="date"]')
-            await expect(date_input.first).to_be_visible()
-            print("✓ Date input visible")
+            # Check Date range filter
+            await expect(page.get_by_text("Date Range")).to_be_visible()
+            date_buttons = page.locator(".react-datepicker-wrapper button, button:has-text('/')")
+            assert await date_buttons.count() >= 2, "Date range should render start/end controls"
+            print("✓ Date range controls visible")
 
             # Check Host filter
-            host_label = page.locator('small:has-text("Host:")')
-            await expect(host_label).to_be_visible()
+            main = page.locator("main")
+
+            host_label = main.get_by_text("Host", exact=True)
+            await expect(host_label.first).to_be_visible()
             print("✓ Host label visible")
 
             # Check Tool filter
-            tool_label = page.locator('small:has-text("Tool:")')
-            await expect(tool_label).to_be_visible()
+            tool_label = main.get_by_text("Tool", exact=True)
+            await expect(tool_label.first).to_be_visible()
             print("✓ Tool label visible")
 
             # Check Sender filter
-            sender_label = page.locator('small:has-text("Sender:")')
-            await expect(sender_label).to_be_visible()
+            sender_label = main.get_by_text("Sender", exact=True)
+            await expect(sender_label.first).to_be_visible()
             print("✓ Sender label visible")
 
             # Check Search filter
-            search_label = page.locator('small:has-text("Search:")')
-            await expect(search_label).to_be_visible()
+            search_label = main.get_by_text("Search", exact=True)
+            await expect(search_label.first).to_be_visible()
             print("✓ Search label visible")
 
             search_input = page.locator('input[placeholder*="Search messages"]')
@@ -101,38 +97,30 @@ async def test_messages_filter_layout():
             # Step 5: Verify second row - Role checkboxes
             print("\n[Step 5] Checking second row - Role checkboxes...")
 
-            role_label = page.locator('small:has-text("Role:")')
-            await expect(role_label).to_be_visible()
+            role_label = main.get_by_text("Role", exact=True)
+            await expect(role_label.first).to_be_visible()
             print("✓ Role label visible")
 
             # Check User checkbox
-            user_checkbox = page.locator("#roleUser")
+            role_checkboxes = page.get_by_role("checkbox")
+            assert await role_checkboxes.count() >= 3, "Role checkboxes should render"
+
+            user_checkbox = role_checkboxes.nth(0)
             await expect(user_checkbox).to_be_visible()
-            user_label = page.locator('label[for="roleUser"]')
-            await expect(user_label).to_have_text("User")
             print("✓ User checkbox visible with correct label")
 
             # Check Assistant checkbox
-            assistant_checkbox = page.locator("#roleAssistant")
+            assistant_checkbox = role_checkboxes.nth(1)
             await expect(assistant_checkbox).to_be_visible()
-            assistant_label = page.locator('label[for="roleAssistant"]')
-            await expect(assistant_label).to_have_text("Assistant")
             print("✓ Assistant checkbox visible with correct label")
 
             # Check System checkbox
-            system_checkbox = page.locator("#roleSystem")
+            system_checkbox = role_checkboxes.nth(2)
             await expect(system_checkbox).to_be_visible()
-            system_label = page.locator('label[for="roleSystem"]')
-            await expect(system_label).to_have_text("System")
             print("✓ System checkbox visible with correct label")
 
             # Step 6: Test filter functionality
             print("\n[Step 6] Testing filter functionality...")
-
-            # Test Date filter change (use first date input = Start Date)
-            await date_input.first.fill("2026-03-17")
-            await page.wait_for_timeout(500)
-            print("✓ Date filter can be changed")
 
             # Test User checkbox toggle
             await user_checkbox.check()

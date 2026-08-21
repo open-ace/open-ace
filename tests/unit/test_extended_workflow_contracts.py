@@ -126,8 +126,32 @@ def test_full_e2e_governance_job_wraps_full_e2e_and_feeds_nightly_gate():
         for step in governance["steps"]
         if step.get("name") == "Compare nightly selection against observed outcomes"
     )
-    assert "--selection artifacts/test-results/full-e2e-selection.json" in compare_step["run"]
-    assert "--envelope artifacts/test-results/full-e2e-envelope.json" in compare_step["run"]
+    assert (
+        "--selection artifacts/full-e2e-1/test-results/full-e2e-selection.json"
+        in compare_step["run"]
+    )
+    assert "--envelope artifacts/full-e2e-envelope.json" in compare_step["run"]
+    merge_step = next(
+        step for step in governance["steps"] if step.get("name") == "Merge Full E2E shard envelopes"
+    )
+    assert "scripts/e2e/envelope_merge.py" in merge_step["run"]
+    assert "full-e2e-envelope-1.json" in merge_step["run"]
+    assert "full-e2e-envelope-2.json" in merge_step["run"]
+    downloads = {
+        step["name"]: step["with"]
+        for step in governance["steps"]
+        if step.get("uses") == "actions/download-artifact@v7"
+    }
+    assert downloads == {
+        "Download Full E2E shard 1 artifact": {
+            "name": "full-e2e-1",
+            "path": "artifacts/full-e2e-1",
+        },
+        "Download Full E2E shard 2 artifact": {
+            "name": "full-e2e-2",
+            "path": "artifacts/full-e2e-2",
+        },
+    }
 
     nightly = jobs["nightly-summary"]
     assert "full-e2e-governance" in nightly["needs"]
@@ -173,7 +197,7 @@ def test_nightly_gate_returns_nonzero_for_every_failed_lane(tmp_path, failed_lan
 def test_execution_lane_names_and_artifacts_are_unique():
     jobs = _workflow()["jobs"]
     expected = {
-        "full-e2e": ("Full E2E", "full-e2e"),
+        "full-e2e": ("Full E2E (${{ matrix.shard }}/2)", "full-e2e-${{ matrix.shard }}"),
         "issue-tests": ("Issue Tests (${{ matrix.group }}/4)", "issue-tests-${{ matrix.group }}"),
         "manual-extended": ("Manual Extended Tests", "manual-extended-tests"),
     }

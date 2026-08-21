@@ -62,7 +62,14 @@ class QuotaConfig:
 
 @dataclass
 class TenantSettings:
-    """Tenant-specific settings."""
+    """Tenant-specific settings.
+
+    Note (Issue #2128): The following fields are deprecated and will be removed:
+    - sso_enabled: Use system-level sso_enabled setting via /api/system/settings
+    - sso_provider: Register SSO providers via /api/sso/providers instead
+
+    The global SSO switch is stored in config.json under system_settings.sso_enabled.
+    """
 
     allowed_tools: list[str] = field(
         default_factory=lambda: ["claude", "qwen", "openclaw", "codex", "zcode"]
@@ -71,7 +78,11 @@ class TenantSettings:
     audit_log_enabled: bool = True
     audit_log_retention_days: int = 90
     data_retention_days: int = 365
+    # Issue #2128: DEPRECATED - Use system-level sso_enabled in config.json
+    # This field is kept for backward compatibility but has no effect on login page.
     sso_enabled: bool = False
+    # Issue #2128: DEPRECATED - Register providers via /api/sso/providers
+    # Provider association is now at the sso_providers table level (tenant_id column).
     sso_provider: str | None = None
     auto_provision_users: bool = False
     custom_branding: bool = False
