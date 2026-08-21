@@ -145,7 +145,10 @@ class RemoteAgentManager:
     _STATUS_OFFLINE = "offline"  # Disconnected or timed out
 
     # Online status set for conflict detection (Issue #2537)
-    # Any machine in these states should block re-registration with same hostname
+    # This set documents the known valid online states for reference and logging.
+    # The actual conflict detection uses a conservative approach (status != offline)
+    # to also catch NULL and unknown statuses. This ensures safe handling of
+    # unexpected database states without allowing duplicate registrations.
     _ONLINE_STATUSES = frozenset({_STATUS_ONLINE, _STATUS_IDLE, _STATUS_BUSY})
 
     HEARTBEAT_TIMEOUT_SECONDS = 180  # 3 minutes without heartbeat = offline
@@ -766,6 +769,11 @@ class RemoteAgentManager:
                     # Issue #2537: Conflict detection - cover all online statuses
                     # Conservative approach: only allow merge for explicit offline status
                     # Treat any other status (including NULL/unknown) as online conflict
+                    #
+                    # Transaction protection: This code runs within self._lock and a DB transaction,
+                    # so concurrent registrations with the same hostname are serialized. The first
+                    # registration will succeed (or merge if offline), and the second will see
+                    # the conflict and return 409.
                     online_match = [r for r in existing if r["status"] != self._STATUS_OFFLINE]
                     if online_match:
                         conn.rollback()
