@@ -95,6 +95,63 @@ def test_pytest_parser_clean_exit_without_summary_is_medium_pass():
     assert te.parser_confidence == ParserConfidence.MEDIUM.value
 
 
+# ── pytest footer anchoring (#2735) ───────────────────────────────────────────
+
+
+def test_pytest_skipped_nested_db_error_not_failed():
+    # A skipped test's reason embeds a real backend connect error
+    # ("port 5432 failed: FATAL ..."). Without footer anchoring the pending
+    # "5432 failed" match is misread as a failure count (#2735).
+    excerpt = (
+        "tests/integration/test_multiuser_qwen_collection_2735.py::TestSessionDataPersistence::"
+        "test_daily_usage_persistence SKIPPED (connection to server\n"
+        'at "localhost" (::1), port 5432 failed: FATAL:  role "openace-agent"\n'
+        "does not exist)\n"
+        "============================ 6 skipped in 0.15s ============================"
+    )
+    te = parse_test_evidence(_ce("c1", "python -m pytest", 0, excerpt), "python")
+    assert te.failed is None
+    assert te.passed is None
+    assert te.skipped == 6
+    assert te.verdict == ExecutionVerdict.PASSED.value
+    assert te.parser_confidence == ParserConfidence.MEDIUM.value
+
+
+def test_pytest_mixed_passed_skipped_footer_high():
+    # Footer still governs: a real passed count wins, the nested error is ignored.
+    excerpt = (
+        "some node output\n"
+        'port 5432 failed: FATAL:  role "openace-agent" does not exist\n'
+        "================ 5 passed, 3 skipped in 2.10s ================"
+    )
+    te = parse_test_evidence(_ce("c1", "python -m pytest", 0, excerpt), "python")
+    assert te.passed == 5
+    assert te.failed is None
+    assert te.verdict == ExecutionVerdict.PASSED.value
+    assert te.parser_confidence == ParserConfidence.HIGH.value
+
+
+def test_pytest_real_failure_footer_still_failed():
+    # Regression guard: anchoring must NOT swallow a real failure.
+    excerpt = "=========== 1 failed, 6 passed, 2 skipped in 2.10s ============="
+    te = parse_test_evidence(_ce("c1", "python -m pytest", 1, excerpt), "python")
+    assert te.failed == 1
+    assert te.passed == 6
+    assert te.verdict == ExecutionVerdict.FAILED.value
+    assert te.parser_confidence == ParserConfidence.HIGH.value
+
+
+def test_cargo_failure_parse_unchanged():
+    # Pin cargo's current behavior (unchanged by this fix). cargo's `passed`
+    # only matches "test result: ok. N passed"; a FAILED run has no `ok.` so
+    # `passed` stays None rather than 0.
+    excerpt = "test result: FAILED. 1 failed; 0 passed; 0 ignored"
+    te = parse_test_evidence(_ce("c1", "cargo test", 1, excerpt), "rust")
+    assert te.verdict == ExecutionVerdict.FAILED.value
+    assert te.failed == 1
+    assert te.passed is None
+
+
 # ── jest / go / cargo ─────────────────────────────────────────────────────────
 
 
