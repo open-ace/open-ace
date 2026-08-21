@@ -15,13 +15,13 @@ import pytest
 import requests
 
 from app.modules.governance.alert_notifier import (
-    _PinnedHTTPSConnection,
-    _PinnedHTTPSConnectionPool,
-    _PinnedWebhookAdapter,
     Alert,
     AlertNotifier,
     DeliveryResult,
     NotificationPreference,
+    _PinnedHTTPSConnection,
+    _PinnedHTTPSConnectionPool,
+    _PinnedWebhookAdapter,
 )
 
 

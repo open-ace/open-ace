@@ -12,10 +12,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.modules.governance.alert_notifier import (
-    _PinnedWebhookAdapter,
     Alert,
     AlertNotifier,
     NotificationPreference,
+    _PinnedWebhookAdapter,
 )
 
 

@@ -12,16 +12,16 @@ import socket
 import ssl
 import tempfile
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.modules.governance.alert_notifier import (
-    _PinnedWebhookAdapter,
     Alert,
     AlertNotifier,
     NotificationPreference,
+    _PinnedWebhookAdapter,
 )
 
 
@@ -58,12 +58,13 @@ class TestRealTLSHandshake:
     def https_server(self):
         """Create a local HTTPS server with self-signed certificate."""
         # Create self-signed certificate
+        import datetime
+
         from cryptography import x509
-        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.backends import default_backend
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import rsa
-        from cryptography.hazmat.backends import default_backend
-        import datetime
+        from cryptography.x509.oid import NameOID
 
         # Generate private key
         private_key = rsa.generate_private_key(
@@ -266,9 +267,9 @@ class TestErrorHandling:
 
     def test_ssl_error_is_retriable(self):
         """Verify SSL errors are classified as retriable."""
-        from app.modules.governance.alert_notifier import _classify_delivery_error
-
         import requests
+
+        from app.modules.governance.alert_notifier import _classify_delivery_error
 
         exc = requests.exceptions.SSLError("TLS handshake failed")
         retriable, error_type = _classify_delivery_error(exc)
@@ -278,9 +279,9 @@ class TestErrorHandling:
 
     def test_connection_error_is_retriable(self):
         """Verify connection errors are classified as retriable."""
-        from app.modules.governance.alert_notifier import _classify_delivery_error
-
         import requests
+
+        from app.modules.governance.alert_notifier import _classify_delivery_error
 
         exc = requests.exceptions.ConnectionError("Connection refused")
         retriable, error_type = _classify_delivery_error(exc)
