@@ -1486,16 +1486,21 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
                             success=False,
                         )
                     except Exception:
-                        logger.warning("Failed to audit-log SSO auto-provision denial", exc_info=True)
+                        logger.warning(
+                            "Failed to audit-log SSO auto-provision denial", exc_info=True
+                        )
 
-                    return jsonify(
-                        {
-                            "success": False,
-                            "error": "auto_provision_disabled",
-                            "message": "Automatic user provisioning is disabled for this organization. "
-                            "Please contact your administrator.",
-                        }
-                    ), 403
+                    return (
+                        jsonify(
+                            {
+                                "success": False,
+                                "error": "auto_provision_disabled",
+                                "message": "Automatic user provisioning is disabled for this organization. "
+                                "Please contact your administrator.",
+                            }
+                        ),
+                        403,
+                    )
 
             # Link identity
             if user_id:

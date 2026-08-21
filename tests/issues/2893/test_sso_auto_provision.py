@@ -286,9 +286,7 @@ class TestSSOAutoProvisionFinalizeLogin:
         with app.test_request_context():
             # _allow_email_linking returns False
             with patch("app.routes.sso._allow_email_linking", return_value=False):
-                response, status_code = _finalize_sso_login(
-                    "test_provider", mock_auth_result, None
-                )
+                response, status_code = _finalize_sso_login("test_provider", mock_auth_result, None)
 
         assert status_code == 403
         data = response.get_json()
