@@ -37,6 +37,14 @@ vi.mock('@/i18n', () => ({
       ssoSettings: 'SSO Settings',
       ssoConfiguration: 'SSO Configuration',
       enableSSO: 'Enable SSO',
+      // Issue #2128: Global SSO settings
+      enableGlobalSSO: 'Enable Global SSO Login',
+      globalSSODesc:
+        'Control whether SSO login is available on the login page (affects all tenants)',
+      globalSSOHint:
+        'When enabled, users can sign in through configured SSO providers. This setting affects all tenants.',
+      globalSSOWarning:
+        'This setting affects all tenants. Disable with caution during security incidents.',
       ssoEnabledDesc: 'Enable SSO login for users through configured providers',
       ssoSystemSettingHint:
         'SSO enable switch has been moved to System Settings. Please configure SSO providers here.',
