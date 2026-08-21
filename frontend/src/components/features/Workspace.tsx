@@ -1040,6 +1040,10 @@ export const Workspace: React.FC = () => {
               t('sessionNotFound', language) || 'Session does not exist or has been deleted'
             );
             setSessionVerified(false);
+          } else if (!response.data.project_path) {
+            // Issue #2892: Validate project path exists
+            setError(t('projectNotFound', language) || 'Project path does not exist');
+            setSessionVerified(false);
           } else {
             setSessionVerified(true);
           }
