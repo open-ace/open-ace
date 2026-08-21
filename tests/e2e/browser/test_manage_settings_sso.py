@@ -37,7 +37,6 @@ from tests.e2e.browser.test_helpers import (
 )
 
 # Issue #2114: Import additional test helpers
-import json
 import logging
 
 logger = logging.getLogger(__name__)
