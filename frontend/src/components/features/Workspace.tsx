@@ -1036,7 +1036,9 @@ export const Workspace: React.FC = () => {
         .getSession(restoreSessionId, false)
         .then((response) => {
           if (!response.success) {
-            setError(t('sessionNotFound', language) || 'Session does not exist or has been deleted');
+            setError(
+              t('sessionNotFound', language) || 'Session does not exist or has been deleted'
+            );
             setSessionVerified(false);
           } else {
             setSessionVerified(true);
