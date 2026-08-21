@@ -1023,6 +1023,10 @@ def register_blueprints(app):
 
     app.register_blueprint(feature_flags_bp)
     app.register_blueprint(pages_bp)
+    # Frontend error reporting endpoint
+    from app.routes.frontend_errors import frontend_errors_bp
+
+    app.register_blueprint(frontend_errors_bp, url_prefix="/api")
 
     logger.info("All blueprints registered")
 
