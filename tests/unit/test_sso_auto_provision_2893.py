@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # Mark all tests in this module
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.regression, pytest.mark.issue(2893)]
 
 # NOTE: TenantRepository is lazy-imported inside _create_user_from_sso(),
 # so we must patch it at its source module, NOT at app.routes.sso.
