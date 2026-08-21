@@ -162,9 +162,7 @@ export function sanitizeErrorPayload(payload: FrontendErrorPayload): FrontendErr
     ...payload,
     pathname: sanitizePathname(payload.pathname),
     message: sanitizeMessage(payload.message),
-    stack: payload.stack
-      ? truncateStack(sanitizePath(sanitizeMessage(payload.stack)))
-      : undefined,
+    stack: payload.stack ? truncateStack(sanitizePath(sanitizeMessage(payload.stack))) : undefined,
     componentStack: payload.componentStack
       ? truncateComponentStack(sanitizePath(payload.componentStack))
       : undefined,
@@ -239,13 +237,11 @@ export function shouldDedupe(error: Error): boolean {
  */
 export function logFallback(...args: unknown[]): void {
   try {
-    const errorLogs = (window as any).__errorLog__ || [];
+    const errorLogs = (window as any).__errorLogs__ || [];
     errorLogs.push({
       timestamp: Date.now(),
       args: args.map((arg) =>
-        arg instanceof Error
-          ? { name: arg.name, message: arg.message, stack: arg.stack }
-          : arg
+        arg instanceof Error ? { name: arg.name, message: arg.message, stack: arg.stack } : arg
       ),
     });
 
@@ -254,7 +250,7 @@ export function logFallback(...args: unknown[]): void {
       errorLogs.shift();
     }
 
-    (window as any).__errorLog__ = errorLogs;
+    (window as any).__errorLogs__ = errorLogs;
 
     // Dev mode console output
     if (import.meta.env.DEV) {

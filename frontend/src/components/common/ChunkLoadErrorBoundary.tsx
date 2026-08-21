@@ -1,5 +1,5 @@
 import React from 'react';
-import { reportFrontendError } from '@utils/errorReporter';
+import { reportFrontendError, logFallback } from '@utils/errorReporter';
 import { isChunkLoadError } from './isChunkLoadError';
 
 interface ChunkLoadErrorBoundaryProps {
@@ -39,20 +39,7 @@ export class ChunkLoadErrorBoundary extends React.Component<
       });
     } catch (e) {
       // Swallow all exceptions to prevent infinite loop
-      try {
-        // Use fallback logging
-        const errorLogs = (window as any).__errorLogs__ || [];
-        errorLogs.push({
-          timestamp: Date.now(),
-          args: ['[ErrorReporter] Failed to report', e],
-        });
-        if (errorLogs.length > 50) {
-          errorLogs.shift();
-        }
-        (window as any).__errorLogs__ = errorLogs;
-      } catch {
-        // Completely swallow
-      }
+      logFallback('[ErrorReporter] Failed to report', e);
       this.errorId = 'fallback';
     }
   }
