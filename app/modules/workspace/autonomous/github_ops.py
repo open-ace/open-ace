@@ -208,6 +208,14 @@ _MISSING_REMOTE_REF_FETCH_KEYWORDS = (
     "could not find remote ref",
     "couldn't find remote branch",
     "could not find remote branch",
+    # zh_CN locale: the production server's git localizes the missing-ref
+    # fetch failure as "致命错误：无法找到远程引用 <ref>" (#322/#340: the
+    # English-only list skipped the plain-push recovery and the workflow
+    # burned all 6 transient retries on a deterministic failure).
+    # _is_missing_remote_ref_fetch_error lowercases the message; Chinese
+    # characters are unaffected by .lower().
+    "无法找到远程引用",
+    "无法找到远程分支",
 )
 
 
