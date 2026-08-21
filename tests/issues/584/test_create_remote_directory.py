@@ -158,6 +158,50 @@ class TestCreateRemoteDirectoryRoute(unittest.TestCase):
             )
             self.assertEqual(resp.status_code, 503)
 
+    def test_machine_idle_creates_directory(self):
+        """Test that idle status (machine available for new sessions) allows directory creation."""
+        mgr = MagicMock()
+        mgr.get_machine.return_value = {"status": "idle"}
+        mgr.send_command.return_value = True
+        mgr.get_browse_result.return_value = {
+            "success": True,
+            "result": {"path": "/tmp/test", "message": "Directory created successfully"},
+        }
+        app = self._make_app(mgr)
+        with app.test_client() as client:
+            resp = self._auth_post(
+                client,
+                "/api/remote/machines/m1/create-directory",
+                "test-token-1-admin",
+                json={"path": "/tmp/test"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertTrue(data["success"])
+            self.assertEqual(data["result"]["path"], "/tmp/test")
+
+    def test_machine_busy_creates_directory(self):
+        """Test that busy status (machine with active sessions) still allows directory creation."""
+        mgr = MagicMock()
+        mgr.get_machine.return_value = {"status": "busy"}
+        mgr.send_command.return_value = True
+        mgr.get_browse_result.return_value = {
+            "success": True,
+            "result": {"path": "/tmp/test", "message": "Directory created successfully"},
+        }
+        app = self._make_app(mgr)
+        with app.test_client() as client:
+            resp = self._auth_post(
+                client,
+                "/api/remote/machines/m1/create-directory",
+                "test-token-1-admin",
+                json={"path": "/tmp/test"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.get_json()
+            self.assertTrue(data["success"])
+            self.assertEqual(data["result"]["path"], "/tmp/test")
+
     def test_non_admin_no_access_returns_403(self):
         mgr = MagicMock()
         mgr.check_user_access.return_value = False
