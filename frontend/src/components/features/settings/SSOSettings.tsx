@@ -569,7 +569,8 @@ export const SSOSettings: React.FC = () => {
             onClick={async () => {
               setIsSaving(true);
               try {
-                await systemApi.updateSystemSettings({ sso_enabled: ssoEnabled });
+                // ssoEnabled is guaranteed to be boolean when button is enabled (disabled when null)
+                await systemApi.updateSystemSettings({ sso_enabled: ssoEnabled! });
                 success(t('settingsSaved', language));
               } catch (err) {
                 console.error('Failed to save global SSO setting:', err);
