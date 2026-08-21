@@ -23,9 +23,13 @@ import time
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
+REPO_ROOT = os.path.dirname(os.path.dirname(PROJECT_ROOT))
+sys.path.insert(0, REPO_ROOT)
 
 import requests
 from playwright.sync_api import sync_playwright
+
+from tests.e2e.sync_helpers import login_context_via_api
 
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
@@ -160,14 +164,17 @@ def test_ui_thresholds(page):  # allow-no-assert: smoke test - visual verificati
     pause(2)
     shot(page, "01_security_center_loaded")
 
-    # Click on Audit Thresholds tab
-    try:
-        page.click("text=Audit Thresholds", timeout=5000)
-    except Exception:  # allow-swallow: UI element may not exist
-        try:
-            page.click("text=审计阈值", timeout=5000)
-        except Exception:  # allow-swallow: UI element may not exist
-            page.click("text=監査しきい値", timeout=5000)
+    check("/login" not in page.url, "Security Center loaded without login redirect")
+
+    # Click on Audit Thresholds tab (current label is locale-dependent).
+    tab = page.locator(".nav-tabs button").filter(has_text="Audit Thresholds")
+    if not tab.first.is_visible():
+        tab = page.locator(".nav-tabs button").filter(has_text="审计阈值")
+    if not tab.first.is_visible():
+        tab = page.locator(".nav-tabs button").filter(has_text="監査しきい値")
+    if not tab.first.is_visible():
+        tab = page.locator(".nav-tabs button:has(.bi-sliders)")
+    tab.first.click(timeout=5000)
     pause(1)
     shot(page, "02_audit_thresholds_tab")
 
@@ -209,20 +216,7 @@ def main():
         browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context(viewport={"width": 1280, "height": 800})
 
-        # Inject session cookie from API login
-        api_session = requests.Session()
-        api_login(api_session)
-        for cookie in api_session.cookies:
-            context.add_cookies(
-                [
-                    {
-                        "name": cookie.name,
-                        "value": cookie.value,
-                        "domain": "localhost",
-                        "path": "/",
-                    }
-                ]
-            )
+        login_context_via_api(context, BASE_URL)
 
         page = context.new_page()
 

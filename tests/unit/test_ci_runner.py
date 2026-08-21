@@ -95,6 +95,14 @@ def test_ci_policy_change_fails_safe_to_all_pr_suites():
     assert "performance" not in selected
 
 
+def test_compatibility_smoke_stays_bounded():
+    command = ci.load_config()["suites"]["compatibility-smoke"]["commands"][1]
+    targets = [part for part in command if part.startswith("tests/unit/")]
+
+    assert "tests/unit/" not in command
+    assert 3 <= len(targets) <= 10
+
+
 def test_e2e_governance_change_selects_governance_suite():
     selected = ci.select_pr_suites(["scripts/e2e/comparator.py"])
     assert "e2e-governance" in selected

@@ -25,6 +25,7 @@ export {
   useCreateUser,
   useUpdateUser,
   useDeleteUser,
+  useRestoreUser,
   useUpdateUserPassword,
   useResetUserPassword,
   useSyncFeishuOrg,

@@ -992,6 +992,10 @@ export const translations: Record<Language, Translations> = {
     autoProvisionHint: 'Automatically create user accounts for this tenant on first SSO login',
     disabled: 'Disabled',
     saveFailed: 'Failed to save settings',
+    failedToLoadSSOSettings: 'Failed to load SSO settings. Please refresh the page.',
+    ssoSettingNotLoaded: 'SSO setting is still loading. Please wait.',
+    ssoSettingVerificationFailed:
+      'SSO setting verification failed. The saved value does not match. Please try again.',
     tenantIdRequired: 'Tenant ID is required',
     noTenantConfigured: 'No Tenant Configured',
     ssoRequiresTenant:
@@ -3058,6 +3062,9 @@ export const translations: Record<Language, Translations> = {
     autoProvisionHint: '首次 SSO 登录时为此租户自动创建用户账户',
     disabled: '已禁用',
     saveFailed: '保存设置失败',
+    failedToLoadSSOSettings: '加载 SSO 设置失败。请刷新页面。',
+    ssoSettingNotLoaded: 'SSO 设置正在加载中。请稍候。',
+    ssoSettingVerificationFailed: 'SSO 设置验证失败。保存的值与服务器不一致。请重试。',
     tenantIdRequired: '需要租户 ID',
     noTenantConfigured: '未配置租户',
     ssoRequiresTenant: 'SSO 需要租户。请联系管理员为您的账户设置租户。',
@@ -4468,6 +4475,10 @@ export const translations: Record<Language, Translations> = {
     providerUpdated: 'プロバイダーが正常に更新されました',
     updatedAt: '更新日時',
     saveFailed: '設定保存失敗',
+    failedToLoadSSOSettings: 'SSO設定の読み込みに失敗しました。ページを更新してください。',
+    ssoSettingNotLoaded: 'SSO設定を読み込んでいます。しばらくお待ちください。',
+    ssoSettingVerificationFailed:
+      'SSO設定の検証に失敗しました。保存された値が一致しません。もう一度お試しください。',
     tenantIdRequired: 'テナントID必須',
     noTenantConfigured: 'テナント未設定',
     ssoRequiresTenant:
@@ -6337,6 +6348,10 @@ export const translations: Record<Language, Translations> = {
     autoProvisionHint: '첫 SSO 로그인 시 이 테넌트의 사용자 계정 자동 생성',
     disabled: '비활성화',
     saveFailed: '설정 저장 실패',
+    failedToLoadSSOSettings: 'SSO 설정을 불러오지 못했습니다. 페이지를 새로고침하세요.',
+    ssoSettingNotLoaded: 'SSO 설정을 불러오는 중입니다. 잠시 기다려주세요.',
+    ssoSettingVerificationFailed:
+      'SSO 설정 검증에 실패했습니다. 저장된 값이 일치하지 않습니다. 다시 시도하세요.',
     tenantIdRequired: '테넌트 ID 필요',
     noTenantConfigured: '테넌트 미설정',
     ssoRequiresTenant:

@@ -290,3 +290,154 @@ class TestTenantAllocationNullHandling:
         )
 
         assert result["is_valid"] is True
+
+
+class TestTenantAllocationSoftDelete:
+    """Test soft-deleted user handling in quota allocation.
+
+    Issue #2927: Soft-deleted users should not be counted in tenant quota allocation.
+    """
+
+    def test_soft_deleted_user_not_counted_in_token_quota(self):
+        """Test that soft-deleted users with is_active=true are not counted in token quota."""
+        from app.schemas.quota import validate_tenant_allocation
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            # tenant_quotas row
+            {
+                "daily_token_limit": 10000000,  # 10M
+                "monthly_token_limit": 100000000,
+                "daily_request_limit": 1000,
+                "monthly_request_limit": 10000,
+            },
+            # allocated quota row - only active (non-deleted) users
+            {
+                "daily_token": 3,  # Only 3M from active users (soft-deleted user's quota excluded)
+                "monthly_token": 0,
+                "daily_request": 0,
+                "monthly_request": 0,
+            },
+        ]
+
+        # Try to allocate 6M to a new user (total would be 3M + 6M = 9M < 10M)
+        # If soft-deleted user's quota was counted, this would fail
+        result = validate_tenant_allocation(
+            tenant_id=1,
+            user_id=2,  # New user
+            new_daily_token_quota=6,
+            new_monthly_token_quota=10,
+            new_daily_request_quota=100,
+            new_monthly_request_quota=1000,
+            db=mock_db,
+        )
+
+        assert result["is_valid"] is True
+
+    def test_soft_deleted_user_not_counted_in_request_quota(self):
+        """Test that soft-deleted users with is_active=true are not counted in request quota."""
+        from app.schemas.quota import validate_tenant_allocation
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            # tenant_quotas row
+            {
+                "daily_token_limit": 10000000,
+                "monthly_token_limit": 100000000,
+                "daily_request_limit": 1000,  # 1000 requests limit
+                "monthly_request_limit": 10000,
+            },
+            # allocated quota row - only active (non-deleted) users
+            {
+                "daily_token": 0,
+                "monthly_token": 0,
+                "daily_request": 400,  # Only 400 from active users
+                "monthly_request": 0,
+            },
+        ]
+
+        # Try to allocate 500 requests (total would be 400 + 500 = 900 < 1000)
+        # If soft-deleted user's quota was counted, this might fail
+        result = validate_tenant_allocation(
+            tenant_id=1,
+            user_id=2,
+            new_daily_token_quota=5,
+            new_monthly_token_quota=10,
+            new_daily_request_quota=500,
+            new_monthly_request_quota=1000,
+            db=mock_db,
+        )
+
+        assert result["is_valid"] is True
+
+    def test_active_user_counted_in_quota(self):
+        """Test that active users with deleted_at=NULL are counted in quota."""
+        from app.schemas.quota import validate_tenant_allocation
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            # tenant_quotas row
+            {
+                "daily_token_limit": 10000000,  # 10M
+                "monthly_token_limit": 100000000,
+                "daily_request_limit": 1000,
+                "monthly_request_limit": 10000,
+            },
+            # allocated quota row - active users counted
+            {
+                "daily_token": 8,  # 8M already allocated to active users
+                "monthly_token": 0,
+                "daily_request": 0,
+                "monthly_request": 0,
+            },
+        ]
+
+        # Try to allocate 3M more (total would be 8M + 3M = 11M > 10M limit)
+        # This should fail because active users' quotas are counted
+        result = validate_tenant_allocation(
+            tenant_id=1,
+            user_id=2,
+            new_daily_token_quota=3,
+            new_monthly_token_quota=10,
+            new_daily_request_quota=100,
+            new_monthly_request_quota=1000,
+            db=mock_db,
+        )
+
+        assert result["is_valid"] is False
+        assert "exceeded" in result["error"].lower()
+
+    def test_current_user_excluded_from_allocation(self):
+        """Test that current user being edited is excluded from allocation sum."""
+        from app.schemas.quota import validate_tenant_allocation
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            # tenant_quotas row
+            {
+                "daily_token_limit": 10000000,  # 10M
+                "monthly_token_limit": 100000000,
+                "daily_request_limit": 1000,
+                "monthly_request_limit": 10000,
+            },
+            # allocated quota row - excludes current user (user_id=1)
+            {
+                "daily_token": 3,  # Other users have 3M (user 1's quota excluded)
+                "monthly_token": 0,
+                "daily_request": 0,
+                "monthly_request": 0,
+            },
+        ]
+
+        # Update user 1's quota to 6M (total = 3M + 6M = 9M < 10M)
+        result = validate_tenant_allocation(
+            tenant_id=1,
+            user_id=1,  # Editing user 1
+            new_daily_token_quota=6,
+            new_monthly_token_quota=10,
+            new_daily_request_quota=100,
+            new_monthly_request_quota=1000,
+            db=mock_db,
+        )
+
+        assert result["is_valid"] is True

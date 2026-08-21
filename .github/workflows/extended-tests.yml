@@ -78,9 +78,19 @@ jobs:
 
       - name: Install dependencies
         run: |
+          install_playwright_browser() {
+            if timeout 10m playwright install chromium --with-deps; then
+              echo "Installed Playwright Chromium with system dependencies."
+              return 0
+            fi
+
+            echo "playwright install --with-deps stalled or failed; falling back to browser-only install."
+            playwright install chromium
+          }
+
           python -m pip install --upgrade pip
           pip install -r requirements-ci.lock
-          playwright install chromium --with-deps
+          install_playwright_browser
 
       - name: Run critical extended tests
         run: python scripts/ci.py run critical-e2e
@@ -145,13 +155,17 @@ jobs:
           retention-days: 90
 
   full-e2e:
-    name: Full E2E
+    name: Full E2E (${{ matrix.shard }}/2)
     if: |
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && (inputs.category == 'e2e' || inputs.category == 'all')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-full-e2e'))
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
@@ -181,9 +195,19 @@ jobs:
 
       - name: Install dependencies
         run: |
+          install_playwright_browser() {
+            if timeout 10m playwright install chromium --with-deps; then
+              echo "Installed Playwright Chromium with system dependencies."
+              return 0
+            fi
+
+            echo "playwright install --with-deps stalled or failed; falling back to browser-only install."
+            playwright install chromium
+          }
+
           python -m pip install --upgrade pip
           pip install -r requirements-ci.lock
-          playwright install chromium --with-deps
+          install_playwright_browser
 
       - name: Build nightly E2E selection
         run: |
@@ -200,18 +224,22 @@ jobs:
           python scripts/run_extended_tests.py \
             --category e2e \
             --selection-json test-results/full-e2e-selection.json \
+            --split-total 2 \
+            --split-group ${{ matrix.shard }} \
             --dry-run 2>&1 | grep -E "Collected|Total targets" || true
 
           python scripts/run_extended_tests.py \
             --category e2e \
             --selection-json test-results/full-e2e-selection.json \
+            --split-total 2 \
+            --split-group ${{ matrix.shard }} \
             --isolated-home \
             --reruns 1 \
             --timeout 240 \
-            --junitxml test-results/full-e2e.xml \
-            --e2e-attempts test-results/full-e2e-attempts.jsonl \
-            --envelope-json test-results/full-e2e-envelope.json
-          echo $? > test-results/full-e2e.exit-code
+            --junitxml test-results/full-e2e-${{ matrix.shard }}.xml \
+            --e2e-attempts test-results/full-e2e-attempts-${{ matrix.shard }}.jsonl \
+            --envelope-json test-results/full-e2e-envelope-${{ matrix.shard }}.json
+          echo $? > test-results/full-e2e-${{ matrix.shard }}.exit-code
         env:
           CI: true
           HEADLESS: true
@@ -220,7 +248,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: full-e2e
+          name: full-e2e-${{ matrix.shard }}
           path: |
             test-results/
             screenshots/
@@ -241,11 +269,22 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - name: Download full E2E artifacts
+      - name: Download Full E2E shard 1 artifact
         uses: actions/download-artifact@v7
         with:
-          name: full-e2e
-          path: artifacts
+          name: full-e2e-1
+          path: artifacts/full-e2e-1
+      - name: Download Full E2E shard 2 artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: full-e2e-2
+          path: artifacts/full-e2e-2
+      - name: Merge Full E2E shard envelopes
+        run: |
+          python scripts/e2e/envelope_merge.py \
+            artifacts/full-e2e-1/test-results/full-e2e-envelope-1.json \
+            artifacts/full-e2e-2/test-results/full-e2e-envelope-2.json \
+            --out artifacts/full-e2e-envelope.json
       - name: Validate governance ledgers
         run: |
           python scripts/e2e/governance.py validate \
@@ -253,8 +292,8 @@ jobs:
       - name: Compare nightly selection against observed outcomes
         run: |
           python scripts/e2e/comparator.py compare \
-            --selection artifacts/test-results/full-e2e-selection.json \
-            --envelope artifacts/test-results/full-e2e-envelope.json \
+            --selection artifacts/full-e2e-1/test-results/full-e2e-selection.json \
+            --envelope artifacts/full-e2e-envelope.json \
             --json-output test-results/full-e2e-diff.json \
             --markdown-output test-results/full-e2e-summary.md \
             --governance-report test-results/full-e2e-governance-report.json
@@ -312,9 +351,19 @@ jobs:
 
       - name: Install dependencies
         run: |
+          install_playwright_browser() {
+            if timeout 10m playwright install chromium --with-deps; then
+              echo "Installed Playwright Chromium with system dependencies."
+              return 0
+            fi
+
+            echo "playwright install --with-deps stalled or failed; falling back to browser-only install."
+            playwright install chromium
+          }
+
           python -m pip install --upgrade pip
           pip install -r requirements-ci.lock
-          playwright install chromium --with-deps
+          install_playwright_browser
 
       - name: Run issue regression shard
         # Known legacy failures make pytest exit non-zero; keep going so the
@@ -386,9 +435,19 @@ jobs:
 
       - name: Install dependencies
         run: |
+          install_playwright_browser() {
+            if timeout 10m playwright install chromium --with-deps; then
+              echo "Installed Playwright Chromium with system dependencies."
+              return 0
+            fi
+
+            echo "playwright install --with-deps stalled or failed; falling back to browser-only install."
+            playwright install chromium
+          }
+
           python -m pip install --upgrade pip
           pip install -r requirements-ci.lock
-          playwright install chromium --with-deps
+          install_playwright_browser
 
       - name: Run selected extended tests
         run: |

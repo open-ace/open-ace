@@ -9676,10 +9676,21 @@ class AutonomousOrchestrator:
 
         if not issue_number and requirements_text:
             # Create issue from text
+            # For new project scenarios, extract owner/repo from repo_url
+            # so create_issue can target the repository explicitly.
+            issue_repo = None
+            project_repo_url = wf.get("project_repo_url", "")
+            if project_repo_url:
+                # Extract owner/repo from URL like https://github.com/owner/repo
+                match = re.search(r"github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", project_repo_url)
+                if match:
+                    issue_repo = match.group(1)
+
             try:
                 issue_data = gh.create_issue(
                     title=wf.get("title") or f"Autonomous Dev: {requirements_text[:60]}",
                     body=requirements_text,
+                    repo=issue_repo,
                 )
                 issue_number = issue_data.get("number")
                 # The issue number is an irreversible external-resource id: a
