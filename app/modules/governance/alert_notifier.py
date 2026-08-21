@@ -537,10 +537,14 @@ class _PinnedWebhookAdapter(HTTPAdapter):
         proxies: dict[str, str] | None = None,
         cert: Any = None,
     ) -> Any:
-        """Get a connection with TLS context, asserting the target IP is pinned."""
+        """Get a connection pool with TLS context, asserting the target IP is pinned.
+
+        Returns:
+            HTTPConnectionPool as expected by HTTPAdapter.
+        """
         self._assert_pinned(request.url)
-        # Use our custom pool manager which handles TLS SNI
-        return self._get_connection(request.url, verify, proxies, cert)
+        # Use the parent implementation which returns HTTPConnectionPool
+        return super().get_connection_with_tls_context(request, verify, proxies, cert)
 
     def _get_connection(
         self,
