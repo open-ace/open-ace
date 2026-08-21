@@ -300,12 +300,8 @@ describe('calculateAvailableQuota - edge cases', () => {
       monthly_request_quota: 0,
     });
 
-    expect(
-      calculateAvailableQuota(QuotaType.DAILY_TOKEN, { quotaStats, editingUser })
-    ).toBe(0);
-    expect(
-      calculateAvailableQuota(QuotaType.DAILY_REQUEST, { quotaStats, editingUser })
-    ).toBe(0);
+    expect(calculateAvailableQuota(QuotaType.DAILY_TOKEN, { quotaStats, editingUser })).toBe(0);
+    expect(calculateAvailableQuota(QuotaType.DAILY_REQUEST, { quotaStats, editingUser })).toBe(0);
   });
 
   it('should handle large request values without precision loss', () => {

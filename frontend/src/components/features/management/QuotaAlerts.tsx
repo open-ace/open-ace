@@ -32,14 +32,8 @@ import {
 import { useConfirm } from '@/components/common';
 import { formatTokens, formatDateTime, formatNumber, createMatcherConfig } from '@/utils';
 import { parseApiError } from '@/utils/error';
-import {
-  QuotaType,
-  TOKEN_QUOTA_MULTIPLIER,
-} from '@/constants/quota';
-import {
-  parseAndValidateQuota,
-  formatQuotaForDisplay,
-} from '@/utils/quotaFormatter';
+import { QuotaType, TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
+import { parseAndValidateQuota, formatQuotaForDisplay } from '@/utils/quotaFormatter';
 import { calculateAvailableQuota, getQuotaTypeInfo } from '@/utils/quotaHint';
 import { formatQuotaHint } from './utils/quotaHintFormat';
 import { alertsApi, type Alert, type NotificationPreferences } from '@/api';

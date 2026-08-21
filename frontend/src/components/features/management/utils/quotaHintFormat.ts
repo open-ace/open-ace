@@ -23,8 +23,7 @@ export function formatQuotaHint(
   max: number,
   isStatsAvailable: boolean
 ): string {
-  const isToken =
-    quotaType === QuotaType.DAILY_TOKEN || quotaType === QuotaType.MONTHLY_TOKEN;
+  const isToken = quotaType === QuotaType.DAILY_TOKEN || quotaType === QuotaType.MONTHLY_TOKEN;
 
   // Fallback when no stats available
   if (!isStatsAvailable) {

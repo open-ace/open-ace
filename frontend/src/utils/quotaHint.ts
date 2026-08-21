@@ -29,10 +29,7 @@ interface QuotaTypeConfig {
 /**
  * Get the configuration for a specific quota type
  */
-function getQuotaTypeConfig(
-  quotaType: QuotaType,
-  params: QuotaHintParams
-): QuotaTypeConfig {
+function getQuotaTypeConfig(quotaType: QuotaType, params: QuotaHintParams): QuotaTypeConfig {
   const { quotaStats, editingUser } = params;
 
   const typeMap: Record<QuotaType, QuotaTypeConfig> = {
@@ -74,10 +71,7 @@ function getQuotaTypeConfig(
  * @param params - Parameters including quotaStats and editingUser
  * @returns The calculated available quota value
  */
-export function calculateAvailableQuota(
-  quotaType: QuotaType,
-  params: QuotaHintParams
-): number {
+export function calculateAvailableQuota(quotaType: QuotaType, params: QuotaHintParams): number {
   const config = getQuotaTypeConfig(quotaType, params);
   const available = Math.max(0, Math.min(config.remaining + config.current, config.max));
   return available;
@@ -90,11 +84,8 @@ export function calculateAvailableQuota(
  * @param quotaType - The type of quota
  * @returns Configuration with max value and isToken flag
  */
-export function getQuotaTypeInfo(
-  quotaType: QuotaType
-): { max: number; isToken: boolean } {
-  const isToken =
-    quotaType === QuotaType.DAILY_TOKEN || quotaType === QuotaType.MONTHLY_TOKEN;
+export function getQuotaTypeInfo(quotaType: QuotaType): { max: number; isToken: boolean } {
+  const isToken = quotaType === QuotaType.DAILY_TOKEN || quotaType === QuotaType.MONTHLY_TOKEN;
   return {
     max: isToken ? MAX_TOKEN_QUOTA : MAX_REQUEST_QUOTA,
     isToken,
