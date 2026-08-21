@@ -177,8 +177,6 @@ class TestTLSHandshakeWithMockedSocket:
         """Verify that wrap_socket receives correct server_hostname parameter (Issue #2883)."""
         captured = {}
 
-        original_wrap = ssl.SSLContext.wrap_socket
-
         def capturing_wrap(self, sock, **kwargs):
             captured["server_hostname"] = kwargs.get("server_hostname")
             # Return mock socket

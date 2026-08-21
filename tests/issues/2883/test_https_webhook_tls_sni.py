@@ -189,7 +189,7 @@ class TestRealTLSHandshake:
 
                 with patch("ssl.SSLContext.wrap_socket", capture_wrap_socket):
                     try:
-                        result = notifier._post_webhook_secure(_create_test_alert(), prefs)
+                        _ = notifier._post_webhook_secure(_create_test_alert(), prefs)
                     except Exception:
                         pass
 
@@ -256,7 +256,7 @@ class TestRealTLSHandshake:
                 mock_session.post = capturing_post
                 mock_session_class.return_value = mock_session
 
-                result = notifier._post_webhook_secure(_create_test_alert(), prefs)
+                _ = notifier._post_webhook_secure(_create_test_alert(), prefs)
 
             # Verify Host header is original hostname
             assert captured_headers.get("Host") == "example.com"

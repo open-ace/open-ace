@@ -76,10 +76,12 @@ class TestConcurrencySafety:
                 mock_response.status_code = 200
                 mock_response.raise_for_status = MagicMock()
 
-                def capturing_post(url, *args, **kwargs):
-                    captured["url"] = url
-                    captured["headers"] = kwargs.get("headers", {})
-                    return mock_response
+                def capturing_post(
+                    url, *args, _captured=captured, _mock_response=mock_response, **kwargs
+                ):
+                    _captured["url"] = url
+                    _captured["headers"] = kwargs.get("headers", {})
+                    return _mock_response
 
                 with patch("requests.Session") as mock_session_class:
                     mock_session = MagicMock()
@@ -87,7 +89,7 @@ class TestConcurrencySafety:
                     mock_session_class.return_value = mock_session
 
                     alert = _create_test_alert(case["alert_id"])
-                    result = notifier._post_webhook_secure(alert, prefs)
+                    _ = notifier._post_webhook_secure(alert, prefs)
 
                 # Verify URL contains correct pinned ip
                 assert case["ip"] in captured["url"], (
@@ -160,7 +162,7 @@ class TestConcurrencySafety:
                         min_severity="warning",
                     )
 
-                    result = notifier._post_webhook_secure(
+                    _ = notifier._post_webhook_secure(
                         _create_test_alert(f"test-{i}"),
                         prefs,
                     )

@@ -152,7 +152,7 @@ class TestServerHostnamePropagation:
                     mock_session.post.return_value = mock_response
                     mock_session_class.return_value = mock_session
 
-                    result = notifier._post_webhook_secure(_create_test_alert(), prefs)
+                    _ = notifier._post_webhook_secure(_create_test_alert(), prefs)
 
         # Verify original_hostname was passed
         assert captured.get("original_hostname") == "example.com"

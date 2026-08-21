@@ -87,7 +87,7 @@ class TestFeishuWebhook:
                 mock_session.post = capturing_post
                 mock_session_class.return_value = mock_session
 
-                result = notifier._post_webhook_secure(_create_test_alert(), prefs)
+                _ = notifier._post_webhook_secure(_create_test_alert(), prefs)
 
             # Verify Host header uses original hostname
             assert captured["headers"].get("Host") == "open.feishu.cn"
@@ -158,7 +158,7 @@ class TestDingtalkWebhook:
                     mock_session.post = capturing_post
                     mock_session_class.return_value = mock_session
 
-                    result = notifier._post_webhook_secure(_create_test_alert(), prefs)
+                    _ = notifier._post_webhook_secure(_create_test_alert(), prefs)
 
             # Verify Host header uses original hostname
             assert captured["headers"].get("Host") == "oapi.dingtalk.com"
@@ -224,7 +224,7 @@ class TestIPv6Scenarios:
                 mock_session.post = capturing_post
                 mock_session_class.return_value = mock_session
 
-                result = notifier._post_webhook_secure(_create_test_alert(), prefs)
+                _ = notifier._post_webhook_secure(_create_test_alert(), prefs)
 
             # Verify URL contains IPv6 in brackets
             assert "[2001:db8::1]" in captured["url"]
