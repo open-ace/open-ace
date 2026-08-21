@@ -329,10 +329,19 @@ class TestSchedulerSafetyNet:
 
         scheduler = DataFetchScheduler()
 
+        # Grant leadership without touching the DB. _run_fetch's leader election
+        # reads the scheduler_leaders table and bails ("not leader") if it can't;
+        # under per-test DB isolation (#2869) that table isn't bootstrapped, so
+        # this unit test must mock the client to stay self-contained. It
+        # previously passed only because an earlier test had created
+        # scheduler_leaders in the shared app.db — the exact cross-test coupling
+        # #2869 removes.
         with (
             patch("app.routes.fetch.run_fetch_scripts"),
+            patch("app.services.leader_election.LeaderElectionClient") as mock_leader,
             patch.object(scheduler, "_refresh_materialized_views"),
             patch.object(scheduler, "_aggregate_user_stats") as mock_agg,
         ):
+            mock_leader.return_value.try_acquire_leadership.return_value = True
             scheduler._run_fetch()
             mock_agg.assert_called_once()

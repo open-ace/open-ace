@@ -33,9 +33,11 @@ import { useConfirm } from '@/components/common';
 import { formatTokens, formatDateTime, formatNumber, createMatcherConfig } from '@/utils';
 import { parseApiError } from '@/utils/error';
 import { QuotaType, TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
-import { parseAndValidateQuota, formatQuotaForDisplay } from '@/utils/quotaFormatter';
-import { calculateAvailableQuota, getQuotaTypeInfo } from '@/utils/quotaHint';
-import { formatQuotaHint } from './utils/quotaHintFormat';
+import {
+  parseAndValidateQuota,
+  formatQuotaForDisplay,
+  getAvailableQuotaHint,
+} from '@/utils/quotaFormatter';
 import { alertsApi, type Alert, type NotificationPreferences } from '@/api';
 import type { QuotaUsage, UpdateQuotaRequest } from '@/api';
 
@@ -183,13 +185,29 @@ export const QuotaAlerts: React.FC = () => {
   };
 
   // Get available quota hint for input field (shows actual available quota)
-  const getAvailableQuotaHint = useCallback(
+  // Now uses the utility function from quotaFormatter
+  const getHint = useCallback(
     (quotaType: QuotaType): string => {
-      const available = calculateAvailableQuota(quotaType, { quotaStats, editingUser });
-      const { max } = getQuotaTypeInfo(quotaType);
-      return formatQuotaHint(quotaType, available, max, !!quotaStats);
+      // Determine current quota based on quota type
+      let currentQuota: number | undefined;
+      switch (quotaType) {
+        case QuotaType.DAILY_TOKEN:
+          currentQuota = editingUser?.daily_token_quota;
+          break;
+        case QuotaType.MONTHLY_TOKEN:
+          currentQuota = editingUser?.monthly_token_quota;
+          break;
+        case QuotaType.DAILY_REQUEST:
+          currentQuota = editingUser?.daily_request_quota;
+          break;
+        case QuotaType.MONTHLY_REQUEST:
+          currentQuota = editingUser?.monthly_request_quota;
+          break;
+      }
+
+      return getAvailableQuotaHint(quotaType, quotaStats, currentQuota, language);
     },
-    [quotaStats, editingUser]
+    [quotaStats, editingUser, language]
   );
 
   // Handle quota input change with validation
@@ -710,9 +728,7 @@ export const QuotaAlerts: React.FC = () => {
                 <div className="col-md-6">
                   <label className="form-label">
                     {t('dailyTokenQuota', language)} (M)
-                    <small className="text-muted ms-1">
-                      ({getAvailableQuotaHint(QuotaType.DAILY_TOKEN)})
-                    </small>
+                    <small className="text-muted ms-1">({getHint(QuotaType.DAILY_TOKEN)})</small>
                   </label>
                   <TextInput
                     type="text"
@@ -736,9 +752,7 @@ export const QuotaAlerts: React.FC = () => {
                 <div className="col-md-6">
                   <label className="form-label">
                     {t('monthlyTokenQuota', language)} (M)
-                    <small className="text-muted ms-1">
-                      ({getAvailableQuotaHint(QuotaType.MONTHLY_TOKEN)})
-                    </small>
+                    <small className="text-muted ms-1">({getHint(QuotaType.MONTHLY_TOKEN)})</small>
                   </label>
                   <TextInput
                     type="text"
@@ -762,9 +776,7 @@ export const QuotaAlerts: React.FC = () => {
                 <div className="col-md-6">
                   <label className="form-label">
                     {t('dailyRequestQuota', language)}
-                    <small className="text-muted ms-1">
-                      ({getAvailableQuotaHint(QuotaType.DAILY_REQUEST)})
-                    </small>
+                    <small className="text-muted ms-1">({getHint(QuotaType.DAILY_REQUEST)})</small>
                   </label>
                   <TextInput
                     type="text"
@@ -789,7 +801,7 @@ export const QuotaAlerts: React.FC = () => {
                   <label className="form-label">
                     {t('monthlyRequestQuota', language)}
                     <small className="text-muted ms-1">
-                      ({getAvailableQuotaHint(QuotaType.MONTHLY_REQUEST)})
+                      ({getHint(QuotaType.MONTHLY_REQUEST)})
                     </small>
                   </label>
                   <TextInput
