@@ -33,6 +33,16 @@
 历史文件继续按 inventory 逐步迁移；不要再新增新的“按功能域”顶层目录或
 tests 根目录测试文件。
 
+**测试数据库隔离（#2869）**：`tests/unit/conftest.py` 的 `_isolated_unit_db`
+autouse fixture 给每个 unit 测试指向自己的一次性 sqlite 库
+（`DATABASE_URL=sqlite:///<tmp>/unit-test.db`），非 `@pytest.mark.postgres` 测试
+一律如此。这样走 `create_app` 的测试不再共享工作区级 `app.db`——早先某个测试留下
+列形态不一致的同名表会让后续 `create_app` 的 schema 重放随机崩
+（`no such column`），本 fixture 从根上消除该共享态，并使测试默认库选择显式化
+（不静默继承开发机的 `DATABASE_URL`）。`tests/integration/conftest.py` 早已用
+每测试 `tmp_path` 库。需要 Postgres 的测试打 `@pytest.mark.postgres` 并放入
+`tests/integration/`（由独立 postgres lane 执行）。
+
 ## 回归测试写法
 
 新回归测试直接写到其规范目录，并在模块或测试函数上记录来源：
@@ -80,11 +90,27 @@ python scripts/run_extended_tests.py --category issues --split-total 4 --split-g
    tests 根目录测试文件，以及 `tests/regression/`、`tests/security/`。
 
 所有 suite 的命令、超时和工具链版本以 `ci/suites.json` 为唯一来源；本地和
-GitHub Actions 都通过 `python scripts/ci.py` 执行。PR 使用生产 Python 3.11
-做全量确定性测试；为兼容当前 ruleset，3.10、3.12、3.14 的同名 check 只执行
-compileall 和 unit smoke，并不代表全量跨版本覆盖。Python 3.13 仍是声明支持版本，
-但不在 PR 矩阵中。定时工作流在 3.10、3.11、3.14 上执行完整 Python suite，
-并承担 E2E、legacy shards 和易受 runner 噪声影响的检查。
+GitHub Actions 都通过 `python scripts/ci.py` 执行。PR 矩阵按版本分工（#2868）：
+
+- **3.11（生产运行时）**：`python-core`——全量 `pytest tests/`（含 integration）
+  + 覆盖率 + 假阳性扫描，每个非文档改动都跑。
+- **3.10（最低支持版本）**：`python-min`——`compileall` + 全量 `pytest tests/unit/`，
+  每个非文档改动都跑。版本特有的回归几乎总先在最老解释器上暴露（例如 3.11 之前
+  `datetime.fromisoformat` 不接受 `Z` 后缀），旧矩阵只在 3.10 跑 7 文件 smoke，使
+  这类**单元级**回归在 PR 与合并后 main 推送上都漏网、红 main 75 分钟无人察觉。
+  只跑 unit 使其快（~2min）且确定（无 integration flake、无覆盖率/超时——直接在
+  较慢的 3.10 上跑全量 `tests/` 会撞 10 分钟预算并放大 flake）。
+- **3.12、3.14（前向兼容）**：`compatibility-smoke`——`compileall` + 少量关键单元
+  文件，按依赖变更选择。
+
+`python-min` 与 `python-core` 都对每个代码改动生效，故 `app/**` 改动必在最低支持
+版本真跑全量单元。Python 3.13 仍是声明支持版本但不在 PR 矩阵中。定时工作流在
+3.10、3.11、3.14 上执行完整 Python suite，并承担 E2E、legacy shards 和易受 runner
+噪声影响的检查。`tests/unit/test_ci_runner.py::test_min_supported_python_runs_the_full_unit_suite`
+把「最低支持版本必须跑全量 tests/unit」锁进门禁。合并后对 main 的验证由既有
+`push: [main]`（`ci.yml` 与 `schema-sync.yml`）承担，本改动使其对最低版本真正
+生效——红 main 因此成为提交上诚实可见的红 check。（注：当前 ruleset 未开启
+"require branches up to date"，跨 PR 陈旧基线仍可能红 main，属独立 ruleset 配置项。）
 
 提交前可运行 `python scripts/ci.py doctor --strict` 验证本地 Python/Node
 主版本与 PR 一致，再用 `python scripts/ci.py pr --base origin/main` 按相同路径
