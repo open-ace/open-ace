@@ -522,3 +522,6 @@ export const useModelGatewayEnabled = () => useAppStore((state) => state.modelGa
 export const useRunTimelineEnabled = () => useAppStore((state) => state.runTimelineEnabled);
 export const usePolicyEnabled = () => useAppStore((state) => state.policyEnabled);
 export const useConfigLoaded = () => useAppStore((state) => state.configLoaded);
+
+// Admin tenant store (Issue #2841)
+export { useAdminTenantStore } from './adminTenantStore';
