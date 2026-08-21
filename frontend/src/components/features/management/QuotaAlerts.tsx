@@ -35,14 +35,13 @@ import { parseApiError } from '@/utils/error';
 import {
   QuotaType,
   TOKEN_QUOTA_MULTIPLIER,
-  MAX_TOKEN_QUOTA,
-  MAX_REQUEST_QUOTA,
 } from '@/constants/quota';
 import {
   parseAndValidateQuota,
   formatQuotaForDisplay,
-  formatNumberAsString,
 } from '@/utils/quotaFormatter';
+import { calculateAvailableQuota, getQuotaTypeInfo } from '@/utils/quotaHint';
+import { formatQuotaHint } from './utils/quotaHintFormat';
 import { alertsApi, type Alert, type NotificationPreferences } from '@/api';
 import type { QuotaUsage, UpdateQuotaRequest } from '@/api';
 
@@ -192,44 +191,9 @@ export const QuotaAlerts: React.FC = () => {
   // Get available quota hint for input field (shows actual available quota)
   const getAvailableQuotaHint = useCallback(
     (quotaType: QuotaType): string => {
-      const typeMap = {
-        [QuotaType.DAILY_TOKEN]: {
-          remaining: quotaStats?.remaining.daily_token ?? 0,
-          current: editingUser?.daily_token_quota ?? 0,
-          max: MAX_TOKEN_QUOTA,
-          isToken: true,
-        },
-        [QuotaType.MONTHLY_TOKEN]: {
-          remaining: quotaStats?.remaining.monthly_token ?? 0,
-          current: editingUser?.monthly_token_quota ?? 0,
-          max: MAX_TOKEN_QUOTA,
-          isToken: true,
-        },
-        [QuotaType.DAILY_REQUEST]: {
-          remaining: quotaStats?.remaining.daily_request ?? 0,
-          current: editingUser?.daily_request_quota ?? 0,
-          max: MAX_REQUEST_QUOTA,
-          isToken: false,
-        },
-        [QuotaType.MONTHLY_REQUEST]: {
-          remaining: quotaStats?.remaining.monthly_request ?? 0,
-          current: editingUser?.monthly_request_quota ?? 0,
-          max: MAX_REQUEST_QUOTA,
-          isToken: false,
-        },
-      };
-
-      const info = typeMap[quotaType];
-      const available = Math.max(0, Math.min(info.remaining + info.current, info.max));
-
-      if (!quotaStats) {
-        return info.isToken ? `Max: ${info.max}M` : `Max: ${formatNumberAsString(info.max)}`;
-      }
-
-      if (info.isToken) {
-        return `可用: ${available.toFixed(2)}M (上限: ${info.max}M)`;
-      }
-      return `可用: ${formatNumberAsString(available)} (上限: ${formatNumberAsString(info.max)})`;
+      const available = calculateAvailableQuota(quotaType, { quotaStats, editingUser });
+      const { max } = getQuotaTypeInfo(quotaType);
+      return formatQuotaHint(quotaType, available, max, !!quotaStats);
     },
     [quotaStats, editingUser]
   );
