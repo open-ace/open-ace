@@ -22,7 +22,7 @@ import {
 interface SafeWorkspaceState {
   /** Validated tabs array (never null, always an array) */
   tabs: WorkspaceTab[];
-  /** Validated tabs order (never null, always a string array) */
+  /** Validated tabs order (never null, always a string array, IDs validated against tabs) */
   tabsOrder: string[];
   /** Validated active tab ID (never null, always a string) */
   activeTabId: string;
@@ -31,6 +31,7 @@ interface SafeWorkspaceState {
 /**
  * Hook that provides validated workspace state values.
  * All values are guaranteed to be valid types, with invalid data filtered out.
+ * Issue #2953: tabsOrder is additionally validated to ensure IDs exist in tabs
  *
  * @returns SafeWorkspaceState - Validated workspace state
  */
@@ -59,7 +60,7 @@ export const useSafeWorkspaceState = (): SafeWorkspaceState => {
     const safeActiveTabId: string = typeof storedActiveTabId === 'string' ? storedActiveTabId : '';
 
     // Validate storedTabsOrder - must be array of strings
-    const safeTabsOrder: string[] = Array.isArray(storedTabsOrder)
+    const validTabsOrder: string[] = Array.isArray(storedTabsOrder)
       ? storedTabsOrder.filter((id) => {
           if (typeof id !== 'string') {
             console.warn('[useSafeWorkspaceState] Invalid tabsOrder item removed:', id);
@@ -68,6 +69,16 @@ export const useSafeWorkspaceState = (): SafeWorkspaceState => {
           return true;
         })
       : [];
+
+    // Issue #2953: Additionally validate that tabsOrder IDs exist in tabs
+    const tabIds = new Set(safeTabs.map((t) => t.id));
+    const safeTabsOrder = validTabsOrder.filter((id) => {
+      if (!tabIds.has(id)) {
+        console.warn('[useSafeWorkspaceState] Tab ID in order not found in tabs:', id);
+        return false;
+      }
+      return true;
+    });
 
     return {
       tabs: safeTabs,

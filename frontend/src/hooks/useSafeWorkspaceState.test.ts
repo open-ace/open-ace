@@ -40,7 +40,9 @@ describe('useSafeWorkspaceState Hook (Issue #2953)', () => {
     });
 
     it('should return empty array when tabsOrder is empty', () => {
-      const tabs: WorkspaceTab[] = [{ id: 'tab-1', title: 'Tab 1', createdAt: Date.now() }];
+      const tabs: WorkspaceTab[] = [
+        { id: 'tab-1', title: 'Tab 1', createdAt: Date.now() },
+      ];
       expect(validateTabsOrder([], tabs)).toEqual([]);
     });
 
@@ -75,6 +77,26 @@ describe('useSafeWorkspaceState Hook (Issue #2953)', () => {
     it('should handle empty tabs array', () => {
       const tabsOrder = ['tab-1', 'tab-2'];
       expect(validateTabsOrder(tabsOrder, [])).toEqual([]);
+    });
+  });
+
+  describe('useSafeWorkspaceState hook integration', () => {
+    // Note: Testing the hook directly requires a React test renderer
+    // The following tests verify the exported helper functions
+    // For full hook testing, see the validation tests in store.validation.test.ts
+
+    it('should validate tabsOrder against tabs (simulated)', () => {
+      const tabs: WorkspaceTab[] = [
+        { id: 'tab-1', title: 'Tab 1', createdAt: Date.now() },
+        { id: 'tab-2', title: 'Tab 2', createdAt: Date.now() },
+      ];
+      const tabsOrder = ['tab-1', 'non-existent', 'tab-2'];
+
+      // Simulate what useSafeWorkspaceState does
+      const validOrder = validateTabsOrder(tabsOrder, tabs);
+
+      expect(validOrder).toEqual(['tab-1', 'tab-2']);
+      expect(validOrder).toHaveLength(2);
     });
   });
 });

@@ -3,7 +3,7 @@
  */
 
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
 import type { User, Theme, Language, AppMode } from '@/types';
 
 /**
@@ -148,7 +148,7 @@ interface AppState {
  * Validate workspace tab has required fields
  * Issue #2953: Defensive validation
  */
-const isValidWorkspaceTab = (tab: unknown): tab is WorkspaceTab => {
+export const isValidWorkspaceTab = (tab: unknown): tab is WorkspaceTab => {
   if (typeof tab !== 'object' || tab === null) return false;
   const t = tab as Record<string, unknown>;
   return typeof t.id === 'string' && typeof t.title === 'string';
@@ -157,8 +157,10 @@ const isValidWorkspaceTab = (tab: unknown): tab is WorkspaceTab => {
 /**
  * Validate and sanitize stored state
  * Issue #2953: Schema validation for localStorage data
+ * @param persistedState - The raw state from localStorage
+ * @returns Partial validated state with only valid fields
  */
-const validateStoredState = (persistedState: unknown): Partial<PersistedState> => {
+export const validateStoredState = (persistedState: unknown): Partial<PersistedState> => {
   if (typeof persistedState !== 'object' || persistedState === null) {
     return {};
   }
@@ -232,8 +234,11 @@ const validateStoredState = (persistedState: unknown): Partial<PersistedState> =
 /**
  * Migrate from older versions
  * Issue #2953: Version migration support
+ * @param persistedState - The raw state from localStorage
+ * @param version - The version number of the persisted state
+ * @returns Fully migrated and validated state
  */
-const migrate = (persistedState: unknown, version: number): PersistedState => {
+export const migrate = (persistedState: unknown, version: number): PersistedState => {
   console.log('[Store] Migrating from version', version, 'to version 1');
 
   const validated = validateStoredState(persistedState);
@@ -427,11 +432,7 @@ export const useAppStore = create<AppState>()(
     {
       name: 'open-ace-store',
       version: 1, // Issue #2953: Add version for migration support
-      migrate, // Issue #2953: Migration function
-      storage: createJSONStorage(() => localStorage, {
-        // Issue #2953: Handle JSON parse errors (reviver is a placeholder for custom parsing)
-        reviver: (_key, value) => value,
-      }),
+      migrate, // Issue #2953: Migration function handles version updates and validation
       // Issue #2953: Error handling during rehydration is done in migrate function
       partialize: (state): PersistedState => ({
         theme: state.theme,
