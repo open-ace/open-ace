@@ -374,9 +374,9 @@ class _PinnedHTTPSConnectionPool(urllib3.HTTPSConnectionPool):
         """Create a new connection with correct TLS SNI hostname.
 
         Note: This overrides an internal urllib3 API. The attributes used here
-        (source_address, socket_options, _tunnel_host, _tunnel_port) are stable
-        in urllib3 2.x as of version 2.0.0. We use getattr with None defaults
-        to gracefully handle cases where attributes might not be set.
+        (source_address, socket_options) are stable in urllib3 2.x as of version 2.0.0.
+        We use getattr with None defaults to gracefully handle cases where attributes
+        might not be set.
 
         Issue #2883: Required to pass original_hostname through the connection stack.
         """
@@ -394,10 +394,13 @@ class _PinnedHTTPSConnectionPool(urllib3.HTTPSConnectionPool):
 
         conn = self.ConnectionCls(**conn_kwargs)
 
-        # Set proxy tunnel attributes if present
-        # These are used for CONNECT proxy support
-        conn._tunnel_host = getattr(self, "_tunnel_host", None)
-        conn._tunnel_port = getattr(self, "_tunnel_port", None)
+        # Note: We intentionally do NOT set _tunnel_host and _tunnel_port here
+        # because:
+        # 1. ConnectionPool.__init__ sets _tunnel_host = host (for proxy tunnel support)
+        # 2. Setting _tunnel_host on the connection object tells urllib3 to use HTTP CONNECT
+        # 3. We're not using HTTP proxy tunnels for pinned webhooks
+        # 4. If we set _tunnel_host, the connection will try to tunnel, causing errors
+        # Proxy tunnel attributes should only be set by HTTPAdapter when a proxy is configured.
 
         return conn
 
