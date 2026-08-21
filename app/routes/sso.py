@@ -1466,7 +1466,28 @@ def _finalize_sso_login(provider_name: str, auth_result, frontend_url: str | Non
                 try:
                     user_id = _create_user_from_sso(auth_result.user, provider_name)
                 except _AutoProvisionDenied:
-                    # Issue #2893: Return explicit error when auto-provisioning is denied
+                    # Issue #2893: Audit-log the policy denial before returning error
+                    try:
+                        get_audit_logger().log(
+                            action=AuditAction.LOGIN.value,
+                            user_id=None,
+                            username=auth_result.user.username if auth_result.user else None,
+                            resource_type="sso_session",
+                            resource_id=provider_name,
+                            details={
+                                "provider": provider_name,
+                                "method": "sso",
+                                "denied_reason": "auto_provision_disabled",
+                                "email_linked": False,
+                                "email_linking_enabled": _allow_email_linking(provider_name),
+                            },
+                            ip_address=request.remote_addr if request else None,
+                            user_agent=request.headers.get("User-Agent") if request else None,
+                            success=False,
+                        )
+                    except Exception:
+                        logger.warning("Failed to audit-log SSO auto-provision denial", exc_info=True)
+
                     return jsonify(
                         {
                             "success": False,
@@ -2121,20 +2142,13 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
 
     from app.repositories.tenant_repo import TenantRepository
 
-    # Generate username if not provided
-    username = sso_user.username or sso_user.email or f"{provider_name}_{sso_user.provider_user_id}"
-
-    # Ensure username is unique
-    base_username = username
-    counter = 1
-    while user_repo.get_user_by_username(username):
-        username = f"{base_username}_{counter}"
-        counter += 1
-
     # Issue #2174 F6: Tenant resolution priority chain
     # Priority 1: Provider configuration (default_tenant_id in provider config)
     # Priority 2: Request tenant context (from authenticated session)
     # Priority 3: REJECT if neither available
+    #
+    # Issue #2893: Resolve tenant and check auto_provision BEFORE username
+    # generation to avoid unnecessary DB queries when creation is denied.
 
     provider = get_sso_manager().get_provider(provider_name)
     tenant_id = None
@@ -2163,14 +2177,14 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
         if null_tenant_policy == "reject":
             logger.error(
                 f"SSO user creation rejected - no tenant binding: "
-                f"provider={provider_name}, username={username}. "
+                f"provider={provider_name}. "
                 f"Contact administrator to configure default_tenant_id for this provider."
             )
             return None
         elif null_tenant_policy == "warn":
             logger.warning(
                 f"SSO user creation rejected - no tenant binding (policy=warn): "
-                f"provider={provider_name}, username={username}. "
+                f"provider={provider_name}. "
                 f"DEPRECATION NOTICE: SSO_NULL_TENANT_POLICY=warn will reject user creation. "
                 f"Please migrate to 'reject' or configure provider default_tenant_id."
             )
@@ -2215,6 +2229,16 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
                 f"Denying auto-provision for safety."
             )
             return None
+
+    # Generate username if not provided (after policy checks pass)
+    username = sso_user.username or sso_user.email or f"{provider_name}_{sso_user.provider_user_id}"
+
+    # Ensure username is unique
+    base_username = username
+    counter = 1
+    while user_repo.get_user_by_username(username):
+        username = f"{base_username}_{counter}"
+        counter += 1
 
     # Create user
     try:

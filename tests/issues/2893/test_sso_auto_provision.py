@@ -252,7 +252,12 @@ class TestSSOAutoProvisionFinalizeLogin:
         self, mock_request, mock_g, mock_user_repo, mock_sso_manager, mock_tenant_repo
     ):
         """Test that _finalize_sso_login returns 403 when auto_provision is denied."""
+        from flask import Flask
+
         from app.routes.sso import _finalize_sso_login
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
 
         mock_g.tenant_id = 1
         mock_g.user = {}
@@ -277,9 +282,12 @@ class TestSSOAutoProvisionFinalizeLogin:
         mock_tenant = MockTenant(tenant_id=1, auto_provision_users=False)
         mock_tenant_repo.return_value.get_by_id.return_value = mock_tenant
 
-        # _allow_email_linking returns False
-        with patch("app.routes.sso._allow_email_linking", return_value=False):
-            response, status_code = _finalize_sso_login("test_provider", mock_auth_result, None)
+        with app.test_request_context():
+            # _allow_email_linking returns False
+            with patch("app.routes.sso._allow_email_linking", return_value=False):
+                response, status_code = _finalize_sso_login(
+                    "test_provider", mock_auth_result, None
+                )
 
         assert status_code == 403
         data = response.get_json()
