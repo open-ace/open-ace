@@ -276,6 +276,7 @@ class TestSSOAutoProvisionFinalizeLogin:
         # get_user_by_sso_identity returns None (no bound identity)
         mock_manager = MagicMock()
         mock_manager.get_user_by_sso_identity.return_value = None
+        mock_manager.get_provider.return_value = _make_mock_provider(1)
         mock_sso_manager.return_value = mock_manager
 
         # Tenant with auto_provision_users=False → will raise _AutoProvisionDenied
