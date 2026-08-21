@@ -590,6 +590,39 @@ ps aux | grep python
 chmod -R 755 ~/.open-ace/
 ```
 
+### code-server Installation Verification
+
+**Purpose**: code-server is used for the "Open VS Code" button in local workspace sessions. When users click the "Open VS Code" button in a local workspace, the system launches code-server to provide a web-based VS Code editor.
+
+**Verify Installation**:
+
+```bash
+# Verify in Docker container
+docker run --rm <image> which code-server
+docker run --rm <image> code-server --version
+```
+
+**Common Issues**:
+
+| Error Message | Cause | Solution |
+|--------------|-------|----------|
+| `code-server is not installed` | Image version outdated or not built correctly | Rebuild Docker image |
+| `code-server: command not found` | PATH issue | Check if `/usr/bin/code-server` exists |
+| Installation failed | Network issue | Check network connection, consider using proxy |
+
+**Fix History**:
+
+| Issue/PR | Date | Fix Content |
+|----------|------|-------------|
+| #2245 / #2250 | 2026-08-05 | First added code-server installation |
+| #2358 | 2026-08-06 | Fixed verification path (/usr/local/bin → /usr/bin) |
+| #2498 | 2026-08-11 | Removed invalid `--prefix` parameter |
+
+**Installation Method**:
+- Uses official install script: `https://code-server.dev/install.sh`
+- Debian environment uses deb package, installs to `/usr/bin/code-server`
+- Timeout settings: 15s connection, 300s execution
+
 ## Security Considerations
 
 1. **Security Mode**: Must explicitly set `OPENACE_SECURITY_MODE` (Issue #2185)
