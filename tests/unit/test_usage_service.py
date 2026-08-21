@@ -75,7 +75,19 @@ class TestUsageService:
 
     def test_get_usage_summary(self):
         svc, mock_repo = self._make_service()
-        mock_repo.get_summary_by_tool.return_value = {"qwen": {"total": 1000}}
+        mock_repo.get_summary_by_tool.return_value = {
+            "qwen": {
+                "days_count": 5,
+                "total_tokens": 1000,
+                "avg_tokens": 200,
+                "total_requests": 10,
+                "total_input_tokens": 800,
+                "total_output_tokens": 200,
+                "first_date": "2026-01-01",
+                "last_date": "2026-01-05",
+            }
+        }
+        mock_repo.get_session_summary_by_tool.return_value = {}
         result = svc.get_usage_summary()
         assert "qwen" in result
 

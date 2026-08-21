@@ -522,47 +522,78 @@ export const SSOSettings: React.FC = () => {
         </Card>
       )}
 
+      {/* Global SSO Setting - Issue #2128 */}
+      <Card className="mb-4">
+        <div className="d-flex align-items-center mb-3">
+          <i className="bi bi-globe fs-4 me-2 text-primary" />
+          <h5 className="mb-0">{t('enableGlobalSSO', language)}</h5>
+        </div>
+        <div className="form-check form-switch mb-2">
+          <input
+            className="form-check-input"
+            type="checkbox"
+            id="ssoEnabled"
+            aria-describedby="globalSSODesc"
+            checked={ssoEnabled ?? false}
+            disabled={ssoEnabled === null || isSaving}
+            onChange={(e) => setSsoEnabled(e.target.checked)}
+          />
+          <label className="form-check-label" htmlFor="ssoEnabled">
+            {t('enableGlobalSSO', language)}
+          </label>
+          <span id="globalSSODesc" className="visually-hidden">
+            {t('globalSSODesc', language)}
+          </span>
+        </div>
+        <small className="text-muted d-block mb-2">
+          <i className="bi bi-info-circle me-1" />
+          {t('globalSSOHint', language)}
+        </small>
+        {ssoEnabled && (
+          <div className="alert alert-warning py-2 mb-2" role="alert">
+            <i className="bi bi-exclamation-triangle me-1" />
+            {t('globalSSOWarning', language)}
+          </div>
+        )}
+        {ssoLoadError && (
+          <div className="alert alert-warning mt-2 py-1 px-2 small">
+            <i className="bi bi-exclamation-triangle me-1" />
+            {ssoLoadError}
+          </div>
+        )}
+        <div className="mt-2">
+          <Button
+            variant="primary"
+            size="sm"
+            ariaLabel="Save global SSO setting"
+            onClick={async () => {
+              setIsSaving(true);
+              try {
+                // ssoEnabled is guaranteed to be boolean when button is enabled (disabled when null)
+                await systemApi.updateSystemSettings({ sso_enabled: ssoEnabled! });
+                success(t('settingsSaved', language));
+              } catch (err) {
+                console.error('Failed to save global SSO setting:', err);
+                toastError(t('saveFailed', language));
+              } finally {
+                setIsSaving(false);
+              }
+            }}
+            loading={isSaving}
+            disabled={ssoEnabled === null}
+          >
+            <i className="bi bi-check-lg me-1" />
+            {t('save', language)}
+          </Button>
+        </div>
+      </Card>
+
       {/* SSO Configuration Form */}
       <Card title={t('ssoConfiguration', language)} className="mb-4">
         <form className="sso-form" onSubmit={handleSaveSettings}>
           <div className="row g-3">
-            <div className="col-md-6">
-              <div className="form-check form-switch">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  id="ssoEnabled"
-                  name="system_sso_enabled"
-                  autoComplete="off"
-                  aria-describedby="ssoEnabledDesc"
-                  checked={ssoEnabled ?? false}
-                  disabled={ssoEnabled === null || isSaving}
-                  onChange={(e) => setSsoEnabled(e.target.checked)}
-                />
-                <label className="form-check-label" htmlFor="ssoEnabled">
-                  {t('enableSSO', language)}
-                  {ssoEnabled === null && (
-                    <span className="ms-2 text-muted">
-                      <i className="bi bi-arrow-repeat spinner-border spinner-border-sm" />
-                      {t('loading', language)}
-                    </span>
-                  )}
-                </label>
-                <span id="ssoEnabledDesc" className="visually-hidden">
-                  {t('ssoEnabledDesc', language)}
-                </span>
-              </div>
-              {ssoLoadError && (
-                <div className="alert alert-warning mt-2 py-1 px-2 small">
-                  <i className="bi bi-exclamation-triangle me-1" />
-                  {t('failedToLoadSSOSettings', language)}
-                </div>
-              )}
-              <small className="text-muted d-block mt-1">
-                <i className="bi bi-info-circle me-1" />
-                {t('ssoSystemSettingHint', language)}
-              </small>
-            </div>
+            {/* Issue #2128: ssoEnabled moved to global settings card above */}
+
             <div className="col-md-6">
               <div className="form-check form-switch">
                 <input
@@ -590,6 +621,7 @@ export const SSOSettings: React.FC = () => {
             <Button
               variant="primary"
               type="submit"
+              ariaLabel="Save tenant SSO settings"
               loading={isSaving}
               disabled={!effectiveTenantId}
             >

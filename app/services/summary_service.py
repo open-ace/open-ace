@@ -86,10 +86,34 @@ class SummaryService:
                     MAX(date) as last_date
                 FROM daily_messages
                 WHERE host_name = ?
+                  AND (agent_session_id IS NULL OR agent_session_id = '')
                 GROUP BY tool_name
                 ORDER BY tool_name
             """
             params = (host_name, host_name)
+            dm_results = self.db.fetch_all(query, params)
+
+            # Supplement with agent_sessions data for this host
+            session_query = """
+                SELECT
+                    COALESCE(tool_name, 'unknown') as tool_name,
+                    ? as host_name,
+                    COUNT(DISTINCT CAST(created_at AS DATE)) as days_count,
+                    SUM(COALESCE(total_tokens, 0)) as total_tokens,
+                    SUM(COALESCE(total_tokens, 0)) / COUNT(DISTINCT CAST(created_at AS DATE)) as avg_tokens,
+                    SUM(COALESCE(request_count, 0)) as total_requests,
+                    SUM(COALESCE(total_input_tokens, 0)) as total_input_tokens,
+                    SUM(COALESCE(total_output_tokens, 0)) as total_output_tokens,
+                    MIN(CAST(created_at AS DATE)) as first_date,
+                    MAX(CAST(created_at AS DATE)) as last_date
+                FROM agent_sessions
+                WHERE host_name = ?
+                  AND workspace_type IN ('local', 'remote', 'terminal')
+                GROUP BY COALESCE(tool_name, 'unknown')
+                ORDER BY tool_name
+            """
+            session_results = self.db.fetch_all(session_query, (host_name, host_name))
+            return self._merge_aggregates(dm_results + session_results)
         else:
             # Calculate for all hosts (both per-host and global)
             # Per-host summaries
@@ -106,6 +130,7 @@ class SummaryService:
                     MIN(date) as first_date,
                     MAX(date) as last_date
                 FROM daily_messages
+                WHERE (agent_session_id IS NULL OR agent_session_id = '')
                 GROUP BY tool_name, host_name
                 ORDER BY tool_name, host_name
             """
@@ -124,6 +149,7 @@ class SummaryService:
                     MIN(date) as first_date,
                     MAX(date) as last_date
                 FROM daily_messages
+                WHERE (agent_session_id IS NULL OR agent_session_id = '')
                 GROUP BY tool_name
                 ORDER BY tool_name
             """
@@ -131,9 +157,51 @@ class SummaryService:
             # Execute both queries
             per_host_results = self.db.fetch_all(query_per_host, ())
             global_results = self.db.fetch_all(query_global, ())
-            return self._merge_aggregates(per_host_results + global_results)
 
-        return self._merge_aggregates(self.db.fetch_all(query, params))
+            # Supplement with agent_sessions data (per-host and global)
+            session_per_host_query = """
+                SELECT
+                    COALESCE(tool_name, 'unknown') as tool_name,
+                    host_name,
+                    COUNT(DISTINCT CAST(created_at AS DATE)) as days_count,
+                    SUM(COALESCE(total_tokens, 0)) as total_tokens,
+                    SUM(COALESCE(total_tokens, 0)) / COUNT(DISTINCT CAST(created_at AS DATE)) as avg_tokens,
+                    SUM(COALESCE(request_count, 0)) as total_requests,
+                    SUM(COALESCE(total_input_tokens, 0)) as total_input_tokens,
+                    SUM(COALESCE(total_output_tokens, 0)) as total_output_tokens,
+                    MIN(CAST(created_at AS DATE)) as first_date,
+                    MAX(CAST(created_at AS DATE)) as last_date
+                FROM agent_sessions
+                WHERE workspace_type IN ('local', 'remote', 'terminal')
+                GROUP BY COALESCE(tool_name, 'unknown'), host_name
+                ORDER BY tool_name, host_name
+            """
+            session_global_query = """
+                SELECT
+                    COALESCE(tool_name, 'unknown') as tool_name,
+                    '' as host_name,
+                    COUNT(DISTINCT CAST(created_at AS DATE)) as days_count,
+                    SUM(COALESCE(total_tokens, 0)) as total_tokens,
+                    SUM(COALESCE(total_tokens, 0)) / COUNT(DISTINCT CAST(created_at AS DATE)) as avg_tokens,
+                    SUM(COALESCE(request_count, 0)) as total_requests,
+                    SUM(COALESCE(total_input_tokens, 0)) as total_input_tokens,
+                    SUM(COALESCE(total_output_tokens, 0)) as total_output_tokens,
+                    MIN(CAST(created_at AS DATE)) as first_date,
+                    MAX(CAST(created_at AS DATE)) as last_date
+                FROM agent_sessions
+                WHERE workspace_type IN ('local', 'remote', 'terminal')
+                GROUP BY COALESCE(tool_name, 'unknown')
+                ORDER BY tool_name
+            """
+            session_per_host_results = self.db.fetch_all(session_per_host_query, ())
+            session_global_results = self.db.fetch_all(session_global_query, ())
+
+            return self._merge_aggregates(
+                per_host_results
+                + global_results
+                + session_per_host_results
+                + session_global_results
+            )
 
     def _merge_aggregates(self, rows: list[dict]) -> list[dict]:
         merged: dict[tuple, dict] = {}
@@ -143,7 +211,7 @@ class SummaryService:
             key = (tool, host)
             if key in merged:
                 existing = merged[key]
-                existing["days_count"] = max(existing["days_count"], row["days_count"] or 0)
+                existing["days_count"] += row["days_count"] or 0
                 existing["total_tokens"] += row["total_tokens"] or 0
                 existing["total_requests"] += row["total_requests"] or 0
                 existing["total_input_tokens"] += row["total_input_tokens"] or 0
