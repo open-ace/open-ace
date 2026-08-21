@@ -93,7 +93,9 @@ python scripts/run_extended_tests.py --category issues --split-total 4 --split-g
 GitHub Actions 都通过 `python scripts/ci.py` 执行。PR 矩阵按版本分工（#2868）：
 
 - **3.11（生产运行时）**：`python-core`——全量 `pytest tests/`（含 integration）
-  + 覆盖率 + 假阳性扫描，每个非文档改动都跑。
+  + 覆盖率，每个非文档改动都跑。
+- **false-positive-scan**：测试代码假阳性扫描（Issue #2189，Scope #6），
+  每个非文档改动都跑，独立于 `python-core` 以避免超时。
 - **3.10（最低支持版本）**：`python-min`——`compileall` + 全量 `pytest tests/unit/`，
   每个非文档改动都跑。版本特有的回归几乎总先在最老解释器上暴露（例如 3.11 之前
   `datetime.fromisoformat` 不接受 `Z` 后缀），旧矩阵只在 3.10 跑 7 文件 smoke，使

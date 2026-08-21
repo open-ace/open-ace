@@ -18,10 +18,29 @@ vi.mock('@/store', () => ({
   useLanguage: () => 'en',
 }));
 
-// Mock auth hook
+// Mock auth hook and admin tenant hook
 vi.mock('@/hooks', () => ({
   useAuth: () => ({
     user: { tenant_id: 1, role: 'admin' },
+  }),
+  useAdminTenant: () => ({
+    tenants: [
+      {
+        id: 1,
+        name: 'Test Tenant',
+        slug: 'test',
+        status: 'active',
+        plan: 'standard',
+        created_at: '2026-01-01',
+      },
+    ],
+    selectedTenantId: null,
+    effectiveTenantId: 1,
+    isLoading: false,
+    error: null,
+    selectTenant: vi.fn(),
+    clearSelection: vi.fn(),
+    retry: vi.fn(),
   }),
 }));
 
