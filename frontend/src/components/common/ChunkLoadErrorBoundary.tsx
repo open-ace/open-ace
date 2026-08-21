@@ -31,11 +31,52 @@ export class ChunkLoadErrorBoundary extends React.Component<
 
   public override componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
     try {
-      // Report error
+      // Issue #2953: Build context object with additional information
+      const context: Record<string, unknown> = {
+        url: window.location.href,
+        path: window.location.pathname,
+        search: window.location.search,
+      };
+
+      // Extract URL parameters relevant to session restoration
+      const urlParams = new URLSearchParams(window.location.search);
+      const sessionId = urlParams.get('sessionId');
+      const encodedProjectName = urlParams.get('encodedProjectName');
+      const restoreSession = urlParams.get('restoreSession');
+
+      if (sessionId) context.sessionId = sessionId;
+      if (encodedProjectName) context.encodedProjectName = encodedProjectName;
+      if (restoreSession) context.restoreSession = restoreSession;
+
+      // Add store state summary if available
+      try {
+        const storedState = localStorage.getItem('open-ace-store');
+        if (storedState) {
+          const parsed = JSON.parse(storedState);
+          if (parsed?.state) {
+            context.storeState = {
+              hasTabs: Array.isArray(parsed.state.workspaceTabs),
+              tabsCount: Array.isArray(parsed.state.workspaceTabs)
+                ? parsed.state.workspaceTabs.length
+                : 0,
+              hasActiveTabId: typeof parsed.state.workspaceActiveTabId === 'string',
+              hasTabsOrder: Array.isArray(parsed.state.workspaceTabsOrder),
+              tabsOrderCount: Array.isArray(parsed.state.workspaceTabsOrder)
+                ? parsed.state.workspaceTabsOrder.length
+                : 0,
+            };
+          }
+        }
+      } catch (e) {
+        // Ignore errors when reading localStorage
+      }
+
+      // Report error with context
       this.errorId = reportFrontendError({
         error,
         errorInfo: { componentStack: errorInfo.componentStack ?? undefined },
         category: isChunkLoadError(error) ? 'chunk-load' : 'render-runtime',
+        context,
       });
     } catch (e) {
       // Swallow all exceptions to prevent infinite loop
