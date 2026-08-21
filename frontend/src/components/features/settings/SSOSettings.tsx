@@ -581,43 +581,7 @@ export const SSOSettings: React.FC = () => {
       <Card title={t('ssoConfiguration', language)} className="mb-4">
         <form className="sso-form" onSubmit={handleSaveSettings}>
           <div className="row g-3">
-            <div className="col-md-6">
-              <div className="form-check form-switch">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  id="ssoEnabled"
-                  name="system_sso_enabled"
-                  autoComplete="off"
-                  aria-describedby="ssoEnabledDesc"
-                  checked={ssoEnabled ?? false}
-                  disabled={ssoEnabled === null || isSaving}
-                  onChange={(e) => setSsoEnabled(e.target.checked)}
-                />
-                <label className="form-check-label" htmlFor="ssoEnabled">
-                  {t('enableSSO', language)}
-                  {ssoEnabled === null && (
-                    <span className="ms-2 text-muted">
-                      <i className="bi bi-arrow-repeat spinner-border spinner-border-sm" />
-                      {t('loading', language)}
-                    </span>
-                  )}
-                </label>
-                <span id="ssoEnabledDesc" className="visually-hidden">
-                  {t('ssoEnabledDesc', language)}
-                </span>
-              </div>
-              {ssoLoadError && (
-                <div className="alert alert-warning mt-2 py-1 px-2 small">
-                  <i className="bi bi-exclamation-triangle me-1" />
-                  {ssoLoadError}
-                </div>
-              )}
-              <small className="text-muted d-block mt-1">
-                <i className="bi bi-info-circle me-1" />
-                {t('ssoSystemSettingHint', language)}
-              </small>
-            </div>
+            {/* Issue #2128: ssoEnabled moved to global settings card above */}
             <div className="col-md-6">
               <div className="form-check form-switch">
                 <input
