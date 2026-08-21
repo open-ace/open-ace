@@ -32,16 +32,11 @@ import {
 import { useConfirm } from '@/components/common';
 import { formatTokens, formatDateTime, formatNumber, createMatcherConfig } from '@/utils';
 import { parseApiError } from '@/utils/error';
-import {
-  QuotaType,
-  TOKEN_QUOTA_MULTIPLIER,
-  MAX_TOKEN_QUOTA,
-  MAX_REQUEST_QUOTA,
-} from '@/constants/quota';
+import { QuotaType, TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
 import {
   parseAndValidateQuota,
   formatQuotaForDisplay,
-  formatNumberAsString,
+  getAvailableQuotaHint,
 } from '@/utils/quotaFormatter';
 import { alertsApi, type Alert, type NotificationPreferences } from '@/api';
 import type { QuotaUsage, UpdateQuotaRequest } from '@/api';
@@ -190,48 +185,29 @@ export const QuotaAlerts: React.FC = () => {
   };
 
   // Get available quota hint for input field (shows actual available quota)
-  const getAvailableQuotaHint = useCallback(
+  // Now uses the utility function from quotaFormatter
+  const getHint = useCallback(
     (quotaType: QuotaType): string => {
-      const typeMap = {
-        [QuotaType.DAILY_TOKEN]: {
-          remaining: quotaStats?.remaining.daily_token ?? 0,
-          current: editingUser?.daily_token_quota ?? 0,
-          max: MAX_TOKEN_QUOTA,
-          isToken: true,
-        },
-        [QuotaType.MONTHLY_TOKEN]: {
-          remaining: quotaStats?.remaining.monthly_token ?? 0,
-          current: editingUser?.monthly_token_quota ?? 0,
-          max: MAX_TOKEN_QUOTA,
-          isToken: true,
-        },
-        [QuotaType.DAILY_REQUEST]: {
-          remaining: quotaStats?.remaining.daily_request ?? 0,
-          current: editingUser?.daily_request_quota ?? 0,
-          max: MAX_REQUEST_QUOTA,
-          isToken: false,
-        },
-        [QuotaType.MONTHLY_REQUEST]: {
-          remaining: quotaStats?.remaining.monthly_request ?? 0,
-          current: editingUser?.monthly_request_quota ?? 0,
-          max: MAX_REQUEST_QUOTA,
-          isToken: false,
-        },
-      };
-
-      const info = typeMap[quotaType];
-      const available = Math.max(0, Math.min(info.remaining + info.current, info.max));
-
-      if (!quotaStats) {
-        return info.isToken ? `Max: ${info.max}M` : `Max: ${formatNumberAsString(info.max)}`;
+      // Determine current quota based on quota type
+      let currentQuota: number | undefined;
+      switch (quotaType) {
+        case QuotaType.DAILY_TOKEN:
+          currentQuota = editingUser?.daily_token_quota;
+          break;
+        case QuotaType.MONTHLY_TOKEN:
+          currentQuota = editingUser?.monthly_token_quota;
+          break;
+        case QuotaType.DAILY_REQUEST:
+          currentQuota = editingUser?.daily_request_quota;
+          break;
+        case QuotaType.MONTHLY_REQUEST:
+          currentQuota = editingUser?.monthly_request_quota;
+          break;
       }
 
-      if (info.isToken) {
-        return `可用: ${available.toFixed(2)}M (上限: ${info.max}M)`;
-      }
-      return `可用: ${formatNumberAsString(available)} (上限: ${formatNumberAsString(info.max)})`;
+      return getAvailableQuotaHint(quotaType, quotaStats, currentQuota, language);
     },
-    [quotaStats, editingUser]
+    [quotaStats, editingUser, language]
   );
 
   // Handle quota input change with validation
@@ -752,9 +728,7 @@ export const QuotaAlerts: React.FC = () => {
                 <div className="col-md-6">
                   <label className="form-label">
                     {t('dailyTokenQuota', language)} (M)
-                    <small className="text-muted ms-1">
-                      ({getAvailableQuotaHint(QuotaType.DAILY_TOKEN)})
-                    </small>
+                    <small className="text-muted ms-1">({getHint(QuotaType.DAILY_TOKEN)})</small>
                   </label>
                   <TextInput
                     type="text"
@@ -778,9 +752,7 @@ export const QuotaAlerts: React.FC = () => {
                 <div className="col-md-6">
                   <label className="form-label">
                     {t('monthlyTokenQuota', language)} (M)
-                    <small className="text-muted ms-1">
-                      ({getAvailableQuotaHint(QuotaType.MONTHLY_TOKEN)})
-                    </small>
+                    <small className="text-muted ms-1">({getHint(QuotaType.MONTHLY_TOKEN)})</small>
                   </label>
                   <TextInput
                     type="text"
@@ -804,9 +776,7 @@ export const QuotaAlerts: React.FC = () => {
                 <div className="col-md-6">
                   <label className="form-label">
                     {t('dailyRequestQuota', language)}
-                    <small className="text-muted ms-1">
-                      ({getAvailableQuotaHint(QuotaType.DAILY_REQUEST)})
-                    </small>
+                    <small className="text-muted ms-1">({getHint(QuotaType.DAILY_REQUEST)})</small>
                   </label>
                   <TextInput
                     type="text"
@@ -831,7 +801,7 @@ export const QuotaAlerts: React.FC = () => {
                   <label className="form-label">
                     {t('monthlyRequestQuota', language)}
                     <small className="text-muted ms-1">
-                      ({getAvailableQuotaHint(QuotaType.MONTHLY_REQUEST)})
+                      ({getHint(QuotaType.MONTHLY_REQUEST)})
                     </small>
                   </label>
                   <TextInput
