@@ -43,9 +43,9 @@ class TestMultiUserComposeConfig:
         assert services_match, "open-ace service not found"
 
         openace_section = services_match.group(1)
-        assert "OPENACE_CONFIG_DIR" in openace_section, (
-            "OPENACE_CONFIG_DIR must be set in open-ace service environment"
-        )
+        assert (
+            "OPENACE_CONFIG_DIR" in openace_section
+        ), "OPENACE_CONFIG_DIR must be set in open-ace service environment"
 
     def test_openace_config_dir_set_in_scheduler_service(self):
         """Verify OPENACE_CONFIG_DIR is set in scheduler service."""
@@ -59,9 +59,9 @@ class TestMultiUserComposeConfig:
         assert scheduler_match, "scheduler service not found"
 
         scheduler_section = scheduler_match.group(1)
-        assert "OPENACE_CONFIG_DIR" in scheduler_section, (
-            "OPENACE_CONFIG_DIR must be set in scheduler service environment"
-        )
+        assert (
+            "OPENACE_CONFIG_DIR" in scheduler_section
+        ), "OPENACE_CONFIG_DIR must be set in scheduler service environment"
 
     def test_config_volume_mount_path_documented(self):
         """Verify comment explains config persistence mechanism."""
@@ -69,12 +69,10 @@ class TestMultiUserComposeConfig:
         content = compose_file.read_text(encoding="utf-8")
 
         # Check for documentation about config persistence
-        assert "Issue #2235" in content, (
-            "Configuration should reference Issue #2235 for context"
-        )
-        assert "OPENACE_CONFIG_DIR" in content, (
-            "Documentation should mention OPENACE_CONFIG_DIR mechanism"
-        )
+        assert "Issue #2235" in content, "Configuration should reference Issue #2235 for context"
+        assert (
+            "OPENACE_CONFIG_DIR" in content
+        ), "Documentation should mention OPENACE_CONFIG_DIR mechanism"
 
 
 class TestErrorMessageImprovement:
@@ -85,9 +83,9 @@ class TestErrorMessageImprovement:
         entrypoint = ROOT / "docker-entrypoint.sh"
         content = entrypoint.read_text(encoding="utf-8")
 
-        assert "docker-compose.multi-user.yml" in content, (
-            "Error message should mention docker-compose.multi-user.yml as easy fix"
-        )
+        assert (
+            "docker-compose.multi-user.yml" in content
+        ), "Error message should mention docker-compose.multi-user.yml as easy fix"
 
     def test_error_message_includes_config_dir(self):
         """Verify error message includes OPENACE_CONFIG_DIR in manual fix."""
@@ -111,39 +109,37 @@ class TestInstallScriptMultiUser:
 
         # Check for conditional user: "0" addition
         # The script uses escaped quotes in the heredoc
-        assert 'user: "0"' in content or 'user: \\"0\\"' in content, (
-            "install.sh should set user: \"0\" for multi-user mode"
-        )
-        assert "WORKSPACE_MULTI_USER_MODE" in content, (
-            "install.sh should check WORKSPACE_MULTI_USER_MODE"
-        )
+        assert (
+            'user: "0"' in content or 'user: \\"0\\"' in content
+        ), 'install.sh should set user: "0" for multi-user mode'
+        assert (
+            "WORKSPACE_MULTI_USER_MODE" in content
+        ), "install.sh should check WORKSPACE_MULTI_USER_MODE"
 
     def test_install_sh_sets_openace_allow_root(self):
         """Verify install.sh adds OPENACE_ALLOW_ROOT_MULTI_USER."""
         install_sh = ROOT / "scripts/install-central/docker-method/install.sh"
         content = install_sh.read_text(encoding="utf-8")
 
-        assert "OPENACE_ALLOW_ROOT_MULTI_USER" in content, (
-            "install.sh should set OPENACE_ALLOW_ROOT_MULTI_USER for multi-user mode"
-        )
+        assert (
+            "OPENACE_ALLOW_ROOT_MULTI_USER" in content
+        ), "install.sh should set OPENACE_ALLOW_ROOT_MULTI_USER for multi-user mode"
 
     def test_install_sh_sets_config_dir(self):
         """Verify install.sh adds OPENACE_CONFIG_DIR."""
         install_sh = ROOT / "scripts/install-central/docker-method/install.sh"
         content = install_sh.read_text(encoding="utf-8")
 
-        assert "OPENACE_CONFIG_DIR" in content, (
-            "install.sh should set OPENACE_CONFIG_DIR for multi-user mode"
-        )
+        assert (
+            "OPENACE_CONFIG_DIR" in content
+        ), "install.sh should set OPENACE_CONFIG_DIR for multi-user mode"
 
     def test_install_sh_adds_home_data_volume(self):
         """Verify install.sh adds home-data volume for multi-user mode."""
         install_sh = ROOT / "scripts/install-central/docker-method/install.sh"
         content = install_sh.read_text(encoding="utf-8")
 
-        assert "home-data" in content, (
-            "install.sh should add home-data volume for multi-user mode"
-        )
+        assert "home-data" in content, "install.sh should add home-data volume for multi-user mode"
 
 
 class TestDockerComposeMultiUserSyntax:
@@ -166,7 +162,10 @@ class TestDockerComposeMultiUserSyntax:
         # If it fails due to missing base file, that's still a syntax validation
         if result.returncode != 0:
             # Check if it's just a missing base file issue
-            if "docker-compose.yml" in result.stderr or "has neither an image nor a build context" in result.stderr:
+            if (
+                "docker-compose.yml" in result.stderr
+                or "has neither an image nor a build context" in result.stderr
+            ):
                 pytest.skip("Base docker-compose.yml validation required")
             else:
                 pytest.fail(f"Invalid YAML syntax: {result.stderr}")
@@ -180,9 +179,9 @@ class TestEnvExampleMultiUser:
         env_example = ROOT / ".env.example"
         content = env_example.read_text(encoding="utf-8")
 
-        assert "docker-compose.multi-user.yml" in content, (
-            ".env.example should mention docker-compose.multi-user.yml for multi-user mode"
-        )
+        assert (
+            "docker-compose.multi-user.yml" in content
+        ), ".env.example should mention docker-compose.multi-user.yml for multi-user mode"
 
     def test_env_example_documents_config_dir(self):
         """Verify .env.example documents OPENACE_CONFIG_DIR."""
@@ -190,6 +189,6 @@ class TestEnvExampleMultiUser:
         content = env_example.read_text(encoding="utf-8")
 
         # Should mention that multi-user.yml handles config persistence
-        assert "OPENACE_CONFIG_DIR" in content or "配置持久化" in content, (
-            ".env.example should document config persistence mechanism"
-        )
+        assert (
+            "OPENACE_CONFIG_DIR" in content or "配置持久化" in content
+        ), ".env.example should document config persistence mechanism"
