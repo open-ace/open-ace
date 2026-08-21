@@ -298,7 +298,7 @@ def test_global_sso_toggle_initial_state():
                         sso_toggle = locator.first
                         logger.debug(f"找到 SSO 开关，使用选择器: {selector}")
                         break
-                except Exception:  # allow-swallow: selector validation
+                except Exception:  # allow-swallow: optional UI element
                     continue
 
             # 如果仍未找到，尝试在SSO表单区域内查找checkbox
