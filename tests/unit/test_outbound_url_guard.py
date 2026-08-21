@@ -460,9 +460,9 @@ def test_deepseek_api_tls_sni_with_hostname():
 
     This is critical for certificate verification.
     """
-    from app.utils.outbound_url_guard import safe_request
-
     import ipaddress
+
+    from app.utils.outbound_url_guard import safe_request
 
     # Mock the session.request to verify URL
     mock_session = MagicMock()
@@ -498,9 +498,9 @@ def test_cdn_ip_rotation_allows_different_public_ips():
     The adapter should allow this (with a warning) since HTTPS certificate
     verification mitigates rebinding to a different public host.
     """
-    from app.utils.outbound_url_guard import _PinnedIPAdapter
-
     import ipaddress
+
+    from app.utils.outbound_url_guard import _PinnedIPAdapter
 
     # Create an adapter with pre-verified IP
     adapter = _PinnedIPAdapter(
@@ -550,9 +550,9 @@ def test_adapter_unmount_from_shared_session():
 
     This prevents adapter leakage into subsequent requests on shared sessions.
     """
-    from app.utils.outbound_url_guard import safe_request
-
     import requests
+
+    from app.utils.outbound_url_guard import safe_request
 
     # Create a shared session with a custom adapter
     shared_session = requests.Session()
