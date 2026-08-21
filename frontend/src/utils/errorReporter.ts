@@ -237,7 +237,7 @@ export function shouldDedupe(error: Error): boolean {
  */
 export function logFallback(...args: unknown[]): void {
   try {
-    const errorLogs = (window as any).__errorLogs__ || [];
+    const errorLogs = (window as any).__errorLogs__ ?? [];
     errorLogs.push({
       timestamp: Date.now(),
       args: args.map((arg) =>
