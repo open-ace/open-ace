@@ -439,3 +439,14 @@ jobs:
           tags: open-ace:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # Issue #2238: Verify code-server installation
+      - name: Verify code-server installation
+        run: |
+          echo "=== Verifying code-server installation (Issue #2238) ==="
+          docker run --rm open-ace:${{ github.sha }} bash /app/scripts/verify-code-server.sh
+      - name: Check image size
+        run: |
+          echo "=== Checking Docker image size ==="
+          SIZE=$(docker images open-ace:${{ github.sha }} --format "{{.Size}}")
+          echo "Image size: $SIZE"
+          echo "Image size: $SIZE" >> "$GITHUB_STEP_SUMMARY"
