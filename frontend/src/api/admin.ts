@@ -140,6 +140,28 @@ export interface SecuritySettings {
 }
 
 // API
+export interface RestoreUserRequest {
+  username?: string;
+  email?: string;
+  password?: string;
+  role?: 'admin' | 'platform_admin' | 'tenant_admin' | 'manager' | 'user' | 'readonly';
+}
+
+export interface RestoreUserResponse {
+  success: boolean;
+  user_id: number;
+  message?: string;
+}
+
+export interface SoftDeletedUserConflict {
+  user_id: number;
+  username: string;
+  email: string;
+  deleted_at: string;
+  tenant_id?: number;
+  conflicts: ('username' | 'email')[];
+}
+
 export const adminApi = {
   // User Management
   async getUsers(tenantId?: number): Promise<AdminUser[]> {
@@ -157,6 +179,10 @@ export const adminApi = {
 
   async deleteUser(userId: number): Promise<{ success: boolean }> {
     return apiClient.delete<{ success: boolean }>(`/api/admin/users/${userId}`);
+  },
+
+  async restoreUser(userId: number, data?: RestoreUserRequest): Promise<RestoreUserResponse> {
+    return apiClient.post<RestoreUserResponse>(`/api/admin/users/${userId}/restore`, data);
   },
 
   async updateUserPassword(userId: number, password: string): Promise<{ success: boolean }> {

@@ -19,6 +19,7 @@ import type {
   AuditThresholds,
   CreatePolicyRuleRequest,
   PolicyRule,
+  RestoreUserRequest,
 } from '@/api';
 
 // User Management Hooks
@@ -57,6 +58,18 @@ export function useDeleteUser() {
 
   return useMutation({
     mutationFn: (userId: number) => adminApi.deleteUser(userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+    },
+  });
+}
+
+export function useRestoreUser() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ userId, data }: { userId: number; data?: RestoreUserRequest }) =>
+      adminApi.restoreUser(userId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
     },
