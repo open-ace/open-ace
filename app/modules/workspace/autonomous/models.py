@@ -87,6 +87,9 @@ class AutonomousWorkflow:
     # to a fresh development round. Capped by MAX_MERGE_FAIL_DEV_ROUNDS; at the
     # cap the workflow falls through to a Tier2 terminal report + failed.
     merge_fail_dev_rounds: int = 0
+    # Bounded merge-policy settle budget (merge residual-race guard); cleared
+    # on pause so a resume gets a fresh budget.
+    merge_policy_settle_retries: int = 0
     # Source of truth for AI-authored content language (en/zh/ja/ko). Set once
     # at creation; persisted content is generated in this language and rendered
     # verbatim (it does NOT switch per viewer). System-authored structured
@@ -178,6 +181,7 @@ class AutonomousWorkflow:
             "last_ci_failure_signature": self.last_ci_failure_signature,
             "last_ci_failure_head_sha": self.last_ci_failure_head_sha,
             "merge_fail_dev_rounds": self.merge_fail_dev_rounds,
+            "merge_policy_settle_retries": self.merge_policy_settle_retries,
             "content_language": self.content_language,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -250,6 +254,7 @@ class AutonomousWorkflow:
             last_ci_failure_signature=data.get("last_ci_failure_signature", ""),
             last_ci_failure_head_sha=data.get("last_ci_failure_head_sha", ""),
             merge_fail_dev_rounds=data.get("merge_fail_dev_rounds", 0),
+            merge_policy_settle_retries=data.get("merge_policy_settle_retries", 0),
             content_language=data.get("content_language", "en"),
             created_at=(
                 datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
