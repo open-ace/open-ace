@@ -2095,8 +2095,11 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
 
     Issue #1826 F3: Explicit tenant_id passing with policy configuration.
     Issue #2174 F6: Fail-closed tenant resolution with priority chain.
+    Issue #2893: Check auto_provision_users setting before creating user.
     """
     from flask import g
+
+    from app.repositories.tenant_repo import TenantRepository
 
     # Generate username if not provided
     username = sso_user.username or sso_user.email or f"{provider_name}_{sso_user.provider_user_id}"
@@ -2154,6 +2157,27 @@ def _create_user_from_sso(sso_user, provider_name: str) -> int | None:
             return None  # Issue #1826 F6: Reject creation instead of falling back to tenant 1
         # "allow" policy: silent allow (for admin accounts with global scope)
         # tenant_id remains None
+
+    # Issue #2893: Check auto_provision_users setting for the tenant
+    if tenant_id is not None:
+        try:
+            tenant_repo = TenantRepository()
+            tenant = tenant_repo.get_by_id(tenant_id)
+            if tenant and hasattr(tenant, "settings"):
+                auto_provision = getattr(tenant.settings, "auto_provision_users", False)
+                if not auto_provision:
+                    logger.warning(
+                        f"SSO auto-provision disabled for tenant {tenant_id}: "
+                        f"provider={provider_name}, username={username}"
+                    )
+                    return None
+        except Exception as e:
+            # Fail closed: if we can't read settings, deny auto-provision
+            logger.error(
+                f"Failed to check auto_provision_users for tenant {tenant_id}: {e}. "
+                f"Denying auto-provision for safety."
+            )
+            return None
 
     # Create user
     try:
