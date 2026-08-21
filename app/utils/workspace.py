@@ -250,9 +250,7 @@ def _ensure_workspace_dirs(system_account: str, base_dir: str):
         # Issue #2894: wrapper 脚本需要 root 权限
         for directory in [workspace_dir, qwen_dir]:
             if _is_wrapper_available(OPENACE_CHOWN_WRAPPER):
-                result = run_as_root_if_needed(
-                    [OPENACE_CHOWN_WRAPPER, f"{uid}:{gid}", directory]
-                )
+                result = run_as_root_if_needed([OPENACE_CHOWN_WRAPPER, f"{uid}:{gid}", directory])
                 if result.returncode != 0:
                     logger.warning(f"Cannot chown {directory} via wrapper: {result.stderr}")
             else:
