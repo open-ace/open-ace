@@ -503,17 +503,13 @@ class TestRequestTrendByToolConsistency:
         repo = UsageRepository(db=tmp_db)
 
         # Test tenant 1 filtering
-        result_tenant1 = repo.get_request_trend_by_tool(
-            "2026-08-21", "2026-08-21", tenant_id=1
-        )
+        result_tenant1 = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21", tenant_id=1)
         assert len(result_tenant1) == 1
         assert result_tenant1[0]["requests"] == 3
         assert result_tenant1[0]["tool"] == "claude"
 
         # Test tenant 2 filtering
-        result_tenant2 = repo.get_request_trend_by_tool(
-            "2026-08-21", "2026-08-21", tenant_id=2
-        )
+        result_tenant2 = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21", tenant_id=2)
         assert len(result_tenant2) == 1
         assert result_tenant2[0]["requests"] == 2
         assert result_tenant2[0]["tool"] == "codex"
@@ -655,17 +651,17 @@ class TestRequestTrendByToolConsistency:
         today_stats = repo.get_today_request_stats()
 
         # CORE ASSERTION: trend total must equal today's total
-        assert trend_total == today_stats["total_requests"], (
-            f"Trend total ({trend_total}) != today total ({today_stats['total_requests']})"
-        )
+        assert (
+            trend_total == today_stats["total_requests"]
+        ), f"Trend total ({trend_total}) != today total ({today_stats['total_requests']})"
 
         # Verify tool breakdown consistency
         trend_by_tool = {r["tool"]: r["requests"] for r in trend_data}
         for tool, count in today_stats["by_tool"].items():
             assert tool in trend_by_tool, f"Tool {tool} missing from trend data"
-            assert trend_by_tool[tool] == count, (
-                f"Tool {tool}: trend={trend_by_tool[tool]}, today={count}"
-            )
+            assert (
+                trend_by_tool[tool] == count
+            ), f"Tool {tool}: trend={trend_by_tool[tool]}, today={count}"
 
     def test_empty_data_returns_empty_list(self, tmp_db):
         """Test that empty dataset returns empty list."""
@@ -721,16 +717,12 @@ class TestRequestTrendByToolConsistency:
                 )
 
         # Test filtering by host1
-        result_host1 = repo.get_request_trend_by_tool(
-            "2026-08-21", "2026-08-21", host_name="host1"
-        )
+        result_host1 = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21", host_name="host1")
         assert len(result_host1) == 1
         assert result_host1[0]["requests"] == 3
 
         # Test filtering by host2
-        result_host2 = repo.get_request_trend_by_tool(
-            "2026-08-21", "2026-08-21", host_name="host2"
-        )
+        result_host2 = repo.get_request_trend_by_tool("2026-08-21", "2026-08-21", host_name="host2")
         assert len(result_host2) == 1
         assert result_host2[0]["requests"] == 3
 
