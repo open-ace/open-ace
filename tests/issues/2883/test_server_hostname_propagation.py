@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
+import requests
 
 from app.modules.governance.alert_notifier import (
     _PinnedHTTPSConnection,
@@ -199,7 +200,3 @@ class TestDeliveryResult:
 
         assert retriable is True
         assert error_type == "connection"
-
-
-# Import requests for exception classes
-import requests

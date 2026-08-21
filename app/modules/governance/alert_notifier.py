@@ -497,9 +497,6 @@ class _PinnedWebhookAdapter(HTTPAdapter):
 
         Also injects assert_hostname for certificate hostname verification.
         """
-        # Store pool_connections list
-        self._pool_connections = []
-
         # Inject assert_hostname for certificate verification
         pool_kwargs["assert_hostname"] = self._original_hostname
 

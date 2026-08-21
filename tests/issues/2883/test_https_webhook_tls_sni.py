@@ -73,9 +73,11 @@ class TestRealTLSHandshake:
         )
 
         # Create certificate with test.example.com as SAN
-        subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, "test.example.com"),
-        ])
+        subject = issuer = x509.Name(
+            [
+                x509.NameAttribute(NameOID.COMMON_NAME, "test.example.com"),
+            ]
+        )
 
         cert = (
             x509.CertificateBuilder()
@@ -83,12 +85,16 @@ class TestRealTLSHandshake:
             .issuer_name(issuer)
             .public_key(private_key.public_key())
             .serial_number(x509.random_serial_number())
-            .not_valid_before(datetime.datetime.utcnow())
-            .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=1))
+            .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
+            .not_valid_after(
+                datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)
+            )
             .add_extension(
-                x509.SubjectAlternativeName([
-                    x509.DNSName("test.example.com"),
-                ]),
+                x509.SubjectAlternativeName(
+                    [
+                        x509.DNSName("test.example.com"),
+                    ]
+                ),
                 critical=False,
             )
             .sign(private_key, hashes.SHA256(), default_backend())
@@ -188,9 +194,9 @@ class TestRealTLSHandshake:
 
                 # Verify SNI was the original domain name, not IP
                 if captured_sni:
-                    assert "test.example.com" in captured_sni, (
-                        f"Expected SNI 'test.example.com', got {captured_sni}"
-                    )
+                    assert (
+                        "test.example.com" in captured_sni
+                    ), f"Expected SNI 'test.example.com', got {captured_sni}"
 
     def test_ip_pinning_enforced(self, tmp_path):
         """Verify that IP pinning is enforced (Issue #2883)."""

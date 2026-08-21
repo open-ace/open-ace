@@ -206,6 +206,6 @@ class TestTLSHandshakeWithMockedSocket:
 
         # If we captured server_hostname, it should be the original domain
         if captured.get("server_hostname"):
-            assert captured["server_hostname"] == "example.com", (
-                f"Expected server_hostname='example.com', got {captured.get('server_hostname')}"
-            )
+            assert (
+                captured["server_hostname"] == "example.com"
+            ), f"Expected server_hostname='example.com', got {captured.get('server_hostname')}"
