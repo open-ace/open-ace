@@ -147,6 +147,23 @@ def make_manager():
         "is_consumed INTEGER DEFAULT 0, "
         "consumed_at TIMESTAMP)"
     )
+    # agent_tokens is required by register_machine(); without it every test
+    # fails with 'no such table: agent_tokens'
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS agent_tokens ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "token_hash TEXT NOT NULL, "
+        "machine_id TEXT NOT NULL, "
+        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+        "is_revoked INTEGER DEFAULT 0, "
+        "revoked_at TIMESTAMP, "
+        "revoked_by INTEGER, "
+        "rotated_at TIMESTAMP, "
+        "pending_revoke INTEGER DEFAULT 0 NOT NULL, "
+        "revoke_after TIMESTAMP, "
+        "rotation_id TEXT, "
+        "token_version INTEGER DEFAULT '0' NOT NULL)"
+    )
     conn.execute("INSERT OR IGNORE INTO users (id, username) VALUES (1, 'admin')")
     conn.execute("INSERT OR IGNORE INTO users (id, username) VALUES (2, 'user2')")
     conn.execute("INSERT OR IGNORE INTO users (id, username) VALUES (3, 'user3')")
@@ -582,6 +599,179 @@ def test_invalid_token():
         fail(f"expected None, got: {result}")
 
 
+def test_reject_idle_duplicate():
+    """Re-registering with same hostname where old record is idle should return error (Issue #2537)."""
+    test("reject when old record is idle")
+    mgr = make_manager()
+
+    insert_machine(mgr, "idle-uuid-001", "node-idle", "node-idle", status="idle")
+
+    token = create_token(mgr)
+    result = mgr.register_machine(
+        registration_token=token,
+        machine_id="new-uuid-idle",
+        machine_name="node-idle",
+        hostname="node-idle",
+    )
+
+    if result and result.get("error") == "hostname_conflict":
+        # Verify original record is untouched
+        cnt = count_machines_by_hostname(mgr, "node-idle")
+        if cnt != 1:
+            fail(f"expected 1 machine, got {cnt}")
+            return
+        # Verify error message contains status and machine_id
+        if "conflicting_status" in result and result["conflicting_status"] == "idle":
+            ok("returned hostname_conflict error with idle status")
+        else:
+            fail(f"expected conflicting_status=idle, got: {result}")
+    else:
+        fail(f"expected hostname_conflict error, got: {result}")
+
+
+def test_reject_busy_duplicate():
+    """Re-registering with same hostname where old record is busy should return error (Issue #2537)."""
+    test("reject when old record is busy")
+    mgr = make_manager()
+
+    insert_machine(mgr, "busy-uuid-001", "node-busy", "node-busy", status="busy")
+
+    token = create_token(mgr)
+    result = mgr.register_machine(
+        registration_token=token,
+        machine_id="new-uuid-busy",
+        machine_name="node-busy",
+        hostname="node-busy",
+    )
+
+    if result and result.get("error") == "hostname_conflict":
+        # Verify original record is untouched
+        cnt = count_machines_by_hostname(mgr, "node-busy")
+        if cnt != 1:
+            fail(f"expected 1 machine, got {cnt}")
+            return
+        # Verify error message contains status and machine_id
+        if "conflicting_status" in result and result["conflicting_status"] == "busy":
+            ok("returned hostname_conflict error with busy status")
+        else:
+            fail(f"expected conflicting_status=busy, got: {result}")
+    else:
+        fail(f"expected hostname_conflict error, got: {result}")
+
+
+def test_reject_null_status_duplicate():
+    """Re-registering with same hostname where old record has NULL status should return error (Issue #2537)."""
+    test("reject when old record has NULL status (conservative)")
+    mgr = make_manager()
+
+    # Insert machine with NULL status
+    with mgr.db.connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO remote_machines "
+            "(machine_id, machine_name, hostname, status, tenant_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, NULL, 1, '2026-01-01T00:00:00', '2026-01-01T00:00:00')",
+            ("null-uuid-001", "node-null", "node-null"),
+        )
+        conn.commit()
+
+    token = create_token(mgr)
+    result = mgr.register_machine(
+        registration_token=token,
+        machine_id="new-uuid-null",
+        machine_name="node-null",
+        hostname="node-null",
+    )
+
+    if result and result.get("error") == "hostname_conflict":
+        # Verify original record is untouched
+        cnt = count_machines_by_hostname(mgr, "node-null")
+        if cnt != 1:
+            fail(f"expected 1 machine, got {cnt}")
+            return
+        ok("returned hostname_conflict error for NULL status (conservative)")
+    else:
+        fail(f"expected hostname_conflict error for NULL status, got: {result}")
+
+
+def test_reject_unknown_status_duplicate():
+    """Re-registering with same hostname where old record has unknown status should return error (Issue #2537)."""
+    test("reject when old record has unknown status (conservative)")
+    mgr = make_manager()
+
+    # Insert machine with unknown status
+    insert_machine(mgr, "unknown-uuid-001", "node-unknown", "node-unknown", status="error")
+
+    token = create_token(mgr)
+    result = mgr.register_machine(
+        registration_token=token,
+        machine_id="new-uuid-unknown",
+        machine_name="node-unknown",
+        hostname="node-unknown",
+    )
+
+    if result and result.get("error") == "hostname_conflict":
+        # Verify original record is untouched
+        cnt = count_machines_by_hostname(mgr, "node-unknown")
+        if cnt != 1:
+            fail(f"expected 1 machine, got {cnt}")
+            return
+        # Verify error message contains unknown status
+        if "conflicting_status" in result and result["conflicting_status"] == "error":
+            ok("returned hostname_conflict error for unknown status (conservative)")
+        else:
+            fail(f"expected conflicting_status=error, got: {result}")
+    else:
+        fail(f"expected hostname_conflict error for unknown status, got: {result}")
+
+
+def test_error_message_contains_details():
+    """Error message should contain conflicting_machine_id and conflicting_status (Issue #2537)."""
+    test("error message contains machine_id and status details")
+    mgr = make_manager()
+
+    insert_machine(mgr, "detail-uuid-001", "node-detail", "node-detail", status="idle")
+
+    token = create_token(mgr)
+    result = mgr.register_machine(
+        registration_token=token,
+        machine_id="new-uuid-detail",
+        machine_name="node-detail",
+        hostname="node-detail",
+    )
+
+    if result and result.get("error") == "hostname_conflict":
+        # Check all required fields are present
+        if "conflicting_machine_id" not in result:
+            fail("missing conflicting_machine_id in error response")
+            return
+        if "conflicting_status" not in result:
+            fail("missing conflicting_status in error response")
+            return
+        if "message" not in result:
+            fail("missing message in error response")
+            return
+
+        # Verify values
+        if result["conflicting_machine_id"] != "detail-uuid-001":
+            fail(
+                f"expected conflicting_machine_id=detail-uuid-001, got {result['conflicting_machine_id']}"
+            )
+            return
+        if result["conflicting_status"] != "idle":
+            fail(f"expected conflicting_status=idle, got {result['conflicting_status']}")
+            return
+        # Verify message contains key info
+        msg = result["message"]
+        if "idle" not in msg or "detail-uuid-001"[:8] not in msg:
+            fail(f"message missing status or machine_id: {msg}")
+            return
+
+        ok("error message contains all required details")
+    else:
+        fail(f"expected hostname_conflict error, got: {result}")
+
+
 # ════════════════════════════════════════════
 #  Main
 # ════════════════════════════════════════════
@@ -590,6 +780,11 @@ if __name__ == "__main__":
     test_new_machine_no_duplicate()
     test_merge_offline_duplicate()
     test_reject_online_duplicate()
+    test_reject_idle_duplicate()
+    test_reject_busy_duplicate()
+    test_reject_null_status_duplicate()
+    test_reject_unknown_status_duplicate()
+    test_error_message_contains_details()
     test_empty_hostname_no_merge()
     test_merge_preserves_assignments()
     test_merge_preserves_sessions()
