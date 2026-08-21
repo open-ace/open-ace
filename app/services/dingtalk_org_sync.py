@@ -927,14 +927,23 @@ class DingTalkOrgSyncService:
         to avoid full table scan.
         """
         # Use WHERE clause to filter at database level
-        # This leverages the idx_teams_dingtalk_sync partial index
-        # Note: Using JSON_EXTRACT for SQLite compatibility (Issue #2174)
-        # PostgreSQL supports settings->>'sync_source', but SQLite requires json_extract
-        query = """
-            SELECT team_id, name, settings
-            FROM teams
-            WHERE json_extract(settings, '$.sync_source') = ?
-        """
+        # This leverages the idx_teams_sync_source index
+        # Issue #2885: Branch by database dialect — PostgreSQL has no json_extract().
+        # The settings column is TEXT, so PostgreSQL requires ::jsonb cast before
+        # using the ->> operator. This matches the index expression in migration
+        # 20260731_003_add_teams_sync_source_indexes.
+        if self.db.is_postgresql:
+            query = """
+                SELECT team_id, name, settings
+                FROM teams
+                WHERE settings::jsonb->>'sync_source' = ?
+            """
+        else:
+            query = """
+                SELECT team_id, name, settings
+                FROM teams
+                WHERE json_extract(settings, '$.sync_source') = ?
+            """
         rows = self.db.fetch_all(query, (DINGTALK_PROVIDER_NAME,))
 
         synced: dict[str, dict[str, Any]] = {}
