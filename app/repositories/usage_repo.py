@@ -264,10 +264,10 @@ class UsageRepository:
                             WHEN EXCLUDED.models_used IS NULL
                             THEN daily_usage.models_used
                             ELSE (
-                                SELECT json_agg(DISTINCT elem)
-                                FROM json_array_elements(
-                                    COALESCE(daily_usage.models_used::json, '[]')
-                                    || EXCLUDED.models_used::json
+                                SELECT jsonb_agg(DISTINCT elem)::text
+                                FROM jsonb_array_elements(
+                                    COALESCE(daily_usage.models_used::jsonb, '[]'::jsonb)
+                                    || EXCLUDED.models_used::jsonb
                                 ) elem
                             )
                         END

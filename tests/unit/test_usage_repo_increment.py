@@ -1,6 +1,8 @@
 """Unit tests for UsageRepository.increment_usage() (Issue #2732)."""
 
 import json
+import re
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -357,3 +359,84 @@ class TestIncrementUsageIssue2585:
         # Different variants should normalize to same tool family
         assert normalize_tool_name("qwen-code") == normalize_tool_name("QWEN")
         assert normalize_tool_name("qwen-code-cli") == normalize_tool_name("QWEN")
+
+
+class TestPostgresqlUpsertContract:
+    """Contract tests for the PostgreSQL increment UPSERT.
+
+    Bug 8 (2026-08-21): the models_used merge used ``json || json`` and
+    ``json_agg(DISTINCT ...)`` which PostgreSQL rejects (no ``||`` operator
+    and no equality operator for the ``json`` type), failing every usage
+    increment that carried a model. CI has no PostgreSQL server, so the
+    SQL text is pinned here instead: the merge must be expressed purely
+    with jsonb operators.
+    """
+
+    @staticmethod
+    def _capture_upsert_sql() -> str:
+        """Run _increment_usage_postgresql against a fake connection."""
+        repo = UsageRepository.__new__(UsageRepository)
+
+        cursor = MagicMock()
+        captured: dict = {}
+
+        def _record_execute(sql, params=None):
+            captured["sql"] = sql
+
+        cursor.execute.side_effect = _record_execute
+
+        conn = MagicMock()
+        conn.cursor.return_value = cursor
+
+        db = MagicMock()
+        db.connection.return_value.__enter__.return_value = conn
+        repo.db = db
+
+        ok = repo._increment_usage_postgresql(
+            tool_name="qwen-code",
+            host_name="localhost",
+            tenant_id=1,
+            tokens_used=10,
+            input_tokens=6,
+            output_tokens=4,
+            cache_tokens=0,
+            request_count=1,
+            models_json='["m1"]',
+        )
+        assert ok is True
+        return captured["sql"]
+
+    @classmethod
+    def _normalized_sql(cls) -> str:
+        return re.sub(r"\s+", " ", cls._capture_upsert_sql())
+
+    def test_no_json_typed_merge_primitives(self):
+        """The json type supports neither ``||`` nor DISTINCT aggregates.
+
+        The buggy form was ``COALESCE(...::json, '[]') || EXCLUDED...::json``
+        with ``json_array_elements``/``json_agg(DISTINCT ...)``. Pin the
+        json-typed primitives out of the statement so the merge can only
+        be expressed with jsonb.
+        """
+        normalized = self._normalized_sql()
+        assert "json_array_elements(" not in normalized, (
+            "json_array_elements implies json-typed operands; json has no "
+            "|| or equality operators — use jsonb_array_elements"
+        )
+        assert "json_agg(" not in normalized, (
+            "json_agg(DISTINCT ...) is invalid (json has no equality "
+            "operator); use jsonb_agg(DISTINCT ...)"
+        )
+
+    def test_merge_uses_jsonb_operators(self):
+        """The models_used merge must be expressed with jsonb primitives."""
+        normalized = self._normalized_sql()
+        assert "jsonb_agg(DISTINCT elem)::text" in normalized
+        assert "jsonb_array_elements(" in normalized
+        assert "COALESCE(daily_usage.models_used::jsonb, '[]'::jsonb)" in normalized
+        assert "|| EXCLUDED.models_used::jsonb" in normalized
+
+    def test_null_models_preserved_branch(self):
+        """EXCLUDED.models_used NULL must keep the existing models_used."""
+        normalized = self._normalized_sql()
+        assert "WHEN EXCLUDED.models_used IS NULL THEN daily_usage.models_used" in normalized
