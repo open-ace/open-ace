@@ -287,13 +287,13 @@
         "tests/e2e/ui/test_workspace_fullscreen.py::test_workspace_fullscreen",
         "tests/e2e/ui/test_workspace_remote_icon.py::test_remote_workspace_icon_consistency",
         "tests/e2e/work/e2e_paused_acceptance_ui_playwright.py::test_paused_acceptance_ui",
-        "tests/e2e/work/e2e_vscode_websocket.py::test_vscode_websocket",
+        "tests/e2e/work/e2e_vscode_websocket.py::test_vscode_websocket"
     ],
     "collection_protocol": {
         "command": "pytest --collect-only -q",
         "needs_server": false,
-        "needs_frontend_build": false,
+        "needs_frontend_build": false
     },
     "schema_name": "openace-e2e-expected-nodeids",
-    "schema_version": 1,
+    "schema_version": 1
 }
