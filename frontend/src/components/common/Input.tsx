@@ -25,6 +25,8 @@ interface TextInputProps extends BaseInputProps {
   icon?: React.ReactNode;
   iconPosition?: 'left' | 'right';
   id?: string;
+  name?: string;
+  autoComplete?: string;
   'aria-label'?: string;
   'aria-describedby'?: string;
 }
@@ -46,6 +48,8 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
       iconPosition = 'left',
       className,
       id,
+      name,
+      autoComplete,
       'aria-label': ariaLabel,
       'aria-describedby': ariaDescribedBy,
     },
@@ -65,6 +69,8 @@ export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(
             ref={ref}
             type={type}
             id={id}
+            name={name}
+            autoComplete={autoComplete}
             className={cn('form-control', error && 'is-invalid')}
             placeholder={placeholder}
             value={value}

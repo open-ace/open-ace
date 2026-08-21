@@ -246,15 +246,22 @@ export const SSOSettings: React.FC = () => {
 
   const handlePredefinedChange = (value: string) => {
     const isPredefined = value !== '';
+    // Reset credential fields when switching providers to prevent stale values
     setFormData({
       ...formData,
       name: value,
       predefined: isPredefined,
       provider_type: value === 'okta' ? 'oidc' : 'oauth2',
+      client_id: '',
+      client_secret: '',
     });
+    setClientSecretConfirm('');
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) {
+      e.preventDefault();
+    }
     setRegisterError(null);
 
     // Validate required fields
@@ -361,7 +368,10 @@ export const SSOSettings: React.FC = () => {
   };
 
   // Update provider
-  const handleUpdateProvider = async () => {
+  const handleUpdateProvider = async (e?: React.FormEvent) => {
+    if (e) {
+      e.preventDefault();
+    }
     setEditError(null);
 
     if (!providerDetail) {
@@ -673,153 +683,209 @@ export const SSOSettings: React.FC = () => {
             <Button variant="secondary" onClick={handleCloseModal}>
               {t('cancel', language)}
             </Button>
-            <Button variant="primary" onClick={handleSubmit} loading={isRegistering}>
+            <Button variant="primary" type="submit" form="register-provider-form" loading={isRegistering}>
               {t('register', language)}
             </Button>
           </>
         }
       >
-        {/* Error message */}
-        {registerError && (
-          <div className="alert alert-danger mb-3">
-            <i className="bi bi-exclamation-circle me-2" />
-            {registerError}
-          </div>
-        )}
-        <div className="row g-3">
-          {/* Predefined Provider Selection */}
-          <div className="col-12">
-            <label className="form-label">{t('selectProvider', language)}</label>
-            <Select
-              options={PREDEFINED_PROVIDERS}
-              value={formData.predefined ? formData.name : ''}
-              onChange={handlePredefinedChange}
-            />
-          </div>
-
-          {/* Custom Provider Name */}
-          {!formData.predefined && (
-            <div className="col-md-6">
-              <label className="form-label">{t('providerName', language)} *</label>
-              <TextInput
-                value={formData.name}
-                onChange={(value: string) => setFormData({ ...formData, name: value })}
-                placeholder={t('enterProviderName', language)}
-              />
+        <form id="register-provider-form" autoComplete="off" onSubmit={handleSubmit}>
+          {/* Error message */}
+          {registerError && (
+            <div className="alert alert-danger mb-3">
+              <i className="bi bi-exclamation-circle me-2" />
+              {registerError}
             </div>
           )}
+          <div className="row g-3">
+            {/* Predefined Provider Selection */}
+            <div className="col-12">
+              <label className="form-label" htmlFor="register-provider-select">
+                {t('selectProvider', language)}
+              </label>
+              <Select
+                options={PREDEFINED_PROVIDERS}
+                value={formData.predefined ? formData.name : ''}
+                onChange={handlePredefinedChange}
+              />
+            </div>
 
-          {/* Provider Type */}
-          <div className="col-md-6">
-            <label className="form-label">{t('providerType', language)}</label>
-            <Select
-              options={[
-                { value: 'oauth2', label: 'OAuth 2.0' },
-                { value: 'oidc', label: 'OpenID Connect' },
-              ]}
-              value={formData.provider_type ?? 'oauth2'}
-              onChange={(value) =>
-                setFormData({ ...formData, provider_type: value as 'oauth2' | 'oidc' })
-              }
-            />
-          </div>
-
-          {/* Client ID */}
-          <div className="col-md-6">
-            <label className="form-label">{t('clientId', language)} *</label>
-            <TextInput
-              value={formData.client_id}
-              onChange={(value: string) => setFormData({ ...formData, client_id: value })}
-              placeholder={t('enterClientId', language)}
-            />
-          </div>
-
-          {/* Client Secret */}
-          <div className="col-md-6">
-            <label className="form-label">{t('clientSecret', language)} *</label>
-            <TextInput
-              type="password"
-              value={formData.client_secret}
-              onChange={(value: string) => setFormData({ ...formData, client_secret: value })}
-              placeholder={t('enterClientSecret', language)}
-            />
-          </div>
-
-          {/* Client Secret Confirm */}
-          <div className="col-md-6">
-            <label className="form-label">{t('clientSecretConfirm', language)} *</label>
-            <TextInput
-              type="password"
-              value={clientSecretConfirm}
-              onChange={(value: string) => setClientSecretConfirm(value)}
-              placeholder={t('enterClientSecretConfirm', language)}
-            />
-          </div>
-
-          {/* Redirect URI */}
-          <div className="col-md-6">
-            <label className="form-label">{t('redirectUri', language)}</label>
-            <TextInput
-              value={formData.redirect_uri ?? ''}
-              onChange={(value: string) => setFormData({ ...formData, redirect_uri: value })}
-              placeholder={t('enterRedirectUri', language)}
-            />
-          </div>
-
-          {/* Scope */}
-          <div className="col-md-6">
-            <label className="form-label">{t('scope', language)}</label>
-            <TextInput
-              value={formData.scope ?? ''}
-              onChange={(value: string) => setFormData({ ...formData, scope: value })}
-              placeholder="openid profile email"
-            />
-          </div>
-
-          {/* Custom Provider URLs */}
-          {!formData.predefined && (
-            <>
-              <div className="col-12">
-                <hr />
-                <h6>{t('customProviderUrls', language)}</h6>
-              </div>
+            {/* Custom Provider Name */}
+            {!formData.predefined && (
               <div className="col-md-6">
-                <label className="form-label">{t('authorizationUrl', language)}</label>
+                <label className="form-label" htmlFor="register-provider-name">
+                  {t('providerName', language)} *
+                </label>
                 <TextInput
-                  value={formData.authorization_url ?? ''}
-                  onChange={(value: string) =>
-                    setFormData({ ...formData, authorization_url: value })
-                  }
-                  placeholder="https://provider.com/oauth/authorize"
+                  id="register-provider-name"
+                  name="oauth_provider_name"
+                  autoComplete="off"
+                  value={formData.name}
+                  onChange={(value: string) => setFormData({ ...formData, name: value })}
+                  placeholder={t('enterProviderName', language)}
                 />
               </div>
-              <div className="col-md-6">
-                <label className="form-label">{t('tokenUrl', language)}</label>
-                <TextInput
-                  value={formData.token_url ?? ''}
-                  onChange={(value: string) => setFormData({ ...formData, token_url: value })}
-                  placeholder="https://provider.com/oauth/token"
-                />
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">{t('userinfoUrl', language)}</label>
-                <TextInput
-                  value={formData.userinfo_url ?? ''}
-                  onChange={(value: string) => setFormData({ ...formData, userinfo_url: value })}
-                  placeholder="https://provider.com/oauth/userinfo"
-                />
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">{t('issuerUrl', language)}</label>
-                <TextInput
-                  value={formData.issuer_url ?? ''}
-                  onChange={(value: string) => setFormData({ ...formData, issuer_url: value })}
-                  placeholder="https://provider.com"
-                />
-              </div>
-            </>
-          )}
-        </div>
+            )}
+
+            {/* Provider Type */}
+            <div className="col-md-6">
+              <label className="form-label" htmlFor="register-provider-type">
+                {t('providerType', language)}
+              </label>
+              <Select
+                options={[
+                  { value: 'oauth2', label: 'OAuth 2.0' },
+                  { value: 'oidc', label: 'OpenID Connect' },
+                ]}
+                value={formData.provider_type ?? 'oauth2'}
+                onChange={(value) =>
+                  setFormData({ ...formData, provider_type: value as 'oauth2' | 'oidc' })
+                }
+              />
+            </div>
+
+            {/* Client ID */}
+            <div className="col-md-6">
+              <label className="form-label" htmlFor="register-client-id">
+                {t('clientId', language)} *
+              </label>
+              <TextInput
+                id="register-client-id"
+                name="oauth_provider_client_id"
+                autoComplete="off"
+                value={formData.client_id}
+                onChange={(value: string) => setFormData({ ...formData, client_id: value })}
+                placeholder={t('enterClientId', language)}
+              />
+            </div>
+
+            {/* Client Secret */}
+            <div className="col-md-6">
+              <label className="form-label" htmlFor="register-client-secret">
+                {t('clientSecret', language)} *
+              </label>
+              <TextInput
+                id="register-client-secret"
+                name="oauth_provider_client_secret"
+                type="password"
+                autoComplete="new-password"
+                value={formData.client_secret}
+                onChange={(value: string) => setFormData({ ...formData, client_secret: value })}
+                placeholder={t('enterClientSecret', language)}
+              />
+            </div>
+
+            {/* Client Secret Confirm */}
+            <div className="col-md-6">
+              <label className="form-label" htmlFor="register-client-secret-confirm">
+                {t('clientSecretConfirm', language)} *
+              </label>
+              <TextInput
+                id="register-client-secret-confirm"
+                name="oauth_provider_client_secret_confirmation"
+                type="password"
+                autoComplete="new-password"
+                value={clientSecretConfirm}
+                onChange={(value: string) => setClientSecretConfirm(value)}
+                placeholder={t('enterClientSecretConfirm', language)}
+              />
+            </div>
+
+            {/* Redirect URI */}
+            <div className="col-md-6">
+              <label className="form-label" htmlFor="register-redirect-uri">
+                {t('redirectUri', language)}
+              </label>
+              <TextInput
+                id="register-redirect-uri"
+                name="oauth_provider_redirect_uri"
+                autoComplete="off"
+                value={formData.redirect_uri ?? ''}
+                onChange={(value: string) => setFormData({ ...formData, redirect_uri: value })}
+                placeholder={t('enterRedirectUri', language)}
+              />
+            </div>
+
+            {/* Scope */}
+            <div className="col-md-6">
+              <label className="form-label" htmlFor="register-scope">
+                {t('scope', language)}
+              </label>
+              <TextInput
+                id="register-scope"
+                name="oauth_provider_scope"
+                autoComplete="off"
+                value={formData.scope ?? ''}
+                onChange={(value: string) => setFormData({ ...formData, scope: value })}
+                placeholder="openid profile email"
+              />
+            </div>
+
+            {/* Custom Provider URLs */}
+            {!formData.predefined && (
+              <>
+                <div className="col-12">
+                  <hr />
+                  <h6>{t('customProviderUrls', language)}</h6>
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label" htmlFor="register-authorization-url">
+                    {t('authorizationUrl', language)}
+                  </label>
+                  <TextInput
+                    id="register-authorization-url"
+                    name="oauth_provider_authorization_url"
+                    autoComplete="off"
+                    value={formData.authorization_url ?? ''}
+                    onChange={(value: string) =>
+                      setFormData({ ...formData, authorization_url: value })
+                    }
+                    placeholder="https://provider.com/oauth/authorize"
+                  />
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label" htmlFor="register-token-url">
+                    {t('tokenUrl', language)}
+                  </label>
+                  <TextInput
+                    id="register-token-url"
+                    name="oauth_provider_token_url"
+                    autoComplete="off"
+                    value={formData.token_url ?? ''}
+                    onChange={(value: string) => setFormData({ ...formData, token_url: value })}
+                    placeholder="https://provider.com/oauth/token"
+                  />
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label" htmlFor="register-userinfo-url">
+                    {t('userinfoUrl', language)}
+                  </label>
+                  <TextInput
+                    id="register-userinfo-url"
+                    name="oauth_provider_userinfo_url"
+                    autoComplete="off"
+                    value={formData.userinfo_url ?? ''}
+                    onChange={(value: string) => setFormData({ ...formData, userinfo_url: value })}
+                    placeholder="https://provider.com/oauth/userinfo"
+                  />
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label" htmlFor="register-issuer-url">
+                    {t('issuerUrl', language)}
+                  </label>
+                  <TextInput
+                    id="register-issuer-url"
+                    name="oauth_provider_issuer_url"
+                    autoComplete="off"
+                    value={formData.issuer_url ?? ''}
+                    onChange={(value: string) => setFormData({ ...formData, issuer_url: value })}
+                    placeholder="https://provider.com"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </form>
       </Modal>
 
       {/* Provider Detail Modal */}
@@ -945,7 +1011,7 @@ export const SSOSettings: React.FC = () => {
             <Button variant="secondary" onClick={() => setShowEditModal(false)}>
               {t('cancel', language)}
             </Button>
-            <Button variant="primary" onClick={handleUpdateProvider} loading={isUpdating}>
+            <Button variant="primary" type="submit" form="edit-provider-form" loading={isUpdating}>
               {t('save', language)}
             </Button>
           </>
@@ -954,7 +1020,7 @@ export const SSOSettings: React.FC = () => {
         {isLoadingDetail ? (
           <Loading size="md" text={t('loading', language)} />
         ) : providerDetail ? (
-          <>
+          <form id="edit-provider-form" autoComplete="off" onSubmit={handleUpdateProvider}>
             {editError && (
               <div className="alert alert-danger mb-3">
                 <i className="bi bi-exclamation-circle me-2" />
@@ -975,8 +1041,13 @@ export const SSOSettings: React.FC = () => {
 
               {/* Client ID */}
               <div className="col-md-6">
-                <label className="form-label">{t('clientId', language)} *</label>
+                <label className="form-label" htmlFor="edit-client-id">
+                  {t('clientId', language)} *
+                </label>
                 <TextInput
+                  id="edit-client-id"
+                  name="oauth_provider_client_id_edit"
+                  autoComplete="off"
                   value={editFormData.client_id ?? ''}
                   onChange={(value: string) =>
                     setEditFormData({ ...editFormData, client_id: value })
@@ -987,12 +1058,17 @@ export const SSOSettings: React.FC = () => {
 
               {/* Client Secret (optional for edit) */}
               <div className="col-md-6">
-                <label className="form-label">{t('clientSecret', language)}</label>
+                <label className="form-label" htmlFor="edit-client-secret">
+                  {t('clientSecret', language)}
+                </label>
                 <small className="text-muted d-block mb-1">
                   {t('clientSecretEditHint', language)}
                 </small>
                 <TextInput
+                  id="edit-client-secret"
+                  name="oauth_provider_client_secret_edit"
                   type="password"
+                  autoComplete="new-password"
                   value={editFormData.client_secret ?? ''}
                   onChange={(value: string) =>
                     setEditFormData({ ...editFormData, client_secret: value })
@@ -1004,9 +1080,14 @@ export const SSOSettings: React.FC = () => {
               {/* Client Secret Confirm */}
               {editFormData.client_secret && (
                 <div className="col-md-6">
-                  <label className="form-label">{t('clientSecretConfirm', language)} *</label>
+                  <label className="form-label" htmlFor="edit-client-secret-confirm">
+                    {t('clientSecretConfirm', language)} *
+                  </label>
                   <TextInput
+                    id="edit-client-secret-confirm"
+                    name="oauth_provider_client_secret_confirmation_edit"
                     type="password"
+                    autoComplete="new-password"
                     value={editClientSecretConfirm}
                     onChange={(value: string) => setEditClientSecretConfirm(value)}
                     placeholder={t('enterClientSecretConfirm', language)}
@@ -1016,8 +1097,13 @@ export const SSOSettings: React.FC = () => {
 
               {/* Redirect URI */}
               <div className="col-md-6">
-                <label className="form-label">{t('redirectUri', language)}</label>
+                <label className="form-label" htmlFor="edit-redirect-uri">
+                  {t('redirectUri', language)}
+                </label>
                 <TextInput
+                  id="edit-redirect-uri"
+                  name="oauth_provider_redirect_uri_edit"
+                  autoComplete="off"
                   value={editFormData.redirect_uri ?? ''}
                   onChange={(value: string) =>
                     setEditFormData({ ...editFormData, redirect_uri: value })
@@ -1028,8 +1114,13 @@ export const SSOSettings: React.FC = () => {
 
               {/* Scope */}
               <div className="col-md-6">
-                <label className="form-label">{t('scope', language)}</label>
+                <label className="form-label" htmlFor="edit-scope">
+                  {t('scope', language)}
+                </label>
                 <TextInput
+                  id="edit-scope"
+                  name="oauth_provider_scope_edit"
+                  autoComplete="off"
                   value={editFormData.scope ?? ''}
                   onChange={(value: string) => setEditFormData({ ...editFormData, scope: value })}
                   placeholder="openid profile email"
@@ -1042,8 +1133,13 @@ export const SSOSettings: React.FC = () => {
                 <h6>{t('providerUrls', language)}</h6>
               </div>
               <div className="col-md-6">
-                <label className="form-label">{t('authorizationUrl', language)}</label>
+                <label className="form-label" htmlFor="edit-authorization-url">
+                  {t('authorizationUrl', language)}
+                </label>
                 <TextInput
+                  id="edit-authorization-url"
+                  name="oauth_provider_authorization_url_edit"
+                  autoComplete="off"
                   value={editFormData.authorization_url ?? ''}
                   onChange={(value: string) =>
                     setEditFormData({ ...editFormData, authorization_url: value })
@@ -1052,8 +1148,13 @@ export const SSOSettings: React.FC = () => {
                 />
               </div>
               <div className="col-md-6">
-                <label className="form-label">{t('tokenUrl', language)}</label>
+                <label className="form-label" htmlFor="edit-token-url">
+                  {t('tokenUrl', language)}
+                </label>
                 <TextInput
+                  id="edit-token-url"
+                  name="oauth_provider_token_url_edit"
+                  autoComplete="off"
                   value={editFormData.token_url ?? ''}
                   onChange={(value: string) =>
                     setEditFormData({ ...editFormData, token_url: value })
@@ -1062,8 +1163,13 @@ export const SSOSettings: React.FC = () => {
                 />
               </div>
               <div className="col-md-6">
-                <label className="form-label">{t('userinfoUrl', language)}</label>
+                <label className="form-label" htmlFor="edit-userinfo-url">
+                  {t('userinfoUrl', language)}
+                </label>
                 <TextInput
+                  id="edit-userinfo-url"
+                  name="oauth_provider_userinfo_url_edit"
+                  autoComplete="off"
                   value={editFormData.userinfo_url ?? ''}
                   onChange={(value: string) =>
                     setEditFormData({ ...editFormData, userinfo_url: value })
@@ -1072,8 +1178,13 @@ export const SSOSettings: React.FC = () => {
                 />
               </div>
               <div className="col-md-6">
-                <label className="form-label">{t('issuerUrl', language)}</label>
+                <label className="form-label" htmlFor="edit-issuer-url">
+                  {t('issuerUrl', language)}
+                </label>
                 <TextInput
+                  id="edit-issuer-url"
+                  name="oauth_provider_issuer_url_edit"
+                  autoComplete="off"
                   value={editFormData.issuer_url ?? ''}
                   onChange={(value: string) =>
                     setEditFormData({ ...editFormData, issuer_url: value })
@@ -1082,7 +1193,7 @@ export const SSOSettings: React.FC = () => {
                 />
               </div>
             </div>
-          </>
+          </form>
         ) : (
           <EmptyState
             icon="bi-exclamation-circle"
