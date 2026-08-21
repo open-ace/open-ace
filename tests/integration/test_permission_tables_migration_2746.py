@@ -153,9 +153,7 @@ class TestPermissionTablesMigration:
         tables = inspector.get_table_names()
 
         assert "permission_tasks" in tables, "permission_tasks table should be created"
-        assert "permission_checkpoints" in tables, (
-            "permission_checkpoints table should be created"
-        )
+        assert "permission_checkpoints" in tables, "permission_checkpoints table should be created"
 
         # Verify permission_tasks columns
         pt_columns = [col["name"] for col in inspector.get_columns("permission_tasks")]
@@ -235,12 +233,12 @@ class TestPermissionTablesMigration:
         inspector = sa.inspect(db_engine)
         tables_after = inspector.get_table_names()
 
-        assert "permission_tasks" not in tables_after, (
-            "permission_tasks should be removed on downgrade"
-        )
-        assert "permission_checkpoints" not in tables_after, (
-            "permission_checkpoints should be removed on downgrade"
-        )
+        assert (
+            "permission_tasks" not in tables_after
+        ), "permission_tasks should be removed on downgrade"
+        assert (
+            "permission_checkpoints" not in tables_after
+        ), "permission_checkpoints should be removed on downgrade"
 
     def test_migration_is_idempotent(self, db_engine):
         """Test that running upgrade twice doesn't fail."""
@@ -316,7 +314,9 @@ class TestPermissionTablesDataPreservation:
                 )
             """))
             # Insert test data
-            conn.execute(sa.text("INSERT INTO projects (path, name) VALUES ('/path/1', 'Project 1')"))
+            conn.execute(
+                sa.text("INSERT INTO projects (path, name) VALUES ('/path/1', 'Project 1')")
+            )
             conn.execute(sa.text("INSERT INTO users (username, role) VALUES ('user1', 'admin')"))
             conn.commit()
 
@@ -344,6 +344,7 @@ class TestPermissionTablesDataPreservation:
         # Note: SQLite foreign key constraints are not reflected in inspector
         # in the same way as PostgreSQL. This test verifies the tables are created.
         # The actual FK behavior is tested in integration tests with real data.
+
     def test_data_preservation_after_downgrade(self, db_engine_with_data):
         """Test that data in projects and users tables is preserved after downgrade."""
         import importlib
@@ -393,4 +394,3 @@ class TestPermissionTablesDataPreservation:
             result = conn.execute(sa.text("SELECT COUNT(*) FROM users"))
             user_count = result.scalar()
             assert user_count == 1, "User data should be preserved after downgrade"
-

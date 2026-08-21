@@ -192,18 +192,18 @@ class TestPermissionStatusMigration:
         inspector = sa.inspect(db_engine)
         columns_after = [col["name"] for col in inspector.get_columns("projects")]
 
-        assert "permission_status" not in columns_after, (
-            "permission_status should be removed on downgrade"
-        )
-        assert "permission_task_id" not in columns_after, (
-            "permission_task_id should be removed on downgrade"
-        )
+        assert (
+            "permission_status" not in columns_after
+        ), "permission_status should be removed on downgrade"
+        assert (
+            "permission_task_id" not in columns_after
+        ), "permission_task_id should be removed on downgrade"
 
         # Verify index was removed
         indexes = [idx["name"] for idx in inspector.get_indexes("projects")]
-        assert "idx_projects_permission_status" not in indexes, (
-            "index should be removed on downgrade"
-        )
+        assert (
+            "idx_projects_permission_status" not in indexes
+        ), "index should be removed on downgrade"
 
     def test_migration_is_idempotent(self, db_engine):
         """Test that running upgrade twice doesn't fail."""
@@ -310,6 +310,7 @@ class TestPermissionStatusDataPreservation:
             row = result.fetchone()
             assert row[0] is None, "permission_status should be NULL for existing rows"
             assert row[1] is None, "permission_task_id should be NULL for existing rows"
+
     def test_downgrade_preserves_existing_data(self, db_engine_with_data):
         """Test that data is preserved during downgrade."""
         import importlib
@@ -339,4 +340,3 @@ class TestPermissionStatusDataPreservation:
             result = conn.execute(sa.text("SELECT COUNT(*) FROM projects"))
             count_after = result.scalar()
             assert count_after == 2, "Data should be preserved after downgrade"
-

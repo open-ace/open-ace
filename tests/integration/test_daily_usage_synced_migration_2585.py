@@ -162,9 +162,7 @@ class TestDailyUsageSyncedMigration:
 
         # Verify partial index was created
         indexes = [idx["name"] for idx in inspector.get_indexes("agent_sessions")]
-        assert "idx_agent_sessions_daily_usage_synced" in indexes, (
-            "Partial index should be created"
-        )
+        assert "idx_agent_sessions_daily_usage_synced" in indexes, "Partial index should be created"
 
     def test_downgrade_removes_daily_usage_synced_column(self, db_engine):
         """Test that downgrade removes daily_usage_synced column and index.
@@ -198,15 +196,15 @@ class TestDailyUsageSyncedMigration:
         inspector = sa.inspect(db_engine)
         columns_after = [col["name"] for col in inspector.get_columns("agent_sessions")]
 
-        assert "daily_usage_synced" not in columns_after, (
-            "daily_usage_synced should be removed on downgrade"
-        )
+        assert (
+            "daily_usage_synced" not in columns_after
+        ), "daily_usage_synced should be removed on downgrade"
 
         # Verify index was removed
         indexes = [idx["name"] for idx in inspector.get_indexes("agent_sessions")]
-        assert "idx_agent_sessions_daily_usage_synced" not in indexes, (
-            "Index should be removed on downgrade"
-        )
+        assert (
+            "idx_agent_sessions_daily_usage_synced" not in indexes
+        ), "Index should be removed on downgrade"
 
     def test_migration_is_idempotent(self, db_engine):
         """Test that running upgrade twice doesn't fail."""
@@ -339,7 +337,6 @@ class TestDailyUsageSyncedDefault:
             row = result.fetchone()
             assert row[0] == 5, "Request count should be preserved"
 
-
     def test_downgrade_preserves_existing_data(self, db_engine_with_data):
         """Test that data is preserved during downgrade."""
         import importlib
@@ -376,4 +373,3 @@ class TestDailyUsageSyncedDefault:
             )
             row = result.fetchone()
             assert row[0] == 5, "Request count should be preserved after downgrade"
-
