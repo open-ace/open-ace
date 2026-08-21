@@ -26,7 +26,7 @@ import pytest
 from playwright.sync_api import sync_playwright
 
 # Test configuration
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
@@ -71,7 +71,7 @@ def test_anomaly_detection_layout(
 
             # Step 1: Login
             print("\n[Step 1] Logging in...")
-            page.goto(f"{BASE_URL}login")
+            page.goto(f"{BASE_URL}/login")
             page.wait_for_load_state("networkidle")
             page.fill("#username", USERNAME)
             page.fill("#password", PASSWORD)
@@ -85,7 +85,7 @@ def test_anomaly_detection_layout(
 
             # Step 2: Navigate directly to Anomaly Detection page
             print("\n[Step 2] Navigating to Anomaly Detection page...")
-            page.goto(f"{BASE_URL}manage/analysis/anomaly")
+            page.goto(f"{BASE_URL}/manage/analysis/anomaly")
             page.wait_for_load_state("networkidle")
             time.sleep(3)
             print(f"✓ Anomaly Detection page loaded, current URL: {page.url}")

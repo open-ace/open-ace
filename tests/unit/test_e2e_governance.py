@@ -100,6 +100,31 @@ class TestRequiredLegality:
         assert governance.validate_required_legality(state, promo) == []
 
 
+class TestExecutionDispositions:
+    def test_nodeid_state_is_rejected_after_a_file_becomes_standalone(self):
+        inventory = {
+            "entries": [
+                {
+                    "path": "tests/e2e/manage/legacy.py",
+                    "mode": "standalone-automated",
+                }
+            ]
+        }
+        state = {"entries": {"tests/e2e/manage/legacy.py::test_old": {"debt": "stable-pass"}}}
+        assert governance.validate_execution_dispositions(inventory, state, _promo()) == [
+            "tests/e2e/manage/legacy.py::test_old: state entry requires pytest-automated disposition"
+        ]
+
+    def test_standalone_state_is_rejected_after_a_file_becomes_pytest(self):
+        inventory = {
+            "entries": [{"path": "tests/e2e/manage/legacy.py", "mode": "pytest-automated"}]
+        }
+        state = {"entries": {"standalone::tests/e2e/manage/legacy.py": {"debt": "stable-pass"}}}
+        assert governance.validate_execution_dispositions(inventory, state, _promo()) == [
+            "standalone::tests/e2e/manage/legacy.py: state entry requires standalone-automated disposition"
+        ]
+
+
 class TestQuarantineAndSkipValidation:
     def _state(self, entries):
         return {"entries": entries}
@@ -175,6 +200,103 @@ class TestEffectiveSamples:
 
 class TestWriter:
     """A1: the writer is the only legal mutation path and refuses bad states."""
+
+    def test_set_disposition_updates_executor_and_collects_together(self, tmp_path):
+        tests_dir = tmp_path / "tests" / "e2e"
+        tests_dir.mkdir(parents=True)
+        target = tests_dir / "legacy_playwright.py"
+        target.write_text("# legacy standalone script\n", encoding="utf-8")
+        inventory_path = tmp_path / "inventory.json"
+        common.dump_artifact(
+            inventory_path,
+            {
+                "entries": [
+                    {
+                        "path": "tests/e2e/legacy_playwright.py",
+                        "mode": "pytest-automated",
+                        "owner": "e2e-governance",
+                        "issue": 2491,
+                        "home_lane": "nightly",
+                        "executor": "pytest",
+                        "collects": True,
+                    }
+                ]
+            },
+            "openace-e2e-inventory",
+        )
+
+        rc = governance.main(
+            [
+                "set-disposition",
+                "--path",
+                "tests/e2e/legacy_playwright.py",
+                "--mode",
+                "standalone-automated",
+                "--inventory",
+                str(inventory_path),
+                "--root",
+                str(tmp_path),
+            ]
+        )
+        assert rc == 0
+        inventory = common.load_artifact(inventory_path, "openace-e2e-inventory")
+        row = inventory["entries"][0]
+        assert row["mode"] == "standalone-automated"
+        assert row["executor"] == "standalone"
+        assert row["collects"] is False
+
+    def test_set_disposition_rejects_orphaned_pytest_state(self, tmp_path):
+        tests_dir = tmp_path / "tests" / "e2e"
+        tests_dir.mkdir(parents=True)
+        (tests_dir / "legacy_playwright.py").write_text("# legacy script\n", encoding="utf-8")
+        inventory_path = tmp_path / "inventory.json"
+        state_path = tmp_path / "state.json"
+        promotion_path = tmp_path / "promotion.json"
+        common.dump_artifact(
+            inventory_path,
+            {
+                "entries": [
+                    {
+                        "path": "tests/e2e/legacy_playwright.py",
+                        "mode": "pytest-automated",
+                        "owner": "e2e-governance",
+                        "issue": 2491,
+                        "home_lane": "nightly",
+                        "executor": "pytest",
+                        "collects": True,
+                    }
+                ]
+            },
+            "openace-e2e-inventory",
+        )
+        common.dump_artifact(
+            state_path,
+            {"entries": {"tests/e2e/legacy_playwright.py::test_legacy": {"debt": "stable-pass"}}},
+            "openace-e2e-state",
+        )
+        common.dump_artifact(promotion_path, {"entries": {}}, "openace-e2e-promotion")
+
+        rc = governance.main(
+            [
+                "set-disposition",
+                "--path",
+                "tests/e2e/legacy_playwright.py",
+                "--mode",
+                "standalone-automated",
+                "--inventory",
+                str(inventory_path),
+                "--state",
+                str(state_path),
+                "--promotion",
+                str(promotion_path),
+                "--root",
+                str(tmp_path),
+            ]
+        )
+
+        assert rc == 1
+        inventory = common.load_artifact(inventory_path, "openace-e2e-inventory")
+        assert inventory["entries"][0]["mode"] == "pytest-automated"
 
     def test_quarantine_demotes_required_atomically(self, tmp_path):
         state_path = tmp_path / "state.json"

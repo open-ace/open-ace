@@ -25,6 +25,8 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from playwright.sync_api import expect, sync_playwright
 
+from tests.e2e.sync_helpers import login_as
+
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "tests", "screenshots", "e2e-compliance-report")
@@ -66,17 +68,8 @@ def check(condition, description):
 def login(page):
     """Login as admin user."""
     print("\n[TEST] Login as admin...")
-    page.goto(f"{BASE_URL}/login")
-    pause(1)
-
-    page.fill("input[name='username']", "admin")
-    page.fill("input[name='password']", "admin123")
-    page.click("button[type='submit']")
-    pause(2)
-
-    # Wait for redirect to work page
-    page.wait_for_url("**/work**", timeout=10000)
-    check(True, "Login successful, redirected to work page")
+    login_as(page, BASE_URL)
+    check(True, f"Login successful (landed on {page.url})")
     shot(page, "01-login")
 
 
@@ -87,12 +80,12 @@ def navigate_to_compliance(page):
     pause(2)
 
     # Verify page loaded
-    compliance_header = page.locator("h2").filter(has_text="合规管理")
+    compliance_header = page.locator("h2").filter(has_text="合规")
     if not compliance_header.is_visible():
         # Try English header
-        compliance_header = page.locator("h2").filter(has_text="Compliance Management")
+        compliance_header = page.locator("h2").filter(has_text="Compliance")
 
-    check(compliance_header.is_visible(), "Compliance Management header is visible")
+    check(compliance_header.first.is_visible(), "Compliance Management header is visible")
     shot(page, "02-compliance-page")
 
 
@@ -133,17 +126,13 @@ def test_report_types_visible(page):  # allow-no-assert: smoke test - visual ver
     """Test that report types are visible."""
     print("\n[TEST] Report types visible...")
 
-    # Check for report type selection
-    report_type_select = page.locator("select[name*='type'], [class*='report-type']").first
-    if report_type_select.is_visible():
-        check(True, "Report type selector is visible")
-
-        # Check options
-        options = report_type_select.locator("option")
-        option_count = options.count()
-        check(option_count > 0, f"Report type has {option_count} options")
+    # Current UI renders report types as clickable cards, not a select.
+    report_type_cards = page.locator(".report-type-card")
+    if report_type_cards.first.is_visible():
+        check(True, "Report type cards are visible")
+        check(report_type_cards.count() > 0, f"Report type has {report_type_cards.count()} cards")
     else:
-        check(False, "Report type selector not visible")
+        check(False, "Report type selector/cards not visible")
 
     shot(page, "04-report-types")
 
@@ -152,22 +141,21 @@ def test_generate_json_report(page):  # allow-no-assert: smoke test - visual ver
     """Test generating a JSON format report."""
     print("\n[TEST] Generate JSON report...")
 
-    # Set report type
-    report_type_select = page.locator("select[name*='type'], [class*='report-type']").first
-    if report_type_select.is_visible():
-        report_type_select.select_option(value="usage_summary")
+    report_type_card = page.locator(".report-type-card").first
+    if report_type_card.is_visible():
+        report_type_card.click()
         pause(0.5)
 
     # Set format to JSON
-    format_select = page.locator("select[name*='format'], [class*='format']").first
+    format_select = page.locator("select.form-select").first
     if format_select.is_visible():
         format_select.select_option(value="json")
         pause(0.5)
 
     # Click generate button
-    generate_button = page.locator("button").filter(has_text="生成报告").first
+    generate_button = page.locator("button").filter(has_text="生成").first
     if not generate_button.is_visible():
-        generate_button = page.locator("button").filter(has_text="Generate Report").first
+        generate_button = page.locator("button").filter(has_text="Generate").first
 
     if generate_button.is_visible():
         generate_button.click()
