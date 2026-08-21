@@ -135,6 +135,9 @@ export const Workspace: React.FC = () => {
   // Flag to track if tabs have been initialized (Issue #65)
   const [tabsInitialized, setTabsInitialized] = useState(false);
 
+  // Issue #2892: Session verification state
+  const [sessionVerified, setSessionVerified] = useState<boolean | null>(null);
+
   // Remote projects list (Issue #417: Populate "Your Projects" for remote workspace)
   const [remoteProjects, setRemoteProjects] = useState<RemoteProject[]>([]);
 
@@ -1029,6 +1032,37 @@ export const Workspace: React.FC = () => {
     const urlResumeHint = searchParams.get('resumeHint') === 'true';
     const restoreSessionId = urlSessionId ?? restoreSession;
 
+    // Issue #2892: Validate session exists before restoration (non-terminal only)
+    if (restoreSessionId && urlWorkspaceType !== 'terminal' && sessionVerified === null) {
+      sessionsApi
+        .getSession(restoreSessionId, false)
+        .then((response) => {
+          if (!response.success) {
+            setError(
+              t('sessionNotFound', language) || 'Session does not exist or has been deleted'
+            );
+            setSessionVerified(false);
+          } else if (!response.data.project_path) {
+            // Issue #2892: Validate project path exists
+            setError(t('projectNotFound', language) || 'Project path does not exist');
+            setSessionVerified(false);
+          } else {
+            setSessionVerified(true);
+          }
+        })
+        .catch((err) => {
+          console.error('[Workspace] Failed to verify session:', err);
+          setError(t('sessionNotFound', language) || 'Session does not exist or has been deleted');
+          setSessionVerified(false);
+        });
+      return;
+    }
+
+    // Skip if session verification failed
+    if (restoreSessionId && urlWorkspaceType !== 'terminal' && sessionVerified === false) {
+      return;
+    }
+
     // Determine if we should restore from store or create new
     // Priority: URL restore params > Store saved state > New session
     let initialTabs: WorkspaceTab[] = [];
@@ -1270,6 +1304,7 @@ export const Workspace: React.FC = () => {
     addStoredTab,
 
     setStoredActiveTabId,
+    sessionVerified, // Issue #2892
   ]);
 
   // Listen for browser back/forward (Issue #2899)
