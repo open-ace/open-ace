@@ -683,7 +683,12 @@ export const SSOSettings: React.FC = () => {
             <Button variant="secondary" onClick={handleCloseModal}>
               {t('cancel', language)}
             </Button>
-            <Button variant="primary" type="submit" form="register-provider-form" loading={isRegistering}>
+            <Button
+              variant="primary"
+              type="submit"
+              form="register-provider-form"
+              loading={isRegistering}
+            >
               {t('register', language)}
             </Button>
           </>

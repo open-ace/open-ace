@@ -472,9 +472,7 @@ describe('SSOSettings OAuth Form Autofill Prevention (Issue #2895)', () => {
       await screen.findByRole('button', { name: /Add Provider/i });
       fireEvent.click(screen.getByRole('button', { name: /Add Provider/i }));
 
-      const clientSecretConfirmInput = container.querySelector(
-        '#register-client-secret-confirm'
-      );
+      const clientSecretConfirmInput = container.querySelector('#register-client-secret-confirm');
       expect(clientSecretConfirmInput).toBeInTheDocument();
       expect(clientSecretConfirmInput).toHaveAttribute(
         'name',
