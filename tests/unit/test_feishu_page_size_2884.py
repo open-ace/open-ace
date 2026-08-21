@@ -23,10 +23,10 @@ from app.services.feishu_org_sync import (
     FeishuOrgSyncService,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
+
 
 class _FakeResponse:
     """Minimal requests.Response stand-in for mocking HTTP calls."""
@@ -43,9 +43,7 @@ class _FakeResponse:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            raise requests.HTTPError(
-                f"{self.status_code} Client Error", response=self
-            )
+            raise requests.HTTPError(f"{self.status_code} Client Error", response=self)
 
 
 def _make_service():
@@ -61,6 +59,7 @@ def _make_service():
 # Tests: page_size constant
 # ---------------------------------------------------------------------------
 
+
 def test_directory_page_size_is_50():
     """FEISHU_DIRECTORY_PAGE_SIZE must be <= 50 per Feishu Contact v3 limits."""
     assert FEISHU_DIRECTORY_PAGE_SIZE == 50
@@ -70,6 +69,7 @@ def test_directory_page_size_is_50():
 # ---------------------------------------------------------------------------
 # Tests: _fetch_child_departments uses page_size <= 50
 # ---------------------------------------------------------------------------
+
 
 def test_fetch_child_departments_page_size():
     """The department-children request must not exceed page_size=50."""
@@ -140,14 +140,16 @@ def test_fetch_child_departments_paginates_across_pages():
     assert http.request.call_count == 2
 
     # Verify second call used the page_token from the first response
-    second_call_params = http.request.call_args_list[1].kwargs.get("params") or \
-        http.request.call_args_list[1][1].get("params")
+    second_call_params = http.request.call_args_list[1].kwargs.get(
+        "params"
+    ) or http.request.call_args_list[1][1].get("params")
     assert second_call_params.get("page_token") == "token-page-2"
 
 
 # ---------------------------------------------------------------------------
 # Tests: _fetch_department_users uses page_size <= 50
 # ---------------------------------------------------------------------------
+
 
 def test_fetch_department_users_page_size():
     """The find-by-department users request must not exceed page_size=50."""
@@ -219,14 +221,16 @@ def test_fetch_department_users_paginates_across_pages():
     assert users[1].open_id == "ou_bob"
     assert http.request.call_count == 2
 
-    second_call_params = http.request.call_args_list[1].kwargs.get("params") or \
-        http.request.call_args_list[1][1].get("params")
+    second_call_params = http.request.call_args_list[1].kwargs.get(
+        "params"
+    ) or http.request.call_args_list[1][1].get("params")
     assert second_call_params.get("page_token") == "users-token-2"
 
 
 # ---------------------------------------------------------------------------
 # Tests: _request_json_once error handling for HTTP 4xx
 # ---------------------------------------------------------------------------
+
 
 def test_request_json_parses_feishu_error_on_4xx():
     """HTTP 4xx with a Feishu JSON error body should raise FeishuApiError."""

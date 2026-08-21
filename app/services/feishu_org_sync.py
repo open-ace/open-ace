@@ -823,11 +823,7 @@ class FeishuOrgSyncService:
                     return self._request_json_once(
                         method, url, fresh, params, json_payload, retried=True
                     )
-                msg = (
-                    payload.get("msg")
-                    or payload.get("message")
-                    or "unknown error"
-                )
+                msg = payload.get("msg") or payload.get("message") or "unknown error"
                 # Attach the sanitized field description when available (e.g.
                 # "the max value is 50") so the error message is actionable.
                 details = payload.get("details")
