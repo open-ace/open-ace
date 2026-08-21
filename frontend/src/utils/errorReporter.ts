@@ -239,7 +239,7 @@ export function shouldDedupe(error: Error): boolean {
  */
 export function logFallback(...args: unknown[]): void {
   try {
-    const errorLogs = (window as any).__errorLogs__ || [];
+    const errorLogs = (window as any).__errorLog__ || [];
     errorLogs.push({
       timestamp: Date.now(),
       args: args.map((arg) =>
@@ -254,7 +254,7 @@ export function logFallback(...args: unknown[]): void {
       errorLogs.shift();
     }
 
-    (window as any).__errorLogs__ = errorLogs;
+    (window as any).__errorLog__ = errorLogs;
 
     // Dev mode console output
     if (import.meta.env.DEV) {
