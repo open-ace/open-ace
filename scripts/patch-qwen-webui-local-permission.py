@@ -79,7 +79,7 @@ def main() -> int:
             file=sys.stderr,
         )
         # Already patched (NEW_PROCESS present) counts as success; drift fails.
-        if "else if(r.type===`control_request`" in data:
+        if "else if(n.type===`control_request`" in data:
             print(
                 "[patch-qwen-webui-local-permission] bundle already patched, skipping",
                 file=sys.stderr,
