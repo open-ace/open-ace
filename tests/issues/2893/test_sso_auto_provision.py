@@ -11,8 +11,9 @@ Key scenarios:
 4. Tenant missing or settings read failure → fail closed (deny)
 """
 
+from unittest.mock import MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
 
 # Mark all tests in this module
 pytestmark = pytest.mark.unit
