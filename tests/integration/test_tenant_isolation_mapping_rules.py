@@ -353,20 +353,40 @@ class TestTenantIsolationForGenerateDefaultRules:
             skipped_count=0,
         )
 
-        # Pre-seed the buckets so results[tid] is never created concurrently.
-        results: dict[int, list] = {1: [], 2: []}
+        # Concurrent operations mix legitimate same-tenant generates (expect 2xx)
+        # with cross-tenant attempts (a tenant admin targeting a user in the OTHER
+        # tenant — expect 404 per the isolation contract, to avoid disclosing the
+        # user's existence). Running the denial and success paths together under
+        # concurrency is the point: each request's admin identity must stay pinned
+        # to that request, so the outcome must track the tenant relationship and
+        # never leak across threads.
+        operations = [
+            (1, 11),  # tenant-1 admin -> own user      -> allowed
+            (1, 12),  # tenant-1 admin -> own user      -> allowed
+            (2, 21),  # tenant-2 admin -> own user      -> allowed
+            (2, 22),  # tenant-2 admin -> own user      -> allowed
+            (1, 21),  # tenant-1 admin -> tenant-2 user -> denied (404)
+            (2, 12),  # tenant-2 admin -> tenant-1 user -> denied (404)
+        ]
+        results: list[dict] = []  # list.append is atomic under the GIL
         errors: list[str] = []
 
-        def generate_rules_for_tenant(tenant_id, user_id):
-            """Authenticate as the tenant's admin (via Bearer token) and generate."""
+        def run_operation(admin_tenant, target_user):
+            """Authenticate as admin_tenant's admin (Bearer token) and generate."""
             try:
                 response = app.test_client().post(
-                    f"/api/mapping-rules/user/{user_id}/generate-default",
-                    headers={"Authorization": f"Bearer tenant-{tenant_id}"},
+                    f"/api/mapping-rules/user/{target_user}/generate-default",
+                    headers={"Authorization": f"Bearer tenant-{admin_tenant}"},
                     content_type="application/json",
                 )
-                results[tenant_id].append({"user_id": user_id, "status": response.status_code})
-            except Exception as e:  # allow-swallow: collected and asserted below
+                results.append(
+                    {
+                        "admin_tenant": admin_tenant,
+                        "target_user": target_user,
+                        "status": response.status_code,
+                    }
+                )
+            except Exception as e:  # allow-swallow: collect per-thread errors; asserted empty below
                 errors.append(str(e))
 
         with ExitStack() as stack:
@@ -382,32 +402,38 @@ class TestTenantIsolationForGenerateDefaultRules:
             mock_service.return_value.create_default_rules_for_user.return_value = default_result
 
             threads = [
-                threading.Thread(
-                    target=generate_rules_for_tenant, args=(tenant_id, tenant_id * 10 + user_id)
-                )
-                for tenant_id in (1, 2)
-                for user_id in range(1, 3)
+                threading.Thread(target=run_operation, args=(admin_tenant, target_user))
+                for admin_tenant, target_user in operations
             ]
             for t in threads:
                 t.start()
             for t in threads:
                 t.join(timeout=5)
 
-        # Verify no errors occurred
+        # No thread errored out, and every operation reported a result.
         assert len(errors) == 0, f"Errors during concurrent execution: {errors}"
+        assert len(results) == len(
+            operations
+        ), f"Expected {len(operations)} results, got {len(results)}"
 
-        # Verify all operations succeeded (status 200 or 201)
-        for tenant_id, tenant_results in results.items():
-            for r in tenant_results:
-                assert r["status"] in (200, 201), (
-                    f"Tenant {tenant_id} operation on user {r['user_id']} "
-                    f"returned status {r['status']}"
+        # Each request's outcome must match its tenant relationship: same-tenant
+        # succeeds, cross-tenant is denied. A cross-thread auth leak would flip a
+        # cross-tenant attempt to 2xx (admin identity bled from another thread) or
+        # a same-tenant attempt to 404 (identity lost) — this asserts neither.
+        status_by_op = {(r["admin_tenant"], r["target_user"]): r["status"] for r in results}
+        for admin_tenant, target_user in operations:
+            status = status_by_op[(admin_tenant, target_user)]
+            same_tenant = tenant_user_map[target_user]["tenant_id"] == admin_tenant
+            if same_tenant:
+                assert status in (
+                    200,
+                    201,
+                ), f"same-tenant admin{admin_tenant} -> user{target_user} returned {status}"
+            else:
+                assert status == 404, (
+                    f"cross-tenant admin{admin_tenant} -> user{target_user} must be denied "
+                    f"(404), got {status}"
                 )
-
-        # Verify each tenant admin operated only on its own users (isolation).
-        assert len(results) == 2, f"Expected 2 tenants in results, got {len(results)}"
-        assert {r["user_id"] for r in results[1]} == {11, 12}
-        assert {r["user_id"] for r in results[2]} == {21, 22}
 
 
 class TestTenantIsolationForOtherOperations:
