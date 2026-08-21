@@ -1033,63 +1033,89 @@ export const Workspace: React.FC = () => {
     let initialActiveTabId = '';
 
     if (restoreSessionId) {
-      // Case 1: URL restore params - create a single tab with the restore session
-      // Build settings from URL params
-      const urlSettings:
-        { model?: string; useWebUI?: boolean; permissionMode?: string } | undefined =
-        urlModel || urlUseWebUI !== null || urlPermissionMode
-          ? {
-              model: urlModel ?? undefined,
-              useWebUI: urlUseWebUI === 'true' ? true : urlUseWebUI === 'false' ? false : undefined,
-              permissionMode: urlPermissionMode ?? undefined,
+      // Issue #2892: Validate session exists before restoring
+      // This prevents showing empty page when user visits a non-existent session URL
+      const validateAndRestoreSession = async () => {
+        // Only validate non-terminal sessions (terminal uses terminalId)
+        if (urlWorkspaceType !== 'terminal') {
+          try {
+            const response = await sessionsApi.getSession(restoreSessionId, false);
+            if (!response.success || response.error) {
+              console.warn('[Workspace] Session validation failed:', response.error);
+              setError(t('sessionNotFound', language) || 'Session not found or has been deleted');
+              setTabsInitialized(true);
+              return;
             }
-          : undefined;
+          } catch (err) {
+            console.error('[Workspace] Failed to verify session:', err);
+            setError(t('sessionNotFound', language) || 'Session not found or has been deleted');
+            setTabsInitialized(true);
+            return;
+          }
+        }
 
-      // Build remote params from URL (only for local/remote, not terminal)
-      const remoteParams:
-        | { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string }
-        | undefined =
-        urlWorkspaceType && urlWorkspaceType !== 'terminal'
-          ? {
-              workspaceType: urlWorkspaceType,
-              machineId: urlMachineId ?? undefined,
-              machineName: urlMachineName ?? undefined,
-            }
-          : undefined;
+        // Session is valid, proceed to create tab
+        // Case 1: URL restore params - create a single tab with the restore session
+        // Build settings from URL params
+        const urlSettings:
+          { model?: string; useWebUI?: boolean; permissionMode?: string } | undefined =
+          urlModel || urlUseWebUI !== null || urlPermissionMode
+            ? {
+                model: urlModel ?? undefined,
+                useWebUI: urlUseWebUI === 'true' ? true : urlUseWebUI === 'false' ? false : undefined,
+                permissionMode: urlPermissionMode ?? undefined,
+              }
+            : undefined;
 
-      // Handle terminal session restoration separately
-      if (urlWorkspaceType === 'terminal' && urlTerminalId && urlMachineId) {
-        // Create terminal tab
-        const tab: WorkspaceTab = {
-          id: generateTabId(),
-          title: t('restoredSession', language),
-          url: '', // Terminal tabs don't use iframe URL
-          token: '',
-          sessionId: restoreSessionId,
-          tabType: 'terminal',
-          terminalId: urlTerminalId,
-          machineId: urlMachineId,
-          machineName: urlMachineName ?? undefined,
-          createdAt: Date.now(),
-          waitingForUser: false,
-          waitingType: null,
-        };
-        initialTabs = [tab];
-        initialActiveTabId = tab.id;
+        // Build remote params from URL (only for local/remote, not terminal)
+        const remoteParams:
+          | { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string }
+          | undefined =
+          urlWorkspaceType && urlWorkspaceType !== 'terminal'
+            ? {
+                workspaceType: urlWorkspaceType,
+                machineId: urlMachineId ?? undefined,
+                machineName: urlMachineName ?? undefined,
+              }
+            : undefined;
 
-        // Save to store
-        addStoredTab({
-          id: tab.id,
-          title: tab.title,
-          tabType: 'terminal',
-          terminalId: urlTerminalId,
-          machineId: urlMachineId,
-          machineName: urlMachineName ?? undefined,
-          createdAt: tab.createdAt,
-          waitingForUser: false,
-          waitingType: null,
-        });
-      } else {
+        // Handle terminal session restoration separately
+        if (urlWorkspaceType === 'terminal' && urlTerminalId && urlMachineId) {
+          // Create terminal tab
+          const tab: WorkspaceTab = {
+            id: generateTabId(),
+            title: t('restoredSession', language),
+            url: '', // Terminal tabs don't use iframe URL
+            token: '',
+            sessionId: restoreSessionId,
+            tabType: 'terminal',
+            terminalId: urlTerminalId,
+            machineId: urlMachineId,
+            machineName: urlMachineName ?? undefined,
+            createdAt: Date.now(),
+            waitingForUser: false,
+            waitingType: null,
+          };
+          setTabs([tab]);
+          setActiveTabId(tab.id);
+          setStoredActiveTabId(tab.id);
+
+          // Save to store
+          addStoredTab({
+            id: tab.id,
+            title: tab.title,
+            tabType: 'terminal',
+            terminalId: urlTerminalId,
+            machineId: urlMachineId,
+            machineName: urlMachineName ?? undefined,
+            createdAt: tab.createdAt,
+            waitingForUser: false,
+            waitingType: null,
+          });
+          setTabsInitialized(true);
+          return;
+        }
+
         // Regular session (local or remote)
         const effectiveUrl = getEffectiveUrl(
           restoreSessionId,
@@ -1117,10 +1143,11 @@ export const Workspace: React.FC = () => {
             waitingForUser: false,
             waitingType: null,
           };
-          initialTabs = [tab];
-          initialActiveTabId = tab.id;
+          setTabs([tab]);
+          setActiveTabId(tab.id);
+          setStoredActiveTabId(tab.id);
 
-          // Save to store (this replaces any previous stored tabs)
+          // Save to store
           addStoredTab({
             id: tab.id,
             title: tab.title,
@@ -1135,20 +1162,24 @@ export const Workspace: React.FC = () => {
             waitingForUser: tab.waitingForUser,
             waitingType: tab.waitingType,
           });
+          setTabsInitialized(true);
         }
-      }
 
-      // Clear the restore parameters after using it
-      searchParams.delete('sessionId');
-      searchParams.delete('restoreSession');
-      searchParams.delete('encodedProjectName');
-      searchParams.delete('toolName');
-      searchParams.delete('workspaceType');
-      searchParams.delete('machineId');
-      searchParams.delete('machineName');
-      searchParams.delete('terminalId');
-      searchParams.delete('resumeHint');
-      setSearchParams(searchParams, { replace: true });
+        // Clear the restore parameters after using it
+        searchParams.delete('sessionId');
+        searchParams.delete('restoreSession');
+        searchParams.delete('encodedProjectName');
+        searchParams.delete('toolName');
+        searchParams.delete('workspaceType');
+        searchParams.delete('machineId');
+        searchParams.delete('machineName');
+        searchParams.delete('terminalId');
+        searchParams.delete('resumeHint');
+        setSearchParams(searchParams, { replace: true });
+      };
+
+      validateAndRestoreSession();
+      return;
     } else if (storedTabs.length > 0) {
       // Case 2: Restore from store - regenerate URLs for each tab
       initialTabs = storedTabs.map((storedTab) => {

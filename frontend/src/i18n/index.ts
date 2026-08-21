@@ -200,6 +200,8 @@ export const translations: Record<Language, Translations> = {
     workspaceNotConfiguredHelp: 'Please contact administrator to configure workspace URL',
     workspaceUnavailable: 'Workspace unavailable',
     workspaceUnavailableHelp: 'Please log in to access your workspace',
+    sessionNotFound: 'Session not found or has been deleted',
+    projectPathNotFound: 'Project path not found in history',
     security: 'Security',
 
     // Mode - Dual-track system
@@ -2286,6 +2288,8 @@ export const translations: Record<Language, Translations> = {
     workspaceNotConfiguredHelp: '请联系管理员配置工作区 URL',
     workspaceUnavailable: '工作区不可用',
     workspaceUnavailableHelp: '请登录后访问您的工作区',
+    sessionNotFound: '会话不存在或已被删除',
+    projectPathNotFound: '项目路径不在历史记录中',
     security: '安全',
 
     // Mode - Dual-track system
