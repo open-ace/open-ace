@@ -1082,4 +1082,15 @@ def start_background_services():
     except Exception as e:
         logger.warning(f"Failed to start SSO auth state cleanup: {e}")
 
+    # Issue #2596: Start deregister compensation worker
+    try:
+        from app.repositories.database import Database
+        from app.services.deregister_compensation_worker import start_deregister_compensation_worker
+
+        db = Database()
+        start_deregister_compensation_worker(db)
+        logger.info("Deregister compensation worker started")
+    except Exception as e:
+        logger.warning(f"Failed to start deregister compensation worker: {e}")
+
     logger.info("Background services started")
