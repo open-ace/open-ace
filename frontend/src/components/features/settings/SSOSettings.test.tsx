@@ -1,10 +1,11 @@
 /**
- * SSOSettings Component Tests - Accessibility
+ * SSOSettings Component Tests - Accessibility & Autofill Prevention
  *
  * Tests cover:
  * - aria-describedby attributes
  * - Visually hidden description elements
  * - Checkbox state and keyboard interaction
+ * - Issue #2895: OAuth form autofill prevention (name/autoComplete attributes)
  */
 
 import { render, screen, fireEvent } from '@testing-library/react';
@@ -61,6 +62,22 @@ vi.mock('@/i18n', () => ({
       tableActions: 'Actions',
       enabled: 'Enabled',
       disabled: 'Disabled',
+      // Issue #2895: SSO Provider registration form
+      registerProvider: 'Register Provider',
+      selectProvider: 'Select Provider',
+      providerType: 'Provider Type',
+      clientId: 'Client ID',
+      clientSecret: 'Client Secret',
+      clientSecretConfirm: 'Confirm Client Secret',
+      redirectUri: 'Redirect URI',
+      scope: 'Scope',
+      enterClientId: 'Enter Client ID',
+      enterClientSecret: 'Enter Client Secret',
+      enterClientSecretConfirm: 'Confirm Client Secret',
+      enterRedirectUri: 'Enter Redirect URI',
+      enterProviderName: 'Enter Provider Name',
+      register: 'Register',
+      cancel: 'Cancel',
     };
     return translations[key] || key;
   },
@@ -103,6 +120,7 @@ vi.mock('@/components/common', () => ({
     children,
     onClick,
     type,
+    form,
     loading,
     disabled,
     variant,
@@ -111,6 +129,7 @@ vi.mock('@/components/common', () => ({
     children: React.ReactNode;
     onClick?: () => void;
     type?: string;
+    form?: string;
     loading?: boolean;
     disabled?: boolean;
     variant?: string;
@@ -118,6 +137,7 @@ vi.mock('@/components/common', () => ({
   }) => (
     <button
       type={type || 'button'}
+      form={form}
       onClick={onClick}
       disabled={disabled || loading}
       className={`btn btn-${variant || 'primary'} ${size ? `btn-${size}` : ''}`}
@@ -138,11 +158,13 @@ vi.mock('@/components/common', () => ({
     onClose,
     title,
     children,
+    footer,
   }: {
     isOpen: boolean;
     onClose: () => void;
     title: string;
     children: React.ReactNode;
+    footer?: React.ReactNode;
   }) =>
     isOpen ? (
       <div className="modal">
@@ -151,6 +173,7 @@ vi.mock('@/components/common', () => ({
           <button onClick={onClose}>Close</button>
         </div>
         <div className="modal-body">{children}</div>
+        {footer && <div className="modal-footer">{footer}</div>}
       </div>
     ) : null,
   TextInput: ({
@@ -158,17 +181,26 @@ vi.mock('@/components/common', () => ({
     onChange,
     placeholder,
     type,
+    id,
+    name,
+    autoComplete,
   }: {
     value: string;
     onChange: (value: string) => void;
     placeholder?: string;
     type?: string;
+    id?: string;
+    name?: string;
+    autoComplete?: string;
   }) => (
     <input
       type={type || 'text'}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
+      id={id}
+      name={name}
+      autoComplete={autoComplete}
     />
   ),
   Select: ({
@@ -362,6 +394,81 @@ describe('SSOSettings Accessibility', () => {
         const descIndex = children.indexOf(desc!);
         expect(descIndex).toBeGreaterThan(labelIndex);
       });
+    });
+  });
+});
+
+// Issue #2895: Autofill prevention tests
+describe('SSOSettings OAuth Form Autofill Prevention (Issue #2895)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('Register Provider Modal', () => {
+    it('should have form with autoComplete="off"', async () => {
+      const { container } = render(<SSOSettings />);
+
+      // Wait for component to load and click "Add Provider" button
+      await screen.findByRole('button', { name: /Add Provider/i });
+      fireEvent.click(screen.getByRole('button', { name: /Add Provider/i }));
+
+      // Find the register form
+      const form = container.querySelector('#register-provider-form');
+      expect(form).toBeInTheDocument();
+      expect(form).toHaveAttribute('autocomplete', 'off');
+    });
+
+    it('should have Client ID input with correct name and autoComplete', async () => {
+      const { container } = render(<SSOSettings />);
+
+      await screen.findByRole('button', { name: /Add Provider/i });
+      fireEvent.click(screen.getByRole('button', { name: /Add Provider/i }));
+
+      const clientIdInput = container.querySelector('#register-client-id');
+      expect(clientIdInput).toBeInTheDocument();
+      expect(clientIdInput).toHaveAttribute('name', 'oauth_provider_client_id');
+      expect(clientIdInput).toHaveAttribute('autocomplete', 'off');
+    });
+
+    it('should have Client Secret input with autoComplete="new-password"', async () => {
+      const { container } = render(<SSOSettings />);
+
+      await screen.findByRole('button', { name: /Add Provider/i });
+      fireEvent.click(screen.getByRole('button', { name: /Add Provider/i }));
+
+      const clientSecretInput = container.querySelector('#register-client-secret');
+      expect(clientSecretInput).toBeInTheDocument();
+      expect(clientSecretInput).toHaveAttribute('name', 'oauth_provider_client_secret');
+      expect(clientSecretInput).toHaveAttribute('type', 'password');
+      expect(clientSecretInput).toHaveAttribute('autocomplete', 'new-password');
+    });
+
+    it('should have Client Secret Confirm input with autoComplete="new-password"', async () => {
+      const { container } = render(<SSOSettings />);
+
+      await screen.findByRole('button', { name: /Add Provider/i });
+      fireEvent.click(screen.getByRole('button', { name: /Add Provider/i }));
+
+      const clientSecretConfirmInput = container.querySelector('#register-client-secret-confirm');
+      expect(clientSecretConfirmInput).toBeInTheDocument();
+      expect(clientSecretConfirmInput).toHaveAttribute(
+        'name',
+        'oauth_provider_client_secret_confirmation'
+      );
+      expect(clientSecretConfirmInput).toHaveAttribute('type', 'password');
+      expect(clientSecretConfirmInput).toHaveAttribute('autocomplete', 'new-password');
+    });
+
+    it('should have submit button with form attribute pointing to register form', async () => {
+      render(<SSOSettings />);
+
+      await screen.findByRole('button', { name: /Add Provider/i });
+      fireEvent.click(screen.getByRole('button', { name: /Add Provider/i }));
+
+      // Find the Register button in modal
+      const registerButton = await screen.findByRole('button', { name: /Register/i });
+      expect(registerButton).toHaveAttribute('type', 'submit');
+      expect(registerButton).toHaveAttribute('form', 'register-provider-form');
     });
   });
 });
