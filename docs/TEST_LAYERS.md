@@ -33,6 +33,16 @@
 历史文件继续按 inventory 逐步迁移；不要再新增新的“按功能域”顶层目录或
 tests 根目录测试文件。
 
+**测试数据库隔离（#2869）**：`tests/unit/conftest.py` 的 `_isolated_unit_db`
+autouse fixture 给每个 unit 测试指向自己的一次性 sqlite 库
+（`DATABASE_URL=sqlite:///<tmp>/unit-test.db`），非 `@pytest.mark.postgres` 测试
+一律如此。这样走 `create_app` 的测试不再共享工作区级 `app.db`——早先某个测试留下
+列形态不一致的同名表会让后续 `create_app` 的 schema 重放随机崩
+（`no such column`），本 fixture 从根上消除该共享态，并使测试默认库选择显式化
+（不静默继承开发机的 `DATABASE_URL`）。`tests/integration/conftest.py` 早已用
+每测试 `tmp_path` 库。需要 Postgres 的测试打 `@pytest.mark.postgres` 并放入
+`tests/integration/`（由独立 postgres lane 执行）。
+
 ## 回归测试写法
 
 新回归测试直接写到其规范目录，并在模块或测试函数上记录来源：
