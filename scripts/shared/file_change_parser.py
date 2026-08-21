@@ -71,6 +71,52 @@ class FileChangeParser(ABC):
         """Return the source identifier for this parser."""
         return "unknown"
 
+    def _resolve_path(self, path: str, project_path: str) -> str | None:
+        """Resolve a path to its absolute form.
+
+        Handles relative paths, absolute paths, environment variables,
+        and home directory expansion.
+
+        Args:
+            path: The path to resolve.
+            project_path: The project root directory for resolving relative paths.
+
+        Returns:
+            The resolved absolute path, or None if the path is empty.
+        """
+        if not path:
+            return None
+        path = os.path.expandvars(path)
+        path = os.path.expanduser(path)
+        if os.path.isabs(path):
+            return os.path.normpath(path)
+        return os.path.normpath(os.path.join(project_path, path))
+
+    def _is_safe_path(self, path: str, project_path: str) -> bool:
+        """Check if a path is safe to use.
+
+        Security checks include:
+        1. Path must be within the project directory (prevents path traversal).
+        2. Path must not contain dangerous characters: $ ` | ; & < > *
+           These characters could be used for command injection attacks.
+
+        Args:
+            path: The path to check.
+            project_path: The project root directory.
+
+        Returns:
+            True if the path is safe, False otherwise.
+        """
+        try:
+            abs_path = os.path.realpath(path)
+            abs_project = os.path.realpath(project_path)
+            if not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project:
+                return False
+            dangerous_chars = ["$", "`", "|", ";", "&", "<", ">", "*"]
+            return not any(char in path for char in dangerous_chars)
+        except Exception:
+            return False
+
 
 class FileChangeParserRegistry:
     """Registry for file change parsers."""
@@ -194,26 +240,6 @@ class MkdirParser(FileChangeParser):
             break
         return paths
 
-    def _resolve_path(self, path: str, project_path: str) -> str | None:
-        if not path:
-            return None
-        path = os.path.expandvars(path)
-        path = os.path.expanduser(path)
-        if os.path.isabs(path):
-            return os.path.normpath(path)
-        return os.path.normpath(os.path.join(project_path, path))
-
-    def _is_safe_path(self, path: str, project_path: str) -> bool:
-        try:
-            abs_path = os.path.realpath(path)
-            abs_project = os.path.realpath(project_path)
-            if not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project:
-                return False
-            dangerous_chars = ["$", "`", "|", ";", "&", "<", ">", "*"]
-            return not any(char in path for char in dangerous_chars)
-        except Exception:
-            return False
-
 
 class RmParser(FileChangeParser):
     """Parser for rm shell commands."""
@@ -294,23 +320,6 @@ class RmParser(FileChangeParser):
             break
         return paths
 
-    def _resolve_path(self, path: str, project_path: str) -> str | None:
-        if not path:
-            return None
-        path = os.path.expandvars(path)
-        path = os.path.expanduser(path)
-        if os.path.isabs(path):
-            return os.path.normpath(path)
-        return os.path.normpath(os.path.join(project_path, path))
-
-    def _is_safe_path(self, path: str, project_path: str) -> bool:
-        try:
-            abs_path = os.path.realpath(path)
-            abs_project = os.path.realpath(project_path)
-            return not (not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project)
-        except Exception:
-            return False
-
     def _is_directory_flag(self, command: str) -> bool:
         return bool(re.search(r"-[rf]+\b", command) or re.search(r"-[a-zA-Z]*r", command))
 
@@ -349,23 +358,6 @@ class WriteFileParser(FileChangeParser):
     def source(self) -> str:
         return "write_file"
 
-    def _resolve_path(self, path: str, project_path: str) -> str | None:
-        if not path:
-            return None
-        path = os.path.expandvars(path)
-        path = os.path.expanduser(path)
-        if os.path.isabs(path):
-            return os.path.normpath(path)
-        return os.path.normpath(os.path.join(project_path, path))
-
-    def _is_safe_path(self, path: str, project_path: str) -> bool:
-        try:
-            abs_path = os.path.realpath(path)
-            abs_project = os.path.realpath(project_path)
-            return not (not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project)
-        except Exception:
-            return False
-
 
 class EditParser(FileChangeParser):
     """Parser for edit tool."""
@@ -400,23 +392,6 @@ class EditParser(FileChangeParser):
     @property
     def source(self) -> str:
         return "edit"
-
-    def _resolve_path(self, path: str, project_path: str) -> str | None:
-        if not path:
-            return None
-        path = os.path.expandvars(path)
-        path = os.path.expanduser(path)
-        if os.path.isabs(path):
-            return os.path.normpath(path)
-        return os.path.normpath(os.path.join(project_path, path))
-
-    def _is_safe_path(self, path: str, project_path: str) -> bool:
-        try:
-            abs_path = os.path.realpath(path)
-            abs_project = os.path.realpath(project_path)
-            return not (not abs_path.startswith(abs_project + os.sep) and abs_path != abs_project)
-        except Exception:
-            return False
 
 
 def _contains_wildcard(path: str) -> bool:
