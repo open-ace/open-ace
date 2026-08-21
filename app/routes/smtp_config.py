@@ -97,7 +97,7 @@ def update_smtp_config():
 
         # Audit log for SMTP config save (do not log password)
         audit_logger.log_action(
-            action=AuditAction.SMTP_CONFIG_SAVE.value,
+            action=AuditAction.SMTP_CONFIG_SAVE,
             user_id=user_id,
             resource_type="smtp_config",
             resource_id=config.get("id"),
@@ -174,7 +174,7 @@ def delete_smtp_config():
 
         # Audit log for SMTP config delete (do not log password)
         audit_logger.log_action(
-            action=AuditAction.SMTP_CONFIG_DELETE.value,
+            action=AuditAction.SMTP_CONFIG_DELETE,
             user_id=user_id,
             resource_type="smtp_config",
             resource_id=config.get("id"),
