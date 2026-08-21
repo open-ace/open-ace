@@ -363,7 +363,8 @@ CREATE TABLE autonomous_workflows (
  verified_by text,
  verification_session_id text,
  issue_closed_by_workflow_at TIMESTAMP,
- merge_fail_dev_rounds integer DEFAULT 0
+ merge_fail_dev_rounds integer DEFAULT 0,
+ merge_policy_settle_retries integer DEFAULT 0
 );
 
 CREATE TABLE backfill_logs (
