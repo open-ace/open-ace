@@ -79,7 +79,7 @@ def _run(wf, agent_out):
     # Isolate the infra-retry decision from the mechanical gates.
     with (
         patch.object(av, "is_acceptance_verification_enabled", return_value=True),
-        patch.object(av, "run_scope_gate", return_value=[]),
+        patch.object(av, "run_scope_gate", return_value=([], [])),
         patch.object(av, "run_mechanical_gates", return_value=[]),
     ):
         return av.handle(_ctx(wf), _deps(agent_out))
