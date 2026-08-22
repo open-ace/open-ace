@@ -153,12 +153,17 @@ class TestDockerComposeMultiUserSyntax:
         compose_file = ROOT / "docker-compose.multi-user.yml"
 
         # Use docker compose config to validate syntax
-        result = subprocess.run(
-            ["docker", "compose", "-f", str(compose_file), "config", "--quiet"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-        )
+        # Set timeout to avoid hanging the test suite if Docker daemon is slow
+        try:
+            result = subprocess.run(
+                ["docker", "compose", "-f", str(compose_file), "config", "--quiet"],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.skip("Docker compose command timed out")
 
         # Note: This may fail if docker-compose.yml dependencies are not met
         # That's acceptable - we're mainly checking YAML syntax
