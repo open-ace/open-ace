@@ -5,19 +5,24 @@ Test script for Issue #47: Claude 工具的 messages 在 auto-refresh 时不能�
 This test verifies that:
 1. When viewing today, auto-refresh correctly detects message changes
 2. When viewing a historical date, auto-refresh prompts user to switch to today
-3. currentMessageCount is updated correctly after loadMessages()
+
+#2457 realignment: converted from the async playwright API (the sync `with`
+on async_playwright() was a protocol error — the baselined TypeError) and
+re-pointed at the current Messages page (/manage/messages): PageRefreshControl
+carries the auto-refresh toggle, the date range moved into
+.messages-filter-dates inputs, and the admin password-change gate is cleared
+like every other lane e2e. The sync API also keeps pytest away from the
+async teardown path entirely.
 """
 
 import os
+import re
 import time
+from datetime import datetime, timedelta
 
 import pytest
 import requests
 from playwright.sync_api import sync_playwright
-
-# #2457: converted from the async API (the sync `with` on async_playwright()
-# was a protocol error — the baselined TypeError), keeping pytest away from
-# the async teardown path entirely.
 
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
@@ -28,8 +33,68 @@ PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 TIMEOUT = 15000  # 15 seconds timeout
 
 
+def _clear_seeded_password_gate():
+    """Clear must_change_password for the seeded admin (lane/CI only)."""
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "UPDATE users SET must_change_password = 0 "
+                "WHERE username = ? AND must_change_password = 1",
+                (USERNAME,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+
+
+def _skip_if_no_server():
+    try:
+        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+    except Exception:
+        pytest.skip(f"test server not reachable at {BASE_URL}")
+
+
+def _login(page):
+    page.goto(f"{BASE_URL}/login", wait_until="networkidle")
+    page.fill("#username", USERNAME)
+    page.fill("#password", PASSWORD)
+    page.click("button[type='submit']")
+    # admins land on /manage, users on /work
+    page.wait_for_url(re.compile(r".*/(work|manage)"), timeout=15000)
+    page.goto(f"{BASE_URL}/manage/messages", wait_until="networkidle")
+    page.wait_for_selector(".messages", state="visible", timeout=TIMEOUT)
+
+
+def _enable_auto_refresh(page):
+    """Open PageRefreshControl's dropdown and tick the auto-refresh item."""
+    page.locator("[data-testid='dropdown-toggle']").first.click()
+    checkbox = page.locator("[id$='-auto-refresh']").first
+    checkbox.wait_for(state="visible", timeout=5000)
+    checkbox.check()
+    page.keyboard.press("Escape")
+    return checkbox
+
+
+def _disable_auto_refresh(page, checkbox):
+    """Re-open the dropdown and untick (the menu closed on Escape)."""
+    page.locator("[data-testid='dropdown-toggle']").first.click()
+    checkbox.wait_for(state="visible", timeout=5000)
+    checkbox.uncheck()
+    page.keyboard.press("Escape")
+
+
 def test_auto_refresh_today():
     """Test auto-refresh when viewing today's messages."""
+    _skip_if_no_server()
+    _clear_seeded_password_gate()
     print("=" * 60)
     print("[Test 1] Auto-refresh when viewing today")
     print("=" * 60)
@@ -41,66 +106,34 @@ def test_auto_refresh_today():
         page.set_default_timeout(TIMEOUT)
 
         try:
-            # Login
-            print("\n[Step 1] Logging in...")
-            page.goto(f"{BASE_URL}/login")
-            page.fill('input[name="username"]', USERNAME)
-            page.fill('input[name="password"]', PASSWORD)
-            page.click('button[type="submit"]')
-            page.wait_for_url(f"{BASE_URL}/", timeout=15000)
-            print("✓ Login successful")
-
-            # Navigate to Messages page
-            print("\n[Step 2] Navigating to Messages page...")
-            page.click("#nav-messages")
-            page.wait_for_selector("#messages-container", state="visible", timeout=5000)
+            _login(page)
             print("✓ Messages page loaded")
 
-            # Check current date filter
-            date_filter = page.locator("#date-filter")
-            current_date = date_filter.input_value()
-            print(f"  Current date filter: {current_date}")
+            # Date range lives in DatePicker buttons (custom input), not <input>s
+            dates = page.locator(".messages-filter-dates button")
+            values = [dates.nth(i).inner_text().strip() for i in range(min(dates.count(), 2))]
+            print(f"  Date filter buttons: {dates.count()}, values: {values}")
 
-            # Get initial message count
-            time.sleep(2)  # Wait for messages to load
-            messages = page.locator(".message-item")
-            initial_count = messages.count()
-            print(f"  Initial message count: {initial_count}")
-
-            # Enable auto-refresh
-            print("\n[Step 3] Enabling auto-refresh...")
-            auto_refresh_checkbox = page.locator("#auto-refresh")
-            auto_refresh_checkbox.check()
+            # Enable auto-refresh (PageRefreshControl dropdown item)
+            print("\n[Step] Enabling auto-refresh...")
+            auto_refresh_checkbox = _enable_auto_refresh(page)
             print("✓ Auto-refresh enabled")
 
-            # Wait and observe
-            print("\n[Step 4] Waiting for auto-refresh cycle (10 seconds)...")
+            # Wait and observe one refresh cycle
+            print("  Waiting for auto-refresh cycle (10 seconds)...")
             time.sleep(10)
 
-            # Check if page is still responsive
-            print("\n[Step 5] Checking page responsiveness...")
-            try:
-                page.hover("#nav-dashboard")
-                print("✓ Page is responsive after auto-refresh")
-            except Exception as e:
-                print(f"✗ Page became unresponsive: {e}")
+            # Check the page is still responsive
+            print("  Checking page responsiveness...")
+            page.hover(".messages-header h2")
+            print("✓ Page is responsive after auto-refresh")
 
-            # Check console for errors
-            print("\n[Step 6] Checking for console errors...")
-            # Note: Playwright doesn't capture console logs by default
-            # We'll just verify the page state
-
-            # Disable auto-refresh
-            auto_refresh_checkbox.uncheck()
+            _disable_auto_refresh(page, auto_refresh_checkbox)
             print("✓ Auto-refresh disabled")
 
-            # Take screenshot
             page.screenshot(path="screenshots/issues/47/test_auto_refresh_today.png")
             print("✓ Screenshot saved")
-
-            print("\n" + "=" * 60)
             print("Test 1 completed successfully!")
-            print("=" * 60)
 
         except Exception as e:
             print(f"\n✗ Test failed: {e}")
@@ -112,6 +145,8 @@ def test_auto_refresh_today():
 
 def test_auto_refresh_historical_date():
     """Test auto-refresh when viewing a historical date."""
+    _skip_if_no_server()
+    _clear_seeded_password_gate()
     print("\n" + "=" * 60)
     print("[Test 2] Auto-refresh when viewing historical date")
     print("=" * 60)
@@ -123,62 +158,42 @@ def test_auto_refresh_historical_date():
         page.set_default_timeout(TIMEOUT)
 
         try:
-            # Login
-            print("\n[Step 1] Logging in...")
-            page.goto(f"{BASE_URL}/login")
-            page.fill('input[name="username"]', USERNAME)
-            page.fill('input[name="password"]', PASSWORD)
-            page.click('button[type="submit"]')
-            page.wait_for_url(f"{BASE_URL}/", timeout=15000)
-            print("✓ Login successful")
+            _login(page)
 
-            # Navigate to Messages page
-            print("\n[Step 2] Navigating to Messages page...")
-            page.click("#nav-messages")
-            page.wait_for_selector("#messages-container", state="visible", timeout=5000)
-            print("✓ Messages page loaded")
+            # Set the range to yesterday
+            print("\n[Step] Setting date range to yesterday...")
+            yesterday = datetime.now() - timedelta(days=1)
+            # DatePickers render as buttons that open a react-datepicker popup
+            page.locator(".messages-filter-dates button").first.click()
+            page.wait_for_selector(".react-datepicker", timeout=5000)
+            day_cell = page.locator(
+                ".react-datepicker__day:not(.react-datepicker__day--outside-month)",
+                has_text=str(yesterday.day),
+            ).first
+            day_cell.click()
+            print(f"  Start date set to: {yesterday.strftime('%Y-%m-%d')}")
 
-            # Set date to yesterday
-            print("\n[Step 3] Setting date to yesterday...")
-            date_filter = page.locator("#date-filter")
-            # Calculate yesterday's date
-            from datetime import datetime, timedelta
-
-            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-            date_filter.fill(yesterday)
-            print(f"  Date set to: {yesterday}")
-
-            # Wait for messages to load
+            # Wait for the filtered view to load
             time.sleep(2)
             print("✓ Messages loaded for historical date")
 
             # Enable auto-refresh
-            print("\n[Step 4] Enabling auto-refresh...")
-            auto_refresh_checkbox = page.locator("#auto-refresh")
-            auto_refresh_checkbox.check()
+            print("  Enabling auto-refresh...")
+            auto_refresh_checkbox = _enable_auto_refresh(page)
             print("✓ Auto-refresh enabled")
 
-            # Wait for auto-refresh cycle
-            print("\n[Step 5] Waiting for auto-refresh cycle (10 seconds)...")
+            # Wait for the auto-refresh cycle; viewing a historical range must
+            # not break the cycle or the page
+            print("  Waiting for auto-refresh cycle (10 seconds)...")
             time.sleep(10)
-
-            # Check if a confirm dialog appears (it should if today has new messages)
-            # Note: In headless=False mode, the dialog will appear and block
-            # We'll just verify the page state
-
             print("✓ Auto-refresh cycle completed")
 
-            # Disable auto-refresh
-            auto_refresh_checkbox.uncheck()
+            _disable_auto_refresh(page, auto_refresh_checkbox)
             print("✓ Auto-refresh disabled")
 
-            # Take screenshot
             page.screenshot(path="screenshots/issues/47/test_auto_refresh_historical.png")
             print("✓ Screenshot saved")
-
-            print("\n" + "=" * 60)
             print("Test 2 completed successfully!")
-            print("=" * 60)
 
         except Exception as e:
             print(f"\n✗ Test failed: {e}")
@@ -190,25 +205,18 @@ def test_auto_refresh_historical_date():
 
 def main():
     """Run all tests."""
-    import os
-
     os.makedirs("screenshots/issues/47", exist_ok=True)
 
     print("\n" + "=" * 60)
     print("Issue #47: Auto-refresh Messages Test Suite")
     print("=" * 60)
 
-    try:
-        test_auto_refresh_today()
-        test_auto_refresh_historical_date()
+    test_auto_refresh_today()
+    test_auto_refresh_historical_date()
 
-        print("\n" + "=" * 60)
-        print("All tests passed!")
-        print("=" * 60)
-
-    except Exception as e:
-        print(f"\n✗ Test suite failed: {e}")
-        raise
+    print("\n" + "=" * 60)
+    print("All tests passed!")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
