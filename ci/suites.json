@@ -4,7 +4,10 @@
     "toolchain": {
         "production_python": "3.11",
         "min_python": "3.10",
-        "compatibility_python": ["3.12", "3.14"],
+        "compatibility_python": [
+            "3.12",
+            "3.14"
+        ],
         "node": "20",
         "runner": "ubuntu-24.04"
     },
@@ -34,15 +37,37 @@
             "description": "Audit declared Python and locked frontend production dependencies",
             "timeout_seconds": 300,
             "commands": [
-                ["{python}", "-m", "pip_audit", "-r", "requirements-ci.lock", "--skip-editable"],
-                ["{python}", "-m", "pip_audit", "-r", "requirements.lock", "--skip-editable"],
+                [
+                    "{python}",
+                    "-m",
+                    "pip_audit",
+                    "-r",
+                    "requirements-ci.lock",
+                    "--skip-editable"
+                ],
+                [
+                    "{python}",
+                    "-m",
+                    "pip_audit",
+                    "-r",
+                    "requirements.lock",
+                    "--skip-editable"
+                ],
                 {
                     "working_directory": "frontend",
-                    "command": ["npm", "ci", "--no-audit", "--no-fund"]
+                    "command": [
+                        "npm",
+                        "ci",
+                        "--no-audit",
+                        "--no-fund"
+                    ]
                 },
                 {
                     "working_directory": "frontend",
-                    "command": ["bash", "../scripts/ci/npm_audit_with_whitelist.sh"]
+                    "command": [
+                        "bash",
+                        "../scripts/ci/npm_audit_with_whitelist.sh"
+                    ]
                 }
             ]
         },
@@ -50,12 +75,39 @@
             "description": "Validate E2E governance artifacts, ledgers, and lane closures",
             "timeout_seconds": 180,
             "commands": [
-                ["{python}", "scripts/e2e/inventory.py", "validate"],
-                ["{python}", "scripts/e2e/manifest.py", "validate"],
-                ["{python}", "scripts/e2e/governance.py", "validate"],
-                ["{python}", "scripts/e2e/selector.py", "--event", "pr"],
-                ["{python}", "scripts/e2e/selector.py", "--event", "nightly"],
-                ["{python}", "scripts/e2e/selector.py", "--event", "weekly"]
+                [
+                    "{python}",
+                    "scripts/e2e/inventory.py",
+                    "validate"
+                ],
+                [
+                    "{python}",
+                    "scripts/e2e/manifest.py",
+                    "validate"
+                ],
+                [
+                    "{python}",
+                    "scripts/e2e/governance.py",
+                    "validate"
+                ],
+                [
+                    "{python}",
+                    "scripts/e2e/selector.py",
+                    "--event",
+                    "pr"
+                ],
+                [
+                    "{python}",
+                    "scripts/e2e/selector.py",
+                    "--event",
+                    "nightly"
+                ],
+                [
+                    "{python}",
+                    "scripts/e2e/selector.py",
+                    "--event",
+                    "weekly"
+                ]
             ]
         },
         "python-core": {
@@ -100,15 +152,26 @@
         },
         "python-min": {
             "description": "compileall + full unit suite on the minimum supported Python (catches version-specific regressions on the oldest interpreter; #2868)",
-            "timeout_seconds": 480,
+            "timeout_seconds": 600,
             "commands": [
-                ["{python}", "-m", "compileall", "-q", "app", "scripts", "cli.py", "server.py"],
+                [
+                    "{python}",
+                    "-m",
+                    "compileall",
+                    "-q",
+                    "app",
+                    "scripts",
+                    "cli.py",
+                    "server.py"
+                ],
                 [
                     "{python}",
                     "-m",
                     "pytest",
                     "tests/unit/",
                     "-q",
+                    "-n",
+                    "auto",
                     "--maxfail=1",
                     "-m",
                     "not postgres and not performance"
@@ -119,7 +182,16 @@
             "description": "Fast minimum/maximum Python compatibility coverage",
             "timeout_seconds": 420,
             "commands": [
-                ["{python}", "-m", "compileall", "-q", "app", "scripts", "cli.py", "server.py"],
+                [
+                    "{python}",
+                    "-m",
+                    "compileall",
+                    "-q",
+                    "app",
+                    "scripts",
+                    "cli.py",
+                    "server.py"
+                ],
                 [
                     "{python}",
                     "-m",
@@ -165,18 +237,53 @@
             "timeout_seconds": 480,
             "working_directory": "frontend",
             "commands": [
-                ["npm", "ci", "--no-audit", "--no-fund"],
-                ["npm", "run", "lint"],
-                ["npm", "run", "format:check"],
-                ["npm", "run", "typecheck"],
-                ["npm", "run", "test:coverage"],
-                ["npm", "run", "build"]
+                [
+                    "npm",
+                    "ci",
+                    "--no-audit",
+                    "--no-fund"
+                ],
+                [
+                    "npm",
+                    "run",
+                    "lint"
+                ],
+                [
+                    "npm",
+                    "run",
+                    "format:check"
+                ],
+                [
+                    "npm",
+                    "run",
+                    "typecheck"
+                ],
+                [
+                    "npm",
+                    "run",
+                    "test:coverage"
+                ],
+                [
+                    "npm",
+                    "run",
+                    "build"
+                ]
             ]
         },
         "package": {
             "description": "Build Python source and wheel artifacts",
             "timeout_seconds": 240,
-            "commands": [["{python}", "-m", "build", "--sdist", "--wheel", "--outdir", "dist/"]]
+            "commands": [
+                [
+                    "{python}",
+                    "-m",
+                    "build",
+                    "--sdist",
+                    "--wheel",
+                    "--outdir",
+                    "dist/"
+                ]
+            ]
         },
         "postgres": {
             "description": "PostgreSQL integration suite; requires the CI postgres service",
