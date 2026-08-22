@@ -3,8 +3,8 @@
 
 #2457 realignment: converted from the async playwright API (the baselined
 Page.fill timeout came from the retired input[name=...] login fields) and
-re-pointed at the current markup — nav.sidebar with the sidebar-collapsed
-class and the .sidebar-toggle-btn button. The admin password-change gate
+re-pointed at the current markup — aside.work-left-panel with the collapsed
+class driven by the .panel-toggle button. The admin password-change gate
 is cleared like every other lane e2e.
 """
 

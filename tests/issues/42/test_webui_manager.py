@@ -10,9 +10,12 @@ Tests for:
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
+
+import pytest
 
 # Add app to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -206,31 +209,29 @@ def test_manager_instance_limit():
 
     # Mock the process launch to avoid actually starting processes.
     # _start_instance_internal unpacks (process, model_pool) and treats a
-    # None process as a launch failure; the fake process must also look
-    # alive (poll() -> None) for the instance-limit accounting, and the
-    # readiness wait must pass without a real listener on the port.
-    fake_process = MagicMock()
-    fake_process.poll.return_value = None
-    manager._launch_webui_process = MagicMock(return_value=(fake_process, MagicMock()))
+    # None process as a launch failure. WebUIInstance.is_alive() signals the
+    # pid with os.kill(pid, 0), so every fake must carry a signalable pid;
+    # the HTTP health probe then fails but stays under the 10-failure death
+    # budget, keeping each instance alive for the limit accounting. The
+    # readiness wait is stubbed so no real listener is required.
+    def fake_launch(user_id, system_account, port, base_url):
+        process = MagicMock()
+        process.pid = os.getpid()
+        return process, MagicMock()
+
+    manager._launch_webui_process = MagicMock(side_effect=fake_launch)
     manager._wait_for_service_ready = MagicMock(return_value=True)
 
-    # These should work (within limit)
-    try:
-        url1, _ = manager.get_user_webui_url(1, "user1")
-        print(f"✓ Started instance for user 1: {url1}")
+    # Within limit: two instances start and are registered
+    url1, _ = manager.get_user_webui_url(1, "user1")
+    assert url1 == "http://localhost:3100", f"unexpected url for user 1: {url1}"
 
-        url2, _ = manager.get_user_webui_url(2, "user2")
-        print(f"✓ Started instance for user 2: {url2}")
-    except ValueError as e:
-        print(f"✗ Unexpected error: {e}")
-        return
+    url2, _ = manager.get_user_webui_url(2, "user2")
+    assert url2 == "http://localhost:3101", f"unexpected url for user 2: {url2}"
 
-    # This should fail (exceeds limit)
-    try:
+    # Third instance exceeds max_instances=2 and is rejected
+    with pytest.raises(ValueError, match=r"Maximum instances \(2\) reached"):
         manager.get_user_webui_url(3, "user3")
-        print("✗ Should have raised ValueError for instance limit")
-    except ValueError as e:
-        print(f"✓ Correctly rejected: {e}")
 
 
 def test_config_json_sample():

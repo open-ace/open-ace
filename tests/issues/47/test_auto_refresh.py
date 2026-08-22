@@ -2,9 +2,12 @@
 """
 Test script for Issue #47: Claude 工具的 messages 在 auto-refresh 时不能及时显示
 
-This test verifies that:
-1. When viewing today, auto-refresh correctly detects message changes
-2. When viewing a historical date, auto-refresh prompts user to switch to today
+This test drives the Messages page (/manage/messages) through the
+auto-refresh toggle and the date-range picker:
+1. Toggling auto-refresh on/off via the PageRefreshControl dropdown keeps
+   the page responsive and the toggle state intact.
+2. Selecting a historical date through the DatePicker popup keeps the
+   filtered view stable across an auto-refresh cycle.
 
 #2457 realignment: converted from the async playwright API (the sync `with`
 on async_playwright() was a protocol error — the baselined TypeError) and

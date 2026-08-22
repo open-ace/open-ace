@@ -10,14 +10,7 @@ Test cases:
 """
 
 import os
-import sys
 import time
-
-# Add project root to path
-project_root = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
-sys.path.insert(0, project_root)
 
 from playwright.sync_api import expect, sync_playwright
 
@@ -151,7 +144,7 @@ def test_status_bar_usage():
             # as hidden (#2457)
             token_progress = token_usage.locator(".status-progress-bar")
             expect(token_progress).to_be_attached()
-            print("  ✓ Token progress bar is visible")
+            print("  ✓ Token progress bar is attached")
 
             # Step 6: Check separator
             print("\nStep 6: Check separator between Token and Request")
@@ -182,7 +175,7 @@ def test_status_bar_usage():
             # Check request progress bar — same zero-width caveat as tokens
             request_progress = request_usage.locator(".status-progress-bar")
             expect(request_progress).to_be_attached()
-            print("  ✓ Request progress bar is visible")
+            print("  ✓ Request progress bar is attached")
 
             # Final screenshot
             take_screenshot(page, "05_final_status_bar.png")
