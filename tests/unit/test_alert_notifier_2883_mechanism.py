@@ -193,8 +193,9 @@ class TestTLSHandshakeWithMockedSocket:
             original_hostname="example.com",
         )
 
-        # Mock socket connection
-        with patch("socket.create_connection") as mock_create:
+        # Mock socket connection at the urllib3 level to avoid real network calls
+        # urllib3 uses urllib3.util.connection.create_connection internally
+        with patch("urllib3.util.connection.create_connection") as mock_create:
             mock_socket = MagicMock()
             mock_create.return_value = mock_socket
 
