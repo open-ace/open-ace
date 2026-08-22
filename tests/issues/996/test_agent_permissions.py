@@ -177,28 +177,34 @@ class TestFixPhasePermissionsAndFallback:
         orch._get_gh.return_value = gh
         orch.repo.list_milestones.return_value = []
 
-        # #2457 realignment: the fix flow now distinguishes dirty-BEFORE the
+        # #2457 realignment: the fix flow distinguishes dirty-BEFORE the fix
         # agent (#1828 pre-commits + scope-validates pre-existing changes)
-        # from dirty-AFTER (the salvage this test pins). Model a CLEAN tree
-        # before the agent that the AGENT dirties without committing: the
-        # salvage must then git_add_all + git_commit(no_verify), the commit
-        # must advance HEAD (a no-op commit is rejected), and the fix is
-        # pushed (plus the final branch-safety push).
-        tree_dirty = {"v": False}
+        # from dirty-AFTER (the salvage this test pins). HEAD is modeled
+        # independently of dirtiness, and only the FIX agent call dirties the
+        # tree — identified by its allowed_tools signature (the fix phase
+        # passes AUTONOMOUS_DEV_ALLOWED_TOOLS incl. Bash; review/summary
+        # calls don't). Post-agent HEAD == commit_before, so the dirty-AFTER
+        # salvage runs: git_add_all + git_commit(no_verify) whose commit must
+        # ADVANCE HEAD (a no-op commit raises "did not advance branch HEAD"),
+        # then the fix is pushed (plus the final branch-safety push).
+        state = {"dirty": False, "head": "same123"}
 
-        def agent_dirties(**kwargs):
-            tree_dirty["v"] = True
+        def agent_leaves_changes(**kwargs):
+            tools = kwargs.get("allowed_tools") or []
+            if "Bash" in tools:  # the fix agent dirties without committing
+                state["dirty"] = True
             return _make_agent_result()
 
-        orch._run_agent = MagicMock(side_effect=agent_dirties)
-        gh.has_uncommitted_changes = MagicMock(side_effect=lambda: tree_dirty["v"])
+        orch._run_agent = MagicMock(side_effect=agent_leaves_changes)
+        gh.has_uncommitted_changes = MagicMock(side_effect=lambda: state["dirty"])
 
         def fake_git_commit(*args, **kwargs):
-            tree_dirty["v"] = False
+            state["dirty"] = False
+            state["head"] = "fix4567"
             return {"sha": "fix4567"}
 
         gh.git_commit.side_effect = fake_git_commit
-        gh.get_current_commit.side_effect = lambda: "fix4567" if not tree_dirty["v"] else "same123"
+        gh.get_current_commit.side_effect = lambda: state["head"]
 
         orch._do_pr_review(wf)
 

@@ -76,7 +76,8 @@ def test_single_migration_head():
 
 
 def test_new_migration_parents_off_current_head():
-    """The new migration must chain directly under the prior head, not branch."""
+    """This change's migration chains directly under its prior head (historical
+    chain property — stable as the head advances)."""
     cfg = _alembic_config()
     script_dir = ScriptDirectory.from_config(cfg)
     revision = script_dir.get_revision(HEAD_REVISION)

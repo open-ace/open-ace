@@ -96,9 +96,9 @@ def api_store_key(token, key_name, provider="anthropic"):
             "provider": provider,
             "key_name": key_name,
             "api_key": "sk-test-e2e-toggle-key",
-            # The outbound URL guard blocks documentation ranges (example.com);
-            # a real provider host passes validation (the URL is only checked,
-            # never dialed, on store).
+            # api.example.com fails store-time validation (fail-closed on the
+            # unresolvable host via validate_llm_proxy_url); a real provider
+            # host passes (the URL is only checked, never dialed, on store).
             "base_url": "https://api.anthropic.com",
             "tenant_id": 1,
         },

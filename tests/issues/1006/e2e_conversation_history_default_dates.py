@@ -178,6 +178,18 @@ def test_default_dates():
     print(f"BASE_URL={BASE_URL}  HEADLESS={HEADLESS}")
     print("=" * 60)
 
+    # Skip (not silently pass) when the lane server is not reachable — the
+    # curl login below would otherwise print ABORT and return before the
+    # gating assert.
+    import requests as _requests
+
+    try:
+        _requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+    except Exception:
+        import pytest
+
+        pytest.skip(f"test server not reachable at {BASE_URL}")
+
     clear_seeded_password_gate()
 
     # Authenticate via curl (urllib->gevent returns 502 with `requests`; curl

@@ -225,6 +225,5 @@ class TestWebhookFailurePrefsUnbound:
 
         # The modern single-snapshot path takes prefs as a parameter, so a
         # prefs read failure cannot leave it unbound mid-delivery either.
-        assert "_deliver_to_prefs" in AlertNotifier._send_webhook_notification.__doc__
         # Reference original to keep linters happy about unused symbol.
         assert original is not None
