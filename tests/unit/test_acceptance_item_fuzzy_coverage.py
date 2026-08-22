@@ -366,8 +366,10 @@ class TestCjkFuzzyMatching:
 
     # Real prod pair (#2828): checklist inserts （YYYYMMDD） mid-phrase. The
     # short side is ONE 17-char run (16 bigrams incl. the 期不 bridge); the
-    # long side is two runs (15 bigrams) + 1 latin token. Shared 15, union 17
-    # -> Jaccard 15/17 = 0.882 (assert >= 0.8; margin is thin by design).
+    # long side is two runs (15 bigrams) + 1 latin token. Weighted Jaccard
+    # (bigrams 1x, latin token 2x): 15 / (15+1+2) = 0.833 — margin over the
+    # 0.8 bar is only 0.033; assert >= 0.8 and keep the exact value in sync
+    # if weights ever change.
     PROD_2828_VERIFIER = "紧凑日期不再被误识别为国际电话号码"
     PROD_2828_CHECKLIST = "紧凑日期（YYYYMMDD）不再被误识别为国际电话号码"
 
@@ -432,9 +434,22 @@ class TestCjkFuzzyMatching:
         assert self._fuzzy()("支持重试且不删除数据", "支持重试并删除数据") == 0.0
 
     def test_cjk_negation_on_both_sides_still_matches(self):
-        # Same 不再 on both sides (marker sets equal): punctuation-only
-        # elaboration keeps Jaccard 6/7 = 0.857 above the bar.
-        assert self._fuzzy()("不再删除旧记录", "不再删除旧记录。") >= 0.8
+        # Same 不再 on both sides (marker sets equal): a one-char CJK tail
+        # elaboration keeps the weighted Jaccard at 6/7 = 0.857.
+        assert self._fuzzy()("不再删除旧记录", "不再删除旧记录了") >= 0.8
+
+    def test_cjk_negation_head_false_positive_is_conservative(self):
+        # 未来 opens with the negation head 未 but is NOT a negation. A
+        # one-sided 未来 only makes the pair NOT match (conservative loss of
+        # coverage), never a false confirmation — and when 未来 appears on
+        # both sides the markers cancel and matching is unaffected.
+        assert self._fuzzy()("未来版本支持该参数", "版本支持该参数") == 0.0
+        assert self._fuzzy()("未来版本支持该参数", "未来版本支持该参数。") >= 0.8
+
+    def test_isolated_single_char_negation_segment_flips(self):
+        # An isolated 无 between runs is a single-char token; its head must
+        # still flip (without the guard this pair would score 4/5 = 0.8).
+        assert self._fuzzy()("发送 无限制通知", "发送 限制通知") == 0.0
 
     def test_distinct_cjk_requirements_sharing_vocabulary_do_not_match(self):
         # Genuinely different Chinese requirements that share many characters:

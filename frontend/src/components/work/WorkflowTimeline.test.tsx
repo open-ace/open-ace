@@ -324,6 +324,22 @@ describe('formatAcceptanceReport (#2658)', () => {
     expect(formatAcceptanceReport('not-json{', 'en')).toBe('not-json{');
   });
 
+  it('renders advisory scope entries with the info tone (#2982)', () => {
+    const out = formatAcceptanceReport(
+      JSON.stringify({
+        status: 'confirmed',
+        scope: [
+          { item: 'src/app.py', verdict: 'confirmed', evidence: [] },
+          { item: 'src/other.py', verdict: 'advisory', evidence: [] },
+        ],
+      }),
+      'en'
+    );
+    expect(out).toContain('- ✅ **src/app.py**');
+    // Advisory is informational (never a failure icon) but still visible.
+    expect(out).toContain('- ℹ️ **src/other.py**');
+  });
+
   it('omits optional fields gracefully', () => {
     const out = formatAcceptanceReport(JSON.stringify({ status: 'indeterminate' }), 'en');
     expect(out).toContain('## ⚠️ Inconclusive');

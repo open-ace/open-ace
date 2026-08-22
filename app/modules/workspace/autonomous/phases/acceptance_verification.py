@@ -67,7 +67,7 @@ def _snapshot_to_json(snapshot: AcceptanceSnapshot) -> str:
 # (observed when the extractor absorbed sibling-issue context); they are not
 # acceptance criteria of the issue being verified. Trailing references
 # ("…修复（Issue #2883）") are unaffected — only leading ownership prefixes.
-_CROSS_ISSUE_PREFIX_RE = re.compile(r"^Issue\s*#(\d+)\s*[:：]")
+_CROSS_ISSUE_PREFIX_RE = re.compile(r"^Issue\s*#(\d+)\s*[:：]", re.IGNORECASE)
 
 
 def _validate_extracted_snapshot(
@@ -352,19 +352,22 @@ def _fuzzy_tokens(normalized: str) -> list[str]:
 
 
 def _weighted_jaccard(tokens_a: list[str], tokens_b: list[str]) -> float:
-    """Token-set Jaccard with alphanumeric tokens weighted 2x.
+    """Token-set Jaccard with CJK tokens weighted 1x and all others 2x.
 
-    A CJK bigram carries one character-pair of information; an alphanumeric
-    identifier token (CSV, XLSX, API…) carries the whole distinction between
-    two otherwise-identical requirements. With uniform weights, swapping one
-    identifier among ten CJK bigrams scores 9/11 = 0.82 — above the 0.8 bar —
-    so the identifier is weighted 2x to sink such pairs (9/13 = 0.69) while
-    near-verbatim pairs stay above it. Pure-English token sets have uniform
-    weights, which cancel, so their scores are bit-for-bit unchanged.
+    A CJK bigram carries one character-pair of information; any other token
+    (an alphanumeric identifier like CSV/XLSX, or a punctuation token)
+    carries the whole distinction between two otherwise-identical
+    requirements. With uniform weights, swapping one identifier among ten
+    CJK bigrams scores 9/11 = 0.82 — above the 0.8 bar — so non-CJK tokens
+    are weighted 2x to sink such pairs (9/13 = 0.69) while near-verbatim
+    pairs stay above it. ``_fuzzy_tokens`` emits tokens that are either
+    pure CJK or CJK-free, so every token in an all-English comparison has
+    the same weight and the ratio — and therefore every existing English
+    score — is bit-for-bit unchanged.
     """
 
     def _weight(token: str) -> int:
-        return 2 if any(c.isascii() and c.isalnum() for c in token) else 1
+        return 1 if _CJK_RUN_RE.search(token) else 2
 
     intersection = set(tokens_a) & set(tokens_b)
     union = set(tokens_a) | set(tokens_b)

@@ -310,8 +310,8 @@ def call_chain_gate(
     base..merge diff; modified modules are exempt (see
     ``_is_repo_or_service_module``). REJECTED if a new repo/service module
     appears with only test references in the changed tree; CONFIRMED if a
-    non-test changed file imports it; INDETERMINATE if no repo/service module
-    changed.
+    non-test changed file imports it; silent (no verdicts) if no repo/service
+    module was added.
     """
     entries = gh.get_changed_files_with_status(base=base_sha, head=merge_sha) or []
     status_by_path: dict[str, str] = {}
