@@ -331,13 +331,20 @@ class RemoteSessionManager:
         if not machine:
             return None
 
-        # Issue #2597: Verify machine DB status is 'online' to prevent zombie sessions
-        # during heartbeat tolerance window (180s). The in-memory is_connected() check
-        # may return True during this window even if the agent is actually dead.
+        # Issue #2597: Verify the machine's DB status is in the online family to
+        # prevent zombie sessions during the heartbeat tolerance window (180s).
+        # The in-memory is_connected() check may return True during this window
+        # even if the agent is actually dead. Issue #2537 split "online" into a
+        # lifecycle: registration is transient 'online', heartbeats report
+        # 'idle' (no sessions) or 'busy' (active sessions) — all three mean the
+        # agent is alive, so only 'offline'/'unknown' reject here. Gating on
+        # 'online' alone would refuse every session on a busy multi-session
+        # machine.
         machine_status = machine.get("status", "")
-        if machine_status != "online":
+        if machine_status not in ("online", "idle", "busy"):
             logger.warning(
-                f"Machine {machine_id} DB status is '{machine_status}', not 'online' - rejecting session creation"
+                f"Machine {machine_id} DB status is '{machine_status}', not in the "
+                f"online family (online/idle/busy) - rejecting session creation"
             )
             return None
 
