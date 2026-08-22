@@ -18,30 +18,50 @@ Tests the terminal tab functionality including:
     - Connection state indicator (green dot for connected)
 
 Run:
-  HEADLESS=true  python tests/394/e2e_terminal_tab.py
-  HEADLESS=false python tests/394/e2e_terminal_tab.py
+  HEADLESS=true  python tests/issues/394/e2e_terminal_tab.py
+  HEADLESS=false python tests/issues/394/e2e_terminal_tab.py
+
+Pytest note (#2457): step functions are named `_check_*` and the script is
+driven by `run_all_checks()`. The only collected test is
+`test_e2e_terminal_tab_script`, which re-runs this file as a subprocess
+against BASE_URL (exported by the lane runner) and asserts on its exit
+code — the same pattern as tests/issues/559/e2e_terminal_ws_handler.py.
+The sync subprocess keeps pytest away from the async `page` fixture in
+tests/conftest.py, whose teardown pytest-timeout cannot kill (the CI
+shard deadlocks quarantined in August 2026 were exactly that).
+
+Cohabitation hardening (#2457): this file shares shard 2 of the issues
+lane with tests/issues/165, whose leftover machine goes offline (heartbeat
+timeout) and whose sessions stay in the shared per-shard DB. The script
+therefore registers its OWN machine right before Phase 4 (selected by
+name in the modal) and seeds its own terminal-model API key, instead of
+trusting whatever machine rows earlier tests left behind.
 """
 
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import time
 import traceback
+import uuid
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 
+import pytest
 import requests
-from playwright.sync_api import expect, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
 
 # ── Config ──
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-terminal-tab")
 
-TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
-TEST_PASS = "admin123"
+TEST_USER = os.environ.get("TEST_REAL_USER", "admin")
+TEST_PASS = os.environ.get("TEST_REAL_PASS", "admin123")
 
 
 def log(stage, msg):
@@ -55,6 +75,34 @@ def take_screenshot(page, name):
     log("Screenshot", path)
 
 
+def _clear_seeded_password_gate():
+    """Clear must_change_password for the seeded admin (lane/CI only, #2457).
+
+    Freshly initialized databases gate the admin behind a password-change
+    flow that would intercept the UI pages this script exercises. Deployed
+    environments keep their own user list and are unaffected (no-op when
+    the default DB is absent or the gate is already clear).
+    """
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "UPDATE users SET must_change_password = 0 "
+                "WHERE username = ? AND must_change_password = 1",
+                (TEST_USER,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        log("Setup", f"password-gate clear skipped: {exc}")
+
+
 def login_via_api():
     """Login and get session token."""
     resp = requests.post(
@@ -65,6 +113,131 @@ def login_via_api():
     token = resp.cookies.get("session_token")
     assert token, f"No session_token cookie found. Cookies: {dict(resp.cookies)}"
     return token
+
+
+def _current_user_id(token):
+    resp = requests.get(f"{BASE_URL}/api/auth/me", cookies={"session_token": token}, timeout=10)
+    assert resp.status_code == 200, f"/api/auth/me failed: {resp.status_code}"
+    return resp.json()["user"]["id"]
+
+
+def seed_terminal_model_key(token):
+    """Seed an API key advertising a terminal model (idempotent, #2457).
+
+    /api/workspace/terminal-models (remote scope) only lists models that an
+    active api_key_store row advertises, and the lane DB starts with zero
+    keys — without a seeded key the modal never gets a model, the Create
+    button stays disabled, and no terminal tab ever mounts. Scope 'shared'
+    satisfies the remote pool (api_key_proxy._list_tool_key_rows matches
+    scope = ? OR scope = 'shared'). Re-runs tolerate the duplicate-name
+    rejection: any leftover key advertising the model is enough.
+    """
+    key_name = "e2e-394-terminal-model-key"
+    resp = requests.post(
+        f"{BASE_URL}/api/api-keys",
+        json={
+            "provider": "openai",
+            "key_name": key_name,
+            "api_key": "sk-e2e-394-placeholder-key-000000000000",
+            "tenant_id": 1,
+            "scope": "shared",
+            "cli_tools": json.dumps(["qwen-code"]),
+            "cli_settings": json.dumps(
+                {
+                    "qwen-code": {
+                        "modelProviders": {
+                            "openai": [{"id": "qwen3-coder-plus", "name": "qwen3-coder-plus"}]
+                        }
+                    }
+                }
+            ),
+        },
+        cookies={"session_token": token},
+        timeout=10,
+    )
+    if resp.status_code == 200:
+        log("Setup", f"seeded terminal-model key {key_name!r}")
+    else:
+        log(
+            "Setup",
+            f"terminal-model key seed returned {resp.status_code} "
+            f"(ok if a previous run already seeded one): {resp.text[:120]}",
+        )
+
+
+def register_terminal_machine(token):
+    """Register a fresh machine for this run; return (id, name, bearer).
+
+    The machine is selected BY NAME in Phase 4 so stale rows from sibling
+    e2e files (e.g. issue 165's, offline by the time this file runs in the
+    shard) can never be picked. Registration + the 'register' message put
+    it in the 'online' family that /api/remote/machines/available serves.
+    """
+    machine_name = f"E2E-394 Terminal {os.getpid()}"
+    resp = requests.post(
+        f"{BASE_URL}/api/remote/machines/register",
+        json={"tenant_id": 1},
+        cookies={"session_token": token},
+        timeout=10,
+    )
+    assert resp.status_code == 200, f"machines/register failed: {resp.text[:200]}"
+    reg_token = resp.json()["registration_token"]
+
+    machine_id = str(uuid.uuid4())
+    resp = requests.post(
+        f"{BASE_URL}/api/remote/agent/register",
+        json={
+            "registration_token": reg_token,
+            "machine_id": machine_id,
+            "machine_name": machine_name,
+            "hostname": "e2e-394.local",
+            "os_type": "linux",
+            "os_version": "Ubuntu 24.04",
+            "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
+            "agent_version": "1.0.0-e2e",
+        },
+        timeout=10,
+    )
+    assert resp.status_code == 200, f"agent/register failed: {resp.text[:200]}"
+    agent_bearer = resp.json()["machine"].get("agent_token")
+    assert agent_bearer, "No agent_token in register response"
+
+    resp = requests.post(
+        f"{BASE_URL}/api/remote/agent/message",
+        json={
+            "type": "register",
+            "machine_id": machine_id,
+            "capabilities": {"cpu_cores": 8, "memory_gb": 32, "cli_installed": True},
+        },
+        headers={"Authorization": f"Bearer {agent_bearer}"},
+        timeout=10,
+    )
+    assert resp.status_code == 200, f"agent register message failed: {resp.text[:200]}"
+
+    # terminal-models checks machine assignment (check_user_access), so the
+    # machine must belong to the login user, not just exist.
+    resp = requests.post(
+        f"{BASE_URL}/api/remote/machines/{machine_id}/assign",
+        json={"user_id": _current_user_id(token), "permission": "admin"},
+        cookies={"session_token": token},
+        timeout=10,
+    )
+    assert resp.status_code == 200, f"machine assign failed: {resp.text[:200]}"
+    log("Setup", f"registered machine {machine_name!r} ({machine_id[:8]}...)")
+    return machine_id, machine_name, agent_bearer
+
+
+def cleanup_terminal_machine(token, machine_id):
+    """Best-effort machine removal so later files see no extra rows."""
+    try:
+        requests.delete(
+            f"{BASE_URL}/api/remote/machines/{machine_id}",
+            cookies={"session_token": token},
+            timeout=10,
+        )
+        log("Cleanup", f"deleted machine {machine_id[:8]}...")
+    except requests.RequestException as exc:
+        log("Cleanup", f"machine delete failed (best-effort): {exc}")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -137,18 +310,21 @@ def start_mock_terminal_server():
 
 
 # ═══════════════════════════════════════════════════════════
-# Phase 1 Tests
+# Phase 1 Checks
 # ═══════════════════════════════════════════════════════════
 
 
-def test_terminal_option_in_modal(page):
+def _check_terminal_option_in_modal(page):
     """Verify terminal option exists in the new session modal."""
     log("Phase 1", "Navigating to workspace...")
     page.goto(f"{BASE_URL}/work/workspace", wait_until="networkidle", timeout=30000)
     time.sleep(2)
     take_screenshot(page, "p1-01-workspace")
 
-    new_tab_btn = page.locator(".workspace-new-tab-btn")
+    # Sidebar button on a fresh workspace (no tabs yet); the tab-strip
+    # ".workspace-new-tab-btn" only renders once at least one tab exists —
+    # both open the same NewSessionModal (Workspace.tsx / SessionList.tsx)
+    new_tab_btn = page.locator("[data-testid='new-session-btn'], .workspace-new-tab-btn").first
     new_tab_btn.wait_for(state="visible", timeout=10000)
     new_tab_btn.click()
     time.sleep(1)
@@ -176,20 +352,24 @@ def test_terminal_option_in_modal(page):
 
 
 # ═══════════════════════════════════════════════════════════
-# Phase 2 Tests (API-level)
+# Phase 2 Checks (API-level)
 # ═══════════════════════════════════════════════════════════
 
 
-def test_session_sync_api(token):
-    """Test session-sync API endpoint accepts data."""
+def _check_session_sync_api(token, machine_id, agent_bearer):
+    """Test session-sync API endpoint accepts data for OUR machine."""
     log("Phase 2", "Testing session-sync endpoint...")
-    headers = {"Cookie": f"session_token={token}", "Content-Type": "application/json"}
+    headers = {
+        "Cookie": f"session_token={token}",
+        "Authorization": f"Bearer {agent_bearer}",
+        "Content-Type": "application/json",
+    }
 
     resp = requests.post(
         f"{BASE_URL}/api/remote/agent/message",
         json={
             "type": "session_sync",
-            "machine_id": "test-machine-e2e",
+            "machine_id": machine_id,
             "session_id": "test-session-e2e-001",
             "tool_name": "claude-code",
             "message_count": 2,
@@ -227,21 +407,21 @@ def test_session_sync_api(token):
 
 
 # ═══════════════════════════════════════════════════════════
-# Phase 4 Tests (Full terminal connection & interaction)
+# Phase 4 Checks (Full terminal connection & interaction)
 # ═══════════════════════════════════════════════════════════
 
 
-def test_terminal_connection_and_interaction(page, mock_ws_port):
+def _check_terminal_connection_and_interaction(page, mock_ws_port, machine_name):
     """
     Test full terminal lifecycle with mock WebSocket server.
 
     Uses Playwright route interception to inject mock server URL,
     then verifies: xterm.js rendering, connection state, keyboard input,
-    and terminal output echo.
+    and terminal output echo. The machine is selected by name so a stale
+    sibling-test machine can never be picked (see module docstring).
     """
     if mock_ws_port is None:
-        log("Phase 4", "SKIPPED - websockets package not available")
-        return
+        raise AssertionError("websockets package not available for the mock terminal server")
 
     mock_ws_url = f"ws://localhost:{mock_ws_port}"
     log("Phase 4", f"Mock terminal server running on port {mock_ws_port}")
@@ -272,8 +452,8 @@ def test_terminal_connection_and_interaction(page, mock_ws_port):
         page.goto(f"{BASE_URL}/work/workspace", wait_until="networkidle", timeout=30000)
         time.sleep(2)
 
-        # Open new session modal
-        new_tab_btn = page.locator(".workspace-new-tab-btn")
+        # Open new session modal (see Phase 1 note on the selector)
+        new_tab_btn = page.locator("[data-testid='new-session-btn'], .workspace-new-tab-btn").first
         new_tab_btn.wait_for(state="visible", timeout=10000)
         new_tab_btn.click()
         time.sleep(1)
@@ -291,32 +471,61 @@ def test_terminal_connection_and_interaction(page, mock_ws_port):
                 terminal_btn = buttons.nth(i)
                 break
 
-        if not terminal_btn:
-            log("Phase 4", "SKIPPED - Terminal button not found")
-            return
-
+        assert terminal_btn, "Terminal button not found in modal"
         terminal_btn.click()
         time.sleep(0.5)
 
-        # Select first machine
+        # Select OUR machine by name (cohabitation hardening, #2457)
         machine_list = modal.locator(".list-group-item")
-        if machine_list.count() == 0:
-            log("Phase 4", "SKIPPED - No machines available")
-            return
+        machine_list.first.wait_for(state="visible", timeout=10000)
+        our_row = machine_list.filter(has_text=machine_name)
+        assert our_row.count() > 0, (
+            f"Machine {machine_name!r} not in modal list "
+            f"(rows: {[machine_list.nth(i).inner_text()[:40] for i in range(machine_list.count())]})"
+        )
+        our_row.first.click()
+        time.sleep(1)
+        log("Phase 4", f"Selected machine {machine_name!r}")
 
-        machine_list.first.click()
-        time.sleep(0.5)
-
-        # Click Create - this triggers the intercepted start_terminal API
-        create_btn = modal.locator(".btn-primary").last
+        # Wait for the terminal-models fetch to arm the Create button
+        # (selectedModelKey defaults to the first advertised model).
+        create_btn = modal.locator("button.btn-primary").filter(has_text=["创建", "Create"]).last
+        for _ in range(30):
+            if create_btn.is_enabled():
+                break
+            time.sleep(1)
+        assert create_btn.is_enabled(), (
+            "Create button never enabled — terminal-models likely returned no "
+            f"models (modal: {modal.inner_text()[:300]})"
+        )
         create_btn.click()
         log("Phase 4", "Clicked Create - mock server will handle connection")
-        time.sleep(3)
-        take_screenshot(page, "p4-02-terminal-created")
+        take_screenshot(page, "p4-01b-create-clicked")
 
-        # ── Verify: xterm.js rendered ──
-        xterm_screen = page.locator(".xterm-screen")
-        assert xterm_screen.count() > 0, "xterm.js terminal not rendered (no .xterm-screen)"
+        # The terminal tab mounts asynchronously (tab switch, React mount,
+        # then a dynamic import of the @xterm/xterm chunk); slow CI runners
+        # regularly exceed any fixed sleep, so wait for xterm to actually
+        # attach and dump browser diagnostics if it never does.
+        console_errors: list[str] = []
+        page.on(
+            "console",
+            lambda msg: (
+                console_errors.append(f"[console.{msg.type}] {msg.text}")
+                if msg.type in ("error", "warning")
+                else None
+            ),
+        )
+        page.on("pageerror", lambda err: console_errors.append(f"[pageerror] {err}"))
+
+        try:
+            page.locator(".xterm-screen").wait_for(state="visible", timeout=30000)
+        except PlaywrightTimeoutError:
+            take_screenshot(page, "error-no-xterm")
+            log("Phase 4", "body text: " + page.locator("body").inner_text()[:400])
+            if console_errors:
+                log("Phase 4", "browser errors: " + " | ".join(console_errors[-10:]))
+            raise
+        take_screenshot(page, "p4-02-terminal-created")
         log("Phase 4", "xterm.js terminal rendered!")
 
         # ── Verify: dark background (terminal area) ──
@@ -371,7 +580,7 @@ def test_terminal_connection_and_interaction(page, mock_ws_port):
             assert "Connected" in status_text, f"'Connected' not in status bar: {status_text}"
 
         # ── Verify: keyboard input and echo ──
-        xterm_screen.first.click()
+        page.locator(".xterm-screen").first.click()
         time.sleep(0.3)
         page.keyboard.type("echo hello")
         time.sleep(0.5)
@@ -413,53 +622,57 @@ def test_terminal_connection_and_interaction(page, mock_ws_port):
 # ═══════════════════════════════════════════════════════════
 
 
-def test_terminal_tab():
-    """Run all terminal tab tests."""
+def run_all_checks():
+    """Run all terminal tab checks (script entrypoint)."""
+    _clear_seeded_password_gate()
     token = login_via_api()
     log("Setup", f"Logged in as {TEST_USER}")
 
-    # Phase 2: API-level tests
-    test_session_sync_api(token)
+    seed_terminal_model_key(token)
+    machine_id, machine_name, agent_bearer = register_terminal_machine(token)
 
-    # Start mock terminal server for Phase 4
-    mock_ws_port = start_mock_terminal_server()
-    if mock_ws_port:
-        log("Setup", f"Mock terminal server started on port {mock_ws_port}")
+    try:
+        # Phase 2: API-level checks (own machine, authenticated)
+        _check_session_sync_api(token, machine_id, agent_bearer)
 
-    # Browser tests
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS)
-        context = browser.new_context(
-            viewport={"width": 1280, "height": 900},
-            locale="en",
-        )
-        context.add_cookies(
-            [
-                {
-                    "name": "session_token",
-                    "value": token,
-                    "domain": "localhost",
-                    "path": "/",
-                }
-            ]
-        )
-        page = context.new_page()
+        # Start mock terminal server for Phase 4
+        mock_ws_port = start_mock_terminal_server()
+        if mock_ws_port:
+            log("Setup", f"Mock terminal server started on port {mock_ws_port}")
 
-        try:
-            # Phase 1: Modal UI verification
-            test_terminal_option_in_modal(page)
+        # Browser checks
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=HEADLESS)
+            context = browser.new_context(
+                viewport={"width": 1280, "height": 900},
+                locale="en",
+            )
+            page = context.new_page()
 
-            # Phase 4: Full terminal connection & interaction
-            test_terminal_connection_and_interaction(page, mock_ws_port)
+            try:
+                # UI login establishes the full client-side auth state the SPA
+                # needs (cookie alone is not enough for the workspace route)
+                page.goto(f"{BASE_URL}/login", wait_until="networkidle", timeout=30000)
+                page.fill("#username", TEST_USER)
+                page.fill("#password", TEST_PASS)
+                page.click("button[type='submit']")
+                page.wait_for_load_state("networkidle", timeout=30000)
+                # Phase 1: Modal UI verification
+                _check_terminal_option_in_modal(page)
 
-            log("Result", "All Phase 1-4 tests passed!")
-        except Exception as e:
-            take_screenshot(page, "error-final")
-            log("Error", str(e))
-            traceback.print_exc()
-            raise
-        finally:
-            browser.close()
+                # Phase 4: Full terminal connection & interaction
+                _check_terminal_connection_and_interaction(page, mock_ws_port, machine_name)
+
+                log("Result", "All Phase 1-4 tests passed!")
+            except Exception as e:
+                take_screenshot(page, "error-final")
+                log("Error", str(e))
+                traceback.print_exc()
+                raise
+            finally:
+                browser.close()
+    finally:
+        cleanup_terminal_machine(token, machine_id)
 
 
 if __name__ == "__main__":
@@ -468,4 +681,27 @@ if __name__ == "__main__":
     print(f"  BASE_URL:  {BASE_URL}")
     print(f"  HEADLESS:  {HEADLESS}")
     print("=" * 60)
-    test_terminal_tab()
+    run_all_checks()
+
+
+# ═══════════════════════════════════════════════════════════
+# Pytest entry (single collected test; see module docstring)
+# ═══════════════════════════════════════════════════════════
+
+
+def test_e2e_terminal_tab_script():
+    """Drive this script as a subprocess against BASE_URL (#2457)."""
+    try:
+        resp = requests.get(f"{BASE_URL}/login", timeout=5)
+        resp.raise_for_status()
+    except Exception:
+        pytest.skip(f"test server not reachable at {BASE_URL}")
+
+    proc = subprocess.run(
+        [sys.executable, os.path.abspath(__file__)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert proc.returncode == 0, f"script failed:\n{proc.stdout}\n{proc.stderr}"
+    assert "All Phase 1-4 tests passed!" in proc.stdout

@@ -13,17 +13,32 @@ Open ACE - File Changes Panel E2E Test (Issue #144)
 8. 设置关闭面板后验证（localStorage + URL 参数）
 
 Run:
-  HEADLESS=true  python tests/144/e2e_file_changes_panel.py
-  HEADLESS=false python tests/144/e2e_file_changes_panel.py
+  HEADLESS=true  python tests/issues/144/e2e_file_changes_panel.py
+  HEADLESS=false python tests/issues/144/e2e_file_changes_panel.py
+
+Pytest note (#2457): step functions are named `_check_*`/helpers and the
+script is driven by `run_tests()`. The only collected test is
+`test_e2e_file_changes_panel_script`, which re-runs this file as a
+subprocess against BASE_URL (exported by the lane runner) and asserts on
+its exit code — the same pattern as tests/issues/559. The sync subprocess
+keeps pytest away from the async `page` fixture in tests/conftest.py,
+whose teardown pytest-timeout cannot kill (the CI shard deadlocks
+quarantined in August 2026 were exactly that).
+
+Phases 3-7 need a reachable qwen-code-webui; the issues lane does not
+start one, so the script probes it and degrades to the Open ACE-side
+phases (1-2, 8-9) instead of failing.
 """
 
 import os
+import subprocess
 import sys
 import time
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 
+import pytest
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -31,8 +46,8 @@ from playwright.sync_api import sync_playwright
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:3000")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
-TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
-TEST_PASS = "admin123"
+TEST_USER = os.environ.get("TEST_REAL_USER", "admin")
+TEST_PASS = os.environ.get("TEST_REAL_PASS", "admin123")
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-file-changes")
 
 passed = 0
@@ -71,13 +86,41 @@ def pause(seconds):
 
 
 def log(tag, msg):
-    print(f"    [{tag}] {msg}")
+    print(f"    [{tag}] {msg}", flush=True)
+
+
+def _clear_seeded_password_gate():
+    """Clear must_change_password for the seeded admin (lane/CI only, #2457).
+
+    Freshly initialized databases gate the admin behind a password-change
+    flow that would intercept the pages this script exercises. Deployed
+    environments keep their own user list and are unaffected (no-op when
+    the default DB is absent or the gate is already clear).
+    """
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "UPDATE users SET must_change_password = 0 "
+                "WHERE username = ? AND must_change_password = 1",
+                (TEST_USER,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        log("Setup", f"password-gate clear skipped: {exc}")
 
 
 # ── 面板功能测试（在 qwen-code-webui 页面上执行）──────────────
 
 
-def test_panel_features(page, frame, shot_fn, check_fn, log_fn, pause_fn):
+def _check_panel_features(page, frame, shot_fn, check_fn, log_fn, pause_fn):
     """测试面板功能，frame 可以是 page 本身（直接模式）或 iframe content_frame"""
     # ══════ 4. 文件变更面板验证 ══════
     print("\n══════ 4. 文件变更面板验证")
@@ -247,6 +290,8 @@ def test_panel_features(page, frame, shot_fn, check_fn, log_fn, pause_fn):
 def run_tests():
     global passed, failed
 
+    _clear_seeded_password_gate()
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS, slow_mo=100 if not HEADLESS else 0)
         context = browser.new_context(
@@ -347,28 +392,39 @@ def run_tests():
         token = webui_info.get("token", "")
         openace_url = webui_info.get("openace_url", BASE_URL)
 
-        # 直接导航到 qwen-code-webui projects 页面
-        direct_url = (
-            f"{webui_url}/projects"
-            f"?token={token}"
-            f"&openace_url={openace_url}"
-            f"&lang=zh"
-            f"&showFileChangesPanel=true"
-        )
-        log("导航", direct_url[:200])
-        page.goto(direct_url, wait_until="domcontentloaded")
-        pause(5)
-        shot(page, "06_webui_projects")
+        # 阶段 3-7 需要真实 qwen-code-webui；issues lane 不启动它（user-url
+        # 指向无人监听的端口），探测失败时降级跳过而不是让导航超时。
+        webui_reachable = False
+        try:
+            probe = requests.get(webui_url, timeout=3)
+            webui_reachable = probe.status_code < 500
+        except requests.RequestException as exc:
+            log("webui 探测", f"不可达（{exc.__class__.__name__}），跳过阶段 3-7")
 
-        # 检查是否到了 qwen-code-webui
-        body_text = page.locator("body").text_content() or ""
-        is_webui = len(body_text) > 50
-        check("qwen-code-webui 已加载", is_webui)
-        log("页面文本", body_text[:200])
+        is_webui = False
+        if webui_reachable:
+            # 直接导航到 qwen-code-webui projects 页面
+            direct_url = (
+                f"{webui_url}/projects"
+                f"?token={token}"
+                f"&openace_url={openace_url}"
+                f"&lang=zh"
+                f"&showFileChangesPanel=true"
+            )
+            log("导航", direct_url[:200])
+            page.goto(direct_url, wait_until="domcontentloaded")
+            pause(5)
+            shot(page, "06_webui_projects")
+
+            # 检查是否到了 qwen-code-webui
+            body_text = page.locator("body").text_content() or ""
+            is_webui = len(body_text) > 50
+            check("qwen-code-webui 已加载", is_webui)
+            log("页面文本", body_text[:200])
 
         # ══════ 4-7. 面板功能测试 ══════
         if is_webui:
-            test_panel_features(page, page, shot, check, log, pause)
+            _check_panel_features(page, page, shot, check, log, pause)
 
         # ══════ 8. 设置关闭面板验证 ══════
         print("\n══════ 8. 设置关闭面板验证（localStorage → URL 参数）")
@@ -454,3 +510,26 @@ def run_tests():
 
 if __name__ == "__main__":
     run_tests()
+
+
+# ═══════════════════════════════════════════════════════════
+# Pytest entry (single collected test; see module docstring)
+# ═══════════════════════════════════════════════════════════
+
+
+def test_e2e_file_changes_panel_script():
+    """Drive this script as a subprocess against BASE_URL (#2457)."""
+    try:
+        resp = requests.get(f"{BASE_URL}/login", timeout=5)
+        resp.raise_for_status()
+    except Exception:
+        pytest.skip(f"test server not reachable at {BASE_URL}")
+
+    proc = subprocess.run(
+        [sys.executable, os.path.abspath(__file__)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert proc.returncode == 0, f"script failed:\n{proc.stdout}\n{proc.stderr}"
+    assert "结果: " in proc.stdout and "失败" in proc.stdout
