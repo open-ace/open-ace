@@ -74,14 +74,6 @@
     },
     {
       "category": "setup_error",
-      "exception_type": "AssertionError",
-      "issue_number": "144",
-      "nodeid": "tests/issues/144/e2e_file_changes_panel.py::test_panel_features",
-      "outcome": "error",
-      "summary": "failed on setup with \"AssertionError\""
-    },
-    {
-      "category": "setup_error",
       "exception_type": "",
       "issue_number": "166",
       "nodeid": "tests/issues/166/test_launchd_env.py::test_qwen_cli",
@@ -209,38 +201,6 @@
       "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/login"
     },
     {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "210",
-      "nodeid": "tests/issues/210/e2e_project_stats_accuracy.py::test_project_stats_accuracy",
-      "outcome": "failure",
-      "summary": "AssertionError: Stats API failed: 403"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "211",
-      "nodeid": "tests/issues/211/e2e_project_sort.py::test_project_sort",
-      "outcome": "failure",
-      "summary": "AssertionError: Stats API failed: 403"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "2121",
-      "nodeid": "tests/issues/2121/test_sso_user_tenant_id.py::TestCreateUserFromSsoTenantId::test_uses_default_tenant_id_when_provider_not_found",
-      "outcome": "failure",
-      "summary": "assert None == 42"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "2121",
-      "nodeid": "tests/issues/2121/test_sso_user_tenant_id.py::TestCreateUserFromSsoTenantId::test_uses_default_tenant_id_when_provider_tenant_id_is_none",
-      "outcome": "failure",
-      "summary": "assert None == 42"
-    },
-    {
       "category": "test_body_exception",
       "exception_type": "ValueError",
       "issue_number": "22",
@@ -263,38 +223,6 @@
       "nodeid": "tests/issues/25/test_issue25.py::test_issue25",
       "outcome": "failure",
       "summary": "playwright._impl._errors.TimeoutError: Page.fill: Timeout 30000ms exceeded."
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "394",
-      "nodeid": "tests/issues/394/e2e_terminal_tab.py::test_session_sync_api",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/394/e2e_terminal_tab.py, line 183"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "AssertionError",
-      "issue_number": "394",
-      "nodeid": "tests/issues/394/e2e_terminal_tab.py::test_terminal_connection_and_interaction",
-      "outcome": "error",
-      "summary": "failed on setup with \"AssertionError\""
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "AssertionError",
-      "issue_number": "394",
-      "nodeid": "tests/issues/394/e2e_terminal_tab.py::test_terminal_option_in_modal",
-      "outcome": "error",
-      "summary": "failed on setup with \"AssertionError\""
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "394",
-      "nodeid": "tests/issues/394/e2e_terminal_tab.py::test_terminal_tab",
-      "outcome": "failure",
-      "summary": "AssertionError: Login failed: {\"error\":\"Invalid username or password\"}"
     },
     {
       "category": "assertion_failure",
@@ -366,7 +294,7 @@
       "issue_number": "52",
       "nodeid": "tests/issues/52/test_issue52.py::test_database_migration",
       "outcome": "failure",
-      "summary": "AssertionError: linux_account 字段未添加到 users 表"
+      "summary": "AssertionError: linux_account \u5b57\u6bb5\u672a\u6dfb\u52a0\u5230 users \u8868"
     },
     {
       "category": "assertion_failure",
@@ -382,7 +310,7 @@
       "issue_number": "52",
       "nodeid": "tests/issues/52/test_issue52.py::test_update_user_with_linux_account",
       "outcome": "failure",
-      "summary": "AssertionError: 创建用户失败"
+      "summary": "AssertionError: \u521b\u5efa\u7528\u6237\u5931\u8d25"
     },
     {
       "category": "test_body_exception",
@@ -550,7 +478,7 @@
       "issue_number": "913",
       "nodeid": "tests/issues/913/test_pr909_review_feedback.py::TestGetCheckFailureExcerpt::test_ci_repair_context_skips_excerpt_failure",
       "outcome": "failure",
-      "summary": "assert '失败摘录' not in \"PR #42 在合并前...9180888144'>\""
+      "summary": "assert '\u5931\u8d25\u6458\u5f55' not in \"PR #42 \u5728\u5408\u5e76\u524d...9180888144'>\""
     },
     {
       "category": "test_body_exception",
@@ -587,8 +515,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-20 prune 12 resolved entries across three clusters (85->73). 172 quota e2e (4): the file was a manual deployment diagnostic whose check functions took plain args pytest misread as fixtures; moved to manual_e2e_quota_enforcement.py out of discovery, historical path kept as a pointer+guard so the round-robin shard layout is unchanged. 1895 redis auth (4): production evolved to fail-closed - dev empty REDIS_PASSWORD now raises RuntimeError instead of warning, so the fail-open assertion was inverted and special-char passwords lengthened past the validation minimum. 987 prompt truncation (4): fixtures drifted from the phase-migrated autonomous review - agent result must be a REVIEW_RESULT JSON verdict, gh.get_current_branch/_validate_autonomous_change_scope mocked, zh content-language case constructed accordingly.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32373066502",
+    "prune_note": "2026-08-22 prune 9 entries (73->64). Fixed by this PR's test realignments: 211 e2e (1) - the projects page renders an empty-state with no <table> on a fresh DB and the table gained a spacer column plus non-sortable columns, so the test now seeds projects via the API and asserts caret icons only on columns that actually toggle; 2121 sso provisioning (2) - #2893 added the auto_provision_users tenant check (stubbed for hermetic unit tests) and #1826 F6 removed the silent tenant-1 fallback, so the two no-binding cases now assert rejection. Resolved independently on main, observed in the verification run: 210 e2e project stats accuracy (1). Moved to quarantine, NOT fixed: 144 e2e (1) + 394 terminal e2e (4) - these legacy sync-playwright scripts are wired onto the async 'page' fixture; on CI the fixture wedges chromium and async teardown sits outside pytest-timeout's coverage, so issue-tests shards 1/2 hung for the full 180-minute job timeout on runs 32509705360/32561885885. They are deselected via ci/legacy-issue-quarantine.json pending the #2457 rewrite onto self-contained sync subprocess plumbing.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32565288903",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
