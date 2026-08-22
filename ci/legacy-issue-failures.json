@@ -83,58 +83,10 @@
     {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
-      "issue_number": "42",
-      "nodeid": "tests/issues/42/test_webui_manager.py::test_manager_get_user_webui_url_single_user",
-      "outcome": "failure",
-      "summary": "AssertionError: assert False"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "42",
-      "nodeid": "tests/issues/42/test_webui_manager.py::test_manager_instance_limit",
-      "outcome": "failure",
-      "summary": "TypeError: cannot unpack non-iterable NoneType object"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
       "issue_number": "435",
       "nodeid": "tests/issues/435/e2e_api_key_toggle.py::test_api_key_toggle",
       "outcome": "failure",
       "summary": "assert 403 == 200"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "47",
-      "nodeid": "tests/issues/47/test_auto_refresh.py::test_auto_refresh_historical_date",
-      "outcome": "failure",
-      "summary": "TypeError: 'PlaywrightContextManager' object does not support the context manager protocol"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TypeError",
-      "issue_number": "47",
-      "nodeid": "tests/issues/47/test_auto_refresh.py::test_auto_refresh_today",
-      "outcome": "failure",
-      "summary": "TypeError: 'PlaywrightContextManager' object does not support the context manager protocol"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "Error",
-      "issue_number": "48",
-      "nodeid": "tests/issues/48/test_status_bar_usage.py::test_status_bar_usage",
-      "outcome": "failure",
-      "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "Error",
-      "issue_number": "48",
-      "nodeid": "tests/issues/48/test_status_bar_usage_v2.py::test_status_bar_improvements",
-      "outcome": "failure",
-      "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/"
     },
     {
       "category": "test_body_exception",
@@ -217,22 +169,6 @@
       "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/login"
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "TimeoutError",
-      "issue_number": "82",
-      "nodeid": "tests/issues/82/test_sidebar_collapse.py::test_sidebar_collapse",
-      "outcome": "failure",
-      "summary": "playwright._impl._errors.TimeoutError: Page.fill: Timeout 30000ms exceeded."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "TimeoutError",
-      "issue_number": "82",
-      "nodeid": "tests/issues/82/test_sidebar_collapse_normal_user.py::test_sidebar_collapse_normal_user",
-      "outcome": "failure",
-      "summary": "playwright._impl._errors.TimeoutError: Page.fill: Timeout 30000ms exceeded."
-    },
-    {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
       "issue_number": "913",
@@ -275,8 +211,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-22 prune 27 entries (61->34). Batch closeout of eleven fixture-drift clusters (1111, 1306, 166, 1778, 1816, 1897, 198, 52, 761, 811, 826), all realigned against evolved production contracts: retired numbered-migration ids (1111) with the alias-merged summary span now recomputed at the repository boundary; v2 webui token format (1306); launchd/stream-json manual diagnostics moved out of discovery (166); proxy env isolation for safe_request merge semantics (1778); staged-dirty-tree policy and require_tenant rebinding kwarg (1816); _extract_session_token decorator rename (1897); manual-driver collection fixes (198); system_account rename + hermetic sqlite (52); PLANNING_TIMEOUT 1800s (761); rebuilt tmp_db fixture (811); regular-repo git context shape (826). One production fix rides along: get_summary_by_tool recomputes days_count/first_date/last_date over the whole alias family (the migration-038 property the read-boundary merge had lost).",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32580586752",
+    "prune_note": "Prune 8 entries (34->26). Batch closeout of four lane-e2e clusters: 42 (v2 webui token prefix; _launch_webui_process now returns (process, model_pool) and a None process means launch failure), 47 (sync-API conversion — async_playwright under a sync with-block was the baselined protocol TypeError — plus current /manage/messages selectors), 48 (BASE_URL was hardcoded to localhost:19888 so the lane's ephemeral port was the baselined ERR_CONNECTION_REFUSED), 82 (async API + retired login fields and sidebar ids; the /work panel collapse is session-local by design). All test-only.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32583357367",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
