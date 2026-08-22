@@ -10,51 +10,6 @@
       "exit_condition": "The remote LLM-proxy handler returns a non-deadlocking result (500/502) after exhausting failover keys; verified when the weekly subprocess probe for this nodeid passes.",
       "expires_on": "2026-09-09",
       "expected_probe_outcome": "timeout"
-    },
-    {
-      "nodeid": "tests/issues/144/e2e_file_changes_panel.py::test_panel_features",
-      "reason": "Legacy sync-playwright e2e wired onto the async page fixture (pytest-asyncio): fixture setup wedges chromium, pytest-timeout kills the test but async fixture teardown is outside its coverage, so the CI shard never exits (two nightly runs lost issue-tests shards 1/2 to this for the full 180-minute job timeout).",
-      "owner": "richardhuang",
-      "tracking_issue": "https://github.com/open-ace/open-ace/issues/2457",
-      "exit_condition": "Issue-144 e2e rewritten onto self-contained sync subprocess plumbing (skip without a reachable server) and re-added to discovery under #2457 cluster closeout.",
-      "expires_on": "2026-09-05",
-      "expected_probe_outcome": "timeout"
-    },
-    {
-      "nodeid": "tests/issues/394/e2e_terminal_tab.py::test_terminal_option_in_modal",
-      "reason": "Legacy sync-playwright e2e wired onto the async page fixture (pytest-asyncio): same CI shard deadlock as the issue-144 entry; pytest-timeout cannot recover the session once async fixture teardown wedges.",
-      "owner": "richardhuang",
-      "tracking_issue": "https://github.com/open-ace/open-ace/issues/2457",
-      "exit_condition": "Issue-394 e2e rewrite (subprocess entry, cohabitation-safe against issue-165 session pollution) lands under #2457 cluster closeout.",
-      "expires_on": "2026-09-05",
-      "expected_probe_outcome": "timeout"
-    },
-    {
-      "nodeid": "tests/issues/394/e2e_terminal_tab.py::test_session_sync_api",
-      "reason": "Legacy sync-playwright e2e wired onto the async page fixture (pytest-asyncio): same CI shard deadlock as the issue-144 entry.",
-      "owner": "richardhuang",
-      "tracking_issue": "https://github.com/open-ace/open-ace/issues/2457",
-      "exit_condition": "Issue-394 e2e rewrite (subprocess entry, cohabitation-safe against issue-165 session pollution) lands under #2457 cluster closeout.",
-      "expires_on": "2026-09-05",
-      "expected_probe_outcome": "timeout"
-    },
-    {
-      "nodeid": "tests/issues/394/e2e_terminal_tab.py::test_terminal_connection_and_interaction",
-      "reason": "Legacy sync-playwright e2e wired onto the async page fixture (pytest-asyncio): same CI shard deadlock as the issue-144 entry.",
-      "owner": "richardhuang",
-      "tracking_issue": "https://github.com/open-ace/open-ace/issues/2457",
-      "exit_condition": "Issue-394 e2e rewrite (subprocess entry, cohabitation-safe against issue-165 session pollution) lands under #2457 cluster closeout.",
-      "expires_on": "2026-09-05",
-      "expected_probe_outcome": "timeout"
-    },
-    {
-      "nodeid": "tests/issues/394/e2e_terminal_tab.py::test_terminal_tab",
-      "reason": "Legacy sync-playwright e2e wired onto the async page fixture (pytest-asyncio): same CI shard deadlock as the issue-144 entry.",
-      "owner": "richardhuang",
-      "tracking_issue": "https://github.com/open-ace/open-ace/issues/2457",
-      "exit_condition": "Issue-394 e2e rewrite (subprocess entry, cohabitation-safe against issue-165 session pollution) lands under #2457 cluster closeout.",
-      "expires_on": "2026-09-05",
-      "expected_probe_outcome": "timeout"
     }
   ]
 }
