@@ -25,6 +25,20 @@ _SCRIPTS_PATH = os.path.join(_REPO_ROOT, "scripts")
 if _SCRIPTS_PATH not in sys.path:
     sys.path.insert(0, _SCRIPTS_PATH)
 
+# #2457 realignment: `import config` in a shared-shard lane can resolve to a
+# DIFFERENT config module an earlier test left on sys.path (e.g.
+# remote-agent/config.py, which has no DB_DIR — the baselined
+# AttributeError). Pin the resolution: scripts/shared first on sys.path and
+# any stale non-shared `config` dropped from the module cache before import.
+_SHARED_PATH = os.path.join(_SCRIPTS_PATH, "shared")
+if sys.path and sys.path[0] != _SHARED_PATH:
+    if _SHARED_PATH in sys.path:
+        sys.path.remove(_SHARED_PATH)
+    sys.path.insert(0, _SHARED_PATH)
+_stale_config = sys.modules.get("config")
+if _stale_config is not None and not hasattr(_stale_config, "DB_DIR"):
+    del sys.modules["config"]
+
 
 def _load_shared_db():
     """Lazy import to keep these path-dependent imports out of the top-level
