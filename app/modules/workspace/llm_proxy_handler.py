@@ -21,6 +21,11 @@ from app.utils.outbound_url_guard import safe_request
 
 logger = logging.getLogger(__name__)
 
+# Issue #1995: HTTP status codes that trigger HA failover
+# 502/503/504 are transient gateway errors suitable for failover to another key.
+# 500/501 are server-side bugs that failover cannot fix, so they are excluded.
+RETRY_STATUS_CODES = (401, 403, 429, 502, 503, 504)
+
 # Issue #2547: Stopped sessions cache for request circuit breaking
 # When a session is stopped, we add its ID here to reject subsequent
 # LLM requests from orphan processes (PPID=1) that may still be retrying.
@@ -1764,7 +1769,9 @@ def handle_llm_proxy_request(
                     exclude_key_ids.add(key_id)
                     continue
 
-                if resp.status_code in (401, 403, 429):
+                # Issue #1995: Retry on auth errors (401/403/429) and gateway errors (502/503/504)
+                # Gateway errors are transient issues where another key may succeed.
+                if resp.status_code in RETRY_STATUS_CODES:
                     exclude_key_ids.add(key_id)
                     continue
 

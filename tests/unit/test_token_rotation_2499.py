@@ -10,6 +10,7 @@ Tests for:
 
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 import sys
@@ -22,9 +23,6 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-# Add remote-agent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "remote-agent"))
-
 from app.modules.workspace.agent_token import generate_agent_token, hash_token
 
 # Test fixtures
@@ -34,6 +32,14 @@ from app.modules.workspace.remote_agent_manager import (
     MIN_TOKEN_REVOKE_TIMEOUT,
     RemoteAgentManager,
 )
+
+# Import AgentConfig directly from remote-agent/config.py to avoid conflicts
+# with scripts/shared/config.py which conftest.py adds to sys.path
+_remote_agent_config_path = Path(__file__).parent.parent.parent / "remote-agent" / "config.py"
+_spec = importlib.util.spec_from_file_location("agent_config", _remote_agent_config_path)
+_agent_config_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_agent_config_module)
+AgentConfig = _agent_config_module.AgentConfig
 
 
 class TestTokenRotation:
@@ -423,8 +429,6 @@ class TestAtomicConfigWrite:
 
     def test_atomic_write_creates_file(self):
         """Test that atomic write creates config file."""
-        from config import AgentConfig
-
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.json"
             config = AgentConfig(str(config_path))
@@ -443,8 +447,6 @@ class TestAtomicConfigWrite:
 
     def test_atomic_write_creates_backup(self):
         """Test that atomic write creates backup of existing config."""
-        from config import AgentConfig
-
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.json"
 
@@ -468,8 +470,6 @@ class TestAtomicConfigWrite:
 
     def test_atomic_write_is_atomic(self):
         """Test that atomic write doesn't corrupt config on failure."""
-        from config import AgentConfig
-
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.json"
 

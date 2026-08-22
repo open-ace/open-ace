@@ -3,7 +3,10 @@
 Tests for LLM proxy multi-key failover behavior.
 
 Validates that llm_proxy retries with the next candidate key when upstream
-returns 401/403/429, and exhausts all keys before giving up.
+returns 401/403/429 or gateway errors (502/503/504), and exhausts all keys
+before giving up.
+
+Issue #1995: Added 502/503/504 gateway error failover support.
 """
 
 import json
@@ -193,8 +196,8 @@ class TestLLMProxyFailover:
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_PROXY_PATH)
-    def test_5xx_no_failover(self, mock_get_proxy, mock_quota_cls, mock_http_req, app):
-        """5xx errors should NOT trigger failover — return error directly."""
+    def test_no_failover_on_500(self, mock_get_proxy, mock_quota_cls, mock_http_req, app):
+        """500 internal server error should NOT trigger failover — return error directly."""
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
         mock_proxy.resolve_api_key_for_scope.return_value = (
@@ -222,6 +225,149 @@ class TestLLMProxyFailover:
         assert resp.status_code == 500
         # Only 1 resolve call — no retry
         assert mock_proxy.resolve_api_key_for_scope.call_count == 1
+
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_PROXY_PATH)
+    def test_failover_on_503(self, mock_get_proxy, mock_quota_cls, mock_http_req, app):
+        """First key returns 503, second key returns 200 → succeeds via failover.
+
+        Issue #1995: 503 Service Unavailable is a transient gateway error.
+        """
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
+        mock_proxy.resolve_api_key_for_scope.side_effect = [
+            ("sk-key1", "https://api.openai.com/v1", 1, None, None),
+            ("sk-key2", "https://api.openai.com/v1", 2, None, None),
+            None,
+        ]
+        mock_get_proxy.return_value = mock_proxy
+        mock_quota_cls.return_value = _make_quota_ok()
+
+        mock_http_req.side_effect = [
+            _mock_upstream_response(503, b'{"error":{"message":"Service Unavailable"}}'),
+            _mock_upstream_response(200),
+        ]
+
+        client = app.test_client()
+        resp = client.post(
+            "/api/remote/llm-proxy",
+            json={"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert resp.status_code == 200
+        # Second resolve call should have key 1 excluded
+        calls = mock_proxy.resolve_api_key_for_scope.call_args_list
+        assert len(calls) == 2
+        second_exclude = calls[1].kwargs.get("exclude_key_ids", set())
+        assert 1 in second_exclude
+
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_PROXY_PATH)
+    def test_failover_on_502(self, mock_get_proxy, mock_quota_cls, mock_http_req, app):
+        """First key returns 502 Bad Gateway, second key returns 200 → succeeds.
+
+        Issue #1995: 502 Bad Gateway is a transient gateway error.
+        """
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
+        mock_proxy.resolve_api_key_for_scope.side_effect = [
+            ("sk-key1", "https://api.openai.com/v1", 1, None, None),
+            ("sk-key2", "https://api.openai.com/v1", 2, None, None),
+            None,
+        ]
+        mock_get_proxy.return_value = mock_proxy
+        mock_quota_cls.return_value = _make_quota_ok()
+
+        mock_http_req.side_effect = [
+            _mock_upstream_response(502, b'{"error":{"message":"Bad Gateway"}}'),
+            _mock_upstream_response(200),
+        ]
+
+        client = app.test_client()
+        resp = client.post(
+            "/api/remote/llm-proxy",
+            json={"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert resp.status_code == 200
+        calls = mock_proxy.resolve_api_key_for_scope.call_args_list
+        assert len(calls) == 2
+        second_exclude = calls[1].kwargs.get("exclude_key_ids", set())
+        assert 1 in second_exclude
+
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_PROXY_PATH)
+    def test_failover_on_504(self, mock_get_proxy, mock_quota_cls, mock_http_req, app):
+        """First key returns 504 Gateway Timeout, second key returns 200 → succeeds.
+
+        Issue #1995: 504 Gateway Timeout is a transient gateway error.
+        """
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
+        mock_proxy.resolve_api_key_for_scope.side_effect = [
+            ("sk-key1", "https://api.openai.com/v1", 1, None, None),
+            ("sk-key2", "https://api.openai.com/v1", 2, None, None),
+            None,
+        ]
+        mock_get_proxy.return_value = mock_proxy
+        mock_quota_cls.return_value = _make_quota_ok()
+
+        mock_http_req.side_effect = [
+            _mock_upstream_response(504, b'{"error":{"message":"Gateway Timeout"}}'),
+            _mock_upstream_response(200),
+        ]
+
+        client = app.test_client()
+        resp = client.post(
+            "/api/remote/llm-proxy",
+            json={"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert resp.status_code == 200
+        calls = mock_proxy.resolve_api_key_for_scope.call_args_list
+        assert len(calls) == 2
+        second_exclude = calls[1].kwargs.get("exclude_key_ids", set())
+        assert 1 in second_exclude
+
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_PROXY_PATH)
+    def test_all_keys_exhausted_on_503(self, mock_get_proxy, mock_quota_cls, mock_http_req, app):
+        """All keys fail with 503 → returns 502 with exhaustion message.
+
+        Issue #1995: Verify all keys are tried before giving up on 503.
+        """
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
+        mock_proxy.resolve_api_key_for_scope.side_effect = [
+            ("sk-1", "https://api.openai.com/v1", 1, None, None),
+            ("sk-2", "https://api.openai.com/v1", 2, None, None),
+            ("sk-3", "https://api.openai.com/v1", 3, None, None),
+            None,
+        ]
+        mock_get_proxy.return_value = mock_proxy
+        mock_quota_cls.return_value = _make_quota_ok()
+
+        mock_http_req.return_value = _mock_upstream_response(
+            503, b'{"error":{"message":"Service Unavailable"}}'
+        )
+
+        client = app.test_client()
+        resp = client.post(
+            "/api/remote/llm-proxy",
+            json={"model": "gpt-4", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert resp.status_code == 502
+        data = resp.get_json()
+        assert "3 API key(s) failed" in data["error"]["message"]
 
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
