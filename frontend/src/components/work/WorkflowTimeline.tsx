@@ -81,6 +81,12 @@ const STATUS_ICONS: Record<string, string> = {
   cancelled: 'bi-slash-circle-fill',
   forked: 'bi-diagram-3-fill',
   pending: 'bi-circle',
+  // acceptance_verification milestones carry the verifier's verdict as their
+  // status; without these entries they all fell through to the pending icon
+  // ("等待中" + hollow circle) even after a confirmed/rejected verdict.
+  confirmed: 'bi-check-circle-fill',
+  rejected: 'bi-x-circle-fill',
+  indeterminate: 'bi-exclamation-circle-fill',
 };
 
 // Milestone type display config
@@ -130,6 +136,95 @@ const ACCEPTANCE_STATUS_KEYS: Record<string, string> = {
   confirmed: 'autoAcceptanceStatusConfirmed',
   rejected: 'autoAcceptanceStatusRejected',
   indeterminate: 'autoAcceptanceStatusIndeterminate',
+};
+
+interface AcceptanceEntryLike {
+  item?: unknown;
+  verdict?: unknown;
+}
+
+const truncateSummaryName = (name: string): string =>
+  name.length > 40 ? `${name.slice(0, 39)}…` : name;
+
+/**
+ * One-line, UI-language summary of an acceptance_verification milestone,
+ * computed from the full report JSON in `milestone.metadata` (#2985).
+ *
+ * The backend `result_summary` ("status=confirmed; scope=1 gates=0 verifier=3")
+ * is a compact diagnostic string; users cannot tell what scope/gates/verifier
+ * mean. This renders e.g. "必需路径 1/1 已变更 · 语义检查 3/3 确认" for a
+ * confirmed report, or "未过项: quotaFormatter.ts、… (+1 项)" for a rejected
+ * one. Returns null when metadata is absent/malformed so the caller falls
+ * back to the persisted raw summary.
+ */
+export const getAcceptanceSummaryDetail = (
+  metadata: string | null | undefined,
+  language: Language
+): string | null => {
+  if (!metadata?.trim()) return null;
+  let report: Record<string, unknown>;
+  try {
+    report = JSON.parse(metadata) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const status = String(report.status ?? '');
+  if (!(status in ACCEPTANCE_STATUS_KEYS)) return null;
+  const translate = (key: string, fallback: string) => {
+    const value = t(key, language);
+    return value === key ? fallback : value;
+  };
+  const itemsSuffix = translate('autoAcceptanceItemsSuffix', 'items');
+  const collect = (key: string): AcceptanceEntryLike[] => {
+    const value = report[key];
+    return Array.isArray(value)
+      ? (value.filter((e) => e && typeof e === 'object') as AcceptanceEntryLike[])
+      : [];
+  };
+  const scope = collect('scope');
+  const gates = collect('gates');
+  const verifier = collect('verifier');
+  const advisoryCount = [scope, gates, verifier]
+    .flat()
+    .filter((e) => e.verdict === 'advisory').length;
+  const failed = [scope, gates, verifier]
+    .flat()
+    .filter((e) => e.verdict !== 'confirmed' && e.verdict !== 'advisory')
+    .map((e) => String(e.item ?? '').trim())
+    .filter(Boolean);
+
+  const parts: string[] = [];
+  if (status === 'confirmed') {
+    const groups: Array<[string, string, AcceptanceEntryLike[]]> = [
+      ['autoAcceptancePathsLabel', 'Required paths', scope],
+      ['autoAcceptanceGatesLabel', 'Mechanical gates', gates],
+      ['autoAcceptanceChecksLabel', 'Semantic checks', verifier],
+    ];
+    for (const [labelKey, labelFallback, entries] of groups) {
+      if (entries.length === 0) continue;
+      const confirmed = entries.filter((e) => e.verdict === 'confirmed').length;
+      parts.push(`${translate(labelKey, labelFallback)} ${confirmed}/${entries.length}`);
+    }
+  } else {
+    const label =
+      status === 'rejected'
+        ? translate('autoAcceptanceFailedLabel', 'Failed')
+        : translate('autoAcceptanceUnresolvedLabel', 'Unresolved');
+    const nameJoin = language === 'zh' || language === 'ja' ? '、' : ', ';
+    if (failed.length > 0) {
+      const shown = failed.slice(0, 3).map(truncateSummaryName);
+      const extra = failed.length - shown.length;
+      parts.push(
+        `${label}: ${shown.join(nameJoin)}${extra > 0 ? ` (+${extra} ${itemsSuffix})` : ''}`
+      );
+    } else {
+      parts.push(label);
+    }
+  }
+  if (advisoryCount > 0) {
+    parts.push(`${translate('autoAcceptanceAdvisoryLabel', 'advisory')} ${advisoryCount}`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
 };
 
 export const formatAcceptanceReport = (metadata: string, language: Language): string => {
@@ -881,6 +976,28 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     if (!value) return '';
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) return '';
+    // Time alone cannot tell which DAY a milestone belongs to — workflows
+    // span multiple days, so always show month-day (plus year when it
+    // differs from the current year).
+    const sameYear = parsed.getFullYear() === new Date().getFullYear();
+    return new Intl.DateTimeFormat(undefined, {
+      ...(sameYear ? {} : { year: 'numeric' }),
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(parsed);
+  };
+
+  // Live-activity rows live in a fixed-width (58px) time column laid out for
+  // HH:mm:ss (#1025) and stream same-session events — keep them time-only so
+  // the longer date-bearing string cannot wrap the row.
+  const formatActivityTime = (value: string | null) => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
     return new Intl.DateTimeFormat(undefined, {
       hour: '2-digit',
       minute: '2-digit',
@@ -899,7 +1016,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     subtype?: string;
     attempt?: number;
   }) => {
-    const timestamp = formatMilestoneTime(activity.timestamp ?? null) || '--:--:--';
+    const timestamp = formatActivityTime(activity.timestamp ?? null) || '--:--:--';
     if (activity.type === 'tool_use') {
       const snippet = activity.tool_input?.trim();
       return {
@@ -1628,6 +1745,13 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       ''
     ).trim();
     const milestoneSummary = rawSummary ? truncateInlineText(rawSummary, compact ? 120 : 220) : '';
+    // acceptance_verification cards prefer the structured, UI-language summary
+    // computed from the report JSON over the backend's diagnostic string
+    // ("status=confirmed; scope=1 gates=0 verifier=3").
+    const acceptanceSummaryDetail =
+      milestone.milestone_type === 'acceptance_verification'
+        ? getAcceptanceSummaryDetail(milestone.metadata, language)
+        : null;
     const statusDisplay = (() => {
       if (milestone.status === 'completed') {
         return {
@@ -1664,6 +1788,30 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           tone: 'warning' as const,
         };
       }
+      // acceptance_verification verdicts (labels reuse the #2658 report-viewer
+      // keys): confirmed is a terminal green check, rejected a red cross,
+      // indeterminate a warning awaiting human review.
+      if (milestone.status === 'confirmed') {
+        return {
+          icon: STATUS_ICONS.confirmed,
+          label: t('autoAcceptanceStatusConfirmed', language),
+          tone: 'success' as const,
+        };
+      }
+      if (milestone.status === 'rejected') {
+        return {
+          icon: STATUS_ICONS.rejected,
+          label: t('autoAcceptanceStatusRejected', language),
+          tone: 'danger' as const,
+        };
+      }
+      if (milestone.status === 'indeterminate') {
+        return {
+          icon: STATUS_ICONS.indeterminate,
+          label: t('autoAcceptanceStatusIndeterminate', language),
+          tone: 'warning' as const,
+        };
+      }
       return {
         icon: STATUS_ICONS.pending,
         label: t('autoStatusPending', language),
@@ -1676,7 +1824,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         : '';
     const showDetailSections = isExpanded && canExpand;
     const showLiveActivitySection = isActivityHost;
-    const showInlinePreview = !compact && milestoneSummary;
+    const showInlinePreview = !compact && (acceptanceSummaryDetail ?? milestoneSummary);
     const showInlineSessionButton = !compact && !!llmSessionId;
     const showInlineActionGroup =
       showInlineSessionButton ||
@@ -1723,9 +1871,15 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               {showInlinePreview && (
                 <p
                   className="timeline-milestone-preview"
-                  title={rawSummary.length > 220 ? rawSummary : undefined}
+                  title={
+                    acceptanceSummaryDetail
+                      ? undefined
+                      : rawSummary.length > 220
+                        ? rawSummary
+                        : undefined
+                  }
                 >
-                  {milestoneSummary}
+                  {acceptanceSummaryDetail ?? milestoneSummary}
                 </p>
               )}
               <div className="timeline-milestone-meta-row">

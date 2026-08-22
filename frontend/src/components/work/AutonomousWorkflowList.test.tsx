@@ -477,9 +477,30 @@ describe('AutonomousWorkflowList', () => {
     fireEvent.click(pausedTab);
 
     const lastFilters = lastWorkflowFilters();
-    // Exact match — the active tab's comma list also contains "paused" as a
-    // substring, so toContain() would pass trivially here.
-    expect(lastFilters?.status).toBe('paused');
+    // Exact match — a substring assertion would pass trivially. planning_timeout
+    // is the paused-variant state and belongs here, not in the active tab.
+    expect(lastFilters?.status).toBe('paused,planning_timeout');
+  });
+
+  it('keeps paused workflows out of the active tab (#2985)', () => {
+    // The active tab used to include paused(+planning_timeout) in its comma
+    // list, so it rendered the exact same rows as the paused tab whenever
+    // only paused workflows remained.
+    mockWorkflowList([
+      workflow({ workflow_id: 'wf-paused', status: 'paused' }),
+      workflow({ workflow_id: 'wf-active', status: 'developing' }),
+    ]);
+
+    render(
+      <AutonomousWorkflowList selectedId={null} onSelect={vi.fn()} onClearSelection={vi.fn()} />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Active' }));
+
+    const lastFilters = lastWorkflowFilters();
+    expect(lastFilters?.status).toBe(
+      'pending,preparing,planning,developing,pr_review,reporting,waiting,merging,verification_pending'
+    );
   });
 
   it('labels pause reasons for acceptance, quota, and manual pauses', () => {
