@@ -35,7 +35,11 @@ lane with tests/issues/165, whose leftover machine goes offline (heartbeat
 timeout) and whose sessions stay in the shared per-shard DB. The script
 therefore registers its OWN machine right before Phase 4 (selected by
 name in the modal) and seeds its own terminal-model API key, instead of
-trusting whatever machine rows earlier tests left behind.
+trusting whatever machine rows earlier tests left behind. It also enables
+the workspace feature in the lane config (fresh homes default it off and
+the page gates even terminal-only tabs behind it) and seeds one local tab
+first: Workspace's own modal — the one that actually creates a terminal
+tab — only becomes reachable from the tab strip once a tab exists.
 """
 
 import asyncio
@@ -101,6 +105,36 @@ def _clear_seeded_password_gate():
             conn.close()
     except sqlite3.Error as exc:
         log("Setup", f"password-gate clear skipped: {exc}")
+
+
+def _ensure_workspace_enabled():
+    """Enable the workspace feature in the lane config (idempotent, #2457).
+
+    /api/workspace/config reports workspace.enabled from ~/.open-ace/
+    config.json (default false in a freshly initialized home) and the
+    workspace page gates EVERYTHING behind it — including terminal-only
+    tabs — so a default lane home renders "Workspace not configured" and
+    the terminal tab never mounts (this is the "body text: Open ACE" CI
+    failure signature). The endpoint re-reads the file per request, so
+    flipping it needs no server restart. Deployed environments carry
+    their own workspace config and are unaffected.
+    """
+    config_path = os.path.expanduser("~/.open-ace/config.json")
+    config = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            config = {}
+    workspace = config.setdefault("workspace", {})
+    if workspace.get("enabled"):
+        return
+    workspace["enabled"] = True
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+    log("Setup", "enabled workspace feature in config.json")
 
 
 def login_via_api():
@@ -426,16 +460,21 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port, machine_name)
     mock_ws_url = f"ws://localhost:{mock_ws_port}"
     log("Phase 4", f"Mock terminal server running on port {mock_ws_port}")
 
-    # Intercept start_terminal API: return mock server info directly
+    # Intercept start_terminal API like a cold backend: accept the request,
+    # return "pending" with no ws_url yet. The real proxy takes seconds to
+    # spawn, and that ordering is load-bearing — TerminalTab's connect
+    # effect runs once per wsUrl/token VALUE change, so a ws_url delivered
+    # before xterm's async chunk import finishes is silently dropped (the
+    # browser never opens the WebSocket). The status poll below delivers
+    # the ws_url only after xterm is ready, which is exactly how the
+    # production timing plays out.
     def handle_start(route):
         route.fulfill(
             json={
                 "success": True,
                 "terminal": {
                     "terminal_id": "mock-terminal-e2e-001",
-                    "status": "running",
-                    "ws_url": mock_ws_url,
-                    "token": "test-mock-token",
+                    "status": "pending",
                 },
             }
         )
@@ -444,16 +483,50 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port, machine_name)
     def handle_stop(route):
         route.fulfill(json={"success": True})
 
+    # Intercept the status poll: Workspace polls terminal status until the
+    # WebSocket proxy is ready, and only (re)applies ws_url/token — which
+    # is what triggers TerminalTab's connect once xterm is initialized.
+    # Without this the poll loops on "status: unknown" forever and the
+    # never-connected terminal is exactly the CI failure mode. The first
+    # two polls answer "pending" like the real backend (proxy spawn takes
+    # seconds); answering "running" instantly loses the race against
+    # xterm's async chunk import — the connect effect would fire before
+    # xtermRef exists and never re-fire.
+    status_poll_count = [0]
+
+    def handle_status(route):
+        status_poll_count[0] += 1
+        terminal = {
+            "terminal_id": "mock-terminal-e2e-001",
+            "status": "pending",
+        }
+        if status_poll_count[0] > 2:
+            terminal = {
+                "terminal_id": "mock-terminal-e2e-001",
+                "status": "running",
+                "ws_url": mock_ws_url,
+                "token": "test-mock-token",
+            }
+        route.fulfill(json={"success": True, "terminal": terminal})
+
     page.route("**/api/remote/terminal/start", handle_start)
     page.route("**/api/remote/terminal/stop", handle_stop)
+    # trailing *: playwright globs match the full URL including the
+    # ?machine_id=... query string the status poll appends
+    page.route("**/api/remote/terminal/*/status*", handle_status)
 
     try:
-        # Navigate to workspace
-        page.goto(f"{BASE_URL}/work/workspace", wait_until="networkidle", timeout=30000)
+        # Seed one local tab through the product's own URL-param path. The
+        # tab strip — and Workspace's NewSessionModal wiring, including
+        # onCreateTerminal — only renders once a tab exists; on a fresh
+        # workspace the sidebar button opens SessionList's modal, whose
+        # terminal path calls the API directly and creates NO tab (the
+        # "Create clicked but no xterm" failure mode).
+        page.goto(f"{BASE_URL}/work/workspace?newTab=true", wait_until="networkidle", timeout=30000)
         time.sleep(2)
 
-        # Open new session modal (see Phase 1 note on the selector)
-        new_tab_btn = page.locator("[data-testid='new-session-btn'], .workspace-new-tab-btn").first
+        # Open Workspace's modal via the tab-strip new-tab button
+        new_tab_btn = page.locator(".workspace-new-tab-btn")
         new_tab_btn.wait_for(state="visible", timeout=10000)
         new_tab_btn.click()
         time.sleep(1)
@@ -488,13 +561,17 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port, machine_name)
         log("Phase 4", f"Selected machine {machine_name!r}")
 
         # Wait for the terminal-models fetch to arm the Create button
-        # (selectedModelKey defaults to the first advertised model).
-        create_btn = modal.locator("button.btn-primary").filter(has_text=["创建", "Create"]).last
+        # (selectedModelKey defaults to the first advertised model). The
+        # footer Create is addressed by role: the workspace-type toggles
+        # also carry .btn-primary when selected, so class+text filtering
+        # is ambiguous.
+        create_btn = modal.get_by_role("button", name="Create")
+        create_btn.wait_for(state="visible", timeout=10000)
         for _ in range(30):
-            if create_btn.is_enabled():
+            if create_btn.is_enabled(timeout=1000):
                 break
             time.sleep(1)
-        assert create_btn.is_enabled(), (
+        assert create_btn.is_enabled(timeout=1000), (
             "Create button never enabled — terminal-models likely returned no "
             f"models (modal: {modal.inner_text()[:300]})"
         )
@@ -512,6 +589,8 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port, machine_name)
             lambda msg: (
                 console_errors.append(f"[console.{msg.type}] {msg.text}")
                 if msg.type in ("error", "warning")
+                or "[TerminalTab]" in msg.text
+                or "[Terminal]" in msg.text
                 else None
             ),
         )
@@ -544,7 +623,10 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port, machine_name)
                 break
             time.sleep(1)
 
-        assert connected, "Terminal did not reach Connected state within 15 seconds"
+        assert connected, (
+            "Terminal did not reach Connected state within 15 seconds. "
+            f"Terminal logs: {console_errors}"
+        )
         log("Phase 4", "Terminal connected to mock server!")
         take_screenshot(page, "p4-03-terminal-connected")
 
@@ -615,6 +697,7 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port, machine_name)
     finally:
         page.unroute("**/api/remote/terminal/start")
         page.unroute("**/api/remote/terminal/stop")
+        page.unroute("**/api/remote/terminal/*/status*")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -625,6 +708,7 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port, machine_name)
 def run_all_checks():
     """Run all terminal tab checks (script entrypoint)."""
     _clear_seeded_password_gate()
+    _ensure_workspace_enabled()
     token = login_via_api()
     log("Setup", f"Logged in as {TEST_USER}")
 

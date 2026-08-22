@@ -31,6 +31,7 @@ phases (1-2, 8-9) instead of failing.
 """
 
 import os
+import re
 import subprocess
 import sys
 import time
@@ -309,10 +310,11 @@ def run_tests():
         page.fill("#password", TEST_PASS)
         page.click('button[type="submit"]')
 
-        page.wait_for_url("**/work**", timeout=15000)
+        # 平台管理员登录后落在 /manage/dashboard，普通用户落在 /work
+        page.wait_for_url(re.compile(r".*/(work|manage)"), timeout=15000)
         pause(2)
         shot(page, "01_logged_in")
-        check("登录成功", "work" in page.url)
+        check("登录成功", "work" in page.url or "manage" in page.url)
 
         # ══════ 2. 用户设置 — 面板开关 ══════
         print("\n══════ 2. 用户设置 — 面板开关")
