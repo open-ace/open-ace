@@ -46,6 +46,19 @@ def _make_provider_config(tenant_id=2):
     )
 
 
+def _auto_provision_tenant_repo():
+    """TenantRepository stub for the #2893 auto-provision policy check.
+
+    _create_user_from_sso now reads tenant.settings.auto_provision_users
+    before provisioning; the unit tests must not touch a real database.
+    """
+    tenant = MagicMock()
+    tenant.settings.auto_provision_users = True
+    repo = MagicMock()
+    repo.get_by_id.return_value = tenant
+    return repo
+
+
 class TestCreateUserFromSsoTenantId:
     """Test cases for _create_user_from_sso tenant_id handling."""
 
@@ -66,6 +79,10 @@ class TestCreateUserFromSsoTenantId:
         with (
             patch.object(sso_module, "get_sso_manager", return_value=manager),
             patch.object(sso_module, "user_repo", user_repo_mock),
+            patch(
+                "app.repositories.tenant_repo.TenantRepository",
+                return_value=_auto_provision_tenant_repo(),
+            ),
         ):
             result = sso_module._create_user_from_sso(sso_user, "test-provider")
 
@@ -76,7 +93,12 @@ class TestCreateUserFromSsoTenantId:
         assert call_kwargs["tenant_id"] == 5
 
     def test_uses_default_tenant_id_when_provider_not_found(self, app_ctx):
-        """When Provider is not found, use default tenant_id=1."""
+        """Provider not found leaves no tenant binding: creation is rejected.
+
+        #1826 F6 removed the silent fallback to tenant 1 — SSO_NULL_TENANT_POLICY
+        defaults to reject (and even warn returns None), so a missing binding
+        must fail closed instead of provisioning into the default tenant.
+        """
         sso_user = _make_sso_user()
 
         manager = MagicMock()
@@ -89,15 +111,22 @@ class TestCreateUserFromSsoTenantId:
         with (
             patch.object(sso_module, "get_sso_manager", return_value=manager),
             patch.object(sso_module, "user_repo", user_repo_mock),
+            patch(
+                "app.repositories.tenant_repo.TenantRepository",
+                return_value=_auto_provision_tenant_repo(),
+            ),
         ):
             result = sso_module._create_user_from_sso(sso_user, "unknown-provider")
 
-        assert result == 42
-        call_kwargs = user_repo_mock.create_user.call_args.kwargs
-        assert call_kwargs["tenant_id"] == 1
+        assert result is None
+        user_repo_mock.create_user.assert_not_called()
 
     def test_uses_default_tenant_id_when_provider_tenant_id_is_none(self, app_ctx):
-        """When Provider's tenant_id is None, use default tenant_id=1."""
+        """Provider tenant_id None leaves no binding: creation is rejected.
+
+        Same #1826 F6 fail-closed contract as a missing provider — no silent
+        provisioning into tenant 1.
+        """
         sso_user = _make_sso_user()
         provider_config = _make_provider_config(tenant_id=None)
 
@@ -113,12 +142,15 @@ class TestCreateUserFromSsoTenantId:
         with (
             patch.object(sso_module, "get_sso_manager", return_value=manager),
             patch.object(sso_module, "user_repo", user_repo_mock),
+            patch(
+                "app.repositories.tenant_repo.TenantRepository",
+                return_value=_auto_provision_tenant_repo(),
+            ),
         ):
             result = sso_module._create_user_from_sso(sso_user, "test-provider")
 
-        assert result == 42
-        call_kwargs = user_repo_mock.create_user.call_args.kwargs
-        assert call_kwargs["tenant_id"] == 1
+        assert result is None
+        user_repo_mock.create_user.assert_not_called()
 
     def test_uses_tenant_id_1_when_provider_tenant_id_is_1(self, app_ctx):
         """When Provider's tenant_id is 1, use tenant_id=1."""
@@ -137,6 +169,10 @@ class TestCreateUserFromSsoTenantId:
         with (
             patch.object(sso_module, "get_sso_manager", return_value=manager),
             patch.object(sso_module, "user_repo", user_repo_mock),
+            patch(
+                "app.repositories.tenant_repo.TenantRepository",
+                return_value=_auto_provision_tenant_repo(),
+            ),
         ):
             result = sso_module._create_user_from_sso(sso_user, "test-provider")
 
