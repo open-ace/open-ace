@@ -51,7 +51,14 @@ def _alembic_config() -> Config:
 
 
 def test_single_migration_head():
-    """There must be exactly one Alembic head (no fork-induced split)."""
+    """There must be exactly one Alembic head (no fork-induced split).
+
+    #2457 realignment: the head revision is no longer pinned by name — new
+    migrations legitimately advance it (the baselined failure was the pin
+    rotting when 20260821_001 landed). The guarded property is the SINGLE
+    head itself, plus that this change's migration remains on the head's
+    ancestry (not stranded on a stale side branch).
+    """
     cfg = _alembic_config()
     script_dir = ScriptDirectory.from_config(cfg)
     heads = script_dir.get_heads()
@@ -60,7 +67,12 @@ def test_single_migration_head():
         "A forked/stale head usually means main advanced and a migration needs "
         "re-parenting onto the current head."
     )
-    assert heads[0] == HEAD_REVISION
+    walk = script_dir.walk_revisions()
+    ancestors = {rev.revision for rev in walk}
+    assert ISSUE241_REVISION in ancestors, (
+        f"{ISSUE241_REVISION} is not reachable from head {heads[0]} — "
+        "the pagination index migration is stranded off the main chain"
+    )
 
 
 def test_new_migration_parents_off_current_head():
