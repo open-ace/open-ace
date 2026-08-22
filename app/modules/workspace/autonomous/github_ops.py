@@ -2508,6 +2508,48 @@ class GitHubOps:
         result = self._run_git(["diff", "--name-only", base, head])
         return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
+    def get_changed_files_with_status(
+        self, base: str = "HEAD~1", head: str = "HEAD"
+    ) -> list[tuple[str, str]]:
+        """Get ``(status, path)`` pairs between two refs.
+
+        Status is the git letter (``A``/``M``/``D``/``R``/…); a rename maps to
+        its destination path. ``-M`` is passed explicitly so rename detection
+        does not depend on the ``diff.renames`` config. Unparsable lines are
+        skipped with a warning rather than raised — a parse failure inside an
+        acceptance gate would escalate into a workflow-level infra retry.
+        """
+        result = self._run_git(["diff", "-M", "--name-status", base, head])
+        entries: list[tuple[str, str]] = []
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
+            parts = [p for p in line.split("\t") if p != ""]
+            if len(parts) < 2:
+                logger.warning("skipping unparsable name-status line: %r", line)
+                continue
+            path = parts[-1].strip()
+            if not path:
+                logger.warning("skipping name-status line without a path: %r", line)
+                continue
+            # R100/C50 similarity-scored statuses keep only the letter.
+            entries.append((parts[0].strip()[0].upper(), path))
+        return entries
+
+    def path_touched_in_range(self, base: str, head: str, path: str) -> bool:
+        """Whether ANY commit in ``base..head`` touched ``path``.
+
+        ``--full-history`` is required: git's default history simplification
+        hides commits whose change to a path was later reverted by a merge —
+        exactly the conflict-resolution loss pattern this probe exists to
+        detect (a path modified mid-range but absent from the cumulative
+        diff).
+        """
+        result = self._run_git(
+            ["log", "--full-history", "--format=%H", f"{base}..{head}", "--", path]
+        )
+        return bool(result.stdout.strip())
+
     def get_commit_diff(self, sha: str) -> str:
         """Get the diff for a specific commit."""
         result = self._run_git(["show", "--format=", sha])

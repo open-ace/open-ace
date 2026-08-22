@@ -59,12 +59,13 @@ def test_scope_git_error_is_indeterminate_not_an_exception():
     gh = MagicMock()
     gh.get_changed_files.side_effect = RuntimeError("bad object merge")
 
-    verdicts = av.run_scope_gate(gh, ["app/x.py"], "base", "merge")
+    verdicts, advisory = av.run_scope_gate(gh, ["app/x.py"], "base", "merge")
 
     assert len(verdicts) == 1
     assert verdicts[0].verdict is Verdict.INDETERMINATE
     assert verdicts[0].item == "scope:changed-files"
     assert verdicts[0].retryable is True
+    assert advisory == []
 
 
 def test_broad_legacy_regex_is_retired_from_production_aggregate():
@@ -194,7 +195,9 @@ def test_retryable_probe_error_is_not_terminally_cached_and_can_recover(failing_
         evidence=[{"ref": "error", "note": "bad object"}],
         retryable=True,
     )
-    scope_results = [[failed_probe], [confirmed_scope]] if failing_probe == "scope" else None
+    scope_results = (
+        [([failed_probe], []), ([confirmed_scope], [])] if failing_probe == "scope" else None
+    )
     gate_results = [[failed_probe], []] if failing_probe == "gate" else None
 
     with (
@@ -202,7 +205,7 @@ def test_retryable_probe_error_is_not_terminally_cached_and_can_recover(failing_
             av,
             "run_scope_gate",
             side_effect=scope_results,
-            return_value=[confirmed_scope],
+            return_value=([confirmed_scope], []),
         ),
         patch.object(
             av,
