@@ -20,6 +20,7 @@ Run:
 
 import json
 import os
+import re
 import sys
 import time
 
@@ -78,8 +79,10 @@ def api_login():
 
 
 def api_list_keys(token):
+    # tenant_id is required on the read path too (fail-closed tenant scoping).
     r = requests.get(
         f"{BASE_URL}/api/api-keys",
+        params={"tenant_id": 1},
         cookies={"session_token": token},
     )
     assert r.status_code == 200
@@ -93,7 +96,10 @@ def api_store_key(token, key_name, provider="anthropic"):
             "provider": provider,
             "key_name": key_name,
             "api_key": "sk-test-e2e-toggle-key",
-            "base_url": "https://api.example.com",
+            # The outbound URL guard blocks documentation ranges (example.com);
+            # a real provider host passes validation (the URL is only checked,
+            # never dialed, on store).
+            "base_url": "https://api.anthropic.com",
             "tenant_id": 1,
         },
         cookies={"session_token": token},
@@ -189,8 +195,10 @@ def test_api_key_toggle():
             log_step("Verify", "✓ Toggle switch is present and checked (Active)")
 
             # Verify Active badge
-            active_badge = key_row.locator("span.badge.bg-success")
-            expect(active_badge).to_have_text("Active")
+            active_badge = key_row.locator("span.badge.bg-success").filter(
+                has_text=re.compile(r"^(Active|激活|有効)$")
+            )
+            expect(active_badge).to_have_count(1)
             shot(page, "03_key_active_state")
 
             # ── Step 3: Deactivate key ────────────────────
@@ -204,8 +212,10 @@ def test_api_key_toggle():
             log_step("Verify", "✓ Toggle is unchecked")
 
             # Verify Inactive badge
-            inactive_badge = key_row.locator("span.badge.bg-secondary")
-            expect(inactive_badge).to_have_text("Inactive")
+            inactive_badge = key_row.locator("span.badge.bg-secondary").filter(
+                has_text=re.compile(r"^(Inactive|未激活|無効)$")
+            )
+            expect(inactive_badge).to_have_count(1)
             log_step("Verify", "✓ Badge shows Inactive")
             shot(page, "05_inactive_badge")
 
@@ -226,8 +236,10 @@ def test_api_key_toggle():
             log_step("Verify", "✓ Toggle is checked")
 
             # Verify Active badge
-            active_badge = key_row.locator("span.badge.bg-success")
-            expect(active_badge).to_have_text("Active")
+            active_badge = key_row.locator("span.badge.bg-success").filter(
+                has_text=re.compile(r"^(Active|激活|有効)$")
+            )
+            expect(active_badge).to_have_count(1)
             log_step("Verify", "✓ Badge shows Active")
             shot(page, "07_active_badge_restored")
 

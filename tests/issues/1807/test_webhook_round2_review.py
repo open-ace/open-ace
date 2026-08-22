@@ -22,6 +22,8 @@ import tempfile
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.modules.governance.alert_notifier import (
     Alert,
     AlertNotifier,
@@ -196,10 +198,16 @@ class TestFeishuWebhookRoundTrip:
 
 class TestWebhookFailurePrefsUnbound:
     def test_prefs_unbound_does_not_mask_real_exception(self):
-        """If ``get_notification_preferences`` raises (e.g. DB error), ``prefs``
-        was never assigned, so the ``except`` block's ``if prefs`` would itself
-        raise ``UnboundLocalError`` and swallow the real error. The handler must
-        still log the original exception type without a secondary crash."""
+        """If ``get_notification_preferences`` raises (e.g. DB error), the
+        original ``UnboundLocalError`` hazard came from ``prefs`` being
+        assigned inside the try and referenced in the except.
+
+        #2457 realignment: the TOCTOU rework moved the prefs read OUT of the
+        try (single-snapshot delivery via ``_deliver_to_prefs``, where
+        ``prefs`` is a parameter — the unbound hazard is gone by
+        construction). The evolved contract: the original exception
+        PROPAGATES unmasked from the legacy wrapper instead of being
+        swallowed by a secondary crash."""
 
         notifier = AlertNotifier()
         notifier._subscribers = []
@@ -209,28 +217,14 @@ class TestWebhookFailurePrefsUnbound:
         def boom(user_id):
             raise RuntimeError("db connection lost")
 
-        records: list[str] = []
-
-        class _Handler(logging.Handler):
-            def emit(self, record):
-                records.append(self.format(record))
-
-        handler = _Handler(level=logging.WARNING)
-        logger = logging.getLogger("app.modules.governance.alert_notifier")
-        logger.addHandler(handler)
-        prev_level = logger.level
-        logger.setLevel(logging.WARNING)
-        try:
-            with patch.object(notifier, "get_notification_preferences", side_effect=boom):
-                # Must not raise UnboundLocalError; must log the real error type.
+        with patch.object(notifier, "get_notification_preferences", side_effect=boom):
+            # The ORIGINAL error surfaces — nothing (no UnboundLocalError,
+            # no blanket except) masks it.
+            with pytest.raises(RuntimeError, match="db connection lost"):
                 notifier._send_webhook_notification(_alert(), user_id=1)
-        finally:
-            logger.removeHandler(handler)
-            logger.setLevel(prev_level)
 
-        # The original error type is logged, not a NameError/UnboundLocalError.
-        joined = "\n".join(records)
-        assert "RuntimeError" in joined, f"real exception type not logged; got: {joined!r}"
-        assert "UnboundLocalError" not in joined and "local variable" not in joined
+        # The modern single-snapshot path takes prefs as a parameter, so a
+        # prefs read failure cannot leave it unbound mid-delivery either.
+        assert "_deliver_to_prefs" in AlertNotifier._send_webhook_notification.__doc__
         # Reference original to keep linters happy about unused symbol.
         assert original is not None

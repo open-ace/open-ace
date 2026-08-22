@@ -41,6 +41,10 @@ class GatewayPlan:
     is_responses: bool = False
     ssrf_blocked: bool = False  # Issue #1894: Flag for SSRF blocked response
     ssrf_error: str | None = None  # Issue #1894: Error message for SSRF block
+    # Original request path, consumed by _forward_via_gateway's usage
+    # recording (request_path=plan.path). Without it every successful
+    # gateway forward crashed on AttributeError and surfaced as 502.
+    path: str = ""
 
 
 class GatewayPlanner:
@@ -158,6 +162,7 @@ class LitellmGatewayPlanner(GatewayPlanner):
             body_transformer=body_transformer,
             mode="gateway",
             is_responses=is_responses,
+            path=path,
         )
 
 

@@ -259,10 +259,13 @@ class TestOIDCSignatureVerification:
 
         jwks_response = {"keys": [rsa_key_pair["jwk"]]}
 
-        # Mock the requests.get call
-        with patch("requests.get") as mock_get:
+        # #2457 realignment: _get_jwks fetches via the outbound-guard-wrapped
+        # safe_request (patching requests.get left the real network call in —
+        # the baselined 404 against example.com).
+        with patch("app.modules.sso.oidc.safe_request") as mock_get:
             mock_response = MagicMock()
             mock_response.json.return_value = jwks_response
+            mock_response.status_code = 200
             mock_response.raise_for_status = MagicMock()
             mock_get.return_value = mock_response
 
