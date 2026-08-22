@@ -194,8 +194,21 @@ def test_default_dates():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context(viewport={"width": 1400, "height": 900})
+        # The lane serves on 127.0.0.1:<ephemeral port>; a cookie hardcoded to
+        # domain=localhost never applies there and the SPA bounces to /login —
+        # derive the domain from BASE_URL instead.
+        from urllib.parse import urlparse
+
+        cookie_domain = urlparse(BASE_URL).hostname or "localhost"
         context.add_cookies(
-            [{"name": "session_token", "value": token, "domain": "localhost", "path": "/"}]
+            [
+                {
+                    "name": "session_token",
+                    "value": token,
+                    "domain": cookie_domain,
+                    "path": "/",
+                }
+            ]
         )
         page = context.new_page()
 
