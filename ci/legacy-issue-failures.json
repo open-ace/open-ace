@@ -27,30 +27,6 @@
     {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
-      "issue_number": "1125",
-      "nodeid": "tests/issues/1125/test_workspace_session_summary_contract.py::test_get_session_does_not_fallback_to_daily_messages",
-      "outcome": "failure",
-      "summary": "assert 500 == 404"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "AttributeError",
-      "issue_number": "1125",
-      "nodeid": "tests/issues/1125/test_workspace_session_summary_contract.py::test_get_session_keeps_agent_sessions_request_count",
-      "outcome": "failure",
-      "summary": "AttributeError: 'tuple' object has no attribute 'get_json'"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1125",
-      "nodeid": "tests/issues/1125/test_workspace_session_summary_contract.py::test_list_sessions_hides_autonomous_tracking_wrappers",
-      "outcome": "failure",
-      "summary": "AssertionError: assert ['track-123',...l-claude-123'] == ['actual-claude-123']"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
       "issue_number": "1277",
       "nodeid": "tests/issues/1277/test_test_skip_false_positive.py::TestRetryCounterPersistence::test_skip_retries_persisted_on_test_skip",
       "outcome": "failure",
@@ -294,7 +270,7 @@
       "issue_number": "52",
       "nodeid": "tests/issues/52/test_issue52.py::test_database_migration",
       "outcome": "failure",
-      "summary": "AssertionError: linux_account \u5b57\u6bb5\u672a\u6dfb\u52a0\u5230 users \u8868"
+      "summary": "AssertionError: linux_account 字段未添加到 users 表"
     },
     {
       "category": "assertion_failure",
@@ -310,7 +286,7 @@
       "issue_number": "52",
       "nodeid": "tests/issues/52/test_issue52.py::test_update_user_with_linux_account",
       "outcome": "failure",
-      "summary": "AssertionError: \u521b\u5efa\u7528\u6237\u5931\u8d25"
+      "summary": "AssertionError: 创建用户失败"
     },
     {
       "category": "test_body_exception",
@@ -478,7 +454,7 @@
       "issue_number": "913",
       "nodeid": "tests/issues/913/test_pr909_review_feedback.py::TestGetCheckFailureExcerpt::test_ci_repair_context_skips_excerpt_failure",
       "outcome": "failure",
-      "summary": "assert '\u5931\u8d25\u6458\u5f55' not in \"PR #42 \u5728\u5408\u5e76\u524d...9180888144'>\""
+      "summary": "assert '失败摘录' not in \"PR #42 在合并前...9180888144'>\""
     },
     {
       "category": "test_body_exception",
@@ -515,8 +491,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-22 prune 9 entries (73->64). Fixed by this PR's test realignments: 211 e2e (1) - the projects page renders an empty-state with no <table> on a fresh DB and the table gained a spacer column plus non-sortable columns, so the test now seeds projects via the API and asserts caret icons only on columns that actually toggle; 2121 sso provisioning (2) - #2893 added the auto_provision_users tenant check (stubbed for hermetic unit tests) and #1826 F6 removed the silent tenant-1 fallback, so the two no-binding cases now assert rejection. Resolved independently on main, observed in the verification run: 210 e2e project stats accuracy (1). Moved to quarantine, NOT fixed: 144 e2e (1) + 394 terminal e2e (4) - these legacy sync-playwright scripts are wired onto the async 'page' fixture; on CI the fixture wedges chromium and async teardown sits outside pytest-timeout's coverage, so issue-tests shards 1/2 hung for the full 180-minute job timeout on runs 32509705360/32561885885. They are deselected via ci/legacy-issue-quarantine.json pending the #2457 rewrite onto self-contained sync subprocess plumbing.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32565288903",
+    "prune_note": "2026-08-22 prune 3 entries (64->61). Fixed by this PR's test realignments: 1125 session-contract fixtures drifted from the evolved routes — get_session fakes lacked the tenant_id kwarg (TypeError->500), the non-admin user carried no tenant against the fail-closed _session_lookup_tenant_id guard, and the fake DB keyed wrapper-hiding on the retired cli_session_id predicate instead of visible_session_clause's context-marker match. Contracts verified intact or stronger in production; no code change.",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32579145971",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",
