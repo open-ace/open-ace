@@ -1,127 +1,125 @@
 #!/usr/bin/env python3
-"""Test script for issue 76: Admin menu visibility."""
+"""Test script for issue 76: Admin menu visibility.
 
-import asyncio
+#2457 realignment: the collected test took (username, password, user_type)
+arguments — pytest resolved them as missing fixtures, the baselined setup
+error. It is now a self-contained admin-visibility test: the retired
+#nav-dashboard/#nav-messages style-attribute probing (and the
+#data-status-container panel, which no longer exists) is replaced by the
+current navigation — /manage sections (nav-section-header + nav-item links,
+admin-only items enabled) and the /work panel (aside.work-left-panel).
+"""
+
 import os
+import re
 
 import pytest
-from playwright.async_api import async_playwright
+import requests
+from playwright.sync_api import sync_playwright
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "76")
-
-
-@pytest.mark.asyncio
-async def test_menu(username: str, password: str, user_type: str):
-    """Test menu visibility for a specific user type."""
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(viewport={"width": 1280, "height": 900})
-        page = await context.new_page()
-
-        # 访问登录页面
-        await page.goto(f"{BASE_URL}/login")
-        await page.wait_for_load_state("networkidle")
-
-        # 登录
-        await page.fill('input[name="username"]', username)
-        await page.fill('input[name="password"]', password)
-
-        # 点击登录并等待导航
-        async with page.expect_navigation(timeout=10000):
-            await page.click('button[type="submit"]')
-
-        # 等待页面加载完成
-        await page.wait_for_load_state("networkidle")
-
-        # 打印当前 URL
-        print(f"当前 URL: {page.url}")
-
-        # 等待一下让 JS 执行完成
-        await asyncio.sleep(2)
-
-        # 获取所有菜单项的显示状态
-        menu_items = {
-            "nav-dashboard": await page.locator("#nav-dashboard").get_attribute("style")
-            or "no style",
-            "nav-messages": await page.locator("#nav-messages").get_attribute("style")
-            or "no style",
-            "nav-analysis": await page.locator("#nav-analysis").get_attribute("style")
-            or "no style",
-            "nav-management": await page.locator("#nav-management").get_attribute("style")
-            or "no style",
-            "nav-workspace": await page.locator("#nav-workspace").get_attribute("style")
-            or "no style",
-            "nav-report": await page.locator("#nav-report").get_attribute("style") or "no style",
-        }
-
-        print(f"{user_type} 登录后菜单状态:")
-        for item, style in menu_items.items():
-            print(f"  {item}: {style}")
-
-        # 检查 Data Status Panel
-        print()
-        print("检查 Data Status Panel...")
-        data_status_exists = await page.locator("#data-status-container").count()
-        print(f"Data Status Panel 元素数量: {data_status_exists}")
-        if data_status_exists > 0:
-            data_status = await page.locator("#data-status-container").inner_html()
-            print(f"Data Status Panel 内容: {data_status[:200]}...")
-
-        # 检查页面源代码中是否有 data-status-container
-        page_content = await page.content()
-        has_data_status_in_html = 'id="data-status-container"' in page_content
-        print(f"页面源代码中有 data-status-container: {has_data_status_in_html}")
-
-        # 检查服务端渲染的菜单初始状态
-        # Dashboard 菜单在服务端渲染时的初始 display 状态
-        dashboard_initial = (
-            'style="display: block;"' in page_content or 'style="display:block;"' in page_content
-        )
-        print(f"服务端渲染的 Dashboard 初始状态: {dashboard_initial}")
-
-        # 检查 cookies
-        cookies = await context.cookies()
-        print(f'Cookies: {[c for c in cookies if c["name"] == "session_token"]}')
-
-        # 获取用户信息
-        print()
-        print("检查用户信息...")
-        user_info = await page.evaluate("""() => {
-            const user = localStorage.getItem("current_user");
-            const token = localStorage.getItem("ai_token_session");
-            return { user: user, token: token ? "exists" : "none" };
-        }""")
-        print(f'localStorage user: {user_info["user"]}')
-        print(f'localStorage token: {user_info["token"]}')
-
-        # 截图
-        screenshot_path = os.path.join(SCREENSHOT_DIR, f"{user_type.lower()}_menu_test.png")
-        await page.screenshot(path=screenshot_path)
-        print()
-        print(f"截图已保存到 {screenshot_path}")
-
-        await browser.close()
-
-        return menu_items
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+TIMEOUT = 15000
+SCREENSHOT_DIR = "screenshots/issues/76"
 
 
-async def main():
-    print("=" * 60)
-    print("测试 Admin 用户菜单")
-    print("=" * 60)
-    await test_menu("admin", "admin123", "Admin")
+def _clear_seeded_password_gate():
+    """Clear must_change_password for the seeded admin (lane/CI only)."""
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return
+    import sqlite3
 
-    print()
-    print("=" * 60)
-    print("测试普通用户菜单 (testuser)")
-    print("=" * 60)
     try:
-        await test_menu("testuser", "testuser", "NormalUser")
-    except Exception as e:
-        print(f"普通用户测试失败: {e}")
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "UPDATE users SET must_change_password = 0 "
+                "WHERE username = ? AND must_change_password = 1",
+                (USERNAME,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+def _skip_if_no_server():
+    try:
+        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+    except Exception:
+        pytest.skip(f"test server not reachable at {BASE_URL}")
+
+
+def test_menu():
+    """Admin sees the manage nav sections with items enabled, plus the work panel."""
+    _skip_if_no_server()
+    _clear_seeded_password_gate()
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1280, "height": 900})
+        page = context.new_page()
+        page.set_default_timeout(TIMEOUT)
+
+        try:
+            page.goto(f"{BASE_URL}/login", wait_until="networkidle")
+            page.fill("#username", USERNAME)
+            page.fill("#password", PASSWORD)
+            page.click("button[type='submit']")
+            page.wait_for_url(re.compile(r".*/manage"), timeout=15000)
+            page.wait_for_selector(".nav-section-header", timeout=TIMEOUT)
+            print("✓ Admin 登录，落在 Manage 模式")
+
+            sections = page.locator(".nav-section-header")
+            section_count = sections.count()
+            print(f"导航分区数: {section_count}")
+            assert section_count >= 3, f"expected >=3 nav sections, got {section_count}"
+            for i in range(section_count):
+                title = sections.nth(i).locator(".nav-section-title").inner_text().strip()
+                assert title, f"nav section {i} has empty title"
+                print(f"  ✓ 分区: {title}")
+
+            # Admin: nav items render with targets; feature-flag/platform-admin
+            # items may be disabled (policy / model_gateway flags, tenant
+            # scope) — visibility is the issue-76 contract, not flag state.
+            items = page.locator("a.nav-item")
+            item_count = items.count()
+            print(f"导航项数: {item_count}")
+            assert item_count >= 5, f"expected >=5 nav items, got {item_count}"
+            enabled_count = 0
+            for i in range(item_count):
+                cls = items.nth(i).get_attribute("class") or ""
+                href = items.nth(i).get_attribute("href") or ""
+                assert href, f"nav item {i} has no href"
+                if "disabled" not in cls:
+                    enabled_count += 1
+                else:
+                    print(f"  - 禁用项（feature-flag/权限）: {href}")
+            assert (
+                enabled_count >= 5
+            ), f"only {enabled_count}/{item_count} nav items enabled for admin"
+            print(f"  ✓ {enabled_count}/{item_count} 个导航项对 admin 可用")
+
+            page.screenshot(path=f"{SCREENSHOT_DIR}/admin_menu_test.png")
+
+            # The work-side panel also renders for admin
+            page.goto(f"{BASE_URL}/work", wait_until="networkidle")
+            panel = page.locator("aside.work-left-panel")
+            assert panel.count() == 1, "work left panel not rendered"
+            work_items = page.locator(".work-nav-item")
+            assert work_items.count() >= 1, "work nav items not rendered"
+            print(f"✓ Work 面板导航项: {work_items.count()}")
+            page.screenshot(path=f"{SCREENSHOT_DIR}/admin_work_panel.png")
+
+            print("测试完成！")
+
+        except Exception as e:
+            page.screenshot(path=f"{SCREENSHOT_DIR}/admin_menu_error.png")
+            print(f"\n✗ Test failed: {e}")
+            raise
+        finally:
+            browser.close()

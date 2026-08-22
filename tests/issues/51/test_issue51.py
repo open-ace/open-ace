@@ -3,217 +3,192 @@
 UI Test for Issue 51: 普通用户登录后应该直接进入 Workspace 页面
 
 测试内容：
-1. 创建普通用户（如果不存在）
+1. 通过 admin API 创建普通用户（幂等）
 2. 普通用户登录
-3. 验证 Dashboard 导航链接不可见（仅管理员可见）
-4. 验证 Workspace section 默认显示
-5. 验证 Workspace 导航链接可见
-6. 验证 admin-only 菜单隐藏
+3. 验证直接落在 /work（Workspace），而不是 /manage（Dashboard）
+4. 验证 /manage 对普通用户重定向回 /work（admin-only 区域不可达）
+5. 验证 Workspace 面板与导航渲染
+
+#2457 realignment: the baselined TypeError (object NoneType can't be used in
+'await' expression) came from the async playwright script's missing awaits.
+Converted to the sync API; the retired #nav-management/#add-user-btn UI flow
+for user creation is replaced by the admin REST API (POST /api/admin/users
+with an explicit tenant_id, #2179 fail-closed), and the current routing is
+asserted: normal users land on /work and get redirected away from /manage.
 """
 
+import json
 import os
-import sys
-import time
+import re
+import subprocess
+import tempfile
 
 import pytest
+import requests
+from playwright.sync_api import sync_playwright
 
-# Add skill scripts directory to path
-skill_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, skill_dir)
-
-try:
-    from playwright.async_api import async_playwright, expect
-except ImportError:
-    print(
-        "Error: playwright not installed. Run: pip install playwright && playwright install chromium"
-    )
-    sys.exit(1)
-
-# Test configuration
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/")
 ADMIN_USERNAME = os.environ.get("TEST_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
-TEST_USER_USERNAME = os.environ.get("TEST_USERNAME", "admin")
-TEST_USER_PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
-SCREENSHOT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(skill_dir))), "screenshots", "issues", "51"
-)
-TIMEOUT = 60000  # 60 seconds timeout
-
-# Ensure screenshot directory exists
-os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+TEST_USER_USERNAME = "issue51user"
+TEST_USER_PASSWORD = "Issue51Pass!"
+TIMEOUT = 15000
+SCREENSHOT_DIR = "screenshots/issues/51"
 
 
-HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+def _skip_if_no_server():
+    try:
+        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+    except Exception:
+        pytest.skip(f"test server not reachable at {BASE_URL}")
 
 
-async def take_screenshot(page, name):
-    """Take screenshot and save to issue directory"""
-    path = os.path.join(SCREENSHOT_DIR, name)
-    await page.screenshot(path=path)
-    print(f"  Screenshot saved: {path}")
-    return path
+def _clear_seeded_password_gate():
+    """Clear must_change_password for the seeded admin (lane/CI only)."""
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "UPDATE users SET must_change_password = 0 "
+                "WHERE username = ? AND must_change_password = 1",
+                (ADMIN_USERNAME,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
 
 
-@pytest.mark.asyncio
-async def test_issue51():
+def _admin_login_curl():
+    """Authenticate the admin via curl (dodges the urllib->gevent 502 that
+    affects requests). Returns the session_token or None."""
+    jar = tempfile.NamedTemporaryFile(delete=False, suffix=".txt")
+    jar.close()
+    try:
+        subprocess.run(
+            [
+                "curl",
+                "-s",
+                "-c",
+                jar.name,
+                "-X",
+                "POST",
+                f"{BASE_URL}/api/auth/login",
+                "-H",
+                "Content-Type: application/json",
+                "-d",
+                json.dumps({"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD}),
+                "-o",
+                os.devnull,
+                "--max-time",
+                "10",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if os.path.exists(jar.name):
+            with open(jar.name) as f:
+                for line in f:
+                    if "session_token" in line:
+                        parts = line.rstrip("\n").split("\t")
+                        if len(parts) >= 7:
+                            return parts[6]
+        return None
+    finally:
+        try:
+            os.unlink(jar.name)
+        except OSError:
+            pass
+
+
+def _ensure_normal_user(token):
+    """Create the normal user via the admin API (idempotent). tenant_id=1 is
+    the lane's seed tenant (the admin's own tenant)."""
+    resp = requests.post(
+        f"{BASE_URL}/api/admin/users",
+        cookies={"session_token": token},
+        json={
+            "username": TEST_USER_USERNAME,
+            "email": "issue51@e2e.local",
+            "password": TEST_USER_PASSWORD,
+            "role": "user",
+            "tenant_id": 1,
+        },
+        timeout=10,
+    )
+    if resp.status_code in (200, 201):
+        print(f"  ✓ 创建普通用户 {TEST_USER_USERNAME}")
+        return
+    # Idempotent: an existing user is fine; anything else must fail loudly.
+    assert (
+        resp.status_code == 400
+    ), f"unexpected create-user response {resp.status_code}: {resp.text[:200]}"
+    assert (
+        "exist" in resp.text.lower()
+    ), f"create-user 400 is not an already-exists: {resp.text[:200]}"
+    print(f"  ✓ 普通用户 {TEST_USER_USERNAME} 已存在")
+
+
+def test_issue51():
     """Test Issue 51: Normal user should see Workspace after login (not Dashboard)"""
-    screenshots = []
+    _skip_if_no_server()
+    _clear_seeded_password_gate()
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
-    async with async_playwright() as p:
-        # Launch browser
+    token = _admin_login_curl()
+    assert token, "admin login failed (no session_token)"
+    _ensure_normal_user(token)
 
-        browser = await p.chromium.launch(headless=HEADLESS)
-        context = await browser.new_context(viewport={"width": 1280, "height": 900})
-        page = await context.new_page()
-        await page.set_default_timeout(TIMEOUT)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1280, "height": 900})
+        page = context.new_page()
+        page.set_default_timeout(TIMEOUT)
 
         try:
-            print("\n" + "=" * 60)
-            print("UI Test: Issue 51 - Normal User Workspace Display")
-            print("=" * 60)
+            print("\n[Step 1] 普通用户登录")
+            page.goto(f"{BASE_URL}/login", wait_until="networkidle")
+            page.fill("#username", TEST_USER_USERNAME)
+            page.fill("#password", TEST_USER_PASSWORD)
+            page.click("button[type='submit']")
+            page.wait_for_url(re.compile(r".*/(work|manage)"), timeout=15000)
+            print(f"  ✓ 登录成功，落在 {page.url}")
 
-            # Step 1: Login as admin to create test user
-            print("\n[Step 1] Login as admin to create test user")
-            await page.goto(f"{BASE_URL}/login")
-            await page.wait_for_load_state("networkidle")
-            await page.fill('input[name="username"]', ADMIN_USERNAME)
-            await page.fill('input[name="password"]', ADMIN_PASSWORD)
-            await page.click('button[type="submit"]')
-            await page.wait_for_load_state("networkidle")
-            time.sleep(2)
-            screenshots.append(take_screenshot(page, "01_admin_login.png"))
-            print("  ✓ Admin logged in successfully")
+            print("\n[Step 2] 验证直接进入 Workspace（/work），不是 Dashboard")
+            assert (
+                page.url.endswith("/work") or "/work" in page.url
+            ), f"normal user landed on {page.url}, expected /work"
+            panel = page.locator("aside.work-left-panel")
+            panel.wait_for(state="visible", timeout=TIMEOUT)
+            work_items = page.locator(".work-nav-item")
+            assert work_items.count() >= 1, "work nav items not rendered"
+            page.screenshot(path=f"{SCREENSHOT_DIR}/05_normal_user_login.png")
+            print("  ✓ Workspace 面板与导航渲染正常")
 
-            # Step 2: Navigate to Management page to create user
-            print("\n[Step 2] Navigate to Management page")
-            await page.click("#nav-management")
-            await page.wait_for_load_state("networkidle")
-            time.sleep(1)
-            screenshots.append(take_screenshot(page, "02_management_page.png"))
-            print("  ✓ Management page loaded")
+            print("\n[Step 3] 验证普通用户看不到 admin 菜单分区")
+            assert (
+                page.locator(".nav-section-header").count() == 0
+            ), "manage nav sections visible to a normal user"
+            print("  ✓ 无 admin 菜单分区")
 
-            # Step 3: Check if test user exists, if not create it
-            print("\n[Step 3] Check/Create test user")
-            await page.wait_for_selector("#users-table-body tr", timeout=5000)
-            rows = await page.locator("#users-table-body tr").all()
-            user_exists = False
-            for row in rows:
-                if TEST_USER_USERNAME in row.inner_text():
-                    user_exists = True
-                    break
+            print("\n[Step 4] 验证 /manage 对普通用户重定向回 /work")
+            page.goto(f"{BASE_URL}/manage/dashboard", wait_until="networkidle")
+            page.wait_for_url(re.compile(r".*/work"), timeout=15000)
+            assert page.locator("aside.work-left-panel").count() == 1
+            page.screenshot(path=f"{SCREENSHOT_DIR}/06_manage_redirect.png")
+            print(f"  ✓ /manage 重定向到 {page.url}")
 
-            if not user_exists:
-                print(f"  Creating test user: {TEST_USER_USERNAME}")
-                # Click Add User button
-                await page.click("#add-user-btn")
-                time.sleep(1)
-
-                # Fill in user details
-                await page.fill("#add-username", TEST_USER_USERNAME)
-                await page.fill("#add-password", TEST_USER_PASSWORD)
-                await page.fill("#add-confirm-password", TEST_USER_PASSWORD)
-
-                # Set role to user (not admin)
-                page.select_option("#add-role", "user")
-
-                # Click Create button
-                await page.click("#addUserModal .btn-primary")
-                time.sleep(1)
-                screenshots.append(take_screenshot(page, "03_create_user.png"))
-                print("  ✓ Test user created")
-            else:
-                print(f"  Test user {TEST_USER_USERNAME} already exists")
-
-            # Step 4: Logout admin
-            print("\n[Step 4] Logout admin")
-            await page.click("#nav-logout")
-            await page.wait_for_load_state("networkidle")
-            time.sleep(1)
-            screenshots.append(take_screenshot(page, "04_logout.png"))
-            print("  ✓ Admin logged out")
-
-            # Step 5: Login as test user
-            print("\n[Step 5] Login as test user (normal user)")
-            await page.goto(f"{BASE_URL}/login")
-            await page.wait_for_load_state("networkidle")
-            await page.fill('input[name="username"]', TEST_USER_USERNAME)
-            await page.fill('input[name="password"]', TEST_USER_PASSWORD)
-            await page.click('button[type="submit"]')
-            await page.wait_for_load_state("networkidle")
-            time.sleep(2)
-            screenshots.append(take_screenshot(page, "05_normal_user_login.png"))
-            print("  ✓ Normal user logged in successfully")
-
-            # Step 6: Verify Dashboard navigation link is NOT visible (admin only)
-            print("\n[Step 6] Verify Dashboard navigation link is NOT visible (admin only)")
-            dashboard_nav = await page.locator("#nav-dashboard")
-            expect(dashboard_nav).not_to_be_visible()
-            print("  ✓ Dashboard navigation link is hidden (admin only)")
-
-            # Step 7: Verify Workspace section is displayed by default
-            print("\n[Step 7] Verify Workspace section is displayed by default")
-            workspace_section = await page.locator("#workspace-section")
-            expect(workspace_section).to_be_visible()
-            print("  ✓ Workspace section is displayed by default")
-
-            # Step 8: Verify Workspace navigation link is visible
-            print("\n[Step 8] Verify Workspace navigation link is visible")
-            workspace_nav = await page.locator("#nav-workspace")
-            expect(workspace_nav).to_be_visible()
-            print("  ✓ Workspace navigation link is visible")
-
-            # Step 9: Verify Dashboard section is NOT displayed
-            print("\n[Step 9] Verify Dashboard section is NOT displayed")
-            dashboard_section = await page.locator("#dashboard-section")
-            expect(dashboard_section).not_to_be_visible()
-            print("  ✓ Dashboard section is hidden")
-
-            # Step 10: Verify admin-only menus are hidden
-            print("\n[Step 10] Verify admin-only menus are hidden")
-            messages_nav = await page.locator("#nav-messages")
-            analysis_nav = await page.locator("#nav-analysis")
-            management_nav = await page.locator("#nav-management")
-
-            # These should be hidden for normal user
-            expect(messages_nav).not_to_be_visible()
-            expect(analysis_nav).not_to_be_visible()
-            expect(management_nav).not_to_be_visible()
-            print("  ✓ Admin-only menus (Messages, Analysis, Management) are hidden")
-
-            # Step 11: Take final screenshot
-            print("\n[Step 11] Take final screenshot")
-            screenshots.append(take_screenshot(page, "06_final_workspace.png"))
-
-            # Summary
-            print("\n" + "=" * 60)
-            print("Test Summary")
-            print("=" * 60)
-            print("✓ All tests passed!")
-            print("\nVerified:")
-            print("  - Dashboard navigation link is hidden for normal user (admin only)")
-            print("  - Workspace section is displayed by default after login")
-            print("  - Workspace navigation link is visible")
-            print("  - Dashboard section is hidden")
-            print("  - Admin-only menus are hidden for normal user")
-            print(f"\nScreenshots saved to: {SCREENSHOT_DIR}")
-            for s in screenshots:
-                print(f"  - {os.path.basename(s)}")
-
-            return True
+            print("\n测试完成！")
 
         except Exception as e:
+            page.screenshot(path=f"{SCREENSHOT_DIR}/issue51_error.png")
             print(f"\n✗ Test failed: {e}")
-            import traceback
-
-            traceback.print_exc()
-            screenshots.append(take_screenshot(page, "error.png"))
-            return False
-
+            raise
         finally:
-            await browser.close()
-
-
-if __name__ == "__main__":
-    success = test_issue51()
-    sys.exit(0 if success else 1)
+            browser.close()
