@@ -158,6 +158,11 @@ class TestGetCheckFailureExcerpt:
         gh = MagicMock()
         gh.get_check_failure_excerpt.side_effect = RuntimeError("timeout")
         orch = MagicMock()
+        # #2457 realignment: _build_ci_repair_context now consults
+        # _ci_failure_uses_schema_sync — a bare MagicMock is truthy, which
+        # appended the schema-sync block (whose prose contains 失败摘录) and
+        # broke the no-excerpt assertion. These checks are not schema-sync.
+        orch._ci_failure_uses_schema_sync.return_value = False
 
         context = AutonomousOrchestrator._build_ci_repair_context(
             orch,
