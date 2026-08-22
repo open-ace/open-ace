@@ -58,6 +58,8 @@ def _make_agent_result(text="done\nTL;DR: fixed the bug"):
 def _make_gh(commit_sha="abc1234", uncommitted=True):
     gh = MagicMock()
     gh.get_current_branch.return_value = "feature-x"
+    # Recorded PR is OPEN so handle() reuses it instead of creating a fresh PR
+    gh.get_pr.return_value = {"state": "OPEN", "number": 42, "html_url": "https://example/pr/42"}
     gh.get_diff_stats.return_value = {"commits": 1, "additions": 5, "deletions": 1, "files": 1}
     gh.get_commit_diff_stats.return_value = {
         "commits": 1,
@@ -171,10 +173,32 @@ class TestFixPhasePermissionsAndFallback:
     def test_fix_salvages_uncommitted_when_agent_did_not_commit(self):
         wf = _make_workflow()
         orch = _make_orchestrator(wf)
-        gh = _make_gh(commit_sha="same123", uncommitted=True)
+        gh = _make_gh()
         orch._get_gh.return_value = gh
         orch.repo.list_milestones.return_value = []
-        orch._run_agent = MagicMock(return_value=_make_agent_result())
+
+        # #2457 realignment: the fix flow now distinguishes dirty-BEFORE the
+        # agent (#1828 pre-commits + scope-validates pre-existing changes)
+        # from dirty-AFTER (the salvage this test pins). Model a CLEAN tree
+        # before the agent that the AGENT dirties without committing: the
+        # salvage must then git_add_all + git_commit(no_verify), the commit
+        # must advance HEAD (a no-op commit is rejected), and the fix is
+        # pushed (plus the final branch-safety push).
+        tree_dirty = {"v": False}
+
+        def agent_dirties(**kwargs):
+            tree_dirty["v"] = True
+            return _make_agent_result()
+
+        orch._run_agent = MagicMock(side_effect=agent_dirties)
+        gh.has_uncommitted_changes = MagicMock(side_effect=lambda: tree_dirty["v"])
+
+        def fake_git_commit(*args, **kwargs):
+            tree_dirty["v"] = False
+            return {"sha": "fix4567"}
+
+        gh.git_commit.side_effect = fake_git_commit
+        gh.get_current_commit.side_effect = lambda: "fix4567" if not tree_dirty["v"] else "same123"
 
         orch._do_pr_review(wf)
 
