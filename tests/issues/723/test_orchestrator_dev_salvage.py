@@ -88,6 +88,7 @@ def _make_orchestrator(wf_data, milestones=None):
         orch.repo = mock_repo
         orch.emitter = MagicMock()
         orch._gh = MagicMock()
+        orch._gh.get_current_branch.return_value = wf_data.get("branch_name", "")
         orch._gh.get_current_commit.return_value = "abc1234"
         orch._gh.get_commit_diff_stats.return_value = {
             "additions": 0,
@@ -96,12 +97,43 @@ def _make_orchestrator(wf_data, milestones=None):
             "commits": 1,
         }
         orch._gh.get_diff_stats.return_value = {}
+        orch._gh.get_changed_files.return_value = []
         orch._gh.has_uncommitted_changes.return_value = False
+        # #1611 resets self._gh after the dev agent runs and re-binds via
+        # _get_gh(); _do_development resolves gh the same lazy way. Return the
+        # mock from _get_gh so the post-agent commit comparison stays mocked
+        # instead of falling through to a real GitHubOps (real `git` subprocess
+        # calls against /tmp/p, which is what broke the salvage path).
+        orch._get_gh = MagicMock(return_value=orch._gh)
 
     return orch, mock_repo
 
 
 # ── Salvage (positive): failure + real commit -> proceeds ─────────────
+
+
+def _trusted_repo_context(orch):
+    """Satisfy the pre-agent trusted-git boundary (#2457 realignment).
+
+    _run_agent now refuses to execute without a trusted repo context
+    (repo_integrity_violation), so the MagicMock _gh can no longer carry
+    the salvage tests into the commit-comparison logic. Provide the same
+    regular-repo context shape the 826 tests use.
+    """
+    orch._snapshot_repo_context = MagicMock(
+        return_value={
+            "effective": {
+                "repo_path": "/tmp/test",
+                "git_dir": "/tmp/test/.git",
+                "git_identity": "test-git",
+                "common_dir": "/tmp/test/.git",
+                "common_identity": "test-common",
+                "origin": "",
+            },
+            "main": {},
+        }
+    )
+    orch._validate_repo_context_after_run = MagicMock(return_value="")
 
 
 def test_dev_salvaged_on_timeout_with_commit():
@@ -111,8 +143,13 @@ def test_dev_salvaged_on_timeout_with_commit():
         "plan_content": "1. Implement",
         "status": "completed",
     }
-    wf = _make_workflow()
+    wf = _make_workflow(
+        # Scope validation compares the round against base_commit_sha; pin it
+        # to commit_before so only the current-round range is checked.
+        base_commit_sha="aaa1111"
+    )
     orch, mock_repo = _make_orchestrator(wf, milestones=[plan_ms])
+    _trusted_repo_context(orch)
 
     orch._runner = MagicMock()
     # First call (dev): timed out but produced a commit.
@@ -156,6 +193,7 @@ def test_dev_not_salvaged_when_no_commit():
     }
     wf = _make_workflow()
     orch, mock_repo = _make_orchestrator(wf, milestones=[plan_ms])
+    _trusted_repo_context(orch)
 
     orch._runner = MagicMock()
     orch._runner.run_agent_task.side_effect = [

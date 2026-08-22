@@ -337,7 +337,16 @@ class TestGitHubOpsEnvInjection:
             ops._run_gh(["issue", "list"])
 
         call_kwargs = mock_run.call_args
-        assert "env" not in call_kwargs[1]
+        # #2457 realignment: _run_gh now ALWAYS passes env — the trusted-git
+        # boundary injects the per-command safe.directory trio (GIT_CONFIG_*,
+        # #2021, replacing the old global safe.directory *). The #786
+        # contract that remains: with no AI github env configured, NO AI
+        # identity/token vars are injected.
+        env = call_kwargs[1].get("env") or {}
+        assert "GIT_AUTHOR_NAME" not in env
+        assert "GIT_AUTHOR_EMAIL" not in env
+        assert "GH_TOKEN" not in env
+        assert env.get("GIT_CONFIG_KEY_0") == "safe.directory"
 
 
 # ── invalidate_ai_github_env_cache ──────────────────────────────────
