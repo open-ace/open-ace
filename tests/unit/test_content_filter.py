@@ -638,6 +638,226 @@ class TestPiiFalsePositiveSuppression:
         result = cf.check_content("Call +86 138 0013 8000 now")
         assert any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
 
+    # =========================================================================
+    # Issue #2828: Compact date (YYYYMMDD) false positive suppression
+    # =========================================================================
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_compact_date_not_flagged(self):
+        """A compact date like 20260818 is not an international phone number."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Created 20260818 by auto-dev")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_compact_date_adjacent_to_text(self):
+        """Compact date adjacent to text (no space) is not a phone number."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Report20260818")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_invalid_month_still_flagged(self):
+        """Invalid month (13) in compact date is still flagged as phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Value 20261301")
+        assert any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_zero_month_still_flagged(self):
+        """Zero month (00) in compact date is still flagged as phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Value 20260012")
+        assert any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_invalid_day_still_flagged(self):
+        """Invalid day (32) in compact date is still flagged as phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Value 20260132")
+        assert any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_feb_30_non_leap_still_flagged(self):
+        """Feb 30 in non-leap year is still flagged as phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Value 20260230")
+        assert any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_year_below_min_still_flagged(self):
+        """Year below 1900 is still flagged as phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Value 18991231")
+        assert any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_year_above_max_still_flagged(self):
+        """Year above 2100 is still flagged as phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Value 21010101")
+        assert any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_leap_year_feb_29_not_flagged(self):
+        """Feb 29 in leap year (2024) is a valid date, not a phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Created 20240229")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_non_leap_year_feb_29_still_flagged(self):
+        """Feb 29 in non-leap year (2025) is invalid, still flagged as phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Value 20250229")
+        assert any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_non_leap_year_feb_28_not_flagged(self):
+        """Feb 28 in non-leap year is valid, not a phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Created 20250228")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_year_min_boundary_not_flagged(self):
+        """Year 1900 (minimum) with valid date is not a phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Created 19000101")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_year_max_boundary_not_flagged(self):
+        """Year 2100 (maximum, non-leap century year) with valid date is not a phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Created 21001231")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_month_boundary_jan_not_flagged(self):
+        """Month 01 (January) boundary with valid date is not a phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Created 20260101")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_month_boundary_dec_not_flagged(self):
+        """Month 12 (December) boundary with valid date is not a phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Created 20261231")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_31_day_month_jan_not_flagged(self):
+        """31-day month (January) with day 31 is not a phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Created 20260131")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_31_day_month_jul_not_flagged(self):
+        """31-day month (July) with day 31 is not a phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Created 20260731")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+    @pytest.mark.regression
+    @pytest.mark.issue(2828)
+    def test_phone_intl_31_day_month_aug_not_flagged(self):
+        """31-day month (August) with day 31 is not a phone."""
+        cf = ContentFilter(config={"redact_pii": True})
+        result = cf.check_content("Created 20260831")
+        assert not any(r["type"] == "pii_phone_intl" for r in result.matched_rules)
+
+
+class TestIsCompactDate:
+    """Unit tests for _is_compact_date static method (Issue #2828)."""
+
+    def test_valid_compact_date(self):
+        """Valid compact date returns True."""
+        assert ContentFilter._is_compact_date("20260818") is True
+
+    def test_not_8_digits_returns_false(self):
+        """7-digit string returns False."""
+        assert ContentFilter._is_compact_date("2026081") is False
+
+    def test_9_digits_returns_false(self):
+        """9-digit string returns False."""
+        assert ContentFilter._is_compact_date("202608181") is False
+
+    def test_non_digit_returns_false(self):
+        """Non-digit string returns False."""
+        assert ContentFilter._is_compact_date("2026081a") is False
+
+    def test_leap_year_feb_29_returns_true(self):
+        """Leap year (2024) Feb 29 returns True."""
+        assert ContentFilter._is_compact_date("20240229") is True
+
+    def test_non_leap_year_feb_29_returns_false(self):
+        """Non-leap year (2025) Feb 29 returns False."""
+        assert ContentFilter._is_compact_date("20250229") is False
+
+    def test_century_year_2100_feb_28_returns_true(self):
+        """Century year 2100 (non-leap) Feb 28 returns True."""
+        assert ContentFilter._is_compact_date("21000228") is True
+
+    def test_century_year_2100_feb_29_returns_false(self):
+        """Century year 2100 (non-leap) Feb 29 returns False."""
+        assert ContentFilter._is_compact_date("21000229") is False
+
+    def test_leap_century_2000_feb_29_returns_true(self):
+        """Leap century year 2000 (divisible by 400) Feb 29 returns True."""
+        assert ContentFilter._is_compact_date("20000229") is True
+
+    def test_invalid_month_13_returns_false(self):
+        """Invalid month 13 returns False."""
+        assert ContentFilter._is_compact_date("20261301") is False
+
+    def test_invalid_month_00_returns_false(self):
+        """Invalid month 00 returns False."""
+        assert ContentFilter._is_compact_date("20260012") is False
+
+    def test_invalid_day_32_returns_false(self):
+        """Invalid day 32 returns False."""
+        assert ContentFilter._is_compact_date("20260132") is False
+
+    def test_apr_31_returns_false(self):
+        """April 31 (30-day month) returns False."""
+        assert ContentFilter._is_compact_date("20260431") is False
+
+    def test_year_below_min_returns_false(self):
+        """Year below 1900 returns False."""
+        assert ContentFilter._is_compact_date("18991231") is False
+
+    def test_year_above_max_returns_false(self):
+        """Year above 2100 returns False."""
+        assert ContentFilter._is_compact_date("21010101") is False
+
+    def test_year_min_1900_returns_true(self):
+        """Year 1900 (minimum) returns True for valid date."""
+        assert ContentFilter._is_compact_date("19000101") is True
+
+    def test_year_max_2100_returns_true(self):
+        """Year 2100 (maximum) returns True for valid date."""
+        assert ContentFilter._is_compact_date("21001231") is True
+
 
 class TestTenantKeywordsCache:
     """Tests for tenant keywords cache functionality (Issue #2789)."""
