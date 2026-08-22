@@ -96,8 +96,8 @@ def test_get_user_webui_url_with_host_url():
     print(f"✓ With host_url (fixed port 3100): {url2}")
 
     # Verify tokens are generated
-    assert token1.startswith("1:0:")
-    assert token2.startswith("1:0:")
+    assert token1.startswith("v2:1:0:")
+    assert token2.startswith("v2:1:0:")
     print("✓ Tokens generated correctly")
 
 
@@ -130,8 +130,8 @@ def test_get_user_webui_url_preserves_port_single_user():
     assert url2 == "http://192.168.1.169:3100"
     print(f"✓ With host_url (request IP + fixed port 3100): {url2}")
 
-    assert token1.startswith("1:0:")
-    assert token2.startswith("1:0:")
+    assert token1.startswith("v2:1:0:")
+    assert token2.startswith("v2:1:0:")
     print("✓ Port preservation test passed")
 
 
