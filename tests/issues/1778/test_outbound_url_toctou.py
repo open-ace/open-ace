@@ -271,6 +271,23 @@ def test_is_public_address_rejects_metadata_and_other_non_public(addr):
 # ── safe_request: proxy configuration (PR #2252) ────────────────────────
 
 
+def _isolate_proxy_environment(monkeypatch):
+    """Pin safe_request's proxy inputs to a deterministic baseline.
+
+    safe_request deliberately supports proxy configuration from environment
+    variables (_get_proxies) and requests' trust_env picks up OS-level
+    proxy settings (macOS System Configuration among them), so a developer
+    box or CI runner with any proxy configured would see extra entries
+    merged into the final proxies mapping. The two proxy-contract tests
+    below pin the merge semantics, not the ambient environment.
+    """
+    monkeypatch.setattr("app.utils.outbound_url_guard._get_proxies", lambda: None)
+    # requests merges OS/env proxies in Session.merge_environment_settings via
+    # requests.sessions.get_environ_proxies (trust_env is an instance attr set
+    # in __init__, so the module-level resolver is the patchable seam).
+    monkeypatch.setattr("requests.sessions.get_environ_proxies", lambda *a, **k: {})
+
+
 def test_safe_request_disables_proxy_by_default(monkeypatch):
     """safe_request must disable proxy lookup by default to avoid RecursionError in gevent.
 
@@ -282,6 +299,7 @@ def test_safe_request_disables_proxy_by_default(monkeypatch):
     {"http": None, "https": None} becomes an empty dict, which effectively
     disables proxy lookup.
     """
+    _isolate_proxy_environment(monkeypatch)
 
     def resolver(host, *a, **kw):  # type: ignore[no-untyped-def]
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
@@ -308,6 +326,7 @@ def test_safe_request_preserves_caller_provided_proxies(monkeypatch):
     Using setdefault ensures that if the caller explicitly provides a proxies
     argument (including proxies=None or custom proxy settings), it is preserved.
     """
+    _isolate_proxy_environment(monkeypatch)
 
     def resolver(host, *a, **kw):  # type: ignore[no-untyped-def]
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
