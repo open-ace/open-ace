@@ -10,8 +10,11 @@ Tests for issues #198, #199, #200:
 5. #199d: Anomaly status management (mark processed/ignore)
 6. #200: User dropdown selector
 
+Pytest note (#2457): the API steps are _check_* helpers driven by main();
+test_i18n_translations is the only collected test (needs BASE_URL).
+
 Run:
-  HEADLESS=true  python tests/198-199-200/e2e_audit_analysis_playwright.py   # 自动测试
+  HEADLESS=true  python tests/issues/198/e2e_audit_analysis_playwright.py   # 自动测试
   HEADLESS=false python tests/198-199-200/e2e_audit_analysis_playwright.py   # 演示模式
 """
 
@@ -71,7 +74,7 @@ def api_login(session, username="admin", password="admin123"):
     return r.json().get("success", False)
 
 
-def test_api_anomaly_status(session):
+def _check_api_anomaly_status(session):
     """Test anomaly status API endpoint."""
     print("\n[API] Testing anomaly status endpoint...")
 
@@ -112,7 +115,7 @@ def test_api_anomaly_status(session):
     check(r.status_code == 400, "Invalid status returns 400")
 
 
-def test_api_anomalies_with_status(session):
+def _check_api_anomalies_with_status(session):
     """Test anomalies endpoint returns status field."""
     print("\n[API] Testing anomalies endpoint with status...")
 
@@ -291,8 +294,8 @@ def main():
     # API tests
     session = requests.Session()
     api_login(session)
-    test_api_anomaly_status(session)
-    test_api_anomalies_with_status(session)
+    _check_api_anomaly_status(session)
+    _check_api_anomalies_with_status(session)
     test_i18n_translations()
 
     # UI tests with cookie injection

@@ -215,6 +215,9 @@ def test_dev_context_overflow_recovers_on_fresh_session():
             "context": {},
             "status": "active",
         },
+        # tenant bypass: the tracking line is a system row (same evolution as
+        # the 1816 review-fix rebinding)
+        require_tenant=False,
     )
     # Dev must NOT be marked failed — recovery succeeded.
     workflow_updates = [c.args[0] for c in orch._update_workflow.call_args_list if c.args]
