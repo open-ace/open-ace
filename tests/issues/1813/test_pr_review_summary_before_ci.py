@@ -14,6 +14,34 @@ from unittest.mock import MagicMock, patch
 
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
+FEATURE_SHA = "f" * 40
+MAIN_SHA = "m" * 40
+
+
+class _GitResult:
+    def __init__(self, stdout="", returncode=0):
+        self.stdout = stdout
+        self.returncode = returncode
+
+
+def _fake_run_git(args, check=True):
+    """#2457 realignment: pr_review.handle() shells out via gh._run_git
+    (rev-parse / merge-base) before any milestone write; a bare MagicMock
+    makes the real _validate_autonomous_change_scope fail closed on
+    merge-base derivation. Concrete shapes keep the validator executing and
+    passing (same treatment as tests/issues/993)."""
+    cmd = args[0] if args else ""
+    if cmd == "rev-parse":
+        target = args[1] if len(args) > 1 else ""
+        if target == "main":
+            return _GitResult(stdout=MAIN_SHA + "\n")
+        if target.endswith("^2"):
+            return _GitResult(returncode=128)
+        return _GitResult(stdout=FEATURE_SHA + "\n")
+    if cmd == "merge-base":
+        return _GitResult(returncode=1)
+    return _GitResult(stdout="")
+
 
 def _make_workflow(**overrides):
     base = {
@@ -70,7 +98,11 @@ class TestPrReviewSummaryBeforeCiCheck:
         _start_ci_repair_round."""
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
-        wf = _make_workflow()
+        wf = _make_workflow(
+            # Scope validation compares against base_commit_sha; pin it to the
+            # branch head so only the current-round range is checked.
+            base_commit_sha=FEATURE_SHA
+        )
         call_order = []  # track method call order
 
         with (
@@ -124,6 +156,34 @@ class TestPrReviewSummaryBeforeCiCheck:
                 "number": 99,
                 "url": "https://github.com/pull/99",
             }
+            # #2457 realignment: concrete git shapes for the entry scope gate,
+            # an OPEN recorded PR, changed-files for the round diff, and the
+            # trusted-git boundary so the review agent (real _run_agent with
+            # a mocked runner) actually executes.
+            orch._gh._run_git = MagicMock(side_effect=_fake_run_git)
+            orch._gh.get_changed_files.return_value = []
+            orch._gh.has_uncommitted_changes.return_value = False
+            orch._gh.get_pr.return_value = {
+                "state": "OPEN",
+                "number": 99,
+                "html_url": "https://github.com/pull/99",
+            }
+            orch._get_gh = MagicMock(return_value=orch._gh)
+            orch._snapshot_repo_context = MagicMock(
+                return_value={
+                    "context": {"repo_path": "/tmp/p", "expected_branch": "auto-dev/x"},
+                    "effective": {
+                        "repo_path": "/tmp/p",
+                        "git_dir": "/tmp/p/.git",
+                        "git_identity": "test-git",
+                        "common_dir": "/tmp/p/.git",
+                        "common_identity": "test-common",
+                        "origin": "",
+                    },
+                    "main": {},
+                }
+            )
+            orch._validate_repo_context_after_run = MagicMock(return_value="")
             orch._post_github_comment = MagicMock()
             # Skip the PR review fix path — we only care about the summary
             # ordering relative to the CI check, not the fix mechanics.
