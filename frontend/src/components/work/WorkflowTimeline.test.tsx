@@ -431,56 +431,56 @@ describe('getAcceptanceSummaryDetail (#2985)', () => {
   });
 });
 
+function acceptanceMilestone(overrides: Partial<WorkflowMilestone> = {}): WorkflowMilestone {
+  return {
+    workflow_id: 'wf-1',
+    milestone_id: 'ms-acc-1',
+    phase: 'acceptance_verification',
+    dev_round: 1,
+    round_number: 1,
+    milestone_type: 'acceptance_verification',
+    status: 'confirmed',
+    title: 'Acceptance verification: confirmed',
+    description: '',
+    session_id: '',
+    review_session_id: '',
+    github_issue_number: null,
+    github_pr_number: null,
+    github_comment_id: '',
+    commit_shas: '',
+    diff_stats: '',
+    result_summary: 'status=confirmed; scope=1 gates=0 verifier=3',
+    tldr: '',
+    plan_content: '',
+    review_content: '',
+    error_message: '',
+    parent_milestone_id: '',
+    fork_branch: '',
+    fork_workflow_id: '',
+    metadata: acceptanceReport('confirmed', {
+      scope: [{ item: 'src/app.py', verdict: 'confirmed' }],
+      verifier: [
+        { item: 'a', verdict: 'confirmed' },
+        { item: 'b', verdict: 'confirmed' },
+      ],
+    }),
+    started_at: '2026-08-21T15:00:00Z',
+    completed_at: '2026-08-21T15:05:00Z',
+    created_at: '2026-08-21T15:00:00Z',
+    updated_at: '2026-08-21T15:05:00Z',
+    ...overrides,
+  };
+}
+
+function renderWithMilestones(workflow: AutonomousWorkflow, milestones: WorkflowMilestone[]) {
+  vi.mocked(useWorkflowTimeline).mockReturnValueOnce({
+    data: { milestones },
+    isLoading: false,
+  } as never);
+  return renderTimeline(workflow);
+}
+
 describe('acceptance milestone card (#2985)', () => {
-  function acceptanceMilestone(overrides: Partial<WorkflowMilestone> = {}): WorkflowMilestone {
-    return {
-      workflow_id: 'wf-1',
-      milestone_id: 'ms-acc-1',
-      phase: 'acceptance_verification',
-      dev_round: 1,
-      round_number: 1,
-      milestone_type: 'acceptance_verification',
-      status: 'confirmed',
-      title: 'Acceptance verification: confirmed',
-      description: '',
-      session_id: '',
-      review_session_id: '',
-      github_issue_number: null,
-      github_pr_number: null,
-      github_comment_id: '',
-      commit_shas: '',
-      diff_stats: '',
-      result_summary: 'status=confirmed; scope=1 gates=0 verifier=3',
-      tldr: '',
-      plan_content: '',
-      review_content: '',
-      error_message: '',
-      parent_milestone_id: '',
-      fork_branch: '',
-      fork_workflow_id: '',
-      metadata: acceptanceReport('confirmed', {
-        scope: [{ item: 'src/app.py', verdict: 'confirmed' }],
-        verifier: [
-          { item: 'a', verdict: 'confirmed' },
-          { item: 'b', verdict: 'confirmed' },
-        ],
-      }),
-      started_at: '2026-08-21T15:00:00Z',
-      completed_at: '2026-08-21T15:05:00Z',
-      created_at: '2026-08-21T15:00:00Z',
-      updated_at: '2026-08-21T15:05:00Z',
-      ...overrides,
-    };
-  }
-
-  function renderWithMilestones(workflow: AutonomousWorkflow, milestones: WorkflowMilestone[]) {
-    vi.mocked(useWorkflowTimeline).mockReturnValueOnce({
-      data: { milestones },
-      isLoading: false,
-    } as never);
-    return renderTimeline(workflow);
-  }
-
   it('shows the verdict icon/label and the structured summary instead of the raw backend string', () => {
     const { container } = renderWithMilestones(
       pausedWorkflow({ status: 'completed', verification_status: 'confirmed' }),
@@ -529,5 +529,40 @@ describe('acceptance milestone card (#2985)', () => {
     );
 
     expect(screen.getByText(/status=confirmed; scope=1/)).toBeInTheDocument();
+  });
+});
+
+describe('milestone time format (#2985)', () => {
+  it('shows month-day with the time; adds the year only across years', () => {
+    // The anchor time prefers completed_at ?? started_at ?? created_at, so
+    // override all three together.
+    const { container } = renderWithMilestones(
+      pausedWorkflow({ status: 'completed', verification_status: 'confirmed' }),
+      [
+        acceptanceMilestone({
+          milestone_id: 'ms-t1',
+          started_at: '2026-02-03T04:05:06Z',
+          completed_at: '2026-02-03T04:05:06Z',
+          created_at: '2026-02-03T04:05:06Z',
+        }),
+      ]
+    );
+    const timeEl = container.querySelector('.timeline-milestone-time span');
+    expect(timeEl?.textContent).toMatch(/\d{2}\/\d{2}[,.]? ?\d{2}:\d{2}:\d{2}/);
+    expect(timeEl?.textContent).not.toMatch(/2026/);
+
+    const second = renderWithMilestones(
+      pausedWorkflow({ status: 'completed', verification_status: 'confirmed' }),
+      [
+        acceptanceMilestone({
+          milestone_id: 'ms-t2',
+          started_at: '2024-02-03T04:05:06Z',
+          completed_at: '2024-02-03T04:05:06Z',
+          created_at: '2024-02-03T04:05:06Z',
+        }),
+      ]
+    );
+    const staleEl = second.container.querySelector('.timeline-milestone-time span');
+    expect(staleEl?.textContent).toMatch(/2024/);
   });
 });

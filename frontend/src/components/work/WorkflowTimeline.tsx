@@ -991,6 +991,21 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     }).format(parsed);
   };
 
+  // Live-activity rows live in a fixed-width (58px) time column laid out for
+  // HH:mm:ss (#1025) and stream same-session events — keep them time-only so
+  // the longer date-bearing string cannot wrap the row.
+  const formatActivityTime = (value: string | null) => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+    return new Intl.DateTimeFormat(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(parsed);
+  };
+
   const formatLiveActivityLine = (activity: {
     timestamp?: string;
     type: 'assistant' | 'tool_use' | 'usage' | 'system';
@@ -1001,7 +1016,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     subtype?: string;
     attempt?: number;
   }) => {
-    const timestamp = formatMilestoneTime(activity.timestamp ?? null) || '--:--:--';
+    const timestamp = formatActivityTime(activity.timestamp ?? null) || '--:--:--';
     if (activity.type === 'tool_use') {
       const snippet = activity.tool_input?.trim();
       return {
@@ -1856,7 +1871,13 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               {showInlinePreview && (
                 <p
                   className="timeline-milestone-preview"
-                  title={rawSummary.length > 220 ? rawSummary : undefined}
+                  title={
+                    acceptanceSummaryDetail
+                      ? undefined
+                      : rawSummary.length > 220
+                        ? rawSummary
+                        : undefined
+                  }
                 >
                   {acceptanceSummaryDetail ?? milestoneSummary}
                 </p>
