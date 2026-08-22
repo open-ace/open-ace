@@ -120,6 +120,8 @@
                     "pytest",
                     "tests/",
                     "-q",
+                    "-n",
+                    "auto",
                     "--maxfail=1",
                     "--cov=scripts/shared",
                     "--cov=app/auth",
