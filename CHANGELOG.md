@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Fixed configuration persistence in docker-compose.multi-user.yml by adding `OPENACE_CONFIG_DIR` environment variable to ensure config persists to mounted volume when running as root (Issue #2235)
+- Fixed install.sh script to automatically add required multi-user mode configurations (`user: "0"`, `OPENACE_ALLOW_ROOT_MULTI_USER=1`, `OPENACE_CONFIG_DIR`) when `WORKSPACE_MULTI_USER_MODE=true`
+- Improved error messages in docker-entrypoint.sh when multi-user mode is enabled without root privileges, now recommending docker-compose.multi-user.yml as the easiest fix
+
 ### Changed
+- Multi-user deployment documentation now recommends using docker-compose.multi-user.yml as the primary method
 - The Docker image now defaults to the non-root `open-ace` user (uid 1000) via a `USER 1000` directive in the production stage, so `docker run`, docker-compose, and Kubernetes all run non-root without relying solely on the manifest `securityContext`. Multi-user workspace mode (which needs root for `useradd`/`chown`/`sudo -u`) is now an explicit, fail-fast opt-in: run as uid 0 (`docker run --user 0` / manifest `runAsUser: 0`) and set `OPENACE_ALLOW_ROOT_MULTI_USER=1`, otherwise the entrypoint exits with a clear error instead of silently swallowing permission failures.
 - Kubernetes reference manifests now run the web pod as non-root with 3 replicas, HPA, and Prometheus scrape annotations restored; multi-user workspace deployments that require root must opt in via an explicit overlay.
 - Docker-generated default config now enables AI autonomous development by default and only enables multi-user workspace mode when `WORKSPACE_MULTI_USER_MODE=true`.

@@ -22,9 +22,11 @@
 #   OPENACE_ALLOW_ROOT_MULTI_USER=1 \
 #   docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
 #
-# Config persistence for multi-user mode:
-#   Mount config volume to /root/.open-ace (not /home/open-ace/.open-ace)
-#   Or set OPENACE_CONFIG_DIR to your preferred path
+# Config persistence for multi-user mode (Issue #2235):
+#   OPENACE_CONFIG_DIR is set to /home/open-ace/.open-ace to ensure
+#   configuration persists to the config-data volume mounted in docker-compose.yml.
+#   This fixes the issue where root user's default config path (/root/.open-ace)
+#   would not persist to the mounted volume.
 
 services:
   open-ace:
@@ -37,6 +39,10 @@ services:
       - WORKSPACE_MULTI_USER_MODE=true
       # Explicit root opt-in (Issue #1893)
       - OPENACE_ALLOW_ROOT_MULTI_USER=1
+      # IMPORTANT: OPENACE_CONFIG_DIR must match the volume mount path in
+      # docker-compose.yml (config-data:/home/open-ace/.open-ace).
+      # This ensures configuration persists correctly when running as root.
+      - OPENACE_CONFIG_DIR=/home/open-ace/.open-ace
       # Security mode - recommend production for actual deployments
       - OPENACE_SECURITY_MODE=${OPENACE_SECURITY_MODE:-production}
 
@@ -58,6 +64,10 @@ services:
       - WORKSPACE_MULTI_USER_MODE=true
       # Explicit root opt-in (Issue #1893)
       - OPENACE_ALLOW_ROOT_MULTI_USER=1
+      # IMPORTANT: OPENACE_CONFIG_DIR must match the volume mount path in
+      # docker-compose.yml (config-data:/home/open-ace/.open-ace).
+      # This ensures configuration persists correctly when running as root.
+      - OPENACE_CONFIG_DIR=/home/open-ace/.open-ace
       # Security mode - recommend production for actual deployments
       - OPENACE_SECURITY_MODE=${OPENACE_SECURITY_MODE:-production}
     volumes:

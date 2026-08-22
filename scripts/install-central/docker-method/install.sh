@@ -3092,6 +3092,14 @@ create_docker_compose() {
         print_info "  - 映射 SSH 密钥目录: $SSH_MOUNT_SOURCE"
     fi
 
+    # Multi-user mode configuration (Issue #2235)
+    multi_user_section=""
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        multi_user_section="    user: \"0\"
+"
+        print_info "  - 多用户模式：容器以 root 运行"
+    fi
+
     # Note: We don't specify 'platform' in docker-compose.yml to allow using locally loaded images
     # The platform detection is just for information purposes
     cat > "$compose_file" << EOF
@@ -3103,7 +3111,7 @@ services:
   open-ace:
     image: $IMAGE_NAME
     container_name: open-ace
-    restart: unless-stopped
+$multi_user_section    restart: unless-stopped
     ports:
 $ports_section
     environment:
@@ -3115,6 +3123,19 @@ $ports_section
       - OPENACE_SYSTEM_ACCOUNT=$RUN_USER
       # Data fetch: container runs as root, use venv Python (Issue #1121)
       - FETCH_USE_SUDO=false
+EOF
+
+    # Add multi-user mode environment variables (Issue #2235)
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        cat >> "$compose_file" << EOF
+      # Multi-user mode requires explicit root authorization
+      - OPENACE_ALLOW_ROOT_MULTI_USER=1
+      # Ensure config persists to mounted volume when running as root
+      - OPENACE_CONFIG_DIR=/home/open-ace/.open-ace
+EOF
+    fi
+
+    cat >> "$compose_file" << EOF
     volumes:
 $volumes_section
     depends_on:
@@ -3168,6 +3189,14 @@ volumes:
   postgres-data:
     driver: local
 EOF
+
+    # Add home-data volume for multi-user mode (Issue #2235)
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        cat >> "$compose_file" << EOF
+  home-data:
+    driver: local
+EOF
+    fi
 
     # Set permissions for docker-compose.yml (Issue #1253)
     # This file contains sensitive information: database password, secret key, etc.

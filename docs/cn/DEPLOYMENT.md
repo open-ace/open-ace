@@ -56,16 +56,42 @@ uid 1000 执行入口脚本，而不再仅依赖清单中的 `securityContext`�
 多用户工作区模式（`WORKSPACE_MULTI_USER_MODE=true` 或配置中的
 `workspace.multi_user_mode: true`）确实需要 root——它会创建系统用户
 （`useradd`）、修复属主（`chown`）并在 `/home` 下切换身份
-（`sudo -u <user>`）。多用户部署必须显式回退到 root：
+（`sudo -u <user>`）。
+
+**推荐方式：使用 docker-compose.multi-user.yml**
+
+```bash
+# 一键启用多用户模式
+docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+```
+
+docker-compose.multi-user.yml 会自动配置：
+- 容器以 root 运行（`user: "0"`）
+- 显式授权（`OPENACE_ALLOW_ROOT_MULTI_USER=1`）
+- 配置持久化（`OPENACE_CONFIG_DIR=/home/open-ace/.open-ace`）
+
+**手动方式**
 
 ```bash
 docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
-  -e OPENACE_ALLOW_ROOT_MULTI_USER=1 ...
+  -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \
+  -e OPENACE_CONFIG_DIR=/home/open-ace/.open-ace ...
 ```
 
-必须同时设置 `--user 0`（或清单中的 `runAsUser: 0`）与
-`OPENACE_ALLOW_ROOT_MULTI_USER=1`，否则入口脚本会以清晰的错误信息退出，
-而不是默默吞掉非 root 多用户部署会遇到的 `useradd`/`chown` 权限失败。
+必须同时设置 `--user 0`（或清单中的 `runAsUser: 0`）、
+`OPENACE_ALLOW_ROOT_MULTI_USER=1` 和 `OPENACE_CONFIG_DIR`，否则入口脚本会
+以清晰的错误信息退出，而不是默默吞掉非 root 多用户部署会遇到的
+`useradd`/`chown` 权限失败。
+
+**从 config.json 迁移**
+
+如果您之前在 config.json 中设置了 `"multi_user_mode": true`：
+
+1. 推荐使用 docker-compose.multi-user.yml（见上方）
+2. 或在 config.json 中将 `"multi_user_mode"` 设置为 `false`，改用环境变量控制
+
+**注意**：多用户模式需要容器以 root 运行，仅适用于受控环境。生产环境请确保
+设置强密码和安全密钥。
 
 ### 初始部署
 

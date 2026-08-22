@@ -104,7 +104,15 @@ def find_all_qwen_project_dirs() -> dict:
     if not home_base.is_dir():
         return result
 
-    for user_dir in home_base.iterdir():
+    try:
+        user_dirs = list(home_base.iterdir())
+    except PermissionError:
+        # Cannot access home base directory at all
+        result["errors"].append(("N/A", f"Cannot access {home_base}: permission denied"))
+        print(f"  Warning: Cannot access {home_base} (permission denied)")
+        return result
+
+    for user_dir in user_dirs:
         if not user_dir.is_dir():
             continue
 

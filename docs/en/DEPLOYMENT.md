@@ -57,18 +57,43 @@ matches the filesystem ownership baked into the image and the K8s
 Multi-user workspace mode (`WORKSPACE_MULTI_USER_MODE=true` or
 `workspace.multi_user_mode: true` in config) genuinely needs root — it creates
 system users (`useradd`), fixes ownership (`chown`), and switches identity
-(`sudo -u <user>`) across `/home`. For multi-user deployments you must opt back
-into root explicitly:
+(`sudo -u <user>`) across `/home`.
+
+**Recommended: Use docker-compose.multi-user.yml**
+
+```bash
+# One-command multi-user mode
+docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+```
+
+The docker-compose.multi-user.yml automatically configures:
+- Container runs as root (`user: "0"`)
+- Explicit authorization (`OPENACE_ALLOW_ROOT_MULTI_USER=1`)
+- Configuration persistence (`OPENACE_CONFIG_DIR=/home/open-ace/.open-ace`)
+
+**Manual Setup**
 
 ```bash
 docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
-  -e OPENACE_ALLOW_ROOT_MULTI_USER=1 ...
+  -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \
+  -e OPENACE_CONFIG_DIR=/home/open-ace/.open-ace ...
 ```
 
-Without both `--user 0` (or manifest `runAsUser: 0`) and
-`OPENACE_ALLOW_ROOT_MULTI_USER=1`, the entrypoint exits with a clear error
-rather than silently swallowing the `useradd`/`chown` permission failures that
-a naive non-root multi-user deployment would hit.
+You must set `--user 0` (or manifest `runAsUser: 0`),
+`OPENACE_ALLOW_ROOT_MULTI_USER=1`, and `OPENACE_CONFIG_DIR` together.
+Otherwise, the entrypoint exits with a clear error rather than silently
+swallowing the `useradd`/`chown` permission failures that a naive non-root
+multi-user deployment would hit.
+
+**Migrating from config.json**
+
+If you previously set `"multi_user_mode": true` in config.json:
+
+1. Recommended: Use docker-compose.multi-user.yml (see above)
+2. Or set `"multi_user_mode": false` in config.json and use environment variables
+
+**Note**: Multi-user mode requires root and is suitable for controlled environments
+only. For production, ensure strong passwords and security keys are set.
 
 ### Initial Deployment
 
