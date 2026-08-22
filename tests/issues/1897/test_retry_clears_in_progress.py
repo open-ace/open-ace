@@ -156,7 +156,9 @@ class TestRetryClearsInProgress:
             patch("app.routes.autonomous._get_repo") as mock_get_repo,
             patch("app.services.autonomous_scheduler.AutonomousScheduler") as mock_sched_cls,
             patch("app.routes.autonomous._emit_event_safe"),
-            patch("app.auth.decorators._extract_token", return_value="fake-token"),
+            # #1896: query-param tokens are rejected; the decorator extracts from
+            # cookie/header via _extract_session_token (the old _extract_token name is gone)
+            patch("app.auth.decorators._extract_session_token", return_value="fake-token"),
             patch("app.auth.decorators._load_user_from_token", return_value=fake_user),
             patch("app.auth.decorators.enforce_password_change_requirement", return_value=None),
         ):

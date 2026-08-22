@@ -185,14 +185,17 @@ class TestPlanningIntegration:
         orch._runner._uses_sidebar_session_source.return_value = False
         # These tests exercise planning semantics, not the privileged Git
         # boundary. Keep them hermetic on developer machines that do not have
-        # the production repository-owner account configured.
+        # the production repository-owner account configured. The fake layout
+        # must look like a regular repo checkout: the trusted-git boundary
+        # rejects bare-repo shapes (common_dir basename must be ".git", and
+        # repo_path must live under common_dir's parent).
         orch._snapshot_repo_context = MagicMock(
             return_value={
                 "effective": {
                     "repo_path": "/tmp/test",
-                    "git_dir": "/tmp/test.git",
+                    "git_dir": "/tmp/test/.git",
                     "git_identity": "test-git",
-                    "common_dir": "/tmp/test.git",
+                    "common_dir": "/tmp/test/.git",
                     "common_identity": "test-common",
                     "origin": "",
                 },

@@ -225,6 +225,9 @@ def test_stable_session_line_rebinds_once_and_preserves_usage(recovered_success)
             "context": {"keep": "value"},
             "status": "active",
         },
+        # tenant bypass: the tracking line is a system row, the recovery
+        # rebinding must not be bounced by tenant guards
+        require_tenant=False,
     )
     orch._update_workflow.assert_called_once_with({"agent_session_id": "", "agent_pid": None})
     orch._accumulate_tokens.assert_called_once_with(overflow)
@@ -343,15 +346,25 @@ def test_review_fix_double_overflow_fails_before_committing_dirty_tree():
     assert workflow_update["status"] == "failed"
 
 
-def test_review_fix_refuses_preexisting_dirty_tree_before_agent():
-    """Pre-existing edits can never hitchhike on a recovered review fix."""
+def test_review_fix_stages_and_scope_guards_preexisting_dirty_tree():
+    """Pre-existing edits ride through scope validation, never blind (#1828/#1830).
+
+    A dirty worktree used to dead-end the review fix outright — refusing and
+    retrying just hits the same dirt. The contract now: stage + commit the
+    pre-existing changes (no-verify), record the trusted head, and
+    scope-validate that staged range as its own span; only out-of-scope
+    pre-existing content refuses (and is discarded).
+    """
     wf = _make_workflow(current_phase="pr_review", status="pr_review")
     orch, mock_repo = _make_orchestrator(wf)
     orch._create_milestone = MagicMock(return_value={"milestone_id": "ms-fix"})
     orch._update_workflow = MagicMock()
     orch._run_agent_with_context_recovery = MagicMock()
+    orch._record_trusted_head = MagicMock()
+    orch._validate_autonomous_change_scope = MagicMock(return_value="touches unrelated paths")
     gh = MagicMock()
     gh.has_uncommitted_changes.return_value = True
+    gh.get_current_commit.side_effect = ["sha-before", "sha-staged"]
 
     succeeded = orch._apply_pr_review_fix(
         wf,
@@ -363,14 +376,22 @@ def test_review_fix_refuses_preexisting_dirty_tree_before_agent():
         pr_number=1849,
     )
 
+    # The pre-existing diff is committed as its own span and validated as one
+    gh.git_add_all.assert_called_once()
+    gh.git_commit.assert_called_once_with(
+        "auto: stage pre-existing worktree changes before review fix", no_verify=True
+    )
+    assert orch._validate_autonomous_change_scope.call_args.args[2:] == (
+        "sha-before",
+        "sha-staged",
+    )
+    # Out-of-scope pre-existing content never reaches the agent and is discarded
     assert succeeded is False
     orch._run_agent_with_context_recovery.assert_not_called()
-    gh.git_add_all.assert_not_called()
-    gh.git_commit.assert_not_called()
     gh.git_push.assert_not_called()
-    assert (
-        "already had uncommitted changes"
-        in mock_repo.update_milestone.call_args.args[1]["error_message"]
+    gh.reset_hard_to.assert_called_once_with("sha-before")
+    assert "failed scope validation" in (
+        mock_repo.update_milestone.call_args.args[1]["error_message"]
     )
 
 

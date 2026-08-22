@@ -3,9 +3,16 @@
 Test script for Issue 52: Management页面Users tab增加Linux Account功能
 
 测试内容：
-1. 数据库层面：linux_account 字段
-2. API 层面：更新用户接口支持 linux_account，密码重置接口
-3. 前端层面：表格显示 Linux Account 列，编辑和密码重置功能
+1. 数据库层面：system_account 字段（原 linux_account，随多用户工作区改造更名）
+2. API 层面：更新用户接口支持 system_account，密码重置接口
+3. 前端层面：表格显示 System Account 列，编辑和密码重置功能
+
+#2457 realignment notes:
+- linux_account 在迁移中更名为 system_account（db.py 会把旧列名重命名或
+  补新列），断言随之更名。
+- get_connection() 经 _get_db_url() 解析连接目标并缓存；只改 DB_PATH 不
+  生效，历史上这些测试实际落在环境数据库上。现在直接把 _db_url_cache
+  指到临时 SQLite 文件，测试真正自包含、不再污染 lane 数据库。
 """
 
 import hashlib
@@ -13,6 +20,7 @@ import os
 import shutil
 import sys
 import tempfile
+from contextlib import contextmanager
 
 # Add project root to path
 sys.path.insert(
@@ -22,49 +30,58 @@ sys.path.insert(
 from scripts.shared import db as db_module
 
 
-def test_database_migration():
-    """测试数据库迁移：linux_account 字段是否正确添加"""
-    print("\n=== 测试数据库迁移 ===")
+@contextmanager
+def _temp_sqlite_db():
+    """Point the legacy db module at a throwaway SQLite file (#2457).
 
-    # 创建临时数据库
+    get_connection() resolves its target through _get_db_url() (cached), so
+    patching DB_PATH alone never redirected anything — the tests used to run
+    against whatever ambient database the environment configured (a local
+    PostgreSQL in dev, the shared lane DB in CI). Overriding the cache pins
+    the connection to a temp file regardless of ambient config.
+    """
     temp_dir = tempfile.mkdtemp()
     original_db_path = db_module.DB_PATH
+    original_db_dir = db_module.DB_DIR
+    original_url_cache = db_module._db_url_cache
     db_module.DB_PATH = os.path.join(temp_dir, "test.db")
     db_module.DB_DIR = temp_dir
-
+    db_module._db_url_cache = f"sqlite:///{db_module.DB_PATH}"
     try:
+        yield
+    finally:
+        db_module.DB_PATH = original_db_path
+        db_module.DB_DIR = original_db_dir
+        db_module._db_url_cache = original_url_cache
+        shutil.rmtree(temp_dir)
+
+
+def test_database_migration():
+    """测试数据库迁移：system_account 字段是否正确添加（原 linux_account）"""
+    print("\n=== 测试数据库迁移 ===")
+
+    with _temp_sqlite_db():
         # 初始化数据库
         db_module.init_database()
 
-        # 检查 linux_account 字段是否存在
+        # 检查 system_account 字段是否存在
         conn = db_module.get_connection()
         cursor = conn.cursor()
         cursor.execute("PRAGMA table_info(users)")
         columns = [col[1] for col in cursor.fetchall()]
         conn.close()
 
-        assert "linux_account" in columns, "linux_account 字段未添加到 users 表"
-        print("✓ linux_account 字段已添加到 users 表")
+        assert "system_account" in columns, "system_account 字段未添加到 users 表"
+        print("✓ system_account 字段已添加到 users 表")
 
         return True
-    finally:
-        # 清理
-        db_module.DB_PATH = original_db_path
-        db_module.DB_DIR = os.path.dirname(original_db_path)
-        shutil.rmtree(temp_dir)
 
 
-def test_update_user_with_linux_account():
-    """测试更新用户时可以设置 linux_account"""
-    print("\n=== 测试更新用户 linux_account ===")
+def test_update_user_with_system_account():
+    """测试更新用户时可以设置 system_account"""
+    print("\n=== 测试更新用户 system_account ===")
 
-    # 创建临时数据库
-    temp_dir = tempfile.mkdtemp()
-    original_db_path = db_module.DB_PATH
-    db_module.DB_PATH = os.path.join(temp_dir, "test.db")
-    db_module.DB_DIR = temp_dir
-
-    try:
+    with _temp_sqlite_db():
         # 初始化数据库
         db_module.init_database()
 
@@ -81,35 +98,24 @@ def test_update_user_with_linux_account():
         assert user is not None, "获取用户失败"
         user_id = user["id"]
 
-        # 更新 linux_account
-        result = db_module.update_user(user_id, linux_account="test_linux_user")
-        assert result, "更新 linux_account 失败"
-        print("✓ 更新 linux_account 成功")
+        # 更新 system_account
+        result = db_module.update_user(user_id, system_account="test_sys_user")
+        assert result, "更新 system_account 失败"
+        print("✓ 更新 system_account 成功")
 
         # 验证更新
         user = db_module.get_user_by_id(user_id)
-        assert user["linux_account"] == "test_linux_user", "linux_account 值不正确"
-        print(f"✓ linux_account 值正确: {user['linux_account']}")
+        assert user["system_account"] == "test_sys_user", "system_account 值不正确"
+        print(f"✓ system_account 值正确: {user['system_account']}")
 
         return True
-    finally:
-        # 清理
-        db_module.DB_PATH = original_db_path
-        db_module.DB_DIR = os.path.dirname(original_db_path)
-        shutil.rmtree(temp_dir)
 
 
 def test_update_user_password():
     """测试更新用户密码"""
     print("\n=== 测试更新用户密码 ===")
 
-    # 创建临时数据库
-    temp_dir = tempfile.mkdtemp()
-    original_db_path = db_module.DB_PATH
-    db_module.DB_PATH = os.path.join(temp_dir, "test.db")
-    db_module.DB_DIR = temp_dir
-
-    try:
+    with _temp_sqlite_db():
         # 初始化数据库
         db_module.init_database()
 
@@ -141,24 +147,18 @@ def test_update_user_password():
         print("✓ 密码哈希已正确更新")
 
         return True
-    finally:
-        # 清理
-        db_module.DB_PATH = original_db_path
-        db_module.DB_DIR = os.path.dirname(original_db_path)
-        shutil.rmtree(temp_dir)
 
 
-def test_get_all_users_includes_linux_account():
-    """测试获取所有用户时包含 linux_account 字段"""
-    print("\n=== 测试获取用户列表包含 linux_account ===")
+def test_get_all_users_projection_and_system_account():
+    """测试用户列表投影，及 system_account 的持久化可见性
 
-    # 创建临时数据库
-    temp_dir = tempfile.mkdtemp()
-    original_db_path = db_module.DB_PATH
-    db_module.DB_PATH = os.path.join(temp_dir, "test.db")
-    db_module.DB_DIR = temp_dir
+    get_all_users 是配额脚本用的精简投影（不含 system_account）；完整的
+    system_account 值经 get_user_by_id（SELECT *）读取 —— 与 Management
+    页面走 app 层 user_repo 的行为区分开。
+    """
+    print("\n=== 测试获取用户列表投影与 system_account ===")
 
-    try:
+    with _temp_sqlite_db():
         # 初始化数据库
         db_module.init_database()
 
@@ -172,44 +172,50 @@ def test_get_all_users_includes_linux_account():
         )
         print("✓ 创建测试用户成功")
 
-        # 更新一个用户的 linux_account
+        # 更新一个用户的 system_account
         user1 = db_module.get_user_by_username("user1")
-        db_module.update_user(user1["id"], linux_account="linux_user1")
+        db_module.update_user(user1["id"], system_account="system_user1")
 
         # 获取所有用户
         users = db_module.get_all_users()
         assert len(users) >= 2, "用户数量不正确"
         print(f"✓ 获取到 {len(users)} 个用户")
 
-        # 检查 linux_account 字段
-        user1_found = False
+        # 配额脚本的固定投影列
+        usernames = {user["username"] for user in users}
+        assert {"user1", "user2"} <= usernames, "用户列表缺少测试用户"
         for user in users:
-            if user["username"] == "user1":
-                assert user["linux_account"] == "linux_user1", "user1 的 linux_account 不正确"
-                user1_found = True
-                print(f"✓ user1 的 linux_account: {user['linux_account']}")
+            assert set(user.keys()) == {
+                "id",
+                "username",
+                "email",
+                "role",
+                "daily_token_quota",
+                "daily_request_quota",
+                "is_active",
+                "created_at",
+            }, f"get_all_users 投影列漂移: {sorted(user.keys())}"
+        print("✓ get_all_users 投影列符合配额脚本契约")
 
-        assert user1_found, "未找到 user1"
+        # system_account 持久化，经详情读取
+        detail = db_module.get_user_by_id(user1["id"])
+        assert detail["system_account"] == "system_user1", "user1 的 system_account 不正确"
+        print(f"✓ user1 的 system_account: {detail['system_account']}")
 
         return True
-    finally:
-        # 清理
-        db_module.DB_PATH = original_db_path
-        db_module.DB_DIR = os.path.dirname(original_db_path)
-        shutil.rmtree(temp_dir)
 
 
 def run_all_tests():
     """运行所有测试"""
     print("=" * 60)
-    print("Issue 52 测试: Management页面Users tab增加Linux Account功能")
+    print("Issue 52 测试: Management页面Users tab增加System Account功能")
     print("=" * 60)
 
     tests = [
         ("数据库迁移测试", test_database_migration),
-        ("更新用户 linux_account 测试", test_update_user_with_linux_account),
+        ("更新用户 system_account 测试", test_update_user_with_system_account),
         ("更新用户密码测试", test_update_user_password),
-        ("获取用户列表包含 linux_account 测试", test_get_all_users_includes_linux_account),
+        ("用户列表投影与 system_account 测试", test_get_all_users_projection_and_system_account),
     ]
 
     passed = 0

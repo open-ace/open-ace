@@ -401,7 +401,9 @@ class TestPlanningTimeout:
     def test_planning_timeout_constant(self):
         from app.modules.workspace.autonomous.orchestrator import PLANNING_TIMEOUT
 
-        assert PLANNING_TIMEOUT == 600
+        # Raised 600 -> 1800: ZCode+GLM planning round-trips take 10-15 min
+        # for complex issues; 600s succeeded only ~30% of the time.
+        assert PLANNING_TIMEOUT == 1800
 
     def test_planning_timeout_is_less_than_default(self):
         """Planning timeout should be shorter than the default 1-hour task timeout."""
@@ -413,13 +415,13 @@ class TestPlanningTimeout:
         """Verify extend API accumulates into planning_timeout_extension."""
         from app.modules.workspace.autonomous.orchestrator import PLANNING_TIMEOUT
 
-        # Simulate: initial extension = 0 → timeout = 600
+        # Simulate: initial extension = 0 → timeout = 1800
         extension = 0
-        assert PLANNING_TIMEOUT + extension == 600
+        assert PLANNING_TIMEOUT + extension == 1800
 
-        # After extend by 600 → timeout = 1200
+        # After extend by 600 → timeout = 2400
         extension = 600
-        assert PLANNING_TIMEOUT + extension == 1200
+        assert PLANNING_TIMEOUT + extension == 2400
 
     def test_multiple_extensions_accumulate(self):
         """Each extend call adds to the previous extension."""
@@ -428,10 +430,10 @@ class TestPlanningTimeout:
         current_extension = 0
         # First extend: +600
         current_extension += 600
-        assert PLANNING_TIMEOUT + current_extension == 1200
+        assert PLANNING_TIMEOUT + current_extension == 2400
         # Second extend: +300
         current_extension += 300
-        assert PLANNING_TIMEOUT + current_extension == 1500
+        assert PLANNING_TIMEOUT + current_extension == 2700
 
 
 class TestLocalSessionAllowedTools:

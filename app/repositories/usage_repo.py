@@ -858,8 +858,10 @@ class UsageRepository:
         rows = self.db.fetch_all(query, tuple(params))
 
         results: dict[str, dict] = {}
+        raw_names_by_tool: dict[str, set[str]] = {}
         for row in rows:
             tool = normalize_tool_name(row["tool_name"])
+            raw_names_by_tool.setdefault(tool, set()).add(row["tool_name"])
             if tool in results:
                 existing = results[tool]
                 existing["total_tokens"] += row["total_tokens"] or 0
@@ -877,6 +879,31 @@ class UsageRepository:
                     "first_date": row["first_date"],
                     "last_date": row["last_date"],
                 }
+
+        # Aliases merged from several raw names inherit days_count /
+        # first_date / last_date from ONE alias's grouped row, which
+        # undercounts days and misreports the range whenever another alias
+        # spans further (migration 038 used to rebuild these during upgrade;
+        # the read-boundary merge must keep the same union semantics —
+        # Issue #1111). Recompute the span over the whole alias family.
+        for tool, raw_names in raw_names_by_tool.items():
+            if len(raw_names) < 2 or tool not in results:
+                continue
+            placeholders = ",".join("?" for _ in raw_names)
+            span_row = self.db.fetch_one(
+                f"""
+                    SELECT COUNT(DISTINCT date) as days_count,
+                           MIN(date) as first_date,
+                           MAX(date) as last_date
+                    FROM daily_messages
+                    {where_clause} AND tool_name IN ({placeholders})
+                """,
+                tuple(params) + tuple(raw_names),
+            )
+            if span_row:
+                results[tool]["days_count"] = span_row["days_count"]
+                results[tool]["first_date"] = span_row["first_date"]
+                results[tool]["last_date"] = span_row["last_date"]
 
         return results
 

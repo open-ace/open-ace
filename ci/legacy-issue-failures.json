@@ -9,22 +9,6 @@
       "summary": "playwright._impl._errors.TimeoutError: Locator.input_value: Timeout 30000ms exceeded."
     },
     {
-      "category": "test_body_exception",
-      "exception_type": "CalledProcessError",
-      "issue_number": "1111",
-      "nodeid": "tests/issues/1111/test_sqlite_normalize_derived_tables.py::test_sqlite_upgrade_merges_qwen_alias_rows_before_normalization",
-      "outcome": "failure",
-      "summary": "subprocess.CalledProcessError: Command '['python', '-m', 'alembic', '-c', 'alembic.ini', 'upgrade', '017_add_usage_summary']' returned non-zero exit status 255."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "CalledProcessError",
-      "issue_number": "1111",
-      "nodeid": "tests/issues/1111/test_sqlite_normalize_derived_tables.py::test_sqlite_upgrade_rebuilds_claude_summary_with_distinct_day_count",
-      "outcome": "failure",
-      "summary": "subprocess.CalledProcessError: Command '['python', '-m', 'alembic', '-c', 'alembic.ini', 'upgrade', '038_normalize_tool_names']' returned non-zero exit status 255."
-    },
-    {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
       "issue_number": "1277",
@@ -33,60 +17,12 @@
       "summary": "AssertionError: skip_retries=1 must be persisted when tests are skipped"
     },
     {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1306",
-      "nodeid": "tests/issues/1306/test_host_url_replacement.py::test_get_user_webui_url_preserves_port_single_user",
-      "outcome": "failure",
-      "summary": "AssertionError: assert False"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1306",
-      "nodeid": "tests/issues/1306/test_host_url_replacement.py::test_get_user_webui_url_with_host_url",
-      "outcome": "failure",
-      "summary": "AssertionError: assert False"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "166",
-      "nodeid": "tests/issues/166/test_launchd_env.py::test_qwen_cli",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/166/test_launchd_env.py, line 37"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "166",
-      "nodeid": "tests/issues/166/test_stream_json_mode.py::test_stream_json_mode",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/166/test_stream_json_mode.py, line 32"
-    },
-    {
       "category": "test_body_exception",
       "exception_type": "AttributeError",
       "issue_number": "1760",
       "nodeid": "tests/issues/1760/test_save_usage_tenant_and_workflow_annotation.py::test_update_agent_sessions_stats_writes_per_session_model",
       "outcome": "failure",
       "summary": "AttributeError: <module 'config' from 'tests/issues/610/../../../remote-agent/config.py'> has no attribute 'DB_DIR'"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1778",
-      "nodeid": "tests/issues/1778/test_outbound_url_toctou.py::test_safe_request_disables_proxy_by_default",
-      "outcome": "failure",
-      "summary": "AssertionError: assert OrderedDict([...,127.0.0.1')]) == {}"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1778",
-      "nodeid": "tests/issues/1778/test_outbound_url_toctou.py::test_safe_request_preserves_caller_provided_proxies",
-      "outcome": "failure",
-      "summary": "AssertionError: assert OrderedDict([...,127.0.0.1')]) == {'http': 'htt....example.com'}"
     },
     {
       "category": "test_body_exception",
@@ -107,66 +43,10 @@
     {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
-      "issue_number": "1816",
-      "nodeid": "tests/issues/1816/test_ci_repair_context_overflow.py::test_review_fix_refuses_preexisting_dirty_tree_before_agent",
-      "outcome": "failure",
-      "summary": "AssertionError: Expected 'git_add_all' to not have been called. Called 1 times."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1816",
-      "nodeid": "tests/issues/1816/test_ci_repair_context_overflow.py::test_stable_session_line_rebinds_once_and_preserves_usage[False]",
-      "outcome": "failure",
-      "summary": "AssertionError: expected call not found."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1816",
-      "nodeid": "tests/issues/1816/test_ci_repair_context_overflow.py::test_stable_session_line_rebinds_once_and_preserves_usage[True]",
-      "outcome": "failure",
-      "summary": "AssertionError: expected call not found."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
       "issue_number": "1831",
       "nodeid": "tests/issues/1831/test_orchestrator_failure_cleanup.py::TestAdvanceTimingDimension::test_transient_error_keeps_worktree",
       "outcome": "failure",
       "summary": "AssertionError: Expected '_mark_failed' to not have been called. Called 1 times."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1897",
-      "nodeid": "tests/issues/1897/test_dev_context_recovery.py::test_dev_context_overflow_recovers_on_fresh_session",
-      "outcome": "failure",
-      "summary": "AssertionError: expected call not found."
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "1897",
-      "nodeid": "tests/issues/1897/test_retry_clears_in_progress.py::TestRetryClearsInProgress::test_retry_endpoint_calls_clear_in_progress",
-      "outcome": "failure",
-      "summary": "AssertionError: Expected 'clear_in_progress' to have been called once. Called 0 times."
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "198",
-      "nodeid": "tests/issues/198/e2e_audit_analysis_playwright.py::test_api_anomalies_with_status",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/198/e2e_audit_analysis_playwright.py, line 115"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "198",
-      "nodeid": "tests/issues/198/e2e_audit_analysis_playwright.py::test_api_anomaly_status",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/198/e2e_audit_analysis_playwright.py, line 74"
     },
     {
       "category": "test_body_exception",
@@ -265,30 +145,6 @@
       "summary": "TypeError: object NoneType can't be used in 'await' expression"
     },
     {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "52",
-      "nodeid": "tests/issues/52/test_issue52.py::test_database_migration",
-      "outcome": "failure",
-      "summary": "AssertionError: linux_account 字段未添加到 users 表"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "52",
-      "nodeid": "tests/issues/52/test_issue52.py::test_get_all_users_includes_linux_account",
-      "outcome": "failure",
-      "summary": "KeyError: 'linux_account'"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "52",
-      "nodeid": "tests/issues/52/test_issue52.py::test_update_user_with_linux_account",
-      "outcome": "failure",
-      "summary": "AssertionError: 创建用户失败"
-    },
-    {
       "category": "test_body_exception",
       "exception_type": "TypeError",
       "issue_number": "53",
@@ -347,30 +203,6 @@
     {
       "category": "assertion_failure",
       "exception_type": "AssertionError",
-      "issue_number": "761",
-      "nodeid": "tests/issues/761/test_planning_restriction.py::TestPlanningTimeout::test_extension_adds_to_base_timeout",
-      "outcome": "failure",
-      "summary": "assert (1800 + 0) == 600"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "761",
-      "nodeid": "tests/issues/761/test_planning_restriction.py::TestPlanningTimeout::test_multiple_extensions_accumulate",
-      "outcome": "failure",
-      "summary": "assert (1800 + 600) == 1200"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
-      "issue_number": "761",
-      "nodeid": "tests/issues/761/test_planning_restriction.py::TestPlanningTimeout::test_planning_timeout_constant",
-      "outcome": "failure",
-      "summary": "assert 1800 == 600"
-    },
-    {
-      "category": "assertion_failure",
-      "exception_type": "AssertionError",
       "issue_number": "786",
       "nodeid": "tests/issues/786/test_ai_github_account.py::TestGitHubOpsEnvInjection::test_run_gh_no_env_when_not_configured",
       "outcome": "failure",
@@ -383,30 +215,6 @@
       "nodeid": "tests/issues/80/test_manage_language_dropdown.py::test_manage_language_dropdown",
       "outcome": "failure",
       "summary": "playwright._impl._errors.Error: Page.goto: net::ERR_CONNECTION_REFUSED at http://<host:port>/login"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "811",
-      "nodeid": "tests/issues/811/test_unknown_user_filter.py::TestUnknownUserFilter::test_known_users_still_returned",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/811/test_unknown_user_filter.py, line 78"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "811",
-      "nodeid": "tests/issues/811/test_unknown_user_filter.py::TestUnknownUserFilter::test_request_counts_correct",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/811/test_unknown_user_filter.py, line 91"
-    },
-    {
-      "category": "setup_error",
-      "exception_type": "",
-      "issue_number": "811",
-      "nodeid": "tests/issues/811/test_unknown_user_filter.py::TestUnknownUserFilter::test_unknown_user_filtered_out",
-      "outcome": "error",
-      "summary": "failed on setup with \"file tests/issues/811/test_unknown_user_filter.py, line 61"
     },
     {
       "category": "test_body_exception",
@@ -423,30 +231,6 @@
       "nodeid": "tests/issues/82/test_sidebar_collapse_normal_user.py::test_sidebar_collapse_normal_user",
       "outcome": "failure",
       "summary": "playwright._impl._errors.TimeoutError: Page.fill: Timeout 30000ms exceeded."
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "GitHubOpsError",
-      "issue_number": "826",
-      "nodeid": "tests/issues/826/test_plan_review_semantics.py::TestPlanningIntegration::test_approved_review_skips_refinement",
-      "outcome": "failure",
-      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: trusted common_dir is not a .git directory: /tmp/test.git"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "GitHubOpsError",
-      "issue_number": "826",
-      "nodeid": "tests/issues/826/test_plan_review_semantics.py::TestPlanningIntegration::test_plan_review_final_refine_failure_blocks_development",
-      "outcome": "failure",
-      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: trusted common_dir is not a .git directory: /tmp/test.git"
-    },
-    {
-      "category": "test_body_exception",
-      "exception_type": "GitHubOpsError",
-      "issue_number": "826",
-      "nodeid": "tests/issues/826/test_plan_review_semantics.py::TestPlanningIntegration::test_substantive_review_triggers_refinement",
-      "outcome": "failure",
-      "summary": "app.modules.workspace.autonomous.github_ops.GitHubOpsError: trusted common_dir is not a .git directory: /tmp/test.git"
     },
     {
       "category": "assertion_failure",
@@ -491,8 +275,8 @@
   ],
   "provenance": {
     "generated_command": "python scripts/legacy_issue_baseline.py snapshot --junit 'artifacts/test-results/issues-*.xml' --output ci/legacy-issue-failures.json --exit-code-glob 'artifacts/test-results/issues-*.exit-code' --shard-count 4 --quarantine ci/legacy-issue-quarantine.json --test-baseline .test-baseline.json --source-run 31382049159 --source-run-url https://github.com/open-ace/open-ace/actions/runs/31382049159 --reference-commit 1f45105e8a7e5ff713d97be3cdc836b525f0d3aa --run-contract 'extended-tests issue-tests --isolated-home --reruns 1 --timeout 240 --continue-on-collection-errors, 4 shards; 604 quarantined (deselect); post-main-sync (#2391 orchestrator refactor): 9 resolved, 2 changed test_body_exception->assertion_failure'",
-    "prune_note": "2026-08-22 prune 3 entries (64->61). Fixed by this PR's test realignments: 1125 session-contract fixtures drifted from the evolved routes — get_session fakes lacked the tenant_id kwarg (TypeError->500), the non-admin user carried no tenant against the fail-closed _session_lookup_tenant_id guard, and the fake DB keyed wrapper-hiding on the retired cli_session_id predicate instead of visible_session_clause's context-marker match. Contracts verified intact or stronger in production; no code change.",
-    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32579145971",
+    "prune_note": "2026-08-22 prune 27 entries (61->34). Batch closeout of eleven fixture-drift clusters (1111, 1306, 166, 1778, 1816, 1897, 198, 52, 761, 811, 826), all realigned against evolved production contracts: retired numbered-migration ids (1111) with the alias-merged summary span now recomputed at the repository boundary; v2 webui token format (1306); launchd/stream-json manual diagnostics moved out of discovery (166); proxy env isolation for safe_request merge semantics (1778); staged-dirty-tree policy and require_tenant rebinding kwarg (1816); _extract_session_token decorator rename (1897); manual-driver collection fixes (198); system_account rename + hermetic sqlite (52); PLANNING_TIMEOUT 1800s (761); rebuilt tmp_db fixture (811); regular-repo git context shape (826). One production fix rides along: get_summary_by_tool recomputes days_count/first_date/last_date over the whole alias family (the migration-038 property the read-boundary merge had lost).",
+    "prune_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/32580586752",
     "recategorize_note": "2026-08-12 targeted re-categorize: 14 still-failing baseline entries shifted (test_body_exception/setup_error -> assertion_failure) because earlier #2457 fixes (object.__new__ polluter #398607d8, #2332 role drift) let their setup/early crash pass so they now reach their pre-existing assertions. No test was fixed or removed here; the (outcome,category,summary) keys were updated to match the current failure mode (what `snapshot` would emit). Affected: 517x2, 716/test_github_opsx2, 733x9, 786x1.",
     "recategorize_source_run_url": "https://github.com/open-ace/open-ace/actions/runs/31596249646",
     "reference_commit": "1f45105e8a7e5ff713d97be3cdc836b525f0d3aa",

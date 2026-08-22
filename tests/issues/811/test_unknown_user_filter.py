@@ -4,9 +4,81 @@ This test verifies that get_request_stats_by_user properly filters out
 unidentifiable users with username 'unknown'.
 """
 
+import os
+import sqlite3
+import sys
 from datetime import datetime
 
 import pytest
+
+project_root = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# Minimal schema (same shape as tests/unit/test_usage_repo_aggregation_consistency.py,
+# which these tests were originally written against — the shared tmp_db
+# fixture vanished from the conftest during its test-config rework).
+SCHEMA_SQL = """
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    email TEXT,
+    password_hash TEXT NOT NULL DEFAULT '',
+    is_active INTEGER DEFAULT 1,
+    system_account TEXT,
+    role TEXT DEFAULT 'user',
+    tenant_id INTEGER
+);
+
+CREATE TABLE tenants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    quota TEXT DEFAULT '{}'
+);
+
+CREATE TABLE daily_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    tool_name TEXT NOT NULL DEFAULT 'test',
+    host_name TEXT DEFAULT 'localhost',
+    message_id TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL,
+    tokens_used INTEGER DEFAULT 0,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    sender_name TEXT,
+    model TEXT,
+    message_source TEXT,
+    agent_session_id TEXT,
+    user_id INTEGER
+);
+"""
+
+
+@pytest.fixture
+def tmp_db(tmp_path, monkeypatch):
+    """Create a temporary SQLite database with required schema."""
+    from app.repositories.database import Database
+
+    # get_request_stats_by_user builds its query shape from the GLOBAL
+    # backend flag, not from this injected instance (see Database._adapt_sql's
+    # docstring for the same class of mismatch) — pin it to the backend the
+    # connection actually opens so a PostgreSQL-configured dev box exercises
+    # the same SQLite branch the lane does.
+    monkeypatch.setattr("app.repositories.database.is_postgresql", lambda: False)
+
+    db_path = str(tmp_path / "test.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(SCHEMA_SQL)
+    conn.commit()
+    conn.close()
+
+    db = Database(db_url=f"sqlite:///{db_path}")
+    yield db
 
 
 class TestUnknownUserFilter:
