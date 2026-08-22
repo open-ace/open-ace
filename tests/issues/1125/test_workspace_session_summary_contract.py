@@ -30,14 +30,17 @@ class _FakeListDatabase:
         raise AssertionError(f"Unexpected fetch_all query: {query}")
 
     def _visible_rows(self, query: str) -> list[dict]:
-        if "COALESCE(cli_session_id, '') != ''" not in query:
+        # Mirrors visible_session_clause(): workflow rows whose context
+        # carries the workflow_id marker are hidden regardless of whether
+        # cli_session_id was backfilled (wrappers are created eagerly, so
+        # agents that fail to start would otherwise leak as orphans).
+        if "COALESCE(context, '') LIKE" not in query:
             return self.session_rows
         return [
             row
             for row in self.session_rows
             if not (
                 row.get("session_type") == "workflow"
-                and row.get("cli_session_id")
                 and '"workflow_id"' in (row.get("context") or "")
             )
         ]
@@ -128,7 +131,17 @@ def test_list_sessions_hides_autonomous_tracking_wrappers(monkeypatch):
         "title": "claude - actual",
         "cli_session_id": "",
     }
-    fake_db = _FakeListDatabase([tracking_row, provider_row])
+    # Wrapper whose agent never started: no cli_session_id backfill, but the
+    # workflow context marker is present — must stay hidden (orphan case).
+    orphan_row = {
+        **tracking_row,
+        "id": 3,
+        "session_id": "track-orphan-456",
+        "title": "Autonomous: wf-2",
+        "cli_session_id": "",
+        "context": '{"workflow_id": "wf-2"}',
+    }
+    fake_db = _FakeListDatabase([tracking_row, provider_row, orphan_row])
 
     monkeypatch.setattr("app.repositories.database.Database", lambda: fake_db)
     monkeypatch.setattr("app.repositories.database.adapt_sql", lambda sql: sql)
@@ -162,7 +175,8 @@ def test_get_session_keeps_agent_sessions_request_count(monkeypatch):
         ],
     )
     manager = SimpleNamespace(
-        get_session=lambda session_id, include_messages=False: session,
+        # **kwargs: the route passes tenant_id= alongside include_messages.
+        get_session=lambda session_id, include_messages=False, **kwargs: session,
         get_messages_page=lambda session_id, limit=None, milestone_id=None: {
             "messages": session.messages,
             "has_more": False,
@@ -175,7 +189,9 @@ def test_get_session_keeps_agent_sessions_request_count(monkeypatch):
 
     app = _make_app()
     with app.test_request_context("/api/workspace/sessions/sess-1125-detail?include_messages=true"):
-        g.user = {"id": 7, "role": "user"}
+        # tenant_id included: _session_lookup_tenant_id fails closed (403)
+        # for non-admins whose tenant cannot be resolved.
+        g.user = {"id": 7, "role": "user", "tenant_id": 1}
         response = workspace_route.get_session("sess-1125-detail")
 
     payload = response.get_json()
@@ -185,7 +201,10 @@ def test_get_session_keeps_agent_sessions_request_count(monkeypatch):
 
 
 def test_get_session_does_not_fallback_to_daily_messages(monkeypatch):
-    manager = SimpleNamespace(get_session=lambda session_id, include_messages=False: None)
+    manager = SimpleNamespace(
+        # **kwargs: the route passes tenant_id= alongside include_messages.
+        get_session=lambda session_id, include_messages=False, **kwargs: None
+    )
 
     monkeypatch.setattr(workspace_route, "get_session_manager", lambda: manager)
 
