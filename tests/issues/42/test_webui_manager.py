@@ -184,7 +184,7 @@ def test_manager_get_user_webui_url_single_user():
     # URL should preserve port from config (WebUI port is fixed in single-user mode)
     assert url == "http://localhost:8080"
     # Token is generated for iframe auth in cross-origin API calls
-    assert token.startswith("1:0:")  # Format: user_id:port:random:signature
+    assert token.startswith("v2:1:0:")  # v2 format: v2:user_id:port:timestamp:random:signature
     print(f"✓ Single-user mode: url={url}, token={token[:20]}...")
 
 
@@ -204,8 +204,15 @@ def test_manager_instance_limit():
     # Stop cleanup thread to avoid issues
     manager.stop_cleanup_thread()
 
-    # Mock the process launch to avoid actually starting processes
-    manager._launch_webui_process = MagicMock(return_value=None)
+    # Mock the process launch to avoid actually starting processes.
+    # _start_instance_internal unpacks (process, model_pool) and treats a
+    # None process as a launch failure; the fake process must also look
+    # alive (poll() -> None) for the instance-limit accounting, and the
+    # readiness wait must pass without a real listener on the port.
+    fake_process = MagicMock()
+    fake_process.poll.return_value = None
+    manager._launch_webui_process = MagicMock(return_value=(fake_process, MagicMock()))
+    manager._wait_for_service_ready = MagicMock(return_value=True)
 
     # These should work (within limit)
     try:
