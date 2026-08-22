@@ -534,35 +534,44 @@ describe('acceptance milestone card (#2985)', () => {
 
 describe('milestone time format (#2985)', () => {
   it('shows month-day with the time; adds the year only across years', () => {
-    // The anchor time prefers completed_at ?? started_at ?? created_at, so
-    // override all three together.
-    const { container } = renderWithMilestones(
-      pausedWorkflow({ status: 'completed', verification_status: 'confirmed' }),
-      [
-        acceptanceMilestone({
-          milestone_id: 'ms-t1',
-          started_at: '2026-02-03T04:05:06Z',
-          completed_at: '2026-02-03T04:05:06Z',
-          created_at: '2026-02-03T04:05:06Z',
-        }),
-      ]
-    );
-    const timeEl = container.querySelector('.timeline-milestone-time span');
-    expect(timeEl?.textContent).toMatch(/\d{2}\/\d{2}[,.]? ?\d{2}:\d{2}:\d{2}/);
-    expect(timeEl?.textContent).not.toMatch(/2026/);
+    // formatMilestoneTime compares the milestone year against the wall
+    // clock; pin the clock so the same-year assertion cannot flip into the
+    // cross-year branch on 2027-01-01 (repo convention: format.test.ts).
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-23T00:00:00Z'));
+    try {
+      // The anchor time prefers completed_at ?? started_at ?? created_at, so
+      // override all three together.
+      const { container } = renderWithMilestones(
+        pausedWorkflow({ status: 'completed', verification_status: 'confirmed' }),
+        [
+          acceptanceMilestone({
+            milestone_id: 'ms-t1',
+            started_at: '2026-02-03T04:05:06Z',
+            completed_at: '2026-02-03T04:05:06Z',
+            created_at: '2026-02-03T04:05:06Z',
+          }),
+        ]
+      );
+      const timeEl = container.querySelector('.timeline-milestone-time span');
+      expect(timeEl?.textContent).toMatch(/\d{2}\/\d{2}[,.]? ?\d{2}:\d{2}:\d{2}/);
+      expect(timeEl?.textContent).not.toMatch(/2026/);
 
-    const second = renderWithMilestones(
-      pausedWorkflow({ status: 'completed', verification_status: 'confirmed' }),
-      [
-        acceptanceMilestone({
-          milestone_id: 'ms-t2',
-          started_at: '2024-02-03T04:05:06Z',
-          completed_at: '2024-02-03T04:05:06Z',
-          created_at: '2024-02-03T04:05:06Z',
-        }),
-      ]
-    );
-    const staleEl = second.container.querySelector('.timeline-milestone-time span');
-    expect(staleEl?.textContent).toMatch(/2024/);
+      const second = renderWithMilestones(
+        pausedWorkflow({ status: 'completed', verification_status: 'confirmed' }),
+        [
+          acceptanceMilestone({
+            milestone_id: 'ms-t2',
+            started_at: '2024-02-03T04:05:06Z',
+            completed_at: '2024-02-03T04:05:06Z',
+            created_at: '2024-02-03T04:05:06Z',
+          }),
+        ]
+      );
+      const staleEl = second.container.querySelector('.timeline-milestone-time span');
+      expect(staleEl?.textContent).toMatch(/2024/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
