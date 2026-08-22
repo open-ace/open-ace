@@ -44,6 +44,15 @@ def _bare_orchestrator(wf):
     orch.repo.get_workflow.return_value = wf
     orch.emitter = MagicMock()
     orch._gh = None
+    # __init__-owned state that advance()'s failure handling now reads
+    # directly (#2457 realignment: _build_workflow_context reads
+    # _session_usage_offsets and the _shutdown_requested cancellation event;
+    # the AttributeError from the missing state was non-transient, wrongly
+    # converging the transient-error path on _mark_failed).
+    import threading
+
+    orch._session_usage_offsets = {}
+    orch._shutdown_requested = threading.Event()
     return orch
 
 
@@ -155,9 +164,15 @@ class TestAdvanceTimingDimension:
 
     def _advance_with_phase_error(self, wf, exc):
         orch = _bare_orchestrator(wf)
+        # #2457 realignment: development now runs via the PHASE_HANDLERS
+        # registry (resolve_phase_handler in advance()), so patching the
+        # _do_development shim no longer intercepts it. Raise from
+        # _dispatch_phase instead — the transient-vs-terminal classification
+        # and _mark_failed convergence this class pins live in advance()
+        # around exactly that boundary.
         with (
             patch.object(orch, "_ensure_worktree"),
-            patch.object(orch, "_do_development", side_effect=exc),
+            patch.object(orch, "_dispatch_phase", side_effect=exc),
             patch.object(orch, "_mark_failed") as mock_mark_failed,
         ):
             orch.advance()
