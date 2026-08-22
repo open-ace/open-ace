@@ -123,6 +123,7 @@ const VERDICT_TONE: Record<string, string> = {
   confirmed: '✅',
   rejected: '❌',
   indeterminate: '⚠️',
+  advisory: 'ℹ️',
 };
 
 const ACCEPTANCE_STATUS_KEYS: Record<string, string> = {

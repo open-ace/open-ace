@@ -26,9 +26,13 @@ from app.modules.workspace.autonomous.acceptance_verdicts import ItemVerdict
 from app.modules.workspace.autonomous.evidence import Verdict
 
 
-def _gh(changed: list[str]) -> MagicMock:
+def _gh(changed: list[str], status: str = "A") -> MagicMock:
+    """Gh double. ``status`` is the git letter reported for every changed file
+    (call_chain_gate only treats A/R modules as new; default A keeps the
+    historical "everything in the diff is new" semantics for these tests)."""
     gh = MagicMock()
     gh.get_changed_files.return_value = changed
+    gh.get_changed_files_with_status.return_value = [(status, path) for path in changed]
     return gh
 
 
@@ -185,6 +189,43 @@ def test_call_chain_confirmed_when_caller_in_changed_tree():
     }
     verdicts = call_chain_gate(gh, AcceptanceSnapshot(), "b", "m", read_file=_reader(files))
     assert verdicts[0].verdict is Verdict.CONFIRMED
+
+
+# -- call_chain_gate: added-vs-modified discrimination (#2982) ----------------
+
+
+def test_call_chain_silent_when_service_module_only_modified():
+    # #2951/#2237 pattern: an EXISTING repo/service module edited internally.
+    # Its callers already exist outside the diff — flagging "no production
+    # caller in the diff" as dead code is a false positive.
+    gh = _gh(["app/repositories/usage_repo.py", "tests/unit/test_usage_repo.py"], status="M")
+    files = {"app/repositories/usage_repo.py": "def get_trend():\n    return []\n"}
+    verdicts = call_chain_gate(gh, AcceptanceSnapshot(), "b", "m", read_file=_reader(files))
+    assert verdicts == []
+
+
+def test_call_chain_rejected_when_module_actually_added_without_caller():
+    gh = _gh(
+        ["app/services/feishu_config_service.py", "tests/unit/test_feishu.py"],
+        status="A",
+    )
+    files = {"app/services/feishu_config_service.py": "class C:\n    pass\n"}
+    verdicts = call_chain_gate(gh, AcceptanceSnapshot(), "b", "m", read_file=_reader(files))
+    assert verdicts[0].verdict is Verdict.REJECTED
+
+
+def test_call_chain_rename_target_treated_as_added():
+    # A rename reports R### with the destination path; the destination inside
+    # app/repositories counts as a new module.
+    gh = MagicMock()
+    gh.get_changed_files_with_status.return_value = [
+        ("R", "app/repositories/renamed_repo.py"),
+        ("M", "app/routes/x.py"),
+    ]
+    files = {"app/routes/x.py": "import json\n", "app/repositories/renamed_repo.py": "x = 1\n"}
+    verdicts = call_chain_gate(gh, AcceptanceSnapshot(), "b", "m", read_file=_reader(files))
+    assert verdicts[0].verdict is Verdict.REJECTED
+    assert "renamed_repo" in verdicts[0].item
 
 
 # -- deployment_gate ----------------------------------------------------------

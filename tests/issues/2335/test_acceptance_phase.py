@@ -75,7 +75,8 @@ def test_rejected_pauses_without_reentering_deleted_development_worktree():
     }
     gh = MagicMock()
     gh.get_issue.return_value = {"body": "## Scope\n- `app/services/retention.py`"}
-    gh.get_changed_files.return_value = []  # scope gate: required path missing -> REJECTED
+    gh.get_changed_files.return_value = []  # scope gate: required path missing
+    gh.path_touched_in_range.return_value = False  # never touched -> convention REJECTED
     deps = _deps(gh=gh)
     deps.host.run_verification_agent.return_value = {"verdicts": [], "snapshot": None}
     result = av.handle(_ctx(wf), deps)
