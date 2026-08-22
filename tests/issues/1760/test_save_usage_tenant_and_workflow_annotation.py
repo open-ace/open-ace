@@ -13,6 +13,7 @@ so the frontend can badge them and jump to the workflow timeline.
 import inspect
 import os
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 # conftest.py already adds scripts/shared to sys.path. We also need scripts/
@@ -24,20 +25,6 @@ _REPO_ROOT = os.path.dirname(
 _SCRIPTS_PATH = os.path.join(_REPO_ROOT, "scripts")
 if _SCRIPTS_PATH not in sys.path:
     sys.path.insert(0, _SCRIPTS_PATH)
-
-# #2457 realignment: `import config` in a shared-shard lane can resolve to a
-# DIFFERENT config module an earlier test left on sys.path (e.g.
-# remote-agent/config.py, which has no DB_DIR — the baselined
-# AttributeError). Pin the resolution: scripts/shared first on sys.path and
-# any stale non-shared `config` dropped from the module cache before import.
-_SHARED_PATH = os.path.join(_SCRIPTS_PATH, "shared")
-if sys.path and sys.path[0] != _SHARED_PATH:
-    if _SHARED_PATH in sys.path:
-        sys.path.remove(_SHARED_PATH)
-    sys.path.insert(0, _SHARED_PATH)
-_stale_config = sys.modules.get("config")
-if _stale_config is not None and not hasattr(_stale_config, "DB_DIR"):
-    del sys.modules["config"]
 
 
 def _load_shared_db():
@@ -138,7 +125,17 @@ def test_update_agent_sessions_stats_writes_per_session_model(tmp_path, monkeypa
     session's own stats['last_model'], not a loop-residual `model` variable.
     Without the fix, a batch with multiple sessions all got the model of the
     last-processed message across the whole batch."""
-    import config
+    # #2457 realignment: load scripts/shared/config.py BY FILE PATH. A plain
+    # `import config` resolves through sys.path/sys.modules, and an earlier
+    # test in the same shard can leave a different `config` (e.g.
+    # remote-agent/config.py, which has no DB_DIR) winning the race — the
+    # baselined AttributeError.
+    import importlib.util
+
+    _cfg_path = Path(__file__).resolve().parents[3] / "scripts" / "shared" / "config.py"
+    _spec = importlib.util.spec_from_file_location("scripts_shared_config_1760", _cfg_path)
+    config = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(config)
 
     db_path = tmp_path / "test.db"
     monkeypatch.setattr(config, "CONFIG_DIR", str(tmp_path))
