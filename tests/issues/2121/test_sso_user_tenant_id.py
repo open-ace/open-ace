@@ -92,7 +92,7 @@ class TestCreateUserFromSsoTenantId:
         call_kwargs = user_repo_mock.create_user.call_args.kwargs
         assert call_kwargs["tenant_id"] == 5
 
-    def test_uses_default_tenant_id_when_provider_not_found(self, app_ctx):
+    def test_provider_not_found_rejects_creation(self, app_ctx):
         """Provider not found leaves no tenant binding: creation is rejected.
 
         #1826 F6 removed the silent fallback to tenant 1 — SSO_NULL_TENANT_POLICY
@@ -121,7 +121,7 @@ class TestCreateUserFromSsoTenantId:
         assert result is None
         user_repo_mock.create_user.assert_not_called()
 
-    def test_uses_default_tenant_id_when_provider_tenant_id_is_none(self, app_ctx):
+    def test_provider_tenant_id_none_rejects_creation(self, app_ctx):
         """Provider tenant_id None leaves no binding: creation is rejected.
 
         Same #1826 F6 fail-closed contract as a missing provider — no silent
