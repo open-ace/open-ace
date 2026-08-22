@@ -63,6 +63,31 @@ def test_project_sort():
     stats = r.json().get("stats", [])
     print(f"  OK - {len(stats)} projects found")
 
+    # Seed projects when the DB is fresh: the projects page renders an
+    # empty-state component (no <table>) when there are no projects, which
+    # dead-waits below. The old flow hit that wait before its own
+    # "need at least 2 projects" skip ever ran.
+    if len(stats) < 2:
+        print("\n[1a] Seed projects for sorting")
+        for i in (1, 2, 3):
+            r = session.post(
+                f"{BASE_URL}/api/projects",
+                json={
+                    "name": f"E2E 211 Sort {i}",
+                    "path": f"/tmp/e2e-211-sort-{i}",
+                    "description": "seeded by issue 211 e2e",
+                    "create_dir": False,
+                },
+            )
+            assert r.status_code in (
+                200,
+                201,
+            ), f"Seed project {i} failed: {r.status_code} {r.text[:200]}"
+        r = session.get(f"{BASE_URL}/api/projects/stats")
+        assert r.status_code == 200, f"Stats API failed: {r.status_code}"
+        stats = r.json().get("stats", [])
+        print(f"  OK - seeded, {len(stats)} projects now")
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context(viewport={"width": 1400, "height": 900})
@@ -96,19 +121,25 @@ def test_project_sort():
         headers = page.locator("table thead th")
         header_count = headers.count()
 
+        # The table now has a leading spacer column (empty header) and
+        # non-sortable data columns (requests, work time); only columns whose
+        # header renders a caret after a click are sortable.
+        sortable_columns = []
         for i in range(header_count - 1):  # skip last column (Actions)
             header_text = headers.nth(i).inner_text().strip()
-            print(f"\n  Testing column: {header_text}")
+            print(f"\n  Testing column: {header_text!r}")
 
-            # First click - should activate sort with desc direction
+            # First click - activates sort with desc direction on sortable
+            # columns; non-sortable ones stay icon-less and are skipped.
             headers.nth(i).click()
             page.wait_for_timeout(500)
 
-            # Check sort icon appears (bi-caret-up-fill or bi-caret-down-fill)
             icon = headers.nth(i).locator("i.bi-caret-down-fill, i.bi-caret-up-fill")
-            assert (
-                icon.count() == 1
-            ), f"Sort icon not found for column '{header_text}' after first click"
+            if icon.count() == 0:
+                print("    (not sortable - no sort icon after click)")
+                continue
+            assert icon.count() == 1, f"Expected exactly one sort icon for column '{header_text}'"
+            sortable_columns.append(header_text)
             print("    Click 1: sort icon visible (desc)")
             shot(page, f"02_sort_{header_text}_desc")
 
@@ -145,6 +176,9 @@ def test_project_sort():
         actions_icon = actions_header.locator("i.bi-caret-down-fill, i.bi-caret-up-fill")
         assert actions_icon.count() == 0, "Actions column should not have sort icon"
         print("  OK - Actions column is not sortable")
+
+        assert sortable_columns, "No sortable column found - sort UI missing?"
+        print(f"\n  Sortable columns verified: {sortable_columns}")
 
         print("\n" + "=" * 60)
         print("ALL TESTS PASSED")

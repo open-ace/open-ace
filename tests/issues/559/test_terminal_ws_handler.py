@@ -262,7 +262,9 @@ class TestHandleTerminalWs:
 
         RemoteWSHandler._handle_terminal_ws(handler)
 
-        mock_send_close.assert_called_once_with(handler.socket, 1011)
+        # 28abe659 added a close reason so clients can distinguish failures:
+        # an empty original_ws_url means the agent is offline.
+        mock_send_close.assert_called_once_with(handler.socket, 1011, "Agent offline")
         assert handler.close_connection is True
 
     @patch("app.ws_frame.send_close")
