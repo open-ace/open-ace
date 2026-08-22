@@ -244,10 +244,13 @@ class TestHandleTerminalWs:
         mock_send_close.assert_called_once_with(handler.socket, 4001)
         assert handler.close_connection is True
 
+    @patch("app.modules.workspace.remote_agent_manager.get_remote_agent_manager")
     @patch("app.ws_frame.send_close")
     @patch("app.ws_frame.perform_handshake")
     @patch("app.modules.workspace.terminal_store.terminal_info_store")
-    def test_missing_remote_url_closes(self, mock_store, mock_handshake, mock_send_close):
+    def test_missing_remote_url_closes(
+        self, mock_store, mock_handshake, mock_send_close, mock_get_mgr
+    ):
         handler = self._make_handler(query_string="token=my-token")
         mock_store.find_by_terminal_id.return_value = (
             "machine-123",
@@ -259,6 +262,14 @@ class TestHandleTerminalWs:
             },
         )
         handler._check_relay_redirect = lambda *args: None
+        # The offline fast-path consults the remote_agent_manager singleton's
+        # in-memory _connections. Other tests in the same pytest process can
+        # leave "machine-123" registered there, which flips this scenario into
+        # the 30s relay wait (close 1001 'Relay timeout') instead. Pin the
+        # manager so the branch under test is deterministic.
+        mock_mgr = MagicMock()
+        mock_mgr.is_connected.return_value = False
+        mock_get_mgr.return_value = mock_mgr
 
         RemoteWSHandler._handle_terminal_ws(handler)
 
