@@ -15,7 +15,10 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).parent.parent.parent.parent
+ROOT = Path(__file__).parent.parent.parent
+
+# Issue and regression markers for test discovery
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2235)]
 
 
 class TestMultiUserComposeConfig:

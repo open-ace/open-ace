@@ -180,11 +180,11 @@ class TestTLSHandshakeWithMockedSocket:
         """Verify that wrap_socket receives correct server_hostname parameter (Issue #2883)."""
         captured = {}
 
-        def capturing_wrap(self, sock, **kwargs):
-            captured["server_hostname"] = kwargs.get("server_hostname")
+        def capturing_wrap(sock, server_hostname=None, **kwargs):
+            captured["server_hostname"] = server_hostname
             # Return mock socket
             mock_sock = MagicMock()
-            mock_sock.server_hostname = kwargs.get("server_hostname")
+            mock_sock.server_hostname = server_hostname
             return mock_sock
 
         conn = _PinnedHTTPSConnection(
@@ -193,12 +193,14 @@ class TestTLSHandshakeWithMockedSocket:
             original_hostname="example.com",
         )
 
-        # Mock socket connection
-        with patch("socket.create_connection") as mock_create:
+        # Mock socket connection and SSL wrap function
+        # urllib3 uses _ssl_wrap_socket_and_match_hostname, not ssl.SSLContext.wrap_socket
+        # urllib3.connection._new_conn calls urllib3.util.connection.create_connection
+        with patch("urllib3.util.connection.create_connection") as mock_create:
             mock_socket = MagicMock()
             mock_create.return_value = mock_socket
 
-            with patch("ssl.SSLContext.wrap_socket", capturing_wrap):
+            with patch("urllib3.connection._ssl_wrap_socket_and_match_hostname", capturing_wrap):
                 try:
                     conn.connect()
                 except Exception:  # allow-swallow: test framework error handling
