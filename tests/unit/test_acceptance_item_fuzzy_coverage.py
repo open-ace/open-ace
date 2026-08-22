@@ -360,7 +360,9 @@ class TestCjkFuzzyMatching:
     # identifier enumeration. Short side is a contiguous bigram prefix of the
     # long side (7 bigrams + 4 latin tokens, ratio 7/11 >= 0.5) -> 1.0.
     PROD_2537_VERIFIER = "定义机器状态常量"
-    PROD_2537_CHECKLIST = "定义机器状态常量（_STATUS_ONLINE, _STATUS_IDLE, _STATUS_BUSY, _STATUS_OFFLINE）"
+    PROD_2537_CHECKLIST = (
+        "定义机器状态常量（_STATUS_ONLINE, _STATUS_IDLE, _STATUS_BUSY, _STATUS_OFFLINE）"
+    )
 
     # Real prod pair (#2828): checklist inserts （YYYYMMDD） mid-phrase. The
     # short side is ONE 17-char run (16 bigrams incl. the 期不 bridge); the
@@ -394,9 +396,7 @@ class TestCjkFuzzyMatching:
         assert self._fuzzy()(self.PROD_2239_VERIFIER, self.PROD_2239_CHECKLIST) < 0.8
 
     def test_fuzzy_tokens_split_cjk_runs_into_bigrams(self):
-        from app.modules.workspace.autonomous.phases.acceptance_verification import (
-            _fuzzy_tokens,
-        )
+        from app.modules.workspace.autonomous.phases.acceptance_verification import _fuzzy_tokens
 
         # CJK runs become in-run bigrams; non-CJK segments stay whitespace
         # tokens, so English sequences are unchanged token-for-token.
@@ -470,9 +470,7 @@ class TestCjkCoverageIntegration:
         verdicts = [_verdict("定义机器状态常量", Verdict.CONFIRMED, evidence_ref="manager.py:20")]
         result = _cover_missing_checklist_items(
             verdicts,
-            [
-                "定义机器状态常量（_STATUS_ONLINE, _STATUS_IDLE, _STATUS_BUSY, _STATUS_OFFLINE）"
-            ],
+            ["定义机器状态常量（_STATUS_ONLINE, _STATUS_IDLE, _STATUS_BUSY, _STATUS_OFFLINE）"],
         )
         assert len(result) == 2
         assert result[-1].verdict is Verdict.CONFIRMED
