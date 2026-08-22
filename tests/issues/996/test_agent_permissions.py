@@ -58,6 +58,8 @@ def _make_agent_result(text="done\nTL;DR: fixed the bug"):
 def _make_gh(commit_sha="abc1234", uncommitted=True):
     gh = MagicMock()
     gh.get_current_branch.return_value = "feature-x"
+    # Recorded PR is OPEN so handle() reuses it instead of creating a fresh PR
+    gh.get_pr.return_value = {"state": "OPEN", "number": 42, "html_url": "https://example/pr/42"}
     gh.get_diff_stats.return_value = {"commits": 1, "additions": 5, "deletions": 1, "files": 1}
     gh.get_commit_diff_stats.return_value = {
         "commits": 1,
@@ -171,10 +173,38 @@ class TestFixPhasePermissionsAndFallback:
     def test_fix_salvages_uncommitted_when_agent_did_not_commit(self):
         wf = _make_workflow()
         orch = _make_orchestrator(wf)
-        gh = _make_gh(commit_sha="same123", uncommitted=True)
+        gh = _make_gh()
         orch._get_gh.return_value = gh
         orch.repo.list_milestones.return_value = []
-        orch._run_agent = MagicMock(return_value=_make_agent_result())
+
+        # #2457 realignment: the fix flow distinguishes dirty-BEFORE the fix
+        # agent (#1828 pre-commits + scope-validates pre-existing changes)
+        # from dirty-AFTER (the salvage this test pins). HEAD is modeled
+        # independently of dirtiness, and only the FIX agent call dirties the
+        # tree — identified by its allowed_tools signature (the fix phase
+        # passes AUTONOMOUS_DEV_ALLOWED_TOOLS incl. Bash; review/summary
+        # calls don't). Post-agent HEAD == commit_before, so the dirty-AFTER
+        # salvage runs: git_add_all + git_commit(no_verify) whose commit must
+        # ADVANCE HEAD (a no-op commit raises "did not advance branch HEAD"),
+        # then the fix is pushed (plus the final branch-safety push).
+        state = {"dirty": False, "head": "same123"}
+
+        def agent_leaves_changes(**kwargs):
+            tools = kwargs.get("allowed_tools") or []
+            if "Bash" in tools:  # the fix agent dirties without committing
+                state["dirty"] = True
+            return _make_agent_result()
+
+        orch._run_agent = MagicMock(side_effect=agent_leaves_changes)
+        gh.has_uncommitted_changes = MagicMock(side_effect=lambda: state["dirty"])
+
+        def fake_git_commit(*args, **kwargs):
+            state["dirty"] = False
+            state["head"] = "fix4567"
+            return {"sha": "fix4567"}
+
+        gh.git_commit.side_effect = fake_git_commit
+        gh.get_current_commit.side_effect = lambda: state["head"]
 
         orch._do_pr_review(wf)
 

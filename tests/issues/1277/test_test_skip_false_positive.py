@@ -97,6 +97,7 @@ def _make_orchestrator(wf_data, milestones=None):
         orch.repo = mock_repo
         orch.emitter = MagicMock()
         orch._gh = MagicMock()
+        orch._gh.get_current_branch.return_value = wf_data.get("branch_name", "")
         orch._gh.get_current_commit.return_value = "abc1234"
         orch._gh.get_commit_diff_stats.return_value = {
             "additions": 10,
@@ -105,7 +106,31 @@ def _make_orchestrator(wf_data, milestones=None):
             "commits": 1,
         }
         orch._gh.get_diff_stats.return_value = {}
+        orch._gh.get_changed_files.return_value = []
         orch._gh.has_uncommitted_changes.return_value = False
+        # #1611 resets self._gh after the dev agent and rebinds via _get_gh();
+        # _do_development resolves gh the same lazy way. Return the mock so the
+        # commit comparison stays mocked instead of hitting a real GitHubOps
+        # against /tmp/p.
+        orch._get_gh = MagicMock(return_value=orch._gh)
+        # Satisfy the pre-agent trusted-git boundary — _run_agent returns
+        # repo_integrity_violation before the runner without a trusted repo
+        # context (same realignment as the 723/826 tests).
+        orch._snapshot_repo_context = MagicMock(
+            return_value={
+                "context": {"repo_path": "/tmp/p", "expected_branch": "auto-dev/x"},
+                "effective": {
+                    "repo_path": "/tmp/p",
+                    "git_dir": "/tmp/p/.git",
+                    "git_identity": "test-git",
+                    "common_dir": "/tmp/p/.git",
+                    "common_identity": "test-common",
+                    "origin": "",
+                },
+                "main": {},
+            }
+        )
+        orch._validate_repo_context_after_run = MagicMock(return_value="")
         return orch, mock_repo
 
 
@@ -175,7 +200,11 @@ class TestRetryCounterPersistence:
             "plan_content": "1. Implement",
             "status": "completed",
         }
-        wf = _make_workflow()
+        wf = _make_workflow(
+            # Scope validation compares the round against base_commit_sha; pin
+            # it to commit_before so only the current-round range is checked.
+            base_commit_sha="aaa1111"
+        )
         orch, mock_repo = _make_orchestrator(wf, milestones=[plan_ms])
 
         orch._runner = MagicMock()
