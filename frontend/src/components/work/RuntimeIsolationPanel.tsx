@@ -172,15 +172,20 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
       enforced: enforced.inode,
     },
   ];
-  const visibleSummaryRows: LimitRow[] | null = policyConfigured
-    ? (() => {
-        const summaryRows: LimitRow[] = SUMMARY_LIMIT_KEYS.flatMap((labelKey) => {
-          const row = rows.find((limitRow) => limitRow.labelKey === labelKey);
-          return row && row.value !== '—' ? [row] : [];
-        });
-        return summaryRows.length > 0 ? summaryRows : rows.slice(0, 4);
-      })()
-    : null;
+  // A loaded policy with every limit unset is common in single-user dev
+  // deployments (the conf exists but no agent_task_* limits are typed).
+  // Six dash pills read as broken data; say what actually happened instead.
+  const hasAnyLimit = rows.some((row) => row.value !== '—');
+  const visibleSummaryRows: LimitRow[] | null =
+    policyConfigured && hasAnyLimit
+      ? (() => {
+          const summaryRows: LimitRow[] = SUMMARY_LIMIT_KEYS.flatMap((labelKey) => {
+            const row = rows.find((limitRow) => limitRow.labelKey === labelKey);
+            return row && row.value !== '—' ? [row] : [];
+          });
+          return summaryRows.length > 0 ? summaryRows : rows.slice(0, 4);
+        })()
+      : null;
 
   return (
     <div className="runtime-isolation-panel" data-testid="runtime-isolation-panel">
@@ -216,6 +221,11 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
                 <span className="runtime-isolation-panel__summary-value">{row.value}</span>
               </span>
             ))
+          ) : policyConfigured ? (
+            <span className="runtime-isolation-panel__summary-pill runtime-isolation-panel__summary-pill--warning">
+              <i className="bi bi-slash-circle"></i>
+              <span>{t('autoPolicyNoLimits', language)}</span>
+            </span>
           ) : (
             <span className="runtime-isolation-panel__summary-pill runtime-isolation-panel__summary-pill--warning">
               <i className="bi bi-exclamation-circle"></i>
@@ -231,6 +241,11 @@ export function RuntimeIsolationPanel({ workflow }: RuntimeIsolationPanelProps) 
             <div className="runtime-isolation-panel__notice runtime-isolation-panel__notice--warning">
               <i className="bi bi-exclamation-triangle me-1"></i>
               {t('autoPolicyConfigMissing', language)}
+            </div>
+          ) : !hasAnyLimit ? (
+            <div className="runtime-isolation-panel__notice runtime-isolation-panel__notice--warning">
+              <i className="bi bi-exclamation-triangle me-1"></i>
+              {t('autoPolicyNoLimits', language)}
             </div>
           ) : null}
 

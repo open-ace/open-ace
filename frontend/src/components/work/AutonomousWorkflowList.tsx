@@ -76,12 +76,15 @@ const STATUS_FILTER_TABS = [
   { key: '', labelKey: 'autoFilterAll' },
   { key: 'queued', labelKey: 'autoFilterQueued' },
   {
-    key: 'pending,preparing,planning,developing,pr_review,reporting,waiting,merging,verification_pending,paused,planning_timeout',
+    // Paused/planning_timeout deliberately excluded: they have their own tab,
+    // and including them here made "进行中" and "已暂停" render identical
+    // content whenever only paused workflows remained.
+    key: 'pending,preparing,planning,developing,pr_review,reporting,waiting,merging,verification_pending',
     labelKey: 'autoFilterActive',
   },
   // #2634: paused workflows need explicit human review (acceptance-awaiting)
   // or operator attention (quota/manual) — surface a dedicated filter for them.
-  { key: 'paused', labelKey: 'autoFilterPaused' },
+  { key: 'paused,planning_timeout', labelKey: 'autoFilterPaused' },
   { key: 'completed', labelKey: 'autoFilterCompleted' },
   { key: 'failed', labelKey: 'autoFilterFailed' },
 ];

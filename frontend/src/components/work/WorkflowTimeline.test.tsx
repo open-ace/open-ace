@@ -7,8 +7,13 @@
 
 import { fireEvent, render, screen, within } from '@/test/utils';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { WorkflowTimeline, formatAcceptanceReport } from './WorkflowTimeline';
-import type { AutonomousWorkflow } from '@/api/autonomous';
+import {
+  WorkflowTimeline,
+  formatAcceptanceReport,
+  getAcceptanceSummaryDetail,
+} from './WorkflowTimeline';
+import { useWorkflowTimeline } from '@/hooks/useAutonomous';
+import type { AutonomousWorkflow, WorkflowMilestone } from '@/api/autonomous';
 
 const { mockResumeWithFeedbackMutate, mockAcceptanceOverrideMutate, pendingMutation } = vi.hoisted(
   () => ({
@@ -345,5 +350,184 @@ describe('formatAcceptanceReport (#2658)', () => {
     expect(out).toContain('## ⚠️ Inconclusive');
     expect(out).not.toContain('Merge SHA');
     expect(out).not.toContain('Infra error');
+  });
+});
+
+// ── Acceptance summary + verdict status (#2985) ────────────────────────
+
+function acceptanceReport(
+  status: string,
+  groups: { scope?: unknown[]; gates?: unknown[]; verifier?: unknown[] } = {}
+): string {
+  return JSON.stringify({ status, scope: [], gates: [], verifier: [], ...groups });
+}
+
+describe('getAcceptanceSummaryDetail (#2985)', () => {
+  it('builds a localized confirmed summary with per-group counts', () => {
+    const report = acceptanceReport('confirmed', {
+      scope: [{ item: 'a.py', verdict: 'confirmed' }],
+      gates: [],
+      verifier: [
+        { item: 'x', verdict: 'confirmed' },
+        { item: 'y', verdict: 'confirmed' },
+        { item: 'z', verdict: 'confirmed' },
+      ],
+    });
+    // Empty groups are omitted rather than shown as 0/0.
+    expect(getAcceptanceSummaryDetail(report, 'en')).toBe(
+      'Required paths 1/1 · Semantic checks 3/3'
+    );
+  });
+
+  it('lists failed item names for a rejected report and caps at three', () => {
+    const report = acceptanceReport('rejected', {
+      scope: [
+        { item: 'a.py', verdict: 'rejected' },
+        { item: 'b.py', verdict: 'rejected' },
+        { item: 'very/long/path/that/keeps/going/and/going/and/going/x.py', verdict: 'rejected' },
+        { item: 'd.py', verdict: 'rejected' },
+      ],
+      verifier: [{ item: 'ok', verdict: 'confirmed' }],
+    });
+    const detail = getAcceptanceSummaryDetail(report, 'en');
+    expect(detail).toContain('Failed: a.py, b.py');
+    expect(detail).toContain('(+1 items)');
+    expect(detail).not.toContain('d.py');
+  });
+
+  it('labels unresolved items for an indeterminate report', () => {
+    const report = acceptanceReport('indeterminate', {
+      gates: [{ item: 'deployment:artifacts', verdict: 'indeterminate' }],
+    });
+    expect(getAcceptanceSummaryDetail(report, 'en')).toBe('Unresolved: deployment:artifacts');
+  });
+
+  it('appends the advisory count and excludes advisory from failures', () => {
+    const report = acceptanceReport('confirmed', {
+      scope: [
+        { item: 'a.py', verdict: 'confirmed' },
+        { item: 'other.py', verdict: 'advisory' },
+      ],
+    });
+    expect(getAcceptanceSummaryDetail(report, 'en')).toBe(
+      'Required paths 1/2 · advisory (not counted) 1'
+    );
+  });
+
+  it('renders the zh summary with localized labels and separators', () => {
+    const report = acceptanceReport('rejected', {
+      scope: [
+        { item: 'a.py', verdict: 'rejected' },
+        { item: 'b.py', verdict: 'rejected' },
+      ],
+    });
+    expect(getAcceptanceSummaryDetail(report, 'zh')).toBe('未过项: a.py、b.py');
+  });
+
+  it('returns null for absent, malformed, or non-acceptance metadata', () => {
+    expect(getAcceptanceSummaryDetail(null, 'en')).toBeNull();
+    expect(getAcceptanceSummaryDetail('not-json', 'en')).toBeNull();
+    expect(getAcceptanceSummaryDetail('{"status":"completed"}', 'en')).toBeNull();
+  });
+});
+
+describe('acceptance milestone card (#2985)', () => {
+  function acceptanceMilestone(overrides: Partial<WorkflowMilestone> = {}): WorkflowMilestone {
+    return {
+      workflow_id: 'wf-1',
+      milestone_id: 'ms-acc-1',
+      phase: 'acceptance_verification',
+      dev_round: 1,
+      round_number: 1,
+      milestone_type: 'acceptance_verification',
+      status: 'confirmed',
+      title: 'Acceptance verification: confirmed',
+      description: '',
+      session_id: '',
+      review_session_id: '',
+      github_issue_number: null,
+      github_pr_number: null,
+      github_comment_id: '',
+      commit_shas: '',
+      diff_stats: '',
+      result_summary: 'status=confirmed; scope=1 gates=0 verifier=3',
+      tldr: '',
+      plan_content: '',
+      review_content: '',
+      error_message: '',
+      parent_milestone_id: '',
+      fork_branch: '',
+      fork_workflow_id: '',
+      metadata: acceptanceReport('confirmed', {
+        scope: [{ item: 'src/app.py', verdict: 'confirmed' }],
+        verifier: [
+          { item: 'a', verdict: 'confirmed' },
+          { item: 'b', verdict: 'confirmed' },
+        ],
+      }),
+      started_at: '2026-08-21T15:00:00Z',
+      completed_at: '2026-08-21T15:05:00Z',
+      created_at: '2026-08-21T15:00:00Z',
+      updated_at: '2026-08-21T15:05:00Z',
+      ...overrides,
+    };
+  }
+
+  function renderWithMilestones(workflow: AutonomousWorkflow, milestones: WorkflowMilestone[]) {
+    vi.mocked(useWorkflowTimeline).mockReturnValueOnce({
+      data: { milestones },
+      isLoading: false,
+    } as never);
+    return renderTimeline(workflow);
+  }
+
+  it('shows the verdict icon/label and the structured summary instead of the raw backend string', () => {
+    const { container } = renderWithMilestones(
+      pausedWorkflow({ status: 'completed', verification_status: 'confirmed' }),
+      [acceptanceMilestone()]
+    );
+
+    // Verdict mapping: confirmed gets the green check + Accepted label — not
+    // the pending hollow circle ("等待中") every verdict used to fall into.
+    expect(screen.getByText('Accepted')).toBeInTheDocument();
+    const statusBadge = container.querySelector('.timeline-milestone-status');
+    expect(statusBadge).toBeTruthy();
+    expect(statusBadge?.querySelector('.bi-check-circle-fill')).toBeTruthy();
+    expect(statusBadge?.querySelector('.bi-circle')).toBeFalsy();
+    expect(statusBadge?.className).toContain('timeline-milestone-status--success');
+
+    // Structured, human-readable summary replaces the diagnostic string.
+    expect(screen.getByText('Required paths 1/1 · Semantic checks 2/2')).toBeInTheDocument();
+    expect(screen.queryByText(/status=confirmed; scope=1/)).not.toBeInTheDocument();
+  });
+
+  it('maps rejected verdicts to the danger icon and label', () => {
+    const { container } = renderWithMilestones(
+      pausedWorkflow({ status: 'paused', verification_status: 'rejected' }),
+      [
+        acceptanceMilestone({
+          milestone_id: 'ms-acc-2',
+          status: 'rejected',
+          title: 'Acceptance verification: rejected',
+          result_summary: 'status=rejected; not-verified: a.py',
+          metadata: acceptanceReport('rejected', {
+            scope: [{ item: 'a.py', verdict: 'rejected' }],
+          }),
+        }),
+      ]
+    );
+
+    expect(screen.getByText('Not accepted')).toBeInTheDocument();
+    expect(container.querySelector('.bi-x-circle-fill')).toBeTruthy();
+    expect(screen.getByText('Failed: a.py')).toBeInTheDocument();
+  });
+
+  it('falls back to the persisted raw summary when metadata is unusable', () => {
+    renderWithMilestones(
+      pausedWorkflow({ status: 'completed', verification_status: 'confirmed' }),
+      [acceptanceMilestone({ metadata: '' })]
+    );
+
+    expect(screen.getByText(/status=confirmed; scope=1/)).toBeInTheDocument();
   });
 });
