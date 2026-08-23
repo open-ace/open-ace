@@ -1144,16 +1144,17 @@ def handle(ctx, deps) -> PhaseResult:
         }
 
     if early_milestone_id:
+        # NO phase_* overwrite here: the row already holds the authoritative
+        # usage — _run_agent's _write_phase_usage writes baseline + the SUM of
+        # every in-run invocation delta, which can exceed baseline + the final
+        # result's own delta when the call retried in-run. Overwriting would
+        # silently drop those burned tokens from the card and the totals.
         finalize_fields = {
             "status": status,
             "title": f"Acceptance verification: {status}",
             "result_summary": _acceptance_summary(status, report),
             "metadata": json.dumps(report, ensure_ascii=False),
             "session_id": verifier_session_id,
-            "phase_total_tokens": _merged_usage()["total_tokens"],
-            "phase_input_tokens": _merged_usage()["total_input_tokens"],
-            "phase_output_tokens": _merged_usage()["total_output_tokens"],
-            "phase_request_count": _merged_usage()["request_count"],
         }
         milestone = None  # finalize path carries no milestone_events
         tag_milestone_id = early_milestone_id
@@ -1224,7 +1225,13 @@ def handle(ctx, deps) -> PhaseResult:
         return [milestone] if milestone is not None else []
 
     def _usage_delta() -> dict | None:
-        return (_merged_usage() if early_milestone_id else (verifier_usage or None)) or None
+        # Early path: the row's phase_* already hold the authoritative totals
+        # (written by _run_agent); this value only triggers the idempotent
+        # refresh, so an all-zero delta collapses to None like the fallback.
+        if early_milestone_id:
+            merged = _merged_usage()
+            return merged if any(merged.values()) else None
+        return verifier_usage or None
 
     if agent_out.get("infra_error"):
         exhausted_msg = (

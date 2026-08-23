@@ -160,6 +160,16 @@ def _remove_worktree_dir(gh, path: str, project_path: str = "") -> None:
         pass
 
 
+def _verification_usage_baseline(row: dict) -> dict:
+    """The usage-baseline shape built from a milestone row's phase_* columns."""
+    return {
+        "total_tokens": int(row.get("phase_total_tokens", 0) or 0),
+        "total_input_tokens": int(row.get("phase_input_tokens", 0) or 0),
+        "total_output_tokens": int(row.get("phase_output_tokens", 0) or 0),
+        "request_count": int(row.get("phase_request_count", 0) or 0),
+    }
+
+
 def _attach_early_milestone(payload: dict, early: dict) -> None:
     """Attach the verifier run's early milestone facts to its dict (#3003).
 
@@ -175,12 +185,7 @@ def _attach_early_milestone(payload: dict, early: dict) -> None:
     if not milestone_id:
         return
     payload["milestone_id"] = milestone_id
-    payload["usage_baseline"] = {
-        "total_tokens": int(early.get("phase_total_tokens", 0) or 0),
-        "total_input_tokens": int(early.get("phase_input_tokens", 0) or 0),
-        "total_output_tokens": int(early.get("phase_output_tokens", 0) or 0),
-        "request_count": int(early.get("phase_request_count", 0) or 0),
-    }
+    payload["usage_baseline"] = _verification_usage_baseline(early)
 
 
 def _attach_verifier_runtime(payload: dict, result) -> None:
@@ -9115,13 +9120,40 @@ class AutonomousOrchestrator:
                 # Any other still-in_progress acceptance row is residue of an
                 # interrupted attempt (older by construction — attempt never
                 # resets). Finalize it so it cannot keep hosting activities.
+                swept_id = row.get("milestone_id", "")
                 self.repo.update_milestone(
-                    row.get("milestone_id", ""),
+                    swept_id,
                     {
                         "status": "failed",
                         "error_message": "interrupted: superseded by a later verification attempt",
                     },
                 )
+                self._emit_milestone_updated(swept_id, "failed")
+        if current is None:
+            # The pause paths inside _run_agent terminalize the early row
+            # (quota → failed, cancel/shutdown → cancelled) before raising, so
+            # an auto-resume finds no in_progress row. A same-attempt
+            # failed/cancelled row IS this paused attempt — resurrect it (with
+            # its recorded usage as the resume baseline) instead of minting a
+            # duplicate round_number card. Settled verdict rows can never
+            # match: settling bumps verification_attempt past this attempt.
+            for terminal_status in ("failed", "cancelled"):
+                for row in self.repo.list_milestones(
+                    self._workflow_id,
+                    phase="acceptance_verification",
+                    status=terminal_status,
+                ):
+                    if int(row.get("round_number") or 0) == attempt:
+                        current = row
+                        break
+                if current is not None:
+                    resumed_id = current.get("milestone_id", "")
+                    self.repo.update_milestone(
+                        resumed_id,
+                        {"status": "in_progress", "error_message": ""},
+                    )
+                    self._emit_milestone_updated(resumed_id, "in_progress")
+                    break
         if current is None:
             current = self._create_milestone(
                 phase="acceptance_verification",
@@ -9144,16 +9176,22 @@ class AutonomousOrchestrator:
         if not milestone_id:
             return
         self.repo.update_milestone(milestone_id, fields)
-        self._emit(
-            "milestone_updated",
-            {
-                "milestone_id": milestone_id,
-                "status": fields.get("status", ""),
-                "title": fields.get("title", ""),
-            },
-        )
+        self._emit_milestone_updated(milestone_id, fields.get("status", ""))
         if getattr(self, "_verification_milestone_id", None) == milestone_id:
             self._verification_milestone_id = None
+
+    def _emit_milestone_updated(self, milestone_id: str, status: str) -> None:
+        """Emit a milestone_updated event (#3003).
+
+        No listener switches on the type — the frontend's generic workflow
+        event consumer invalidates its query cache on ANY event, so this is
+        what makes a live timeline refetch when a row flips status outside
+        the poll interval.
+        """
+        self._emit(
+            "milestone_updated",
+            {"milestone_id": milestone_id, "status": status},
+        )
 
     def _run_verification_agent(
         self, *, snapshot, merge_sha, base_sha, issue_number, pr_number
@@ -9191,12 +9229,7 @@ class AutonomousOrchestrator:
         early: dict = {}
         try:
             early = self._ensure_verification_milestone(wf)
-            usage_baseline = {
-                "total_tokens": int(early.get("phase_total_tokens", 0) or 0),
-                "total_input_tokens": int(early.get("phase_input_tokens", 0) or 0),
-                "total_output_tokens": int(early.get("phase_output_tokens", 0) or 0),
-                "request_count": int(early.get("phase_request_count", 0) or 0),
-            }
+            usage_baseline = _verification_usage_baseline(early)
             # Spawn the agent against the merged-main checkout, NOT the dev
             # worktree. We override worktree_path/project_path on a shallow
             # copy so _resolve_effective_repo_context resolves to the checkout.
