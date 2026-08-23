@@ -22,49 +22,60 @@ REMOTE_AGENT_DIR = Path(__file__).resolve().parents[2] / "remote-agent"
 PROXY_BASE_URL = "https://openace.example/api/remote/llm-proxy/v1"
 
 
-def _ensure_remote_agent_on_path() -> None:
+def _load_isolated(module_name: str, relative_path: str) -> Any:
+    """Load a remote-agent module without leaking imports into other tests.
+
+    Two pollution vectors are rolled back after exec_module:
+    - the temporary ``remote-agent`` sys.path entry would shadow bare
+      ``import config`` for every later test in the same worker
+      (tests/unit/test_db.py imports the scripts-side ``config``);
+    - modules the file binds during load (e.g. its sibling ``config``) stay
+      cached in sys.modules otherwise, so the same shadowing survives even
+      after the path entry is removed.
+
+    A previously cached bare ``config`` is popped first (mirrors the
+    tests/issues/1776 loader) and restored afterwards.
+    """
     agent_dir = str(REMOTE_AGENT_DIR)
-    if agent_dir not in sys.path:
+    module_path = REMOTE_AGENT_DIR / relative_path
+    saved_config = sys.modules.pop("config", None)
+    path_added = agent_dir not in sys.path
+    if path_added:
         sys.path.insert(0, agent_dir)
+    known = set(sys.modules)
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec and spec.loader
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        for name in set(sys.modules) - known:
+            del sys.modules[name]
+        if saved_config is not None:
+            sys.modules["config"] = saved_config
+        if path_added:
+            sys.path.remove(agent_dir)
 
 
 def load_cli_settings():
     """Load ``remote-agent/cli_settings.py`` as an isolated module."""
-    _ensure_remote_agent_on_path()
-    module_path = REMOTE_AGENT_DIR / "cli_settings.py"
-    spec = importlib.util.spec_from_file_location("cli_settings_1828", module_path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(module)
-    return module
+    return _load_isolated("cli_settings_1828", "cli_settings.py")
 
 
 def load_openace_cli():
     """Load ``remote-agent/openace_cli.py`` as an isolated module."""
-    _ensure_remote_agent_on_path()
-    module_path = REMOTE_AGENT_DIR / "openace_cli.py"
-    spec = importlib.util.spec_from_file_location("openace_cli_1828", module_path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(module)
-    return module
+    return _load_isolated("openace_cli_1828", "openace_cli.py")
 
 
 def load_agent_module():
     """Load ``remote-agent/agent.py`` as an isolated module.
 
-    ``agent.py`` imports a local ``config`` module; pop any stale cached copy so
-    a foreign module from another test does not leak in (mirrors the
-    ``tests/issues/1776`` loader).
+    ``agent.py`` imports a local ``config`` module; the loader pops any stale
+    cached copy so a foreign module from another test does not leak in
+    (mirrors the ``tests/issues/1776`` loader) and restores it after the load.
     """
-    _ensure_remote_agent_on_path()
-    module_path = REMOTE_AGENT_DIR / "agent.py"
-    sys.modules.pop("config", None)
-    spec = importlib.util.spec_from_file_location("remote_agent_1828", module_path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(module)
-    return module
+    return _load_isolated("remote_agent_1828", "agent.py")
 
 
 def make_proxy_token(
