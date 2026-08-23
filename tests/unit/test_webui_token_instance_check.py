@@ -11,6 +11,7 @@ import os
 import secrets
 from base64 import b64encode
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -239,11 +240,20 @@ class TestWebUITokenNoUserId:
         token = _make_signed_token(service, payload)
 
         # Seed the session row the generic (non-instance) branch looks up —
-        # the legacy location leaned on the ambient seeded database.
+        # the legacy location leaned on the ambient seeded database. The
+        # minimal table covers exactly what the validator's branch SELECTs,
+        # independent of which worker initialized the isolated database.
         conn = service._get_connection()
         try:
-            conn.cursor().execute(
-                "INSERT OR IGNORE INTO agent_sessions"
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_sessions'"
+            )
+            if cursor.fetchone() is None:
+                schema_path = Path(__file__).resolve().parents[2] / "schema" / "schema-sqlite.sql"
+                conn.executescript(schema_path.read_text())
+            cursor.execute(
+                "INSERT OR REPLACE INTO agent_sessions"
                 " (session_id, status, session_type, tool_name, host_name)"
                 " VALUES ('webui:unknown', 'active', 'chat', 'qwen', 'test')"
             )
