@@ -10,6 +10,7 @@ import type { PromptTemplate, PromptVariable } from '@/api/prompts';
 import { useCopyPrompt } from '@/hooks';
 import { Modal, useToast } from '@/components/common';
 import { copyToClipboard } from '@/utils';
+import './PromptDetailModal.css';
 
 interface PromptDetailModalProps {
   isOpen: boolean;

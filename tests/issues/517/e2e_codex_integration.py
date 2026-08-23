@@ -525,7 +525,14 @@ def test_frontend_codex_session_detail():
 
 
 def test_frontend_assist_panel_codex():
-    """Frontend assist panel includes Codex tool option."""
+    """Frontend work page prompts drawer opens (codex panel informational check).
+
+    Historical note: the original test checked a Codex "tools" tab in the
+    right AssistPanel. That tools tab was removed from the AssistPanel long
+    before the panel itself was retired (replaced by the floating prompts
+    drawer). This check is informational only, as it always has been: it
+    opens the drawer and reports whether "codex" text is present on the page.
+    """
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
@@ -540,11 +547,17 @@ def test_frontend_assist_panel_codex():
                 interval=0.5,
                 description="work page load",
             )
+
+            # Open the prompts drawer (replaces the retired assist panel)
+            toggle = page.locator(".prompts-drawer-toggle")
+            if toggle.count() > 0:
+                toggle.first.click()
+                page.wait_for_timeout(500)
             screenshot(page, "codex-assist-panel", SCREENSHOT_DIR)
 
             page_text = page.inner_text("body")
             has_codex = "codex" in page_text.lower()
-            print(f"    Work page loaded, codex in panel: {has_codex}")
+            print(f"    Work page loaded, codex on page: {has_codex}")
         finally:
             browser.close()
 

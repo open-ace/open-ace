@@ -73,7 +73,9 @@ interface AppState {
   // Workspace fullscreen state
   workspaceFullscreen: boolean;
   previousLeftPanelCollapsed: boolean;
-  previousRightPanelCollapsed: boolean;
+
+  // Prompts drawer (work mode, workspace route only)
+  promptsDrawerOpen: boolean;
 
   // Workspace tabs state (Issue #65: Persist workspace state)
   workspaceTabs: WorkspaceTab[];
@@ -110,9 +112,10 @@ interface AppState {
   logout: () => void;
 
   // Workspace fullscreen actions
-  enterWorkspaceFullscreen: (leftCollapsed: boolean, rightCollapsed: boolean) => void;
+  enterWorkspaceFullscreen: (leftCollapsed: boolean) => void;
   exitWorkspaceFullscreen: () => void;
-  toggleWorkspaceFullscreen: (leftCollapsed: boolean, rightCollapsed: boolean) => void;
+  toggleWorkspaceFullscreen: (leftCollapsed: boolean) => void;
+  setPromptsDrawerOpen: (open: boolean) => void;
 
   // Workspace tabs actions (Issue #65)
   setWorkspaceTabs: (tabs: WorkspaceTab[]) => void;
@@ -284,7 +287,9 @@ export const useAppStore = create<AppState>()(
       // Workspace fullscreen state
       workspaceFullscreen: false,
       previousLeftPanelCollapsed: false,
-      previousRightPanelCollapsed: false,
+
+      // Prompts drawer (work mode, workspace route only)
+      promptsDrawerOpen: false,
 
       // Workspace tabs state (Issue #65)
       workspaceTabs: [],
@@ -339,14 +344,13 @@ export const useAppStore = create<AppState>()(
         }),
 
       // Workspace fullscreen actions
-      enterWorkspaceFullscreen: (leftCollapsed, rightCollapsed) =>
+      enterWorkspaceFullscreen: (leftCollapsed) =>
         set({
           workspaceFullscreen: true,
           previousLeftPanelCollapsed: leftCollapsed,
-          previousRightPanelCollapsed: rightCollapsed,
         }),
       exitWorkspaceFullscreen: () => set({ workspaceFullscreen: false }),
-      toggleWorkspaceFullscreen: (leftCollapsed, rightCollapsed) =>
+      toggleWorkspaceFullscreen: (leftCollapsed) =>
         set((state) => {
           if (state.workspaceFullscreen) {
             return { workspaceFullscreen: false };
@@ -354,10 +358,10 @@ export const useAppStore = create<AppState>()(
             return {
               workspaceFullscreen: true,
               previousLeftPanelCollapsed: leftCollapsed,
-              previousRightPanelCollapsed: rightCollapsed,
             };
           }
         }),
+      setPromptsDrawerOpen: (open) => set({ promptsDrawerOpen: open }),
 
       // Workspace tabs actions (Issue #65)
       setWorkspaceTabs: (tabs) => set({ workspaceTabs: tabs }),
@@ -473,11 +477,8 @@ export const useEnableTabNotifications = () => useAppStore((state) => state.enab
 export const useAutoFullscreenOnEnterChat = () =>
   useAppStore((state) => state.autoFullscreenOnEnterChat);
 export const useShowFileChangesPanel = () => useAppStore((state) => state.showFileChangesPanel);
-export const usePreviousPanelState = () =>
-  useAppStore((state) => ({
-    left: state.previousLeftPanelCollapsed,
-    right: state.previousRightPanelCollapsed,
-  }));
+export const usePreviousPanelState = () => useAppStore((state) => state.previousLeftPanelCollapsed);
+export const usePromptsDrawerOpen = () => useAppStore((state) => state.promptsDrawerOpen);
 
 // Workspace tabs selectors (Issue #65)
 export const useWorkspaceTabs = () => useAppStore((state) => state.workspaceTabs);

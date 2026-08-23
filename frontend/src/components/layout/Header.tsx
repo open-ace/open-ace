@@ -9,6 +9,7 @@ import { useAuth, useTheme, useLanguage } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t, setLanguage as setI18nLanguage } from '@/i18n';
 import { UserSettingsModal, Avatar } from '@/components/common';
+import { DocumentViewer, helpDocs, getDocTitle } from '@/components/work/DocumentViewer';
 
 interface HeaderProps {
   compact?: boolean;
@@ -19,6 +20,7 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
   const theme = useTheme();
   const language = useLanguage();
   const [showSettings, setShowSettings] = useState(false);
+  const [helpDocId, setHelpDocId] = useState<string>('');
 
   const handleThemeToggle = () => {
     const newTheme = theme === 'light' ? 'dark' : 'light';
@@ -35,9 +37,33 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
     localStorage.setItem('i18nextLng', lang);
   };
 
-  // Content for right side (language, theme, user menu)
+  // Content for right side (help, language, theme, user menu)
   const rightContent = (
     <div className="d-flex align-items-center gap-2">
+      {/* Help menu */}
+      <div className="dropdown">
+        <button
+          className="btn btn-link header-icon-btn p-0 dropdown-toggle"
+          type="button"
+          data-bs-toggle="dropdown"
+          aria-expanded="false"
+          title={t('help', language)}
+          aria-label={t('help', language)}
+        >
+          <i className="bi bi-question-circle" />
+        </button>
+        <ul className="dropdown-menu dropdown-menu-end">
+          {helpDocs.map((doc) => (
+            <li key={doc.id}>
+              <button className="dropdown-item" onClick={() => setHelpDocId(doc.id)}>
+                <i className={`bi ${doc.icon} me-2`} />
+                {getDocTitle(doc.id, language)}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+
       {/* Language selector */}
       <div className="dropdown">
         <button
@@ -144,6 +170,11 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
       <>
         {rightContent}
         <UserSettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
+        <DocumentViewer
+          isOpen={helpDocId !== ''}
+          onClose={() => setHelpDocId('')}
+          docId={helpDocId}
+        />
       </>
     );
   }
@@ -167,6 +198,11 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
 
       {/* User Settings Modal */}
       <UserSettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
+      <DocumentViewer
+        isOpen={helpDocId !== ''}
+        onClose={() => setHelpDocId('')}
+        docId={helpDocId}
+      />
     </header>
   );
 };

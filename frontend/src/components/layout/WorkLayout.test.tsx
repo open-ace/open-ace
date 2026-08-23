@@ -1,13 +1,15 @@
 /**
- * WorkLayout Component Tests - Feature Flags Loading
+ * WorkLayout Component Tests - Feature Flags Loading & Panel Structure
  *
  * Tests cover:
  * - Feature flags loading on mount
  * - Navigation visibility based on autonomousEnabled
  * - Error handling when config/flags fetch fails
+ * - Left panel structure (no redundant title)
+ * - Prompts drawer toggle visibility per route + ESC layering
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -17,7 +19,8 @@ import { WorkLayout } from './WorkLayout';
 const mockStore = {
   exitWorkspaceFullscreen: vi.fn(),
   previousLeftPanelCollapsed: false,
-  previousRightPanelCollapsed: false,
+  promptsDrawerOpen: false,
+  setPromptsDrawerOpen: vi.fn(),
   autonomousEnabled: false,
   setAutonomousEnabled: vi.fn(),
   setModelGatewayEnabled: vi.fn(),
@@ -30,13 +33,13 @@ vi.mock('@/store', () => ({
   useLanguage: () => 'en',
   useAppStore: () => mockStore,
   useWorkspaceFullscreen: () => false,
+  usePromptsDrawerOpen: () => mockStore.promptsDrawerOpen,
 }));
 
 // Mock i18n
 vi.mock('@/i18n', () => ({
   t: (key: string) => {
     const translations: Record<string, string> = {
-      navigation: 'Navigation',
       workspace: 'Workspace',
       autonomousDev: 'Autonomous Dev',
       sessionHistory: 'Session History',
@@ -45,6 +48,8 @@ vi.mock('@/i18n', () => ({
       insights: 'Insights',
       showMore: 'Show More',
       showLess: 'Show Less',
+      close: 'Close',
+      viewAll: 'View All',
     };
     return translations[key] || key;
   },
@@ -76,9 +81,9 @@ vi.mock('@/components/work', () => ({
   SessionList: ({ collapsed }: { collapsed: boolean }) => (
     <div data-testid="session-list">Session List {collapsed ? '(collapsed)' : ''}</div>
   ),
-  AssistPanel: ({ collapsed }: { collapsed: boolean }) => (
-    <div data-testid="assist-panel">Assist Panel {collapsed ? '(collapsed)' : ''}</div>
-  ),
+  // Mirrors the real component: renders nothing when closed
+  PromptsDrawer: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? <div data-testid="prompts-drawer">Prompts Drawer</div> : null,
   StatusBar: () => <div data-testid="status-bar">Status Bar</div>,
 }));
 
@@ -86,12 +91,21 @@ vi.mock('@/components/work', () => ({
 import { workspaceApi } from '@/api/workspace';
 import { featureFlagsApi } from '@/api/featureFlags';
 
+const renderLayout = (route: string) =>
+  render(
+    <MemoryRouter initialEntries={[route]}>
+      <WorkLayout />
+    </MemoryRouter>
+  );
+
 describe('WorkLayout', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Reset mock store values
     mockStore.autonomousEnabled = false;
+    mockStore.promptsDrawerOpen = false;
     mockStore.exitWorkspaceFullscreen = vi.fn();
+    mockStore.setPromptsDrawerOpen = vi.fn();
     mockStore.setAutonomousEnabled = vi.fn();
     mockStore.setModelGatewayEnabled = vi.fn();
     mockStore.setRunTimelineEnabled = vi.fn();
@@ -113,11 +127,7 @@ describe('WorkLayout', () => {
         autonomous: true,
       });
 
-      render(
-        <MemoryRouter initialEntries={['/work']}>
-          <WorkLayout />
-        </MemoryRouter>
-      );
+      renderLayout('/work');
 
       await waitFor(() => {
         expect(workspaceApi.getConfig).toHaveBeenCalled();
@@ -136,11 +146,7 @@ describe('WorkLayout', () => {
         autonomous: false,
       });
 
-      render(
-        <MemoryRouter initialEntries={['/work']}>
-          <WorkLayout />
-        </MemoryRouter>
-      );
+      renderLayout('/work');
 
       await waitFor(() => {
         expect(mockStore.setAutonomousEnabled).toHaveBeenCalledWith(true);
@@ -158,11 +164,7 @@ describe('WorkLayout', () => {
         autonomous: false,
       });
 
-      render(
-        <MemoryRouter initialEntries={['/work']}>
-          <WorkLayout />
-        </MemoryRouter>
-      );
+      renderLayout('/work');
 
       await waitFor(() => {
         expect(mockStore.setModelGatewayEnabled).toHaveBeenCalledWith(true);
@@ -180,11 +182,7 @@ describe('WorkLayout', () => {
         autonomous: false,
       });
 
-      render(
-        <MemoryRouter initialEntries={['/work']}>
-          <WorkLayout />
-        </MemoryRouter>
-      );
+      renderLayout('/work');
 
       await waitFor(() => {
         expect(mockStore.setRunTimelineEnabled).toHaveBeenCalledWith(true);
@@ -203,11 +201,7 @@ describe('WorkLayout', () => {
         autonomous: false,
       });
 
-      render(
-        <MemoryRouter initialEntries={['/work']}>
-          <WorkLayout />
-        </MemoryRouter>
-      );
+      renderLayout('/work');
 
       await waitFor(() => {
         expect(mockConsoleError).toHaveBeenCalledWith(
@@ -226,11 +220,7 @@ describe('WorkLayout', () => {
       });
       vi.mocked(featureFlagsApi.getFlags).mockRejectedValue(new Error('API error'));
 
-      render(
-        <MemoryRouter initialEntries={['/work']}>
-          <WorkLayout />
-        </MemoryRouter>
-      );
+      renderLayout('/work');
 
       await waitFor(() => {
         expect(mockConsoleError).toHaveBeenCalledWith(
@@ -251,11 +241,7 @@ describe('WorkLayout', () => {
         autonomous: false,
       });
 
-      render(
-        <MemoryRouter initialEntries={['/work']}>
-          <WorkLayout />
-        </MemoryRouter>
-      );
+      renderLayout('/work');
 
       await waitFor(() => {
         expect(mockStore.setConfigLoaded).toHaveBeenCalledWith(true);
@@ -277,11 +263,7 @@ describe('WorkLayout', () => {
         autonomous: true,
       });
 
-      render(
-        <MemoryRouter initialEntries={['/work']}>
-          <WorkLayout />
-        </MemoryRouter>
-      );
+      renderLayout('/work');
 
       await waitFor(() => {
         // Should show autonomous nav item
@@ -291,7 +273,8 @@ describe('WorkLayout', () => {
       // Should show all items
       expect(screen.getByTitle('Workspace')).toBeInTheDocument();
       expect(screen.getByTitle('Session History')).toBeInTheDocument();
-      expect(screen.getByTitle('Prompts')).toBeInTheDocument();
+      // 'Prompts' title is shared by the nav item and the drawer toggle
+      expect(screen.getAllByTitle('Prompts').length).toBe(2);
       expect(screen.getByTitle('My Usage')).toBeInTheDocument();
       expect(screen.getByTitle('Insights')).toBeInTheDocument();
     });
@@ -309,11 +292,7 @@ describe('WorkLayout', () => {
         autonomous: false,
       });
 
-      render(
-        <MemoryRouter initialEntries={['/work']}>
-          <WorkLayout />
-        </MemoryRouter>
-      );
+      renderLayout('/work');
 
       await waitFor(() => {
         expect(workspaceApi.getConfig).toHaveBeenCalled();
@@ -329,7 +308,7 @@ describe('WorkLayout', () => {
   });
 
   describe('Layout Structure', () => {
-    it('renders header, panels, and status bar', async () => {
+    it('renders header, left panel, and status bar', async () => {
       vi.mocked(workspaceApi.getConfig).mockResolvedValue({
         autonomous_enabled: false,
       });
@@ -353,7 +332,6 @@ describe('WorkLayout', () => {
       });
 
       expect(screen.getByTestId('session-list')).toBeInTheDocument();
-      expect(screen.getByTestId('assist-panel')).toBeInTheDocument();
       expect(screen.getByTestId('status-bar')).toBeInTheDocument();
       expect(screen.getByTestId('main-content')).toBeInTheDocument();
     });
@@ -380,6 +358,99 @@ describe('WorkLayout', () => {
       await waitFor(() => {
         expect(screen.getByTestId('child-component')).toBeInTheDocument();
       });
+    });
+
+    it('does not render a redundant left panel title', () => {
+      vi.mocked(workspaceApi.getConfig).mockResolvedValue({
+        autonomous_enabled: false,
+      });
+      vi.mocked(featureFlagsApi.getFlags).mockResolvedValue({
+        model_gateway: false,
+        run_timeline: false,
+        policy: false,
+        autonomous: false,
+      });
+
+      renderLayout('/work');
+
+      expect(screen.queryByText('Navigation')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Prompts Drawer', () => {
+    it('shows the drawer toggle on the workspace route', async () => {
+      vi.mocked(workspaceApi.getConfig).mockResolvedValue({
+        autonomous_enabled: false,
+      });
+      vi.mocked(featureFlagsApi.getFlags).mockResolvedValue({
+        model_gateway: false,
+        run_timeline: false,
+        policy: false,
+        autonomous: false,
+      });
+
+      renderLayout('/work');
+
+      expect(await screen.findByRole('button', { name: 'Prompts' })).toBeInTheDocument();
+    });
+
+    it('hides the drawer toggle on non-workspace routes', async () => {
+      vi.mocked(workspaceApi.getConfig).mockResolvedValue({
+        autonomous_enabled: false,
+      });
+      vi.mocked(featureFlagsApi.getFlags).mockResolvedValue({
+        model_gateway: false,
+        run_timeline: false,
+        policy: false,
+        autonomous: false,
+      });
+
+      renderLayout('/work/sessions');
+
+      await waitFor(() => {
+        expect(workspaceApi.getConfig).toHaveBeenCalled();
+      });
+
+      expect(screen.queryByRole('button', { name: 'Prompts' })).not.toBeInTheDocument();
+    });
+
+    it('opens the drawer when the toggle is clicked', async () => {
+      vi.mocked(workspaceApi.getConfig).mockResolvedValue({
+        autonomous_enabled: false,
+      });
+      vi.mocked(featureFlagsApi.getFlags).mockResolvedValue({
+        model_gateway: false,
+        run_timeline: false,
+        policy: false,
+        autonomous: false,
+      });
+
+      renderLayout('/work');
+
+      const toggle = await screen.findByRole('button', { name: 'Prompts' });
+      fireEvent.click(toggle);
+
+      expect(mockStore.setPromptsDrawerOpen).toHaveBeenCalledWith(true);
+    });
+
+    it('ESC closes an open drawer instead of exiting fullscreen', async () => {
+      mockStore.promptsDrawerOpen = true;
+      vi.mocked(workspaceApi.getConfig).mockResolvedValue({
+        autonomous_enabled: false,
+      });
+      vi.mocked(featureFlagsApi.getFlags).mockResolvedValue({
+        model_gateway: false,
+        run_timeline: false,
+        policy: false,
+        autonomous: false,
+      });
+
+      renderLayout('/work');
+
+      fireEvent.keyDown(window, { key: 'Escape' });
+
+      expect(mockStore.setPromptsDrawerOpen).toHaveBeenCalledWith(false);
+      expect(mockStore.exitWorkspaceFullscreen).not.toHaveBeenCalled();
     });
   });
 });

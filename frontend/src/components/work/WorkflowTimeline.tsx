@@ -2379,7 +2379,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               <Button
                 size="sm"
                 variant="outline-secondary"
-                onClick={() => toggleWorkspaceFullscreen(false, false)}
+                onClick={() => toggleWorkspaceFullscreen(false)}
               >
                 <i className="bi bi-fullscreen-exit me-1"></i>
                 {t('exitFullscreen', language)}
