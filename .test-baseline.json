@@ -33,9 +33,9 @@
       "min_tests": 4145,
       "min_files": 413,
       "last_updated": "2026-08-23",
-      "update_reason": "Issue #2429 batch 1: migrated 155 items / 17 files out of the 8 pr-gate dirs into canonical layers; min lowered by exactly that delta (4300-155, 430-17)",
-      "actual_collected": 4358,
-      "actual_files": 429,
+      "update_reason": "Issue #2429 batch 1: migrated 155 items / 17 files out of the 8 pr-gate dirs into canonical layers; min lowered by exactly that delta (4300-155, 430-17); actuals from CI run 32636484269 (clean checkout)",
+      "actual_collected": 4357,
+      "actual_files": 428,
       "threshold_percent": 97
     }
   },
@@ -47,7 +47,7 @@
     "Baseline created before pytest.ini modification to enable e2e_*.py collection",
     "tests/e2e currently excluded by norecursedirs in pytest.ini",
     "Default count from: python scripts/ci.py run default-collection (7036 items after #2429 batch 1)",
-    "Issue count from: python scripts/ci.py run issue-collection (4358 items, 429 files after #2429 batch 1)",
+    "Issue count from: CI run 32636484269 issue-collection (4357 items, 428 files after #2429 batch 1; a checkout with the gitignored local tests/issues/89 dir collects 4358/429)",
     "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard"
   ]
 }
