@@ -11,6 +11,9 @@ import pytest
 
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(910)]
+
+
 # ── Test _clean_plan_output ──────────────────────────────────────────────
 
 

@@ -21,6 +21,8 @@ import pytest
 from app.modules.workspace.autonomous.github_ops import GitHubOpsError
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1814)]
+
 
 def _make_workflow(**overrides):
     """Create a minimal workflow dict for testing."""

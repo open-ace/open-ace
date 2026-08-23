@@ -33,6 +33,9 @@ import pytest
 
 import app.ws_frame as ws_frame
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1830)]
+
+
 ENV_VAR = "OPENACE_WS_MAX_MESSAGE_BYTES"
 
 

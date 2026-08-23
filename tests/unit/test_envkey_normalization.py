@@ -16,7 +16,10 @@ import tempfile
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "remote-agent"))
+pytestmark = [pytest.mark.regression, pytest.mark.issue(456)]
+
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "remote-agent"))
 
 from cli_adapters.base import collect_custom_envkeys, normalize_model_providers
 

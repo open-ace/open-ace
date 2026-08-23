@@ -16,6 +16,9 @@ import pytest
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2041)]
+
+
 WT_PATH = "/srv/repo/.worktrees/wf-2041"
 PROJECT_PATH = "/srv/repo"
 BRANCH = "auto-dev/wf2041"
@@ -267,8 +270,8 @@ def test_verify_worktree_restored_accepts_refs_heads_branch_format():
     o, _ = _make_orchestrator(_make_workflow())
     gh = MagicMock()
     gh.list_worktrees.return_value = [{"path": WT_PATH, "branch": f"refs/heads/{BRANCH}"}]
-    # Must not raise on the porcelain-parsed shape.
-    o._verify_worktree_restored(gh, WT_PATH, BRANCH)
+    # Must accept the porcelain-parsed shape without raising (returns None).
+    assert o._verify_worktree_restored(gh, WT_PATH, BRANCH) is None
 
 
 def test_verify_worktree_restored_rejects_wrong_branch():

@@ -9,7 +9,11 @@ cannot drift.
 
 from __future__ import annotations
 
-from _helpers import PROXY_TOKEN, load_cli_settings
+import pytest
+
+from tests.unit._helpers_1828 import PROXY_TOKEN, load_cli_settings
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1828)]
 
 
 def test_returns_token_on_windows_when_non_empty(monkeypatch):

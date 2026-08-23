@@ -11,7 +11,10 @@ non-active provider.
 from __future__ import annotations
 
 import pytest
-from _helpers import PROXY_BASE_URL, PROXY_TOKEN, load_cli_settings
+
+from tests.unit._helpers_1828 import PROXY_BASE_URL, PROXY_TOKEN, load_cli_settings
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1828)]
 
 
 @pytest.fixture(scope="module")

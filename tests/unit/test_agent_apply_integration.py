@@ -9,7 +9,18 @@ routing) and lands the correct on-disk config.
 
 from __future__ import annotations
 
-from _helpers import PROXY_TOKEN, REMOTE_AGENT_DIR, load_agent_module, load_cli_settings, make_agent
+import pytest
+
+from tests.unit._helpers_1828 import (
+    PROXY_TOKEN,
+    REMOTE_AGENT_DIR,
+    load_agent_module,
+    load_cli_settings,
+    make_agent,
+)
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1828)]
+
 
 # ---------------------------------------------------------------------------
 # V8a: source-level contract (robust against os.name monkeypatch hazards)

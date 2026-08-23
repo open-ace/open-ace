@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-REMOTE_AGENT_DIR = Path(__file__).resolve().parents[3] / "remote-agent"
+REMOTE_AGENT_DIR = Path(__file__).resolve().parents[2] / "remote-agent"
 
 PROXY_BASE_URL = "https://openace.example/api/remote/llm-proxy/v1"
 
