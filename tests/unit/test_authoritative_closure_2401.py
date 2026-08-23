@@ -5,7 +5,7 @@ this proves the *wiring* — that the evidence filter in
 ``_compute_structured_test_verdict`` uses the recognizer, so a
 ``tool_name="test"`` row with an empty (or non-test) command and exit 0 is
 excluded and the run resolves NOT_RUN rather than the authoritative PASSED it
-reached before. Method-level, repos mocked (mirrors tests/issues/2046).
+reached before. Method-level, repos mocked (mirrors tests/unit (ex tests/issues/2046)).
 """
 
 from __future__ import annotations

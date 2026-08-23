@@ -1,0 +1,346 @@
+#!/usr/bin/env python3
+"""
+Tests for Issue #1169: WebUI session token validation based on instance alive status.
+
+Tests that validate_proxy_token() checks both TTL and instance-alive status for
+WebUI sessions.
+"""
+
+import json
+import os
+import secrets
+from base64 import b64encode
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1169)]
+
+
+# Set encryption key for tests
+os.environ.setdefault("OPENACE_ENCRYPTION_KEY", "test-encryption-key-for-issue-1169-tests")
+
+
+def _make_proxy_token_payload(
+    user_id: int = 1,
+    session_id: str = "webui:1",
+    tenant_id: int = 1,
+    provider: str = "openai",
+    expires_minutes: int = 60,
+    session_type: str = "webui",
+) -> dict:
+    """Create a mock proxy token payload."""
+    # Naive LOCAL now to match the validator's comparison basis
+    # (api_key_proxy.py uses datetime.now()); a UTC-naive exp would read as
+    # already-expired on any non-UTC machine (latent tz bug, surfaces in #2429
+    # batch 8 migration).
+    exp = datetime.now() + timedelta(minutes=expires_minutes)
+    exp_str = exp.isoformat()
+    return {
+        "user_id": user_id,
+        "session_id": session_id,
+        "tenant_id": tenant_id,
+        "provider": provider,
+        "exp": exp_str,
+        "jti": secrets.token_hex(16),
+        "session_type": session_type,
+    }
+
+
+def _encode_payload(payload: dict) -> str:
+    """Encode payload to base64."""
+    return b64encode(json.dumps(payload).encode()).decode()
+
+
+def _make_signed_token(service, payload: dict) -> str:
+    """Create a signed token from payload."""
+    import hashlib
+    import hmac
+
+    payload_b64 = _encode_payload(payload)
+    signature = hmac.new(
+        service._encryption_key,
+        payload_b64.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    token = f"{payload_b64}.{signature}"
+    service._record_proxy_token_issue(
+        token=token,
+        payload=payload,
+        expires_at=datetime.fromisoformat(payload["exp"]),
+        reuse_mode=payload.get("reuse_mode", "multi_use"),
+    )
+    return token
+
+
+class TestWebUITokenInstanceCheck:
+    """Tests for WebUI session token validation based on instance alive status."""
+
+    @patch("app.services.webui_manager.get_webui_manager")
+    def test_webui_session_instance_alive_token_accepted(self, mock_get_manager):
+        """
+        Test that a valid WebUI token is accepted only if the instance is alive.
+        """
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        # Setup mock manager and instance
+        mock_instance = MagicMock()
+        mock_instance.is_alive.return_value = True
+        mock_manager = MagicMock()
+        mock_manager.get_user_instance.return_value = mock_instance
+        mock_get_manager.return_value = mock_manager
+
+        # Create service and generate expired token
+        service = APIKeyProxyService()
+        payload = _make_proxy_token_payload(
+            user_id=1,
+            session_id="webui:1",
+        )
+        token = _make_signed_token(service, payload)
+
+        # Validate - should succeed because instance is alive
+        result = service.validate_proxy_token(token)
+        assert result is not None, "Token should be accepted when instance is alive"
+        assert result["user_id"] == 1
+        assert result["session_id"] == "webui:1"
+
+    @patch("app.services.webui_manager.get_webui_manager")
+    def test_webui_session_instance_dead_token_rejected(self, mock_get_manager):
+        """
+        Test that a valid WebUI token is rejected if instance is dead.
+        """
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        # Setup mock manager and instance (dead)
+        mock_instance = MagicMock()
+        mock_instance.is_alive.return_value = False
+        mock_manager = MagicMock()
+        mock_manager.get_user_instance.return_value = mock_instance
+        mock_get_manager.return_value = mock_manager
+
+        # Create service and generate expired token
+        service = APIKeyProxyService()
+        payload = _make_proxy_token_payload(
+            user_id=1,
+            session_id="webui:1",
+        )
+        token = _make_signed_token(service, payload)
+
+        # Validate - should fail because instance is dead
+        result = service.validate_proxy_token(token)
+        assert result is None, "Token should be rejected when instance is dead"
+
+    @patch("app.services.webui_manager.get_webui_manager")
+    def test_webui_session_no_instance_token_rejected(self, mock_get_manager):
+        """
+        Test that a valid WebUI token is rejected if instance not found.
+        """
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        # Setup mock manager (no instance)
+        mock_manager = MagicMock()
+        mock_manager.get_user_instance.return_value = None
+        mock_get_manager.return_value = mock_manager
+
+        # Create service and generate expired token
+        service = APIKeyProxyService()
+        payload = _make_proxy_token_payload(
+            user_id=1,
+            session_id="webui:1",
+        )
+        token = _make_signed_token(service, payload)
+
+        # Validate - should fail because instance not found
+        result = service.validate_proxy_token(token)
+        assert result is None, "Token should be rejected when instance not found"
+
+    def test_agent_session_expired_token_rejected(self):
+        """
+        Test that expired token for agent session is rejected (original behavior).
+        """
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        # Create service and generate expired token for agent session
+        service = APIKeyProxyService()
+        payload = _make_proxy_token_payload(
+            user_id=1,
+            session_id="agent-session-id",
+            expires_minutes=-1,
+            session_type="agent",
+        )
+        token = _make_signed_token(service, payload)
+
+        # Validate - should fail because it's agent session and expired
+        result = service.validate_proxy_token(token)
+        assert result is None, "Agent session expired token should be rejected"
+
+    def test_agent_session_valid_token_accepted_if_db_check_passes(self):
+        """
+        Test that valid token for agent session goes through expiration check.
+        Note: Agent session also needs database check, which may fail in unit test.
+        The point is to verify expiration logic is applied correctly for agent sessions.
+        """
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        # Create service and generate valid token for agent session
+        service = APIKeyProxyService()
+        payload = _make_proxy_token_payload(
+            user_id=1,
+            session_id="agent-session-id",
+            expires_minutes=60,  # Valid for 60 minutes
+            session_type="agent",
+        )
+        token = _make_signed_token(service, payload)
+
+        # Validate: the agent token goes through expiration + DB checks and
+        # must NOT take the WebUI instance-alive branch (patched to prove it).
+        with patch("app.services.webui_manager.get_webui_manager") as mock_manager:
+            service.validate_proxy_token(token)
+        mock_manager.assert_not_called()
+
+
+class TestWebUITokenNoUserId:
+    """Tests for WebUI session token without user_id."""
+
+    def test_webui_session_no_user_id_uses_expiration_check(self):
+        """
+        Test that WebUI session token without user_id falls back to expiration check.
+        """
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        # Create service and generate expired token without user_id
+        service = APIKeyProxyService()
+        payload = _make_proxy_token_payload(
+            user_id=None,
+            session_id="webui:unknown",
+            expires_minutes=-1,
+        )
+        token = _make_signed_token(service, payload)
+
+        # Validate - should fail because expired (no user_id to check instance)
+        result = service.validate_proxy_token(token)
+        assert result is None, "Token without user_id should use expiration check and fail"
+
+    @patch("app.services.webui_manager.get_webui_manager")
+    def test_webui_session_no_user_id_valid_token(self, mock_get_manager):
+        """
+        Test that WebUI session token without user_id but valid expiration passes.
+        """
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        # Create service and generate valid token without user_id
+        service = APIKeyProxyService()
+        payload = _make_proxy_token_payload(
+            user_id=None,
+            session_id="webui:unknown",
+            expires_minutes=60,  # Valid
+        )
+        token = _make_signed_token(service, payload)
+
+        # Seed the session row the generic (non-instance) branch looks up —
+        # the legacy location leaned on the ambient seeded database.
+        conn = service._get_connection()
+        try:
+            conn.cursor().execute(
+                "INSERT OR IGNORE INTO agent_sessions"
+                " (session_id, status, session_type, tool_name, host_name)"
+                " VALUES ('webui:unknown', 'active', 'chat', 'qwen', 'test')"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Validate - should pass expiration check (but no instance check)
+        result = service.validate_proxy_token(token)
+        # Without user_id, it falls through to expiration check which passes
+        assert result is not None, "Token without user_id but valid expiration should pass"
+
+
+class TestWebUIvsAgentBehaviorDifference:
+    """Tests to verify different behavior between WebUI and Agent sessions."""
+
+    @patch("app.services.webui_manager.get_webui_manager")
+    def test_webui_alive_instance_token_accepted_even_when_expired(self, mock_get_manager):
+        """
+        TDD test for the webui-token-ttl High finding.
+
+        A WebUI proxy token issued with session_type="webui" must keep working as long
+        as the backing instance is alive, even after its TTL expires. The instance-alive
+        lifecycle signal is authoritative for webui sessions; hard-rejecting on exp
+        mid-session causes long-running WebUI sessions to silently lose LLM access (~4h).
+        """
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        # Setup mock manager and an ALIVE instance
+        mock_instance = MagicMock()
+        mock_instance.is_alive.return_value = True
+        mock_manager = MagicMock()
+        mock_manager.get_user_instance.return_value = mock_instance
+        mock_get_manager.return_value = mock_manager
+
+        service = APIKeyProxyService()
+
+        # Token whose exp/expires_at are clearly in the past.
+        payload = _make_proxy_token_payload(
+            user_id=1,
+            session_id="webui:1",
+            expires_minutes=-1,
+        )
+        token = _make_signed_token(service, payload)
+
+        result = service.validate_proxy_token(token)
+        assert result is not None, "Alive WebUI instance must not lose proxy access on token exp"
+        assert result["session_id"] == "webui:1"
+
+    @patch("app.services.webui_manager.get_webui_manager")
+    def test_webui_dead_instance_expired_token_rejected(self, mock_get_manager):
+        """
+        Security contract preserved: once the backing instance is gone, an expired
+        (or otherwise) webui token is rejected. The instance-alive exemption does not
+        leak to dead instances.
+        """
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        # Setup mock manager and a DEAD instance
+        mock_instance = MagicMock()
+        mock_instance.is_alive.return_value = False
+        mock_manager = MagicMock()
+        mock_manager.get_user_instance.return_value = mock_instance
+        mock_get_manager.return_value = mock_manager
+
+        service = APIKeyProxyService()
+
+        payload = _make_proxy_token_payload(
+            user_id=1,
+            session_id="webui:1",
+            expires_minutes=-1,
+        )
+        token = _make_signed_token(service, payload)
+
+        result = service.validate_proxy_token(token)
+        assert result is None, "Dead WebUI instance must still reject expired tokens"
+
+    def test_agent_rejects_expiration_even_very_old(self):
+        """
+        Test that Agent session rejects expired token based on expiration time.
+        """
+        from app.modules.workspace.api_key_proxy import APIKeyProxyService
+
+        service = APIKeyProxyService()
+
+        # Test with extremely expired token for agent session
+        payload = _make_proxy_token_payload(
+            user_id=1,
+            session_id="agent-session-id",
+            expires_minutes=-1000 * 24 * 60,  # 1000 days ago
+            session_type="agent",
+        )
+        token = _make_signed_token(service, payload)
+
+        result = service.validate_proxy_token(token)
+        assert result is None, "Agent session should reject expired token"
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
