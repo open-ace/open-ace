@@ -879,6 +879,40 @@
   background: color-mix(in srgb, var(--color-warning) 4%, var(--bg-primary) 96%);
 }
 
+/* Session-viewer messages (#3000): timestamp label, markdown body with a
+   collapsed scroll window (toggle removes the cap), monospace tool output. */
+.timeline-session-msg-time {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-session-msg-md {
+  max-height: 240px;
+  overflow: auto;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 68%, var(--bg-primary) 32%);
+  font-size: 0.84rem;
+}
+
+.timeline-session-msg-md--expanded {
+  max-height: none;
+}
+
+.timeline-session-msg-pre {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  font-size: 0.8rem;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  margin-bottom: 0;
+}
+
 .timeline-milestone-activity {
   margin-top: 12px;
   padding: 12px;

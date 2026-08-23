@@ -29,6 +29,7 @@ import json
 import logging
 import re
 import time
+import uuid
 from typing import cast
 
 from app.modules.workspace.autonomous.acceptance_gates import run_mechanical_gates
@@ -784,6 +785,7 @@ def _acceptance_milestone(
     report,
     session_id: str = "",
     usage: dict | None = None,
+    milestone_id: str = "",
 ) -> dict:
     """Build the acceptance-verification milestone row.
 
@@ -799,11 +801,16 @@ def _acceptance_milestone(
     ``phase_*`` columns every other AI milestone uses, so workflow totals
     (summed from those columns) finally include verification consumption and
     the UI card gets its session button + token/request chips.
+
+    ``milestone_id`` is minted by the caller (#3000) so the session's messages
+    can be tagged before the row is inserted; empty falls back to
+    create_milestone's own uuid.
     """
     summary = _acceptance_summary(status, report)
     usage = usage or {}
     return {
         "workflow_id": workflow_id,
+        "milestone_id": milestone_id or "",
         "phase": "acceptance_verification",
         "dev_round": dev_round,
         "round_number": attempt,
@@ -1114,6 +1121,12 @@ def handle(ctx, deps) -> PhaseResult:
         "verified_by": verified_by,
         "verification_attempt": (wf.get("verification_attempt") or 0) + 1,
     }
+    # Mint the milestone id here so the verifier session's messages can be
+    # tagged with it before the row itself is inserted (create_milestone
+    # honors a caller-supplied id; session_messages has no FK, so the
+    # tag-before-insert ordering is safe). Best-effort attribution only
+    # (#3000) — the viewer's full-transcript path does not depend on the tag.
+    settle_milestone_id = str(uuid.uuid4())
     milestone = _acceptance_milestone(
         workflow_id=wf.get("workflow_id"),
         dev_round=int(wf.get("dev_round") or 1),
@@ -1122,6 +1135,7 @@ def handle(ctx, deps) -> PhaseResult:
         report=report,
         session_id=verifier_session_id,
         usage=verifier_usage,
+        milestone_id=settle_milestone_id,
     )
     # A deterministic parse failure that repeats identically across consecutive
     # attempts is certain to keep failing, so cap it below the transient budget
@@ -1145,6 +1159,12 @@ def handle(ctx, deps) -> PhaseResult:
                 "error_message": "Acceptance verifier infrastructure failure; retrying",
             }
         )
+    if verifier_session_id:
+        # Sweep every still-untagged message of the session (including any
+        # burned by earlier infra-retry attempts) onto this settle milestone.
+        # Runs only on settle paths — a retrying attempt creates no milestone
+        # row, so its messages stay untagged until an attempt settles (#3000).
+        deps.host.tag_session_messages(verifier_session_id, settle_milestone_id)
     if agent_out.get("infra_error"):
         exhausted_msg = (
             "Acceptance verifier produced unparseable output "

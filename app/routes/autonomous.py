@@ -1774,6 +1774,22 @@ def resume_with_feedback(workflow_id):
     return jsonify({"success": True})
 
 
+def _session_payload(session_data):
+    """Normalize a SessionManager result for the milestone-session viewer.
+
+    AgentSession objects are serialized via ``to_dict()`` so each message
+    carries an ISO ``timestamp`` and its ``milestone_id`` (Flask's dataclass
+    asdict would emit http-date datetimes instead). Anything else — dicts,
+    None, test doubles — passes through untouched. isinstance (not hasattr)
+    so MagicMock doubles never take the to_dict branch (#3000).
+    """
+    from app.modules.workspace.session_manager import AgentSession
+
+    if isinstance(session_data, AgentSession):
+        return session_data.to_dict()
+    return session_data
+
+
 @autonomous_bp.route("/workflows/<workflow_id>/milestones/<milestone_id>/session", methods=["GET"])
 @auth_required
 def get_milestone_session(workflow_id, milestone_id):
@@ -1810,13 +1826,17 @@ def get_milestone_session(workflow_id, milestone_id):
             include_messages=True,
         )
         if session_data:
-            return jsonify({"success": True, "session": session_data})
+            return jsonify({"success": True, "session": _session_payload(session_data)})
 
-    session_data = sm.get_session(
-        session_id, include_messages=True, message_milestone_id=milestone_id
-    )
+    # The mapped CLI session row may not exist (this deployment persists the
+    # transcript under the tracking id), and milestone tagging is unreliable
+    # (verification-line messages are 100% untagged — the settle-time milestone
+    # does not exist while the verifier runs). Return the tracking session's
+    # FULL transcript unfiltered; a filtered view here once left the viewer
+    # rendering only the status badge (#3000).
+    session_data = sm.get_session(session_id, include_messages=True)
 
-    return jsonify({"success": True, "session": session_data})
+    return jsonify({"success": True, "session": _session_payload(session_data)})
 
 
 @autonomous_bp.route("/workflows/<workflow_id>/milestones/<milestone_id>/diff", methods=["GET"])

@@ -13,6 +13,7 @@
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useQueries } from '@tanstack/react-query';
+import { format as formatDateTime } from 'date-fns';
 import { useAppStore, useLanguage, useWorkspaceFullscreen } from '@/store';
 import { t } from '@/i18n';
 import { Button, Badge, Loading, Modal } from '@/components/common';
@@ -87,6 +88,19 @@ const STATUS_ICONS: Record<string, string> = {
   confirmed: 'bi-check-circle-fill',
   rejected: 'bi-x-circle-fill',
   indeterminate: 'bi-exclamation-circle-fill',
+};
+
+// Session-viewer message limits (#3000): a hard char cap so one giant tool
+// payload cannot take the modal down, and the threshold above which a message
+// gets an expand/collapse toggle (below it the toggle is pointless noise).
+const SESSION_MESSAGE_CHAR_CAP = 200_000;
+const SESSION_MESSAGE_COLLAPSE_AT = 800;
+
+/** ISO → 'MM-dd HH:mm' for the session viewer; '' for absent/invalid values. */
+const formatSessionTimestamp = (value?: string | null): string => {
+  if (!value) return '';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? '' : formatDateTime(parsed, 'MM-dd HH:mm');
 };
 
 // Milestone type display config
@@ -483,6 +497,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     milestoneId: string;
     sessionId: string;
   } | null>(null);
+  // Session-viewer per-message expansion (#3000), keyed `${milestoneId}:${idx}`
+  // so stale entries from a previously viewed milestone are harmless.
+  const [expandedSessionMessages, setExpandedSessionMessages] = useState<
+    Record<string, boolean>
+  >({});
   const [showBranchSelector, setShowBranchSelector] = useState(false);
   const [viewingDiff, setViewingDiff] = useState<string | null>(null);
   const [selectedDiffFileId, setSelectedDiffFileId] = useState<string | null>(null);
@@ -2829,48 +2848,95 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               </Badge>
             </div>
             {Array.isArray(session.messages) &&
-              session.messages.map((msg, idx) => (
-                <div key={idx} className="mb-2">
-                  <Badge
-                    variant={
-                      msg.role === 'assistant'
-                        ? 'primary'
-                        : msg.role === 'user'
-                          ? 'success'
-                          : 'secondary'
-                    }
-                  >
-                    {(() => {
-                      switch (msg.role) {
-                        case 'user':
-                          return t('messageRoleUser', language);
-                        case 'assistant':
-                          return t('messageRoleAssistant', language);
-                        case 'system':
-                          return t('messageRoleSystem', language);
-                        case 'toolResult':
-                          return t('messageRoleToolResult', language);
-                        default:
-                          return msg.role;
-                      }
-                    })()}
-                  </Badge>
-                  {typeof msg.content === 'string' ? (
-                    <pre
-                      className="p-2 rounded mt-1 mb-0"
-                      style={{
-                        backgroundColor: 'var(--bg-secondary)',
-                        fontSize: '0.8rem',
-                        maxHeight: '200px',
-                        overflow: 'auto',
-                        whiteSpace: 'pre-wrap',
-                      }}
-                    >
-                      {formatSessionMessageContent(msg.content).slice(0, 4000)}
-                    </pre>
-                  ) : null}
-                </div>
-              ))}
+              session.messages.map((msg, idx) => {
+                // Conversational turns render as markdown; tool/system output
+                // stays monospace (commands/JSON — rendering it as markdown
+                // would mangle it). #3000.
+                const isConversational = msg.role === 'assistant' || msg.role === 'user';
+                const normalized =
+                  typeof msg.content === 'string' ? formatSessionMessageContent(msg.content) : '';
+                const overLimit = normalized.length > SESSION_MESSAGE_CHAR_CAP;
+                const body = overLimit
+                  ? `${normalized.slice(0, SESSION_MESSAGE_CHAR_CAP)}\n\n… ${t(
+                      'autoMessageTruncated',
+                      language
+                    )}`
+                  : normalized;
+                const expandKey = `${viewingSession?.milestoneId ?? ''}:${idx}`;
+                const expanded = !!expandedSessionMessages[expandKey];
+                const toggleExpanded = () =>
+                  setExpandedSessionMessages((prev) => ({
+                    ...prev,
+                    [expandKey]: !prev[expandKey],
+                  }));
+                const timestampTitle = msg.timestamp ?? '';
+                const timestampText = formatSessionTimestamp(msg.timestamp);
+                return (
+                  <div key={idx} className="mb-2">
+                    <div className="d-flex align-items-center gap-2 flex-wrap">
+                      <Badge
+                        variant={
+                          msg.role === 'assistant'
+                            ? 'primary'
+                            : msg.role === 'user'
+                              ? 'success'
+                              : 'secondary'
+                        }
+                      >
+                        {(() => {
+                          switch (msg.role) {
+                            case 'user':
+                              return t('messageRoleUser', language);
+                            case 'assistant':
+                              return t('messageRoleAssistant', language);
+                            case 'system':
+                              return t('messageRoleSystem', language);
+                            case 'toolResult':
+                              return t('messageRoleToolResult', language);
+                            default:
+                              return msg.role;
+                          }
+                        })()}
+                      </Badge>
+                      {timestampText && (
+                        <span className="timeline-session-msg-time" title={timestampTitle}>
+                          {timestampText}
+                        </span>
+                      )}
+                    </div>
+                    {body ? (
+                      isConversational ? (
+                        <div
+                          className={`timeline-session-msg-md ${
+                            expanded ? 'timeline-session-msg-md--expanded' : ''
+                          }`}
+                        >
+                          <MarkdownContent content={body} />
+                        </div>
+                      ) : (
+                        <pre
+                          className="timeline-session-msg-pre"
+                          style={expanded ? { maxHeight: 'none' } : undefined}
+                        >
+                          {body}
+                        </pre>
+                      )
+                    ) : null}
+                    {body.length > SESSION_MESSAGE_COLLAPSE_AT && (
+                      <Button
+                        size="sm"
+                        variant="outline-secondary"
+                        className="mt-1 py-0 px-2"
+                        onClick={toggleExpanded}
+                      >
+                        {expanded
+                          ? t('autoCollapseMessage', language)
+                          : t('autoExpandMessage', language)}
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
             {!Array.isArray(session.messages) && (
               <p className="text-muted">{t('autoNoMessagesAvailable', language)}</p>
             )}
