@@ -12,9 +12,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from app.modules.workspace.autonomous.terminal_report_i18n import render_ci_repair_terminal_report
 
-ORCH = Path(__file__).resolve().parents[3] / "app/modules/workspace/autonomous/orchestrator.py"
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2443)]
+
+ORCH = Path(__file__).resolve().parents[2] / "app/modules/workspace/autonomous/orchestrator.py"
 ORCH_SRC = ORCH.read_text(encoding="utf-8")
 
 

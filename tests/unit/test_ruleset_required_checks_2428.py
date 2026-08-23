@@ -32,6 +32,8 @@ import pytest
 
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2428)]
+
 CLASSIC = "branches/main/protection"
 RULES = "rules/branches/main"
 

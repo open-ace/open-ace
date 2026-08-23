@@ -13,11 +13,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.modules.workspace.autonomous.command_evidence.types import (
     CommandExecutionEvidence,
     ExecutionVerdict,
 )
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2401)]
 
 _CMD_REPO = "app.repositories.command_evidence_repo.CommandExecutionEvidenceRepository"
 _TEST_REPO = "app.repositories.test_evidence_repo.TestExecutionEvidenceRepository"

@@ -19,8 +19,12 @@ for legacy callers without a task_id.
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner, _LocalSession
 from app.modules.workspace.autonomous.task_isolation import DEFAULT_TASK_ROOT, task_runtime_dirs
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2439)]
 
 
 def test_resolve_home_dir_uses_per_task_home_when_task_id_set():

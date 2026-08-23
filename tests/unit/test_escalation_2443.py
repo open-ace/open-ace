@@ -29,6 +29,8 @@ import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.modules.workspace.autonomous.orchestrator import (
     MAX_CI_REPAIR_ATTEMPTS,
     MAX_CI_REPAIR_TRANSIENT_RETRIES,
@@ -36,10 +38,12 @@ from app.modules.workspace.autonomous.orchestrator import (
     AutonomousOrchestrator,
 )
 
-ORCH = Path(__file__).resolve().parents[3] / "app/modules/workspace/autonomous/orchestrator.py"
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2443)]
+
+ORCH = Path(__file__).resolve().parents[2] / "app/modules/workspace/autonomous/orchestrator.py"
 ORCH_SRC = ORCH.read_text(encoding="utf-8")
 
-AUTONOMOUS_ROUTE = Path(__file__).resolve().parents[3] / "app/routes/autonomous.py"
+AUTONOMOUS_ROUTE = Path(__file__).resolve().parents[2] / "app/routes/autonomous.py"
 ROUTE_SRC = AUTONOMOUS_ROUTE.read_text(encoding="utf-8")
 
 TIER1_CATEGORIES = [

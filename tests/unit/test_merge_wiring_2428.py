@@ -26,10 +26,14 @@ import threading
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.modules.workspace.autonomous.evidence import Evidence, Verdict
 from app.modules.workspace.autonomous.github_ops import GitHubOpsError
 from app.modules.workspace.autonomous.phase_contract import WorkflowContext
 from app.modules.workspace.autonomous.phases import merge as merge_phase
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2428)]
 
 # The live required set for open-ace/open-ace main, from
 # `gh api repos/open-ace/open-ace/rules/branches/main`. Still used by the

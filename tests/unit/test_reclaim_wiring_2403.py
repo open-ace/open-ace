@@ -23,7 +23,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "openace-run-as.sh"
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2403)]
+
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "openace-run-as.sh"
 SRC = SCRIPT.read_text(encoding="utf-8")
 LINES = SRC.splitlines()
 

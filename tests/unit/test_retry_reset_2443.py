@@ -12,7 +12,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-AUTONOMOUS = Path(__file__).resolve().parents[3] / "app/routes/autonomous.py"
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2443)]
+
+AUTONOMOUS = Path(__file__).resolve().parents[2] / "app/routes/autonomous.py"
 SRC = AUTONOMOUS.read_text(encoding="utf-8")
 
 # Every field a CI-repair-exhausted workflow accumulates. retry must zero/clear

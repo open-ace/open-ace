@@ -17,6 +17,10 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2442)]
+
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "openace-run-as.sh"
 
 
