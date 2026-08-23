@@ -19,6 +19,7 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 )
 
+import re
 import time
 
 from playwright.sync_api import expect, sync_playwright
@@ -79,14 +80,23 @@ def test_assist_panel_prompts():
         # Step 6: Check category filters
         print("Step 6: Check category filters...")
         category_filters = page.locator(".category-filter-btn")
+        # Categories arrive via a separate async query; wait for the prompt
+        # data to load so the filter branch is not skipped by a data race.
+        page.wait_for_selector(".prompt-list", timeout=10000)
+        for _ in range(10):
+            if category_filters.count() > 0:
+                break
+            page.wait_for_timeout(500)
         count = category_filters.count()
         if count > 0:
             results.append(("Category filters exist", "Passed"))
             # Click a category filter
             category_filters.first.click()
             page.wait_for_timeout(500)
-            # Check if category filter is active
-            expect(category_filters.first).to_have_class(".*active.*")
+            # Check if category filter is active. A string argument would be
+            # an exact-match against the full class attribute
+            # ("category-filter-btn active"), so pass a regex.
+            expect(category_filters.first).to_have_class(re.compile(r"\bactive\b"))
             results.append(("Category filter clickable", "Passed"))
         else:
             results.append(("Category filters (no categories)", "Passed"))

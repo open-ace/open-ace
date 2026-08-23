@@ -56,13 +56,12 @@ def login(page):
 
 
 def navigate_to_analysis(page):
-    """Navigate to Analysis page."""
+    """Navigate to the Trend Analysis page hosting the user segmentation card."""
     print("\n[Navigate] Going to Analysis page...")
-    analysis_nav = page.locator('a:has-text("Analysis"), #nav-analysis, [href="#/analysis"]')
-    if analysis_nav.count() > 0:
-        analysis_nav.first.click()
-    else:
-        page.goto(f"{BASE_URL}#/analysis")
+    # The manage sidebar groups nav items under collapsible sections; clicking
+    # the section-hidden link is intercepted by the section header. Navigate
+    # straight to the current route instead.
+    page.goto(f"{BASE_URL.rstrip('/')}/manage/analysis/trend")
     page.wait_for_load_state("networkidle")
     time.sleep(3)
 
@@ -70,27 +69,30 @@ def navigate_to_analysis(page):
 def change_language(page, language_code):
     """Change the language setting."""
     print(f"\n[Language] Changing to {language_code}...")
-    # Find language dropdown in header (globe icon dropdown)
-    globe_icon = page.locator(".bi-globe").first
-    if globe_icon.is_visible():
-        globe_icon.click()
-        time.sleep(0.5)
+    # Language dropdown lives in the header: a dropdown-toggle button with a
+    # globe icon. Clicking the icon itself does not open the menu; the toggle
+    # button does. Items are labeled in the CURRENT language, so try both.
+    language_names = {
+        "en": ["English", "英语"],
+        "zh": ["Chinese", "中文"],
+        "ja": ["Japanese", "日语"],
+        "ko": ["Korean", "韩语"],
+    }
 
-        # Find the dropdown item for the specified language
-        # Language codes: en, zh, ja, ko
-        language_names = {
-            "en": ["English", "英语"],
-            "zh": ["Chinese", "中文"],
-            "ja": ["Japanese", "日语"],
-            "ko": ["Korean", "韩语"],
-        }
+    lang_toggle = page.locator("button.header-icon-btn.dropdown-toggle:has(i.bi-globe)").first
+    if not lang_toggle.is_visible():
+        print("  ⚠ Language toggle not found")
+        return False
+    lang_toggle.click()
+    page.wait_for_timeout(300)
 
-        for name in language_names.get(language_code, [language_code]):
-            lang_option = page.locator(".dropdown-item").filter(has_text=name)
-            if lang_option.count() > 0:
-                lang_option.first.click()
-                time.sleep(1)
-                print(f"  ✓ Language changed to {language_code}")
+    for name in language_names.get(language_code, [language_code]):
+        lang_option = page.locator("button.dropdown-item").filter(has_text=name).first
+        if lang_option.count() > 0 and lang_option.is_visible():
+            lang_option.click()
+            time.sleep(1)
+            print(f"  ✓ Language changed to {language_code}")
+            return True
 
     print("  ⚠ Language change not successful")
     return False
