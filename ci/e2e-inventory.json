@@ -2451,6 +2451,38 @@
       "notes": "initial disposition (issue #2491 P1 draft)"
     },
     {
+      "path": "tests/e2e/work/e2e_session_topology_983.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 983,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "#2429 batch 3: converted from the tests/issues/983 manual playwright script; scenario asserts inside run_tests()"
+    },
+    {
+      "path": "tests/e2e/work/e2e_milestone_fulltext_988.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 988,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "#2429 batch 3: converted from the tests/issues/988 manual playwright script; scenario asserts inside run_tests()"
+    },
+    {
       "path": "tests/e2e/work/e2e_context_command.py",
       "mode": "pytest-automated",
       "owner": "e2e-governance",

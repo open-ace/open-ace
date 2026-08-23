@@ -17,9 +17,9 @@ Verifies the autonomous-workflow refactor:
 
 Data is seeded directly via AutonomousWorkflowRepository (no real agent runs).
 
-Run:
-  HEADLESS=true  python tests/issues/983/e2e_session_topology_playwright.py   # CI
-  HEADLESS=false python tests/issues/983/e2e_session_topology_playwright.py   # Demo
+Run (CI: scripts/run_extended_tests.py --category work; pytest entry: test_session_topology_983):
+  HEADLESS=true  python tests/e2e/work/e2e_session_topology_983.py   # CI
+  HEADLESS=false python tests/e2e/work/e2e_session_topology_983.py   # Demo
 """
 
 import json
@@ -28,13 +28,16 @@ import sys
 import time
 import uuid
 
-# tests/issues/983/file.py → tests/issues/983 → tests/issues → tests → PROJECT_ROOT
+# tests/e2e/work/file.py → tests/e2e/work → tests/e2e → tests → PROJECT_ROOT
 PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 sys.path.insert(0, PROJECT_ROOT)
 
+import pytest
 import requests
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(983)]
 
 os.environ["NO_PROXY"] = "localhost,127.0.0.1"
 _session = requests.Session()
@@ -108,11 +111,11 @@ def cleanup_workflows():
     for wf_id in created_workflow_ids:
         try:
             api("post", f"/api/autonomous/workflows/{wf_id}/stop")
-        except Exception:
+        except Exception:  # allow-swallow: best-effort cleanup
             pass
         try:
             api("delete", f"/api/autonomous/workflows/{wf_id}")
-        except Exception:
+        except Exception:  # allow-swallow: best-effort cleanup
             pass
 
 
@@ -548,12 +551,12 @@ def run_tests():
         failed += 1
         print("\nCannot continue without login — aborting.\n")
         cleanup_workflows()
-        sys.exit(1)
+        raise AssertionError("login failed — cannot continue") from e
 
     repo = None
     try:
         repo = get_repo()
-    except Exception as e:
+    except Exception as e:  # allow-swallow: best-effort repository import for seeding
         print(f"  ⚠️  Cannot import AutonomousWorkflowRepository: {e}", flush=True)
 
     single_wf = None
@@ -562,13 +565,13 @@ def run_tests():
         try:
             single_wf = seed_single_round_workflow(repo)
             passed += 1
-        except Exception as e:
+        except Exception as e:  # allow-swallow: collect step errors for the final failure report
             print(f"  ❌ SEED SINGLE FAILED: {e}", flush=True)
             failed += 1
         try:
             multi_wf = seed_multi_round_workflow(repo)
             passed += 1
-        except Exception as e:
+        except Exception as e:  # allow-swallow: collect step errors for the final failure report
             print(f"  ❌ SEED MULTI FAILED: {e}", flush=True)
             failed += 1
 
@@ -582,7 +585,7 @@ def run_tests():
         try:
             fn()
             passed += 1
-        except Exception as e:
+        except Exception as e:  # allow-swallow: collect step errors for the final failure report
             print(f"  ❌ {name.upper()} FAILED: {e}", flush=True)
             failed += 1
 
@@ -615,12 +618,12 @@ def run_tests():
                 try:
                     fn()
                     passed += 1
-                except Exception as e:
+                except Exception as e:  # allow-swallow: collect step errors
                     print(f"  ❌ {name.upper()} FAILED: {e}", flush=True)
                     failed += 1
                     try:
                         shot(page, f"error-{name.lower().replace(' ', '-')}")
-                    except Exception:
+                    except Exception:  # allow-swallow: screenshot failure non-critical
                         pass
 
             browser.close()
@@ -634,7 +637,20 @@ def run_tests():
     print("=" * 60 + "\n", flush=True)
 
     if failed > 0:
-        sys.exit(1)
+        raise AssertionError(
+            f"session topology checks: {failed} step(s) failed "
+            f"({passed} passed, {skipped} skipped)"
+        )
+
+
+def test_session_topology_983() -> None:
+    """Pytest entry: run_tests() raises AssertionError when any step fails.
+
+    The guard keeps the wrapper assert-bearing (scanner #2189); failures
+    surface via the AssertionError raised inside run_tests().
+    """
+
+    assert run_tests() is None, "run_tests must return None on success"
 
 
 if __name__ == "__main__":
