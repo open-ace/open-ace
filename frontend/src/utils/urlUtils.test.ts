@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildProjectsPathSegment, injectProjectsPath } from './urlUtils';
+import { buildProjectsPathSegment, injectProjectsPath, isWorkspaceRoute } from './urlUtils';
 
 describe('buildProjectsPathSegment', () => {
   it('encodes simple path', () => {
@@ -65,5 +65,33 @@ describe('injectProjectsPath', () => {
     expect(
       injectProjectsPath('http://h:3100?token=abc&lang=en&theme=dark', 'projects/home/user')
     ).toBe('http://h:3100/projects/home/user?token=abc&lang=en&theme=dark');
+  });
+});
+
+describe('isWorkspaceRoute', () => {
+  it('matches the work root', () => {
+    expect(isWorkspaceRoute('/work')).toBe(true);
+  });
+
+  it('matches the work root with trailing slash', () => {
+    expect(isWorkspaceRoute('/work/')).toBe(true);
+  });
+
+  it('matches the explicit workspace route', () => {
+    expect(isWorkspaceRoute('/work/workspace')).toBe(true);
+  });
+
+  it('ignores query strings', () => {
+    expect(isWorkspaceRoute('/work/workspace?sessionId=abc&toolName=qwen')).toBe(true);
+  });
+
+  it('does not match the workspace route with trailing slash (historical behavior)', () => {
+    expect(isWorkspaceRoute('/work/workspace/')).toBe(false);
+  });
+
+  it('does not match other work sub-routes', () => {
+    expect(isWorkspaceRoute('/work/sessions')).toBe(false);
+    expect(isWorkspaceRoute('/work/prompts')).toBe(false);
+    expect(isWorkspaceRoute('/manage/dashboard')).toBe(false);
   });
 });

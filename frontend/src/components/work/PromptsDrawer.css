@@ -1,18 +1,113 @@
 /**
- * AssistPanel Styles
+ * PromptsDrawer Styles
+ *
+ * Floating non-modal side sheet for the workspace route. Replaces the
+ * retired right-side AssistPanel.
+ *
+ * Stacking constraint: the drawer and its edge toggle live at z-index 150 —
+ * above workspace content and the fullscreen sticky tab bar (z 100), but
+ * below the header stacking context (z 200, which caps its dropdown menus),
+ * toasts, tooltip/loading-overlay (9999), and the app Modal (10040/10050).
  */
 
-/* Assist Panel Container - styles defined in main.css */
+.prompts-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  border-left: 1px solid var(--border-color);
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.12);
+  z-index: 150;
+}
 
-/* Prompts Tab Content */
-.assist-prompts {
+.prompts-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--border-color-light);
+  flex-shrink: 0;
+}
+
+.prompts-drawer-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-wide);
+}
+
+.prompts-drawer-close {
+  padding: var(--spacing-xs);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--border-radius-sm);
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.prompts-drawer-body {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding: var(--spacing-sm) var(--spacing-md);
 }
 
-/* Prompt Search - Match session list style */
+.prompts-drawer-footer {
+  flex-shrink: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-top: 1px solid var(--border-color-light);
+}
+
+.prompts-drawer-view-all {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-primary);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+/* Edge toggle button (rendered by WorkLayout, styled here to keep the
+   drawer's look in one place) */
+.prompts-drawer-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--spacing-sm) 4px;
+  border: 1px solid var(--border-color);
+  border-right: none;
+  border-radius: var(--border-radius) 0 0 var(--border-radius);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  z-index: 150;
+  writing-mode: vertical-rl;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--color-primary);
+  }
+}
+
+/* Prompt Search - matches session list style */
 .prompt-search {
   margin-bottom: var(--spacing-sm);
 
@@ -227,17 +322,26 @@
   }
 }
 
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
+/* Responsive: keep the drawer usable on narrow screens */
+@media (max-width: 1024px) {
+  .prompts-drawer {
+    width: min(320px, 85vw);
   }
 }
 
 /* Dark mode support */
 [data-theme='dark'] {
+  .prompts-drawer {
+    background: var(--bg-primary);
+    border-left-color: var(--border-color);
+  }
+
+  .prompts-drawer-toggle {
+    background: var(--bg-primary);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+  }
+
   .prompt-search .input-group {
     background: var(--bg-secondary);
     border-color: var(--border-color);
@@ -295,114 +399,5 @@
     &.disabled {
       color: var(--text-muted);
     }
-  }
-
-  /* Assist docs and clickable items */
-  .assist-item {
-    background: var(--bg-tertiary);
-    border-color: var(--border-color);
-  }
-
-  .assist-item-title {
-    color: var(--text-primary);
-  }
-
-  .assist-item-clickable {
-    color: var(--text-secondary);
-    border-color: var(--border-color);
-
-    &:hover {
-      background: var(--bg-tertiary);
-      color: var(--color-primary);
-      border-color: var(--color-primary);
-    }
-
-    &:active {
-      background: var(--color-primary-light);
-    }
-  }
-}
-
-/* Prompt Detail Modal Styles */
-.prompt-detail {
-  .prompt-variables-section {
-    background: var(--bg-secondary);
-    padding: var(--spacing-md);
-    border-radius: var(--border-radius);
-
-    h6 {
-      color: var(--text-primary);
-      margin-bottom: var(--spacing-md);
-    }
-  }
-
-  .prompt-variables-grid {
-    display: grid;
-    gap: var(--spacing-md);
-  }
-
-  .prompt-variable-item {
-    label {
-      display: block;
-      margin-bottom: var(--spacing-xs);
-
-      .text-danger {
-        color: var(--color-danger);
-      }
-
-      .text-muted {
-        color: var(--text-muted);
-        font-size: 11px;
-      }
-    }
-
-    input {
-      width: 100%;
-    }
-  }
-
-  .prompt-content-section {
-    h6 {
-      color: var(--text-primary);
-    }
-  }
-
-  .prompt-content-box {
-    background: var(--bg-code);
-    border: 1px solid var(--border-color);
-    border-radius: var(--border-radius);
-    padding: var(--spacing-md);
-    max-height: 300px;
-    overflow-y: auto;
-  }
-
-  .prompt-content-text {
-    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-    font-size: var(--font-size-sm);
-    line-height: 1.5;
-    color: var(--text-primary);
-    white-space: pre-wrap;
-    word-break: break-word;
-    margin: 0;
-  }
-}
-
-/* Dark mode for prompt detail */
-[data-theme='dark'] .prompt-detail {
-  .prompt-variables-section {
-    background: var(--bg-secondary);
-
-    h6 {
-      color: var(--text-primary);
-    }
-  }
-
-  .prompt-content-box {
-    background: var(--bg-code);
-    border-color: var(--border-color);
-  }
-
-  .prompt-content-text {
-    color: var(--text-primary);
   }
 }

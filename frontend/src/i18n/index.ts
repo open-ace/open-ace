@@ -4526,6 +4526,7 @@ export const translations: Record<Language, Translations> = {
     dataRetention: 'データ保持',
     complianceReport: 'コンプライアンス報告',
     settings: '設定',
+    help: 'ヘルプ',
 
     // Report
     myUsageReport: 'マイ使用レポート',
@@ -6410,6 +6411,7 @@ export const translations: Record<Language, Translations> = {
     dataRetention: '데이터 보존',
     complianceReport: '규정 준수 보고서',
     settings: '설정',
+    help: '도움말',
     // SSO Settings
     registeredProviders: '등록된 제공업체',
     noProvidersRegistered: 'SSO 제공업체가 등록되지 않음',

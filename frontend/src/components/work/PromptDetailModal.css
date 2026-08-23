@@ -1,0 +1,90 @@
+/**
+ * PromptDetailModal Styles
+ *
+ * Migrated from AssistPanel.css when the AssistPanel was retired; these
+ * rules style the PromptDetailModal markup regardless of entry point
+ * (prompts drawer, prompts page, etc.).
+ */
+
+.prompt-detail {
+  .prompt-variables-section {
+    background: var(--bg-secondary);
+    padding: var(--spacing-md);
+    border-radius: var(--border-radius);
+
+    h6 {
+      color: var(--text-primary);
+      margin-bottom: var(--spacing-md);
+    }
+  }
+
+  .prompt-variables-grid {
+    display: grid;
+    gap: var(--spacing-md);
+  }
+
+  .prompt-variable-item {
+    label {
+      display: block;
+      margin-bottom: var(--spacing-xs);
+
+      .text-danger {
+        color: var(--color-danger);
+      }
+
+      .text-muted {
+        color: var(--text-muted);
+        font-size: 11px;
+      }
+    }
+
+    input {
+      width: 100%;
+    }
+  }
+
+  .prompt-content-section {
+    h6 {
+      color: var(--text-primary);
+    }
+  }
+
+  .prompt-content-box {
+    background: var(--bg-code);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: var(--spacing-md);
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .prompt-content-text {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+  }
+}
+
+/* Dark mode for prompt detail */
+[data-theme='dark'] .prompt-detail {
+  .prompt-variables-section {
+    background: var(--bg-secondary);
+
+    h6 {
+      color: var(--text-primary);
+    }
+  }
+
+  .prompt-content-box {
+    background: var(--bg-code);
+    border-color: var(--border-color);
+  }
+
+  .prompt-content-text {
+    color: var(--text-primary);
+  }
+}

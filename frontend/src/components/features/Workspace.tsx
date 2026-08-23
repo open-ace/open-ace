@@ -534,7 +534,7 @@ export const Workspace: React.FC = () => {
       // Issue #121: Only auto-fullscreen if setting is enabled
       if (event.data?.type === 'openace-enter-chat') {
         if (useAppStore.getState().autoFullscreenOnEnterChat) {
-          useAppStore.getState().enterWorkspaceFullscreen(false, false);
+          useAppStore.getState().enterWorkspaceFullscreen(false);
         }
       }
 
@@ -680,8 +680,18 @@ export const Workspace: React.FC = () => {
       }
 
       // Listen for ESC key forwarded from qwen-code-webui iframe (Issue #103)
-      if (event.data?.type === 'qwen-code-esc-pressed' && workspaceFullscreen) {
-        exitWorkspaceFullscreen();
+      // Layered ESC handling (shared rule with WorkLayout): an open modal handles
+      // ESC itself; otherwise close the prompts drawer first; otherwise exit
+      // fullscreen. Values read via getState() to avoid stale closures.
+      if (event.data?.type === 'qwen-code-esc-pressed') {
+        const state = useAppStore.getState();
+        if (!document.querySelector('.modal.show')) {
+          if (state.promptsDrawerOpen) {
+            state.setPromptsDrawerOpen(false);
+          } else if (state.workspaceFullscreen) {
+            exitWorkspaceFullscreen();
+          }
+        }
       }
 
       // Listen for switch project request from qwen-code-webui iframe (Issue #229)
@@ -733,13 +743,7 @@ export const Workspace: React.FC = () => {
 
     window.addEventListener('message', handleIframeMessage);
     return () => window.removeEventListener('message', handleIframeMessage);
-  }, [
-    enableTabNotifications,
-    language,
-    workspaceFullscreen,
-    exitWorkspaceFullscreen,
-    clearTabNotification,
-  ]);
+  }, [enableTabNotifications, language, exitWorkspaceFullscreen, clearTabNotification]);
 
   // Check quota
   const checkQuota = useCallback(async () => {
@@ -2415,7 +2419,7 @@ export const Workspace: React.FC = () => {
           {/* Fullscreen toggle button */}
           <button
             className="btn btn-sm btn-outline-secondary fullscreen-toggle-btn"
-            onClick={() => toggleWorkspaceFullscreen(false, false)}
+            onClick={() => toggleWorkspaceFullscreen(false)}
             title={
               workspaceFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)
             }
@@ -2570,7 +2574,7 @@ export const Workspace: React.FC = () => {
           {workspaceFullscreen && (
             <button
               className="btn btn-sm btn-outline-secondary px-3 py-1 mx-2"
-              onClick={() => toggleWorkspaceFullscreen(false, false)}
+              onClick={() => toggleWorkspaceFullscreen(false)}
               title={t('exitFullscreen', language)}
             >
               <i className="bi bi-fullscreen-exit me-1" />

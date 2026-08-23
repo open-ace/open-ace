@@ -81,6 +81,26 @@ const docTitles: Record<string, Record<string, string>> = {
   },
 };
 
+// Help document metadata for entry points (header help menu, etc.)
+export interface HelpDoc {
+  id: string;
+  icon: string;
+}
+
+export const helpDocs: HelpDoc[] = [
+  { id: 'getting-started', icon: 'bi-book' },
+  { id: 'prompts-guide', icon: 'bi-file-text' },
+  { id: 'keyboard-shortcuts', icon: 'bi-keyboard' },
+  { id: 'faq', icon: 'bi-question-circle' },
+];
+
+// Localized title for a help doc, falling back to English then the id
+export const getDocTitle = (docId: string, language: string): string => {
+  const titles = docTitles[docId];
+  if (!titles) return docId;
+  return titles[language] || titles['en'] || docId;
+};
+
 export const DocumentViewer: React.FC<DocumentViewerProps> = ({ isOpen, onClose, docId }) => {
   const language = useLanguage();
   const doc = documents[docId];
@@ -90,17 +110,8 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ isOpen, onClose,
       ? '# 文档未找到'
       : '# Document Not Found';
 
-  // Get title based on docId and language
-  const getTitle = () => {
-    const titles = docTitles[docId];
-    if (titles) {
-      return titles[language] || titles['en'] || docId;
-    }
-    return docId;
-  };
-
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={getTitle()} size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={getDocTitle(docId, language)} size="lg">
       <div className="document-viewer">
         <div className="document-content">
           <MarkdownContent content={content} />
