@@ -4,12 +4,12 @@
   "created_before_modification": true,
   "layers": {
     "default": {
-      "min_tests": 5214,
+      "min_tests": 5455,
       "min_files": 250,
       "last_updated": "2026-08-23",
-      "update_reason": "Issue #2429 batch 7: P4 group migrated into tests/unit (276 items); min raised by exactly +276 (4938+276); actual 8282 = 8006 + 276",
-      "actual_collected": 8282,
-      "actual_files": 527,
+      "update_reason": "Issue #2429 batch 8: P5 group migrated into tests/unit (241 items); min raised by exactly +241 (5214+241); actual 8523 = 8282 + 241",
+      "actual_collected": 8523,
+      "actual_files": 566,
       "threshold_percent": 96
     },
     "critical": {
@@ -30,12 +30,12 @@
       "note": "Currently excluded by norecursedirs"
     },
     "issues": {
-      "min_tests": 2880,
-      "min_files": 316,
+      "min_tests": 2639,
+      "min_files": 277,
       "last_updated": "2026-08-23",
-      "update_reason": "Issue #2429 batch 7: P4 group (18 dirs) \u2014 276 items / 22 glob files migrated to tests/unit (3 no-assert tests fixed: 2 equivalent asserts, 1 route-fn rename; 826 given hermetic system-account resolution; 357's pre-existing order-dependent collection fixed); min lowered by exactly that delta (3156-276, 338-22); actuals from clean checkout",
-      "actual_collected": 3092,
-      "actual_files": 331,
+      "update_reason": "Issue #2429 batch 8: P5 group (38 dirs, final pure-dir batch) \u2014 241 items / 39 glob files migrated to tests/unit (9 scanner findings governed: 2 fixture renames, 5 equivalent asserts, 2 best-effort annotations; 2277 conftest ported to an autouse env fixture; 1169 given hermetic DB seeding + a tz-basis fix; 189/2365 converted to isolated loaders); min lowered by exactly that delta (2880-241, 316-39); actuals from clean checkout",
+      "actual_collected": 2851,
+      "actual_files": 292,
       "threshold_percent": 97
     }
   },
@@ -46,8 +46,8 @@
   "notes": [
     "Baseline created before pytest.ini modification to enable e2e_*.py collection",
     "tests/e2e currently excluded by norecursedirs in pytest.ini",
-    "Default count from: python scripts/ci.py run default-collection (8282 items after #2429 batch 7)",
-    "Issue count from: clean-checkout issue-collection (3092 items, 331 files after #2429 batch 7; a checkout with the gitignored local tests/issues/89 dir collects +1/+1)",
+    "Default count from: python scripts/ci.py run default-collection (8523 items after #2429 batch 8)",
+    "Issue count from: clean-checkout issue-collection (2851 items, 292 files after #2429 batch 8; a checkout with the gitignored local tests/issues/89 dir collects +1/+1)",
     "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard"
   ]
 }

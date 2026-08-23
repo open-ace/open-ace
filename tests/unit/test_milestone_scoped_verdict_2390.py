@@ -9,7 +9,7 @@ false-FAIL (pytest broad→targeted) instead of confirming a clean current round
 The fix scopes the session evidence to the current test milestone
 (``test_ms["milestone_id"]``), but only when milestone stamping is present in the
 session — an unstamped legacy session keeps session scope rather than silently
-resolving NOT_RUN. Method-level, repos mocked (mirrors tests/issues/2046).
+resolving NOT_RUN. Method-level, repos mocked (mirrors tests/unit (ex tests/issues/2046)).
 """
 
 from __future__ import annotations
