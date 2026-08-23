@@ -76,7 +76,10 @@ def change_language(page, language_code):
         "en": ["English", "英语"],
         "zh": ["Chinese", "中文"],
         "ja": ["Japanese", "日语"],
-        "ko": ["Korean", "韩语"],
+        # Items are labeled in the CURRENT language: reaching ko goes
+        # en -> zh -> ja -> ko, so the ja-state label 韓国語 is the one
+        # that has to match here.
+        "ko": ["Korean", "韩语", "韓国語"],
     }
 
     lang_toggle = page.locator("button.header-icon-btn.dropdown-toggle:has(i.bi-globe)").first
