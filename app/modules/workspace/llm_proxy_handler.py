@@ -1481,7 +1481,7 @@ def handle_llm_proxy_request(
         # away from means the unexcluded pool is empty — retrying it would spin
         # this loop forever. Treat it exactly like "no key left".
         if not key_result or key_result[2] in exclude_key_ids:
-            if key_result is not None:
+            if key_result:
                 logger.error(
                     "LLM proxy: resolver returned excluded key_id=%s "
                     "(attempt=%d, excluded=%d); treating failover pool as exhausted",
