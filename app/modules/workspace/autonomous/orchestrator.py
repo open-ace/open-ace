@@ -9109,7 +9109,7 @@ class AutonomousOrchestrator:
             self._remove_verification_worktree(checkout_path)
         if result is None or getattr(result, "success", False) is not True:
             error_code = getattr(result, "error_code", None) if result is not None else None
-            failure = {
+            failure: dict = {
                 "verdicts": [],
                 "snapshot": None,
                 "verified_by": verified_by,
