@@ -532,6 +532,60 @@ describe('acceptance milestone card (#2985)', () => {
   });
 });
 
+describe('acceptance milestone usage wiring (#2994)', () => {
+  it('shows token/request chips, the session button, and no system-step chip once the milestone carries the verifier runtime', () => {
+    const { container } = renderWithMilestones(
+      pausedWorkflow({ status: 'completed', verification_status: 'confirmed' }),
+      [
+        acceptanceMilestone({
+          session_id: 'verif-tracking-session-1',
+          llm_total_tokens: 730000,
+          llm_request_count: 33,
+        }),
+      ]
+    );
+
+    // Usage chips render from the milestone's phase usage.
+    expect(screen.getByText('730.00K')).toBeInTheDocument();
+    expect(screen.getByText('33 Requests')).toBeInTheDocument();
+    // Session button opens the verifier tracking session.
+    expect(screen.getByText(/Session ID.*verif-tr/)).toBeInTheDocument();
+    // The verifier is an agent milestone, not a system step.
+    expect(screen.queryByText('System step')).not.toBeInTheDocument();
+    // #2995: the acceptance-report button carries the warning variant class
+    // (the CSS rule this class was missing used to leave it unstyled).
+    expect(container.querySelector('button.timeline-inline-btn--warning')).toBeTruthy();
+  });
+
+  it('keeps the AI-session presentation for a zero-usage verified milestone', () => {
+    const { container } = renderWithMilestones(
+      pausedWorkflow({ status: 'completed', verification_status: 'confirmed' }),
+      [
+        acceptanceMilestone({
+          session_id: 'verif-tracking-session-2',
+          llm_total_tokens: 0,
+          llm_request_count: 0,
+        }),
+      ]
+    );
+
+    const badges = container.querySelector('.timeline-milestone-badges');
+    expect(badges?.textContent).toContain('0');
+    expect(badges?.textContent).toContain('0 Requests');
+    expect(screen.queryByText('System step')).not.toBeInTheDocument();
+  });
+
+  it('no longer labels a session-less acceptance milestone a system step', () => {
+    // Legacy rows predating the wiring: no session id, no usage.
+    renderWithMilestones(
+      pausedWorkflow({ status: 'completed', verification_status: 'confirmed' }),
+      [acceptanceMilestone()]
+    );
+
+    expect(screen.queryByText('System step')).not.toBeInTheDocument();
+  });
+});
+
 describe('milestone time format (#2985)', () => {
   it('shows month-day with the time; adds the year only across years', () => {
     // formatMilestoneTime compares the milestone year against the wall

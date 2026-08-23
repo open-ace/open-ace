@@ -12,6 +12,10 @@ const AI_MILESTONE_TYPES = new Set([
   'pr_updated',
   'ci_repair_applied',
   'conflicts_resolved',
+  // #2994: the acceptance verifier is a real agent session — with its session
+  // id + usage now recorded on the milestone, the card must render the usage
+  // chips / session button instead of the "system step" fallback.
+  'acceptance_verification',
 ]);
 
 export function isAiMilestoneType(milestoneType: string): boolean {
