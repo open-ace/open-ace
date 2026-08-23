@@ -9105,7 +9105,10 @@ class AutonomousOrchestrator:
         so a retry sweeps this row's predecessor to ``failed`` ("interrupted")
         and mints a fresh one; a WorkflowPaused/crash resume re-enters with the
         same attempt number and reuses the row, seeding its already-recorded
-        usage as the call's ``prior_usage`` baseline.
+        usage as the call's ``prior_usage`` baseline. The pause paths inside
+        ``_run_agent`` terminalize the row before raising, so resume also
+        resurrects a same-attempt failed/cancelled row instead of minting a
+        duplicate card.
         """
         attempt = int(wf.get("verification_attempt") or 0) + 1
         dev_round = int(wf.get("dev_round") or 1)

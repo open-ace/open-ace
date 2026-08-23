@@ -766,8 +766,13 @@ def test_ensure_resumes_terminalized_same_attempt_row():
     assert resumed[0][1]["error_message"] == ""
 
 
-def test_ensure_does_not_resurrect_settled_rows():
-    """A settled verdict row for this attempt must not be reused or blocked."""
+def test_ensure_leaves_mismatched_terminal_rows_alone():
+    """Only the CURRENT attempt's terminal row may be resurrected.
+
+    A same-attempt settled row is unreachable by the attempt invariant
+    (settling bumps the counter); the practical guard is the round mismatch —
+    an older failed row must neither be reused nor modified.
+    """
     orch = _orch_for_ensure(
         [],
         terminal_rows=[{"milestone_id": "ms-old-fail", "round_number": 2, "status": "failed"}],
@@ -778,6 +783,7 @@ def test_ensure_does_not_resurrect_settled_rows():
     # round_number 3 ≠ the failed row's 2 → fresh row, old row untouched.
     assert row["milestone_id"] == "ms-new"
     assert row["round_number"] == 3
+    orch.repo.update_milestone.assert_not_called()
 
 
 def test_finalize_updates_row_emits_event_and_clears_stash():
