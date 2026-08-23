@@ -7,7 +7,11 @@ so the failure is reported as a nesting-guard abort, not a generic crash.
 
 from __future__ import annotations
 
+import pytest
+
 from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2442)]
 
 
 def test_exit_70_is_preserve_preparation_failed():

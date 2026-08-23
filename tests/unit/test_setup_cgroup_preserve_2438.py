@@ -8,7 +8,7 @@ reset to the wrapper default.
 
 The script must run as root and probes ``/sys/fs/cgroup``, so it cannot be
 exercised behaviourally in CI. These are source assertions (wiring locks) in
-the style of ``tests/issues/2403/test_reclaim_wiring.py``: they pin that the
+the style of ``tests/unit/test_reclaim_wiring_2403.py``: they pin that the
 preserve key is read, fail-safed, and re-emitted, and that the strip still
 drops the prefix so the key is emitted exactly once.
 """
@@ -18,7 +18,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "setup-cgroup-v2.sh"
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2438)]
+
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "setup-cgroup-v2.sh"
 SRC = SCRIPT.read_text(encoding="utf-8")
 LINES = SRC.splitlines()
 

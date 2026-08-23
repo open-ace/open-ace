@@ -12,7 +12,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2390)]
 
 
 def _orch() -> AutonomousOrchestrator:

@@ -607,13 +607,26 @@ def test_pause_result_commits_its_milestone_event():
 def test_ci_executes_the_issue_2335_verifier_regressions():
     repo_root = Path(__file__).resolve().parents[3]
     workflow = (repo_root / ".github" / "workflows" / "ci.yml").read_text()
-    suites = (repo_root / "ci" / "suites.json").read_text()
+    suites_text = (repo_root / "ci" / "suites.json").read_text()
+    suites = json.loads(suites_text)
     promoted = (repo_root / "tests" / "issues" / "pr-gate-directories.txt").read_text().splitlines()
 
     assert "scripts/ci.py run legacy-pr" in workflow
-    assert '"legacy-pr"' in suites
-    assert "priority_p0 and not postgres and not performance" in suites
-    assert {"2335", "2390", "2401", "2403"} <= set(promoted)
+    assert '"legacy-pr"' in suites_text
+    assert "priority_p0 and not postgres and not performance" in suites_text
+    assert "2335" in set(promoted)
+    # #2429 batch 1 moved the 2390/2401/2403 regressions out of the pr-gate
+    # into tests/unit/, where the required python-core lane picks them up by
+    # directory (pytest tests/) instead of the priority_p0 marker.
+    python_core = suites["suites"]["python-core"]["commands"][0]
+    assert python_core[:3] == ["{python}", "-m", "pytest"] and "tests/" in python_core
+    for migrated in (
+        "test_milestone_scoped_verdict_2390.py",
+        "test_authoritative_closure_2401.py",
+        "test_tool_name_contract_2401.py",
+        "test_reclaim_wiring_2403.py",
+    ):
+        assert (repo_root / "tests" / "unit" / migrated).is_file(), migrated
 
 
 class _SQLiteDB:

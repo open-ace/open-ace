@@ -1,7 +1,7 @@
 """Issue #2442: both preserve sites must use the fail-closed helper.
 
 Source assertions (wiring locks), in the style of
-``tests/issues/2403/test_reclaim_wiring.py``. The behavioural proof that the
+``tests/unit/test_reclaim_wiring_2403.py``. The behavioural proof that the
 helper itself works is in ``test_preserve_nesting.py``; these pin that the
 script actually calls it at both the startup and reclaim sites, with the
 right fail-closed policy at each (startup aborts; reclaim logs because it
@@ -13,7 +13,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "openace-run-as.sh"
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2442)]
+
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "openace-run-as.sh"
 SRC = SCRIPT.read_text(encoding="utf-8")
 LINES = SRC.splitlines()
 
@@ -28,12 +32,13 @@ def test_both_preserve_sites_call_helper():
 
 
 def test_no_bare_rm_rf_of_preserve_dir_remains():
-    for i, line in enumerate(LINES):
-        if "rm -rf" in line and "preserve_claude_dir" in line:
-            raise AssertionError(
-                f"bare `rm -rf ... preserve_claude_dir` at line {i + 1}; "
-                "must go through _move_to_preserve"
-            )
+    offending = [
+        i + 1 for i, line in enumerate(LINES) if "rm -rf" in line and "preserve_claude_dir" in line
+    ]
+    assert not offending, (
+        f"bare `rm -rf ... preserve_claude_dir` at line(s) {offending}; "
+        "must go through _move_to_preserve"
+    )
 
 
 def test_helper_contains_chmod_700():

@@ -219,7 +219,9 @@ def test_collection_count_uses_final_pytest_summary():
 
 def test_collection_file_count_honors_default_quarantine():
     assert ci.candidate_test_file_count("tests") >= 250
-    assert ci.candidate_test_file_count("tests/issues") >= 430
+    # Floor mirrors .test-baseline.json issues.min_files (430 -> 413 after the
+    # #2429 batch-1 migration moved 17 files into canonical layers).
+    assert ci.candidate_test_file_count("tests/issues") >= 413
 
 
 def test_missing_push_base_fails_safe_to_policy_change():

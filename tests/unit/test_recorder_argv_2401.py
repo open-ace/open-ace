@@ -12,8 +12,12 @@ when there is no joined command, synthesize one from it.
 
 from __future__ import annotations
 
+import pytest
+
 from app.modules.workspace.autonomous.command_evidence import CommandExecutionEvidence
 from app.modules.workspace.autonomous.command_evidence.recorder import CommandEvidenceRecorder
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2401)]
 
 
 class _CapturingRepo:

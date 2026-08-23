@@ -26,6 +26,8 @@ import pytest
 
 from app.modules.workspace.autonomous.orchestrator import _has_test_tool_call
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2401)]
+
 
 def _call(name: str, tool_input: dict, framework_type: str = "python") -> bool:
     return _has_test_tool_call([{"tool": {"name": name, "input": tool_input}}], framework_type)
