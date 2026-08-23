@@ -13,7 +13,9 @@ attribution.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -184,7 +186,7 @@ def test_agent_session_payload_is_normalized_with_iso_timestamps(client):
         session_id="actual-1",
         role="assistant",
         content="Done",
-        timestamp=None,  # _format_dt(None) → None; parse_datetime below covers set case
+        timestamp=datetime(2026, 8, 22, 12, 34, 56),
         milestone_id="ms-9",
     )
     actual = AgentSession(
@@ -208,7 +210,8 @@ def test_agent_session_payload_is_normalized_with_iso_timestamps(client):
     session = resp.get_json()["session"]
     assert session["session_id"] == "actual-1"
     assert session["messages"][0]["milestone_id"] == "ms-9"
-    assert "timestamp" in session["messages"][0]
+    # ISO format — the property the asdict path (http-date datetimes) broke.
+    assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", session["messages"][0]["timestamp"])
 
 
 # ── tag_untagged_messages tests ─────────────────────────────────────────────
@@ -279,3 +282,34 @@ def test_tag_untagged_messages_rejects_empty_args(tag_db):
     manager = SessionManager(db_path=tag_db)
     assert manager.tag_untagged_messages("", "ms") == 0
     assert manager.tag_untagged_messages("sess-1", "") == 0
+
+
+def test_tag_untagged_messages_fails_closed_on_unresolved_tenant(tag_db):
+    """A session row with no resolvable tenant must not retag anything."""
+    conn = sqlite3.connect(tag_db)
+    try:
+        # tenant_id is NOT NULL in the schema; 0 is a non-positive value that
+        # _normalize_tenant_id maps to None → the write must fail closed.
+        conn.execute(
+            "INSERT INTO agent_sessions (session_id, tool_name, tenant_id, status)"
+            " VALUES ('sess-null-tenant', 'claude', 0, 'completed')"
+        )
+        conn.execute(
+            "INSERT INTO session_messages (session_id, role, content, tenant_id, milestone_id)"
+            " VALUES ('sess-null-tenant', 'user', 'u', 1, '')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert SessionManager(db_path=tag_db).tag_untagged_messages("sess-null-tenant", "ms") == 0
+
+    conn = sqlite3.connect(tag_db)
+    try:
+        still_untagged = conn.execute(
+            "SELECT COUNT(*) FROM session_messages WHERE session_id = 'sess-null-tenant'"
+            " AND milestone_id = ''"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert still_untagged == 1

@@ -442,17 +442,19 @@ def step_test_session_message_filtering(repo):
     sm.add_message(shared_session, "user", "message for milestone A", milestone_id=ms_a)
     sm.add_message(shared_session, "user", "message for milestone B", milestone_id=ms_b)
 
-    # Ask for ms_a's session detail — only ms_a's message should surface.
+    # Ask for ms_a's session detail — the FULL shared transcript surfaces
+    # (#3000: milestone filtering dropped untagged messages and once left the
+    # viewer rendering only the status badge).
     r = api("get", f"/api/autonomous/workflows/{wf_id}/milestones/{ms_a}/session")
     assert r.status_code == 200, r.text
     payload = r.json()
     session = payload.get("session") or {}
     contents = [m.get("content", "") for m in (session.get("messages") or [])]
     assert any("message for milestone A" in c for c in contents), f"ms_a msg missing: {contents}"
-    assert not any(
+    assert any(
         "message for milestone B" in c for c in contents
-    ), f"ms_b leaked into ms_a detail: {contents}"
-    log("SESSION", "  ✅ milestone session detail filtered by milestone_id")
+    ), f"ms_b missing from the shared transcript: {contents}"
+    log("SESSION", "  ✅ milestone session detail returns the full shared transcript")
 
 
 # ── Browser assertions ─────────────────────────────────

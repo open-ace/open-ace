@@ -159,6 +159,7 @@ def test_rejected_pause_carries_session_usage_and_delta():
     (milestone,) = result.milestone_events
     assert milestone["session_id"] == SESSION_ID
     assert milestone["phase_total_tokens"] == USAGE["total_tokens"]
+    deps.host.tag_session_messages.assert_called_once_with(SESSION_ID, milestone["milestone_id"])
 
 
 def test_indeterminate_pause_carries_session_usage_and_delta():
@@ -173,6 +174,7 @@ def test_indeterminate_pause_carries_session_usage_and_delta():
     (milestone,) = result.milestone_events
     assert milestone["session_id"] == SESSION_ID
     assert milestone["phase_total_tokens"] == USAGE["total_tokens"]
+    deps.host.tag_session_messages.assert_called_once_with(SESSION_ID, milestone["milestone_id"])
 
 
 def test_infra_exhausted_pause_carries_partial_usage_and_delta():
@@ -203,6 +205,7 @@ def test_infra_exhausted_pause_carries_partial_usage_and_delta():
     (milestone,) = outcomes[-1].milestone_events
     assert milestone["session_id"] == SESSION_ID
     assert milestone["phase_total_tokens"] == USAGE["total_tokens"]
+    deps.host.tag_session_messages.assert_called_once_with(SESSION_ID, milestone["milestone_id"])
 
 
 # ── handle(): paths that must NOT record anything new ────────────────────────

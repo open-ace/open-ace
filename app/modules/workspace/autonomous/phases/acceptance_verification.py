@@ -1159,12 +1159,17 @@ def handle(ctx, deps) -> PhaseResult:
                 "error_message": "Acceptance verifier infrastructure failure; retrying",
             }
         )
-    if verifier_session_id:
-        # Sweep every still-untagged message of the session (including any
-        # burned by earlier infra-retry attempts) onto this settle milestone.
-        # Runs only on settle paths — a retrying attempt creates no milestone
-        # row, so its messages stay untagged until an attempt settles (#3000).
-        deps.host.tag_session_messages(verifier_session_id, settle_milestone_id)
+
+    def _tag_settle_messages() -> None:
+        # #3000: sweep the verifier session's still-untagged messages
+        # (including any burned by earlier infra-retry attempts) onto the
+        # settle milestone. Invoked at every milestone-carrying return ONLY —
+        # a retrying attempt (infra retry, or the lock/cancellation guards in
+        # the confirmed branch) inserts no milestone row, so tagging on those
+        # exits would leave a milestone_id pointing at nothing.
+        if verifier_session_id:
+            deps.host.tag_session_messages(verifier_session_id, settle_milestone_id)
+
     if agent_out.get("infra_error"):
         exhausted_msg = (
             "Acceptance verifier produced unparseable output "
@@ -1172,6 +1177,7 @@ def handle(ctx, deps) -> PhaseResult:
             if deterministic_repeat
             else "Acceptance verifier infrastructure retries exhausted; awaiting review"
         )
+        _tag_settle_messages()
         return PhaseResult.pause(
             workflow_patch={
                 **common_patch,
@@ -1190,6 +1196,7 @@ def handle(ctx, deps) -> PhaseResult:
             return PhaseResult.retry()
         gh.close_issue(issue_number)
         common_patch["issue_closed_by_workflow_at"] = _now_iso()
+        _tag_settle_messages()
         return PhaseResult.completed(
             next_phase="completed",
             workflow_patch={
@@ -1202,6 +1209,7 @@ def handle(ctx, deps) -> PhaseResult:
         )
     if status == "rejected":
         _post_verdict_comment(deps, issue_number, report)
+        _tag_settle_messages()
         return PhaseResult.pause(
             structured_error={
                 "message": "Acceptance verification rejected",
@@ -1216,6 +1224,7 @@ def handle(ctx, deps) -> PhaseResult:
         )
     # indeterminate
     _post_verdict_comment(deps, issue_number, report)
+    _tag_settle_messages()
     return PhaseResult.pause(
         workflow_patch={
             **common_patch,

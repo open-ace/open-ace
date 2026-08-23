@@ -5,6 +5,7 @@ Provides session persistence and recovery for AI interactions.
 Manages conversation history, state, and context across sessions.
 """
 
+import contextlib
 import json
 import logging
 import sqlite3
@@ -2071,6 +2072,7 @@ class SessionManager:
         """
         if not session_id or not milestone_id:
             return 0
+        conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -2080,7 +2082,6 @@ class SessionManager:
             )
             row = cursor.fetchone()
             if not row:
-                conn.close()
                 return 0
             if isinstance(row, dict):
                 session_tenant = row.get("tenant_id")
@@ -2103,13 +2104,18 @@ class SessionManager:
             )
             retagged = cursor.rowcount
             conn.commit()
-            conn.close()
             return max(0, retagged)
         except Exception:
+            if conn is not None:
+                with contextlib.suppress(Exception):
+                    conn.rollback()
             logger.warning(
                 "Failed to tag untagged messages for session %s", session_id, exc_info=True
             )
             return 0
+        finally:
+            if conn is not None:
+                conn.close()
 
     def list_sessions(
         self,

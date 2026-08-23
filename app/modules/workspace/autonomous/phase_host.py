@@ -109,8 +109,9 @@ class PhaseHost(Protocol):
 
         Verification-line messages persist untagged (the milestone is created
         at settle); the handler back-fills the tag once the milestone id is
-        known. Best-effort attribution only — the viewer's full-transcript
-        path does not depend on it, so failures must not affect the verdict.
+        known. Delegates to the orchestrator's ``_tag_session_messages``.
+        Best-effort attribution only — the viewer's full-transcript path
+        does not depend on it, so failures must not affect the verdict.
         """
 
     def ensure_scheduler_lock(self) -> bool:
