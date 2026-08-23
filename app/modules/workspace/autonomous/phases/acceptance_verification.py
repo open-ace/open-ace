@@ -775,7 +775,16 @@ def _prior_infra_error_kind(wf: dict, merge_sha: str, snap_hash: str) -> str | N
     return kind if isinstance(kind, str) and kind else None
 
 
-def _acceptance_milestone(*, workflow_id, dev_round, attempt, status, report) -> dict:
+def _acceptance_milestone(
+    *,
+    workflow_id,
+    dev_round,
+    attempt,
+    status,
+    report,
+    session_id: str = "",
+    usage: dict | None = None,
+) -> dict:
     """Build the acceptance-verification milestone row.
 
     ``result_summary`` / ``metadata`` are DB columns inserted verbatim by
@@ -783,8 +792,16 @@ def _acceptance_milestone(*, workflow_id, dev_round, attempt, status, report) ->
     — passing the raw ``report`` dict crashed with ``can't adapt type 'dict'``
     the moment a verdict was committed (#2394). ``metadata`` keeps the full
     structured report as JSON; ``result_summary`` is a short readable line.
+
+    ``session_id`` is the verifier run's tracking session id and ``usage`` its
+    own increment for THIS attempt (#2994) — both from
+    ``_run_verification_agent``'s runtime attachment. They land in the same
+    ``phase_*`` columns every other AI milestone uses, so workflow totals
+    (summed from those columns) finally include verification consumption and
+    the UI card gets its session button + token/request chips.
     """
     summary = _acceptance_summary(status, report)
+    usage = usage or {}
     return {
         "workflow_id": workflow_id,
         "phase": "acceptance_verification",
@@ -795,6 +812,11 @@ def _acceptance_milestone(*, workflow_id, dev_round, attempt, status, report) ->
         "title": f"Acceptance verification: {status}",
         "result_summary": summary,
         "metadata": json.dumps(report, ensure_ascii=False),
+        "session_id": session_id or "",
+        "phase_total_tokens": int(usage.get("total_tokens", 0) or 0),
+        "phase_input_tokens": int(usage.get("total_input_tokens", 0) or 0),
+        "phase_output_tokens": int(usage.get("total_output_tokens", 0) or 0),
+        "phase_request_count": int(usage.get("request_count", 0) or 0),
     }
 
 
@@ -910,6 +932,11 @@ def handle(ctx, deps) -> PhaseResult:
         )
         or {}
     )
+    # Verifier runtime facts (#2994): tracking session id + this attempt's own
+    # usage increment — recorded on the settle-time milestone (and reflected
+    # into workflow totals via usage_delta on the settled PhaseResult).
+    verifier_session_id = str(agent_out.get("session_id") or "")
+    verifier_usage = agent_out.get("usage") or {}
     verifier_verdicts: list[ItemVerdict] = []
     for index, raw_verdict in enumerate(agent_out.get("verdicts") or []):
         if not isinstance(raw_verdict, dict):
@@ -1093,6 +1120,8 @@ def handle(ctx, deps) -> PhaseResult:
         attempt=common_patch["verification_attempt"],
         status=status,
         report=report,
+        session_id=verifier_session_id,
+        usage=verifier_usage,
     )
     # A deterministic parse failure that repeats identically across consecutive
     # attempts is certain to keep failing, so cap it below the transient budget
@@ -1130,6 +1159,7 @@ def handle(ctx, deps) -> PhaseResult:
             },
             milestone_events=[milestone],
             structured_error={"message": "verifier-infrastructure-exhausted", "report": report},
+            usage_delta=verifier_usage or None,
         )
 
     if status == "confirmed":
@@ -1148,6 +1178,7 @@ def handle(ctx, deps) -> PhaseResult:
                 "error_message": None,
             },
             milestone_events=[milestone],
+            usage_delta=verifier_usage or None,
         )
     if status == "rejected":
         _post_verdict_comment(deps, issue_number, report)
@@ -1161,6 +1192,7 @@ def handle(ctx, deps) -> PhaseResult:
                 "error_message": "Acceptance verification rejected; awaiting review",
             },
             milestone_events=[milestone],
+            usage_delta=verifier_usage or None,
         )
     # indeterminate
     _post_verdict_comment(deps, issue_number, report)
@@ -1171,4 +1203,5 @@ def handle(ctx, deps) -> PhaseResult:
         },
         milestone_events=[milestone],
         structured_error={"message": "indeterminate", "report": report},
+        usage_delta=verifier_usage or None,
     )

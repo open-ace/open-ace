@@ -160,6 +160,28 @@ def _remove_worktree_dir(gh, path: str, project_path: str = "") -> None:
         pass
 
 
+def _attach_verifier_runtime(payload: dict, result) -> None:
+    """Attach the verifier run's session id + usage increment to its dict (#2994).
+
+    Mutates ``payload`` in place with ``session_id`` (the tracking id — the
+    stable milestone-identity convention; the runner may overwrite
+    ``session_id`` with the real CLI transcript id on success) and ``usage``
+    (this call's own increment, matching the per-milestone phase_*
+    convention). Called only from ``_run_verification_agent`` after
+    ``_parse_verifier_output``, whose exact-shape contract must not gain
+    these keys.
+    """
+    payload["session_id"] = str(getattr(result, "tracking_session_id", "") or "") or str(
+        getattr(result, "session_id", "") or ""
+    )
+    payload["usage"] = {
+        "total_tokens": int(getattr(result, "total_tokens", 0) or 0),
+        "total_input_tokens": int(getattr(result, "total_input_tokens", 0) or 0),
+        "total_output_tokens": int(getattr(result, "total_output_tokens", 0) or 0),
+        "request_count": int(getattr(result, "request_count", 0) or 0),
+    }
+
+
 def _infer_test_framework(project_path: str, cli_tool: str) -> str:
     """Infer test framework type from project structure and CLI tool.
 
@@ -2580,6 +2602,13 @@ class AutonomousOrchestrator:
         # milestone. Live milestone totals apply this runtime offset when the
         # stable main/review/test session starts its next provider request.
         self._session_usage_offsets: dict[str, dict[str, int]] = {}
+        # True only while the acceptance verifier agent is running (#2994).
+        # Gates the in-run milestone writers (_write_realtime_phase_usage /
+        # _link_session_to_current_milestone): the acceptance milestone is
+        # created at settle time, so a leftover in_progress milestone (e.g. the
+        # merge phase's pr_zero_check_runs tracker) would otherwise absorb the
+        # verifier's usage/session id and double-count against the settle write.
+        self._verification_agent_active = False
         self._cancel_requested = threading.Event()  # in-memory cancel signal
         # Set only by the application shutdown path. Unlike a user stop, this
         # interrupts the current attempt without changing the workflow's active
@@ -7032,6 +7061,10 @@ class AutonomousOrchestrator:
 
     def _link_session_to_current_milestone(self, session_id: str):
         """Write session_id to the latest in_progress milestone immediately."""
+        # #2994: never link the verifier session onto an earlier phase's leaked
+        # in-progress milestone — the acceptance milestone gets the id at settle.
+        if getattr(self, "_verification_agent_active", False):
+            return
         try:
             milestones = self.repo.list_milestones(self._workflow_id, status="in_progress")
             if milestones:
@@ -8168,6 +8201,12 @@ class AutonomousOrchestrator:
         so total_requests climbs in lockstep with total_tokens instead of only
         jumping once the call returns.
         """
+        # #2994: the acceptance milestone is created at settle time, so during
+        # a verifier run the "in-progress" milestone (if any leaked, e.g. the
+        # pr_zero_check_runs tracker) belongs to an earlier phase — the
+        # verifier's usage must land only on its own settle-time milestone.
+        if getattr(self, "_verification_agent_active", False):
+            return
         try:
             milestones = self.repo.list_milestones(self._workflow_id, status="in_progress")
             if not milestones:
@@ -9035,17 +9074,23 @@ class AutonomousOrchestrator:
             # repo_integrity_violation ("Agent changed the workflow branch").
             # The repo-escape guard is a separate check and still applies.
             verify_wf["branch_name"] = ""
-            result = self._run_agent(
-                verify_wf,
-                session_line="verification",
-                prompt=prompt,
-                allowed_tools=VERIFICATION_ALLOWED_TOOLS.get(cli_tool, []),
-                permission_mode="bypassPermissions",
-                cli_tool=cli_tool,
-                model=model,
-                project_path=checkout_path,
-                workflow_id=self._workflow_id,
-            )
+            self._verification_agent_active = True
+            try:
+                result = self._run_agent(
+                    verify_wf,
+                    session_line="verification",
+                    prompt=prompt,
+                    allowed_tools=VERIFICATION_ALLOWED_TOOLS.get(cli_tool, []),
+                    permission_mode="bypassPermissions",
+                    cli_tool=cli_tool,
+                    model=model,
+                    project_path=checkout_path,
+                    workflow_id=self._workflow_id,
+                )
+            finally:
+                # Covers the WorkflowPaused re-raise and every other exit, so
+                # later phases' realtime usage writes resume immediately.
+                self._verification_agent_active = False
         except WorkflowPaused:
             # The pause is already persisted with its marker (quota window or
             # hard quota); the generic handler below would swallow it into an
@@ -9065,14 +9110,23 @@ class AutonomousOrchestrator:
             self._remove_verification_worktree(checkout_path)
         if result is None or getattr(result, "success", False) is not True:
             error_code = getattr(result, "error_code", None) if result is not None else None
-            return {
+            failure: dict = {
                 "verdicts": [],
                 "snapshot": None,
                 "verified_by": verified_by,
                 "infra_error": f"verification agent failed ({error_code or 'runner error'})",
             }
+            if result is not None:
+                # A failed run may still have burned tokens; surface whatever
+                # it consumed so the settle milestone records it (#2994).
+                _attach_verifier_runtime(failure, result)
+            return failure
         parsed = self._parse_verifier_output(result)
         parsed["verified_by"] = verified_by
+        # Runtime facts for the settle-time milestone: session + this call's
+        # usage increment. Attached AFTER _parse_verifier_output so its exact-
+        # shape contract (tests/issues/2335/test_verifier_checkout.py) holds.
+        _attach_verifier_runtime(parsed, result)
         return parsed
 
     def _build_verification_prompt(self, snapshot, merge_sha, base_sha, issue_number) -> str:

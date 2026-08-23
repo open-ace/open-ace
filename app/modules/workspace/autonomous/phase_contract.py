@@ -159,6 +159,7 @@ class PhaseResult:
         workflow_patch: dict | None = None,
         milestone_events: list[dict] | None = None,
         structured_error: object | None = None,
+        usage_delta: object | None = None,
     ) -> PhaseResult:
         """Build a result that pauses the workflow (user-facing pause)."""
         return PhaseResult(
@@ -168,6 +169,7 @@ class PhaseResult:
             workflow_patch=workflow_patch or {},
             milestone_events=milestone_events or [],
             structured_error=structured_error,
+            usage_delta=usage_delta,
         )
 
     @staticmethod
