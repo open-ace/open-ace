@@ -24,6 +24,11 @@ def test_run_verification_agent_passes_workflow_id():
     orch._build_verification_prompt = MagicMock(return_value="verify prompt")
     orch._checkout_merged_main = MagicMock(return_value="/tmp/merged-checkout")
     orch._remove_verification_worktree = MagicMock()
+    # #3003: the in_progress acceptance row minted at spawn.
+    orch._verification_milestone_id = None
+    orch._ensure_verification_milestone = MagicMock(
+        return_value={"milestone_id": "ms-early", "phase_total_tokens": 0}
+    )
     # success=False so the method returns the infra_error dict early (no parsing).
     orch._run_agent = MagicMock(return_value=MagicMock(success=False, error_code=""))
 
@@ -68,6 +73,11 @@ def test_run_verification_agent_clears_branch_name_for_detached_checkout():
     orch._build_verification_prompt = MagicMock(return_value="verify prompt")
     orch._checkout_merged_main = MagicMock(return_value="/tmp/merged-checkout")
     orch._remove_verification_worktree = MagicMock()
+    # #3003: the in_progress acceptance row minted at spawn.
+    orch._verification_milestone_id = None
+    orch._ensure_verification_milestone = MagicMock(
+        return_value={"milestone_id": "ms-early", "phase_total_tokens": 0}
+    )
     orch._run_agent = MagicMock(return_value=MagicMock(success=False, error_code=""))
 
     with patch.object(

@@ -278,6 +278,121 @@ def test_legacy_agent_dict_without_runtime_keys_yields_zero_milestone():
     assert result.usage_delta is None
 
 
+# ── handle(): early-milestone finalize path (#3003) ──────────────────────────
+
+BASELINE = {
+    "total_tokens": 500,
+    "total_input_tokens": 400,
+    "total_output_tokens": 100,
+    "request_count": 4,
+}
+
+
+def _agent_out_early(**extra):
+    out = _agent_out_confirmed(milestone_id=EARLY_MILESTONE_ID, usage_baseline={**BASELINE})
+    out.update(extra)
+    return out
+
+
+def test_confirmed_settle_finalizes_early_milestone():
+    deps = _deps_confirmed()
+    deps.host.run_verification_agent.return_value = _agent_out_early()
+
+    result = av.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "completed"
+    # No create-events: the early row is finalized in place.
+    assert result.milestone_events == []
+    fields = deps.host.finalize_acceptance_milestone.call_args[0][1]
+    assert fields["status"] == "confirmed"
+    assert fields["session_id"] == SESSION_ID
+    # The row's phase_* are NOT overwritten — _run_agent's _write_phase_usage
+    # already wrote baseline + Σ(in-run deltas), which may exceed the final
+    # result's own delta when the call retried in-run (#3005 review MAJOR-2).
+    assert "phase_total_tokens" not in fields
+    assert "phase_request_count" not in fields
+    assert result.usage_delta["total_tokens"] == BASELINE["total_tokens"] + USAGE["total_tokens"]
+    deps.host.tag_session_messages.assert_called_once_with(SESSION_ID, EARLY_MILESTONE_ID)
+
+
+def test_rejected_settle_finalizes_early_milestone():
+    deps = _deps_confirmed()
+    deps.host.run_verification_agent.return_value = _agent_out_early(
+        verdicts=[
+            {
+                "item": "The endpoint rejects expired tokens",
+                "verdict": "rejected",
+                "evidence": [{"ref": "src/auth.py:10", "note": "not covered"}],
+            }
+        ]
+    )
+
+    result = av.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "pause"
+    assert result.milestone_events == []
+    assert deps.host.finalize_acceptance_milestone.call_args[0][1]["status"] == "rejected"
+    deps.host.tag_session_messages.assert_called_once_with(SESSION_ID, EARLY_MILESTONE_ID)
+
+
+def test_infra_retry_with_early_milestone_finalizes_failed_and_tags():
+    deps = MagicMock()
+    deps.gh.get_issue.return_value = {"body": "## Scope\n- `app/x.py`"}
+    deps.gh.get_changed_files.return_value = ["app/x.py"]
+    deps.gh._run_git.return_value.stdout = ""
+    deps.host.issue_is_open.return_value = True
+    deps.host.run_verification_agent.return_value = {
+        "verdicts": [],
+        "snapshot": None,
+        "infra_error": "verification agent timed out",
+        "session_id": SESSION_ID,
+        "usage": USAGE,
+        "milestone_id": EARLY_MILESTONE_ID,
+        "usage_baseline": dict(BASELINE),
+    }
+
+    result = av.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "retry"
+    assert result.milestone_events == []
+    fields = deps.host.finalize_acceptance_milestone.call_args[0][1]
+    assert fields["status"] == "failed"
+    # The row's realtime-recorded usage is preserved (no phase_* overwrite).
+    assert "phase_total_tokens" not in fields
+    deps.host.tag_session_messages.assert_called_once_with(SESSION_ID, EARLY_MILESTONE_ID)
+
+
+def test_infra_exhausted_with_early_milestone_finalizes_with_report():
+    deps = MagicMock()
+    deps.gh.get_issue.return_value = {"body": "## Scope\n- `app/x.py`"}
+    deps.gh.get_changed_files.return_value = ["app/x.py"]
+    deps.gh._run_git.return_value.stdout = ""
+    deps.host.issue_is_open.return_value = True
+    exhausted = {
+        "verdicts": [],
+        "snapshot": None,
+        "infra_error": "verification agent timed out",
+        "session_id": SESSION_ID,
+        "usage": USAGE,
+        "milestone_id": EARLY_MILESTONE_ID,
+        "usage_baseline": dict(BASELINE),
+    }
+    deps.host.run_verification_agent.side_effect = lambda **_kwargs: exhausted
+
+    workflow = _workflow()
+    outcomes = []
+    for _ in range(av.MAX_VERIFIER_INFRA_RETRIES):
+        result = av.handle(_ctx(workflow), deps)
+        outcomes.append(result)
+        workflow = {**workflow, **result.workflow_patch}
+
+    assert outcomes[-1].outcome == "pause"
+    assert outcomes[-1].milestone_events == []
+    fields = deps.host.finalize_acceptance_milestone.call_args[0][1]
+    assert fields["status"] == "indeterminate"
+    assert "phase_total_tokens" not in fields
+
+
 # ── PhaseResult.pause() usage_delta passthrough ──────────────────────────────
 
 
@@ -296,7 +411,28 @@ def test_phase_result_pause_accepts_and_passes_usage_delta():
 # ── orchestrator: _run_verification_agent runtime attachment ────────────────
 
 
-def _orch_for_agent_run(run_agent_result):
+EARLY_MILESTONE_ID = "ms-early-3003"
+ZERO_BASELINE = {
+    "total_tokens": 0,
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "request_count": 0,
+}
+
+
+def _early_row(**overrides):
+    row = {
+        "milestone_id": EARLY_MILESTONE_ID,
+        "phase_total_tokens": 0,
+        "phase_input_tokens": 0,
+        "phase_output_tokens": 0,
+        "phase_request_count": 0,
+    }
+    row.update(overrides)
+    return row
+
+
+def _orch_for_agent_run(run_agent_result, early_row=None):
     orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
     orch._workflow_id = "wf-2994"
     orch._build_verification_prompt = MagicMock(return_value="verify prompt")
@@ -304,6 +440,16 @@ def _orch_for_agent_run(run_agent_result):
     orch._remove_verification_worktree = MagicMock()
     orch._parse_verifier_output = MagicMock(return_value={"verdicts": [], "snapshot": None})
     orch._run_agent = MagicMock(return_value=run_agent_result)
+
+    def _ensure(_wf):
+        row = _early_row(**(early_row or {}))
+        # Mirror the real method's side effect: the row becomes the writers'
+        # preferred target for the duration of the run.
+        orch._verification_milestone_id = row["milestone_id"]
+        return row
+
+    orch._ensure_verification_milestone = MagicMock(side_effect=_ensure)
+    orch._verification_milestone_id = None
     return orch
 
 
@@ -328,16 +474,16 @@ def _wf_property(orch):
     )
 
 
-def test_run_verification_agent_success_attaches_runtime():
-    flag_during_run = {}
+def test_run_verification_agent_success_attaches_runtime_and_early_milestone():
+    stash_during_run = {}
     result = _run_agent_result()
 
-    def _capture_flag(*_args, **_kwargs):
-        flag_during_run["value"] = getattr(orch, "_verification_agent_active", None)
+    def _capture_stash(*_args, **_kwargs):
+        stash_during_run["value"] = getattr(orch, "_verification_milestone_id", None)
         return result
 
     orch = _orch_for_agent_run(result)
-    orch._run_agent = MagicMock(side_effect=_capture_flag)
+    orch._run_agent = MagicMock(side_effect=_capture_stash)
 
     with _wf_property(orch):
         out = orch._run_verification_agent(
@@ -346,9 +492,40 @@ def test_run_verification_agent_success_attaches_runtime():
 
     assert out["session_id"] == SESSION_ID
     assert out["usage"] == USAGE
-    # The suppression window must span the run itself, not just its cleanup.
-    assert flag_during_run["value"] is True
-    assert orch._verification_agent_active is False
+    assert out["milestone_id"] == EARLY_MILESTONE_ID
+    assert out["usage_baseline"] == ZERO_BASELINE
+    # The early row exists (and is the writers' preferred target) DURING the run.
+    assert stash_during_run["value"] == EARLY_MILESTONE_ID
+    # #3003: the call links the early row and carries the resume baseline.
+    call_kwargs = orch._run_agent.call_args[1]
+    assert call_kwargs["milestone_id"] == EARLY_MILESTONE_ID
+    assert call_kwargs["prior_usage"] == ZERO_BASELINE
+
+
+def test_run_verification_agent_passes_reuse_baseline_as_prior_usage():
+    baseline = {
+        "total_tokens": 500,
+        "total_input_tokens": 400,
+        "total_output_tokens": 100,
+        "request_count": 4,
+    }
+    orch = _orch_for_agent_run(
+        _run_agent_result(),
+        early_row={
+            "phase_total_tokens": 500,
+            "phase_input_tokens": 400,
+            "phase_output_tokens": 100,
+            "phase_request_count": 4,
+        },
+    )
+
+    with _wf_property(orch):
+        out = orch._run_verification_agent(
+            snapshot=MagicMock(), merge_sha="m", base_sha="b", issue_number=1, pr_number=2
+        )
+
+    assert out["usage_baseline"] == baseline
+    assert orch._run_agent.call_args[1]["prior_usage"] == baseline
 
 
 def test_run_verification_agent_failure_still_attaches_runtime():
@@ -362,6 +539,22 @@ def test_run_verification_agent_failure_still_attaches_runtime():
     assert out["infra_error"]
     assert out["session_id"] == SESSION_ID
     assert out["usage"]["total_tokens"] == USAGE["total_tokens"]
+    # Post-checkout failures keep the early milestone facts (#3003).
+    assert out["milestone_id"] == EARLY_MILESTONE_ID
+
+
+def test_run_verification_agent_spawn_exception_carries_early_milestone():
+    orch = _orch_for_agent_run(_run_agent_result())
+    orch._run_agent = MagicMock(side_effect=RuntimeError("spawn blew up"))
+
+    with _wf_property(orch):
+        out = orch._run_verification_agent(
+            snapshot=MagicMock(), merge_sha="m", base_sha="b", issue_number=1, pr_number=2
+        )
+
+    assert out["infra_error"] == "verification agent spawn failed"
+    assert out["milestone_id"] == EARLY_MILESTONE_ID
+    assert out["usage_baseline"] == ZERO_BASELINE
 
 
 def test_run_verification_agent_none_result_has_no_runtime_keys():
@@ -374,6 +567,8 @@ def test_run_verification_agent_none_result_has_no_runtime_keys():
 
     assert "session_id" not in out
     assert "usage" not in out
+    # The early row still exists — the handler must finalize it.
+    assert out["milestone_id"] == EARLY_MILESTONE_ID
 
 
 def test_run_verification_agent_checkout_failure_has_no_runtime_keys():
@@ -388,7 +583,10 @@ def test_run_verification_agent_checkout_failure_has_no_runtime_keys():
     assert out["infra_error"] == "merged-main checkout failed"
     assert "session_id" not in out
     assert "usage" not in out
+    # No row was minted — the handler's create fallback applies.
+    assert "milestone_id" not in out
     orch._run_agent.assert_not_called()
+    orch._ensure_verification_milestone.assert_not_called()
 
 
 def test_run_verification_agent_tracking_id_wins_over_blank_session_id():
@@ -402,7 +600,7 @@ def test_run_verification_agent_tracking_id_wins_over_blank_session_id():
     assert out["session_id"] == SESSION_ID
 
 
-def test_verification_flag_cleared_even_when_agent_raises_pause():
+def test_workflow_pause_leaves_early_row_open_for_resume():
     orch = _orch_for_agent_run(_run_agent_result())
     orch._run_agent = MagicMock(side_effect=WorkflowPaused("quota window"))
 
@@ -411,43 +609,203 @@ def test_verification_flag_cleared_even_when_agent_raises_pause():
             snapshot=MagicMock(), merge_sha="m", base_sha="b", issue_number=1, pr_number=2
         )
 
-    assert orch._verification_agent_active is False
+    # The row stays the writers' target across the pause — resume re-enters
+    # with the same attempt number and reuses it (#3003).
+    assert orch._verification_milestone_id == EARLY_MILESTONE_ID
 
 
-# ── orchestrator: realtime writers suppressed during the verifier run ───────
+# ── orchestrator: realtime writers target the verifier's row (#3003) ───────
 
 
 def _orch_for_writers():
     orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
     orch._workflow_id = "wf-2994"
     orch.repo = MagicMock()
+    orch._verification_milestone_id = None
     return orch
 
 
-def test_realtime_writers_noop_while_verification_agent_active():
+def test_realtime_writers_prefer_stashed_verification_milestone():
+    """Even when a leaked row sorts last, the stashed verifier row wins."""
     orch = _orch_for_writers()
-    orch._verification_agent_active = True
-
-    orch._write_realtime_phase_usage({"total_tokens": 5})
-    orch._link_session_to_current_milestone("sess-1")
-
-    # Zero DB access: the gate must fire before list_milestones.
-    orch.repo.list_milestones.assert_not_called()
-    orch.repo.update_milestone.assert_not_called()
-
-
-def test_realtime_writers_resume_after_flag_clears():
-    orch = _orch_for_writers()
-    orch._verification_agent_active = False
+    orch._verification_milestone_id = "ms-verif"
     orch.repo.list_milestones.return_value = [
-        {"milestone_id": "ms-1", "milestone_type": "pr_zero_check_runs"}
+        {"milestone_id": "ms-leak", "milestone_type": "pr_zero_check_runs"},
+        {"milestone_id": "ms-verif", "milestone_type": "acceptance_verification"},
     ]
 
     orch._write_realtime_phase_usage({"total_tokens": 5, "request_count": 1})
     orch._link_session_to_current_milestone("sess-1")
 
-    assert orch.repo.list_milestones.call_count == 2
-    assert orch.repo.update_milestone.call_count == 2
+    usage_target = orch.repo.update_milestone.call_args_list[0][0][0]
+    link_fields = orch.repo.update_milestone.call_args_list[1][0][1]
+    assert usage_target == "ms-verif"
+    assert orch.repo.update_milestone.call_args_list[1][0][0] == "ms-verif"
+    assert "sess-1" in link_fields.values()
+
+
+def test_realtime_writers_stale_stash_is_inert():
+    """A stash whose row went terminal (not in_progress) must not redirect."""
+    orch = _orch_for_writers()
+    orch._verification_milestone_id = "ms-gone"
+    orch.repo.list_milestones.return_value = [
+        {"milestone_id": "ms-1", "milestone_type": "dev_started"}
+    ]
+
+    orch._write_realtime_phase_usage({"total_tokens": 5, "request_count": 1})
+    orch._link_session_to_current_milestone("sess-1")
+
+    assert orch.repo.update_milestone.call_args_list[0][0][0] == "ms-1"
+    assert orch.repo.update_milestone.call_args_list[1][0][0] == "ms-1"
+
+
+def test_realtime_writers_default_to_last_in_progress_row():
+    """No stash → NON-verification phases keep targeting milestones[-1]."""
+    orch = _orch_for_writers()
+    orch.repo.list_milestones.return_value = [
+        {"milestone_id": "ms-1", "milestone_type": "pr_zero_check_runs"},
+        {"milestone_id": "ms-2", "milestone_type": "dev_started"},
+    ]
+
+    orch._write_realtime_phase_usage({"total_tokens": 5, "request_count": 1})
+    orch._link_session_to_current_milestone("sess-1")
+
+    assert orch.repo.update_milestone.call_args_list[0][0][0] == "ms-2"
+    assert orch.repo.update_milestone.call_args_list[1][0][0] == "ms-2"
+
+
+# ── orchestrator: _ensure_verification_milestone lifecycle (#3003) ──────────
+
+
+def _orch_for_ensure(in_progress_rows, terminal_rows=None):
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch._workflow_id = "wf-2994"
+    orch.repo = MagicMock()
+    terminal_rows = terminal_rows or []
+
+    def _list(_workflow_id, phase=None, status=None, **_kwargs):
+        if status == "failed":
+            return [r for r in terminal_rows if r.get("status") == "failed"]
+        if status == "cancelled":
+            return [r for r in terminal_rows if r.get("status") == "cancelled"]
+        return in_progress_rows
+
+    orch.repo.list_milestones.side_effect = _list
+    orch._create_milestone = MagicMock(side_effect=lambda **kw: {"milestone_id": "ms-new", **kw})
+    orch._emit = MagicMock()
+    orch._verification_milestone_id = None
+    return orch
+
+
+def test_ensure_creates_row_for_current_attempt():
+    orch = _orch_for_ensure([])
+
+    row = orch._ensure_verification_milestone({"verification_attempt": 2, "dev_round": 1})
+
+    assert row["milestone_id"] == "ms-new"
+    assert orch._create_milestone.call_args[1]["round_number"] == 3
+    assert orch._create_milestone.call_args[1]["status"] == "in_progress"
+    assert orch._verification_milestone_id == "ms-new"
+
+
+def test_ensure_reuses_same_attempt_row():
+    orch = _orch_for_ensure(
+        [{"milestone_id": "ms-resume", "round_number": 3, "phase_total_tokens": 500}]
+    )
+
+    row = orch._ensure_verification_milestone({"verification_attempt": 2, "dev_round": 1})
+
+    assert row["milestone_id"] == "ms-resume"
+    orch._create_milestone.assert_not_called()
+    orch.repo.update_milestone.assert_not_called()
+
+
+def test_ensure_sweeps_interrupted_older_rows():
+    orch = _orch_for_ensure(
+        [
+            {"milestone_id": "ms-old", "round_number": 1},
+            {"milestone_id": "ms-resume", "round_number": 3},
+        ]
+    )
+
+    row = orch._ensure_verification_milestone({"verification_attempt": 2, "dev_round": 1})
+
+    assert row["milestone_id"] == "ms-resume"
+    swept = orch.repo.update_milestone.call_args_list[0]
+    assert swept[0][0] == "ms-old"
+    assert swept[0][1]["status"] == "failed"
+    # The sweep is not silent — live timelines refetch off the event.
+    assert orch._emit.call_args[0][0] == "milestone_updated"
+
+
+def test_ensure_resumes_terminalized_same_attempt_row():
+    """Quota/cancel pause terminalized the row; auto-resume must resurrect it.
+
+    Without this the resume mints a duplicate same-round_number card and
+    loses the attempt's recorded usage (#3005 review MAJOR-1).
+    """
+    orch = _orch_for_ensure(
+        [],
+        terminal_rows=[
+            {
+                "milestone_id": "ms-paused",
+                "round_number": 3,
+                "status": "failed",
+                "phase_total_tokens": 900,
+            }
+        ],
+    )
+
+    row = orch._ensure_verification_milestone({"verification_attempt": 2, "dev_round": 1})
+
+    assert row["milestone_id"] == "ms-paused"
+    orch._create_milestone.assert_not_called()
+    resumed = orch.repo.update_milestone.call_args
+    assert resumed[0][0] == "ms-paused"
+    assert resumed[0][1]["status"] == "in_progress"
+    assert resumed[0][1]["error_message"] == ""
+
+
+def test_ensure_leaves_mismatched_terminal_rows_alone():
+    """Only the CURRENT attempt's terminal row may be resurrected.
+
+    A same-attempt settled row is unreachable by the attempt invariant
+    (settling bumps the counter); the practical guard is the round mismatch —
+    an older failed row must neither be reused nor modified.
+    """
+    orch = _orch_for_ensure(
+        [],
+        terminal_rows=[{"milestone_id": "ms-old-fail", "round_number": 2, "status": "failed"}],
+    )
+
+    row = orch._ensure_verification_milestone({"verification_attempt": 2, "dev_round": 1})
+
+    # round_number 3 ≠ the failed row's 2 → fresh row, old row untouched.
+    assert row["milestone_id"] == "ms-new"
+    assert row["round_number"] == 3
+    orch.repo.update_milestone.assert_not_called()
+
+
+def test_finalize_updates_row_emits_event_and_clears_stash():
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch.repo = MagicMock()
+    orch._emit = MagicMock()
+    orch._verification_milestone_id = "ms-verif"
+
+    orch.finalize_acceptance_milestone("ms-verif", {"status": "confirmed"})
+
+    orch.repo.update_milestone.assert_called_once_with("ms-verif", {"status": "confirmed"})
+    assert orch._emit.call_args[0][0] == "milestone_updated"
+    assert orch._verification_milestone_id is None
+
+
+def test_finalize_with_empty_id_is_noop():
+    orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    orch.repo = MagicMock()
+
+    orch.finalize_acceptance_milestone("", {"status": "confirmed"})
+
+    orch.repo.update_milestone.assert_not_called()
 
 
 # ── commit path: usage_delta triggers the totals refresh ─────────────────────

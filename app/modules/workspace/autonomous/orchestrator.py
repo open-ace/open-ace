@@ -160,6 +160,34 @@ def _remove_worktree_dir(gh, path: str, project_path: str = "") -> None:
         pass
 
 
+def _verification_usage_baseline(row: dict) -> dict:
+    """The usage-baseline shape built from a milestone row's phase_* columns."""
+    return {
+        "total_tokens": int(row.get("phase_total_tokens", 0) or 0),
+        "total_input_tokens": int(row.get("phase_input_tokens", 0) or 0),
+        "total_output_tokens": int(row.get("phase_output_tokens", 0) or 0),
+        "request_count": int(row.get("phase_request_count", 0) or 0),
+    }
+
+
+def _attach_early_milestone(payload: dict, early: dict) -> None:
+    """Attach the verifier run's early milestone facts to its dict (#3003).
+
+    ``milestone_id`` identifies the in_progress acceptance row minted at spawn
+    (the phase handler finalizes it at settle); ``usage_baseline`` is that
+    row's already-recorded usage so a resumed attempt's totals continue from
+    it instead of resetting. A falsy ``early`` (checkout failed before the row
+    was minted) attaches nothing — the caller then takes the create fallback.
+    """
+    if not early:
+        return
+    milestone_id = str(early.get("milestone_id", "") or "")
+    if not milestone_id:
+        return
+    payload["milestone_id"] = milestone_id
+    payload["usage_baseline"] = _verification_usage_baseline(early)
+
+
 def _attach_verifier_runtime(payload: dict, result) -> None:
     """Attach the verifier run's session id + usage increment to its dict (#2994).
 
@@ -2602,13 +2630,13 @@ class AutonomousOrchestrator:
         # milestone. Live milestone totals apply this runtime offset when the
         # stable main/review/test session starts its next provider request.
         self._session_usage_offsets: dict[str, dict[str, int]] = {}
-        # True only while the acceptance verifier agent is running (#2994).
-        # Gates the in-run milestone writers (_write_realtime_phase_usage /
-        # _link_session_to_current_milestone): the acceptance milestone is
-        # created at settle time, so a leftover in_progress milestone (e.g. the
-        # merge phase's pr_zero_check_runs tracker) would otherwise absorb the
-        # verifier's usage/session id and double-count against the settle write.
-        self._verification_agent_active = False
+        # The in_progress acceptance milestone minted for the running verifier
+        # (#3003). The in-run milestone writers (_write_realtime_phase_usage /
+        # _link_session_to_current_milestone) prefer it over their
+        # milestones[-1] heuristic so the verifier's live usage/session land on
+        # its own row; None outside a verifier run (a stale id left after the
+        # row went terminal is inert — the writers only match in_progress rows).
+        self._verification_milestone_id: str | None = None
         self._cancel_requested = threading.Event()  # in-memory cancel signal
         # Set only by the application shutdown path. Unlike a user stop, this
         # interrupts the current attempt without changing the workflow's active
@@ -7059,16 +7087,29 @@ class AutonomousOrchestrator:
                 return True
         return False
 
+    def _preferred_in_progress_milestone_id(self, milestones: list[dict]) -> str:
+        """The milestone the in-run writers should target (#3003).
+
+        During a verifier run this is the stashed acceptance row (created at
+        spawn, so it is also the newest by created_at/id order); the explicit
+        preference keeps a future background writer from stealing the slot.
+        """
+        target = getattr(self, "_verification_milestone_id", None)
+        if target:
+            for ms in milestones:
+                if ms.get("milestone_id") == target:
+                    return target
+        return milestones[-1].get("milestone_id", "")
+
     def _link_session_to_current_milestone(self, session_id: str):
         """Write session_id to the latest in_progress milestone immediately."""
-        # #2994: never link the verifier session onto an earlier phase's leaked
-        # in-progress milestone — the acceptance milestone gets the id at settle.
-        if getattr(self, "_verification_agent_active", False):
-            return
         try:
             milestones = self.repo.list_milestones(self._workflow_id, status="in_progress")
             if milestones:
                 ms = milestones[-1]  # most recent
+                preferred = self._preferred_in_progress_milestone_id(milestones)
+                if preferred and preferred != ms.get("milestone_id"):
+                    ms = next((m for m in milestones if m.get("milestone_id") == preferred), ms)
                 field_name = (
                     "review_session_id"
                     if ms.get("milestone_type") in REVIEW_SESSION_MILESTONE_TYPES
@@ -8201,17 +8242,11 @@ class AutonomousOrchestrator:
         so total_requests climbs in lockstep with total_tokens instead of only
         jumping once the call returns.
         """
-        # #2994: the acceptance milestone is created at settle time, so during
-        # a verifier run the "in-progress" milestone (if any leaked, e.g. the
-        # pr_zero_check_runs tracker) belongs to an earlier phase — the
-        # verifier's usage must land only on its own settle-time milestone.
-        if getattr(self, "_verification_agent_active", False):
-            return
         try:
             milestones = self.repo.list_milestones(self._workflow_id, status="in_progress")
             if not milestones:
                 return
-            ms_id = milestones[-1].get("milestone_id", "")
+            ms_id = self._preferred_in_progress_milestone_id(milestones)
             if not ms_id:
                 return
             self.repo.update_milestone(
@@ -9060,6 +9095,107 @@ class AutonomousOrchestrator:
         wf = self.workflow or {}
         _remove_worktree_dir(gh, path, str(wf.get("project_path") or ""))
 
+    def _ensure_verification_milestone(self, wf: dict) -> dict:
+        """Find-or-create the in_progress acceptance milestone for THIS attempt (#3003).
+
+        Created after the merged-main checkout succeeds and before the verifier
+        spawns, so the running verification has a live card to host AI
+        activities (and to receive realtime usage/session writes). One row per
+        attempt: infra-retry bumps ``verification_attempt`` in its retry patch,
+        so a retry sweeps this row's predecessor to ``failed`` ("interrupted")
+        and mints a fresh one; a WorkflowPaused/crash resume re-enters with the
+        same attempt number and reuses the row, seeding its already-recorded
+        usage as the call's ``prior_usage`` baseline. The pause paths inside
+        ``_run_agent`` terminalize the row before raising, so resume also
+        resurrects a same-attempt failed/cancelled row instead of minting a
+        duplicate card.
+        """
+        attempt = int(wf.get("verification_attempt") or 0) + 1
+        dev_round = int(wf.get("dev_round") or 1)
+        rows = self.repo.list_milestones(
+            self._workflow_id, phase="acceptance_verification", status="in_progress"
+        )
+        current = None
+        for row in rows:
+            if int(row.get("round_number") or 0) == attempt:
+                current = row
+            else:
+                # Any other still-in_progress acceptance row is residue of an
+                # interrupted attempt (older by construction — attempt never
+                # resets). Finalize it so it cannot keep hosting activities.
+                swept_id = row.get("milestone_id", "")
+                self.repo.update_milestone(
+                    swept_id,
+                    {
+                        "status": "failed",
+                        "error_message": "interrupted: superseded by a later verification attempt",
+                    },
+                )
+                self._emit_milestone_updated(swept_id, "failed")
+        if current is None:
+            # The pause paths inside _run_agent terminalize the early row
+            # (quota → failed, cancel/shutdown → cancelled) before raising, so
+            # an auto-resume finds no in_progress row. A same-attempt
+            # failed/cancelled row IS this paused attempt — resurrect it (with
+            # its recorded usage as the resume baseline) instead of minting a
+            # duplicate round_number card. Settled verdict rows can never
+            # match: settling bumps verification_attempt past this attempt.
+            for terminal_status in ("failed", "cancelled"):
+                for row in self.repo.list_milestones(
+                    self._workflow_id,
+                    phase="acceptance_verification",
+                    status=terminal_status,
+                ):
+                    if int(row.get("round_number") or 0) == attempt:
+                        current = row
+                        break
+                if current is not None:
+                    resumed_id = current.get("milestone_id", "")
+                    self.repo.update_milestone(
+                        resumed_id,
+                        {"status": "in_progress", "error_message": ""},
+                    )
+                    self._emit_milestone_updated(resumed_id, "in_progress")
+                    break
+        if current is None:
+            current = self._create_milestone(
+                phase="acceptance_verification",
+                milestone_type="acceptance_verification",
+                dev_round=dev_round,
+                round_number=attempt,
+                status="in_progress",
+                title="Acceptance verification: running",
+            )
+        self._verification_milestone_id = current.get("milestone_id", "") or None
+        return current
+
+    def finalize_acceptance_milestone(self, milestone_id: str, fields: dict) -> None:
+        """Terminal-update the verifier's in_progress milestone (#3003).
+
+        Delegates to repo.update_milestone and emits a ``milestone_updated``
+        event; clears the writer-preference stash. Missing id is a no-op so the
+        phase's fallback path (settle-by-create) stays independent.
+        """
+        if not milestone_id:
+            return
+        self.repo.update_milestone(milestone_id, fields)
+        self._emit_milestone_updated(milestone_id, fields.get("status", ""))
+        if getattr(self, "_verification_milestone_id", None) == milestone_id:
+            self._verification_milestone_id = None
+
+    def _emit_milestone_updated(self, milestone_id: str, status: str) -> None:
+        """Emit a milestone_updated event (#3003).
+
+        No listener switches on the type — the frontend's generic workflow
+        event consumer invalidates its query cache on ANY event, so this is
+        what makes a live timeline refetch when a row flips status outside
+        the poll interval.
+        """
+        self._emit(
+            "milestone_updated",
+            {"milestone_id": milestone_id, "status": status},
+        )
+
     def _run_verification_agent(
         self, *, snapshot, merge_sha, base_sha, issue_number, pr_number
     ) -> dict:
@@ -9070,6 +9206,14 @@ class AutonomousOrchestrator:
         ``verification``. On any checkout/spawn/parse failure it returns empty
         verdicts, which aggregate to ``indeterminate`` (pause) — never a false
         ``confirmed``. The temp worktree is always cleaned up (try/finally).
+
+        #3003: an in_progress acceptance milestone is minted for this attempt
+        before the spawn. Its id rides every post-checkout return as
+        ``milestone_id`` (with ``usage_baseline`` = the row's recorded usage, for
+        attempt-resume), the ``_run_agent`` call links it directly and gets the
+        baseline as ``prior_usage``, and the phase handler finalizes the row at
+        settle instead of creating one. Only the checkout-failure return omits
+        the key — no row exists there.
         """
         wf = self.workflow or {}
         cli_tool = wf.get("cli_tool", "claude-code")
@@ -9085,7 +9229,10 @@ class AutonomousOrchestrator:
                 "verified_by": verified_by,
                 "infra_error": "merged-main checkout failed",
             }
+        early: dict = {}
         try:
+            early = self._ensure_verification_milestone(wf)
+            usage_baseline = _verification_usage_baseline(early)
             # Spawn the agent against the merged-main checkout, NOT the dev
             # worktree. We override worktree_path/project_path on a shallow
             # copy so _resolve_effective_repo_context resolves to the checkout.
@@ -9100,48 +9247,54 @@ class AutonomousOrchestrator:
             # repo_integrity_violation ("Agent changed the workflow branch").
             # The repo-escape guard is a separate check and still applies.
             verify_wf["branch_name"] = ""
-            self._verification_agent_active = True
-            try:
-                result = self._run_agent(
-                    verify_wf,
-                    session_line="verification",
-                    prompt=prompt,
-                    allowed_tools=VERIFICATION_ALLOWED_TOOLS.get(cli_tool, []),
-                    permission_mode="bypassPermissions",
-                    cli_tool=cli_tool,
-                    model=model,
-                    project_path=checkout_path,
-                    workflow_id=self._workflow_id,
-                )
-            finally:
-                # Covers the WorkflowPaused re-raise and every other exit, so
-                # later phases' realtime usage writes resume immediately.
-                self._verification_agent_active = False
+            result = self._run_agent(
+                verify_wf,
+                session_line="verification",
+                prompt=prompt,
+                allowed_tools=VERIFICATION_ALLOWED_TOOLS.get(cli_tool, []),
+                permission_mode="bypassPermissions",
+                cli_tool=cli_tool,
+                model=model,
+                project_path=checkout_path,
+                workflow_id=self._workflow_id,
+                milestone_id=early.get("milestone_id", ""),
+                # Attempt-resume baseline: _run_agent seeds it into the
+                # session-usage offsets so live usage climbs from the row's
+                # already-recorded totals, and _write_phase_usage folds it into
+                # the final write. Seeding the offsets directly here would be
+                # clobbered at call start (they are rebuilt from prior_usage).
+                prior_usage=usage_baseline,
+            )
         except WorkflowPaused:
             # The pause is already persisted with its marker (quota window or
             # hard quota); the generic handler below would swallow it into an
             # infra_error whose retry patch overwrites error_message and
             # strands the auto-resume scan (#2709). Propagate to advance()'s
-            # WorkflowPaused handling; the finally below still cleans up.
+            # WorkflowPaused handling; the finally below still cleans up. The
+            # in_progress row stays open — resume re-enters with the same
+            # attempt number and reuses it.
             raise
         except Exception:
             logger.exception("acceptance verifier spawn failed for issue %s", issue_number)
-            return {
+            failure: dict = {
                 "verdicts": [],
                 "snapshot": None,
                 "verified_by": verified_by,
                 "infra_error": "verification agent spawn failed",
             }
+            _attach_early_milestone(failure, early)
+            return failure
         finally:
             self._remove_verification_worktree(checkout_path)
         if result is None or getattr(result, "success", False) is not True:
             error_code = getattr(result, "error_code", None) if result is not None else None
-            failure: dict = {
+            failure = {
                 "verdicts": [],
                 "snapshot": None,
                 "verified_by": verified_by,
                 "infra_error": f"verification agent failed ({error_code or 'runner error'})",
             }
+            _attach_early_milestone(failure, early)
             if result is not None:
                 # A failed run may still have burned tokens; surface whatever
                 # it consumed so the settle milestone records it (#2994).
@@ -9153,6 +9306,7 @@ class AutonomousOrchestrator:
         # usage increment. Attached AFTER _parse_verifier_output so its exact-
         # shape contract (tests/issues/2335/test_verifier_checkout.py) holds.
         _attach_verifier_runtime(parsed, result)
+        _attach_early_milestone(parsed, early)
         return parsed
 
     def _build_verification_prompt(self, snapshot, merge_sha, base_sha, issue_number) -> str:

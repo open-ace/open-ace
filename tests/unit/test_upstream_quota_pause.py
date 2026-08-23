@@ -339,6 +339,12 @@ def test_verification_agent_re_raise_workflow_pause():
         patch.object(AutonomousOrchestrator, "_checkout_merged_main", return_value="/tmp/vw"),
         patch.object(AutonomousOrchestrator, "_run_agent", side_effect=_raise),
         patch.object(AutonomousOrchestrator, "_remove_verification_worktree") as cleanup,
+        # #3003: the in_progress acceptance row minted before the spawn.
+        patch.object(
+            AutonomousOrchestrator,
+            "_ensure_verification_milestone",
+            return_value={"milestone_id": "ms-early", "phase_total_tokens": 0},
+        ),
     ):
         with pytest.raises(UpstreamQuotaPaused):
             orchestrator._run_verification_agent(
