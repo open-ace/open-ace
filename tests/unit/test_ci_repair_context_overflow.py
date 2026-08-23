@@ -13,6 +13,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1816)]
+
+import pytest
+
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
 

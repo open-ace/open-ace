@@ -11,7 +11,11 @@ The fix requires contextual clues (``status``, ``error``, ``too many requests``)
 around a bare ``429``, while still catching real API error messages.
 """
 
+import pytest
+
 from app.modules.workspace.autonomous.orchestrator import _TRANSIENT_API_ERROR_RE
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1816)]
 
 
 class TestTransientApiErrorRegex:

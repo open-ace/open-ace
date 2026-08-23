@@ -31,7 +31,7 @@ Deviation notes (mirroring the T8/T9/T10/T11 patterns):
   the handler would either (a) require ~15 new host aliases (exceeding the 40
   cap even after service-routing) or (b) break the static-source and direct-call
   tests under tests/issues/1140, tests/issues/1897, tests/issues/1647,
-  tests/issues/1520, tests/issues/1277, tests/issues/1574, tests/issues/1547,
+  tests/unit/test_keyword_detection.py (ex tests/issues/1520), tests/issues/1277, tests/issues/1574, tests/issues/1547,
   tests/unit/test_autonomous_ci_guardrails.py (each calls
   ``orch._run_development_agent`` / ``orch._run_test_phase`` /
   ``orch._validate_test_report_format`` directly).

@@ -10,6 +10,8 @@ exclude hallucination patterns.
 
 import pytest
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1520)]
+
 # ── Test result detection patterns ──────────────────────────────────────
 
 

@@ -1484,7 +1484,7 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     ]
     if framework_type == "mixed":
         # A polyglot repo must match every language, not the weakest fallback.
-        # tests/issues/1520/test_keyword_detection.py records this as the
+        # tests/unit/test_keyword_detection.py records this as the
         # original design intent ("mixed -> pytest + Jest + go test + unittest").
         patterns_to_check = _ALL_TEST_PATTERNS
     else:

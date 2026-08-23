@@ -15,6 +15,8 @@ from app.middleware.tenant_check import (
     init_tenant_check_middleware,
 )
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2163)]
+
 
 class TestTenantCheckMiddleware:
     """Test suite for tenant check middleware."""
@@ -36,24 +38,21 @@ class TestTenantCheckMiddleware:
         """Test check when no user context."""
         with app.test_request_context():
             g.user = None
-            # Should not raise
-            check_tenant_version()
+            assert check_tenant_version() is None
 
     def test_check_tenant_version_no_session(self, app):
         """Test check when no session context."""
         with app.test_request_context():
             g.user = {"id": 1, "tenant_version": 1}
             g.session = None
-            # Should not raise
-            check_tenant_version()
+            assert check_tenant_version() is None
 
     def test_check_tenant_version_match(self, app):
         """Test check when versions match."""
         with app.test_request_context():
             g.user = {"id": 1, "tenant_version": 1}
             g.session = {"id": 1, "tenant_version": 1}
-            # Should not raise
-            check_tenant_version()
+            assert check_tenant_version() is None
 
     def test_check_tenant_version_mismatch(self, app):
         """Test check when versions mismatch."""

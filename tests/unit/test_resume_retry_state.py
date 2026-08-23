@@ -10,6 +10,8 @@ import pytest
 
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1520)]
+
 
 class TestPauseResumeRetryState:
     """Test retry state persistence during pause/resume."""
