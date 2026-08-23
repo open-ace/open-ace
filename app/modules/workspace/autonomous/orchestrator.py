@@ -163,12 +163,13 @@ def _remove_worktree_dir(gh, path: str, project_path: str = "") -> None:
 def _attach_verifier_runtime(payload: dict, result) -> None:
     """Attach the verifier run's session id + usage increment to its dict (#2994).
 
-    Mutates ``payload`` in place with ``session_id`` (tracking id preferred —
-    the spawn-failure result constructions blank ``session_id`` but always set
-    ``tracking_session_id``) and ``usage`` (this call's own increment, matching
-    the per-milestone phase_* convention). Called only from
-    ``_run_verification_agent`` after ``_parse_verifier_output``, whose exact-
-    shape contract must not gain these keys.
+    Mutates ``payload`` in place with ``session_id`` (the tracking id — the
+    stable milestone-identity convention; the runner may overwrite
+    ``session_id`` with the real CLI transcript id on success) and ``usage``
+    (this call's own increment, matching the per-milestone phase_*
+    convention). Called only from ``_run_verification_agent`` after
+    ``_parse_verifier_output``, whose exact-shape contract must not gain
+    these keys.
     """
     payload["session_id"] = str(getattr(result, "tracking_session_id", "") or "") or str(
         getattr(result, "session_id", "") or ""

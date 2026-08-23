@@ -67,6 +67,7 @@ export interface WorkflowSessionLinesLike {
   main_session_id?: string;
   review_session_id?: string;
   test_session_id?: string;
+  verification_session_id?: string | null;
 }
 
 /** Return the stable session line that owns an in-flight AI milestone. */
@@ -77,6 +78,13 @@ export function getWorkflowSessionIdForMilestone(
   if (milestoneType === 'tests_run') return workflow.test_session_id?.trim() ?? '';
   if (milestoneType === 'plan_reviewed' || milestoneType === 'pr_reviewed') {
     return workflow.review_session_id?.trim() ?? '';
+  }
+  // Unreachable today (acceptance milestones are never activity hosts — they
+  // are only created at settle, never in_progress), but map the line
+  // explicitly so widening the host logic later can't render the verifier
+  // session's activity under the main session's card. #2994.
+  if (milestoneType === 'acceptance_verification') {
+    return workflow.verification_session_id?.trim() ?? '';
   }
   return workflow.main_session_id?.trim() ?? '';
 }

@@ -307,7 +307,15 @@ def _wf_property(orch):
 
 
 def test_run_verification_agent_success_attaches_runtime():
-    orch = _orch_for_agent_run(_run_agent_result())
+    flag_during_run = {}
+    result = _run_agent_result()
+
+    def _capture_flag(*_args, **_kwargs):
+        flag_during_run["value"] = getattr(orch, "_verification_agent_active", None)
+        return result
+
+    orch = _orch_for_agent_run(result)
+    orch._run_agent = MagicMock(side_effect=_capture_flag)
 
     with _wf_property(orch):
         out = orch._run_verification_agent(
@@ -316,6 +324,8 @@ def test_run_verification_agent_success_attaches_runtime():
 
     assert out["session_id"] == SESSION_ID
     assert out["usage"] == USAGE
+    # The suppression window must span the run itself, not just its cleanup.
+    assert flag_during_run["value"] is True
     assert orch._verification_agent_active is False
 
 
@@ -423,9 +433,12 @@ def test_realtime_writers_resume_after_flag_clears():
 
 def test_commit_phase_result_refreshes_totals_after_milestone_insert():
     orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+    # Shared parent so mock_calls records the load-bearing order:
+    # the milestone insert must land before the totals refresh reads it.
+    calls = MagicMock()
     orch._update_workflow = MagicMock()
-    orch._create_milestone = MagicMock()
-    orch._accumulate_tokens = MagicMock()
+    orch._create_milestone = calls.create_milestone
+    orch._accumulate_tokens = calls.accumulate_tokens
     result = av.handle(_ctx(_workflow()), _deps_confirmed())
 
     orch._commit_phase_result(result)
@@ -434,6 +447,7 @@ def test_commit_phase_result_refreshes_totals_after_milestone_insert():
     orch._accumulate_tokens.assert_called_once()
     # usage_delta carries the verifier usage dict verbatim.
     assert orch._accumulate_tokens.call_args[0][0] == USAGE
+    assert [c[0] for c in calls.mock_calls] == ["create_milestone", "accumulate_tokens"]
 
 
 def test_commit_phase_result_without_delta_skips_refresh():

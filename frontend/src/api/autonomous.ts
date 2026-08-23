@@ -114,6 +114,8 @@ export interface AutonomousWorkflow {
   verification_status?: string | null;
   verification_merge_sha?: string | null;
   verified_by?: string | null;
+  /** Tracking id of the acceptance-verifier session line (#2335/#2994). */
+  verification_session_id?: string | null;
 }
 
 export interface WorkflowMilestone {

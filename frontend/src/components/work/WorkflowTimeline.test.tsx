@@ -552,8 +552,9 @@ describe('acceptance milestone usage wiring (#2994)', () => {
     expect(screen.getByText(/Session ID.*verif-tr/)).toBeInTheDocument();
     // The verifier is an agent milestone, not a system step.
     expect(screen.queryByText('System step')).not.toBeInTheDocument();
-    // #2995: the acceptance-report button carries the warning variant class
-    // (the CSS rule this class was missing used to leave it unstyled).
+    // #2995: the acceptance-report button carries the warning variant class,
+    // pinning the class hookup for the new CSS rule (jsdom cannot assert the
+    // stylesheet itself).
     expect(container.querySelector('button.timeline-inline-btn--warning')).toBeTruthy();
   });
 
@@ -570,7 +571,6 @@ describe('acceptance milestone usage wiring (#2994)', () => {
     );
 
     const badges = container.querySelector('.timeline-milestone-badges');
-    expect(badges?.textContent).toContain('0');
     expect(badges?.textContent).toContain('0 Requests');
     expect(screen.queryByText('System step')).not.toBeInTheDocument();
   });

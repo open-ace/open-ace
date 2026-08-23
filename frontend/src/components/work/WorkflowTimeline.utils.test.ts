@@ -41,6 +41,7 @@ describe('WorkflowTimeline.utils', () => {
       main_session_id: 'main-session',
       review_session_id: 'review-session',
       test_session_id: 'test-session',
+      verification_session_id: 'verification-session',
     };
 
     expect(getWorkflowSessionIdForMilestone('pr_updated', workflow)).toBe('main-session');
@@ -48,6 +49,9 @@ describe('WorkflowTimeline.utils', () => {
     expect(getWorkflowSessionIdForMilestone('pr_reviewed', workflow)).toBe('review-session');
     expect(getWorkflowSessionIdForMilestone('plan_reviewed', workflow)).toBe('review-session');
     expect(getWorkflowSessionIdForMilestone('tests_run', workflow)).toBe('test-session');
+    expect(getWorkflowSessionIdForMilestone('acceptance_verification', workflow)).toBe(
+      'verification-session'
+    );
   });
 
   it('classifies AI-backed and system-only milestone cards', () => {
@@ -63,6 +67,7 @@ describe('WorkflowTimeline.utils', () => {
       'pr_updated',
       'ci_repair_applied',
       'conflicts_resolved',
+      'acceptance_verification',
     ]) {
       expect(isAiMilestoneType(type), type).toBe(true);
     }
