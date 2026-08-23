@@ -7,9 +7,9 @@
       "min_tests": 4150,
       "min_files": 250,
       "last_updated": "2026-08-23",
-      "update_reason": "Issue #2429 batch 1: pr-gate dirs 2390/2401/2403/2428/2438/2439/2442/2443 migrated into tests/unit + tests/integration/subprocess; actuals refreshed",
-      "actual_collected": 7036,
-      "actual_files": 441,
+      "update_reason": "Issue #2429 batch 2: pr-gate dirs 2335/2431 migrated into tests/unit + tests/integration/subprocess (20 legacy files -> 21 canonical files); actuals refreshed",
+      "actual_collected": 7203,
+      "actual_files": 462,
       "threshold_percent": 96
     },
     "critical": {
@@ -30,12 +30,12 @@
       "note": "Currently excluded by norecursedirs"
     },
     "issues": {
-      "min_tests": 4145,
-      "min_files": 413,
+      "min_tests": 3978,
+      "min_files": 393,
       "last_updated": "2026-08-23",
-      "update_reason": "Issue #2429 batch 1: migrated 155 items / 17 files out of the 8 pr-gate dirs into canonical layers; min lowered by exactly that delta (4300-155, 430-17); actuals from CI run 32636484269 (clean checkout)",
-      "actual_collected": 4357,
-      "actual_files": 428,
+      "update_reason": "Issue #2429 batch 2: migrated the final 167 items / 20 files (2335, 2431) out of the pr-gate into canonical layers and retired legacy-pr; min lowered by exactly that delta (4145-167, 413-20); actuals from clean checkout",
+      "actual_collected": 4190,
+      "actual_files": 408,
       "threshold_percent": 97
     }
   },
@@ -46,8 +46,8 @@
   "notes": [
     "Baseline created before pytest.ini modification to enable e2e_*.py collection",
     "tests/e2e currently excluded by norecursedirs in pytest.ini",
-    "Default count from: python scripts/ci.py run default-collection (7036 items after #2429 batch 1)",
-    "Issue count from: CI run 32636484269 issue-collection (4357 items, 428 files after #2429 batch 1; a checkout with the gitignored local tests/issues/89 dir collects 4358/429)",
+    "Default count from: python scripts/ci.py run default-collection (7203 items after #2429 batch 2)",
+    "Issue count from: clean-checkout issue-collection (4190 items, 408 files after #2429 batch 2; a checkout with the gitignored local tests/issues/89 dir collects +1/+1)",
     "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard"
   ]
 }

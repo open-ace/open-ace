@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.modules.workspace.autonomous import acceptance_gates as gates_module
 from app.modules.workspace.autonomous.acceptance_gates import (
     call_chain_gate,
@@ -24,6 +26,12 @@ from app.modules.workspace.autonomous.acceptance_gates import (
 from app.modules.workspace.autonomous.acceptance_snapshot import AcceptanceSnapshot
 from app.modules.workspace.autonomous.acceptance_verdicts import ItemVerdict
 from app.modules.workspace.autonomous.evidence import Verdict
+
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.issue(2335),
+    pytest.mark.usefixtures("_enable_acceptance_verification"),
+]
 
 
 def _gh(changed: list[str], status: str = "A") -> MagicMock:

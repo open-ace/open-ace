@@ -10,6 +10,8 @@ from __future__ import annotations
 import sqlite3
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.modules.workspace.autonomous.models import AutonomousWorkflow
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 from app.modules.workspace.autonomous.phases import acceptance_verification as av
@@ -17,6 +19,8 @@ from app.repositories.autonomous_repo import AutonomousWorkflowRepository
 from app.routes.autonomous import PHASE_TO_STATUS
 from app.services.autonomous_scheduler import ACTIVE_WORKFLOW_STATUSES
 from app.utils import config as config_module
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2431)]
 
 
 class _SQLiteDB:

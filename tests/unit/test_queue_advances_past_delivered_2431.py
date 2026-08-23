@@ -22,12 +22,16 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.services.autonomous_scheduler import (
     QUEUE_ADVANCE_STATUSES,
     QUEUE_BLOCKING_STATUSES,
     AutonomousScheduler,
     _slot_released,
 )
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2431)]
 
 
 def _wf(wid: str, status: str, phase: str, order: int, *, verification_status: str = "") -> dict:

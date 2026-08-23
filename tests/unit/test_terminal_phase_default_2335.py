@@ -13,8 +13,16 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.modules.workspace.autonomous.orchestrator import PHASE_ORDER, AutonomousOrchestrator
 from app.modules.workspace.autonomous.phase_contract import PhaseResult
+
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.issue(2335),
+    pytest.mark.usefixtures("_enable_acceptance_verification"),
+]
 
 
 def _make_orchestrator(workflow: dict) -> AutonomousOrchestrator:

@@ -9304,7 +9304,7 @@ class AutonomousOrchestrator:
         parsed["verified_by"] = verified_by
         # Runtime facts for the settle-time milestone: session + this call's
         # usage increment. Attached AFTER _parse_verifier_output so its exact-
-        # shape contract (tests/issues/2335/test_verifier_checkout.py) holds.
+        # shape contract (tests/unit/test_verifier_checkout_2335.py) holds.
         _attach_verifier_runtime(parsed, result)
         _attach_early_milestone(parsed, early)
         return parsed

@@ -1,5 +1,13 @@
+import pytest
+
 from app.modules.workspace.autonomous.acceptance_verdicts import ItemVerdict, aggregate_verdicts
 from app.modules.workspace.autonomous.evidence import Verdict
+
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.issue(2335),
+    pytest.mark.usefixtures("_enable_acceptance_verification"),
+]
 
 
 def _item(v, item="x"):

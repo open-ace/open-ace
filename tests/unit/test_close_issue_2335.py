@@ -1,7 +1,15 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import app.modules.workspace.autonomous.github_ops as gh_mod
 from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.issue(2335),
+    pytest.mark.usefixtures("_enable_acceptance_verification"),
+]
 
 BOT_ENV = {
     "GH_TOKEN": "ghp-bot",

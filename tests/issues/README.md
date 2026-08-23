@@ -3,11 +3,6 @@
 `tests/issues/<number>/` is retained only for the historical suites listed in
 `legacy-directories.txt`. It is not the destination for new tests.
 
-`pr-gate-directories.txt` is the temporary promotion list for legacy suites
-that already blocked PRs before Issue #2429. Root `conftest.py` marks these
-tests `priority_p0`; the required `legacy-pr` suite selects the marker. Remove
-an entry only after moving its tests to a canonical layer.
-
 The directory mixes unit, integration, browser, performance, privileged-host,
 and manual verification scripts. Treating them as one suite made their runtime
 contract unclear and caused the entire tree to be excluded from normal CI.

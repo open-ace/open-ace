@@ -1,8 +1,16 @@
+import pytest
+
 from app.modules.workspace.autonomous.acceptance_snapshot import (
     AcceptanceSnapshot,
     hash_snapshot,
     parse_acceptance_snapshot,
 )
+
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.issue(2335),
+    pytest.mark.usefixtures("_enable_acceptance_verification"),
+]
 
 
 def test_parses_convention_sections():

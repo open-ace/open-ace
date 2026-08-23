@@ -11,8 +11,16 @@ import dataclasses
 import json
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.modules.workspace.autonomous.phase_contract import PhaseResult, WorkflowContext
 from app.modules.workspace.autonomous.phases import acceptance_verification as av
+
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.issue(2335),
+    pytest.mark.usefixtures("_enable_acceptance_verification"),
+]
 
 
 def _ctx(wf):

@@ -180,7 +180,7 @@ def select_pr_suites(changed_files: list[str]) -> list[str]:
     """Select coarse, fail-safe PR lanes from repository-relative paths."""
     clean = sorted({path.strip().lstrip("./") for path in changed_files if path.strip()})
     if not clean:
-        return ["default-collection", "issue-collection", "legacy-pr", "python-core", "python-min"]
+        return ["default-collection", "issue-collection", "python-core", "python-min"]
 
     policy_change = any(matches(path, POLICY_PATTERNS) for path in clean)
     docs_only = all(matches(path, DOC_PATTERNS) for path in clean)
@@ -196,7 +196,6 @@ def select_pr_suites(changed_files: list[str]) -> list[str]:
     selected = {
         "default-collection",
         "issue-collection",
-        "legacy-pr",
         "python-core",
         "python-min",
     }

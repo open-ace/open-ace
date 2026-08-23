@@ -16,6 +16,12 @@ import pytest
 
 from app import create_app
 
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.issue(2335),
+    pytest.mark.usefixtures("_enable_acceptance_verification"),
+]
+
 
 def _workflow_row(**overrides):
     base = {

@@ -1,9 +1,17 @@
+import pytest
+
 from app.modules.workspace.autonomous.orchestrator import (
     _COMPLETED_TERMINAL_PHASES,
     PHASE_ORDER,
     PHASE_STATUS_MAP,
 )
 from app.modules.workspace.autonomous.phases import resolve_phase_handler
+
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.issue(2335),
+    pytest.mark.usefixtures("_enable_acceptance_verification"),
+]
 
 
 def test_acceptance_verification_phase_registered_and_ordered():
