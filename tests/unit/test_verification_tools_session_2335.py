@@ -1,9 +1,17 @@
 import copy
 
+import pytest
+
 from app.modules.workspace.autonomous.constants import (
     REVIEW_ALLOWED_TOOLS,
     VERIFICATION_ALLOWED_TOOLS,
 )
+
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.issue(2335),
+    pytest.mark.usefixtures("_enable_acceptance_verification"),
+]
 
 
 def test_verification_adds_bash_to_review_set():

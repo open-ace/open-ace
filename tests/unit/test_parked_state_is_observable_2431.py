@@ -18,12 +18,16 @@ import threading
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.repositories.autonomous_repo import AutonomousWorkflowRepository
 from app.services.autonomous_scheduler import (
     AutonomousScheduler,
     _is_in_flight,
     _retry_pending_git_cleanups,
 )
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2431)]
 
 
 class TestMaintenanceQueriesSeeParkedWorkflows:

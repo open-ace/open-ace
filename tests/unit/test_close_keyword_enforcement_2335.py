@@ -1,4 +1,12 @@
+import pytest
+
 from app.modules.workspace.autonomous.phases.pr_review import build_pr_body_close_ref
+
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.issue(2335),
+    pytest.mark.usefixtures("_enable_acceptance_verification"),
+]
 
 
 def test_pr_body_uses_implements_not_closes():

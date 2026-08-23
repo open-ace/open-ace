@@ -57,7 +57,7 @@ pytestmark = [pytest.mark.security, pytest.mark.regression, pytest.mark.issue(24
 
 ```bash
 # 默认 required suite（与 GitHub Actions 共用定义，并隔离 HOME/数据库环境）
-python scripts/ci.py run default-collection issue-collection legacy-pr python-core
+python scripts/ci.py run default-collection issue-collection python-core
 
 # 按 issue 运行已经迁移到任意规范目录的测试
 pytest --issue=2429
@@ -81,11 +81,11 @@ python scripts/run_extended_tests.py --category issues --split-total 4 --split-g
    `security` marker 包含在同一 required suite 中。
 2. Python 3.11 的 required job 对 `tests/issues/` 做全量 pytest collection，
    收集错误或 item 数低于 `.test-baseline.json` 立即失败。
-   历史上已进入 PR 门禁的 issue 目录继续由 `legacy-pr`
-   required suite 执行，不回退既有覆盖（#2429 批次 1 已将其中 8 个目录
-   ——2390/2401/2403/2428/2438/2439/2442/2443——迁入 `tests/unit/` 与
-   `tests/integration/subprocess/`，由 `python-core`/`python-min` 接管；
-   清单剩 2335、2431）。
+   历史上已进入 PR 门禁的 10 个 issue 目录已全部迁入 canonical 层
+   （#2429 批次 1：2390/2401/2403/2428/2438/2439/2442/2443；批次 2：
+   2335/2431），`legacy-pr` required suite 与
+   `tests/issues/pr-gate-directories.txt` 已随之退役，这些回归由
+   `python-core`/`python-min` required lane 按目录自动执行。
 3. critical E2E 按变更路径或标签执行，稳定前不作为 required check；完整 E2E
    和 legacy issue shards 每夜执行。
 4. PostgreSQL 和 performance 使用独立 lane，避免把环境需求隐藏成 skip。

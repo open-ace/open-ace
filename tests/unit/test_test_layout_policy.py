@@ -5,7 +5,7 @@ from pathlib import Path
 TESTS_ROOT = Path(__file__).resolve().parents[1]
 LEGACY_ISSUES_ROOT = TESTS_ROOT / "issues"
 LEGACY_INVENTORY = LEGACY_ISSUES_ROOT / "legacy-directories.txt"
-LEGACY_PR_GATE = LEGACY_ISSUES_ROOT / "pr-gate-directories.txt"
+RETIRED_PR_GATE_LIST = LEGACY_ISSUES_ROOT / "pr-gate-directories.txt"
 LEGACY_TOP_LEVEL_DIRECTORIES = TESTS_ROOT / "legacy-top-level-directories.txt"
 LEGACY_TOP_LEVEL_FILES = TESTS_ROOT / "legacy-top-level-files.txt"
 CANONICAL_DIRECTORIES = {"e2e", "integration", "issues", "performance", "support", "unit"}
@@ -15,14 +15,6 @@ def _legacy_inventory():
     return {
         line.strip()
         for line in LEGACY_INVENTORY.read_text().splitlines()
-        if line.strip() and not line.startswith("#")
-    }
-
-
-def _number_inventory(path):
-    return {
-        line.strip()
-        for line in path.read_text().splitlines()
         if line.strip() and not line.startswith("#")
     }
 
@@ -55,10 +47,15 @@ def test_legacy_issue_inventory_contains_only_issue_numbers():
     assert not invalid, f"Invalid entries in legacy issue inventory: {invalid}"
 
 
-def test_legacy_pr_gate_is_a_subset_of_the_frozen_inventory():
-    promoted = _number_inventory(LEGACY_PR_GATE)
-    assert promoted
-    assert promoted <= _legacy_inventory()
+def test_legacy_pr_gate_promotion_list_stays_retired():
+    """The pr-gate promotion list and its legacy-pr suite were retired when the
+    last two promoted directories (2335, 2431) migrated to canonical layers
+    (#2429 batch 2). Promoted coverage is the required python-core/python-min
+    lanes now; the list must not come back."""
+    assert not RETIRED_PR_GATE_LIST.exists(), (
+        "tests/issues/pr-gate-directories.txt was retired with the legacy-pr "
+        "suite; promote regressions by moving them to a canonical layer instead"
+    )
 
 
 def test_no_numbered_test_directory_exists_at_the_test_root():

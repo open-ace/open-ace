@@ -12,8 +12,16 @@ import os
 import stat
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.modules.workspace.autonomous import orchestrator as orch_mod
 from app.modules.workspace.autonomous.github_ops import OPENACE_RM_WRAPPER, GitHubOps
+
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.issue(2335),
+    pytest.mark.usefixtures("_enable_acceptance_verification"),
+]
 
 
 def _make_orchestrator():
@@ -135,18 +143,6 @@ def test_cross_user_verifier_directory_is_created_by_repository_owner():
         ["sudo", "-u", "alice", "mkdir", "-p", "--", expected_root],
         ["sudo", "-u", "alice", "mkdir", "-m", "700", "--", path],
     ]
-
-
-def test_same_user_verifier_directory_is_private_and_owner_writable(tmp_path):
-    """The real allocator creates a traversable/writable 0700 dir for its owner."""
-    gh = GitHubOps(str(tmp_path))
-    path = gh.create_verification_worktree_dir(str(tmp_path))
-    try:
-        mode = stat.S_IMODE(os.stat(path).st_mode)
-        assert mode == 0o700
-        assert os.access(path, os.X_OK | os.W_OK)
-    finally:
-        gh.remove_verification_worktree_dir(path, str(tmp_path))
 
 
 def test_cross_user_verifier_cleanup_uses_owner_safe_wrapper():

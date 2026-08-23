@@ -10,8 +10,16 @@ report entry excluded from aggregation.
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.modules.workspace.autonomous.evidence import Verdict
 from app.modules.workspace.autonomous.phases.acceptance_verification import run_scope_gate
+
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.issue(2335),
+    pytest.mark.usefixtures("_enable_acceptance_verification"),
+]
 
 
 def _gh(changed, touched=None):

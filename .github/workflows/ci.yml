@@ -41,7 +41,6 @@ jobs:
       e2e_governance: ${{ steps.select.outputs.e2e_governance }}
       frontend: ${{ steps.select.outputs.frontend }}
       issue_collection: ${{ steps.select.outputs.issue_collection }}
-      legacy_pr: ${{ steps.select.outputs.legacy_pr }}
       package: ${{ steps.select.outputs.package }}
       postgres: ${{ steps.select.outputs.postgres }}
       python_core: ${{ steps.select.outputs.python_core }}
@@ -187,10 +186,6 @@ jobs:
       - name: Validate E2E governance artifacts
         if: matrix.suite == 'python-core' && needs.changes.outputs.e2e_governance == 'true'
         run: python scripts/ci.py run e2e-governance
-
-      - name: Run promoted legacy regressions
-        if: matrix.suite == 'python-core' && needs.changes.outputs.legacy_pr == 'true'
-        run: python scripts/ci.py run legacy-pr
 
       - name: Run selected test suite
         if: >-
