@@ -499,9 +499,9 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   } | null>(null);
   // Session-viewer per-message expansion (#3000), keyed `${milestoneId}:${idx}`
   // so stale entries from a previously viewed milestone are harmless.
-  const [expandedSessionMessages, setExpandedSessionMessages] = useState<
-    Record<string, boolean>
-  >({});
+  const [expandedSessionMessages, setExpandedSessionMessages] = useState<Record<string, boolean>>(
+    {}
+  );
   const [showBranchSelector, setShowBranchSelector] = useState(false);
   const [viewingDiff, setViewingDiff] = useState<string | null>(null);
   const [selectedDiffFileId, setSelectedDiffFileId] = useState<string | null>(null);

@@ -2074,7 +2074,6 @@ class SessionManager:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            has_session_tenant = self._column_exists(cursor, "agent_sessions", "tenant_id")
             cursor.execute(
                 f"SELECT tenant_id FROM agent_sessions WHERE session_id = {_param()}",
                 (session_id,),
