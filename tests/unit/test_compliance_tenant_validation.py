@@ -13,34 +13,11 @@ import pytest
 
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1824)]
+
 
 class TestComplianceTenantValidation:
     """Test compliance report tenant_id validation."""
-
-    def test_non_admin_uses_own_tenant(self):
-        """Non-admin users must use their own tenant scope."""
-        # Unit test: verify tenant scope resolution logic
-        # Non-admin should be forced to use their own tenant_id
-        pass
-
-    def test_admin_cross_tenant_with_valid_tenant(self):
-        """Admin can request cross-tenant report with valid tenant_id."""
-        # Mock database with valid tenant
-        mock_db = MagicMock()
-        mock_db.fetch_one.return_value = {"id": 2, "name": "test_tenant_2"}
-
-        # Admin can access tenant 2's data
-        # Validation should pass
-        pass
-
-    def test_admin_cross_tenant_with_invalid_tenant(self):
-        """Admin requesting non-existent tenant should return 404."""
-        # Mock database with no matching tenant
-        mock_db = MagicMock()
-        mock_db.fetch_one.return_value = None
-
-        # Should return 404 for non-existent tenant
-        pass
 
     def test_audit_log_matches_report_tenant(self):
         """Audit log tenant_id must match report's tenant_id."""

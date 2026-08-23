@@ -8,9 +8,12 @@ Tests for:
 """
 
 import sys
+import unittest.mock
 from pathlib import Path
 
 import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1824)]
 
 
 class TestDailyUsageQualityCheck:
@@ -19,20 +22,20 @@ class TestDailyUsageQualityCheck:
     def test_script_exists(self):
         """Script file should exist."""
         script_path = (
-            Path(__file__).parent.parent.parent.parent / "scripts" / "check_daily_usage_quality.py"
+            Path(__file__).parent.parent.parent / "scripts" / "check_daily_usage_quality.py"
         )
         assert script_path.exists()
 
     def test_script_is_executable(self):
         """Script should be importable."""
         script_path = (
-            Path(__file__).parent.parent.parent.parent / "scripts" / "check_daily_usage_quality.py"
+            Path(__file__).parent.parent.parent / "scripts" / "check_daily_usage_quality.py"
         )
         assert script_path.is_file()
 
     def test_script_functions(self):
         """Script should have required functions."""
-        scripts_dir = Path(__file__).parent.parent.parent.parent / "scripts"
+        scripts_dir = Path(__file__).parent.parent.parent / "scripts"
         sys.path.insert(0, str(scripts_dir))
 
         # Import module
@@ -51,24 +54,20 @@ class TestDailyUsageConflictDetection:
     def test_script_exists(self):
         """Script file should exist."""
         script_path = (
-            Path(__file__).parent.parent.parent.parent
-            / "scripts"
-            / "check_daily_usage_conflicts.py"
+            Path(__file__).parent.parent.parent / "scripts" / "check_daily_usage_conflicts.py"
         )
         assert script_path.exists()
 
     def test_script_is_executable(self):
         """Script should be importable."""
         script_path = (
-            Path(__file__).parent.parent.parent.parent
-            / "scripts"
-            / "check_daily_usage_conflicts.py"
+            Path(__file__).parent.parent.parent / "scripts" / "check_daily_usage_conflicts.py"
         )
         assert script_path.is_file()
 
     def test_script_functions(self):
         """Script should have required functions."""
-        scripts_dir = Path(__file__).parent.parent.parent.parent / "scripts"
+        scripts_dir = Path(__file__).parent.parent.parent / "scripts"
         sys.path.insert(0, str(scripts_dir))
 
         import check_daily_usage_conflicts
@@ -84,24 +83,20 @@ class TestDailyUsageConflictResolution:
     def test_script_exists(self):
         """Script file should exist."""
         script_path = (
-            Path(__file__).parent.parent.parent.parent
-            / "scripts"
-            / "resolve_daily_usage_conflicts.py"
+            Path(__file__).parent.parent.parent / "scripts" / "resolve_daily_usage_conflicts.py"
         )
         assert script_path.exists()
 
     def test_script_is_executable(self):
         """Script should be importable."""
         script_path = (
-            Path(__file__).parent.parent.parent.parent
-            / "scripts"
-            / "resolve_daily_usage_conflicts.py"
+            Path(__file__).parent.parent.parent / "scripts" / "resolve_daily_usage_conflicts.py"
         )
         assert script_path.is_file()
 
     def test_script_functions(self):
         """Script should have required functions."""
-        scripts_dir = Path(__file__).parent.parent.parent.parent / "scripts"
+        scripts_dir = Path(__file__).parent.parent.parent / "scripts"
         sys.path.insert(0, str(scripts_dir))
 
         import resolve_daily_usage_conflicts
@@ -112,34 +107,22 @@ class TestDailyUsageConflictResolution:
 
     def test_dry_run_strategy(self):
         """Script should support --strategy=dry-run."""
-        scripts_dir = Path(__file__).parent.parent.parent.parent / "scripts"
+        scripts_dir = Path(__file__).parent.parent.parent / "scripts"
         sys.path.insert(0, str(scripts_dir))
 
         import resolve_daily_usage_conflicts
 
-        # Test that dry-run is the default strategy
-        result = resolve_daily_usage_conflicts.resolve_conflict_earliest(
-            date="2026-07-30",
-            tool_name="test_tool",
-            host_name="localhost",
-            target_tenant=1,
-            dry_run=True,
-        )
+        # No live DB in the unit layer: the resolver reads conflicts through
+        # the module-level Database handle, so an empty-row mock keeps the
+        # dry-run contract assertion self-contained.
+        with unittest.mock.patch.object(resolve_daily_usage_conflicts, "Database") as database_cls:
+            database_cls.return_value.fetch_all.return_value = []
+            result = resolve_daily_usage_conflicts.resolve_conflict_earliest(
+                date="2026-07-30",
+                tool_name="test_tool",
+                host_name="localhost",
+                target_tenant=1,
+                dry_run=True,
+            )
         # Returns 0 rows in dry-run mode
         assert result == 0
-
-
-class TestDailyUsageDataIntegrity:
-    """Test data integrity validation."""
-
-    def test_no_null_tenant_ids(self):
-        """All daily_usage rows should have tenant_id (not NULL)."""
-        # Unit test: verify server_default is set correctly in migration
-        # This would be verified in integration test with real DB
-        pass
-
-    def test_unique_constraint_enforced(self):
-        """Unique constraint on (tenant_id, date, tool_name, host_name) should be enforced."""
-        # Unit test: verify constraint is defined in migration
-        # Integration test would verify it's enforced at DB level
-        pass

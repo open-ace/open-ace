@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(764)]
+
 
 class TestCreateSessionAcceptsWorkspaceParams:
     """Verify create_session() accepts workspace_type and remote_machine_id."""

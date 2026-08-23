@@ -6,7 +6,7 @@ import sys
 import pytest
 
 # Add remote-agent to path so we can import cli_adapters
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "remote-agent"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "remote-agent"))
 
 from cli_adapters.usage_parser import (
     CUMULATIVE_RESULT_TOOLS,
@@ -16,6 +16,8 @@ from cli_adapters.usage_parser import (
     extract_stream_usage,
     is_cumulative_result_tool,
 )
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(764)]
 
 
 class TestExtractClaudeStreamUsage:

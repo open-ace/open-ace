@@ -48,6 +48,9 @@ from app.repositories.autonomous_repo import (
     AutonomousWorkflowRepository,
 )
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1284)]
+
+
 SUPPORTED_LANGUAGES = ("en", "zh", "ja", "ko")
 
 
