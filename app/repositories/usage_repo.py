@@ -881,11 +881,12 @@ class UsageRepository:
                 }
 
         # Aliases merged from several raw names inherit days_count /
-        # first_date / last_date from ONE alias's grouped row, which
-        # undercounts days and misreports the range whenever another alias
-        # spans further (migration 038 used to rebuild these during upgrade;
-        # the read-boundary merge must keep the same union semantics —
-        # Issue #1111). Recompute the span over the whole alias family.
+        # first_date / last_date / avg_tokens from ONE alias's grouped row,
+        # which undercounts days, misreports the range, and reports the
+        # dominant alias's average whenever another alias spans further
+        # (migration 038 used to rebuild these during upgrade; the
+        # read-boundary merge must keep the same union semantics —
+        # Issue #1111). Recompute the aggregates over the whole alias family.
         for tool, raw_names in raw_names_by_tool.items():
             if len(raw_names) < 2 or tool not in results:
                 continue
@@ -894,7 +895,8 @@ class UsageRepository:
                 f"""
                     SELECT COUNT(DISTINCT date) as days_count,
                            MIN(date) as first_date,
-                           MAX(date) as last_date
+                           MAX(date) as last_date,
+                           AVG(tokens_used) as avg_tokens
                     FROM daily_messages
                     {where_clause} AND tool_name IN ({placeholders})
                 """,
@@ -904,6 +906,9 @@ class UsageRepository:
                 results[tool]["days_count"] = span_row["days_count"]
                 results[tool]["first_date"] = span_row["first_date"]
                 results[tool]["last_date"] = span_row["last_date"]
+                results[tool]["avg_tokens"] = (
+                    round(span_row["avg_tokens"], 2) if span_row["avg_tokens"] else 0
+                )
 
         return results
 
