@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.orchestrator import (
     AutonomousOrchestrator,
@@ -379,10 +380,12 @@ def test_verification_quota_pause_writes_usage_to_early_row_before_raising():
     orchestrator._ensure_verification_milestone = MagicMock(
         return_value={
             "milestone_id": "ms-early-2999",
-            "phase_total_tokens": 0,
-            "phase_input_tokens": 0,
-            "phase_output_tokens": 0,
-            "phase_request_count": 0,
+            # Non-zero baseline: _write_phase_usage must fold prior + result
+            # (a dropped prior_usage term would write 500, not 700).
+            "phase_total_tokens": 200,
+            "phase_input_tokens": 150,
+            "phase_output_tokens": 50,
+            "phase_request_count": 2,
         }
     )
     orchestrator._build_verification_prompt = MagicMock(return_value="verify")
@@ -391,17 +394,16 @@ def test_verification_quota_pause_writes_usage_to_early_row_before_raising():
     orchestrator._checkout_merged_main = MagicMock(return_value="/tmp/merged")
     orchestrator._remove_verification_worktree = MagicMock()
 
-    with patch.object(
-        type(orchestrator),
-        "workflow",
-        new_callable=PropertyMock,
-        return_value={
-            "user_id": 1,
-            "content_language": "en",
-            "cli_tool": "claude-code",
-            "model": "",
-            "workspace_type": "remote",
-        },
+    # The verification call defaults to the local path, whose isolation probe
+    # is environment-dependent (/usr/local/bin/openace-run-as) — pin it off.
+    with (
+        patch.object(AutonomousAgentRunner, "is_isolated_launcher_available", return_value=False),
+        patch.object(
+            type(orchestrator),
+            "workflow",
+            new_callable=PropertyMock,
+            return_value={"user_id": 1, "content_language": "en", "cli_tool": "claude-code"},
+        ),
     ):
         with pytest.raises(UpstreamQuotaPaused):
             orchestrator._run_verification_agent(
@@ -409,12 +411,18 @@ def test_verification_quota_pause_writes_usage_to_early_row_before_raising():
             )
 
     updates = orchestrator.repo.update_milestone.call_args_list
-    usage_idx = next(i for i, c in enumerate(updates) if "phase_total_tokens" in c.args[1])
-    failed_idx = next(i for i, c in enumerate(updates) if c.args[1].get("status") == "failed")
-    # The burned tokens land on the early row BEFORE the pause terminalizes it.
+    usage_idx = next((i for i, c in enumerate(updates) if "phase_total_tokens" in c.args[1]), None)
+    assert usage_idx is not None, "no phase_* usage write observed"
+    failed_idx = next(
+        (i for i, c in enumerate(updates) if c.args[1].get("status") == "failed"), None
+    )
+    assert failed_idx is not None, "no pause terminalization observed"
+    # The burned tokens land on the early row BEFORE the pause terminalizes
+    # THE SAME ROW, folding the resume baseline: 200 prior + 500 burned.
     assert updates[usage_idx].args[0] == "ms-early-2999"
-    assert updates[usage_idx].args[1]["phase_total_tokens"] == 500
-    assert updates[usage_idx].args[1]["phase_request_count"] == 3
+    assert updates[usage_idx].args[1]["phase_total_tokens"] == 700
+    assert updates[usage_idx].args[1]["phase_request_count"] == 5
+    assert updates[failed_idx].args[0] == "ms-early-2999"
     assert usage_idx < failed_idx
     # The verification call carries the early-row binding (pinned elsewhere
     # for prior_usage too; asserted here for the composition).
