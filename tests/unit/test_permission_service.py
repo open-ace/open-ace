@@ -7,6 +7,23 @@ import pytest
 from app.services.permission_service import DEFAULT_ROLES, Permission, PermissionService, Role
 
 
+@pytest.fixture(autouse=True)
+def _restore_default_roles():
+    """Snapshot/restore the shared DEFAULT_ROLES Role objects around each test.
+
+    ``PermissionService.roles`` is a shallow dict copy of ``DEFAULT_ROLES`` —
+    the Role objects are shared, and ``update_role_permissions`` rewrites
+    ``role.permissions`` in place. Without this fixture a mutating test leaks
+    its permissions into any later in-process reader (e.g.
+    ``test_security_model.py`` under xdist worker interleaving, surfaced when
+    #2429 batch 1 shifted suite scheduling).
+    """
+    snapshot = {name: set(role.permissions) for name, role in DEFAULT_ROLES.items()}
+    yield
+    for name, role in DEFAULT_ROLES.items():
+        role.permissions = snapshot[name]
+
+
 class TestPermissionEnum:
     """Test Permission enum."""
 
