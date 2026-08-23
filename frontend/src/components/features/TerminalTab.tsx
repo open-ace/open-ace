@@ -80,6 +80,11 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   onErrorRef.current = onError;
 
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
+  // initTerminal sets xtermRef asynchronously (dynamic chunk import); a ref
+  // write does not re-run effects, so mirror readiness as state. Without it,
+  // a wsUrl/token arriving before the import finishes is silently dropped —
+  // the connect effect never fires again and no WebSocket is opened.
+  const [xtermReady, setXtermReady] = useState(false);
 
   const connect = useCallback(() => {
     console.log('[TerminalTab] connect called:', {
@@ -359,6 +364,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 
       xtermRef.current = terminal;
       fitAddonRef.current = fitAddon;
+      setXtermReady(true);
 
       console.log('[TerminalTab] xterm.js initialized, ready to connect');
 
@@ -400,15 +406,16 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   // Connect when xterm is ready or wsUrl/token change
   useEffect(() => {
     console.log('[TerminalTab] Connect effect triggered:', {
+      xtermReady,
       hasXterm: !!xtermRef.current,
       wsUrl,
       token: !!token,
     });
-    if (xtermRef.current && wsUrl && token) {
+    if (xtermReady && xtermRef.current && wsUrl && token) {
       console.log('[TerminalTab] Calling connect() from effect');
       connect();
     }
-  }, [connect, wsUrl, token]);
+  }, [connect, wsUrl, token, xtermReady]);
 
   // Handle resize and focus when tab becomes active
   useEffect(() => {
