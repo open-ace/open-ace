@@ -9,6 +9,7 @@ WebUI sessions.
 import json
 import os
 import secrets
+import sqlite3
 from base64 import b64encode
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -250,8 +251,18 @@ class TestWebUITokenNoUserId:
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_sessions'"
             )
             if cursor.fetchone() is None:
+                # The isolated DB may be partially initialized (other tables
+                # exist); create just agent_sessions from the canonical DDL.
                 schema_path = Path(__file__).resolve().parents[2] / "schema" / "schema-sqlite.sql"
-                conn.executescript(schema_path.read_text())
+                stmt = next(
+                    s
+                    for s in schema_path.read_text().split(";")
+                    if "CREATE TABLE agent_sessions" in s
+                )
+                try:
+                    cursor.execute(stmt)
+                except sqlite3.OperationalError:
+                    pass  # created concurrently by another statement batch
             cursor.execute(
                 "INSERT OR REPLACE INTO agent_sessions"
                 " (session_id, status, session_type, tool_name, host_name)"
