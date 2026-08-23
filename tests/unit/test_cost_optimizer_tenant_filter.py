@@ -13,8 +13,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.modules.analytics.cost_optimizer import CostOptimizer
 from app.utils.cache import get_cache
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1818)]
 
 
 def _seed_daily_usage(db: MagicMock) -> None:

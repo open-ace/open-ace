@@ -12,7 +12,10 @@ import os
 
 import pytest
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+pytestmark = [pytest.mark.regression, pytest.mark.issue(885)]
+
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 I18N_FILE = os.path.join(REPO_ROOT, "frontend", "src", "i18n", "index.ts")
 
 

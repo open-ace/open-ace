@@ -21,6 +21,8 @@ import pytest
 from app.modules.workspace.autonomous.agent_runner import _extract_cli_result_error
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2035)]
+
 
 class TestExtractCliResultErrorResumeSessionFailed:
     """``_extract_cli_result_error`` must classify EPERM and "Failed to resume
@@ -634,6 +636,9 @@ class TestRunAgentSessionResumeRecoveryFollowup:
             "session_resume_recovery",
             {"error_code": "resume_session_failed", "session_line": "main"},
         )
+        # Same contract as a plain assert (assert_any_call is not in the
+        # scanner's ASSERT_METHODS frozenset).
+        assert "session_resume_recovery" in [c.args[0] for c in orch._emit.call_args_list]
 
     def test_recovery_refreshes_session_id_kwarg_before_retry(self):
         """The recovery retry must set kwargs['session_id'] to the tracking

@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1894)]
+
 
 def _resolver(*addresses):
     """Create a mock DNS resolver that returns specified addresses."""

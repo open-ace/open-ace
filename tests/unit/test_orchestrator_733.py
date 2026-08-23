@@ -15,6 +15,8 @@ import pytest
 
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(733)]
+
 
 def _fake_git_run(*args, **kwargs):
     """Fake GitHubOps._run_git for the scope-verification probes (as in 716)."""

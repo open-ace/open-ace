@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(771)]
+
 
 class TestActivityCallback:
     """Verify activity_callback is invoked for each event type."""
@@ -124,9 +126,7 @@ class TestActivityCallback:
     def test_no_callback_when_none(self):
         """No crash when activity_callback is None (backward compat)."""
         runner = self._make_runner(callback=None)
-        # Should not raise
-        if runner._activity_callback:
-            runner._activity_callback("sess-123", {"type": "assistant", "text": "hi"})
+        assert runner._activity_callback is None
 
 
 class TestOrchestratorActivityForwarding:

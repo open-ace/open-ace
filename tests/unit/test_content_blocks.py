@@ -7,11 +7,26 @@ Tests the structured content extraction from Qwen JSONL entries.
 import sys
 from pathlib import Path
 
-# Add scripts directory to path
-scripts_dir = Path(__file__).parent.parent.parent.parent / "scripts"
-sys.path.insert(0, str(scripts_dir.parent))
+import pytest
 
-from scripts.fetch_qwen import extract_content_blocks_from_entry
+pytestmark = [pytest.mark.regression, pytest.mark.issue(357)]
+
+
+# Import scripts.fetch_qwen without leaving entries on sys.path: fetch_qwen
+# imports the ``shared`` package from inside scripts/, so both the repo root
+# (for the ``scripts`` namespace package) and scripts/ itself must be visible
+# during the import. Entries are removed afterwards so later tests in the same
+# worker see an unmutated path (this also fixes the pre-migration standalone
+# collection failure that relied on sibling tests polluting sys.path).
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_SCRIPTS_DIR = _REPO_ROOT / "scripts"
+_added = [str(p) for p in (_REPO_ROOT, _SCRIPTS_DIR) if str(p) not in sys.path]
+sys.path[:0] = _added
+try:
+    from scripts.fetch_qwen import extract_content_blocks_from_entry
+finally:
+    for entry in _added:
+        sys.path.remove(entry)
 
 
 def test_empty_entry():

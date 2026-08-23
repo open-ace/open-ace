@@ -1958,7 +1958,7 @@ def _make_run_agent_orchestrator():
     orch._update_milestone = MagicMock()
     # Bypass trusted-git-context snapshot — tests use synthetic /tmp paths
     # that don't have a real .git directory (same pattern as
-    # tests/issues/2035/test_session_resume_recovery.py).
+    # tests/unit/test_session_resume_recovery.py).
     orch._snapshot_repo_context = MagicMock(
         return_value={
             "context": {"repo_path": "/tmp/test-project"},
