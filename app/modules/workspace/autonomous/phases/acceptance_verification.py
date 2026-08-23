@@ -776,7 +776,14 @@ def _prior_infra_error_kind(wf: dict, merge_sha: str, snap_hash: str) -> str | N
 
 
 def _acceptance_milestone(
-    *, workflow_id, dev_round, attempt, status, report, session_id: str = "", usage: dict | None = None
+    *,
+    workflow_id,
+    dev_round,
+    attempt,
+    status,
+    report,
+    session_id: str = "",
+    usage: dict | None = None,
 ) -> dict:
     """Build the acceptance-verification milestone row.
 

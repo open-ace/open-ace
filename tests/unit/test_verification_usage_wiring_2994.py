@@ -14,10 +14,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
-from app.modules.workspace.autonomous.orchestrator import (
-    AutonomousOrchestrator,
-    WorkflowPaused,
-)
+from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator, WorkflowPaused
 from app.modules.workspace.autonomous.phase_contract import PhaseResult
 from app.modules.workspace.autonomous.phases import acceptance_verification as av
 
@@ -363,9 +360,7 @@ def test_run_verification_agent_checkout_failure_has_no_runtime_keys():
 
 
 def test_run_verification_agent_tracking_id_wins_over_blank_session_id():
-    orch = _orch_for_agent_run(
-        _run_agent_result(tracking_session_id=SESSION_ID, session_id="")
-    )
+    orch = _orch_for_agent_run(_run_agent_result(tracking_session_id=SESSION_ID, session_id=""))
 
     with _wf_property(orch):
         out = orch._run_verification_agent(
