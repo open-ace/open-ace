@@ -5,14 +5,15 @@
  * resume-with-feedback entry point for rejected acceptance workflows.
  */
 
+import { format as formatDateTime } from 'date-fns';
 import { fireEvent, render, screen, within } from '@/test/utils';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   WorkflowTimeline,
   formatAcceptanceReport,
   getAcceptanceSummaryDetail,
 } from './WorkflowTimeline';
-import { useWorkflowTimeline } from '@/hooks/useAutonomous';
+import { useMilestoneSession, useWorkflowTimeline } from '@/hooks/useAutonomous';
 import type { AutonomousWorkflow, WorkflowMilestone } from '@/api/autonomous';
 
 const { mockResumeWithFeedbackMutate, mockAcceptanceOverrideMutate, pendingMutation } = vi.hoisted(
@@ -583,6 +584,81 @@ describe('acceptance milestone usage wiring (#2994)', () => {
     );
 
     expect(screen.queryByText('System step')).not.toBeInTheDocument();
+  });
+});
+
+describe('session viewer message rendering (#3000)', () => {
+  afterEach(() => {
+    // renderSessionViewer installs a persistent return value (the click that
+    // opens the modal triggers a re-render, so a once-value would be consumed
+    // by the pre-click render); restore the shared default afterwards.
+    vi.mocked(useMilestoneSession).mockReset();
+    vi.mocked(useMilestoneSession).mockReturnValue({ data: undefined, isLoading: false } as never);
+  });
+
+  function renderSessionViewer(messages: Array<Record<string, unknown>>) {
+    vi.mocked(useMilestoneSession).mockReturnValue({
+      data: {
+        success: true,
+        session: {
+          status: 'completed',
+          messages,
+        },
+      },
+    } as never);
+    const utils = renderWithMilestones(
+      pausedWorkflow({ status: 'completed', verification_status: 'confirmed' }),
+      [
+        acceptanceMilestone({
+          session_id: 'verif-tracking-session-1',
+          llm_total_tokens: 1000,
+          llm_request_count: 3,
+        }),
+      ]
+    );
+    fireEvent.click(screen.getByText(/Session ID.*verif-tr/));
+    return utils;
+  }
+
+  it('renders assistant turns as markdown, tool output as monospace, with timestamps', () => {
+    renderSessionViewer([
+      {
+        role: 'assistant',
+        content: '**Fixed** the `token` refresh path',
+        timestamp: '2026-08-22T12:34:56+00:00',
+      },
+      { role: 'tool', content: 'git diff HEAD~1', timestamp: '2026-08-22T12:35:10+00:00' },
+    ]);
+
+    // Conversational turn → markdown body (strong renders as <strong>).
+    const mdBody = document.querySelector('.timeline-session-msg-md');
+    expect(mdBody).toBeTruthy();
+    expect(mdBody?.querySelector('strong')?.textContent).toBe('Fixed');
+    // Tool output stays a monospace <pre>.
+    expect(document.querySelector('.timeline-session-msg-pre')?.textContent).toContain(
+      'git diff HEAD~1'
+    );
+    // Timestamps render next to the role badges (expected value computed with
+    // the same formatter so the assertion is timezone-stable).
+    expect(
+      screen.getByText(formatDateTime(new Date('2026-08-22T12:34:56+00:00'), 'MM-dd HH:mm'))
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(formatDateTime(new Date('2026-08-22T12:35:10+00:00'), 'MM-dd HH:mm'))
+    ).toBeInTheDocument();
+  });
+
+  it('no longer truncates long messages and offers expand/collapse', () => {
+    const tail = 'END-OF-LONG-MESSAGE';
+    const longContent = `${'x'.repeat(5000)}${tail}`;
+    renderSessionViewer([{ role: 'assistant', content: longContent }]);
+
+    // The 4000-char slice is gone — the tail survives.
+    expect(screen.getByText(new RegExp(tail))).toBeInTheDocument();
+    // Long messages get the expand toggle.
+    const expandBtn = screen.getByText('Expand');
+    fireEvent.click(expandBtn);
+    expect(screen.getByText('Collapse')).toBeInTheDocument();
   });
 });
 

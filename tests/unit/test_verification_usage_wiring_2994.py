@@ -134,6 +134,10 @@ def test_confirmed_result_records_session_usage_and_delta():
     assert milestone["session_id"] == SESSION_ID
     assert milestone["phase_total_tokens"] == USAGE["total_tokens"]
     assert milestone["phase_request_count"] == USAGE["request_count"]
+    # #3000: the settle milestone id is pre-minted and the session's untagged
+    # messages are swept onto it.
+    assert milestone["milestone_id"]
+    deps.host.tag_session_messages.assert_called_once_with(SESSION_ID, milestone["milestone_id"])
 
 
 def test_rejected_pause_carries_session_usage_and_delta():
@@ -155,6 +159,7 @@ def test_rejected_pause_carries_session_usage_and_delta():
     (milestone,) = result.milestone_events
     assert milestone["session_id"] == SESSION_ID
     assert milestone["phase_total_tokens"] == USAGE["total_tokens"]
+    deps.host.tag_session_messages.assert_called_once_with(SESSION_ID, milestone["milestone_id"])
 
 
 def test_indeterminate_pause_carries_session_usage_and_delta():
@@ -169,6 +174,7 @@ def test_indeterminate_pause_carries_session_usage_and_delta():
     (milestone,) = result.milestone_events
     assert milestone["session_id"] == SESSION_ID
     assert milestone["phase_total_tokens"] == USAGE["total_tokens"]
+    deps.host.tag_session_messages.assert_called_once_with(SESSION_ID, milestone["milestone_id"])
 
 
 def test_infra_exhausted_pause_carries_partial_usage_and_delta():
@@ -199,6 +205,7 @@ def test_infra_exhausted_pause_carries_partial_usage_and_delta():
     (milestone,) = outcomes[-1].milestone_events
     assert milestone["session_id"] == SESSION_ID
     assert milestone["phase_total_tokens"] == USAGE["total_tokens"]
+    deps.host.tag_session_messages.assert_called_once_with(SESSION_ID, milestone["milestone_id"])
 
 
 # ── handle(): paths that must NOT record anything new ────────────────────────
@@ -223,6 +230,21 @@ def test_infra_retry_creates_no_milestone_and_no_delta():
     assert result.outcome == "retry"
     assert result.milestone_events == []
     assert result.usage_delta is None
+    # No settle milestone exists yet — nothing to tag messages onto (#3000).
+    deps.host.tag_session_messages.assert_not_called()
+
+
+def test_settle_without_session_skips_tagging():
+    """Legacy host dicts carry no session id — tagging must be skipped."""
+    deps = _deps_confirmed()
+    agent_out = _agent_out_confirmed()
+    agent_out.pop("session_id")
+    deps.host.run_verification_agent.return_value = agent_out
+
+    result = av.handle(_ctx(_workflow()), deps)
+
+    assert result.outcome == "completed"
+    deps.host.tag_session_messages.assert_not_called()
 
 
 def test_already_confirmed_noop_creates_no_milestone_and_no_delta():

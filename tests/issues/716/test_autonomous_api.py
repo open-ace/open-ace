@@ -1264,9 +1264,11 @@ class TestGetMilestoneSession:
         data = resp.get_json()
         assert data["success"] is True
         assert data["session"]["session_id"] == "sess-123"
+        # #3000: the milestone-filtered call is gone — the tracking session's
+        # FULL transcript is served (untagged messages must not vanish).
         assert mock_sm.get_session.call_args_list == [
             (("sess-123",), {}),
-            (("sess-123",), {"include_messages": True, "message_milestone_id": "ms-1"}),
+            (("sess-123",), {"include_messages": True}),
         ]
 
     def test_get_session_prefers_actual_cli_session_when_mapped(self, client):

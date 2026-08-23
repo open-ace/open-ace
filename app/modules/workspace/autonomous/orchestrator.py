@@ -8959,6 +8959,32 @@ class AutonomousOrchestrator:
         # so they show up in workflow_events without colliding with phase/status.
         self._emit(name, payload)
 
+    def tag_session_messages(self, session_id: str, milestone_id: str) -> int:
+        return self._tag_session_messages(session_id, milestone_id)
+
+    def _tag_session_messages(self, session_id: str, milestone_id: str) -> int:
+        """Tag a session's milestone-less messages (#3000).
+
+        Thin delegate to SessionManager.tag_untagged_messages — the settle-time
+        milestone id is minted in the acceptance handler before the row exists,
+        and the message rows carry no FK, so ordering is safe. Best-effort: a
+        failure logs a warning and returns 0; verdicts never depend on it.
+        """
+        if not session_id or not milestone_id:
+            return 0
+        try:
+            from app.modules.workspace.session_manager import SessionManager
+
+            return SessionManager().tag_untagged_messages(session_id, milestone_id)
+        except Exception:
+            logger.warning(
+                "Failed to tag verifier session messages (%s -> %s)",
+                session_id,
+                milestone_id,
+                exc_info=True,
+            )
+            return 0
+
     def _dev_round_cap_remaining(self, wf: dict) -> int:
         # Bound the rejected -> development loop so a persistently-rejected issue
         # eventually fails instead of looping forever. Slices may raise this.

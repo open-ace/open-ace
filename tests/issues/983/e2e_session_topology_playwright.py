@@ -12,8 +12,8 @@ Verifies the autonomous-workflow refactor:
      session pollution).
   4. Single-round vs multi-round naming: a phase that ran one round shows a
      numberless label (e.g. "Plan review"); multiple rounds show the round number.
-  5. Milestone session detail surfaces only that milestone's messages (filtered by
-     milestone_id), even when milestones share a resumed session.
+  5. Milestone session detail surfaces the shared session's full transcript
+     (#3000), even when milestones share a resumed session.
 
 Data is seeded directly via AutonomousWorkflowRepository (no real agent runs).
 
@@ -395,7 +395,7 @@ def step_test_multi_round_rounds(wf_id):
 
 
 def step_test_session_message_filtering(repo):
-    """Shared session messages are filtered by milestone_id."""
+    """Shared session messages are returned as the full transcript."""
     log("SESSION", "Verifying message filtering by milestone_id")
     from app.modules.workspace.session_manager import SessionManager
 
@@ -442,17 +442,19 @@ def step_test_session_message_filtering(repo):
     sm.add_message(shared_session, "user", "message for milestone A", milestone_id=ms_a)
     sm.add_message(shared_session, "user", "message for milestone B", milestone_id=ms_b)
 
-    # Ask for ms_a's session detail — only ms_a's message should surface.
+    # Ask for ms_a's session detail — the FULL shared transcript surfaces
+    # (#3000: milestone filtering dropped untagged messages and once left the
+    # viewer rendering only the status badge).
     r = api("get", f"/api/autonomous/workflows/{wf_id}/milestones/{ms_a}/session")
     assert r.status_code == 200, r.text
     payload = r.json()
     session = payload.get("session") or {}
     contents = [m.get("content", "") for m in (session.get("messages") or [])]
     assert any("message for milestone A" in c for c in contents), f"ms_a msg missing: {contents}"
-    assert not any(
+    assert any(
         "message for milestone B" in c for c in contents
-    ), f"ms_b leaked into ms_a detail: {contents}"
-    log("SESSION", "  ✅ milestone session detail filtered by milestone_id")
+    ), f"ms_b missing from the shared transcript: {contents}"
+    log("SESSION", "  ✅ milestone session detail returns the full shared transcript")
 
 
 # ── Browser assertions ─────────────────────────────────
@@ -574,7 +576,7 @@ def run_tests():
     api_tests = [
         ("New Milestones + Usage", lambda: step_test_new_milestones_and_usage(single_wf)),
         ("Multi-Round Rounds", lambda: step_test_multi_round_rounds(multi_wf)),
-        ("Session Message Filtering", lambda: step_test_session_message_filtering(repo)),
+        ("Session Full Transcript", lambda: step_test_session_message_filtering(repo)),
     ]
     for name, fn in api_tests:
         try:

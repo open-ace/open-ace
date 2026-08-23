@@ -104,6 +104,16 @@ class PhaseHost(Protocol):
     def emit_audit_event(self, name: str, payload: dict) -> None:
         """Emit a generic audit event (e.g. acceptance_reopened_issue)."""
 
+    def tag_session_messages(self, session_id: str, milestone_id: str) -> int:
+        """Tag a session's milestone-less messages with the settle milestone (#3000).
+
+        Verification-line messages persist untagged (the milestone is created
+        at settle); the handler back-fills the tag once the milestone id is
+        known. Delegates to the orchestrator's ``_tag_session_messages``.
+        Best-effort attribution only — the viewer's full-transcript path
+        does not depend on it, so failures must not affect the verdict.
+        """
+
     def ensure_scheduler_lock(self) -> bool:
         """Fence the distributed lease before an irreversible external action."""
 
