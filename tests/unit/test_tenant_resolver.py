@@ -8,6 +8,8 @@ import pytest
 
 from app.utils.tenant_resolver import TenantResolutionError, TenantResolver
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2163)]
+
 
 class TestTenantResolver:
     """Test suite for TenantResolver."""

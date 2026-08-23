@@ -16,6 +16,8 @@ import re
 
 import pytest
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1538)]
+
 
 class TestChineseOutputDetection:
     """Verify that Chinese pytest output patterns are correctly detected."""

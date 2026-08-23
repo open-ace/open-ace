@@ -12,6 +12,8 @@ import pytest
 from app.repositories.autonomous_repo import AutonomousWorkflowRepository
 from app.repositories.database import Database
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1520)]
+
 
 class TestOptimisticLock:
     """Test optimistic lock in update_workflow."""

@@ -9,6 +9,8 @@ import pytest
 
 from app.services.tenant_migration import MigrationResult, TenantMigrationService
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2163)]
+
 
 class TestTenantMigrationService:
     """Test suite for TenantMigrationService."""

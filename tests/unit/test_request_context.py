@@ -14,6 +14,8 @@ from app.utils.request_context import (
     require_tenant_id,
 )
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2163)]
+
 
 class TestRequestContext:
     """Test suite for request context utilities."""

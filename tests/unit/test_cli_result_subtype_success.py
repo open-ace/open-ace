@@ -8,7 +8,11 @@ sets ``session.error = "success"`` → ``success = False`` → the milestone is
 marked ``failed`` even though the agent produced valid output.
 """
 
+import pytest
+
 from app.modules.workspace.autonomous.agent_runner import _extract_cli_result_error
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1816)]
 
 
 class TestExtractCliResultErrorSubtypeSuccess:

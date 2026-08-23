@@ -14,6 +14,8 @@ from app.modules.workspace.autonomous.orchestrator import (
     _infer_test_framework,
 )
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1520)]
+
 
 class TestFrameworkInference:
     """Test _infer_test_framework function."""
