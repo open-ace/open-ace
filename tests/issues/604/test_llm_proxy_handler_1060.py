@@ -293,12 +293,10 @@ class TestUpstreamQuotaExceededAlert:
     ):
         """Upstream 429 without 'quota exceeded' should not trigger alert.
 
-        NOTE: this test deadlocks the remote LLM-proxy failover loop (production
-        bug, #2466). It is excluded from the nightly shard via
-        ci/legacy-issue-quarantine.json (deselected, not skipped) so the run can
-        complete; a weekly subprocess probe re-runs it to detect when #2466 is
-        fixed. Do NOT add a bare pytest.mark.skip here — the quarantine is the
-        tracked, gate-visible mechanism.
+        Regression for #2466: the mocked resolver ignores ``exclude_key_ids``
+        and keeps handing back the same key. The handler must treat that as
+        failover-pool exhaustion and return 500/502 instead of retrying the
+        excluded key forever (which deadlocked the failover loop).
         """
         # Setup mocks
         mock_proxy = MagicMock()
@@ -332,10 +330,11 @@ class TestUpstreamQuotaExceededAlert:
                 headers={"Authorization": "Bearer tok"},
             )
 
-            # Should not return 429 quota_exceeded (should continue failover loop)
-            # The 429 without quota exceeded message is treated as regular rate limit
-            # and added to exclude_key_ids for failover
-            # Since we only have one key, it will return 500 after exhausting keys
+            # The 429 without quota exceeded message is treated as a regular
+            # rate limit and added to exclude_key_ids for failover. The mocked
+            # resolver keeps returning the excluded key, so the handler must
+            # terminate with the exhaustion response (502 here, since one key
+            # was excluded) instead of looping forever.
             assert resp.status_code in (500, 502)
 
 

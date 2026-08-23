@@ -509,6 +509,62 @@ class TestLLMProxyFailover:
         assert second_call.kwargs["exclude_key_ids"] == {11}
         mock_proxy.resolve_api_key_for_scope.assert_not_called()
 
+    @patch(_HTTP_PATH)
+    @patch(_QUOTA_PATH)
+    @patch(_PROXY_PATH)
+    def test_ha_pool_exhaustion_terminates_when_resolver_ignores_exclude(
+        self, mock_get_proxy, mock_quota_cls, mock_http_req, app
+    ):
+        """Issue #2466: a resolver that ignores exclude_key_ids and keeps handing
+        back the same key must terminate the failover loop with 502, not retry
+        the excluded key forever."""
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = {
+            **_mock_proxy_token(),
+            "scope": "remote",
+            "ha_candidate_keys": [
+                {"key_id": 11, "priority": 200, "weight": 100},
+            ],
+            "ha_model_key_ids": {
+                "model-a": [11],
+            },
+        }
+        # return_value (not side_effect): ignores exclude_key_ids, always
+        # returns key 11 even after it was excluded by a 429.
+        mock_proxy.resolve_api_key_from_key_ids.return_value = (
+            "sk-key1",
+            "https://api.openai.com/v1",
+            11,
+            None,
+            None,
+        )
+        mock_get_proxy.return_value = mock_proxy
+        mock_quota_cls.return_value = _make_quota_ok()
+        # Two upstream 429s: the loop must stop after the second resolve (the
+        # excluded key comes back), so a StopIteration here would surface as a
+        # test failure rather than an infinite retry loop.
+        mock_http_req.side_effect = [
+            _mock_upstream_response(429, b'{"error":{"message":"rate limited"}}'),
+            _mock_upstream_response(429, b'{"error":{"message":"rate limited"}}'),
+        ]
+
+        client = app.test_client()
+        resp = client.post(
+            "/api/remote/llm-proxy",
+            json={"model": "model-a", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+        assert resp.status_code == 502
+        data = resp.get_json()
+        assert data["error"]["type"] == "upstream_error"
+        assert "1 API key(s) failed" in data["error"]["message"]
+        # Exactly two resolves: first attempt fails and excludes key 11, the
+        # second returns the excluded key and terminates as pool exhaustion.
+        assert mock_proxy.resolve_api_key_from_key_ids.call_count == 2
+        second_call = mock_proxy.resolve_api_key_from_key_ids.call_args_list[1]
+        assert second_call.kwargs["exclude_key_ids"] == {11}
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
