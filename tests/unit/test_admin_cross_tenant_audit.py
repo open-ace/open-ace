@@ -13,6 +13,8 @@ import pytest
 
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1824)]
+
 
 class TestAdminCrossTenantAudit:
     """Test audit logging for admin cross-tenant access."""

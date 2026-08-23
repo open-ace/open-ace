@@ -4,12 +4,12 @@
   "created_before_modification": true,
   "layers": {
     "default": {
-      "min_tests": 4430,
+      "min_tests": 4668,
       "min_files": 250,
       "last_updated": "2026-08-23",
-      "update_reason": "Issue #2429 batch 4: P1 group (280 items) migrated into tests/unit; min raised by exactly +280 (4150+280); actual 7498 = 7218 (post-#3007 main) + 280",
-      "actual_collected": 7498,
-      "actual_files": 474,
+      "update_reason": "Issue #2429 batch 5: P2 group migrated into tests/unit (238 items); min raised by exactly +238 (4430+238); actual 7736 = 7498 + 238",
+      "actual_collected": 7736,
+      "actual_files": 486,
       "threshold_percent": 96
     },
     "critical": {
@@ -30,12 +30,12 @@
       "note": "Currently excluded by norecursedirs"
     },
     "issues": {
-      "min_tests": 3698,
-      "min_files": 371,
+      "min_tests": 3426,
+      "min_files": 357,
       "last_updated": "2026-08-23",
-      "update_reason": "Issue #2429 batch 4: P1 group (1538/1520/2163/1816) \u2014 12 pure in-process files / 280 items migrated to tests/unit with regression+issue markers; min lowered by exactly that delta (3978-280, 383-12); actuals from clean checkout",
-      "actual_collected": 3910,
-      "actual_files": 386,
+      "update_reason": "Issue #2429 batch 5: P2 group (764/1284/1532/1544/1547/1552/1824) \u2014 the issues layer loses all 272 collected items / 14 glob files (238 items / 12 files migrated to tests/unit; 34 zero-assertion stubs in 2 deleted files removed); default layer gains only the 238 migrated; min lowered by exactly that delta (3698-272, 371-14); actuals from clean checkout (local +1/+1 from gitignored tests/issues/89)",
+      "actual_collected": 3638,
+      "actual_files": 372,
       "threshold_percent": 97
     }
   },
@@ -46,8 +46,8 @@
   "notes": [
     "Baseline created before pytest.ini modification to enable e2e_*.py collection",
     "tests/e2e currently excluded by norecursedirs in pytest.ini",
-    "Default count from: python scripts/ci.py run default-collection (7498 items after #2429 batch 4)",
-    "Issue count from: clean-checkout issue-collection (3910 items, 386 files after #2429 batch 4; a checkout with the gitignored local tests/issues/89 dir collects +1/+1)",
+    "Default count from: python scripts/ci.py run default-collection (7736 items after #2429 batch 5)",
+    "Issue count from: clean-checkout issue-collection (3638 items, 372 files after #2429 batch 5; a checkout with the gitignored local tests/issues/89 dir collects +1/+1)",
     "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard"
   ]
 }

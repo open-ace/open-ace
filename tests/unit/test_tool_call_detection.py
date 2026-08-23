@@ -8,6 +8,8 @@ Fix: Check tool_calls for test execution commands + reverse judgment logic.
 
 import pytest
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1532)]
+
 
 class TestHasTestToolCall:
     """Verify _has_test_tool_call detects test commands correctly."""

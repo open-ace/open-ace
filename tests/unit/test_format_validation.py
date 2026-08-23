@@ -12,6 +12,8 @@ Fix components:
 
 import pytest
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1547)]
+
 
 class TestStandardFormatDetection:
     """Verify that standard test output formats are correctly validated."""
@@ -50,9 +52,7 @@ class TestStandardFormatDetection:
         import os
         import sys
 
-        sys.path.insert(
-            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        )
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         # Create a mock instance to access the method
@@ -95,9 +95,7 @@ class TestNonStandardFormatDetection:
         import os
         import sys
 
-        sys.path.insert(
-            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        )
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
@@ -127,9 +125,7 @@ class TestMixedFormatHandling:
         import os
         import sys
 
-        sys.path.insert(
-            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        )
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
@@ -162,9 +158,7 @@ class TestEdgeCases:
         import os
         import sys
 
-        sys.path.insert(
-            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        )
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
@@ -183,9 +177,7 @@ class TestFormatValidationIntegration:
         import os
         import sys
 
-        sys.path.insert(
-            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        )
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
@@ -201,9 +193,7 @@ class TestFormatValidationIntegration:
         import os
         import sys
 
-        sys.path.insert(
-            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        )
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
         from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
         orchestrator = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
