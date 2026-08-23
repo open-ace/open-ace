@@ -12,8 +12,8 @@ Verifies the autonomous-workflow refactor:
      session pollution).
   4. Single-round vs multi-round naming: a phase that ran one round shows a
      numberless label (e.g. "Plan review"); multiple rounds show the round number.
-  5. Milestone session detail surfaces only that milestone's messages (filtered by
-     milestone_id), even when milestones share a resumed session.
+  5. Milestone session detail surfaces the shared session's full transcript
+     (#3000), even when milestones share a resumed session.
 
 Data is seeded directly via AutonomousWorkflowRepository (no real agent runs).
 
@@ -395,7 +395,7 @@ def step_test_multi_round_rounds(wf_id):
 
 
 def step_test_session_message_filtering(repo):
-    """Shared session messages are filtered by milestone_id."""
+    """Shared session messages are returned as the full transcript."""
     log("SESSION", "Verifying message filtering by milestone_id")
     from app.modules.workspace.session_manager import SessionManager
 
@@ -576,7 +576,7 @@ def run_tests():
     api_tests = [
         ("New Milestones + Usage", lambda: step_test_new_milestones_and_usage(single_wf)),
         ("Multi-Round Rounds", lambda: step_test_multi_round_rounds(multi_wf)),
-        ("Session Message Filtering", lambda: step_test_session_message_filtering(repo)),
+        ("Session Full Transcript", lambda: step_test_session_message_filtering(repo)),
     ]
     for name, fn in api_tests:
         try:
