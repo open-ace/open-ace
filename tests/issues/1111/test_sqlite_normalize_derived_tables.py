@@ -123,3 +123,30 @@ def test_summary_by_tool_counts_distinct_days_across_aliases(usage_repo):
     assert qwen["days_count"] == 2, f"same-date alias rows inflated the distinct day count: {qwen}"
     assert qwen["total_tokens"] == 700
     assert qwen["first_date"] == day1 and qwen["last_date"] == day2
+
+
+def test_summary_by_tool_avg_tokens_spans_aliases(usage_repo):
+    """avg_tokens must average the whole alias family, not one alias's rows.
+
+    The span recompute (Issue #1111) rebuilt days_count/first_date/last_date
+    across the family, but avg_tokens kept the highest-total alias's grouped
+    AVG — a small alias merging under a dominant one reported the dominant
+    average instead of the family-wide one.
+    """
+    day1 = "2026-05-01"
+    day2 = "2026-05-02"
+
+    # qwen-code carries the largest total (its grouped row is read first);
+    # qwen contributes one small row to the same family.
+    _insert_message(usage_repo, date=day1, tool_name="qwen-code", tokens=1000)
+    _insert_message(usage_repo, date=day2, tool_name="qwen-code", tokens=1000)
+    _insert_message(usage_repo, date=day1, tool_name="qwen", tokens=10)
+
+    summary = usage_repo.get_summary_by_tool()
+
+    qwen = summary.get("qwen")
+    assert qwen is not None, f"summary shape changed: {summary}"
+    # Family-wide average over all three rows, not the single-alias AVG(1000).
+    assert qwen["avg_tokens"] == round(
+        (1000 + 1000 + 10) / 3, 2
+    ), f"avg_tokens did not span the alias family: {qwen}"
