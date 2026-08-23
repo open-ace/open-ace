@@ -308,8 +308,8 @@ def test_api_endpoint_integration(client, db, user_id, seeded_sessions):
     assert data.get("success") is True
     sessions = data.get("data", {}).get("sessions", [])
     assert len(sessions) == len(
-        sessions
-    ), f"Expected all {len(sessions)} sessions (invalid filter ignored), got {len(sessions)}"
+        seeded_sessions
+    ), f"Expected all {len(seeded_sessions)} sessions (invalid filter ignored), got {len(sessions)}"
     print("[PASS] API 无效参数处理: 返回 200 且忽略无效过滤")
 
 

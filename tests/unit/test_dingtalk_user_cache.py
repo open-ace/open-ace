@@ -7,10 +7,6 @@ import importlib.util
 import sys
 from pathlib import Path
 
-import pytest
-
-pytestmark = [pytest.mark.regression, pytest.mark.issue(1574)]
-
 
 def load_dingtalk_user_cache():
     module_path = (
