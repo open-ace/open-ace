@@ -79,10 +79,10 @@ export function getWorkflowSessionIdForMilestone(
   if (milestoneType === 'plan_reviewed' || milestoneType === 'pr_reviewed') {
     return workflow.review_session_id?.trim() ?? '';
   }
-  // Unreachable today (acceptance milestones are never activity hosts — they
-  // are only created at settle, never in_progress), but map the line
-  // explicitly so widening the host logic later can't render the verifier
-  // session's activity under the main session's card. #2994.
+  // The acceptance line: used when the verifier's in_progress milestone
+  // hosts the live panel during a verification run (#3003; the row is minted
+  // at spawn) — mapped explicitly so the verifier session's activity can
+  // never render under the main session's card.
   if (milestoneType === 'acceptance_verification') {
     return workflow.verification_session_id?.trim() ?? '';
   }
@@ -95,7 +95,13 @@ export function getActivityHostMilestoneId(
   workflowStatus: string
 ): string | null {
   const agentPhaseStatuses = ['planning', 'developing', 'pr_review'];
-  if (![...agentPhaseStatuses, 'merging'].includes(workflowStatus)) return null;
+  // verification_pending: the verifier's in_progress acceptance milestone
+  // (#3003) is a live host. The FALLBACK gate below stays on
+  // agentPhaseStatuses — during verification the merge-SHA retry loop has no
+  // running agent, and pinning the panel to the previous phase's card would
+  // only show stale activity.
+  const hostStatuses = [...agentPhaseStatuses, 'merging', 'verification_pending'];
+  if (!hostStatuses.includes(workflowStatus)) return null;
 
   // Forked workflows can retain a copied in-progress milestone from the
   // parent. Timeline order is oldest-first, so always choose the newest
