@@ -31,11 +31,11 @@
     },
     "issues": {
       "min_tests": 3978,
-      "min_files": 393,
+      "min_files": 383,
       "last_updated": "2026-08-23",
-      "update_reason": "Issue #2429 batch 2: migrated the final 167 items / 20 files (2335, 2431) out of the pr-gate into canonical layers and retired legacy-pr; min lowered by exactly that delta (4145-167, 413-20); actuals from clean checkout",
+      "update_reason": "Issue #2429 batch 3: Z-group audit — deleted 5 screenshot/obsolete-script dirs (15, 50, 164, 341, 415) and converted 983/988 into tests/e2e/work pytest e2e tests; 0 collected items (min_tests unchanged), glob files -10 (393-10); actuals from clean checkout",
       "actual_collected": 4190,
-      "actual_files": 408,
+      "actual_files": 398,
       "threshold_percent": 97
     }
   },
@@ -47,7 +47,7 @@
     "Baseline created before pytest.ini modification to enable e2e_*.py collection",
     "tests/e2e currently excluded by norecursedirs in pytest.ini",
     "Default count from: python scripts/ci.py run default-collection (7203 items after #2429 batch 2)",
-    "Issue count from: clean-checkout issue-collection (4190 items, 408 files after #2429 batch 2; a checkout with the gitignored local tests/issues/89 dir collects +1/+1)",
+    "Issue count from: clean-checkout issue-collection (4190 items, 398 files after #2429 batch 3 — the 10 removed zero-collection files were glob-counted but item-less; a checkout with the gitignored local tests/issues/89 dir collects +1/+1)",
     "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard"
   ]
 }

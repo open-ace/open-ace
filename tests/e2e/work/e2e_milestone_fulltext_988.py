@@ -20,9 +20,9 @@ Verifies the milestone full-text feature layered on #984:
 
 Data is seeded directly via AutonomousWorkflowRepository (no real agent / gh runs).
 
-Run:
-  HEADLESS=true  python tests/issues/988/e2e_milestone_fulltext_playwright.py   # CI
-  HEADLESS=false python tests/issues/988/e2e_milestone_fulltext_playwright.py   # Demo
+Run (CI: scripts/run_extended_tests.py --category work; pytest entry: test_milestone_fulltext_988):
+  HEADLESS=true  python tests/e2e/work/e2e_milestone_fulltext_988.py   # CI
+  HEADLESS=false python tests/e2e/work/e2e_milestone_fulltext_988.py   # Demo
 """
 
 import os
@@ -30,13 +30,16 @@ import sys
 import time
 import uuid
 
-# tests/issues/988/file.py → tests/issues/988 → tests/issues → tests → PROJECT_ROOT
+# tests/e2e/work/file.py → tests/e2e/work → tests/e2e → tests → PROJECT_ROOT
 PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 sys.path.insert(0, PROJECT_ROOT)
 
+import pytest
 import requests
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(988)]
 
 os.environ["NO_PROXY"] = "localhost,127.0.0.1"
 _session = requests.Session()
@@ -110,11 +113,11 @@ def cleanup_workflows():
     for wf_id in created_workflow_ids:
         try:
             api("post", f"/api/autonomous/workflows/{wf_id}/stop")
-        except Exception:
+        except Exception:  # allow-swallow: best-effort cleanup
             pass
         try:
             api("delete", f"/api/autonomous/workflows/{wf_id}")
-        except Exception:
+        except Exception:  # allow-swallow: best-effort cleanup
             pass
 
 
@@ -317,7 +320,9 @@ def open_timeline_english(context, page, workflow_title, shot_name=None):
 
 def _controls_btn(page, text):
     """A header control button matching exact-ish text, scoped to the controls bar."""
-    return page.locator(".workflow-timeline-controls button").filter(has_text=text)
+    # 2026-08 UI: the controls bar moved to the timeline output rail (#2429
+    # batch 3 drift fix — was ".workflow-timeline-controls button").
+    return page.locator(".timeline-output-rail__buttons button").filter(has_text=text)
 
 
 def _close_open_modal(page):
@@ -369,7 +374,7 @@ def step_browser_multi_round(context, page, wf_id):
     _close_open_modal(page)
 
     # Feature A — card buttons. A plan_finalized card has "View Plan".
-    view_plan = page.locator(".workflow-timeline-inline-btn").filter(has_text="View Plan")
+    view_plan = page.locator(".timeline-inline-btn").filter(has_text="View Plan")
     assert view_plan.count() >= 1, "View Plan card button missing"
     view_plan.first.click()
     page.wait_for_timeout(800)
@@ -379,7 +384,7 @@ def step_browser_multi_round(context, page, wf_id):
     _close_open_modal(page)
 
     # A pr_reviewed card has "View Review".
-    view_review = page.locator(".workflow-timeline-inline-btn").filter(has_text="View Review")
+    view_review = page.locator(".timeline-inline-btn").filter(has_text="View Review")
     assert view_review.count() >= 1, "View Review card button missing"
     view_review.first.click()
     page.wait_for_timeout(800)
@@ -399,11 +404,14 @@ def step_browser_fallback(context, page, wf_id):
     pr_summary = _controls_btn(page, "PR Review Summary")
     # plan_finalized is in round 2 → badge Round 2.
     assert "Round 2" in final_plan.first.inner_text(), "Final Plan badge should be Round 2"
-    # pr_review_summary only in round 1 → fallback badge Round 1.
+    # pr_review_summary only in round 1. The 2026-08 UI renders the round badge
+    # only for dev_round > 1, so a round-1-only summary carries NO badge — it
+    # must not inherit the workflow's latest round either (#2429 batch 3 drift
+    # fix; was "Round 1 in text" under the old always-badge UI).
     assert (
-        "Round 1" in pr_summary.first.inner_text()
-    ), "PR Review Summary badge should fall back to Round 1"
-    log("BROWSER", "  ✅ fallback: Final Plan=Round 2, PR Review Summary=Round 1")
+        "Round" not in pr_summary.first.inner_text()
+    ), "PR Review Summary must not show a round badge (its only round is 1)"
+    log("BROWSER", "  ✅ fallback: Final Plan=Round 2, PR Review Summary unbadged (round 1)")
 
 
 def step_browser_disabled(context, page, wf_id):
@@ -437,12 +445,12 @@ def run_tests():
         failed += 1
         print("\nCannot continue without login — aborting.\n")
         cleanup_workflows()
-        sys.exit(1)
+        raise AssertionError("login failed — cannot continue") from e
 
     repo = None
     try:
         repo = get_repo()
-    except Exception as e:
+    except Exception as e:  # allow-swallow: best-effort repository import for seeding
         print(f"  ⚠️  Cannot import AutonomousWorkflowRepository: {e}", flush=True)
 
     multi_wf = fallback_wf = empty_wf = None
@@ -461,7 +469,7 @@ def run_tests():
                 else:
                     empty_wf = wid
                 passed += 1
-            except Exception as e:
+            except Exception as e:  # allow-swallow: collect step errors
                 print(f"  ❌ SEED {label.upper()} FAILED: {e}", flush=True)
                 failed += 1
 
@@ -470,7 +478,7 @@ def run_tests():
         try:
             step_test_pr_diff_route(multi_wf, empty_wf)
             passed += 1
-        except Exception as e:
+        except Exception as e:  # allow-swallow: collect step errors
             print(f"  ❌ PR-DIFF ROUTE FAILED: {e}", flush=True)
             failed += 1
     else:
@@ -503,12 +511,12 @@ def run_tests():
                 try:
                     fn(context, page, wf)
                     passed += 1
-                except Exception as e:
+                except Exception as e:  # allow-swallow: collect step errors
                     print(f"  ❌ {name.upper()} FAILED: {e}", flush=True)
                     failed += 1
                     try:
                         shot(page, f"error-{name.lower().replace(' ', '-')}")
-                    except Exception:
+                    except Exception:  # allow-swallow: screenshot failure non-critical
                         pass
 
             browser.close()
@@ -522,7 +530,20 @@ def run_tests():
     print("=" * 60 + "\n", flush=True)
 
     if failed > 0:
-        sys.exit(1)
+        raise AssertionError(
+            f"milestone fulltext checks: {failed} step(s) failed "
+            f"({passed} passed, {skipped} skipped)"
+        )
+
+
+def test_milestone_fulltext_988() -> None:
+    """Pytest entry: run_tests() raises AssertionError when any step fails.
+
+    The guard keeps the wrapper assert-bearing (scanner #2189); failures
+    surface via the AssertionError raised inside run_tests().
+    """
+
+    assert run_tests() is None, "run_tests must return None on success"
 
 
 if __name__ == "__main__":
