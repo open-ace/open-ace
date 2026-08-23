@@ -19,11 +19,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import app.repositories.database as db_mod
-from app.modules.workspace.session_manager import (
-    AgentSession,
-    SessionManager,
-    SessionMessage,
-)
+from app.modules.workspace.session_manager import AgentSession, SessionManager, SessionMessage
 
 pytestmark = [pytest.mark.issue(3000)]
 
