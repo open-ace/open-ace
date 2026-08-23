@@ -11,6 +11,8 @@ import pytest
 
 from app.modules.governance.content_filter import ContentFilter
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1904)]
+
 
 class TestWordBoundaryMatching:
     """Test suite for word boundary matching."""

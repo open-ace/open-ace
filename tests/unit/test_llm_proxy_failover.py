@@ -14,6 +14,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(593)]
+
 
 @pytest.fixture
 def app():

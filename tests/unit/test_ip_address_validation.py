@@ -13,8 +13,9 @@ import sys
 import unittest
 from unittest.mock import MagicMock
 
-# Add project root to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(486)]
 
 
 # ==================== Unit Tests: validate_ip() ====================
@@ -415,8 +416,9 @@ class TestUpdateMachineIP(unittest.TestCase):
 
     def test_update_machine_ip_nonexistent_machine(self):
         """update_machine_ip should not fail for nonexistent machine."""
-        # Should silently do nothing (no exception raised)
+        # Silent no-op: the machine still does not exist afterwards.
         self.mgr.update_machine_ip("nonexistent-machine-id", "10.0.0.1")
+        assert self.mgr.get_machine("nonexistent-machine-id") is None
 
     def test_update_machine_ip_overwrites_previous(self):
         """update_machine_ip should overwrite previous IP."""

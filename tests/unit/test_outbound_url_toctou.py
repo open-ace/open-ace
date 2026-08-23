@@ -31,6 +31,8 @@ from app.utils.outbound_url_guard import (
     validate_public_http_url,
 )
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1778)]
+
 
 class _RebindingResolver:
     """getaddrinfo that flips: first call returns a PUBLIC ip,
@@ -105,8 +107,8 @@ def test_adapter_allows_matching_public_ip():
             (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
         ],
     )
-    # Should not raise
-    adapter._check_resolved_ip("https://sso.evil.example/token")
+    # Allowed path returns None without raising.
+    assert adapter._check_resolved_ip("https://sso.evil.example/token") is None
 
 
 def test_adapter_allows_different_public_ip_with_warning(caplog):

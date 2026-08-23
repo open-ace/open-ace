@@ -10,6 +10,9 @@ import pytest
 
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(921)]
+
+
 # ── Test _clean_agent_text ──────────────────────────────────────────────
 
 

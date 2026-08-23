@@ -5,17 +5,23 @@ import sys
 
 import pytest
 
-# Add remote-agent to path so we can import cli_adapters
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "remote-agent"))
+# Import remote-agent's parser without leaving the directory on sys.path: a
+# leaked entry shadows bare ``import config`` for later tests in the same
+# worker (seen with tests/unit/test_db.py on CI).
+_REMOTE_AGENT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "remote-agent")
+sys.path.insert(0, _REMOTE_AGENT_DIR)
+try:
+    from cli_adapters.usage_parser import (
+        CUMULATIVE_RESULT_TOOLS,
+        diff_cumulative_usage,
+        extract_claude_stream_usage,
+        extract_qwen_stream_usage,
+        extract_stream_usage,
+        is_cumulative_result_tool,
+    )
+finally:
+    sys.path.remove(_REMOTE_AGENT_DIR)
 
-from cli_adapters.usage_parser import (
-    CUMULATIVE_RESULT_TOOLS,
-    diff_cumulative_usage,
-    extract_claude_stream_usage,
-    extract_qwen_stream_usage,
-    extract_stream_usage,
-    is_cumulative_result_tool,
-)
 
 pytestmark = [pytest.mark.regression, pytest.mark.issue(764)]
 

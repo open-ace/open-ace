@@ -6,7 +6,11 @@ Related Issue: https://github.com/open-ace/open-ace/issues/593
 
 import unittest
 
+import pytest
+
 from app.modules.workspace.api_key_router import APIKeyRouter
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(593)]
 
 
 class TestAPIKeyRouter(unittest.TestCase):

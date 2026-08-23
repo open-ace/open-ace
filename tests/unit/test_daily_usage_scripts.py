@@ -37,9 +37,12 @@ class TestDailyUsageQualityCheck:
         """Script should have required functions."""
         scripts_dir = Path(__file__).parent.parent.parent / "scripts"
         sys.path.insert(0, str(scripts_dir))
+        try:
 
-        # Import module
-        import check_daily_usage_quality
+            # Import module
+            import check_daily_usage_quality
+        finally:
+            sys.path.remove(str(scripts_dir))
 
         # Check functions exist
         assert hasattr(check_daily_usage_quality, "check_tenant_id_null")
@@ -69,8 +72,10 @@ class TestDailyUsageConflictDetection:
         """Script should have required functions."""
         scripts_dir = Path(__file__).parent.parent.parent / "scripts"
         sys.path.insert(0, str(scripts_dir))
-
-        import check_daily_usage_conflicts
+        try:
+            import check_daily_usage_conflicts
+        finally:
+            sys.path.remove(str(scripts_dir))
 
         assert hasattr(check_daily_usage_conflicts, "find_conflicts")
         assert hasattr(check_daily_usage_conflicts, "count_conflict_rows")
@@ -98,8 +103,10 @@ class TestDailyUsageConflictResolution:
         """Script should have required functions."""
         scripts_dir = Path(__file__).parent.parent.parent / "scripts"
         sys.path.insert(0, str(scripts_dir))
-
-        import resolve_daily_usage_conflicts
+        try:
+            import resolve_daily_usage_conflicts
+        finally:
+            sys.path.remove(str(scripts_dir))
 
         assert hasattr(resolve_daily_usage_conflicts, "find_conflicts")
         assert hasattr(resolve_daily_usage_conflicts, "resolve_conflict_earliest")
@@ -109,8 +116,10 @@ class TestDailyUsageConflictResolution:
         """Script should support --strategy=dry-run."""
         scripts_dir = Path(__file__).parent.parent.parent / "scripts"
         sys.path.insert(0, str(scripts_dir))
-
-        import resolve_daily_usage_conflicts
+        try:
+            import resolve_daily_usage_conflicts
+        finally:
+            sys.path.remove(str(scripts_dir))
 
         # No live DB in the unit layer: the resolver reads conflicts through
         # the module-level Database handle, so an empty-row mock keeps the

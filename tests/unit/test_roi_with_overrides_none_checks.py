@@ -15,7 +15,11 @@ asserted here.
 
 from __future__ import annotations
 
+import pytest
+
 from app.modules.analytics.roi_calculator import ROIAssumptions
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1830)]
 
 
 def _defaults() -> ROIAssumptions:

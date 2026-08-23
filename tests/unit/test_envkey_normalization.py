@@ -16,9 +16,16 @@ import tempfile
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "remote-agent"))
+pytestmark = [pytest.mark.regression, pytest.mark.issue(456)]
 
-from cli_adapters.base import collect_custom_envkeys, normalize_model_providers
+
+# Do not leave remote-agent on sys.path (shadows bare ``import config``).
+_REMOTE_AGENT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "remote-agent")
+sys.path.insert(0, _REMOTE_AGENT_DIR)
+try:
+    from cli_adapters.base import collect_custom_envkeys, normalize_model_providers
+finally:
+    sys.path.remove(_REMOTE_AGENT_DIR)
 
 # ---------------------------------------------------------------------------
 # normalize_model_providers tests
