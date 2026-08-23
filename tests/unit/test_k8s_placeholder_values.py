@@ -14,6 +14,8 @@ import pytest
 
 from app.utils.security_env import is_weak_secret_value
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1780)]
+
 
 class TestK8sPlaceholderSecretsFailClosed:
     @pytest.mark.parametrize(

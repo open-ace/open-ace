@@ -11,7 +11,11 @@ Covers:
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.modules.workspace.autonomous.orchestrator import REVIEW_FEEDBACK_MIN_LENGTH
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(826)]
 
 
 class TestReviewFeedbackDetection:
@@ -183,6 +187,10 @@ class TestPlanningIntegration:
         orch.emitter = MagicMock()
         orch._runner = MagicMock()
         orch._runner._uses_sidebar_session_source.return_value = False
+        # Hermetic system-account resolution: the legacy location leaned on an
+        # ambient app.db users table; the unit layer's isolated empty sqlite
+        # has none (same pattern as tests/unit/test_session_resume_recovery.py).
+        orch._resolve_system_account = MagicMock(return_value=None)
         # These tests exercise planning semantics, not the privileged Git
         # boundary. Keep them hermetic on developer machines that do not have
         # the production repository-owner account configured. The fake layout

@@ -28,6 +28,9 @@ import pytest
 from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(814)]
+
+
 # ── _encode_project_path ─────────────────────────────────────────────────
 
 

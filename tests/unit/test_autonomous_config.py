@@ -16,6 +16,9 @@ import pytest
 import app.repositories.database as db_mod
 import app.utils.config as cfg_mod
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(762)]
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
 
@@ -149,7 +152,7 @@ class TestAutonomousBeforeRequest:
                 )
 
         @bp.route("/test-ping")
-        def test_ping():
+        def ping_probe():
             return jsonify({"ok": True})
 
         app.register_blueprint(bp, url_prefix="/api/autonomous")

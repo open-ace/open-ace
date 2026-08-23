@@ -22,7 +22,10 @@ from pathlib import Path
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1194)]
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _load_agent_runner():

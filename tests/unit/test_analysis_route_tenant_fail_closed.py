@@ -22,7 +22,12 @@ import unittest
 from contextlib import ExitStack
 from unittest.mock import patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1818)]
+
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 _DB_PATH = tempfile.mktemp(suffix="_tenant_1818.db")
 _DB_URL = f"sqlite:///{_DB_PATH}"

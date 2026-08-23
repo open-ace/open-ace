@@ -15,6 +15,9 @@ import pytest
 
 from app.services.autonomous_scheduler import AutonomousScheduler
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1578)]
+
+
 # ── Scheduler _conflict_keys Tests ─────────────────────────────────────────
 
 

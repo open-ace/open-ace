@@ -22,6 +22,9 @@ import pytest
 from app.modules.workspace.autonomous.github_ops import GitHubOpsError
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator, _ReconcileFailed
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2050)]
+
+
 PROJECT_PATH = "/srv/repo"
 WT_PATH = "/srv/repo/.worktrees/wf-2050"
 BRANCH = "auto-dev/wf2050"

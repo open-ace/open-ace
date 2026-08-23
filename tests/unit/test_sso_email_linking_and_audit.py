@@ -22,6 +22,9 @@ from app.modules.sso.provider import SSOAuthResult, SSOProviderConfig, SSOToken,
 from app.modules.sso.saml import SAMLProvider
 from app.routes import sso as sso_module
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1788)]
+
+
 SP_ENTITY_ID = "https://openace.example.com/saml/metadata"
 IDP_ENTITY_ID = "https://idp.example.com/metadata"
 IDP_SSO_URL = "https://example.com/sso"

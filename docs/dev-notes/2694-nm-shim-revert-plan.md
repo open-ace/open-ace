@@ -19,7 +19,7 @@
 - `github_ops.py`：删 `_run_as_account`（唯一调用方是 shim）。
 - `tests/autonomous/test_git_workspace_node_modules_shim.py`：删 5 个 shim 测试 +
   相关 import；**保留** cleanup_* 测试（测 #2505 worktree_path 保留，与 shim 无关）。
-- `tests/issues/814/test_worktree_path_selfheal.py`：更新两处过时注释（shim 不复存在）。
+- `tests/unit (ex tests/issues/814)/test_worktree_path_selfheal.py`：更新两处过时注释（shim 不复存在）。
 
 验证：grep 无残留符号；`tests/autonomous/` + issue-814 全量本地跑；无迁移，无 schema 影响。
 

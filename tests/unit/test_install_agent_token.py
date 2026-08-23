@@ -10,7 +10,10 @@ import re
 
 import pytest
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+pytestmark = [pytest.mark.regression, pytest.mark.issue(884)]
+
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 INSTALL_SH = os.path.join(REPO_ROOT, "remote-agent", "install.sh")
 INSTALL_PS1 = os.path.join(REPO_ROOT, "remote-agent", "install.ps1")
 

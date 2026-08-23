@@ -8,7 +8,7 @@ real resource teardown — a ``remote_machine`` orphan is stopped by its persist
 ``sandbox_remote_session_id``; local/gVisor rows (no external id) are DB-reset
 only (the proc died with the server).
 
-Mock-repo driven (no DB), mirroring tests/issues/2050's reconciliation test.
+Mock-repo driven (no DB), mirroring tests/unit (ex tests/issues/2050)'s reconciliation test.
 """
 
 from __future__ import annotations

@@ -15,7 +15,12 @@ error in the middle was truncated away and the agent never saw it.
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.modules.workspace.autonomous.github_ops import _extract_failure_lines
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1811)]
+
 
 # ── Bug 2: _extract_failure_lines finds mid-log errors ───────────────────
 

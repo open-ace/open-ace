@@ -35,6 +35,9 @@ from app.modules.sso.saml import (
     SAMLProvider,
 )
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1788)]
+
+
 SP_ENTITY_ID = "https://openace.example.com/saml/metadata"
 ACS_URL = "https://openace.example.com/api/sso/acs/corp-saml"
 IDP_ENTITY_ID = "https://idp.example.com/metadata"
