@@ -289,7 +289,7 @@ BASELINE = {
 
 
 def _agent_out_early(**extra):
-    out = _agent_out_confirmed(milestone_id=EARLY_MILESTONE_ID, usage_baseline=dict(BASELINE))
+    out = _agent_out_confirmed(milestone_id=EARLY_MILESTONE_ID, usage_baseline={**BASELINE})
     out.update(extra)
     return out
 
@@ -509,12 +509,12 @@ def test_run_verification_agent_passes_reuse_baseline_as_prior_usage():
     }
     orch = _orch_for_agent_run(
         _run_agent_result(),
-        early_row=dict(
-            phase_total_tokens=500,
-            phase_input_tokens=400,
-            phase_output_tokens=100,
-            phase_request_count=4,
-        ),
+        early_row={
+            "phase_total_tokens": 500,
+            "phase_input_tokens": 400,
+            "phase_output_tokens": 100,
+            "phase_request_count": 4,
+        },
     )
 
     with _wf_property(orch):

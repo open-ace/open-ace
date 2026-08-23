@@ -1172,7 +1172,7 @@ def handle(ctx, deps) -> PhaseResult:
             usage=verifier_usage,
             milestone_id=settle_milestone_id,
         )
-        finalize_fields = None
+        finalize_fields = {}  # unused on the fallback path
         tag_milestone_id = settle_milestone_id
 
     # A deterministic parse failure that repeats identically across consecutive

@@ -125,9 +125,7 @@ describe('WorkflowTimeline.utils', () => {
         dev_round: 1,
       },
     ];
-    expect(getActivityHostMilestoneId(milestones, 1, 'verification_pending')).toBe(
-      'verifying'
-    );
+    expect(getActivityHostMilestoneId(milestones, 1, 'verification_pending')).toBe('verifying');
     // Without a live row (e.g. the merge-SHA retry loop), verification must
     // NOT fall back to the previous phase's card — no host at all.
     const noLiveRow = milestones.map((m) => ({ ...m, status: 'completed' }));
