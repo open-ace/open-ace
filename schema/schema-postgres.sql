@@ -2372,6 +2372,11 @@ CREATE TABLE webhook_deliveries (
     alert_id character varying(64) NOT NULL,
     user_id integer NOT NULL,
     webhook_url_hash character varying(64),
+    receiver_identity_hash character varying(64),
+    cooldown_key character varying(64),
+    cooldown_expires_at timestamp without time zone,
+    delivery_claim_token character varying(64),
+    delivery_claim_expires_at timestamp without time zone,
     status character varying(16) NOT NULL,
     attempts integer DEFAULT 0 NOT NULL,
     max_attempts integer DEFAULT 3 NOT NULL,
@@ -4062,6 +4067,24 @@ CREATE INDEX idx_uta_last_activity ON user_tool_accounts USING btree (last_activ
 CREATE INDEX idx_uta_status_account ON user_tool_accounts USING btree (mapping_status, tool_account);
 
 CREATE INDEX idx_webhook_deliveries_alert ON webhook_deliveries USING btree (alert_id);
+
+
+--
+--
+
+CREATE INDEX idx_webhook_deliveries_cooldown_active ON webhook_deliveries USING btree (cooldown_key, status, cooldown_expires_at);
+
+
+--
+--
+
+CREATE INDEX idx_webhook_deliveries_cooldown_expiry ON webhook_deliveries USING btree (cooldown_expires_at);
+
+
+--
+--
+
+CREATE INDEX idx_webhook_deliveries_receiver_identity ON webhook_deliveries USING btree (receiver_identity_hash);
 
 
 --

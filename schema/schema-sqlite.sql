@@ -1533,6 +1533,11 @@ CREATE TABLE webhook_deliveries (
  alert_id TEXT NOT NULL,
  user_id integer NOT NULL,
  webhook_url_hash TEXT,
+ receiver_identity_hash TEXT,
+ cooldown_key TEXT,
+ cooldown_expires_at TIMESTAMP,
+ delivery_claim_token TEXT,
+ delivery_claim_expires_at TIMESTAMP,
  status TEXT NOT NULL,
  attempts integer DEFAULT 0 NOT NULL,
  max_attempts integer DEFAULT 3 NOT NULL,
@@ -2188,6 +2193,12 @@ CREATE INDEX idx_uta_last_activity ON user_tool_accounts (last_activity_at) WHER
 CREATE INDEX idx_uta_status_account ON user_tool_accounts (mapping_status, tool_account);
 
 CREATE INDEX idx_webhook_deliveries_alert ON webhook_deliveries (alert_id);
+
+CREATE INDEX idx_webhook_deliveries_cooldown_active ON webhook_deliveries (cooldown_key, status, cooldown_expires_at);
+
+CREATE INDEX idx_webhook_deliveries_cooldown_expiry ON webhook_deliveries (cooldown_expires_at);
+
+CREATE INDEX idx_webhook_deliveries_receiver_identity ON webhook_deliveries (receiver_identity_hash);
 
 CREATE INDEX idx_webhook_deliveries_status_retry ON webhook_deliveries (status, next_retry_at);
 
