@@ -158,7 +158,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
               position: 'fixed',
               top: position.top,
               left: position.left,
-              zIndex: 9999,
+              zIndex: 10600,
             }}
             role="tooltip"
           >

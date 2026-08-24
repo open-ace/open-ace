@@ -106,7 +106,7 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({
   return createPortal(
     <div
       className={cn('toast-container position-fixed p-3', positionClasses[position])}
-      style={{ zIndex: 9999 }}
+      style={{ zIndex: 10600 }}
     >
       {toasts.map((toast) => (
         <Toast key={toast.id} {...toast} onClose={onClose} />
