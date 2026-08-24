@@ -7,8 +7,12 @@ service user (api_only) so GH_TOKEN reaches gh. Without a token it falls back to
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import app.modules.workspace.autonomous.github_ops as gh_mod
-from app.modules.workspace.autonomous.github_ops import GitHubOps
+from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2340)]
 
 BOT_ENV = {
     "GH_TOKEN": "ghp-bot",
@@ -103,10 +107,6 @@ def test_create_pr_rest_error_includes_stdout_body_so_race_recovery_works():
     # gh api writes the JSON error body to STDOUT (only the summary to stderr).
     # The exception must carry the stdout body so pr_review's "already exists"
     # detection (#1857) still triggers find_existing_pr on the REST path.
-    import pytest
-
-    from app.modules.workspace.autonomous.github_ops import GitHubOpsError
-
     gh = _gh()
     err = MagicMock(
         returncode=1,

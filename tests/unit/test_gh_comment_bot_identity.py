@@ -21,8 +21,12 @@ must keep ``sudo`` (regression guard).
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import app.modules.workspace.autonomous.github_ops as gh_mod
 from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2339)]
 
 BOT_ENV = {
     "GH_TOKEN": "ghp-bot-token-2339",
@@ -177,7 +181,7 @@ def test_api_only_path_does_not_run_git_when_owner_repo_cached():
     ):
         sub_mod.run = run
         gh.add_pr_comment(7, "body")
-    assert run_git.assert_not_called() is None
+    run_git.assert_not_called()
     assert run.call_args.args[0][0] == "gh"  # no sudo
 
 

@@ -12,6 +12,10 @@ import json
 import threading
 from unittest.mock import MagicMock
 
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1395)]
+
 
 class _FakeStream:
     """Mimic subprocess stdout: ``readline()`` returns queued lines, then ``""``."""

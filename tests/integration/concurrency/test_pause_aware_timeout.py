@@ -25,6 +25,8 @@ import pytest
 from app.modules.workspace.autonomous import agent_runner as ar_mod
 from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner, _LocalSession
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1005)]
+
 
 def _make_session() -> _LocalSession:
     """A session with a never-started mock process (no subprocess needed)."""
@@ -136,7 +138,7 @@ class TestWaitForCompletionPauseFreezesBudget:
         assert holder["result"] is False
         # Elapsed wall-clock must reflect BOTH the pause and the active budget,
         # i.e. substantially more than the budget alone.
-        assert elapsed >= pause, "Pause duration must be excluded from the budget"
+        assert elapsed >= pause, "Pause duration must be included in the wall clock"
 
 
 class TestWaitForCompletionResumeTransition:
@@ -264,6 +266,15 @@ class TestRunLocalUsesPauseAwareWait:
             patch.dict("sys.modules", {"cli_adapters": mock_cli_adapters}),
             patch("shutil.which", return_value="/usr/bin/codex"),
             patch("subprocess.Popen", return_value=proc),
+            # This test pins the wait-call routing, not env security (the
+            # env-building contract has its own tests); a real
+            # build_secure_agent_env needs LLM-proxy setup unavailable in a
+            # clean checkout (pre-existing failure on main).
+            patch.object(
+                AutonomousAgentRunner,
+                "_build_agent_env",
+                return_value={"PATH": "/usr/bin:/bin"},
+            ),
             patch.object(AutonomousAgentRunner, "_send_sdk_init"),
             patch.object(AutonomousAgentRunner, "_send_message"),
             patch.object(AutonomousAgentRunner, "_read_stdout"),

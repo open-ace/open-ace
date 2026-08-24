@@ -17,6 +17,9 @@ import pytest
 # ── AiAgentSettingsRepo ─────────────────────────────────────────────
 
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(786)]
+
+
 class TestAiAgentSettingsRepoMaskToken:
     """Verify _mask_token utility."""
 
@@ -194,9 +197,11 @@ class TestGetAiGithubEnv:
         with patch(
             "app.repositories.ai_agent_settings_repo.AiAgentSettingsRepo.get_ai_github_env",
             return_value=None,
-        ):
+        ) as mock_fn:
             result = config.get_ai_github_env()
             assert result is None
+            # The miss actually consulted the repo (not a stale cached value).
+            assert mock_fn.call_count == 1
 
     def test_returns_env_dict_when_configured(self):
         from app.utils import config
@@ -214,9 +219,11 @@ class TestGetAiGithubEnv:
         with patch(
             "app.repositories.ai_agent_settings_repo.AiAgentSettingsRepo.get_ai_github_env",
             return_value=mock_env,
-        ):
+        ) as mock_fn:
             result = config.get_ai_github_env()
             assert result == mock_env
+            # The hit came from the repo call and is now cached (one call).
+            assert mock_fn.call_count == 1
 
     def test_caches_result_within_ttl(self):
         import time
@@ -568,7 +575,7 @@ class TestApiValidateToken:
                 resp = _unwrap(api_validate_github_token)()
                 data = _get_json(resp)
                 assert data["valid"] is False
-                assert data["error"]  # Has error message
+                assert data["error"] == "HTTP 401: Bad credentials"
 
     def test_empty_token_returns_400(self):
         """Verify empty token returns 400 status code."""
