@@ -9833,6 +9833,7 @@ class AutonomousOrchestrator:
         # re-entry, so the gate must be on a durable field. Mirrors the
         # issue-side github_issue_number gate below. (#2044 Phase B P1-b,
         # 5th-round review.)
+        repo_url = ""  # Track newly created repo URL for issue creation (#2963)
         if wf.get("is_new_project"):
             existing_repo = wf.get("project_repo_url", "") or ""
             # A resolved GitHub repo URL starts with http(s)://; a bare
@@ -9841,6 +9842,7 @@ class AutonomousOrchestrator:
             # URL — routes/autonomous.py accepts it as input), so the URL
             # shape is the reliable "repo already created" signal.
             if existing_repo.startswith(("http://", "https://")):
+                repo_url = existing_repo  # Already resolved, use for issue (#2963)
                 logger.info(
                     "Workflow %s: project_repo_url already a resolved repo URL "
                     "(%s); skipping create_repo",
@@ -9865,6 +9867,44 @@ class AutonomousOrchestrator:
                     # between this write and the milestone still gates
                     # re-entry correctly. (#2044 Phase B P1-b.)
                     self._update_workflow({"project_repo_url": repo_url})
+                    wf["project_repo_url"] = repo_url  # Sync in-memory wf (#2963)
+
+                    # Clone the newly created repo to local workspace (#2963)
+                    # This ensures the local directory is a valid git repository
+                    # before subsequent git operations (fetch, branch, worktree).
+                    if not project_path:
+                        user_workspace = self._get_user_workspace(system_account)
+                        repo_name = repo_url.rstrip("/").split("/")[-1]
+                        project_path = os.path.join(user_workspace, repo_name)
+
+                    if os.path.exists(project_path):
+                        if os.path.isdir(os.path.join(project_path, ".git")):
+                            existing_url = gh.get_repo_url()
+                            if existing_url == repo_url:
+                                logger.info(
+                                    "Project already cloned at %s, skipping",
+                                    project_path,
+                                )
+                            else:
+                                raise GitHubOpsError(
+                                    f"Directory {project_path} is a different git repo"
+                                )
+                        else:
+                            if os.listdir(project_path):
+                                raise GitHubOpsError(
+                                    f"Directory {project_path} exists but is not empty "
+                                    "and not a git repo"
+                                )
+                    else:
+                        os.makedirs(os.path.dirname(project_path), exist_ok=True)
+
+                    if not os.path.isdir(os.path.join(project_path, ".git")):
+                        gh._run_git(["clone", repo_url, project_path])
+
+                    self._update_workflow({"project_path": project_path})
+                    wf["project_path"] = project_path
+                    self._gh = GitHubOps(project_path, system_account=system_account)
+
                     self._create_milestone(
                         phase="preparation",
                         milestone_type="repo_setup",
@@ -9918,11 +9958,12 @@ class AutonomousOrchestrator:
             # Create issue from text
             # For new project scenarios, extract owner/repo from repo_url
             # so create_issue can target the repository explicitly.
+            # Prefer local repo_url (from create_repo) over wf dict (#2963)
             issue_repo = None
-            project_repo_url = wf.get("project_repo_url", "")
-            if project_repo_url:
+            issue_repo_url = repo_url or wf.get("project_repo_url", "")
+            if issue_repo_url:
                 # Extract owner/repo from URL like https://github.com/owner/repo
-                match = re.search(r"github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", project_repo_url)
+                match = re.search(r"github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", issue_repo_url)
                 if match:
                     issue_repo = match.group(1)
 
@@ -10023,6 +10064,20 @@ class AutonomousOrchestrator:
 
         if strategy == "new-branch" or strategy == "worktree":
             try:
+                # Validate project_path before git operations (#2963)
+                if not project_path:
+                    raise GitHubOpsError(
+                        "project_path is not set for branch creation"
+                    )
+                if not os.path.isdir(project_path):
+                    raise GitHubOpsError(
+                        f"project_path {project_path} does not exist"
+                    )
+                if not os.path.isdir(os.path.join(project_path, ".git")):
+                    raise GitHubOpsError(
+                        f"{project_path} is not a valid git repository"
+                    )
+
                 # Ensure we branch from latest origin/main
                 gh._run_git(["fetch", "origin", "main"])
 
