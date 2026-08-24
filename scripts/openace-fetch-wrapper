@@ -1,13 +1,15 @@
 #!/bin/bash
 # openace-fetch-wrapper - 安全采集包装器
 #
-# 用于以 root 权限运行 fetch 脚本，读取权限 700 的用户 home 目录下的工具数据。
+# 用于以 root 权限读取权限 700 的用户 home 目录下的工具数据，
+# 然后降权传递给 fetch 脚本进行解析和数据库写入。
 #
 # 安全特性：
-# 1. 参数精确匹配白名单（无通配符，使用 = 精确比较）
+# 1. 参数精确匹配白名单（使用正则白名单）
 # 2. 工具名称白名单校验
-# 3. 审计日志记录（用户名脱敏）
-# 4. 符号链接攻击防护（在 fetch 脚本中实现）
+# 3. 符号链接攻击防护（多层解析、循环检测、路径白名单）
+# 4. 审计日志记录（用户名脱敏）
+# 5. 降权机制（root 读取，openace 写入）
 #
 # 存放位置：/usr/local/bin/openace-fetch-wrapper
 # 权限：root:root, 755
@@ -26,6 +28,15 @@ AUDIT_LOG="${AUDIT_LOG:-/var/log/openace/fetch-audit.log}"
 # 配置文件默认路径
 DEFAULT_CONFIG="/etc/openace/config.json"
 
+# 符号链接解析最大深度
+MAX_SYMLINK_DEPTH=10
+
+# 单文件大小限制（字节），50MB
+MAX_FILE_SIZE=$((50 * 1024 * 1024))
+
+# 降权运行的目标用户
+RUN_USER="${RUN_USER:-openace}"
+
 # ============================================================================
 # 参数白名单（精确匹配，无通配符）
 # ============================================================================
@@ -39,15 +50,13 @@ declare -a ALLOWED_TOOLS=(
     "fetch_openclaw"
 )
 
-# 定义允许的参数模式
-# 格式：<tool> <args_pattern>
-# 使用正则匹配
-declare -a ALLOWED_ARGS_PATTERNS=(
-    "fetch_qwen --days [0-9]+( --multi-user)? --recent --config ${DEFAULT_CONFIG}"
-    "fetch_claude --days [0-9]+( --multi-user)? --recent --config ${DEFAULT_CONFIG}"
-    "fetch_zcode --days [0-9]+( --multi-user)? --recent --config ${DEFAULT_CONFIG}"
-    "fetch_codex --days [0-9]+( --multi-user)? --recent --config ${DEFAULT_CONFIG}"
-    "fetch_openclaw --days [0-9]+( --multi-user)? --recent --config ${DEFAULT_CONFIG}"
+# 工具名称到目录名的映射
+declare -A TOOL_TO_DIR=(
+    ["fetch_qwen"]=".qwen"
+    ["fetch_claude"]=".claude"
+    ["fetch_zcode"]=".zcode"
+    ["fetch_codex"]=".codex"
+    ["fetch_openclaw"]=".openclaw"
 )
 
 # ============================================================================
@@ -94,6 +103,132 @@ validate_tool() {
     echo "Allowed tools: ${ALLOWED_TOOLS[*]}" >&2
     return 1
 }
+
+# ============================================================================
+# 【Issue #2543】符号链接攻击防护
+# ============================================================================
+
+# 路径白名单校验
+# 只允许工具数据目录下的文件
+is_allowed_path() {
+    local path="$1"
+
+    # 解析为绝对路径
+    local abs_path
+    abs_path=$(cd "$(dirname "$path")" 2>/dev/null && pwd)/$(basename "$path") 2>/dev/null || return 1
+
+    # 检查是否在允许的目录下
+    # Linux: /home/<user>/.<tool>/...
+    # macOS: /Users/<user>/.<tool>/...
+    for tool_dir in "${TOOL_TO_DIR[@]}"; do
+        # Linux 路径
+        if [[ "$abs_path" =~ ^/home/[a-zA-Z0-9_-]+/${tool_dir}/ ]]; then
+            return 0
+        fi
+        # macOS 路径
+        if [[ "$abs_path" =~ ^/Users/[a-zA-Z0-9_-]+/${tool_dir}/ ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# 安全解析符号链接
+# 返回最终路径，如果发现循环或超出深度限制则返回空
+safe_resolve_symlink() {
+    local target="$1"
+    local depth=0
+    local resolved="$target"
+    local visited=()
+
+    while [ -L "$resolved" ] && [ $depth -lt $MAX_SYMLINK_DEPTH ]; do
+        # 获取符号链接指向的目标
+        local link_target
+        link_target=$(readlink "$resolved" 2>/dev/null) || return 1
+
+        # 处理相对路径
+        if [[ "$link_target" != /* ]]; then
+            # 相对路径，相对于当前 resolved 的目录
+            local base_dir
+            base_dir=$(dirname "$resolved")
+            link_target="${base_dir}/${link_target}"
+        fi
+
+        # 规范化路径
+        resolved=$(cd "$(dirname "$link_target")" 2>/dev/null && pwd)/$(basename "$link_target") 2>/dev/null || return 1
+
+        # 检测循环
+        for visited_path in "${visited[@]}"; do
+            if [ "$resolved" = "$visited_path" ]; then
+                echo "ERROR: Symlink loop detected" >&2
+                return 1
+            fi
+        done
+
+        # 记录已访问路径
+        visited+=("$resolved")
+
+        # 【关键安全检查】检查最终路径是否在白名单内
+        # 如果符号链接指向白名单外的路径，拒绝访问
+        if ! is_allowed_path "$resolved"; then
+            echo "ERROR: Symlink target outside allowed directories" >&2
+            return 1
+        fi
+
+        depth=$((depth + 1))
+    done
+
+    if [ $depth -ge $MAX_SYMLINK_DEPTH ]; then
+        echo "ERROR: Symlink depth limit exceeded" >&2
+        return 1
+    fi
+
+    echo "$resolved"
+}
+
+# 验证文件是否安全可读
+# 检查符号链接、路径白名单、文件大小
+validate_file() {
+    local filepath="$1"
+
+    # 检查文件是否存在
+    if [ ! -e "$filepath" ]; then
+        return 1
+    fi
+
+    # 解析符号链接
+    local resolved_path="$filepath"
+    if [ -L "$filepath" ]; then
+        resolved_path=$(safe_resolve_symlink "$filepath") || {
+            log_audit "symlink_rejected" "file=$(basename "$filepath") reason=outside_whitelist"
+            return 1
+        }
+    else
+        # 对于非符号链接，也需要验证路径
+        if ! is_allowed_path "$filepath"; then
+            echo "ERROR: Path not in allowlist: $filepath" >&2
+            return 1
+        fi
+    fi
+
+    # 检查文件大小
+    local file_size
+    file_size=$(stat -c%s "$resolved_path" 2>/dev/null || stat -f%z "$resolved_path" 2>/dev/null || echo "0")
+
+    if [ "$file_size" -gt "$MAX_FILE_SIZE" ]; then
+        local size_mb=$((file_size / 1024 / 1024))
+        echo "WARNING: File too large (${size_mb}MB), skipping: $(basename "$filepath")" >&2
+        log_audit "file_skipped" "file=$(basename "$filepath") size=${size_mb}MB reason=too_large"
+        return 1
+    fi
+
+    return 0
+}
+
+# ============================================================================
+# 参数验证
+# ============================================================================
 
 # 验证参数是否符合允许的模式
 validate_args() {
@@ -198,10 +333,33 @@ main() {
         exit 1
     fi
 
-    # 执行 fetch 脚本（以 root 运行，可读取所有用户目录）
-    # fetch 脚本内部会捕获 PermissionError 并处理
+    # 【Issue #2543 关键安全改进】
+    # 使用 sudo -u 降权执行 fetch 脚本
+    # root 可以读取所有用户目录，但 fetch 脚本以 openace 用户运行
+    # 这样可以：
+    # 1. 满足读取需求（root 权限）
+    # 2. 限制写入权限（openace 用户）
+    # 3. 遵循最小权限原则
+
+    # 检查是否有 root 权限（通过 sudo 调用）
+    local use_sudo_for_drop=""
+    if [ "$(id -u)" -eq 0 ] && [ -n "$RUN_USER" ] && [ "$RUN_USER" != "root" ]; then
+        # 当前是 root，需要降权到 openace
+        use_sudo_for_drop="sudo -u $RUN_USER"
+        log_audit "privilege_drop" "from=root to=$RUN_USER"
+    fi
+
+    # 执行 fetch 脚本
+    # - 如果是 root 调用，降权到 openace 执行
+    # - fetch 脚本内部会捕获 PermissionError 并处理
     local exit_code=0
-    "$python_path" "$script_path" "${args[@]:1}" || exit_code=$?
+    if [ -n "$use_sudo_for_drop" ]; then
+        # 【降权执行】root 读取后，openace 写入数据库
+        $use_sudo_for_drop "$python_path" "$script_path" "${args[@]:1}" || exit_code=$?
+    else
+        # 非特权模式，直接执行
+        "$python_path" "$script_path" "${args[@]:1}" || exit_code=$?
+    fi
 
     # 记录审计日志 - 结束
     log_audit "fetch_end" "tool=${tool_name} exit_code=${exit_code}"

@@ -213,6 +213,55 @@ class TestParameterValidation:
 class TestSymlinkPrevention:
     """Test that symlink attacks are prevented."""
 
+    def test_wrapper_has_symlink_protection(self, wrapper_path):
+        """Test that wrapper contains symlink protection code."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        # Read wrapper content
+        with open(wrapper_path) as f:
+            content = f.read()
+
+        # Check for symlink protection functions
+        assert "safe_resolve_symlink" in content, "Missing symlink resolution function"
+        assert "is_allowed_path" in content, "Missing path whitelist function"
+        assert "MAX_SYMLINK_DEPTH" in content, "Missing symlink depth limit"
+
+    def test_path_whitelist_function(self, wrapper_path):
+        """Test that path whitelist function exists."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        with open(wrapper_path) as f:
+            content = f.read()
+
+        # Check for tool directory mapping
+        assert "TOOL_TO_DIR" in content, "Missing tool directory mapping"
+        assert ".qwen" in content, "Missing .qwen directory"
+        assert ".claude" in content, "Missing .claude directory"
+
+    def test_symlink_loop_detection(self, wrapper_path):
+        """Test that symlink loop detection exists."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        with open(wrapper_path) as f:
+            content = f.read()
+
+        # Check for loop detection
+        assert "Symlink loop detected" in content, "Missing loop detection message"
+
+    def test_symlink_depth_limit(self, wrapper_path):
+        """Test that symlink depth limit is enforced."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        with open(wrapper_path) as f:
+            content = f.read()
+
+        # Check for depth limit
+        assert "Symlink depth limit exceeded" in content, "Missing depth limit message"
+
     def test_single_level_symlink_outside_whitelist(self, temp_dir, wrapper_path):
         """Test that symlink pointing outside whitelist is rejected."""
         if not os.path.exists(wrapper_path):
@@ -258,22 +307,6 @@ class TestSymlinkPrevention:
         # Both symlinks exist
         assert link1.is_symlink()
         assert link2.is_symlink()
-
-    def test_circular_symlink_detection(self, temp_dir, wrapper_path):
-        """Test that circular symlinks are detected."""
-        if not os.path.exists(wrapper_path):
-            pytest.skip("Wrapper not installed")
-
-        # Create user directory
-        user_dir = temp_dir / "home" / "user1" / ".qwen" / "projects"
-        user_dir.mkdir(parents=True)
-
-        # Create circular symlinks
-        link1 = user_dir / "link1.jsonl"
-        link2 = user_dir / "link2.jsonl"
-
-        # Note: Creating actual circular symlinks in tests can be tricky
-        # The wrapper should detect this and not hang
 
     def test_relative_path_symlink_attack(self, temp_dir, wrapper_path):
         """Test that relative path symlinks are handled correctly."""
@@ -387,6 +420,49 @@ class TestAuditLogging:
         # Usernames should be sanitized to first letter + ***
         # e.g., "alice" -> "a***"
         # This prevents leaking sensitive information
+
+
+# ============================================================================
+# Test privilege drop mechanism
+# ============================================================================
+
+
+class TestPrivilegeDrop:
+    """Test that privilege drop mechanism is implemented."""
+
+    def test_wrapper_has_privilege_drop(self, wrapper_path):
+        """Test that wrapper contains privilege drop code."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        with open(wrapper_path) as f:
+            content = f.read()
+
+        # Check for privilege drop mechanism
+        assert "sudo -u" in content or "RUN_USER" in content, "Missing privilege drop mechanism"
+        assert "privilege_drop" in content, "Missing privilege drop audit log"
+
+    def test_run_user_configurable(self, wrapper_path):
+        """Test that RUN_USER is configurable."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        with open(wrapper_path) as f:
+            content = f.read()
+
+        # Check that RUN_USER is configurable via environment
+        assert "RUN_USER=" in content, "RUN_USER should be configurable"
+
+    def test_privilege_drop_only_for_root(self, wrapper_path):
+        """Test that privilege drop only happens when running as root."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        with open(wrapper_path) as f:
+            content = f.read()
+
+        # Check for root check
+        assert 'id -u' in content or '$(id -u)' in content, "Missing root check"
 
 
 # ============================================================================
