@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -114,9 +113,7 @@ class TestDingTalkPermissionCheck:
             patch(
                 "app.routes.notification_integrations.get_notification_settings_repository",
                 return_value=MagicMock(
-                    get=MagicMock(
-                        return_value={"app_key": "key", "app_secret": "secret"}
-                    )
+                    get=MagicMock(return_value={"app_key": "key", "app_secret": "secret"})
                 ),
             ),
             patch(
@@ -148,9 +145,7 @@ class TestDingTalkPermissionCheck:
             patch(
                 "app.routes.notification_integrations.get_notification_settings_repository",
                 return_value=MagicMock(
-                    get=MagicMock(
-                        return_value={"app_key": "key", "app_secret": "secret"}
-                    )
+                    get=MagicMock(return_value={"app_key": "key", "app_secret": "secret"})
                 ),
             ),
             patch(
@@ -186,9 +181,7 @@ class TestDingTalkPermissionCheck:
             patch(
                 "app.routes.notification_integrations.get_notification_settings_repository",
                 return_value=MagicMock(
-                    get=MagicMock(
-                        return_value={"app_key": "key", "app_secret": "secret"}
-                    )
+                    get=MagicMock(return_value={"app_key": "key", "app_secret": "secret"})
                 ),
             ),
             patch(
@@ -224,9 +217,7 @@ class TestDingTalkPermissionCheck:
             patch(
                 "app.routes.notification_integrations.get_notification_settings_repository",
                 return_value=MagicMock(
-                    get=MagicMock(
-                        return_value={"app_key": "key", "app_secret": "secret"}
-                    )
+                    get=MagicMock(return_value={"app_key": "key", "app_secret": "secret"})
                 ),
             ),
             patch(
@@ -258,9 +249,7 @@ class TestDingTalkPermissionCheck:
             patch(
                 "app.routes.notification_integrations.get_notification_settings_repository",
                 return_value=MagicMock(
-                    get=MagicMock(
-                        return_value={"app_key": "key", "app_secret": "secret"}
-                    )
+                    get=MagicMock(return_value={"app_key": "key", "app_secret": "secret"})
                 ),
             ),
             patch(
@@ -284,9 +273,7 @@ class TestDingTalkPermissionCheck:
             patch(
                 "app.routes.notification_integrations.get_notification_settings_repository",
                 return_value=MagicMock(
-                    get=MagicMock(
-                        return_value={"app_key": "key", "app_secret": "secret"}
-                    )
+                    get=MagicMock(return_value={"app_key": "key", "app_secret": "secret"})
                 ),
             ),
             patch(
@@ -312,9 +299,7 @@ class TestDingTalkPermissionCheck:
             patch(
                 "app.routes.notification_integrations.get_notification_settings_repository",
                 return_value=MagicMock(
-                    get=MagicMock(
-                        return_value={"app_key": "key", "app_secret": "secret"}
-                    )
+                    get=MagicMock(return_value={"app_key": "key", "app_secret": "secret"})
                 ),
             ),
             patch(
@@ -343,9 +328,7 @@ class TestDingTalkPermissionCheck:
             patch(
                 "app.routes.notification_integrations.get_notification_settings_repository",
                 return_value=MagicMock(
-                    get=MagicMock(
-                        return_value={"app_key": "my-key", "app_secret": "my-secret"}
-                    )
+                    get=MagicMock(return_value={"app_key": "my-key", "app_secret": "my-secret"})
                 ),
             ),
             patch(
@@ -376,9 +359,7 @@ class TestDingTalkPermissionCheck:
             patch(
                 "app.routes.notification_integrations.get_notification_settings_repository",
                 return_value=MagicMock(
-                    get=MagicMock(
-                        return_value={"app_key": "key", "app_secret": "secret"}
-                    )
+                    get=MagicMock(return_value={"app_key": "key", "app_secret": "secret"})
                 ),
             ),
             patch(
@@ -408,9 +389,7 @@ class TestDingTalkPermissionCheck:
             patch(
                 "app.routes.notification_integrations.get_notification_settings_repository",
                 return_value=MagicMock(
-                    get=MagicMock(
-                        return_value={"app_key": "key", "app_secret": "secret"}
-                    )
+                    get=MagicMock(return_value={"app_key": "key", "app_secret": "secret"})
                 ),
             ),
             patch(

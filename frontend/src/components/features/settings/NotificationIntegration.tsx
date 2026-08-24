@@ -57,9 +57,10 @@ export const NotificationIntegration: React.FC = () => {
   const [status, setStatus] = useState<ChannelStatus>({});
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [dingtalkTestChecks, setDingtalkTestChecks] = useState<
-    Record<string, { status: string; message: string }> | null
-  >(null);
+  const [dingtalkTestChecks, setDingtalkTestChecks] = useState<Record<
+    string,
+    { status: string; message: string }
+  > | null>(null);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [webhookTestUrl, setWebhookTestUrl] = useState('');
   const [dingtalkTestUrl, setDingtalkTestUrl] = useState('');

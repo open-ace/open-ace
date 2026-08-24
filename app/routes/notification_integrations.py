@@ -204,11 +204,13 @@ def test_dingtalk_config():
         token = payload.get("accessToken") or payload.get("access_token")
         if not token:
             checks["access_token"] = {"status": "failed", "message": "No access token returned"}
-            return jsonify({
-                "success": False,
-                "message": "DingTalk did not return an access token",
-                "checks": checks,
-            })
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "DingTalk did not return an access token",
+                    "checks": checks,
+                }
+            )
         checks["access_token"] = {"status": "passed", "message": "Access token obtained"}
     except OutboundUrlBlockedError as e:
         logger.error("DingTalk connection test blocked by SSRF protection: %s", e)
@@ -216,19 +218,29 @@ def test_dingtalk_config():
             "status": "failed",
             "message": f"Request blocked by security policy: {e}",
         }
-        return jsonify({
-            "success": False,
-            "message": f"Request blocked by security policy: {e}",
-            "checks": checks,
-        }), 403
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "message": f"Request blocked by security policy: {e}",
+                    "checks": checks,
+                }
+            ),
+            403,
+        )
     except Exception:
         logger.warning("DingTalk connection test failed", exc_info=True)
         checks["access_token"] = {"status": "failed", "message": "Failed to obtain access token"}
-        return jsonify({
-            "success": False,
-            "message": "DingTalk connection test failed",
-            "checks": checks,
-        }), 502
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "message": "DingTalk connection test failed",
+                    "checks": checks,
+                }
+            ),
+            502,
+        )
 
     # ---- 2. department_list check ----
     try:
@@ -277,13 +289,12 @@ def test_dingtalk_config():
     if all_passed:
         message = "DingTalk connection test successful"
     else:
-        message = (
-            "DingTalk connection test: some checks failed – "
-            + ", ".join(failed_checks)
-        )
+        message = "DingTalk connection test: some checks failed – " + ", ".join(failed_checks)
 
-    return jsonify({
-        "success": all_passed,
-        "message": message,
-        "checks": checks,
-    })
+    return jsonify(
+        {
+            "success": all_passed,
+            "message": message,
+            "checks": checks,
+        }
+    )
