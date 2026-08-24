@@ -234,6 +234,47 @@ def test_show_tree_paths_allow_real_filenames_but_not_escapes(wrapper):
     assert_denied(wrapper, sudo_git_prefix() + ["show", "HEAD:/tmp/secret"])
 
 
+def test_clone_context_must_be_existing_parent_not_missing_target(wrapper, tmp_path):
+    parent = tmp_path / "alice"
+    parent.mkdir()
+    target = parent / "new-repo"
+    config = make_config(require_owned_paths=True, allowed_path_roots=[str(tmp_path)])
+    hardening = [
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        f"safe.directory={parent}",
+    ]
+
+    allowed = wrapper.validate_git_argv(
+        hardening
+        + [
+            "-C",
+            str(parent),
+            "clone",
+            "https://github.com/open-ace/new-repo.git",
+            str(target),
+        ],
+        config=config,
+    )
+    assert allowed.allowed, allowed.reason
+
+    denied = wrapper.validate_git_argv(
+        hardening
+        + [
+            "-C",
+            str(target),
+            "clone",
+            "https://github.com/open-ace/new-repo.git",
+            str(target),
+        ],
+        config=config,
+    )
+    assert not denied.allowed
+
+
 @pytest.mark.parametrize(
     "argv",
     [

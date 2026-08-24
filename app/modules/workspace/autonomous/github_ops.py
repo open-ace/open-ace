@@ -783,6 +783,12 @@ class GitHubOps:
         git_bin = (
             os.environ.get("OPENACE_REAL_GIT", "git") if not needs_sudo else OPENACE_GIT_WRAPPER
         )
+        clone_cwd = ""
+        if not trusted_args and len(args) == 3 and args[0] == "clone" and os.path.isabs(args[2]):
+            clone_cwd = os.path.dirname(os.path.realpath(args[2]))
+            if clone_cwd and not needs_sudo:
+                kwargs["cwd"] = clone_cwd
+        command_context_path = clone_cwd or self.repo_path
         # Trust the canonical repo via per-command ``-c`` (never the global
         # ``safe.directory *`` that used to be written via
         # _ensure_safe_directory). git's dubious-ownership check covers every
@@ -795,7 +801,7 @@ class GitHubOps:
         # deployments they can be owned by different accounts. Issue #2021.
         safe_paths: list[str] = []
         for p in (
-            self._trusted_work_tree or os.path.realpath(self.repo_path),
+            self._trusted_work_tree or os.path.realpath(command_context_path),
             self._trusted_git_dir,
             self._trusted_common_dir,
         ):
@@ -823,7 +829,7 @@ class GitHubOps:
                     "core.fsmonitor=false",
                     *safe_cfgs,
                 ]
-                + ([] if trusted_args else ["-C", self.repo_path])
+                + ([] if trusted_args else ["-C", command_context_path])
                 + args
             )
             kwargs.pop("cwd", None)  # Remove cwd to avoid Python permission check
