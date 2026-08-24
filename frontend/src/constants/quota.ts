@@ -2,21 +2,24 @@
  * Quota Constants and Limits
  *
  * Token quotas are stored in M (millions) units in the database.
- * Database field type: INTEGER (PostgreSQL: -2,147,483,648 to 2,147,483,647)
+ * Database field type: BIGINT (Issue #3018: upgraded from INTEGER to BIGINT)
+ *
+ * New limits are set to be safe for JavaScript Number.MAX_SAFE_INTEGER (9,007,199,254,740,991).
  */
 
 /**
  * Maximum token quota in M units
- * Based on PostgreSQL INTEGER max value: 2,147,483,647
- * Since we store in M units, max is approximately 2,147 M tokens
+ * Issue #3018: Upgraded to BIGINT, new limit 100,000M (100 billion tokens)
+ * This allows approximately 100 days of usage at 1 billion tokens/day.
  */
-export const MAX_TOKEN_QUOTA = 2147;
+export const MAX_TOKEN_QUOTA = 100000;
 
 /**
  * Maximum request quota (stored as actual count)
- * PostgreSQL INTEGER max value
+ * Issue #3018: Upgraded to BIGINT, new limit 10 billion requests
+ * This allows approximately 11.5 days at 10,000 requests/second.
  */
-export const MAX_REQUEST_QUOTA = 2147483647;
+export const MAX_REQUEST_QUOTA = 10000000000;
 
 /**
  * Minimum quota value (0 means unlimited in display, but null is preferred)

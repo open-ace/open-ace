@@ -6,6 +6,8 @@
  * - Request type formatting with and without quotaStats
  * - Decimal formatting (toFixed(2) behavior)
  * - Number string formatting
+ *
+ * Issue #3018: Updated for new quota limits (100000M tokens, 10 billion requests)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -19,32 +21,33 @@ import { formatQuotaHint } from './quotaHintFormat';
 describe('formatQuotaHint - token type', () => {
   it('should format token with quotaStats available', () => {
     const result = formatQuotaHint(QuotaType.DAILY_TOKEN, 150, MAX_TOKEN_QUOTA, true);
-    expect(result).toBe('可用: 150.00M (上限: 2147M)');
+    // Issue #3018: New max is 100000M
+    expect(result).toBe('可用: 150.00M (上限: 100000M)');
   });
 
   it('should format token without quotaStats (fallback)', () => {
     const result = formatQuotaHint(QuotaType.DAILY_TOKEN, 0, MAX_TOKEN_QUOTA, false);
-    expect(result).toBe('Max: 2147M');
+    expect(result).toBe('Max: 100000M');
   });
 
   it('should format token with decimal places', () => {
     const result = formatQuotaHint(QuotaType.DAILY_TOKEN, 150.1, MAX_TOKEN_QUOTA, true);
-    expect(result).toBe('可用: 150.10M (上限: 2147M)');
+    expect(result).toBe('可用: 150.10M (上限: 100000M)');
   });
 
   it('should format token with zero available', () => {
     const result = formatQuotaHint(QuotaType.DAILY_TOKEN, 0, MAX_TOKEN_QUOTA, true);
-    expect(result).toBe('可用: 0.00M (上限: 2147M)');
+    expect(result).toBe('可用: 0.00M (上限: 100000M)');
   });
 
   it('should format MONTHLY_TOKEN correctly', () => {
     const result = formatQuotaHint(QuotaType.MONTHLY_TOKEN, 700, MAX_TOKEN_QUOTA, true);
-    expect(result).toBe('可用: 700.00M (上限: 2147M)');
+    expect(result).toBe('可用: 700.00M (上限: 100000M)');
   });
 
   it('should format MONTHLY_TOKEN without quotaStats', () => {
     const result = formatQuotaHint(QuotaType.MONTHLY_TOKEN, 0, MAX_TOKEN_QUOTA, false);
-    expect(result).toBe('Max: 2147M');
+    expect(result).toBe('Max: 100000M');
   });
 });
 
@@ -55,32 +58,33 @@ describe('formatQuotaHint - token type', () => {
 describe('formatQuotaHint - request type', () => {
   it('should format request with quotaStats available', () => {
     const result = formatQuotaHint(QuotaType.DAILY_REQUEST, 1500000, MAX_REQUEST_QUOTA, true);
-    expect(result).toBe('可用: 1,500,000 (上限: 2,147,483,647)');
+    // Issue #3018: New max is 10 billion
+    expect(result).toBe('可用: 1,500,000 (上限: 10,000,000,000)');
   });
 
   it('should format request without quotaStats (fallback)', () => {
     const result = formatQuotaHint(QuotaType.DAILY_REQUEST, 0, MAX_REQUEST_QUOTA, false);
-    expect(result).toBe('Max: 2,147,483,647');
+    expect(result).toBe('Max: 10,000,000,000');
   });
 
   it('should format request with zero available', () => {
     const result = formatQuotaHint(QuotaType.DAILY_REQUEST, 0, MAX_REQUEST_QUOTA, true);
-    expect(result).toBe('可用: 0 (上限: 2,147,483,647)');
+    expect(result).toBe('可用: 0 (上限: 10,000,000,000)');
   });
 
   it('should format MONTHLY_REQUEST correctly', () => {
     const result = formatQuotaHint(QuotaType.MONTHLY_REQUEST, 7000000, MAX_REQUEST_QUOTA, true);
-    expect(result).toBe('可用: 7,000,000 (上限: 2,147,483,647)');
+    expect(result).toBe('可用: 7,000,000 (上限: 10,000,000,000)');
   });
 
   it('should format MONTHLY_REQUEST without quotaStats', () => {
     const result = formatQuotaHint(QuotaType.MONTHLY_REQUEST, 0, MAX_REQUEST_QUOTA, false);
-    expect(result).toBe('Max: 2,147,483,647');
+    expect(result).toBe('Max: 10,000,000,000');
   });
 
   it('should format large request values correctly', () => {
     const result = formatQuotaHint(QuotaType.DAILY_REQUEST, 2000000000, MAX_REQUEST_QUOTA, true);
-    expect(result).toBe('可用: 2,000,000,000 (上限: 2,147,483,647)');
+    expect(result).toBe('可用: 2,000,000,000 (上限: 10,000,000,000)');
   });
 });
 
