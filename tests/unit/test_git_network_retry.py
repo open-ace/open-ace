@@ -29,6 +29,9 @@ from app.modules.workspace.autonomous.orchestrator import (
 # ── Layer 1: _is_transient_error classification ──────────────────────────
 
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1002)]
+
+
 class TestIsTransientError:
     def test_libressl_tls_error_is_transient(self):
         assert _is_transient_error(

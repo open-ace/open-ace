@@ -2,8 +2,12 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.gunicorn_worker import TerminalGeventWorker
 from app.remote_ws_handler import RemoteWSHandler
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(559)]
 
 
 class TestTerminalGeventWorker:

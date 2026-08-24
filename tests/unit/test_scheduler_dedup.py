@@ -15,7 +15,11 @@ Covers:
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.services.autonomous_scheduler import AutonomousScheduler
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1002)]
 
 
 def _scheduler() -> AutonomousScheduler:
@@ -54,11 +58,13 @@ class TestConflictKeys:
 
 
 def _would_block(sched: AutonomousScheduler, wf: dict) -> bool:
-    """Replicate the git-conflict filter in _process_workflows."""
-    workspace, branch = sched._conflict_keys(wf)
-    return (bool(workspace) and workspace in sched._in_progress_workspaces) or (
-        bool(branch) and branch in sched._in_progress_branches
-    )
+    """The REAL git-conflict filter from _process_workflows.
+
+    Calls the production predicate directly (not a local replica) so the
+    tests fail if the filter drifts — the anti-pattern the sibling
+    test_waiting_bypass.py docstring warns about (PR #2016).
+    """
+    return sched._workflow_blocked_by_conflict_locks(wf)
 
 
 class TestDedup:

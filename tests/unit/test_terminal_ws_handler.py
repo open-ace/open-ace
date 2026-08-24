@@ -18,6 +18,9 @@ from app.remote_ws_handler import (
 # ---------------------------------------------------------------------------
 
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(559)]
+
+
 class TestWSPathRegex:
     def test_valid_terminal_ws_path(self):
         m = _WS_PATH_RE.match("/api/remote/terminal/12345678-1234-1234-1234-123456789abc/ws")

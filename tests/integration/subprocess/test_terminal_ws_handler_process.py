@@ -5,7 +5,7 @@ Verifies the full WebSocket path through the custom handler without
 geventwebsocket: handshake, bidirectional bridging, and clean close.
 
 Run:
-    python tests/issues/559/e2e_terminal_ws_handler.py
+    python tests/integration/subprocess/test_terminal_ws_handler_process.py
 """
 
 import asyncio
@@ -15,7 +15,12 @@ import time
 import uuid
 
 # Project root must be on sys.path before gevent monkey-patch triggers any app imports
-# Script is at tests/issues/559/e2e_terminal_ws_handler.py -> 4 levels up to project root
+# Script is at tests/integration/subprocess/test_terminal_ws_handler_process.py
+# -> tests/integration/subprocess is 3 dirnames below the repo root.
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(559)]
+
 PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
@@ -23,7 +28,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 # gevent monkey-patch is needed only when this file runs as a standalone script
-# (``python tests/issues/559/e2e_terminal_ws_handler.py``). Under pytest the
+# (``python tests/integration/subprocess/test_terminal_ws_handler_process.py``). Under pytest the
 # module is *imported* during collection, and a process-wide monkey-patch at
 # import time corrupts every subsequently-collected test in the shard: gevent
 # greenlets + native threading/asyncio deadlock in ways ``--timeout`` cannot
@@ -196,45 +201,62 @@ def _check_multiple_messages(upstream_port, server_port, terminal_id, token):
 
 
 def _check_invalid_token_rejected(server_port, terminal_id):
-    """Invalid token should cause the server to close the connection."""
+    """Invalid token must terminate the session — never normal traffic.
+
+    Either outcome is correct: rejection at the upgrade handshake, or a close
+    right after. Receiving an echoed/normal frame would mean the token check
+    is missing, and fails the check.
+    """
     import socket
 
+    from websockets.exceptions import WebSocketException
     from websockets.sync.client import connect
 
     url = f"ws://127.0.0.1:{server_port}/api/remote/terminal/{terminal_id}/ws?token=wrong-token"
     sock = socket.create_connection(("127.0.0.1", server_port))
+    outcome = "received-data"
     try:
         with connect(url, sock=sock, subprotocols=["binary"]) as ws:
-            # Server should close the connection quickly
             ws.send("should fail")
-            # If we get here, try to recv — should get close or error
             try:
                 ws.recv(timeout=3)
-            except Exception:
-                pass  # Connection closed, as expected
-    except Exception:
-        pass  # Connection rejected during handshake or immediately after, also fine
+            except WebSocketException:
+                outcome = "closed-after-connect"
+    except (OSError, WebSocketException):
+        outcome = "handshake-rejected"
+    assert (
+        outcome != "received-data"
+    ), f"invalid token must close/reject the session, but the client got normal traffic ({outcome})"
     log("PASS", "invalid token rejected")
 
 
 def _check_unknown_terminal_rejected(server_port):
-    """Unknown terminal_id should cause the server to close the connection."""
+    """Unknown terminal_id must terminate the session — never normal traffic.
+
+    Same contract as the invalid-token check: rejection at the handshake or a
+    close right after both pass; an echoed/normal frame fails.
+    """
     import socket
 
+    from websockets.exceptions import WebSocketException
     from websockets.sync.client import connect
 
     fake_id = str(uuid.uuid4())
     url = f"ws://127.0.0.1:{server_port}/api/remote/terminal/{fake_id}/ws?token=anything"
     sock = socket.create_connection(("127.0.0.1", server_port))
+    outcome = "received-data"
     try:
         with connect(url, sock=sock, subprotocols=["binary"]) as ws:
             ws.send("should fail")
             try:
                 ws.recv(timeout=3)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except WebSocketException:
+                outcome = "closed-after-connect"
+    except (OSError, WebSocketException):
+        outcome = "handshake-rejected"
+    assert (
+        outcome != "received-data"
+    ), f"unknown terminal must close/reject the session, but the client got normal traffic ({outcome})"
     log("PASS", "unknown terminal rejected")
 
 

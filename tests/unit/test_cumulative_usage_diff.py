@@ -21,11 +21,20 @@ import os
 import sys
 
 # Make remote-agent importable (cli_adapters, executor, agent_runner helpers).
-_REMOTE_AGENT = os.path.join(os.path.dirname(__file__), "..", "..", "..", "remote-agent")
-sys.path.insert(0, _REMOTE_AGENT)
+import pytest
 
-from cli_adapters.usage_parser import is_cumulative_result_tool  # noqa: E402
-from executor import SessionProcess  # noqa: E402
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1461)]
+
+_REMOTE_AGENT = os.path.join(os.path.dirname(__file__), "..", "..", "remote-agent")
+# Guarded insert: a leaked remote-agent entry shadows bare `import config`
+# for other unit tests (test_db.py expects the scripts-side config) — the
+# test_remote_agent_usage_parser_764.py precedent for exactly this hazard.
+sys.path.insert(0, _REMOTE_AGENT)
+try:
+    from cli_adapters.usage_parser import is_cumulative_result_tool  # noqa: E402
+    from executor import SessionProcess  # noqa: E402
+finally:
+    sys.path.remove(_REMOTE_AGENT)
 
 from app.modules.workspace.autonomous.agent_runner import (  # noqa: E402
     AutonomousAgentRunner,
@@ -33,8 +42,12 @@ from app.modules.workspace.autonomous.agent_runner import (  # noqa: E402
     _LocalSession,
 )
 
-# Populate the cached usage helpers (is_cumulative_result_tool / diff).
-_ensure_usage_parser()
+
+@pytest.fixture(autouse=True)
+def _usage_parser_ready():
+    # Populate the cached usage helpers (is_cumulative_result_tool / diff)
+    # per test instead of at import time, keeping module import side-effect-free.
+    _ensure_usage_parser()
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,8 @@ import pytest
 import app.ws_frame as ws_frame
 
 # Re-export for convenience
+pytestmark = [pytest.mark.regression, pytest.mark.issue(559)]
+
 OP_BINARY = ws_frame.OP_BINARY
 OP_CLOSE = ws_frame.OP_CLOSE
 OP_CONT = ws_frame.OP_CONT
@@ -521,7 +523,6 @@ class TestControlFramePayloadLimit:
         """PONG with 126 bytes payload must be rejected."""
         payload = b"x" * 126
         frame = _build_client_frame(payload, opcode=OP_PONG)
-        sock = FakeSocket(frame)
         # PONG is ignored, so need a text frame after to complete reading
         text_frame = _build_client_frame(b"after", opcode=OP_TEXT)
         sock = FakeSocket(frame + text_frame)
@@ -631,35 +632,24 @@ class TestClientFrameMasking:
 class TestFragmentReassemblyBoundary:
     """RFC 6455 §5.4: Fragment reassembly must not transiently exceed message size."""
 
-    def test_fragment_exceeds_limit_before_append(self):
+    def test_fragment_exceeds_limit_before_append(self, monkeypatch):
         """Total length check must happen BEFORE fragments.append."""
         # Create a fragmented message that would exceed max_message_size
-        # We'll use a smaller limit for testing
-        import os
+        # We'll use a smaller limit for testing (get_max_message_size
+        # re-reads the env each call, so monkeypatch restore is sufficient).
+        monkeypatch.setenv("OPENACE_WS_MAX_MESSAGE_BYTES", "100")
+        max_size = ws_frame.get_max_message_size()
+        assert max_size == 100
 
-        original_limit = os.environ.get("OPENACE_WS_MAX_MESSAGE_BYTES")
+        # First fragment: 80 bytes (within limit)
+        f1 = _build_fragment_frame(b"x" * 80, OP_TEXT, fin=False)
+        # Second fragment: 30 bytes (total would be 110, exceeding 100)
+        f2 = _build_fragment_frame(b"y" * 30, OP_CONT, fin=True)
+        sock = FakeSocket(f1 + f2)
 
-        try:
-            # Set a small limit for testing
-            os.environ["OPENACE_WS_MAX_MESSAGE_BYTES"] = "100"
-            max_size = ws_frame.get_max_message_size()
-            assert max_size == 100
-
-            # First fragment: 80 bytes (within limit)
-            f1 = _build_fragment_frame(b"x" * 80, OP_TEXT, fin=False)
-            # Second fragment: 30 bytes (total would be 110, exceeding 100)
-            f2 = _build_fragment_frame(b"y" * 30, OP_CONT, fin=True)
-            sock = FakeSocket(f1 + f2)
-
-            # Should reject before appending second fragment
-            with pytest.raises(ws_frame.WebSocketMessageTooLarge):
-                ws_frame.recv_message(sock)
-        finally:
-            # Restore original limit
-            if original_limit is not None:
-                os.environ["OPENACE_WS_MAX_MESSAGE_BYTES"] = original_limit
-            else:
-                os.environ.pop("OPENACE_WS_MAX_MESSAGE_BYTES", None)
+        # Should reject before appending second fragment
+        with pytest.raises(ws_frame.WebSocketMessageTooLarge):
+            ws_frame.recv_message(sock)
 
     def test_new_data_frame_interrupts_message(self):
         """New data frame interrupting incomplete message must be rejected."""

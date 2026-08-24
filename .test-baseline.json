@@ -4,12 +4,12 @@
   "created_before_modification": true,
   "layers": {
     "default": {
-      "min_tests": 5960,
+      "min_tests": 6233,
       "min_files": 250,
       "last_updated": "2026-08-24",
-      "update_reason": "Issue #2429 batch 10: db+subprocess cluster migrated 250 items (188 unit + 62 integration); min raised by exactly +250 (5710+250); actual 9159 = 8909 (main pre-batch) + 250",
-      "actual_collected": 9159,
-      "actual_files": 637,
+      "update_reason": "Issue #2429 batch 11: subprocess-core cluster migrated 273 items (251 unit + 22 integration); min raised by exactly +273 (5960+273); actual 9432 = 9159 (main pre-batch) + 273",
+      "actual_collected": 9432,
+      "actual_files": 653,
       "threshold_percent": 96
     },
     "critical": {
@@ -30,12 +30,12 @@
       "note": "Currently excluded by norecursedirs"
     },
     "issues": {
-      "min_tests": 2129,
-      "min_files": 221,
+      "min_tests": 1856,
+      "min_files": 207,
       "last_updated": "2026-08-24",
-      "update_reason": "Issue #2429 batch 10: I-group db+subprocess cluster (4 dirs: 2022/723/1748/2298, 250 items / 23 glob files) — all 250 migrated (188 -> tests/unit incl. legacy_posix spawn-shape half, 62 -> tests/integration incl. subprocess/ for the real-process half, provider_contract_unified and 1748 entrypoint-eval); 2022 empty __init__.py deleted; 12 no-assert sites given real assertions; 723 TestRequestCountDedupField rewritten against the real _read_stdout reader; 2298 vacuous install.sh loop scan fixed + #1262 chown sudo-path drift patched; min lowered by exact deltas (2379-250, 244-23)",
-      "actual_collected": 2341,
-      "actual_files": 236,
+      "update_reason": "Issue #2429 batch 11: I-group subprocess-core cluster (8 dirs: 559/1395/1002/786/1005/1461/2339/2340, 273 items / 14 glob files) — all 273 migrated (251 -> tests/unit incl. dedup filter swapped to the real production predicate, 22 -> tests/integration: subprocess/ for the 559 loopback-WS self-subprocess script [renamed off the e2e_ prefix] and the 1395 wrapper cluster, concurrency/ for 1005 pause-budget wall-clock and the 1002 heartbeat-thread cleanup half); 4 empty __init__.py deleted; 559 e2e's two vacuous rejection checks given real outcome assertions; 1005 wait-routing test hermeticized against build_secure_agent_env; min lowered by exact deltas (2129-273, 221-14)",
+      "actual_collected": 2068,
+      "actual_files": 222,
       "threshold_percent": 97
     }
   },
@@ -47,7 +47,7 @@
     "Baseline created before pytest.ini modification to enable e2e_*.py collection",
     "tests/e2e currently excluded by norecursedirs in pytest.ini",
     "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard",
-    "Default count from: python scripts/ci.py run default-collection (9159 items after #2429 batch 10)",
+    "Default count from: python scripts/ci.py run default-collection (9432 items after #2429 batch 11)",
     "Issue count from: clean-checkout issue-collection (2341 items, 238 files after #2429 batch 10; +1/+1 local gitignored tests/issues/89 noise)"
   ]
 }
