@@ -57,6 +57,9 @@ export const NotificationIntegration: React.FC = () => {
   const [status, setStatus] = useState<ChannelStatus>({});
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [dingtalkTestChecks, setDingtalkTestChecks] = useState<
+    Record<string, { status: string; message: string }> | null
+  >(null);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [webhookTestUrl, setWebhookTestUrl] = useState('');
   const [dingtalkTestUrl, setDingtalkTestUrl] = useState('');
@@ -145,11 +148,13 @@ export const NotificationIntegration: React.FC = () => {
 
   const testDingTalk = async () => {
     setBusy('test');
+    setDingtalkTestChecks(null);
     try {
       const result = await notificationChannelsApi.testDingTalk({
         app_key: dingtalk.app_key || undefined,
         app_secret: dingtalk.app_secret || undefined,
       });
+      setDingtalkTestChecks(result.checks ?? null);
       if (result.success) {
         toast.success(t('integrationTestSuccess', language), result.message);
       } else {
@@ -701,6 +706,49 @@ export const NotificationIntegration: React.FC = () => {
                   {t('testConnection', language)}
                 </Button>
               </div>
+
+              {dingtalkTestChecks && (
+                <div
+                  className="alert mt-3 mb-0"
+                  style={{
+                    borderLeftWidth: 3,
+                    borderLeftColor: Object.values(dingtalkTestChecks).every(
+                      (c) => c.status === 'passed'
+                    )
+                      ? '#639922'
+                      : '#EF9F27',
+                  }}
+                >
+                  <div style={{ fontWeight: 500, marginBottom: 8 }}>
+                    {t('integrationTestCheckResults', language)}
+                  </div>
+                  {Object.entries(dingtalkTestChecks).map(([key, check]) => (
+                    <div key={key} className="d-flex align-items-center gap-2 mb-1">
+                      <span
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background: check.status === 'passed' ? '#639922' : '#EF9F27',
+                          flexShrink: 0,
+                        }}
+                      />
+                      <strong style={{ fontSize: 13 }}>
+                        {key === 'access_token'
+                          ? t('integrationCheckAccessToken', language)
+                          : key === 'department_list'
+                            ? t('integrationCheckDeptList', language)
+                            : key === 'user_list'
+                              ? t('integrationCheckUserList', language)
+                              : key}
+                      </strong>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                        — {check.message}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <div className="ni-section">{t('integrationSyncSettings', language)}</div>
               <div className="row g-3">

@@ -93,6 +93,10 @@ export const translations: Record<Language, Translations> = {
       'Recommended to configure keys per user/tenant; system-level keys serve only as compatibility fallback for legacy setups. Prefer tenant-level keys for new configurations.',
     integrationTestSendHint:
       'Test send: temporary URL input, single-use only, does not alter user notification preferences, operations logged',
+    integrationTestCheckResults: 'Connection test details',
+    integrationCheckAccessToken: 'Credential authentication',
+    integrationCheckDeptList: 'Department read',
+    integrationCheckUserList: 'Member read',
     integrationConfigureAlertTarget: 'Configure your alert targets and personal preferences',
     integrationFeishuBotSubtitle:
       'Feishu bot has no required system-level parameters; target addresses are set per user/tenant',
@@ -2201,6 +2205,10 @@ export const translations: Record<Language, Translations> = {
       '推荐按用户/租户配置密钥；系统级密钥仅作为旧配置的兼容回退，新配置请优先使用租户级密钥',
     integrationTestSendHint:
       '测试发送：临时输入 URL，仅本次使用、不保存、不改变用户通知偏好，操作写审计',
+    integrationTestCheckResults: '连接测试详情',
+    integrationCheckAccessToken: '凭证认证',
+    integrationCheckDeptList: '通讯录部门读取',
+    integrationCheckUserList: '成员信息读取',
     integrationConfigureAlertTarget: '配置你的告警目标与个人偏好',
     integrationFeishuBotSubtitle: '飞书机器人无系统级必填参数，目标地址按用户/租户设置',
     integrationFeishuBotNoConfigDetail:
@@ -4244,6 +4252,10 @@ export const translations: Record<Language, Translations> = {
       'ユーザー/テナントごとにキーを設定することを推奨；システムレベルのキーはレガシー設定の互換フォールバックのみ。新設定はテナントレベルキーを優先。',
     integrationTestSendHint:
       'テスト送信：一時的URL入力、1回のみ、ユーザー通知設定は変更しません、操作は監査ログに記録',
+    integrationTestCheckResults: '接続テスト詳細',
+    integrationCheckAccessToken: 'クレデンシャル認証',
+    integrationCheckDeptList: '部門読み取り',
+    integrationCheckUserList: 'メンバー読み取り',
     integrationConfigureAlertTarget: 'アラート宛先と個人設定を構成',
     integrationFeishuBotSubtitle:
       'Feishuボットにシステムレベルの必須パラメータはありません；宛先アドレスはユーザー/テナントごとに設定',
@@ -6178,6 +6190,10 @@ export const translations: Record<Language, Translations> = {
       '사용자/테넌트별로 키를 구성하는 것을 권장; 시스템 수준 키는 레거시 설정에 대한 호환 폴백 역할만 합니다. 새 설정은 테넌트 수준 키를 우선 사용하세요.',
     integrationTestSendHint:
       '테스트 발송: 일시적 URL 입력, 1회만 사용, 사용자 알림 환경설정을 변경하지 않음, 작업 감사 기록',
+    integrationTestCheckResults: '연결 테스트 상세',
+    integrationCheckAccessToken: '자격 증명 인증',
+    integrationCheckDeptList: '부서 읽기',
+    integrationCheckUserList: '멤버 읽기',
     integrationConfigureAlertTarget: '알림 대상 및 개인 환경설정 구성',
     integrationFeishuBotSubtitle:
       'Feishu 봇은 시스템 수준 필수 매개변수가 없습니다; 대상 주소는 사용자/테넌트별로 설정',
