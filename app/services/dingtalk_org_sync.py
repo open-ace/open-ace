@@ -16,6 +16,7 @@ from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Any, cast
 
 import requests
@@ -102,11 +103,20 @@ class DingTalkUser:
     status: dict[str, Any] = field(default_factory=dict)
 
 
+class SyncStatus(str, Enum):
+    """Sync status for organization synchronization results."""
+
+    SUCCESS = "success"  # Complete success with no critical errors
+    PARTIAL = "partial"  # Partial success, some directories/data failed
+    FAILED = "failed"  # Critical failure, no reliable snapshot obtained
+
+
 @dataclass
 class DingTalkOrgSyncResult:
     """Summary returned to admin/API callers after a sync run."""
 
     tenant_id: int
+    status: SyncStatus = SyncStatus.SUCCESS
     departments_seen: int = 0
     users_seen: int = 0
     teams_created: int = 0
@@ -120,11 +130,13 @@ class DingTalkOrgSyncResult:
     finished_at: str | None = None
     warnings: list[str] = field(default_factory=list)
     snapshot_complete: bool = True
+    errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert result to a JSON-friendly dictionary."""
         return {
             "tenant_id": self.tenant_id,
+            "status": self.status.value,
             "departments_seen": self.departments_seen,
             "users_seen": self.users_seen,
             "teams_created": self.teams_created,
@@ -138,6 +150,7 @@ class DingTalkOrgSyncResult:
             "finished_at": self.finished_at,
             "warnings": list(self.warnings),
             "snapshot_complete": self.snapshot_complete,
+            "errors": list(self.errors),
         }
 
 
@@ -229,10 +242,25 @@ class DingTalkOrgSyncService:
                     result.departments_seen = len(departments)
                     result.users_seen = len(users)
                     result.snapshot_complete = snapshot_complete
+
+                    # Set status based on snapshot completeness
                     if not snapshot_complete:
+                        if len(departments) == 0:
+                            # No departments fetched - critical failure
+                            result.status = SyncStatus.FAILED
+                            result.errors.append(
+                                "Directory snapshot is empty; no departments were fetched. "
+                                "Check API permissions and credentials."
+                            )
+                        else:
+                            # Some departments fetched but incomplete
+                            result.status = SyncStatus.PARTIAL
+                            result.errors.append(
+                                "Directory snapshot is incomplete due to one or more "
+                                "department user fetch failures."
+                            )
                         result.warnings.append(
-                            "Directory snapshot is incomplete due to one or more "
-                            "department user fetch failures; departed-user cleanup "
+                            "Directory snapshot is incomplete; departed-user cleanup "
                             "will be skipped to avoid accidentally deactivating "
                             "valid users."
                         )

@@ -16,6 +16,7 @@ from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Any, cast
 
 import requests
@@ -98,11 +99,20 @@ class FeishuUser:
     status: dict[str, Any] = field(default_factory=dict)
 
 
+class SyncStatus(str, Enum):
+    """Sync status for organization synchronization results."""
+
+    SUCCESS = "success"  # Complete success with no critical errors
+    PARTIAL = "partial"  # Partial success, some directories/data failed
+    FAILED = "failed"  # Critical failure, no reliable snapshot obtained
+
+
 @dataclass
 class FeishuOrgSyncResult:
     """Summary returned to admin/API callers after a sync run."""
 
     tenant_id: int
+    status: SyncStatus = SyncStatus.SUCCESS
     departments_seen: int = 0
     users_seen: int = 0
     teams_created: int = 0
@@ -115,11 +125,13 @@ class FeishuOrgSyncResult:
     started_at: str | None = None
     finished_at: str | None = None
     warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert result to a JSON-friendly dictionary."""
         return {
             "tenant_id": self.tenant_id,
+            "status": self.status.value,
             "departments_seen": self.departments_seen,
             "users_seen": self.users_seen,
             "teams_created": self.teams_created,
@@ -132,6 +144,7 @@ class FeishuOrgSyncResult:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "warnings": list(self.warnings),
+            "errors": list(self.errors),
         }
 
 

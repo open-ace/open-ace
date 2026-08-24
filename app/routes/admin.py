@@ -1387,10 +1387,18 @@ def api_sync_feishu_org():
         return denial
 
     try:
-        from app.services.feishu_org_sync import FeishuOrgSyncService
+        from app.services.feishu_org_sync import FeishuOrgSyncService, SyncStatus
 
         result = FeishuOrgSyncService().sync_org(tenant_id=tenant_id)
-        return jsonify({"success": True, "result": result.to_dict()})
+        response_data = {"success": True, "result": result.to_dict()}
+
+        if result.status == SyncStatus.FAILED:
+            response_data["success"] = False
+            return jsonify(response_data), 500
+        elif result.status == SyncStatus.PARTIAL:
+            return jsonify(response_data), 200
+        else:
+            return jsonify(response_data), 200
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
@@ -1411,10 +1419,18 @@ def api_sync_dingtalk_org():
         return denial
 
     try:
-        from app.services.dingtalk_org_sync import DingTalkOrgSyncService
+        from app.services.dingtalk_org_sync import DingTalkOrgSyncService, SyncStatus
 
         result = DingTalkOrgSyncService().sync_org(tenant_id=tenant_id)
-        return jsonify({"success": True, "result": result.to_dict()})
+        response_data = {"success": True, "result": result.to_dict()}
+
+        if result.status == SyncStatus.FAILED:
+            response_data["success"] = False
+            return jsonify(response_data), 500
+        elif result.status == SyncStatus.PARTIAL:
+            return jsonify(response_data), 200
+        else:
+            return jsonify(response_data), 200
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
