@@ -106,8 +106,9 @@ describe('parseAndValidateQuota', () => {
   });
 
   it('should reject token quotas exceeding max', () => {
-    const result = parseAndValidateQuota('3000', QuotaType.MONTHLY_TOKEN);
-    expect(result.value).toBe(3000);
+    // Issue #3018: New max is 100000M
+    const result = parseAndValidateQuota('200000', QuotaType.MONTHLY_TOKEN);
+    expect(result.value).toBe(200000);
     expect(result.validation.isValid).toBe(false);
     expect(result.validation.error).toContain('exceeds maximum limit');
   });
@@ -119,8 +120,9 @@ describe('parseAndValidateQuota', () => {
   });
 
   it('should reject request quotas exceeding max', () => {
-    const result = parseAndValidateQuota('3000000000', QuotaType.MONTHLY_REQUEST);
-    expect(result.value).toBe(3000000000);
+    // Issue #3018: New max is 10 billion
+    const result = parseAndValidateQuota('20000000000', QuotaType.MONTHLY_REQUEST);
+    expect(result.value).toBe(20000000000);
     expect(result.validation.isValid).toBe(false);
     expect(result.validation.error).toContain('exceeds maximum limit');
   });
@@ -166,8 +168,9 @@ describe('getMaxQuotaDisplay', () => {
   });
 
   it('should return correct display for request quotas', () => {
-    expect(getMaxQuotaDisplay(QuotaType.DAILY_REQUEST)).toBe(`Max: 2,147,483,647`);
-    expect(getMaxQuotaDisplay(QuotaType.MONTHLY_REQUEST)).toBe(`Max: 2,147,483,647`);
+    // Issue #3018: New max is 10 billion
+    expect(getMaxQuotaDisplay(QuotaType.DAILY_REQUEST)).toBe(`Max: 10,000,000,000`);
+    expect(getMaxQuotaDisplay(QuotaType.MONTHLY_REQUEST)).toBe(`Max: 10,000,000,000`);
   });
 });
 
@@ -208,7 +211,7 @@ describe('Edge Cases', () => {
   it('should handle scientific notation input like 1e9', () => {
     const result = parseAndValidateQuota('1e9', QuotaType.DAILY_TOKEN);
     expect(result.value).toBe(1e9);
-    // Should be rejected as it exceeds MAX_TOKEN_QUOTA (2147)
+    // Issue #3018: New max is 100000M, 1e9 exceeds it
     expect(result.validation.isValid).toBe(false);
   });
 
@@ -221,16 +224,17 @@ describe('Edge Cases', () => {
   });
 
   it('should handle boundary values correctly', () => {
+    // Issue #3018: New max is 100000M
     // Just below max
-    const belowMax = parseAndValidateQuota('2146', QuotaType.MONTHLY_TOKEN);
+    const belowMax = parseAndValidateQuota('99999', QuotaType.MONTHLY_TOKEN);
     expect(belowMax.validation.isValid).toBe(true);
 
     // Exactly at max
-    const atMax = parseAndValidateQuota('2147', QuotaType.MONTHLY_TOKEN);
+    const atMax = parseAndValidateQuota('100000', QuotaType.MONTHLY_TOKEN);
     expect(atMax.validation.isValid).toBe(true);
 
     // Just above max
-    const aboveMax = parseAndValidateQuota('2148', QuotaType.MONTHLY_TOKEN);
+    const aboveMax = parseAndValidateQuota('100001', QuotaType.MONTHLY_TOKEN);
     expect(aboveMax.validation.isValid).toBe(false);
   });
 });
@@ -290,15 +294,19 @@ describe('quotaFormatter - available quota functions', () => {
 
     describe('boundary scenarios', () => {
       it('should cap at max when remaining + current exceeds max for token types', () => {
-        expect(calculateAvailableQuota(QuotaType.DAILY_TOKEN, 3000, 0)).toBe(MAX_TOKEN_QUOTA);
-        expect(calculateAvailableQuota(QuotaType.MONTHLY_TOKEN, 2000, 500)).toBe(MAX_TOKEN_QUOTA);
+        // Issue #3018: New max is 100000M
+        expect(calculateAvailableQuota(QuotaType.DAILY_TOKEN, 200000, 0)).toBe(MAX_TOKEN_QUOTA);
+        expect(calculateAvailableQuota(QuotaType.MONTHLY_TOKEN, 150000, 50000)).toBe(
+          MAX_TOKEN_QUOTA
+        );
       });
 
       it('should cap at max when remaining + current exceeds max for request types', () => {
-        expect(calculateAvailableQuota(QuotaType.DAILY_REQUEST, 3000000000, 0)).toBe(
+        // Issue #3018: New max is 10 billion
+        expect(calculateAvailableQuota(QuotaType.DAILY_REQUEST, 15000000000, 0)).toBe(
           MAX_REQUEST_QUOTA
         );
-        expect(calculateAvailableQuota(QuotaType.MONTHLY_REQUEST, 2000000000, 2000000000)).toBe(
+        expect(calculateAvailableQuota(QuotaType.MONTHLY_REQUEST, 8000000000, 5000000000)).toBe(
           MAX_REQUEST_QUOTA
         );
       });
@@ -340,22 +348,23 @@ describe('quotaFormatter - available quota functions', () => {
 
     describe('max derivation', () => {
       it('should use MAX_TOKEN_QUOTA for DAILY_TOKEN', () => {
-        // Test by exceeding the token max
-        expect(calculateAvailableQuota(QuotaType.DAILY_TOKEN, 3000, 0)).toBe(MAX_TOKEN_QUOTA);
+        // Issue #3018: New max is 100000M
+        expect(calculateAvailableQuota(QuotaType.DAILY_TOKEN, 200000, 0)).toBe(MAX_TOKEN_QUOTA);
       });
 
       it('should use MAX_TOKEN_QUOTA for MONTHLY_TOKEN', () => {
-        expect(calculateAvailableQuota(QuotaType.MONTHLY_TOKEN, 3000, 0)).toBe(MAX_TOKEN_QUOTA);
+        expect(calculateAvailableQuota(QuotaType.MONTHLY_TOKEN, 200000, 0)).toBe(MAX_TOKEN_QUOTA);
       });
 
       it('should use MAX_REQUEST_QUOTA for DAILY_REQUEST', () => {
-        expect(calculateAvailableQuota(QuotaType.DAILY_REQUEST, 3000000000, 0)).toBe(
+        // Issue #3018: New max is 10 billion
+        expect(calculateAvailableQuota(QuotaType.DAILY_REQUEST, 20000000000, 0)).toBe(
           MAX_REQUEST_QUOTA
         );
       });
 
       it('should use MAX_REQUEST_QUOTA for MONTHLY_REQUEST', () => {
-        expect(calculateAvailableQuota(QuotaType.MONTHLY_REQUEST, 3000000000, 0)).toBe(
+        expect(calculateAvailableQuota(QuotaType.MONTHLY_REQUEST, 20000000000, 0)).toBe(
           MAX_REQUEST_QUOTA
         );
       });
@@ -371,7 +380,8 @@ describe('quotaFormatter - available quota functions', () => {
 
       it('should format request quota with thousand separators', () => {
         const result = formatAvailableQuotaHint(1500000, QuotaType.DAILY_REQUEST, true, 'zh');
-        expect(result).toBe('可用: 1,500,000 (上限: 2,147,483,647)');
+        // Issue #3018: New max is 10 billion
+        expect(result).toBe('可用: 1,500,000 (上限: 10,000,000,000)');
       });
 
       it('should not display M suffix for request quotas', () => {
@@ -389,7 +399,8 @@ describe('quotaFormatter - available quota functions', () => {
 
       it('should return max-only fallback when hasQuotaStats is false for request quota', () => {
         const result = formatAvailableQuotaHint(1000000, QuotaType.DAILY_REQUEST, false, 'zh');
-        expect(result).toBe('Max: 2,147,483,647');
+        // Issue #3018: New max is 10 billion
+        expect(result).toBe('Max: 10,000,000,000');
         expect(result).not.toContain('可用');
       });
 
@@ -419,7 +430,8 @@ describe('quotaFormatter - available quota functions', () => {
 
       it('should return English hint when language is en for request quota', () => {
         const result = formatAvailableQuotaHint(1500000, QuotaType.DAILY_REQUEST, true, 'en');
-        expect(result).toBe('Available: 1,500,000 (Max: 2,147,483,647)');
+        // Issue #3018: New max is 10 billion
+        expect(result).toBe('Available: 1,500,000 (Max: 10,000,000,000)');
       });
 
       it('should return English hint for ja language (fallback)', () => {
@@ -429,7 +441,8 @@ describe('quotaFormatter - available quota functions', () => {
 
       it('should return English hint for ko language (fallback)', () => {
         const result = formatAvailableQuotaHint(1000000, QuotaType.DAILY_REQUEST, true, 'ko');
-        expect(result).toBe('Available: 1,000,000 (Max: 2,147,483,647)');
+        // Issue #3018: New max is 10 billion
+        expect(result).toBe('Available: 1,000,000 (Max: 10,000,000,000)');
       });
 
       it('should return English fallback when language is en and hasQuotaStats is false', () => {
@@ -456,13 +469,15 @@ describe('quotaFormatter - available quota functions', () => {
       it('should integrate calculate and format for DAILY_REQUEST', () => {
         const quotaStats = createMockQuotaStats({ remaining: { daily_request: 1000000 } });
         const result = getAvailableQuotaHint(QuotaType.DAILY_REQUEST, quotaStats, 500000, 'zh');
-        expect(result).toBe('可用: 1,500,000 (上限: 2,147,483,647)');
+        // Issue #3018: New max is 10 billion
+        expect(result).toBe('可用: 1,500,000 (上限: 10,000,000,000)');
       });
 
       it('should integrate calculate and format for MONTHLY_REQUEST', () => {
         const quotaStats = createMockQuotaStats({ remaining: { monthly_request: 2000000 } });
         const result = getAvailableQuotaHint(QuotaType.MONTHLY_REQUEST, quotaStats, 1000000, 'zh');
-        expect(result).toBe('可用: 3,000,000 (上限: 2,147,483,647)');
+        // Issue #3018: New max is 10 billion
+        expect(result).toBe('可用: 3,000,000 (上限: 10,000,000,000)');
       });
 
       it('should handle currentQuota as 0', () => {
