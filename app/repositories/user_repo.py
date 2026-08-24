@@ -380,10 +380,6 @@ class UserRepository:
             updates.append("system_account = ?")
             params.append(system_account)
 
-        if tenant_id is not None:
-            updates.append("tenant_id = ?")
-            params.append(tenant_id)
-
         # Always clear deleted_at when restoring
         updates.append("deleted_at = NULL")
 

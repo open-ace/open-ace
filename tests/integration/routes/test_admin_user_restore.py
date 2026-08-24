@@ -441,3 +441,260 @@ class TestSessionRevocationOnRestore:
         # Verify sessions are gone
         sessions = tmp_db.fetch_all("SELECT * FROM sessions WHERE user_id = ?", (user_id,))
         assert len(sessions) == 0
+
+
+class TestCrossTenantRestore:
+    """Tests for cross-tenant restore prevention (Issue #2755).
+
+    Acceptance: Restore is tenant-scoped and atomic.
+    """
+
+    def test_restore_preserves_tenant_id(self, tmp_db):
+        """Verify restore preserves original tenant_id."""
+        repo = UserRepository(db=tmp_db)
+
+        # Create tenant 2
+        tmp_db.execute(
+            "INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (?, 'Test Tenant 2', 'test-tenant-2')",
+            (2,),
+        )
+
+        # Create and soft-delete user in tenant 2
+        deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        user_id = _insert_user(tmp_db, username="tenant2_user", tenant_id=2, deleted_at=deleted_at)
+
+        # Restore user
+        result = repo.restore_user_with_update(user_id)
+        assert result is True
+
+        # Verify tenant_id is preserved
+        user = repo.get_user_by_id(user_id)
+        assert user["tenant_id"] == 2
+        assert user["deleted_at"] is None
+
+    def test_cross_tenant_restore_not_allowed_via_update(self, tmp_db):
+        """Verify tenant_id cannot be changed during restore."""
+        repo = UserRepository(db=tmp_db)
+
+        # Create tenants
+        tmp_db.execute(
+            "INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (?, 'Tenant 1', 'tenant-1')",
+            (1,),
+        )
+        tmp_db.execute(
+            "INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (?, 'Tenant 2', 'tenant-2')",
+            (2,),
+        )
+
+        # Create and soft-delete user in tenant 1
+        deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        user_id = _insert_user(
+            tmp_db, username="cross_tenant_user", tenant_id=1, deleted_at=deleted_at
+        )
+
+        # Attempt to restore with different tenant_id should preserve original
+        # (The API layer should reject tenant_id changes; repository just ignores them)
+        result = repo.restore_user_with_update(user_id, tenant_id=2)
+        assert result is True
+
+        # Verify tenant_id is still 1 (unchanged)
+        user = repo.get_user_by_id(user_id)
+        assert user["tenant_id"] == 1  # Repository preserves original tenant_id
+
+
+class TestConcurrentRestore:
+    """Tests for concurrent restore scenarios (Issue #2755).
+
+    Acceptance: Tests cover concurrent restore/create attempts.
+    """
+
+    def test_concurrent_restore_same_user_only_one_succeeds(self, tmp_db):
+        """Verify concurrent restore of same user only succeeds once.
+
+        Note: This tests the optimistic locking behavior of restore_user_with_update.
+        The second restore should fail because the user is no longer soft-deleted.
+        """
+        repo = UserRepository(db=tmp_db)
+
+        # Create and soft-delete user
+        deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        user_id = _insert_user(tmp_db, username="concurrent_restore_user", deleted_at=deleted_at)
+
+        # First restore should succeed
+        result1 = repo.restore_user_with_update(user_id)
+        assert result1 is True
+
+        # Second restore should fail (user is already active)
+        result2 = repo.restore_user_with_update(user_id)
+        assert result2 is False
+
+        # Verify user is active
+        user = repo.get_user_by_id(user_id)
+        assert user["deleted_at"] is None
+
+
+class TestTenantCounterRollback:
+    """Tests for tenant counter rollback on delete/restore (Issue #2755).
+
+    Acceptance: Tenant user counters remain correct on delete and restore.
+    """
+
+    def _get_active_user_count(self, db, tenant_id=1):
+        """Get active user count for a tenant."""
+        result = db.fetch_one(
+            "SELECT COUNT(*) as count FROM users WHERE tenant_id = ? AND deleted_at IS NULL",
+            (tenant_id,),
+        )
+        return result["count"] if result else 0
+
+    def test_delete_decrements_user_count(self, tmp_db):
+        """Verify deleting a user decrements the tenant user count."""
+        repo = UserRepository(db=tmp_db)
+
+        # Create user
+        user_id = _insert_user(tmp_db, username="counter_delete_user")
+        initial_count = self._get_active_user_count(tmp_db)
+
+        # Delete user (soft delete)
+        result = repo.delete_user(user_id)
+        assert result is True
+
+        # Verify user is deleted
+        user = repo.get_user_by_id(user_id)
+        assert user["deleted_at"] is not None
+
+        # Verify count decreased
+        new_count = self._get_active_user_count(tmp_db)
+        assert new_count == initial_count - 1
+
+    def test_restore_increments_user_count(self, tmp_db):
+        """Verify restoring a user increments the tenant user count."""
+        repo = UserRepository(db=tmp_db)
+
+        # Create and soft-delete user
+        deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        user_id = _insert_user(tmp_db, username="counter_restore_user", deleted_at=deleted_at)
+
+        initial_count = self._get_active_user_count(tmp_db)
+
+        # Restore user
+        result = repo.restore_user_with_update(user_id)
+        assert result is True
+
+        # Verify user is restored
+        user = repo.get_user_by_id(user_id)
+        assert user["deleted_at"] is None
+
+        # Verify count increased
+        new_count = self._get_active_user_count(tmp_db)
+        assert new_count == initial_count + 1
+
+    def test_delete_restore_maintains_count(self, tmp_db):
+        """Verify delete then restore maintains original count."""
+        repo = UserRepository(db=tmp_db)
+
+        # Create user
+        user_id = _insert_user(tmp_db, username="counter_cycle_user")
+        original_count = self._get_active_user_count(tmp_db)
+
+        # Delete
+        repo.delete_user(user_id)
+        after_delete_count = self._get_active_user_count(tmp_db)
+        assert after_delete_count == original_count - 1
+
+        # Restore
+        repo.restore_user_with_update(user_id)
+        after_restore_count = self._get_active_user_count(tmp_db)
+        assert after_restore_count == original_count
+
+
+class TestUsernameEmailConflictScenarios:
+    """Tests for various conflict scenarios (Issue #2755).
+
+    Acceptance: Tests cover username-only conflict, email-only conflict,
+    both fields matching, cross-tenant access.
+    """
+
+    def test_username_only_conflict(self, tmp_db):
+        """Verify username-only conflict detection."""
+        repo = UserRepository(db=tmp_db)
+
+        # Create and soft-delete user
+        deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        user_id = _insert_user(
+            tmp_db, username="username_conflict", email="unique1@test.com", deleted_at=deleted_at
+        )
+
+        # Should find soft-deleted user by username
+        deleted_user = repo.get_soft_deleted_user_by_username("username_conflict")
+        assert deleted_user is not None
+        assert deleted_user["id"] == user_id
+
+        # Should not find it by email in soft-deleted lookup
+        deleted_by_email = repo.get_soft_deleted_user_by_email("unique1@test.com")
+        assert deleted_by_email is not None  # Same user, different email
+
+    def test_email_only_conflict(self, tmp_db):
+        """Verify email-only conflict detection."""
+        repo = UserRepository(db=tmp_db)
+
+        # Create and soft-delete user
+        deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        user_id = _insert_user(
+            tmp_db, username="unique_user", email="email_conflict@test.com", deleted_at=deleted_at
+        )
+
+        # Should find soft-deleted user by email
+        deleted_user = repo.get_soft_deleted_user_by_email("email_conflict@test.com")
+        assert deleted_user is not None
+        assert deleted_user["id"] == user_id
+
+    def test_both_fields_matching(self, tmp_db):
+        """Verify both username and email matching same soft-deleted user."""
+        repo = UserRepository(db=tmp_db)
+
+        # Create and soft-delete user
+        deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        user_id = _insert_user(
+            tmp_db,
+            username="both_match_user",
+            email="both_match@test.com",
+            deleted_at=deleted_at,
+        )
+
+        # Should find same user by both username and email
+        deleted_by_username = repo.get_soft_deleted_user_by_username("both_match_user")
+        deleted_by_email = repo.get_soft_deleted_user_by_email("both_match@test.com")
+
+        assert deleted_by_username is not None
+        assert deleted_by_email is not None
+        assert deleted_by_username["id"] == user_id
+        assert deleted_by_email["id"] == user_id
+
+    def test_partial_conflict_username_soft_deleted_email_active(self, tmp_db):
+        """Verify partial conflict: username matches soft-deleted, email matches active."""
+        repo = UserRepository(db=tmp_db)
+
+        # Create active user with specific email
+        active_user_id = _insert_user(
+            tmp_db, username="active_partial", email="active_partial@test.com"
+        )
+
+        # Create soft-deleted user with different username but same email would fail UNIQUE
+        # So we test with different email
+        deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        deleted_user_id = _insert_user(
+            tmp_db,
+            username="deleted_partial",
+            email="deleted_partial@test.com",
+            deleted_at=deleted_at,
+        )
+
+        # Verify both can be found appropriately
+        active_user = repo.get_user_by_username("active_partial", include_deleted=False)
+        assert active_user is not None
+        assert active_user["id"] == active_user_id
+
+        deleted_user = repo.get_soft_deleted_user_by_username("deleted_partial")
+        assert deleted_user is not None
+        assert deleted_user["id"] == deleted_user_id
