@@ -19,10 +19,11 @@ from app.services.dingtalk_org_sync import (
 class FakeDingTalkOrgSyncService(DingTalkOrgSyncService):
     """Deterministic DingTalk sync service for tests."""
 
-    def __init__(self, *args, departments=None, users=None, **kwargs):
+    def __init__(self, *args, departments=None, users=None, snapshot_complete=True, **kwargs):
         super().__init__(*args, **kwargs)
         self._departments = list(departments or [])
         self._users = list(users or [])
+        self._snapshot_complete = snapshot_complete
 
     def _get_access_token(self, app_key: str, app_secret: str) -> str:
         assert app_key == "test-app-key"
@@ -32,7 +33,7 @@ class FakeDingTalkOrgSyncService(DingTalkOrgSyncService):
     def _fetch_directory_snapshot(self, token: str, root_department_id: str, **kwargs):
         assert token == "test-token"
         assert root_department_id == "1"
-        return self._departments, self._users
+        return self._departments, self._users, self._snapshot_complete
 
 
 @pytest.fixture
@@ -324,7 +325,8 @@ def test_fetch_directory_snapshot_uses_dingtalk_department_and_user_apis():
         http_session=FakeHttp(),
     )
 
-    departments, users = service._fetch_directory_snapshot("token", "1")
+    departments, users, snapshot_complete = service._fetch_directory_snapshot("token", "1")
+    assert snapshot_complete is True
 
     assert departments == [DingTalkDepartment(department_id="100", name="Engineering")]
     assert users == [
