@@ -820,6 +820,12 @@ class TestGetGhRerunFallback:
             lambda self, path, **kw: True,
         )
 
+        # Mock get_current_branch to avoid actual git operations on non-existent paths
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.github_ops.GitHubOps.get_current_branch",
+            lambda self: "auto-dev/dead",
+        )
+
         gh = orch._get_gh()
         assert gh.repo_path == "/home/rhuang/auto-dev-dead"  # worktree_path
 
@@ -863,6 +869,11 @@ class TestGetGhRerunFallback:
         monkeypatch.setattr(
             "app.modules.workspace.autonomous.github_ops.GitHubOps.path_exists_as_user",
             lambda self, path, **kw: True,
+        )
+        # Mock get_current_branch to avoid actual git operations on non-existent paths
+        monkeypatch.setattr(
+            "app.modules.workspace.autonomous.github_ops.GitHubOps.get_current_branch",
+            lambda self: "auto-dev/dead",
         )
         third = orch._get_gh()
         assert third.repo_path == "/home/rhuang/auto-dev-dead"  # rebound
