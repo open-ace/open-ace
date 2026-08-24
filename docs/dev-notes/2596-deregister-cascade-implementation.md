@@ -89,8 +89,17 @@
 - `tests/e2e/remote/test_deregister_e2e.py`: 3 skipped (需要真实 agent 环境)
 
 ### 总计
-- **28 passed, 3 skipped**
+- **34 passed, 3 skipped**
 - 所有测试通过，无失败
+
+## 代码审查修复
+
+### AlertSeverity.ERROR 问题修复
+- **问题**: `deregister_compensation_worker.py` 使用了不存在的 `AlertSeverity.ERROR`
+- **影响**: 会导致运行时 AttributeError，告警发送失败
+- **修复**: 改用 `AlertSeverity.CRITICAL.value`
+- **原因**: 补偿失败达到最大重试次数需要人工介入，属于严重问题
+- **测试**: 所有 34 个测试通过，验证修复有效
 
 ## 修改文件清单
 

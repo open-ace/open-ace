@@ -265,7 +265,7 @@ class DeregisterCompensationWorker:
                     "Deregister compensation worker failed after max retries. "
                     f"Manual intervention required. Check deregister_failures table (id={failure_id}) for details."
                 ),
-                severity=AlertSeverity.ERROR.value,
+                severity=AlertSeverity.CRITICAL.value,
             )
             logger.info("Sent alert for permanently failed session termination (failure_id=%d)", failure_id)
         except Exception as e:
