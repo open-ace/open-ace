@@ -90,13 +90,13 @@ describe('calculateAvailableQuota - null boundary', () => {
 
   it('should return remaining quota capped at max when editingUser is null', () => {
     const quotaStats = createMockQuotaStats({
-      remaining: { ...createMockQuotaStats().remaining, daily_token: 9500 },
+      remaining: { ...createMockQuotaStats().remaining, daily_token: 150000 },
     });
     const result = calculateAvailableQuota(QuotaType.DAILY_TOKEN, {
       quotaStats,
       editingUser: null,
     });
-    // remaining is 9500, but max is 2147, so result is capped at 2147
+    // Issue #3018: New max is 100000M, remaining is 150000, so result is capped at 100000
     expect(result).toBe(MAX_TOKEN_QUOTA);
   });
 
@@ -144,7 +144,7 @@ describe('calculateAvailableQuota - field-level undefined', () => {
   it('should use 0 for undefined editingUser.daily_token_quota and cap at max', () => {
     const quotaStats = createMockQuotaStats({
       remaining: {
-        daily_token: 9500,
+        daily_token: 150000,
         monthly_token: 285000,
         daily_request: 50000000,
         monthly_request: 1500000000,
@@ -158,7 +158,7 @@ describe('calculateAvailableQuota - field-level undefined', () => {
       quotaStats,
       editingUser,
     });
-    // remaining is 9500, current is 0 (undefined ?? 0), but max is 2147, so result is capped at 2147
+    // Issue #3018: New max is 100000M, remaining is 150000, current is 0, so result is capped at 100000
     expect(result).toBe(MAX_TOKEN_QUOTA);
   });
 
@@ -268,19 +268,19 @@ describe('calculateAvailableQuota - edge cases', () => {
   it('should return max when sum exceeds max (Math.min(..., max))', () => {
     const quotaStats = createMockQuotaStats({
       remaining: {
-        daily_token: 2000,
+        daily_token: 150000,
         monthly_token: 285000,
         daily_request: 50000000,
         monthly_request: 1500000000,
       },
     });
-    const editingUser = createMockEditingUser({ daily_token_quota: 500 });
+    const editingUser = createMockEditingUser({ daily_token_quota: 50000 });
 
     const result = calculateAvailableQuota(QuotaType.DAILY_TOKEN, {
       quotaStats,
       editingUser,
     });
-    // 2000 + 500 = 2500, but max is 2147, so result is 2147
+    // Issue #3018: New max is 100000M, 150000 + 50000 = 200000, so result is capped at 100000
     expect(result).toBe(MAX_TOKEN_QUOTA);
   });
 
@@ -326,19 +326,19 @@ describe('calculateAvailableQuota - edge cases', () => {
   it('should return exact max when sum equals max', () => {
     const quotaStats = createMockQuotaStats({
       remaining: {
-        daily_token: 1647,
+        daily_token: 80000,
         monthly_token: 285000,
         daily_request: 50000000,
         monthly_request: 1500000000,
       },
     });
-    const editingUser = createMockEditingUser({ daily_token_quota: 500 });
+    const editingUser = createMockEditingUser({ daily_token_quota: 20000 });
 
     const result = calculateAvailableQuota(QuotaType.DAILY_TOKEN, {
       quotaStats,
       editingUser,
     });
-    // 1647 + 500 = 2147 = MAX_TOKEN_QUOTA
+    // Issue #3018: New max is 100000M, 80000 + 20000 = 100000 = MAX_TOKEN_QUOTA
     expect(result).toBe(MAX_TOKEN_QUOTA);
   });
 
@@ -347,16 +347,17 @@ describe('calculateAvailableQuota - edge cases', () => {
       remaining: {
         daily_token: 9500,
         monthly_token: 285000,
-        daily_request: 2000000000,
+        daily_request: 8000000000,
         monthly_request: 1500000000,
       },
     });
-    const editingUser = createMockEditingUser({ daily_request_quota: 500000000 });
+    const editingUser = createMockEditingUser({ daily_request_quota: 5000000000 });
 
     const result = calculateAvailableQuota(QuotaType.DAILY_REQUEST, {
       quotaStats,
       editingUser,
     });
+    // Issue #3018: New max is 10 billion, 8000000000 + 5000000000 exceeds max
     expect(result).toBe(MAX_REQUEST_QUOTA);
   });
 });

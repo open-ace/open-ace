@@ -2,9 +2,12 @@
 Open ACE - Quota Validation Schema
 
 Provides validation and limits for quota values to ensure:
-- Values fit within PostgreSQL INTEGER constraints
+- Values fit within PostgreSQL BIGINT constraints
 - Values are non-negative
 - Values are valid numbers (not NaN)
+- Values are safe for JavaScript Number.MAX_SAFE_INTEGER
+
+Issue #3018: Upgraded from INTEGER to BIGINT to support larger quotas.
 """
 
 from __future__ import annotations
@@ -22,12 +25,16 @@ else:
 logger = logging.getLogger(__name__)
 
 # Token quota limits (stored in M units)
-# PostgreSQL INTEGER max: 2,147,483,647
-# Since we store in M units, max is approximately 2,147 M tokens
-MAX_TOKEN_QUOTA = 2147
+# Issue #3018: Upgraded from INTEGER to BIGINT.
+# New limit set to 100000M (100 billion tokens), safe for JavaScript Number.MAX_SAFE_INTEGER.
+# This allows approximately 100 days of usage at 1 billion tokens/day.
+MAX_TOKEN_QUOTA = 100000
 
 # Request quota limits (stored as actual count)
-MAX_REQUEST_QUOTA = 2147483647
+# Issue #3018: Upgraded from INTEGER to BIGINT.
+# New limit set to 10 billion requests, safe for JavaScript Number.MAX_SAFE_INTEGER.
+# This allows approximately 11.5 days at 10,000 requests/second.
+MAX_REQUEST_QUOTA = 10000000000
 
 # Minimum quota value
 MIN_QUOTA = 0
