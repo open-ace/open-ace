@@ -15,8 +15,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.modules.workspace.autonomous.sandbox.provider import is_current_generation
 from app.services.autonomous_scheduler import _reconcile_orphan_sandboxes
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2022)]
 
 
 def _mock_repo(rows):

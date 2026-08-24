@@ -22,6 +22,8 @@ import pytest
 
 from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(723)]
+
 
 def _write_jsonl(path: Path, session_id: str, *, mtime_offset: float = 0.0) -> Path:
     """Write a minimal claude JSONL whose first record carries sessionId."""

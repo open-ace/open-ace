@@ -11,10 +11,14 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner, _LocalSession
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.sandbox.fake import FakeSandboxProvider
 from app.modules.workspace.autonomous.sandbox.types import SandboxSpec, SandboxStatus
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2022)]
 
 
 def _runner_with_session(process=None) -> tuple:
@@ -43,6 +47,8 @@ def test_stop_session_routes_through_sandbox_provider():
 def test_stop_session_unknown_id_is_noop():
     runner = AutonomousAgentRunner()
     runner.stop_session("nope")  # no raise
+    # No session was created as a side effect of the unknown-id stop.
+    assert runner._local_sessions == {}
 
 
 def test_pause_resume_route_through_sandbox_provider():
@@ -167,11 +173,14 @@ def test_notify_sandbox_created_none_remote_id_for_local():
 
 
 def test_notify_sandbox_created_noop_without_callback():
-    # No callback registered -> no-op, no raise.
+    # No callback registered -> no-op, no raise, and nothing was persisted
+    # to the session record.
     provider = FakeSandboxProvider()
     runner = AutonomousAgentRunner(sandbox_provider=provider)
     handle = provider.create(_spec())
     runner._notify_sandbox_created("s1", handle, None)
+    assert runner._on_sandbox_created is None
+    assert "s1" not in runner._local_sessions
 
 
 def test_notify_sandbox_created_swallows_callback_errors():
@@ -183,3 +192,5 @@ def test_notify_sandbox_created_swallows_callback_errors():
     runner = AutonomousAgentRunner(sandbox_provider=provider, on_sandbox_created=_boom)
     handle = provider.create(_spec())
     runner._notify_sandbox_created("s1", handle, None)  # no raise
+    # The swallow must not have torn down or created runner state.
+    assert runner._on_sandbox_created is _boom

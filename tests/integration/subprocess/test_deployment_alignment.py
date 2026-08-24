@@ -5,7 +5,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 import scripts.shared.config as shared_config
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1748)]
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -240,6 +244,7 @@ def _run_entrypoint_block(block, env, id_u):
         capture_output=True,
         text=True,
         env=full_env,
+        timeout=60,
     )
     assert proc.returncode == 0, "entrypoint block exited %d: stderr=%r" % (
         proc.returncode,

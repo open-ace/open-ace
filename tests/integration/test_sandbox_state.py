@@ -17,39 +17,37 @@ import app.repositories.database as db_mod
 from app.repositories.autonomous_repo import AutonomousWorkflowRepository
 from app.repositories.database import Database
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2022)]
+
 
 @pytest.fixture
-def auto_db(tmp_path):
+def auto_db(tmp_path, monkeypatch):
     """Temp SQLite DB with autonomous tables loaded from schema-sqlite.sql."""
-    orig_adapt_sql = db_mod.adapt_sql
-    db_mod.adapt_sql = lambda q: q
+    # Hermetic HOME: Database._get_sqlite_connection calls ensure_db_dir(),
+    # which mkdirs the module-level CONFIG_DIR (~/.open-ace on a dev box).
+    # Point it at the per-test tmp dir instead of touching the real HOME.
+    monkeypatch.setattr(db_mod, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(db_mod, "adapt_sql", lambda q: q)
     db_path = str(tmp_path / "test_sandbox.db")
-    try:
-        with patch.object(db_mod, "is_postgresql", return_value=False):
-            db = Database(db_url=f"sqlite:///{db_path}")
-            # Load the full schema first (creates users WITH deleted_at + every
-            # index). Do NOT pre-create users — a stale hand-written users table
-            # would shadow the script's and break the deleted_at index.
-            from app.repositories.schema_init import load_schema_from_file
+    with patch.object(db_mod, "is_postgresql", return_value=False):
+        db = Database(db_url=f"sqlite:///{db_path}")
+        # Load the full schema first (creates users WITH deleted_at + every
+        # index). Do NOT pre-create users — a stale hand-written users table
+        # would shadow the script's and break the deleted_at index.
+        from app.repositories.schema_init import load_schema_from_file
 
-            load_schema_from_file(db_url=db.db_url, dialect="sqlite")
-            conn = db.get_connection()
-            try:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
-                    ("testuser", "test@test.com", "hash123", "user"),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-            yield db
-    finally:
-        db_mod.adapt_sql = orig_adapt_sql
+        load_schema_from_file(db_url=db.db_url, dialect="sqlite")
+        conn = db.get_connection()
         try:
-            os.unlink(db_path)
-        except OSError:
-            pass
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
+                ("testuser", "test@test.com", "hash123", "user"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        yield db
 
 
 def _create_workflow(repo, workflow_id="wf-sandbox-1") -> dict:

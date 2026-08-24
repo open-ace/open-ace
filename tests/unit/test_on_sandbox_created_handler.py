@@ -7,7 +7,11 @@ completion leaves an orphan the startup reconciler can destroy by id.
 
 from __future__ import annotations
 
+import pytest
+
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2022)]
 
 
 class _FakeRepo:
@@ -57,11 +61,19 @@ def test_on_sandbox_created_omits_remote_id_for_local() -> None:
 def test_on_sandbox_created_best_effort_repo_failure() -> None:
     # A repo failure must not propagate to the run path (mirrors _on_pid_registered).
 
+    calls: list[tuple] = []
+
     class _BoomRepo:
         def update_workflow(self, *a, **k) -> None:
+            calls.append((a, k))
             raise RuntimeError("db down")
 
     orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
     orch.repo = _BoomRepo()
     orch._workflow_id = "wf-123"
     orch._on_sandbox_created("s1", "sb", "legacy_posix", None)  # no raise
+    # The best-effort persist was attempted exactly once with the
+    # sandbox-identity fields, then swallowed.
+    assert len(calls) == 1
+    # repo.update_workflow(workflow_id, updates) — updates is the 2nd positional arg
+    assert calls[0][0][1]["sandbox_id"] == "sb"

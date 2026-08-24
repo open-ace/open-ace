@@ -19,6 +19,8 @@ from app.services.webui_manager import (
     WebUIManager,
 )
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2298)]
+
 
 class TestWebUIEnvIsolation:
     """Test WebUI environment isolation (Issue #2298)."""
@@ -305,7 +307,8 @@ class TestSudoInlineEnvArgs:
 
     @patch("app.services.webui_manager.pwd")
     @patch("app.services.webui_manager.subprocess.Popen")
-    def test_sudo_path_cmd_includes_launch_wrapper(self, mock_popen, mock_pwd, manager):
+    @patch("app.services.webui_manager.run_as_root_if_needed")
+    def test_sudo_path_cmd_includes_launch_wrapper(self, mock_chown, mock_popen, mock_pwd, manager):
         """Verify sudo path uses the wrapper, not raw /usr/bin/env."""
         # Set platform to linux + current_user != system_account
         manager._platform = "linux"
@@ -342,7 +345,8 @@ class TestSudoInlineEnvArgs:
 
     @patch("app.services.webui_manager.pwd")
     @patch("app.services.webui_manager.subprocess.Popen")
-    def test_sudo_path_skips_popen_env(self, mock_popen, mock_pwd, manager):
+    @patch("app.services.webui_manager.run_as_root_if_needed")
+    def test_sudo_path_skips_popen_env(self, mock_chown, mock_popen, mock_pwd, manager):
         """Verify sudo path does NOT pass child_env to Popen (vars are inlined)."""
         manager._platform = "linux"
         mock_pwd.getpwuid.return_value.pw_name = "service_user"
@@ -378,7 +382,8 @@ class TestSudoInlineEnvArgs:
 
     @patch("app.services.webui_manager.pwd")
     @patch("app.services.webui_manager.subprocess.Popen")
-    def test_same_user_path_passes_child_env(self, mock_popen, mock_pwd, manager):
+    @patch("app.services.webui_manager.run_as_root_if_needed")
+    def test_same_user_path_passes_child_env(self, mock_chown, mock_popen, mock_pwd, manager):
         """Verify same-user path still passes child_env to Popen."""
         manager._platform = "linux"
         mock_pwd.getpwuid.return_value.pw_name = "same_user"
@@ -414,7 +419,8 @@ class TestSudoInlineEnvArgs:
 
     @patch("app.services.webui_manager.pwd")
     @patch("app.services.webui_manager.subprocess.Popen")
-    def test_sudo_path_inlines_dynamic_envkey(self, mock_popen, mock_pwd, manager):
+    @patch("app.services.webui_manager.run_as_root_if_needed")
+    def test_sudo_path_inlines_dynamic_envkey(self, mock_chown, mock_popen, mock_pwd, manager):
         """Verify dynamic envKey is inlined in sudo path command."""
         manager._platform = "linux"
         mock_pwd.getpwuid.return_value.pw_name = "service_user"
@@ -457,14 +463,40 @@ class TestSudoInlineEnvArgs:
                     "BAILIAN_CODING_PLAN_API_KEY" in arg for arg in cmd
                 ), "Dynamic envKey should be inlined in sudo cmd"
 
-    @patch("app.services.webui_manager.pwd")
-    @patch("app.services.webui_manager.subprocess.Popen")
-    def test_sudo_path_no_sensitive_known_keys(self, mock_popen, mock_pwd, manager):
+    def test_sudo_path_no_sensitive_known_keys(self, manager):
         """Verify known_keys does NOT contain sensitive vars that should never leak."""
         assert "DATABASE_URL" not in _WEBUI_ENV_SUDO_KNOWN_KEYS
         assert "TOKEN_SECRET" not in _WEBUI_ENV_SUDO_KNOWN_KEYS
         assert "GH_TOKEN" not in _WEBUI_ENV_SUDO_KNOWN_KEYS
         assert "ANTHROPIC_API_KEY" not in _WEBUI_ENV_SUDO_KNOWN_KEYS
+
+
+def _security_wrapper_loop_lines(content: str) -> list[str]:
+    """Lines of the install.sh security_wrapper_rules generation loop.
+
+    The loop is anchored on the ``security_wrapper_rules`` variable
+    declaration followed by its ``for wrapper in ...`` loop — the for-line
+    itself does not mention the variable name, so a naive "for wrapper in"
+    scan skips it (and used to pass these tests vacuously).
+    """
+    lines = content.split("\n")
+    loop_lines: list[str] = []
+    seen_rules_var = False
+    in_loop = False
+    for line in lines:
+        stripped = line.strip()
+        if 'security_wrapper_rules=""' in stripped:
+            seen_rules_var = True
+            continue
+        if seen_rules_var and not in_loop and stripped.startswith("for wrapper in"):
+            in_loop = True
+            loop_lines.append(stripped)
+            continue
+        if in_loop:
+            loop_lines.append(stripped)
+            if stripped.startswith("done"):
+                break
+    return loop_lines
 
 
 class TestSudoersSecurityRules:
@@ -483,14 +515,14 @@ class TestSudoersSecurityRules:
     @pytest.fixture
     def package_install_sh(self):
         """Path to package-method install.sh."""
-        return Path(__file__).parent.parent.parent.parent / (
+        return Path(__file__).resolve().parents[2] / (
             "scripts/install-central/package-method/install.sh"
         )
 
     @pytest.fixture
     def docker_install_sh(self):
         """Path to docker-method install.sh."""
-        return Path(__file__).parent.parent.parent.parent / (
+        return Path(__file__).resolve().parents[2] / (
             "scripts/install-central/docker-method/install.sh"
         )
 
@@ -506,25 +538,11 @@ class TestSudoersSecurityRules:
 
         content = package_install_sh.read_text()
 
-        # Find the security_wrapper_rules loop
-        # It should NOT contain openace-webui-launch
-        in_wrapper_loop = False
-        loop_lines = []
-        for line in content.split("\n"):
-            stripped = line.strip()
-            if "for wrapper in" in stripped and "security_wrapper" not in stripped:
-                # Different loop, skip
-                continue
-            if "for wrapper in" in stripped:
-                in_wrapper_loop = True
-                loop_lines.append(stripped)
-                continue
-            if in_wrapper_loop:
-                loop_lines.append(stripped)
-                if stripped.startswith("done"):
-                    in_wrapper_loop = False
-                    break
+        loop_lines = _security_wrapper_loop_lines(content)
 
+        # Guard the scan itself: if the loop marker line is ever renamed,
+        # loop_lines stays empty and the "not in" below would pass vacuously.
+        assert loop_lines, "security_wrapper_rules loop not found in install.sh"
         loop_text = "\n".join(loop_lines)
         assert "openace-webui-launch" not in loop_text, (
             "openace-webui-launch must NOT be in the security_wrapper_rules loop "
@@ -541,23 +559,11 @@ class TestSudoersSecurityRules:
 
         content = docker_install_sh.read_text()
 
-        # Find the security_wrapper_rules loop
-        in_wrapper_loop = False
-        loop_lines = []
-        for line in content.split("\n"):
-            stripped = line.strip()
-            if "for wrapper in" in stripped and "security_wrapper" not in stripped:
-                continue
-            if "for wrapper in" in stripped:
-                in_wrapper_loop = True
-                loop_lines.append(stripped)
-                continue
-            if in_wrapper_loop:
-                loop_lines.append(stripped)
-                if stripped.startswith("done"):
-                    in_wrapper_loop = False
-                    break
+        loop_lines = _security_wrapper_loop_lines(content)
 
+        # Guard the scan itself: if the loop marker line is ever renamed,
+        # loop_lines stays empty and the "not in" below would pass vacuously.
+        assert loop_lines, "security_wrapper_rules loop not found in install.sh"
         loop_text = "\n".join(loop_lines)
         assert "openace-webui-launch" not in loop_text, (
             "openace-webui-launch must NOT be in the security_wrapper_rules loop "
