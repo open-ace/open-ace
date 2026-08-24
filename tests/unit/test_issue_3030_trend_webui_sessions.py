@@ -316,7 +316,12 @@ class TestGetKeyMetricsMerge:
         """Key metrics should include session tokens in totals."""
         svc, mock_usage_repo, mock_message_repo = self._make_service()
         mock_usage_repo.get_daily_range.return_value = [
-            {"tokens_used": 10000, "input_tokens": 8000, "output_tokens": 2000, "request_count": 50},
+            {
+                "tokens_used": 10000,
+                "input_tokens": 8000,
+                "output_tokens": 2000,
+                "request_count": 50,
+            },
         ]
         mock_message_repo.get_user_token_totals.return_value = []
         mock_message_repo.get_tool_token_totals.return_value = []

@@ -324,9 +324,7 @@ class UsageService:
             List[Dict]: List of usage records by date and tool.
         """
         # 1. Get trend data from daily_stats (CLI fetch scripts data)
-        dm_trend = self.usage_repo.get_daily_by_tool(
-            start_date, end_date, host_name, tenant_id
-        )
+        dm_trend = self.usage_repo.get_daily_by_tool(start_date, end_date, host_name, tenant_id)
 
         # 2. Get trend data from agent_sessions (WebUI local/remote/terminal sessions)
         session_trend = self.usage_repo.get_session_trend_by_tool(
