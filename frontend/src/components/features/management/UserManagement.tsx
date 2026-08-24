@@ -319,8 +319,9 @@ export const UserManagement: React.FC = () => {
       console.error('Failed to save user:', err);
 
       // Check for soft-deleted user conflict (Issue #2755)
-      const errorObj = err as Record<string, unknown>;
-      const errorData = errorObj?.response?.data as Record<string, unknown> | undefined;
+      type ErrorResponse = { response?: { data?: Record<string, unknown> } };
+      const errorObj = err as ErrorResponse;
+      const errorData = errorObj?.response?.data;
 
       if (errorData?.error === 'USER_SOFT_DELETED' && errorData.soft_deleted_user) {
         // Soft-deleted user conflict - show restore modal
