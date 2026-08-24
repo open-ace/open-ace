@@ -658,7 +658,7 @@ def _write_messages_to_daily_messages(
     timestamp_ms = int(time.time() * 1000)
 
     # Get user_id from evidence or session
-    user_id = evidence.user_id
+    user_id: int | None = evidence.user_id
     if not user_id or user_id <= 0:
         # Try to get from session
         try:
