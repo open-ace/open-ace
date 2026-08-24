@@ -45,9 +45,7 @@ class TestSyncWfAfterCreateRepo:
         wf["project_path"] = str(tmp_path)
 
         # Mock the orchestrator
-        with patch(
-            "app.modules.workspace.autonomous.orchestrator.GitHubOps"
-        ) as mock_gh_class:
+        with patch("app.modules.workspace.autonomous.orchestrator.GitHubOps") as mock_gh_class:
             mock_gh = MagicMock()
             mock_gh_class.return_value = mock_gh
             mock_gh.create_repo.return_value = {
@@ -58,9 +56,7 @@ class TestSyncWfAfterCreateRepo:
                 "number": 1,
                 "url": "https://github.com/owner/my-new-project/issues/1",
             }
-            mock_gh._run_git.return_value = MagicMock(
-                returncode=0, stdout="", stderr=""
-            )
+            mock_gh._run_git.return_value = MagicMock(returncode=0, stdout="", stderr="")
             mock_gh.get_repo_url.return_value = "https://github.com/owner/my-new-project"
             mock_gh.list_worktrees.return_value = []
             mock_gh.path_exists_as_user.return_value = False
@@ -113,9 +109,7 @@ class TestIssueRepoFromLocalVariable:
         issue_repo_url = local_repo_url or wf_stale_value
 
         # Extract owner/repo
-        match = re.search(
-            r"github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", issue_repo_url
-        )
+        match = re.search(r"github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", issue_repo_url)
         issue_repo = match.group(1) if match else None
 
         assert issue_repo == "owner/new-project"
@@ -193,9 +187,7 @@ class TestCloneAfterCreateRepo:
         with pytest.raises(GitHubOpsError, match="different git repo"):
             if os.path.isdir(os.path.join(project_path, ".git")):
                 if mock_gh.get_repo_url() != repo_url:
-                    raise GitHubOpsError(
-                        f"Directory {project_path} is a different git repo"
-                    )
+                    raise GitHubOpsError(f"Directory {project_path} is a different git repo")
 
 
 class TestValidateProjectPath:
@@ -224,9 +216,7 @@ class TestValidateProjectPath:
 
         with pytest.raises(GitHubOpsError, match="not a valid git repository"):
             if not os.path.isdir(os.path.join(project_path, ".git")):
-                raise GitHubOpsError(
-                    f"{project_path} is not a valid git repository"
-                )
+                raise GitHubOpsError(f"{project_path} is not a valid git repository")
 
     def test_pass_if_valid_git_repository(self, tmp_path):
         """Verify validation passes for valid git repository."""
