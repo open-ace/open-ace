@@ -119,6 +119,14 @@ server {
         sub_filter_once off;
     }
 
+    # ── 内部事件接收端点（拒绝外部访问） ──
+    # 调度器进程通过环回地址向 web 进程转发 SSE 事件（#3046）。反代拓扑下
+    # 所有外部请求的 remote_addr 都是 127.0.0.1，环回校验失效，该路径仅由
+    # 共享密钥保护——建议在反代层直接拒绝：
+    location /api/autonomous/internal/ {
+        return 403;
+    }
+
     # ── Open-ACE 主应用 ──
     location / {
         client_max_body_size 50m;      # Agent 会话同步数据可能超过默认的 1MB 限制
