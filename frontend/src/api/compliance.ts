@@ -135,6 +135,11 @@ export interface RetentionReport {
   errors: string[];
 }
 
+// Issue #2617: Cleanup operations can take 60-90s on large datasets
+// (backend processes 7 data types sequentially). Use 120s to avoid
+// premature frontend timeout while backend continues execution.
+const CLEANUP_TIMEOUT = 120_000; // 120 seconds
+
 // API
 export const complianceApi = {
   // Reports
@@ -319,7 +324,8 @@ export const complianceApi = {
     if (dryRun) {
       url += '?dry_run=true';
     }
-    return apiClient.post<RetentionReport>(url);
+    // Issue #2617: Use extended timeout for cleanup operations
+    return apiClient.post<RetentionReport>(url, undefined, undefined, CLEANUP_TIMEOUT);
   },
 
   async getRetentionHistory(limit?: number): Promise<RetentionHistory[]> {
