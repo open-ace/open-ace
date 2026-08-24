@@ -5,6 +5,97 @@
 set -e
 
 # ============================================================================
+# 0. Configuration Validation and Logging (Issue #2242)
+# ============================================================================
+# Validates configuration consistency and logs results for debugging.
+# Outputs a summary to stdout and writes detailed results to a log file.
+
+CONFIG_CHECK_LOG="/tmp/config-check.log"
+
+log_config_check() {
+    local status="$1"
+    local message="$2"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+    # Append to log file
+    mkdir -p "$(dirname "$CONFIG_CHECK_LOG")" 2>/dev/null || true
+    echo "[$timestamp] $status: $message" >> "$CONFIG_CHECK_LOG" 2>/dev/null || true
+}
+
+output_config_summary() {
+    local mode
+    local uid
+    uid=$(id -u)
+
+    # Determine mode
+    if [ "${WORKSPACE_MULTI_USER_MODE}" = "true" ]; then
+        mode="multi-user"
+    else
+        mode="single-user"
+    fi
+
+    echo ""
+    echo "=========================================="
+    echo "  Configuration Summary (Issue #2242)"
+    echo "=========================================="
+    echo ""
+    echo "Mode: $mode"
+    echo "Running as: $(id -un) (uid=$uid)"
+    echo ""
+
+    if [ "$mode" = "multi-user" ]; then
+        echo "Multi-user configuration:"
+        echo "  • WORKSPACE_MULTI_USER_MODE: ${WORKSPACE_MULTI_USER_MODE:-<not set>}"
+        echo "  • OPENACE_ALLOW_ROOT_MULTI_USER: ${OPENACE_ALLOW_ROOT_MULTI_USER:-<not set>}"
+        echo "  • OPENACE_CONFIG_DIR: ${OPENACE_CONFIG_DIR:-<not set>}"
+        echo "  • WORKSPACE_BASE_DIR: ${WORKSPACE_BASE_DIR:-/workspace}"
+        echo ""
+
+        # Validate configuration consistency
+        local config_ok=true
+
+        if [ "$uid" != "0" ]; then
+            echo "  ❌ ERROR: Running as non-root user but multi-user mode requires root"
+            config_ok=false
+        fi
+
+        if [ "${OPENACE_ALLOW_ROOT_MULTI_USER}" != "1" ]; then
+            echo "  ❌ ERROR: OPENACE_ALLOW_ROOT_MULTI_USER=1 not set"
+            config_ok=false
+        fi
+
+        if [ "$config_ok" = true ]; then
+            echo "  ✅ Configuration validated successfully"
+            log_config_check "INFO" "Multi-user mode configuration validated"
+        else
+            echo ""
+            echo "  💡 Quick fix: Use the one-click startup script:"
+            echo "     ./scripts/start-multi-user.sh"
+            echo ""
+            echo "  💡 Or use Docker Compose overlay:"
+            echo "     docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d"
+            log_config_check "ERROR" "Multi-user mode configuration invalid"
+        fi
+    else
+        echo "Single-user mode (default)"
+        echo "  • Container runs as non-root user (uid 1000)"
+        echo "  • No system user creation needed"
+        echo ""
+        echo "  ✅ Configuration OK"
+        log_config_check "INFO" "Single-user mode configuration validated"
+    fi
+
+    echo ""
+    echo "Config check log: $CONFIG_CHECK_LOG"
+    echo "=========================================="
+    echo ""
+}
+
+# Run configuration summary early (after basic validation)
+# This is called later in the script after security mode validation
+
+# ============================================================================
 # 0. Non-root runtime guard (PR #1780 review / docker-root)
 # ============================================================================
 # The image defaults to the non-root open-ace user (uid 1000). Single-user
@@ -19,30 +110,55 @@ require_root_for_multi_user() {
         echo "ERROR: multi-user workspace mode requires root to create system users."
         echo "       The image defaults to the non-root open-ace user (uid 1000)."
         echo ""
-        echo "EASY FIX: Use the multi-user compose overlay:"
-        echo "         docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d"
+        echo "=========================================="
+        echo "  💡 QUICK FIX (Recommended)"
+        echo "=========================================="
         echo ""
-        echo "MANUAL FIX: Start the container as root AND set:"
-        echo "         docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \\"
-        echo "           -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \\"
-        echo "           -e OPENACE_CONFIG_DIR=/home/open-ace/.open-ace ..."
+        echo "Use the one-click startup script:"
+        echo "  ./scripts/start-multi-user.sh"
+        echo ""
+        echo "Or use Docker Compose overlay:"
+        echo "  docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d"
+        echo ""
+        echo "=========================================="
+        echo "  🔧 MANUAL FIX"
+        echo "=========================================="
+        echo ""
+        echo "Start the container as root AND set required variables:"
+        echo "  docker run --user 0 \\"
+        echo "    -e WORKSPACE_MULTI_USER_MODE=true \\"
+        echo "    -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \\"
+        echo "    -e OPENACE_CONFIG_DIR=/home/open-ace/.open-ace ..."
         echo ""
         echo "Or keep single-user mode (the default):"
         echo "  - If set via environment: unset WORKSPACE_MULTI_USER_MODE"
         echo "  - If set via config.json: set 'multi_user_mode': false"
+        log_config_check "ERROR" "Multi-user mode requires root but running as non-root"
         exit 1
     fi
     if [ "${OPENACE_ALLOW_ROOT_MULTI_USER}" != "1" ]; then
         echo "ERROR: multi-user workspace mode is running as root but the explicit"
         echo "       opt-in OPENACE_ALLOW_ROOT_MULTI_USER=1 is not set."
         echo ""
-        echo "EASY FIX: Use the multi-user compose overlay:"
-        echo "         docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d"
+        echo "=========================================="
+        echo "  💡 QUICK FIX (Recommended)"
+        echo "=========================================="
         echo ""
-        echo "MANUAL FIX: Set OPENACE_ALLOW_ROOT_MULTI_USER=1 when running as root:"
-        echo "         docker run --user 0 -e OPENACE_ALLOW_ROOT_MULTI_USER=1 ..."
+        echo "Use the one-click startup script:"
+        echo "  ./scripts/start-multi-user.sh"
+        echo ""
+        echo "Or use Docker Compose overlay:"
+        echo "  docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d"
+        echo ""
+        echo "=========================================="
+        echo "  🔧 MANUAL FIX"
+        echo "=========================================="
+        echo ""
+        echo "Set OPENACE_ALLOW_ROOT_MULTI_USER=1 when running as root:"
+        echo "  docker run --user 0 -e OPENACE_ALLOW_ROOT_MULTI_USER=1 ..."
         echo ""
         echo "Or keep single-user mode (the default, non-root)."
+        log_config_check "ERROR" "Root user without OPENACE_ALLOW_ROOT_MULTI_USER=1"
         exit 1
     fi
 }
@@ -423,6 +539,12 @@ check_security_baseline() {
 
 # Run security baseline check before any other initialization
 check_security_baseline
+
+# ============================================================================
+# 0. Output Configuration Summary (Issue #2242)
+# ============================================================================
+# Output configuration summary after security checks pass
+output_config_summary
 
 # ============================================================================
 # 0. Pre-flight Setup

@@ -58,7 +58,24 @@ uid 1000 执行入口脚本，而不再仅依赖清单中的 `securityContext`�
 （`useradd`）、修复属主（`chown`）并在 `/home` 下切换身份
 （`sudo -u <user>`）。
 
-**推荐方式：使用 docker-compose.multi-user.yml**
+---
+
+### 多用户工作区部署
+
+#### 方式一：一键启动脚本（推荐）
+
+```bash
+# 使用一键脚本启动多用户模式
+./scripts/start-multi-user.sh
+```
+
+脚本会自动：
+- 检测 Docker Compose 版本（v1/v2）
+- 验证配置文件存在
+- 启动多用户模式容器
+- 输出访问地址和状态
+
+#### 方式二：Docker Compose Overlay
 
 ```bash
 # 一键启用多用户模式
@@ -70,7 +87,7 @@ docker-compose.multi-user.yml 会自动配置：
 - 显式授权（`OPENACE_ALLOW_ROOT_MULTI_USER=1`）
 - 配置持久化（`OPENACE_CONFIG_DIR=/home/open-ace/.open-ace`）
 
-**手动方式**
+#### 方式三：手动配置
 
 ```bash
 docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
@@ -83,7 +100,58 @@ docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
 以清晰的错误信息退出，而不是默默吞掉非 root 多用户部署会遇到的
 `useradd`/`chown` 权限失败。
 
-**从 config.json 迁移**
+---
+
+### 多用户模式常见问题
+
+#### 常见错误和解决方案
+
+| 错误信息 | 原因 | 解决方案 |
+|----------|------|----------|
+| `multi-user workspace mode requires root` | 以非 root 运行但启用了多用户模式 | 使用 `./scripts/start-multi-user.sh` 或 overlay 文件 |
+| `OPENACE_ALLOW_ROOT_MULTI_USER=1 is not set` | 以 root 运行但未显式授权 | 使用 `./scripts/start-multi-user.sh` 或设置环境变量 |
+| `工作区加载失败` | iframe 加载失败或超时 | 检查容器日志、验证配置、重启容器 |
+| `docker-compose.multi-user.yml not found` | overlay 文件不存在 | 确保正确克隆了仓库，或从 GitHub 下载文件 |
+
+#### 从单用户迁移到多用户
+
+如果您已有单用户模式部署，可按以下步骤迁移：
+
+1. **停止现有容器**
+   ```bash
+   docker compose down
+   ```
+   > 注意：数据不会丢失，Docker 卷会保留
+
+2. **检查数据卷**
+   ```bash
+   docker volume ls | grep open-ace
+   # 应看到：config-data, postgres-data, workspace-data
+   ```
+
+3. **使用多用户模式启动**
+   ```bash
+   ./scripts/start-multi-user.sh
+   ```
+   或
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+   ```
+
+4. **验证数据完整性**
+   - 登录系统，检查用户和会话数据是否存在
+   - 检查配置是否正确加载
+   - 测试工作区功能
+
+#### 迁移验证清单
+
+- [ ] 数据库数据保留（用户、会话、配置）
+- [ ] Docker 卷数据保留（config-data, workspace-data）
+- [ ] 用户可以正常登录
+- [ ] 工作区可以正常创建和使用
+- [ ] 已有的 AI 会话可以恢复
+
+#### 从 config.json 迁移
 
 如果您之前在 config.json 中设置了 `"multi_user_mode": true`：
 
@@ -92,6 +160,8 @@ docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
 
 **注意**：多用户模式需要容器以 root 运行，仅适用于受控环境。生产环境请确保
 设置强密码和安全密钥。
+
+---
 
 ### 初始部署
 
