@@ -501,6 +501,7 @@ class TestCrossTenantRestore:
         user = repo.get_user_by_id(user_id)
         assert user["tenant_id"] == 1  # Repository preserves original tenant_id
 
+
 class TestConcurrentRestore:
     """Tests for concurrent restore scenarios (Issue #2755).
 
