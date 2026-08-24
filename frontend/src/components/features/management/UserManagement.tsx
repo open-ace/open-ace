@@ -325,13 +325,14 @@ export const UserManagement: React.FC = () => {
 
       if (errorData?.error === 'USER_SOFT_DELETED' && errorData.soft_deleted_user) {
         // Soft-deleted user conflict - show restore modal
+        const deletedUser = errorData.soft_deleted_user as Record<string, unknown>;
         const conflictInfo: SoftDeletedUserConflict = {
-          user_id: errorData.soft_deleted_user.user_id as number,
-          username: errorData.soft_deleted_user.username as string,
-          email: errorData.soft_deleted_user.email as string,
-          deleted_at: errorData.soft_deleted_user.deleted_at as string,
-          tenant_id: errorData.soft_deleted_user.tenant_id as number | undefined,
-          conflicts: errorData.soft_deleted_user.conflicts as ('username' | 'email')[],
+          user_id: deletedUser.user_id as number,
+          username: deletedUser.username as string,
+          email: deletedUser.email as string,
+          deleted_at: deletedUser.deleted_at as string,
+          tenant_id: deletedUser.tenant_id as number | undefined,
+          conflicts: deletedUser.conflicts as ('username' | 'email')[],
         };
 
         setSoftDeletedConflict(conflictInfo);
