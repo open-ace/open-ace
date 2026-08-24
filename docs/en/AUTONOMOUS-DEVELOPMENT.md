@@ -1,6 +1,6 @@
 # AI Autonomous Development
 
-This document is for users, operators, and maintainers of Open ACE AI Autonomous Development. It describes the current feature boundary, workflow lifecycle, three-session topology, CI repair, isolated execution, usage accounting, and frontend observability.
+This document is for users, operators, and maintainers of Open ACE AI Autonomous Development. It describes the current feature boundary, workflow lifecycle, session-line topology, CI repair, post-merge acceptance verification, isolated execution, usage accounting, and frontend observability.
 
 > This document describes the implementation in this repository. Changes to autonomous development must update this document, its Chinese counterpart, and the relevant regression tests.
 
@@ -17,6 +17,7 @@ AI Autonomous Development turns a requirement or GitHub Issue into an auditable 
 7. Produce a final report.
 8. Wait for GitHub CI and repair failures when possible.
 9. Synchronize the base branch or resolve conflicts, merge the PR, and clean up the branch and worktree.
+10. After the merge, a credentialless read-only acceptance Agent verifies the acceptance checklist against the merged main SHA. Only a `confirmed` verdict closes the issue automatically; `rejected`/`indeterminate` pause the workflow for human review.
 
 The workflow is not one opaque Agent script. Important decisions, AI sessions, code changes, tests, reviews, retries, and failure reasons are stored as recoverable milestones.
 
@@ -58,7 +59,7 @@ Pause and stop are different controls. New states and error paths must not make 
 
 - **View definition/plan/review/report** opens persisted content.
 - **View code changes** shows a milestone diff or the complete PR diff and statistics.
-- **View session** opens the milestone's stable session line.
+- **View session** opens the milestone's stable session line (full transcript with timestamps and Markdown rendering).
 - **Cancel round** cancels later milestones and enters `wait` for feedback.
 - **Fork here** copies history through the selected milestone into a separate workflow and worktree.
 - **Continue with feedback** records feedback as a milestone and returns to the appropriate phase.
@@ -71,9 +72,10 @@ Pause and stop are different controls. New states and error paths must not make 
 
 - Current phase, status, development round, and error;
 - Project, branch, worktree, PR, and batch metadata;
-- `main_session_id`, `review_session_id`, and `test_session_id`;
+- `main_session_id`, `review_session_id`, `test_session_id`, and `verification_session_id`;
 - Aggregated token, input/output token, and request usage;
 - CI repair attempts, failure fingerprint, and diagnostics state;
+- Acceptance verification state (`verification_status`), attempt count, issue acceptance snapshot hash, and human-override context;
 - Pause, timeout, feedback, and recovery context.
 
 ### 3.2 Milestone
@@ -81,6 +83,8 @@ Pause and stop are different controls. New states and error paths must not make 
 `workflow_milestones` is the timeline's audit unit. Each row describes one explicit event such as plan generation, plan review, implementation, testing, PR review, CI diagnostics, or conflict resolution.
 
 A milestone stores its own `phase_*` usage delta plus its session, content, commits, diff statistics, and error. It is not a copy of the workflow's cumulative usage.
+
+The acceptance-verification milestone has its own row lifecycle: when the verifier starts, an in_progress "Acceptance verification: running" row is created and hosts live activity; the verdict settle updates that same row in place instead of creating a new one.
 
 ### 3.3 Agent session
 
@@ -91,10 +95,12 @@ A milestone stores its own `phase_*` usage delta plus its session, content, comm
 The normal phase order is:
 
 ```text
-preparation → planning → development → pr_review → report → merge
+preparation → planning → development → pr_review → report → merge → acceptance_verification
 ```
 
 `wait` is a user-feedback phase outside the linear `PHASE_ORDER`. Cancelling a round or supplying feedback can enter it before returning to the relevant business phase.
+
+`acceptance_verification` is the independent post-merge verification phase (#2335, enabled by default; disable it with `autonomous.acceptance_verification_enabled`). The workflow reaches `completed` only after a `confirmed` verdict or a human override of `rejected`/`indeterminate` to `confirmed`; when the phase is disabled, merge completes the workflow directly.
 
 Primary statuses:
 
@@ -109,23 +115,25 @@ Primary statuses:
 | `reporting` | Producing the final report |
 | `waiting` | Waiting for user feedback |
 | `merging` | Checking CI, repairing, synchronizing, and merging |
-| `paused` | Manual, application-quota, or hard upstream-quota pause |
+| `verification_pending` | Independent post-merge acceptance verification running |
+| `paused` | Manual, application-quota, hard upstream-quota, or acceptance pause (rejected/indeterminate/retries exhausted) |
 | `planning_timeout` | Planning timed out and awaits extension or retry |
-| `completed` | PR merged and cleanup completed |
+| `completed` | PR merged and cleaned up, and (with verification enabled) the issue closed after a confirmed verdict |
 | `failed` | Automatic recovery was exhausted |
 | `cancelled` | User stop or batch cancellation |
 
 Persisted state is the recovery authority. A server restart must not depend solely on an in-memory Agent, lock, or SSE connection to decide the next step.
 
-## 5. Strict three-session topology
+## 5. Stable session-line topology
 
-Each workflow owns exactly three stable session lines:
+Each workflow owns exactly four stable session lines:
 
 | Line | Persisted field | Milestones |
 |------|-----------------|------------|
 | `main` | `main_session_id` | Plan generation/refinement, development, PR fixes, final summary, and CI repair |
 | `review` | `review_session_id` | Plan review and PR code review |
 | `test` | `test_session_id` | Testing and verification across development rounds |
+| `verification` | `verification_session_id` | Independent post-merge acceptance verification |
 
 The lines resume across milestones so that:
 
@@ -144,11 +152,14 @@ When a provider transcript exceeds the model context limit, Open ACE:
 4. Rebinds the new provider session to the same Open ACE session row;
 5. Preserves usage from failed attempts.
 
-Recovery therefore does not create a fourth session line. `main / review / test` must remain the only stable workflow topology.
+Recovery therefore does not create an additional session line. `main / review / test / verification` must remain the only stable workflow topology.
 
 ## 6. Scheduling, concurrency, and batches
 
-`AutonomousScheduler` scans active workflows and advances up to three workflows concurrently. This is a fixed module-level limit (`MAX_CONCURRENT_WORKFLOWS = 3` in `app/services/autonomous_scheduler.py`), not an operator-tunable setting; changing it requires a code change.
+`AutonomousScheduler` scans active workflows with a two-layer concurrency cap:
+
+- **Global ceiling**: the total number of workflows advanced concurrently across all users. Default 10 (`MAX_CONCURRENT_WORKFLOWS` in `app/services/autonomous_scheduler.py`), overridable through `agent_max_concurrent_workflows` in `/etc/openace/agent-launcher.conf`. The scheduler re-reads the config every cycle, so changes take effect without a restart.
+- **Per-user cap**: the number of workflows one user may advance concurrently equals that user's tenant `max_sessions_per_user` (default 5), enforced at scheduler selection and consistent with the create-time concurrency check.
 
 It enforces three levels of exclusion:
 
@@ -256,6 +267,7 @@ Classification uses structured runner errors and zero-token error envelopes. It 
 | Context overflow | Maximum context/input length | Replace provider transcript on the same stable session line |
 | Insufficient CI evidence | Actions logs unavailable or unauthorized | Wait for diagnostics, then fail with an actionable permission error |
 | Repository integrity violation | `.git` content, inode, owner, or ACL tampering | Fail closed with exit code 68 |
+| Verifier infrastructure failure | Runner failure, unparseable verifier output | Same-phase automatic retry, up to 3 attempts (deterministic parse failures capped at 2); pause for human review after exhaustion |
 
 Manual, application-quota, and hard upstream-quota pauses all use `paused`, but their reasons differ. Only an application-quota pause is auto-resumable. Manual and hard upstream pauses require a user decision.
 
@@ -306,6 +318,8 @@ Workflow totals are recomputed from each milestone's `phase_total_tokens`, `phas
 
 The runner maintains a baseline for provider cumulative counters and stores only call deltas. Real usage from API retries and context recovery is carried into the milestone as well.
 
+Verifier usage is recorded on the acceptance milestone's own `phase_*` columns: when the `verification` session line is reused across attempts, previously recorded usage is folded in as a `prior_usage` baseline and only the delta is stored; the running acceptance milestone row also receives realtime usage writes.
+
 ### 12.2 AI Activity
 
 AI Activity streams tool use, assistant text, usage, retries, and system events through SSE. It is live observability, not the durable audit log:
@@ -318,7 +332,7 @@ AI Activity streams tool use, assistant text, usage, retries, and system events 
 - Only genuinely long silence becomes stale; normal model first-token latency is not labeled as failure too early.
 - The panel shows recent events; the complete transcript is available through View session.
 
-Activity attaches only to Agent-running planning, development, and PR-review phases, plus explicit merge repair/conflict milestones. Queue, preparation, report, and user-wait phases must not impersonate an active AI call.
+Activity attaches only to milestones that genuinely run an Agent: AI milestones in planning, development, and PR review; explicit merge repair/conflict milestones; and acceptance verification milestones (while the workflow is `verification_pending`, the running acceptance milestone is the activity host and receives realtime usage writes). Queue, preparation, report, and user-wait phases must not impersonate an active AI call. When a milestone changes status outside the scheduler poll interval (for example a running acceptance row settling), the backend emits a `milestone_updated` event so the timeline refreshes immediately.
 
 ## 13. Timeline UX invariants
 
@@ -330,6 +344,8 @@ The timeline is both a control plane and the main diagnostic surface. Frontend c
 - Wrapping milestone action buttons.
 - Per-milestone tokens, requests, and session identity for finalized plans and other AI milestones; “no new AI usage” when a reused session made no new call.
 - No misleading zero-token badge on system-only milestones.
+- Acceptance milestones show tokens, requests, and a session button like other AI milestones; the acceptance-report view button uses the warning style variant (#2995).
+- The session viewer shows the full transcript of the milestone's stable session line: messages carry timestamps, assistant/user content renders as Markdown, long messages start collapsed with expand available, and truncation at the cap is labeled.
 - Scrollable content and diff modal bodies in fullscreen, without an extra title-row gap from the fullscreen control.
 - Auto-expansion for the latest activity milestone that respects manual collapse and viewing older milestones.
 - Auto-scroll only while the user remains near the bottom.
@@ -353,12 +369,14 @@ Important settings:
 | `OPENACE_AUTONOMOUS_AGENT_ACCOUNT` | `openace-agent` | Isolated Agent account |
 | `OPENACE_RUN_AS` | `/usr/local/bin/openace-run-as` | Isolated launcher |
 | `OPENACE_AGENT_GUARD_BIN` | `/usr/local/libexec/openace-agent-bin` | Controlled command directory for isolated execution |
+| `agent_max_concurrent_workflows` | `10` | agent-launcher.conf: scheduler global concurrency ceiling, re-read every scheduler cycle (re-running the cgroup script overwrites this value) |
+| `autonomous.acceptance_verification_enabled` | `true` | config.json `autonomous` section: post-merge acceptance verification toggle |
 
 Internal limits referenced elsewhere in this document are also module-level constants and are not operator-tunable:
 
 | Constant | Default | Source | Purpose |
 |----------|---------|--------|---------|
-| `MAX_CONCURRENT_WORKFLOWS` | `3` | `app/services/autonomous_scheduler.py` | Concurrent workflows advanced by the scheduler (see also §6) |
+| `MAX_CONCURRENT_WORKFLOWS` | `10` | `app/services/autonomous_scheduler.py` | Default scheduler global concurrency; overridable via `agent_max_concurrent_workflows` in agent-launcher.conf (see also §6) |
 | `MAX_CI_REPAIR_ATTEMPTS` | `5` | `app/modules/workspace/autonomous/orchestrator.py` | Automatic merge-phase CI repair attempts (§9.2) |
 | `MAX_CI_DIAGNOSTICS_ATTEMPTS` | `6` | `app/modules/workspace/autonomous/orchestrator.py` | Bounded scheduler polls when failed-job logs stay unavailable (§9.2) |
 | `MAX_PRE_COMMIT_CONVERGENCE_PASSES` | `3` | `app/modules/workspace/autonomous/orchestrator.py` | Isolated `pre-commit` convergence rounds (§9.2) |
@@ -395,7 +413,7 @@ sudo bash scripts/setup-cgroup-v2.sh --memory 4G --pids 1024 --cpu 4
 | `--pids` | `512` | Max processes per agent task |
 | `--cpu` | `2` | CPU cores available to each agent task |
 | `--cgroup-enabled` | `on` | `on` forces; `auto` enables only when cgroupfs is writable; `off` disables |
-| `--concurrency` | `3` | Max concurrent workflows advanced by the scheduler |
+| `--concurrency` | `10` | Scheduler global concurrency ceiling written to the conf (`agent_max_concurrent_workflows`) |
 | `--wall-clock` | `3600` | Per-task wall-clock timeout in seconds |
 | `--conf` | `/etc/openace/agent-launcher.conf` | Configuration file path |
 | `--cgroup-root` | `/sys/fs/cgroup/openace-agent` | Parent cgroup path |
@@ -438,9 +456,20 @@ All endpoints require authentication and enforce workflow ownership or administr
 | `GET /api/autonomous/workflows/:id/timeline` | List milestones |
 | `POST /api/autonomous/workflows/:id/milestones/:mid/cancel` | Cancel a round and wait for feedback |
 | `POST /api/autonomous/workflows/:id/milestones/:mid/fork` | Fork from a milestone |
+| `GET /api/autonomous/workflows/:id/forks` | List forked workflows |
+| `GET /api/autonomous/workflows/:id/milestones/:mid/session` | Milestone session details (full stable-session-line transcript) |
+| `GET /api/autonomous/workflows/:id/milestones/:mid/diff` | Milestone code-change diff |
+| `POST /api/autonomous/workflows/:id/resume-with-feedback` | Continue after feedback |
+| `POST /api/autonomous/workflows/:id/verification_override` | Human override of an acceptance pause to confirmed |
+| `POST /api/autonomous/workflows/:id/extend-planning-timeout` | Extend the planning timeout |
+| `POST /api/autonomous/workflows/:id/done` | Mark the requirement done and finalize |
 | `GET /api/autonomous/workflows/:id/events/stream` | SSE activity stream |
 | `GET /api/autonomous/workflows/:id/pr-diff` | PR diff |
 | `GET /api/autonomous/workflows/:id/pr-stats` | PR change statistics |
+| `DELETE /api/autonomous/workflows/:id` | Delete a workflow |
+| `DELETE /api/autonomous/batches/:id` | Delete a batch |
+
+`GET /tools` and `GET /models` are infrastructure endpoints and are out of scope for this overview.
 
 See the [API reference](API.md) and `app/routes/autonomous.py` for complete fields and responses.
 
@@ -448,9 +477,12 @@ See the [API reference](API.md) and `app/routes/autonomous.py` for complete fiel
 
 | File | Responsibility |
 |------|----------------|
-| `app/routes/autonomous.py` | API, authorization, pause/resume/stop, SSE, milestone operations |
+| `app/routes/autonomous.py` | API, authorization, pause/resume/stop, SSE, milestone operations, acceptance override |
 | `app/services/autonomous_scheduler.py` | Scheduling, quota gate, concurrency, batches, distributed lock |
-| `app/modules/workspace/autonomous/orchestrator.py` | State machine, prompts, three sessions, CI repair, conflicts, merge |
+| `app/modules/workspace/autonomous/orchestrator.py` | State machine, prompts, session lines, CI repair, conflicts, merge |
+| `app/modules/workspace/autonomous/phases/` | Migrated phase handlers (development, pr_review, merge, acceptance_verification) and the registry |
+| `app/modules/workspace/autonomous/phase_host.py` | Host-capability protocol required by phase handlers |
+| `app/modules/workspace/autonomous/acceptance_snapshot.py` / `acceptance_gates.py` / `acceptance_verdicts.py` | Acceptance checklist snapshot, deterministic mechanical gates, per-item verdict aggregation |
 | `app/modules/workspace/autonomous/agent_runner.py` | CLI adapters, resume, activity, and usage collection |
 | `app/modules/workspace/autonomous/github_ops.py` | Controlled Git and GitHub operations |
 | `app/repositories/autonomous_repo.py` | Workflow, milestone, lock, and usage persistence |
@@ -465,10 +497,11 @@ Do not test only the helper that exposed the current failure. Cover the complete
 
 ### 17.1 Sessions and usage
 
-- Resume all three stable lines across multiple milestones.
+- Resume all four stable lines across multiple milestones.
 - Preserve the stable line after context overflow.
 - Keep API retry/context-recovery usage without loss or duplication.
 - Show session and usage for finalized plan, test, review, and CI repair milestones.
+- Acceptance milestones record their own session and usage (running row → settled in place).
 - Keep `thinking_tokens` and empty activity out of the UI.
 
 ### 17.2 CI repair
@@ -511,7 +544,16 @@ Do not test only the helper that exposed the current failure. Cover the complete
 - Stable ordering when timestamps match.
 - Wrapping action buttons.
 - Fullscreen scrolling for content and diff modals.
+- Session viewer timestamps, Markdown rendering, and long-message collapse/truncation.
 - Manual collapse, viewing old milestones, and auto-scroll do not fight each other.
+
+### 17.6 Acceptance verification
+
+- Running acceptance milestone lifecycle: created at verifier start, same-attempt resurrection, older attempts swept to interrupted, settle in place.
+- Upstream quota pausing mid-verification: burned usage is written to the running acceptance row before the row is terminalized.
+- rejected/indeterminate pauses and the human override to confirmed (`verified_by` records the human identity).
+- Infrastructure retry and deterministic-parse retry caps.
+- Settle sweeps the verifier session's untagged messages onto the acceptance milestone.
 
 Suggested focused commands:
 
@@ -519,6 +561,8 @@ Suggested focused commands:
 pytest -q tests/issues/716 tests/unit/test_autonomous_ci_guardrails.py
 pytest -q tests/unit/test_autonomous_timeline_session_identity.py
 pytest -q tests/unit/test_upstream_quota_pause.py
+pytest -q tests/unit/test_verification_usage_wiring_2994.py
+pytest -q tests/unit/test_milestone_session_route_3000.py
 pytest -q tests/issues/1395
 cd frontend && npm test -- --run WorkflowTimeline
 ```
@@ -540,6 +584,9 @@ Then run `tests/autonomous/`, relevant issue regressions, and the repository's f
 | `.git` integrity failure | Inspect registry, ACL, worktree pointer, inode, and interruption logs; do not delete registry blindly |
 | Manual pause auto-resumes | Check whether its reason incorrectly uses the application-quota prefix |
 | Fullscreen modal cannot scroll | Check `min-height: 0` and inner `overflow: auto` on modal body/content |
+| Acceptance milestone has no tokens/session | Check whether `verification_session_id` and the milestone's `phase_*` were written |
+| Running acceptance card shows no AI activity | Status must be `verification_pending` with an in_progress acceptance milestone present; then check SSE/keepalive |
+| Session details missing messages | Check the settle-time untagged-message sweep and the stable session tracking id |
 
 ## 19. Known boundaries
 
@@ -549,3 +596,4 @@ Then run `tests/autonomous/`, relevant issue regressions, and the repository's f
 - Waiting for pending repository checks does not consume CI repair attempts. An explicit no-pending policy block pauses until a user approves, marks the PR ready, or changes repository rules and then resumes it.
 - Provider error wording can change. New adapters must constrain matching to zero-token envelopes and structured runner results.
 - Isolated execution depends on Linux ACLs and controlled sudoers. It must not degrade to running as the project owner when those requirements are unavailable.
+- Acceptance verdicts come from deterministic mechanical gates plus per-item verdict aggregation, not one subjective overall judgment; a human override records the human identity in `verified_by`.

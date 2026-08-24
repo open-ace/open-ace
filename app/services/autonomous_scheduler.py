@@ -53,7 +53,7 @@ WORKFLOW_LOCK_HEARTBEAT_SECONDS = 60.0
 
 
 def get_max_concurrent_workflows() -> int:
-    """Resolve the concurrency cap from agent-launcher.conf (default 3)."""
+    """Resolve the concurrency cap from agent-launcher.conf (default 10)."""
     try:
         from app.modules.workspace.autonomous.task_isolation import (
             read_agent_task_policy,
