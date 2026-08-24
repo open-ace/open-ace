@@ -21,11 +21,14 @@ Phase A introduces a contract without moving the phase methods:
 - **`_commit_phase_result`** — the single authoritative path for phase/status
   transition. Only `outcome="completed"` may advance `current_phase`.
 
-Legacy `_do_*` methods still return `None` and commit inline (unchanged
-behaviour). `advance()` routes through `_dispatch_phase`, which forwards any
-`PhaseResult` to the commit entrypoint and leaves `None` returns on the legacy
-path. Phases migrate one at a time; Phase B (after #2022/#2043 land) will move
-the complex ones into handlers.
+All eight phases now return a `PhaseResult` committed through
+`_commit_phase_result`; no phase commits inline. Four live in `phases/*.py`
+behind the `PHASE_HANDLERS` registry (development, pr_review, merge,
+acceptance_verification — resolved via `resolve_phase_handler`); the other four
+(preparation, planning, report, wait) remain `_do_*` methods in the
+orchestrator but already sit on the `(ctx, deps) -> PhaseResult` contract. The
+`_legacy(...)` wrapper branches in the dispatcher are defensive fallbacks only
+and never fire in practice.
 
 ## Contract fields
 
@@ -46,14 +49,17 @@ Every phase documents these eight properties:
 
 ```
 preparation → planning → development → pr_review → report → merge
-                                                              ↓
-                                                        (completed)
+                                                                ↓
+                                                    acceptance_verification
+                                                                ↓
+                                                          (completed)
 ```
 
 `PHASE_ORDER` and `PHASE_STATUS_MAP` (in `orchestrator.py`) are the canonical
-transition table. `_next_phase("merge") == "merge"` (terminal);
-`_next_phase(<unknown>) == "planning"` (recovery default). The commit entrypoint
-rejects any `next_phase` not in `PHASE_ORDER`.
+transition table. merge's successor is `acceptance_verification` (#2335);
+`_next_phase("acceptance_verification") == "acceptance_verification"`
+(terminal); `_next_phase(<unknown>) == "planning"` (recovery default). The
+commit entrypoint rejects any `next_phase` not in `PHASE_ORDER`.
 
 ---
 
@@ -218,11 +224,14 @@ resolution sub-workflow. Uses the **test session line** for conflict resolution.
 - **authoritative evidence**: `merge_completed` / `merge_failed` milestones;
   conflict-resolution fork milestone.
 - **side effects**: `gh.merge_pull_request`, base sync, conflict worktree
-  create/remove, branch/worktree cleanup, `completed_at`.
-- **postconditions**: on success `status == "completed"`,
-  `current_phase == "merge"` (terminal), `completed_at` set. On conflict → fork
-  a sub-workflow and pause the parent. On unrecoverable conflict →
-  `status == "failed"`.
+  create/remove, branch/worktree cleanup.
+- **postconditions**: on success `current_phase == "acceptance_verification"`,
+  `status == "verification_pending"`. The workflow reaches `completed` only
+  from the verification side (confirmed settle, human override, or the phase
+  being disabled); `completed_at` is written by the confirmed settle patch, the
+  override route, or the unified commit of the `completed` pseudo-phase — not
+  by merge itself. On conflict → fork a sub-workflow and pause the parent. On
+  unrecoverable conflict → `status == "failed"`.
 - **re-entry point**: `worktree_transition_state` is persisted; a SIGKILLed
   transition is reconciled at the top of `advance()` before any phase runs
   (#2050), so a restart never falls back to the main checkout. Cleanup retries
@@ -230,30 +239,75 @@ resolution sub-workflow. Uses the **test session line** for conflict resolution.
 - **recovery behavior**: conflict → fork → parent paused → child resolves →
   parent resumes merge. Reconciliation fail-closes (status=failed) rather than
   running a phase against the wrong checkout.
-- **terminal outcomes**: `completed` → terminal (workflow completed, writes
-  `status=completed` + `completed_at`, symmetric with `pause`'s `paused_at`);
+- **terminal outcomes**: `completed` → acceptance_verification (merge success;
+  the terminal `completed` status is reached from the verification side);
   `pause` (conflict fork); `failed` on unrecoverable conflict/merge error.
 
 > **phase_change emit contract**: `_commit_phase_result` does **not** emit
-> `phase_change` events. The legacy `_do_*` methods emit them inline with
-> phase-specific payloads (e.g. `{"phase":"merge","auto_merge":True}`) that the
-> entrypoint cannot reconstruct. A migrated handler must emit its own
-> `phase_change`. A migrated merge handler returning `completed("completed")`
-> must also emit `phase_change{"phase":"completed"}` to match the legacy path.
+> `phase_change` events. The migrated handlers emit their own via
+> `deps.host.emit_phase_change`; merge's success tail emits
+> `phase_change{"phase":"completed"}` before returning
+> `next_phase="acceptance_verification"`, preserving the legacy event stream
+> for UI consumers.
 
 ---
 
-## Migration status (Phase A)
+## acceptance_verification
 
-All phases remain on the **legacy path** (`_do_*` returns `None`, commits
-inline). The contract and commit entrypoint are in place and tested but no
-production phase has been migrated yet. Migration order (Phase B, after #2022
-and #2043 land):
+Independent post-merge verification (#2335, `phases/acceptance_verification.py`).
+Runs a credentialless read-only verifier on the merged main SHA, applies
+deterministic mechanical gates plus per-item verdict aggregation, and only a
+`confirmed` verdict closes the issue. When disabled
+(`autonomous.acceptance_verification_enabled=false`) the handler completes
+immediately without running the verifier.
 
-1. Thin phases first — `report`, `wait` — to validate the contract end-to-end.
-2. `merge` and `pr_review` (the complex ones) once their dependency services are
-   wired.
-3. `development`, `planning`, `preparation` last.
+- **preconditions**: `current_phase == "acceptance_verification"`, `status ==
+  "verification_pending"`; the PR is merged so a merge SHA resolves.
+- **inputs**: merge SHA (`verification_merge_sha`, resolved from the PR's
+  merge commit when absent), base SHA (`base_commit_sha`), the issue's
+  acceptance snapshot (`issue_acceptance_hash`), `verification_status`,
+  `verification_attempt`, prior `acceptance_verification` milestones,
+  `content_language`.
+- **authoritative evidence**: the `acceptance_verification` milestone — minted
+  `in_progress` ("Acceptance verification: running") at verifier start on the
+  `verification` session line, settled in place with the verdict (#3003).
+- **side effects**: verifier agent run (read-only tools, temporary merged-main
+  checkout on the `verification` session line), issue report comment, issue
+  close on `confirmed`, usage writes to the running acceptance row
+  (`prior_usage` baseline + in-run deltas), `milestone_updated` events;
+  human override via the `verification_override` route records the human
+  identity in `verified_by`.
+- **postconditions**: `confirmed` → `status == "completed"`, issue closed,
+  `completed_at` set. `rejected` / `indeterminate` → `paused` for human review
+  (delivered code is never marked failed). Infrastructure failures retry in
+  the same phase, up to 3 attempts (deterministic parse failures capped at 2,
+  #2867), then pause.
+- **re-entry point**: deduplicated on `(merge_sha, issue_acceptance_hash)`;
+  a settled `confirmed` result is a terminal no-op. A new merge SHA or an
+  edited issue re-runs the verifier naturally. The early milestone row is
+  reused for the same attempt and older `in_progress` rows are swept to
+  failed("interrupted"); a quota pause mid-verification terminalizes the row
+  only after writing its burned usage.
+- **recovery behavior**: infrastructure failure → same-phase retry; verifier
+  quota pause → workflow `paused` (resumable); shutdown → row stays
+  `in_progress` and the same attempt reuses it on resume.
+- **terminal outcomes**: `completed` (confirmed verdict, human override, or
+  phase disabled); `pause` (rejected / indeterminate / retries exhausted);
+  `retry` (infrastructure failure under the cap).
+
+---
+
+## Migration status
+
+All eight phases commit through `_commit_phase_result`; none remains on the
+legacy inline-commit path.
+
+- `phases/*.py` + `PHASE_HANDLERS` registry (resolved via
+  `resolve_phase_handler`): `development`, `pr_review`, `merge`,
+  `acceptance_verification`. The dispatcher's `_legacy(self._do_*)` branches
+  for these are defensive fallbacks only.
+- Contract-direct `_do_*` methods in the orchestrator (#2044 T6–T9):
+  `preparation`, `planning`, `report`, `wait`.
 
 A phase is migrated when it returns a `PhaseResult` and contains **no direct
 `_update_workflow({"current_phase": ...})` / `_create_milestone` calls** — all

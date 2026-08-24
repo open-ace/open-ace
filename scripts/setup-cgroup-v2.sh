@@ -25,7 +25,7 @@
 #   --pids N           pids.max (default: 512)
 #   --cpu N            cpu.max as "quota period" = N * 100000 / 100000 (default: 2 → 200000 100000)
 #   --cgroup-enabled   agent_task_cgroup_enabled value: on|auto|off (default: on)
-#   --concurrency N    agent_max_concurrent_workflows (default: 3)
+#   --concurrency N    agent_max_concurrent_workflows (default: 10)
 #   --wall-clock N     agent_task_wall_clock_limit in seconds (default: 3600)
 #   --conf PATH        agent-launcher.conf path (default: /etc/openace/agent-launcher.conf)
 #   --cgroup-root PATH parent cgroup path (default: /sys/fs/cgroup/openace-agent)
@@ -41,7 +41,7 @@ MEMORY_BYTES=2147483648   # 2 GiB
 PIDS_MAX=512
 CPU_CORES=2               # expanded to "${CPU_CORES}00000 100000"
 CGROUP_ENABLED="on"
-CONCURRENCY=3
+CONCURRENCY=10
 WALL_CLOCK=3600
 CONF_PATH="/etc/openace/agent-launcher.conf"
 # agent_task_preserve_max_age_days default (days). Mirrors openace-run-as.sh so
