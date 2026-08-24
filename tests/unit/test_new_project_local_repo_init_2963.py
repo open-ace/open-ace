@@ -64,15 +64,15 @@ class TestSyncWfAfterCreateRepo:
             # Create a mock repo
             mock_repo = MagicMock()
             mock_repo.get_workflow.return_value = wf
-            mock_repo.update_workflow.return_value = {"success": True}
 
             # Track updates to verify wf sync
             updates_applied = []
 
-            def capture_update(workflow_id, patch):
-                updates_applied.append(patch)
-                # Simulate in-memory update
-                wf.update(patch)
+            def capture_update(*args, **kwargs):
+                # Accept any arguments to be flexible with mock calls
+                if args and isinstance(args[-1], dict):
+                    updates_applied.append(args[-1])
+                    wf.update(args[-1])
                 return {"success": True}
 
             mock_repo.update_workflow.side_effect = capture_update
