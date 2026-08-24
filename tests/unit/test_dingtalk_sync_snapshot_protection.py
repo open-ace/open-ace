@@ -15,8 +15,6 @@ Test cases:
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 import app.utils.smtp_crypto as smtp_crypto
@@ -29,6 +27,8 @@ from app.services.dingtalk_org_sync import (
     DingTalkOrgSyncService,
     DingTalkUser,
 )
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(3020)]
 
 
 class FakeDingTalkOrgSyncService(DingTalkOrgSyncService):
