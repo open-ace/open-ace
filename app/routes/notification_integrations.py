@@ -144,16 +144,55 @@ def dingtalk_config():
     return jsonify({"success": True, "data": saved})
 
 
+def _dingtalk_oapi_request(token: str, url: str, json_payload: dict) -> dict:
+    """Call a DingTalk oapi endpoint via *safe_request* and return the payload.
+
+    Raises ``ValueError`` with a human-readable message when the API returns a
+    non-zero *errcode*.  The access token is passed as a query parameter per
+    DingTalk's oapi convention.
+    """
+    response = safe_request(
+        "POST",
+        url,
+        params={"access_token": token},
+        json=json_payload,
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    errcode = payload.get("errcode", 0)
+    if errcode == 0:
+        return payload
+    errmsg = payload.get("errmsg") or payload.get("message") or "unknown error"
+    raise ValueError(f"DingTalk API error (errcode={errcode}): {errmsg}")
+
+
 @notification_integrations_bp.post("/management/dingtalk-config/test")
 def test_dingtalk_config():
+    """Test DingTalk credentials **and** organisation-sync permissions.
+
+    The test performs the following checks sequentially:
+
+    1. **access_token** – exchange AppKey/AppSecret for an access token.
+    2. **department_list** – list child departments of the root department
+       (verifies the *通讯录部门读取* permission).
+    3. **user_list** – list one user from the root department (verifies the
+       *成员信息读取* permission).
+
+    The response keeps the legacy ``success`` / ``message`` fields for backward
+    compatibility and adds a ``checks`` dict with per-check details.
+    """
     data = request.get_json(silent=True) or {}
     saved = get_notification_settings_repository().get("dingtalk", include_secrets=True) or {}
     app_key = data.get("app_key") or saved.get("app_key")
     app_secret = data.get("app_secret") or saved.get("app_secret")
     if not app_key or not app_secret:
         return jsonify({"success": False, "message": "AppKey and AppSecret are required"}), 400
+
+    checks: dict[str, dict[str, str]] = {}
+
+    # ---- 1. access_token check ----
     try:
-        # Issue #2237: Use safe_request to avoid gevent RecursionError and get SSRF protection
         response = safe_request(
             "POST",
             "https://api.dingtalk.com/v1.0/oauth2/accessToken",
@@ -162,22 +201,100 @@ def test_dingtalk_config():
         )
         response.raise_for_status()
         payload = response.json()
-        return jsonify(
-            {
-                "success": bool(payload.get("accessToken")),
-                "message": (
-                    "DingTalk connection test successful"
-                    if payload.get("accessToken")
-                    else "DingTalk did not return an access token"
-                ),
-            }
-        )
+        token = payload.get("accessToken") or payload.get("access_token")
+        if not token:
+            checks["access_token"] = {"status": "failed", "message": "No access token returned"}
+            return jsonify(
+                {
+                    "success": False,
+                    "message": "DingTalk did not return an access token",
+                    "checks": checks,
+                }
+            )
+        checks["access_token"] = {"status": "passed", "message": "Access token obtained"}
     except OutboundUrlBlockedError as e:
         logger.error("DingTalk connection test blocked by SSRF protection: %s", e)
+        checks["access_token"] = {
+            "status": "failed",
+            "message": f"Request blocked by security policy: {e}",
+        }
         return (
-            jsonify({"success": False, "message": f"Request blocked by security policy: {e}"}),
+            jsonify(
+                {
+                    "success": False,
+                    "message": f"Request blocked by security policy: {e}",
+                    "checks": checks,
+                }
+            ),
             403,
         )
     except Exception:
         logger.warning("DingTalk connection test failed", exc_info=True)
-        return jsonify({"success": False, "message": "DingTalk connection test failed"}), 502
+        checks["access_token"] = {"status": "failed", "message": "Failed to obtain access token"}
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "message": "DingTalk connection test failed",
+                    "checks": checks,
+                }
+            ),
+            502,
+        )
+
+    # ---- 2. department_list check ----
+    try:
+        _dingtalk_oapi_request(
+            token,
+            "https://oapi.dingtalk.com/topapi/v2/department/listsub",
+            {"dept_id": 1},
+        )
+        checks["department_list"] = {"status": "passed", "message": "Department list accessible"}
+    except ValueError as exc:
+        checks["department_list"] = {
+            "status": "failed",
+            "message": f"Department read permission missing ({exc})",
+        }
+    except Exception:
+        logger.warning("DingTalk department list check failed", exc_info=True)
+        checks["department_list"] = {
+            "status": "failed",
+            "message": "Failed to query department list",
+        }
+
+    # ---- 3. user_list check ----
+    try:
+        _dingtalk_oapi_request(
+            token,
+            "https://oapi.dingtalk.com/topapi/v2/user/list",
+            {"dept_id": 1, "cursor": 0, "size": 1},
+        )
+        checks["user_list"] = {"status": "passed", "message": "User list accessible"}
+    except ValueError as exc:
+        checks["user_list"] = {
+            "status": "failed",
+            "message": f"Member read permission missing ({exc})",
+        }
+    except Exception:
+        logger.warning("DingTalk user list check failed", exc_info=True)
+        checks["user_list"] = {
+            "status": "failed",
+            "message": "Failed to query user list",
+        }
+
+    # ---- Overall result ----
+    all_passed = all(c["status"] == "passed" for c in checks.values())
+    failed_checks = [name for name, c in checks.items() if c["status"] != "passed"]
+
+    if all_passed:
+        message = "DingTalk connection test successful"
+    else:
+        message = "DingTalk connection test: some checks failed – " + ", ".join(failed_checks)
+
+    return jsonify(
+        {
+            "success": all_passed,
+            "message": message,
+            "checks": checks,
+        }
+    )
