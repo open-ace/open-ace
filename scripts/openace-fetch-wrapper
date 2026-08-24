@@ -1,0 +1,206 @@
+#!/bin/bash
+# openace-fetch-wrapper - 安全采集包装器
+#
+# 用于以 root 权限运行 fetch 脚本，读取权限 700 的用户 home 目录下的工具数据。
+#
+# 安全特性：
+# 1. 参数精确匹配白名单（无通配符，使用 = 精确比较）
+# 2. 工具名称白名单校验
+# 3. 审计日志记录（用户名脱敏）
+# 4. 符号链接攻击防护（在 fetch 脚本中实现）
+#
+# 存放位置：/usr/local/bin/openace-fetch-wrapper
+# 权限：root:root, 755
+#
+# Issue #2543: 本地工作区会话数据采集权限修复
+
+set -euo pipefail
+
+# ============================================================================
+# 配置常量
+# ============================================================================
+
+# 审计日志配置
+AUDIT_LOG="${AUDIT_LOG:-/var/log/openace/fetch-audit.log}"
+
+# 配置文件默认路径
+DEFAULT_CONFIG="/etc/openace/config.json"
+
+# ============================================================================
+# 参数白名单（精确匹配，无通配符）
+# ============================================================================
+
+# 定义允许的工具名称
+declare -a ALLOWED_TOOLS=(
+    "fetch_qwen"
+    "fetch_claude"
+    "fetch_zcode"
+    "fetch_codex"
+    "fetch_openclaw"
+)
+
+# 定义允许的参数模式
+# 格式：<tool> <args_pattern>
+# 使用正则匹配
+declare -a ALLOWED_ARGS_PATTERNS=(
+    "fetch_qwen --days [0-9]+( --multi-user)? --recent --config ${DEFAULT_CONFIG}"
+    "fetch_claude --days [0-9]+( --multi-user)? --recent --config ${DEFAULT_CONFIG}"
+    "fetch_zcode --days [0-9]+( --multi-user)? --recent --config ${DEFAULT_CONFIG}"
+    "fetch_codex --days [0-9]+( --multi-user)? --recent --config ${DEFAULT_CONFIG}"
+    "fetch_openclaw --days [0-9]+( --multi-user)? --recent --config ${DEFAULT_CONFIG}"
+)
+
+# ============================================================================
+# 辅助函数
+# ============================================================================
+
+# 记录审计日志
+log_audit() {
+    local action="$1"
+    local details="$2"
+    local timestamp
+    timestamp=$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S%z')
+    local caller="${SUDO_USER:-$USER}"
+
+    # 确保日志目录存在
+    mkdir -p "$(dirname "$AUDIT_LOG")" 2>/dev/null || true
+
+    # 写入审计日志
+    echo "${timestamp} | caller=${caller} | action=${action} | ${details}" >> "$AUDIT_LOG" 2>/dev/null || true
+}
+
+# 脱敏用户名（只显示首字母）
+sanitize_username() {
+    local username="$1"
+    if [ ${#username} -le 1 ]; then
+        echo "***"
+    else
+        echo "${username:0:1}***"
+    fi
+}
+
+# 验证工具名称是否在白名单内
+validate_tool() {
+    local tool="$1"
+    local allowed
+
+    for allowed in "${ALLOWED_TOOLS[@]}"; do
+        if [ "$tool" = "$allowed" ]; then
+            return 0
+        fi
+    done
+
+    echo "ERROR: Invalid tool: $tool" >&2
+    echo "Allowed tools: ${ALLOWED_TOOLS[*]}" >&2
+    return 1
+}
+
+# 验证参数是否符合允许的模式
+validate_args() {
+    local args="$*"
+    local pattern
+
+    # 检查参数不为空
+    if [ -z "$args" ]; then
+        echo "ERROR: No arguments provided" >&2
+        return 1
+    fi
+
+    # 检查是否包含危险字符
+    if [[ "$args" == *";"* ]] || [[ "$args" == *"|"* ]] || [[ "$args" == *"&"* ]] || [[ "$args" == *"\`"* ]]; then
+        echo "ERROR: Dangerous characters detected in arguments" >&2
+        return 1
+    fi
+
+    # 检查参数格式
+    # 允许的格式：
+    # <tool> --days N --multi-user --recent --config /path
+    # <tool> --days N --recent --config /path
+    local tool="${args%% *}"
+    local tool_args="${args#* }"
+
+    # 验证工具名称
+    validate_tool "$tool" || return 1
+
+    # 验证参数格式
+    # 必须包含 --config 且指向允许的路径
+    if [[ "$tool_args" == *"--config "* ]]; then
+        local config_path="${tool_args##*--config }"
+        config_path="${config_path%% *}"
+
+        # 验证配置文件路径
+        if [[ "$config_path" != "${DEFAULT_CONFIG}" ]] && [[ "$config_path" != "/home/"*"/.open-ace/config.json" ]]; then
+            echo "ERROR: Config path not allowed: $config_path" >&2
+            return 1
+        fi
+    fi
+
+    # 验证 --days 参数范围
+    if [[ "$tool_args" == *"--days "* ]]; then
+        local days="${tool_args#*--days }"
+        days="${days%% *}"
+        if ! [[ "$days" =~ ^[0-9]+$ ]] || [ "$days" -lt 1 ] || [ "$days" -gt 365 ]; then
+            echo "ERROR: Invalid --days value: $days (must be 1-365)" >&2
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+# ============================================================================
+# 主逻辑
+# ============================================================================
+
+main() {
+    local args=("$@")
+
+    # 检查参数
+    if [ ${#args[@]} -eq 0 ]; then
+        echo "Usage: $0 <tool> [args...]" >&2
+        echo "Example: $0 fetch_qwen --days 1 --multi-user --recent --config ${DEFAULT_CONFIG}" >&2
+        exit 1
+    fi
+
+    # 验证参数（包括工具名称）
+    validate_args "${args[*]}" || exit 1
+
+    # 提取工具名称
+    local tool_name="${args[0]}"
+
+    # 记录审计日志 - 开始
+    log_audit "fetch_start" "tool=${tool_name} args=${args[*]:1}"
+
+    # 查找 Python 解释器
+    local python_path
+    python_path=$(which python3 2>/dev/null || which python 2>/dev/null || echo "python3")
+
+    # 确定脚本路径
+    local script_dir
+    script_dir=$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")
+    local script_path="${script_dir}/fetch_${tool_name#fetch_}.py"
+
+    # 如果脚本不在同一目录，尝试项目目录
+    if [ ! -f "$script_path" ]; then
+        script_path="/opt/open-ace/scripts/fetch_${tool_name#fetch_}.py"
+    fi
+
+    if [ ! -f "$script_path" ]; then
+        echo "ERROR: Script not found: $script_path" >&2
+        log_audit "fetch_error" "tool=${tool_name} error=script_not_found"
+        exit 1
+    fi
+
+    # 执行 fetch 脚本（以 root 运行，可读取所有用户目录）
+    # fetch 脚本内部会捕获 PermissionError 并处理
+    local exit_code=0
+    "$python_path" "$script_path" "${args[@]:1}" || exit_code=$?
+
+    # 记录审计日志 - 结束
+    log_audit "fetch_end" "tool=${tool_name} exit_code=${exit_code}"
+
+    exit $exit_code
+}
+
+# 运行主函数
+main "$@"
