@@ -150,7 +150,7 @@ export const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> 
   // the ✅/❌/⚠️ tone in the card summary; these icons mark the action.
   acceptance_verification: { icon: 'bi-shield-check', color: 'primary' },
   acceptance_rejected_cap_exhausted: { icon: 'bi-shield-exclamation', color: 'warning' },
-  acceptance_rejected_reopened: { icon: 'bi-arrow-repeat', color: 'warning' },
+  acceptance_rejected_reopened: { icon: 'bi-bootstrap-reboot', color: 'warning' },
   pr_head_unverified: { icon: 'bi-question-circle', color: 'warning' },
   // Wait / bookkeeping family. frontend_node_modules_shim_failed only exists
   // on historical rows (producer reverted in #2694) but still needs an icon.
@@ -2366,7 +2366,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     rel="noopener noreferrer"
                     className="timeline-pill-link"
                   >
-                    <i className="bi bi-git-pull-request"></i>
+                    <i className="bi bi-file-earmark-diff"></i>
                     <span>
                       {t('autoPrBadge', language)}
                       {workflow.github_pr_number}
@@ -2374,7 +2374,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   </a>
                 ) : (
                   <span className="timeline-chip timeline-chip--subtle">
-                    <i className="bi bi-git-pull-request me-1"></i>
+                    <i className="bi bi-file-earmark-diff me-1"></i>
                     {t('autoPrBadge', language)}
                     {workflow.github_pr_number}
                   </span>

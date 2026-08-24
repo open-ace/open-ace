@@ -769,10 +769,13 @@ describe('MILESTONE_DISPLAY icon coverage', () => {
     }
   });
 
-  it('uses unique icon+color pairs and known color keys', () => {
+  it('uses unique icons, unique icon+color pairs, and known color keys', () => {
+    const seenIcons = new Set<string>();
     const seen = new Set<string>();
     for (const [type, display] of Object.entries(MILESTONE_DISPLAY)) {
       expect(MILESTONE_ICON_COLORS[display.color], `unknown color for ${type}`).toBeDefined();
+      expect(seenIcons.has(display.icon), `duplicate icon: ${display.icon}`).toBe(false);
+      seenIcons.add(display.icon);
       const key = `${display.icon}/${display.color}`;
       expect(seen.has(key), `duplicate icon+color pair: ${key}`).toBe(false);
       seen.add(key);
