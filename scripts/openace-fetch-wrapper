@@ -106,9 +106,11 @@ validate_args() {
         return 1
     fi
 
-    # 检查是否包含危险字符
-    if [[ "$args" == *";"* ]] || [[ "$args" == *"|"* ]] || [[ "$args" == *"&"* ]] || [[ "$args" == *"\`"* ]]; then
-        echo "ERROR: Dangerous characters detected in arguments" >&2
+    # 【Issue #2543 安全加固】使用正则匹配检查参数格式
+    # 只允许字母、数字、短横线、斜杠、点、空格、等号
+    # 这可以防止命令注入攻击（如 base64 编码绕过）
+    if [[ ! "$args" =~ ^[a-zA-Z0-9\ \-\/\.\=]+$ ]]; then
+        echo "ERROR: Invalid characters in arguments" >&2
         return 1
     fi
 
@@ -128,8 +130,13 @@ validate_args() {
         local config_path="${tool_args##*--config }"
         config_path="${config_path%% *}"
 
-        # 验证配置文件路径
-        if [[ "$config_path" != "${DEFAULT_CONFIG}" ]] && [[ "$config_path" != "/home/"*"/.open-ace/config.json" ]]; then
+        # 【Issue #2543 安全加固】严格验证配置文件路径
+        # 只允许：
+        # 1. 系统配置文件: /etc/openace/config.json
+        # 2. 用户配置文件: /home/[a-zA-Z0-9_-]+/.open-ace/config.json
+        # 使用正则匹配防止路径遍历攻击
+        if [[ "$config_path" != "/etc/openace/config.json" ]] && \
+           [[ ! "$config_path" =~ ^/home/[a-zA-Z0-9_-]+/\.open-ace/config\.json$ ]]; then
             echo "ERROR: Config path not allowed: $config_path" >&2
             return 1
         fi

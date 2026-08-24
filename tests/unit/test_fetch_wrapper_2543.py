@@ -153,7 +153,56 @@ class TestParameterValidation:
             text=True,
         )
         assert result.returncode != 0
-        assert "Dangerous" in result.stderr or "ERROR" in result.stderr
+        assert "Invalid characters" in result.stderr or "ERROR" in result.stderr
+
+        # Test base64 command injection attempt
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "1", "--config", "$(echo test)"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "Invalid characters" in result.stderr or "ERROR" in result.stderr
+
+        # Test backtick injection
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "1", "--config", "`id`"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "Invalid characters" in result.stderr or "ERROR" in result.stderr
+
+        # Test pipe injection
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "1", "--config", "|cat"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "Invalid characters" in result.stderr or "ERROR" in result.stderr
+
+    def test_config_path_validation(self, wrapper_path):
+        """Test that config path validation is strict."""
+        if not os.path.exists(wrapper_path):
+            pytest.skip("Wrapper not installed")
+
+        # Test invalid config path
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "1", "--config", "/tmp/evil.json"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "Config path not allowed" in result.stderr or "ERROR" in result.stderr
+
+        # Test path traversal attempt
+        result = subprocess.run(
+            ["bash", wrapper_path, "fetch_qwen", "--days", "1", "--config", "/home/../../../etc/passwd"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
 
 
 # ============================================================================
