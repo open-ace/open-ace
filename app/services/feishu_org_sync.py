@@ -613,9 +613,6 @@ class FeishuOrgSyncService:
                     departments[department.department_id] = department
                     queue.append(department.department_id)
 
-            if current_department_id == FEISHU_ROOT_DEPARTMENT_ID:
-                continue
-
             direct_users = self._fetch_department_users(token, current_department_id)
             for user in direct_users:
                 existing = users.get(user.open_id)
