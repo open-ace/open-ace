@@ -19,16 +19,18 @@ class TestParseMessagesForDailyMessages:
 
     def test_parse_user_message_string_content(self):
         """Test parsing user message with string content."""
-        request_body = json.dumps({
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "Hello, how are you?"},
-            ]
-        }).encode("utf-8")
+        request_body = json.dumps(
+            {
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "Hello, how are you?"},
+                ]
+            }
+        ).encode("utf-8")
 
-        response_body = json.dumps({
-            "choices": [{"message": {"role": "assistant", "content": "I'm doing well!"}}]
-        }).encode("utf-8")
+        response_body = json.dumps(
+            {"choices": [{"message": {"role": "assistant", "content": "I'm doing well!"}}]}
+        ).encode("utf-8")
 
         messages = _parse_messages_for_daily_messages(
             request_body=request_body,
@@ -46,21 +48,26 @@ class TestParseMessagesForDailyMessages:
 
     def test_parse_user_message_multipart_content(self):
         """Test parsing user message with multi-part content."""
-        request_body = json.dumps({
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "What is in this image?"},
-                        {"type": "image_url", "image_url": {"url": "http://example.com/image.png"}},
-                    ]
-                }
-            ]
-        }).encode("utf-8")
+        request_body = json.dumps(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "What is in this image?"},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": "http://example.com/image.png"},
+                            },
+                        ],
+                    }
+                ]
+            }
+        ).encode("utf-8")
 
-        response_body = json.dumps({
-            "choices": [{"message": {"role": "assistant", "content": "I see a cat."}}]
-        }).encode("utf-8")
+        response_body = json.dumps(
+            {"choices": [{"message": {"role": "assistant", "content": "I see a cat."}}]}
+        ).encode("utf-8")
 
         messages = _parse_messages_for_daily_messages(
             request_body=request_body,
@@ -75,9 +82,9 @@ class TestParseMessagesForDailyMessages:
 
     def test_parse_sse_streaming_response(self):
         """Test parsing SSE streaming response."""
-        request_body = json.dumps({
-            "messages": [{"role": "user", "content": "Tell me a story"}]
-        }).encode("utf-8")
+        request_body = json.dumps(
+            {"messages": [{"role": "user", "content": "Tell me a story"}]}
+        ).encode("utf-8")
 
         # SSE streaming response
         response_body = b"""data: {"choices": [{"delta": {"content": "Once upon"}}]}
@@ -101,13 +108,13 @@ data: [DONE]
     def test_content_truncation(self):
         """Test that content is truncated to 10,000 characters."""
         long_content = "x" * 15000
-        request_body = json.dumps({
-            "messages": [{"role": "user", "content": long_content}]
-        }).encode("utf-8")
+        request_body = json.dumps({"messages": [{"role": "user", "content": long_content}]}).encode(
+            "utf-8"
+        )
 
-        response_body = json.dumps({
-            "choices": [{"message": {"role": "assistant", "content": "OK"}}]
-        }).encode("utf-8")
+        response_body = json.dumps(
+            {"choices": [{"message": {"role": "assistant", "content": "OK"}}]}
+        ).encode("utf-8")
 
         messages = _parse_messages_for_daily_messages(
             request_body=request_body,
@@ -121,9 +128,9 @@ data: [DONE]
 
     def test_no_request_body(self):
         """Test parsing with no request body."""
-        response_body = json.dumps({
-            "choices": [{"message": {"role": "assistant", "content": "Hello"}}]
-        }).encode("utf-8")
+        response_body = json.dumps(
+            {"choices": [{"message": {"role": "assistant", "content": "Hello"}}]}
+        ).encode("utf-8")
 
         messages = _parse_messages_for_daily_messages(
             request_body=None,
@@ -137,9 +144,9 @@ data: [DONE]
 
     def test_no_response_body(self):
         """Test parsing with no response body."""
-        request_body = json.dumps({
-            "messages": [{"role": "user", "content": "Hello"}]
-        }).encode("utf-8")
+        request_body = json.dumps({"messages": [{"role": "user", "content": "Hello"}]}).encode(
+            "utf-8"
+        )
 
         messages = _parse_messages_for_daily_messages(
             request_body=request_body,
@@ -159,13 +166,13 @@ data: [DONE]
         # When the filter identifies content as system context, it should be skipped
 
         # Normal user message should always be included
-        request_body = json.dumps({
-            "messages": [{"role": "user", "content": "Real question"}]
-        }).encode("utf-8")
+        request_body = json.dumps(
+            {"messages": [{"role": "user", "content": "Real question"}]}
+        ).encode("utf-8")
 
-        response_body = json.dumps({
-            "choices": [{"message": {"role": "assistant", "content": "OK"}}]
-        }).encode("utf-8")
+        response_body = json.dumps(
+            {"choices": [{"message": {"role": "assistant", "content": "OK"}}]}
+        ).encode("utf-8")
 
         messages = _parse_messages_for_daily_messages(
             request_body=request_body,
@@ -312,13 +319,13 @@ class TestDailyMessagesSinkIntegration:
             model="gpt-4",
         )
 
-        request_body = json.dumps({
-            "messages": [{"role": "user", "content": "Hello"}]
-        }).encode("utf-8")
+        request_body = json.dumps({"messages": [{"role": "user", "content": "Hello"}]}).encode(
+            "utf-8"
+        )
 
-        response_body = json.dumps({
-            "choices": [{"message": {"role": "assistant", "content": "Hi there!"}}]
-        }).encode("utf-8")
+        response_body = json.dumps(
+            {"choices": [{"message": {"role": "assistant", "content": "Hi there!"}}]}
+        ).encode("utf-8")
 
         # Create sink
         sink = DailyMessagesSink(
@@ -368,13 +375,13 @@ class TestDailyMessagesSinkIntegration:
             model="gpt-4",
         )
 
-        request_body = json.dumps({
-            "messages": [{"role": "user", "content": "Test"}]
-        }).encode("utf-8")
+        request_body = json.dumps({"messages": [{"role": "user", "content": "Test"}]}).encode(
+            "utf-8"
+        )
 
-        response_body = json.dumps({
-            "choices": [{"message": {"role": "assistant", "content": "Response"}}]
-        }).encode("utf-8")
+        response_body = json.dumps(
+            {"choices": [{"message": {"role": "assistant", "content": "Response"}}]}
+        ).encode("utf-8")
 
         sink = DailyMessagesSink(
             request_body=request_body,
@@ -422,13 +429,13 @@ class TestDailyMessagesSinkIntegration:
             model="gpt-4",
         )
 
-        request_body = json.dumps({
-            "messages": [{"role": "user", "content": "Test"}]
-        }).encode("utf-8")
+        request_body = json.dumps({"messages": [{"role": "user", "content": "Test"}]}).encode(
+            "utf-8"
+        )
 
-        response_body = json.dumps({
-            "choices": [{"message": {"role": "assistant", "content": "OK"}}]
-        }).encode("utf-8")
+        response_body = json.dumps(
+            {"choices": [{"message": {"role": "assistant", "content": "OK"}}]}
+        ).encode("utf-8")
 
         sink = DailyMessagesSink(
             request_body=request_body,
@@ -451,7 +458,9 @@ class TestDailyMessagesSinkIntegration:
             with patch("app.repositories.database.is_postgresql") as mock_is_pg:
                 mock_is_pg.return_value = False
 
-                with patch("app.modules.workspace.session_manager.get_session_manager") as mock_get_sm:
+                with patch(
+                    "app.modules.workspace.session_manager.get_session_manager"
+                ) as mock_get_sm:
                     mock_get_sm.return_value = mock_sm
 
                     result = sink.consume(evidence)

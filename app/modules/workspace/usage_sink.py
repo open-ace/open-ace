@@ -600,15 +600,20 @@ class DailyMessagesSink:
             return True
         except Exception as e:
             # Log error with dedup to avoid log storm
+            # Note: If session_messages was written successfully but daily_messages fails,
+            # trend analysis data will be missing. This is acceptable as daily_messages
+            # is an analytics table and can be backfilled from session_messages.
             error_key = f"DailyMessagesSink:{type(e).__name__}:{str(e)[:100]}"
             if _should_log_error(error_key):
-                logger.error(
-                    "DailyMessagesSink failed: %s",
+                logger.warning(
+                    "DailyMessagesSink failed (trend analysis data may be incomplete): %s",
                     e,
                     extra={
                         "session_id": evidence.session_id,
                         "tenant_id": evidence.tenant_id,
                         "error_type": type(e).__name__,
+                        "data_consistency_note": "session_messages may have been written; "
+                        "daily_messages missing for this request",
                     },
                     exc_info=True,
                 )
@@ -814,20 +819,24 @@ def _parse_messages_for_daily_messages(
                         from scripts.shared.qwen_context import is_qwen_system_context
 
                         if not is_qwen_system_context(user_content):
-                            messages.append({
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": user_content[:10000],
+                                    "input_tokens": 0,
+                                    "output_tokens": 0,
+                                }
+                            )
+                    except ImportError:
+                        # If qwen_context not available, include the message
+                        messages.append(
+                            {
                                 "role": "user",
                                 "content": user_content[:10000],
                                 "input_tokens": 0,
                                 "output_tokens": 0,
-                            })
-                    except ImportError:
-                        # If qwen_context not available, include the message
-                        messages.append({
-                            "role": "user",
-                            "content": user_content[:10000],
-                            "input_tokens": 0,
-                            "output_tokens": 0,
-                        })
+                            }
+                        )
         except (json.JSONDecodeError, ValueError):
             pass
 
@@ -843,12 +852,14 @@ def _parse_messages_for_daily_messages(
                     if isinstance(msg, dict) and msg.get("role") == "assistant":
                         content = msg.get("content", "")
                         if isinstance(content, str) and content:
-                            messages.append({
-                                "role": "assistant",
-                                "content": content[:10000],
-                                "input_tokens": 0,
-                                "output_tokens": output_tokens,
-                            })
+                            messages.append(
+                                {
+                                    "role": "assistant",
+                                    "content": content[:10000],
+                                    "input_tokens": 0,
+                                    "output_tokens": output_tokens,
+                                }
+                            )
         except (json.JSONDecodeError, ValueError):
             # Handle SSE streaming response - accumulate delta content
             assistant_content_parts = []
@@ -873,12 +884,14 @@ def _parse_messages_for_daily_messages(
             if assistant_content_parts:
                 full_content = "".join(assistant_content_parts)
                 if full_content:
-                    messages.append({
-                        "role": "assistant",
-                        "content": full_content[:10000],
-                        "input_tokens": 0,
-                        "output_tokens": output_tokens,
-                    })
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": full_content[:10000],
+                            "input_tokens": 0,
+                            "output_tokens": output_tokens,
+                        }
+                    )
 
     return messages
 
