@@ -1387,7 +1387,7 @@ def api_sync_feishu_org():
         return denial
 
     try:
-        from app.services.feishu_org_sync import FeishuOrgSyncService
+        from app.services.feishu_org_sync import FeishuOrgSyncService, SyncStatus
 
         result = FeishuOrgSyncService().sync_org(tenant_id=tenant_id)
         success = result.status == SyncStatus.SUCCESS
