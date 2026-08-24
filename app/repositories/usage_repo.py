@@ -1009,6 +1009,166 @@ class UsageRepository:
             logger.warning("Failed to get session summary by tool: %s", e)
             return {}
 
+    def get_session_trend_by_tool(
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """Get trend data from agent_sessions for WebUI sessions.
+
+        Issue #3030: /api/trend only queries daily_stats, missing WebUI
+        session data (local/remote/terminal). This method aggregates
+        agent_sessions grouped by date + tool to supplement the trend data.
+
+        Args:
+            start_date: Start date filter (YYYY-MM-DD).
+            end_date: End date filter (YYYY-MM-DD).
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter.
+
+        Returns:
+            List[Dict]: Trend data with date, tool_name, tokens fields.
+        """
+        try:
+            conditions = ["workspace_type IN ('local', 'remote', 'terminal')"]
+            params: list[Any] = []
+            normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+            conditions.append("CAST(created_at AS DATE) >= ?")
+            params.append(start_date)
+
+            conditions.append("CAST(created_at AS DATE) <= ?")
+            params.append(end_date)
+
+            if normalized_tenant_id is not None:
+                conditions.append("tenant_id = ?")
+                params.append(normalized_tenant_id)
+
+            if host_name:
+                conditions.append("host_name = ?")
+                params.append(host_name)
+
+            where_clause = " AND ".join(conditions)
+
+            query = f"""
+                SELECT
+                    CAST(created_at AS DATE) as date,
+                    COALESCE(tool_name, 'unknown') as tool_name,
+                    SUM(COALESCE(total_tokens, 0)) as tokens
+                FROM agent_sessions
+                WHERE {where_clause}
+                GROUP BY CAST(created_at AS DATE), COALESCE(tool_name, 'unknown')
+                ORDER BY date ASC, tool_name ASC
+            """
+
+            rows = self.db.fetch_all(query, tuple(params))
+
+            # Normalize tool names and merge duplicates
+            merged: dict[tuple, dict] = {}
+            for row in rows:
+                key = (row["date"], normalize_tool_name(row["tool_name"]))
+                if key in merged:
+                    merged[key]["tokens"] += row["tokens"] or 0
+                else:
+                    merged[key] = {
+                        "date": row["date"],
+                        "tool_name": key[1],
+                        "tokens": row["tokens"] or 0,
+                    }
+
+            return list(merged.values())
+        except Exception as e:
+            logger.warning("Failed to get session trend by tool: %s", e)
+            return []
+
+    def get_session_key_metrics(
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> dict:
+        """Get key metrics from agent_sessions for WebUI sessions.
+
+        Issue #3030: /api/analysis/batch key_metrics only queries daily_messages,
+        missing WebUI session data. This method aggregates agent_sessions
+        to supplement the key_metrics.
+
+        Args:
+            start_date: Start date filter (YYYY-MM-DD).
+            end_date: End date filter (YYYY-MM-DD).
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter.
+
+        Returns:
+            Dict: Key metrics with total_tokens, total_input_tokens,
+                  total_output_tokens, total_requests, unique_tools, unique_hosts.
+        """
+        try:
+            conditions = ["workspace_type IN ('local', 'remote', 'terminal')"]
+            params: list[Any] = []
+            normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+            conditions.append("CAST(created_at AS DATE) >= ?")
+            params.append(start_date)
+
+            conditions.append("CAST(created_at AS DATE) <= ?")
+            params.append(end_date)
+
+            if normalized_tenant_id is not None:
+                conditions.append("tenant_id = ?")
+                params.append(normalized_tenant_id)
+
+            if host_name:
+                conditions.append("host_name = ?")
+                params.append(host_name)
+
+            where_clause = " AND ".join(conditions)
+
+            query = f"""
+                SELECT
+                    SUM(COALESCE(total_tokens, 0)) as total_tokens,
+                    SUM(COALESCE(total_input_tokens, 0)) as total_input_tokens,
+                    SUM(COALESCE(total_output_tokens, 0)) as total_output_tokens,
+                    SUM(COALESCE(request_count, 0)) as total_requests,
+                    COUNT(DISTINCT tool_name) as unique_tools,
+                    COUNT(DISTINCT host_name) as unique_hosts
+                FROM agent_sessions
+                WHERE {where_clause}
+            """
+
+            row = self.db.fetch_one(query, tuple(params))
+            if not row:
+                return {
+                    "total_tokens": 0,
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                    "total_requests": 0,
+                    "unique_tools": 0,
+                    "unique_hosts": 0,
+                }
+
+            return {
+                "total_tokens": row["total_tokens"] or 0,
+                "total_input_tokens": row["total_input_tokens"] or 0,
+                "total_output_tokens": row["total_output_tokens"] or 0,
+                "total_requests": row["total_requests"] or 0,
+                "unique_tools": row["unique_tools"] or 0,
+                "unique_hosts": row["unique_hosts"] or 0,
+            }
+        except Exception as e:
+            logger.warning("Failed to get session key metrics: %s", e)
+            return {
+                "total_tokens": 0,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_requests": 0,
+                "unique_tools": 0,
+                "unique_hosts": 0,
+            }
+
     def get_all_tools(self, tenant_id: int | None = None) -> list[str]:
         """
         Get list of all tools.
