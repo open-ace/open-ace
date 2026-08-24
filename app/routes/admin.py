@@ -1390,9 +1390,9 @@ def api_sync_feishu_org():
         from app.services.feishu_org_sync import FeishuOrgSyncService
 
         result = FeishuOrgSyncService().sync_org(tenant_id=tenant_id)
-        success = result.status.value == "success"
+        success = result.status == SyncStatus.SUCCESS
         response = {"success": success, "result": result.to_dict()}
-        if result.status.value == "failed":
+        if result.status == SyncStatus.FAILED:
             return jsonify(response), 500
         return jsonify(response)
     except ValueError as e:

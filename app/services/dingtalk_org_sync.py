@@ -367,7 +367,9 @@ class DingTalkOrgSyncService:
             self._check_stale_sync(max_runtime_seconds, auto_recover)
 
             result = self.sync_org(tenant_id=config.get("org_sync_tenant_id"))
-            self.__class__._last_scheduled_sync_at = now
+            # Only update last_scheduled_sync_at on complete success
+            if result and result.status == SyncStatus.SUCCESS:
+                self.__class__._last_scheduled_sync_at = now
             return result
         finally:
             self._schedule_lock.release()
@@ -634,14 +636,33 @@ class DingTalkOrgSyncService:
                 continue
             visited.add(current_department_id)
 
-            child_departments = self._fetch_child_departments(token, current_department_id)
+            is_root = current_department_id == root_department_id
+            try:
+                child_departments = self._fetch_child_departments(token, current_department_id)
+            except Exception as exc:
+                msg = f"Skipped DingTalk department {current_department_id} children: {exc}"
+                logger.warning(msg)
+                if warnings is not None:
+                    warnings.append(msg)
+                if errors is not None:
+                    errors.append(
+                        _FetchError(
+                            department_id=current_department_id,
+                            error_type="api_error",
+                            message=msg,
+                            is_critical=is_root,
+                        )
+                    )
+                snapshot_complete = False
+                continue
             for department in child_departments:
                 if department.department_id not in departments:
                     departments[department.department_id] = department
                     queue.append(department.department_id)
 
             direct_users, dept_complete = self._fetch_department_users(
-                token, current_department_id, warnings=warnings
+                token, current_department_id, warnings=warnings, errors=errors,
+                is_root_department=is_root,
             )
             if not dept_complete:
                 snapshot_complete = False
