@@ -205,10 +205,12 @@ export const translations: Record<Language, Translations> = {
     workspaceUnavailable: 'Workspace unavailable',
     workspaceUnavailableHelp: 'Please log in to access your workspace',
     workspaceLoadFailed: 'Workspace failed to load',
-    workspaceLoadFailedHelp: 'The workspace iframe failed to load. This may be due to network issues or server configuration problems.',
+    workspaceLoadFailedHelp:
+      'The workspace iframe failed to load. This may be due to network issues or server configuration problems.',
     workspaceLoadFailedTroubleshoot: 'Troubleshooting steps:',
     workspaceLoadFailedStep1: '1. Check if the Docker container is running properly',
-    workspaceLoadFailedStep2: '2. Verify multi-user mode configuration (if using multi-user workspace)',
+    workspaceLoadFailedStep2:
+      '2. Verify multi-user mode configuration (if using multi-user workspace)',
     workspaceLoadFailedStep3: '3. Check container logs for errors',
     workspaceLoadFailedStep4: '4. Restart the container and try again',
     workspaceLoadFailedDocs: 'View deployment documentation',

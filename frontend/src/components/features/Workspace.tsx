@@ -153,6 +153,8 @@ export const Workspace: React.FC = () => {
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
   // Refresh lock to prevent concurrent token refresh
   const refreshingRef = useRef(false);
+  // Issue #2242: Timeout refs for iframe error detection (cross-origin fallback)
+  const iframeTimeoutRefs = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   // Use stable action selectors (fixes infinite loop)
   const setStoredActiveTabId = useSetWorkspaceActiveTabId();
@@ -2197,6 +2199,49 @@ export const Workspace: React.FC = () => {
     });
   }, []);
 
+  // Issue #2242: Timeout-based iframe error detection
+  // Cross-origin iframes don't trigger onError, so we use timeout as fallback
+  useEffect(() => {
+    // Check each loading tab and set up timeout detection
+    loadingTabs.forEach((tabId) => {
+      if (!iframeTimeoutRefs.current.has(tabId)) {
+        const timeout = setTimeout(() => {
+          // If still loading after timeout, mark as failed
+          setLoadingTabs((prev) => {
+            if (prev.has(tabId)) {
+              setFailedTabs((failed) => {
+                const newSet = new Set(failed);
+                newSet.add(tabId);
+                return newSet;
+              });
+              const newSet = new Set(prev);
+              newSet.delete(tabId);
+              return newSet;
+            }
+            return prev;
+          });
+        }, 30000); // 30 seconds timeout
+        iframeTimeoutRefs.current.set(tabId, timeout);
+      }
+    });
+
+    // Clean up timeouts for tabs that are no longer loading
+    iframeTimeoutRefs.current.forEach((timeout, tabId) => {
+      if (!loadingTabs.has(tabId)) {
+        clearTimeout(timeout);
+        iframeTimeoutRefs.current.delete(tabId);
+      }
+    });
+  }, [loadingTabs]);
+
+  // Clean up all timeouts on unmount
+  useEffect(() => {
+    return () => {
+      iframeTimeoutRefs.current.forEach((timeout) => clearTimeout(timeout));
+      iframeTimeoutRefs.current.clear();
+    };
+  }, []);
+
   // Navigate to usage page
   const goToUsage = useCallback(() => {
     navigate('/work/usage');
@@ -2793,7 +2838,9 @@ export const Workspace: React.FC = () => {
               <div className="d-flex flex-column align-items-center justify-content-center h-100 p-4">
                 <i className="bi bi-exclamation-triangle fs-1 text-warning mb-3" />
                 <h4 className="text-center mb-2">{t('workspaceLoadFailed', language)}</h4>
-                <p className="text-muted text-center mb-3">{t('workspaceLoadFailedHelp', language)}</p>
+                <p className="text-muted text-center mb-3">
+                  {t('workspaceLoadFailedHelp', language)}
+                </p>
                 <div className="text-start mb-3">
                   <p className="fw-medium mb-1">{t('workspaceLoadFailedTroubleshoot', language)}</p>
                   <ul className="text-muted small mb-0">
