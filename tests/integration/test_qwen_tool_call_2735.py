@@ -82,7 +82,11 @@ class TestToolCallMatching:
                         {"functionCall": {"name": "test", "id": "tool-id-abc123"}},
                     ],
                 },
-                "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 20, "totalTokenCount": 30},
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 20,
+                    "totalTokenCount": 30,
+                },
             },
             {
                 "type": "tool_result",
@@ -91,7 +95,9 @@ class TestToolCallMatching:
                 "timestamp": "2026-08-24T10:00:10Z",
                 "message": {
                     "role": "tool",
-                    "parts": [{"tool_result": {"tool_use_id": "tool-id-abc123", "content": "Result"}}],
+                    "parts": [
+                        {"tool_result": {"tool_use_id": "tool-id-abc123", "content": "Result"}}
+                    ],
                 },
             },
         ]
@@ -138,7 +144,11 @@ class TestToolCallMatching:
                         {"functionCall": {"name": "write", "id": "write-2"}},
                     ],
                 },
-                "usageMetadata": {"promptTokenCount": 20, "candidatesTokenCount": 40, "totalTokenCount": 60},
+                "usageMetadata": {
+                    "promptTokenCount": 20,
+                    "candidatesTokenCount": 40,
+                    "totalTokenCount": 60,
+                },
             },
             {
                 "type": "tool_result",
@@ -167,7 +177,9 @@ class TestToolCallMatching:
                 "timestamp": "2026-08-24T10:00:12Z",
                 "message": {
                     "role": "tool",
-                    "parts": [{"tool_result": {"tool_use_id": "write-2", "content": "Write result"}}],
+                    "parts": [
+                        {"tool_result": {"tool_use_id": "write-2", "content": "Write result"}}
+                    ],
                 },
             },
         ]
@@ -197,10 +209,20 @@ class TestToolCallMatching:
                 "message": {
                     "role": "assistant",
                     "parts": [
-                        {"functionCall": {"name": "get_data", "id": "call-123", "args": {"query": "test"}}}
+                        {
+                            "functionCall": {
+                                "name": "get_data",
+                                "id": "call-123",
+                                "args": {"query": "test"},
+                            }
+                        }
                     ],
                 },
-                "usageMetadata": {"promptTokenCount": 15, "candidatesTokenCount": 25, "totalTokenCount": 40},
+                "usageMetadata": {
+                    "promptTokenCount": 15,
+                    "candidatesTokenCount": 25,
+                    "totalTokenCount": 40,
+                },
             },
             {
                 "type": "tool_result",
@@ -210,7 +232,13 @@ class TestToolCallMatching:
                 "message": {
                     "role": "tool",
                     "parts": [
-                        {"functionResponse": {"name": "get_data", "id": "call-123", "response": {"data": "ok"}}}
+                        {
+                            "functionResponse": {
+                                "name": "get_data",
+                                "id": "call-123",
+                                "response": {"data": "ok"},
+                            }
+                        }
                     ],
                 },
             },

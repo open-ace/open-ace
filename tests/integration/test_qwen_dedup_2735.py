@@ -90,7 +90,11 @@ class TestDeduplication:
                 "timestamp": "2026-08-24T10:00:00Z",
                 "model": "qwen-max",
                 "message": {"role": "assistant", "parts": [{"text": "Response"}]},
-                "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 20, "totalTokenCount": 30},
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 20,
+                    "totalTokenCount": 30,
+                },
             },
             {
                 "type": "assistant",
@@ -99,7 +103,11 @@ class TestDeduplication:
                 "timestamp": "2026-08-24T10:00:05Z",
                 "model": "qwen-max",
                 "message": {"role": "assistant", "parts": [{"text": "Duplicate Response"}]},
-                "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 20, "totalTokenCount": 30},
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 20,
+                    "totalTokenCount": 30,
+                },
             },
         ]
         jsonl_path = _write_jsonl(tmp_path / "dup-req.jsonl", entries)

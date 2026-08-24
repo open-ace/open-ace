@@ -80,16 +80,28 @@ class TestSystemUserSyncMock:
         """Comprehensive test for username regex validation."""
         # Valid patterns (no dots allowed in standard Linux usernames)
         valid = [
-            "alice", "bob123", "charlie_", "david-smith", "eve_123",
-            "frank-alias", "h_i_j", "_underscore",
+            "alice",
+            "bob123",
+            "charlie_",
+            "david-smith",
+            "eve_123",
+            "frank-alias",
+            "h_i_j",
+            "_underscore",
         ]
         for name in valid:
             assert USERNAME_PATTERN.match(name), f"'{name}' should be valid"
 
         # Invalid patterns (dots are not allowed in standard Linux usernames)
         invalid = [
-            "1starts_with_digit", "Uppercase", "has space",
-            "special!", "@username", "", "user@domain", "grace.example",
+            "1starts_with_digit",
+            "Uppercase",
+            "has space",
+            "special!",
+            "@username",
+            "",
+            "user@domain",
+            "grace.example",
         ]
         for name in invalid:
             assert not USERNAME_PATTERN.match(name), f"'{name}' should be invalid"

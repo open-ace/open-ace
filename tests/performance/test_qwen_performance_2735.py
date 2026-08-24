@@ -25,7 +25,6 @@ from fetch_qwen import process_jsonl_file  # noqa: E402
 sys.path.insert(0, str(REPO_ROOT / "tests" / "integration"))
 from fixtures.qwen_session_factory import QwenSessionFactory  # noqa: E402
 
-
 # Performance tests are skipped by default
 RUN_PERFORMANCE = os.environ.get("RUN_PERFORMANCE_TESTS", "")
 
@@ -67,13 +66,18 @@ class TestPerformance:
         # Create a session with many messages
         entries = []
         for i in range(1000):
-            entries.append({
-                "type": "user",
-                "uuid": f"msg-{i}",
-                "parentUuid": None if i == 0 else f"msg-{i-1}",
-                "timestamp": f"2026-08-24T10:{i % 60:02d}:00Z",
-                "message": {"role": "user" if i % 2 == 0 else "assistant", "parts": [{"text": f"Message {i}"}]},
-            })
+            entries.append(
+                {
+                    "type": "user",
+                    "uuid": f"msg-{i}",
+                    "parentUuid": None if i == 0 else f"msg-{i-1}",
+                    "timestamp": f"2026-08-24T10:{i % 60:02d}:00Z",
+                    "message": {
+                        "role": "user" if i % 2 == 0 else "assistant",
+                        "parts": [{"text": f"Message {i}"}],
+                    },
+                }
+            )
 
         session_path = tmp_path / "large_session.jsonl"
         factory.write_jsonl(session_path, entries)

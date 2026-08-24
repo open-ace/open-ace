@@ -64,11 +64,6 @@ class TestDirectoryDiscovery:
         # Mock platform and getpass
         with patch("platform.system", return_value="Linux"):
             with patch("getpass.getuser", return_value="testuser"):
-                # Import and call the function with mocked paths
-                # We need to mock the home_base path
-                import importlib
-                import fetch_qwen
-
                 # Patch the home_base logic
                 def mocked_find():
                     result = {"accessible": [], "denied": [], "errors": []}
@@ -221,7 +216,11 @@ class TestConversationIdBoundary:
                 "timestamp": "2026-08-24T10:00:05Z",
                 "model": "qwen-max",
                 "message": {"role": "assistant", "parts": [{"text": "Response 1"}]},
-                "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 20, "totalTokenCount": 30},
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 20,
+                    "totalTokenCount": 30,
+                },
             },
             # Second conversation
             {
@@ -238,7 +237,11 @@ class TestConversationIdBoundary:
                 "timestamp": "2026-08-24T10:01:05Z",
                 "model": "qwen-max",
                 "message": {"role": "assistant", "parts": [{"text": "Response 2"}]},
-                "usageMetadata": {"promptTokenCount": 15, "candidatesTokenCount": 25, "totalTokenCount": 40},
+                "usageMetadata": {
+                    "promptTokenCount": 15,
+                    "candidatesTokenCount": 25,
+                    "totalTokenCount": 40,
+                },
             },
         ]
 
@@ -266,7 +269,11 @@ class TestConversationIdBoundary:
                 "timestamp": "2026-08-24T10:00:05Z",
                 "model": "qwen-max",
                 "message": {"role": "assistant", "parts": [{"text": "B"}]},
-                "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 20, "totalTokenCount": 30},
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 20,
+                    "totalTokenCount": 30,
+                },
             },
             {
                 "type": "assistant",
@@ -275,7 +282,11 @@ class TestConversationIdBoundary:
                 "timestamp": "2026-08-24T10:00:10Z",
                 "model": "qwen-max",
                 "message": {"role": "assistant", "parts": [{"text": "C"}]},
-                "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 20, "totalTokenCount": 30},
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 20,
+                    "totalTokenCount": 30,
+                },
             },
         ]
 
@@ -297,7 +308,11 @@ class TestConversationIdBoundary:
                 "timestamp": "2026-08-24T10:00:00Z",
                 "model": "qwen-max",
                 "message": {"role": "assistant", "parts": [{"text": "Orphan response"}]},
-                "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 20, "totalTokenCount": 30},
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 20,
+                    "totalTokenCount": 30,
+                },
             }
         ]
 
@@ -334,7 +349,11 @@ class TestToolCallMatching:
                         {"functionCall": {"name": "bash", "id": "bash-001"}},
                     ],
                 },
-                "usageMetadata": {"promptTokenCount": 20, "candidatesTokenCount": 30, "totalTokenCount": 50},
+                "usageMetadata": {
+                    "promptTokenCount": 20,
+                    "candidatesTokenCount": 30,
+                    "totalTokenCount": 50,
+                },
             },
             {
                 "type": "tool_result",
@@ -378,7 +397,11 @@ class TestToolCallMatching:
                         {"functionCall": {"name": "write", "id": "write-001"}},
                     ],
                 },
-                "usageMetadata": {"promptTokenCount": 50, "candidatesTokenCount": 100, "totalTokenCount": 150},
+                "usageMetadata": {
+                    "promptTokenCount": 50,
+                    "candidatesTokenCount": 100,
+                    "totalTokenCount": 150,
+                },
             },
             {
                 "type": "tool_result",
@@ -407,7 +430,9 @@ class TestToolCallMatching:
                 "timestamp": "2026-08-24T10:00:12Z",
                 "message": {
                     "role": "tool",
-                    "parts": [{"tool_result": {"tool_use_id": "write-001", "content": "Write done"}}],
+                    "parts": [
+                        {"tool_result": {"tool_use_id": "write-001", "content": "Write done"}}
+                    ],
                 },
             },
         ]
@@ -440,7 +465,11 @@ class TestToolCallMatching:
                         {"functionCall": {"name": "test_tool", "id": "test-tool-id-123"}},
                     ],
                 },
-                "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 20, "totalTokenCount": 30},
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 20,
+                    "totalTokenCount": 30,
+                },
             },
             {
                 "type": "tool_result",
@@ -511,7 +540,11 @@ class TestJsonlParsing:
                 "timestamp": "2026-08-24T10:00:05Z",
                 "model": "qwen-max",
                 "message": {"role": "assistant", "parts": [{"text": "Child 1"}]},
-                "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 20, "totalTokenCount": 30},
+                "usageMetadata": {
+                    "promptTokenCount": 10,
+                    "candidatesTokenCount": 20,
+                    "totalTokenCount": 30,
+                },
             },
             {
                 "type": "user",
@@ -527,7 +560,11 @@ class TestJsonlParsing:
                 "timestamp": "2026-08-24T10:00:15Z",
                 "model": "qwen-max",
                 "message": {"role": "assistant", "parts": [{"text": "Child 3"}]},
-                "usageMetadata": {"promptTokenCount": 15, "candidatesTokenCount": 25, "totalTokenCount": 40},
+                "usageMetadata": {
+                    "promptTokenCount": 15,
+                    "candidatesTokenCount": 25,
+                    "totalTokenCount": 40,
+                },
             },
         ]
 
