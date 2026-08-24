@@ -204,7 +204,13 @@ def test_ingest_url_default_uses_configured_web_port(monkeypatch):
         lambda section, key, default=None: 5000 if key == "web_port" else default,
     )
     monkeypatch.setattr("scripts.shared.config._get_web_port", lambda: 5000, raising=False)
-    assert events_ingest.resolve_ingest_url() == "http://127.0.0.1:5000"
+    # The default URL must carry the ingest PATH — a bare origin POSTs to "/"
+    # and hits the GET-only SPA catch-all (405), as the first production
+    # deploy of #3047 demonstrated.
+    assert (
+        events_ingest.resolve_ingest_url()
+        == "http://127.0.0.1:5000/api/autonomous/internal/events/ingest"
+    )
 
 
 def test_route_is_marked_public_endpoint(client):
