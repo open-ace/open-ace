@@ -98,6 +98,7 @@ class FeishuUser:
     department_ids: list[str] = field(default_factory=list)
     status: dict[str, Any] = field(default_factory=dict)
 
+
 class SyncStatus(str, Enum):
     """Sync status for organization synchronization results."""
 
@@ -114,7 +115,6 @@ class _FetchError:
     error_type: str  # "permission_denied", "api_error", "transport_error", "retries_exhausted"
     message: str
     is_critical: bool = False  # True if root department or complete failure
-
 
 
 @dataclass

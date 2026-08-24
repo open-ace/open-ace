@@ -102,6 +102,7 @@ class DingTalkUser:
     department_ids: list[str] = field(default_factory=list)
     status: dict[str, Any] = field(default_factory=dict)
 
+
 class SyncStatus(str, Enum):
     """Sync status for organization synchronization results."""
 
@@ -118,7 +119,6 @@ class _FetchError:
     error_type: str  # "permission_denied", "api_error", "transport_error", "retries_exhausted"
     message: str
     is_critical: bool = False  # True if root department or complete failure
-
 
 
 @dataclass
@@ -728,8 +728,12 @@ class DingTalkOrgSyncService:
         cursor = 0
         while True:
             data = self._fetch_user_page(
-                token, department_id, cursor, warnings=warnings, errors=errors,
-                is_root_department=is_root_department
+                token,
+                department_id,
+                cursor,
+                warnings=warnings,
+                errors=errors,
+                is_root_department=is_root_department,
             )
             if data is None:
                 # Page failed (non-transient errcode or retries exhausted): keep

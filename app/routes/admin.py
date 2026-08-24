@@ -1387,7 +1387,7 @@ def api_sync_feishu_org():
         return denial
 
     try:
-        from app.services.feishu_org_sync import FeishuOrgSyncService, SyncStatus
+        from app.services.feishu_org_sync import FeishuOrgSyncService
 
         result = FeishuOrgSyncService().sync_org(tenant_id=tenant_id)
         success = result.status.value == "success"
@@ -1478,7 +1478,7 @@ def _release_org_sync_lock_payload(provider: str, key: int) -> dict:
 @admin_required
 def api_feishu_sync_lock_state():
     """Inspect the Feishu org-sync advisory lock (holder pid + hold time)."""
-    from app.services.feishu_org_sync import FeishuOrgSyncService, SyncStatus
+    from app.services.feishu_org_sync import FeishuOrgSyncService
 
     try:
         return jsonify(
@@ -1493,7 +1493,7 @@ def api_feishu_sync_lock_state():
 @admin_required
 def api_release_feishu_sync_lock():
     """Forcefully release a stuck Feishu org-sync advisory lock."""
-    from app.services.feishu_org_sync import FeishuOrgSyncService, SyncStatus
+    from app.services.feishu_org_sync import FeishuOrgSyncService
 
     try:
         return jsonify(
@@ -1508,7 +1508,7 @@ def api_release_feishu_sync_lock():
 @admin_required
 def api_dingtalk_sync_lock_state():
     """Inspect the DingTalk org-sync advisory lock (holder pid + hold time)."""
-    from app.services.dingtalk_org_sync import DingTalkOrgSyncService, SyncStatus
+    from app.services.dingtalk_org_sync import DingTalkOrgSyncService
 
     try:
         return jsonify(
@@ -1523,7 +1523,7 @@ def api_dingtalk_sync_lock_state():
 @admin_required
 def api_release_dingtalk_sync_lock():
     """Forcefully release a stuck DingTalk org-sync advisory lock."""
-    from app.services.dingtalk_org_sync import DingTalkOrgSyncService, SyncStatus
+    from app.services.dingtalk_org_sync import DingTalkOrgSyncService
 
     try:
         return jsonify(
