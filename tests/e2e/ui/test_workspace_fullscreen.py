@@ -152,24 +152,18 @@ async def test_workspace_fullscreen(
             # Step 4: Check initial panel state
             print("\n[Step 4] Checking initial panel state...")
             left_panel = page.locator(".work-left-panel")
-            right_panel = page.locator(".work-right-panel")
 
-            # Check panels are visible and expanded
+            # Check left panel is visible and expanded
+            # (the right panel was retired; prompts are now a floating drawer)
             left_width = await left_panel.evaluate("el => el.offsetWidth")
-            right_width = await right_panel.evaluate("el => el.offsetWidth")
             print(f"   Left panel width: {left_width}px")
-            print(f"   Right panel width: {right_width}px")
 
-            if left_width > 60 and right_width > 60:
-                print("   ✓ Both panels are expanded")
-                test_results.append(
-                    ("Initial Panels Expanded", "PASS", f"Left:{left_width}, Right:{right_width}")
-                )
+            if left_width > 60:
+                print("   ✓ Left panel is expanded")
+                test_results.append(("Initial Panel Expanded", "PASS", f"Left:{left_width}"))
             else:
-                print("   ⚠ Panels may already be collapsed")
-                test_results.append(
-                    ("Initial Panels State", "WARN", f"Left:{left_width}, Right:{right_width}")
-                )
+                print("   ⚠ Panel may already be collapsed")
+                test_results.append(("Initial Panel State", "WARN", f"Left:{left_width}"))
 
             # Step 5: Click fullscreen button
             print("\n[Step 5] Clicking fullscreen button...")
@@ -194,20 +188,16 @@ async def test_workspace_fullscreen(
                 print("   ✗ Fullscreen mode class NOT detected")
                 test_results.append(("Fullscreen Class", "FAIL", "Class not found"))
 
-            # Check panels collapsed
+            # Check left panel collapsed
             left_width_fs = await left_panel.evaluate("el => el.offsetWidth")
-            right_width_fs = await right_panel.evaluate("el => el.offsetWidth")
             print(f"   Left panel width (fullscreen): {left_width_fs}px")
-            print(f"   Right panel width (fullscreen): {right_width_fs}px")
 
-            if left_width_fs == 0 and right_width_fs == 0:
-                print("   ✓ Both panels are collapsed in fullscreen mode")
-                test_results.append(("Panels Collapsed", "PASS", ""))
+            if left_width_fs == 0:
+                print("   ✓ Left panel is collapsed in fullscreen mode")
+                test_results.append(("Panel Collapsed", "PASS", ""))
             else:
-                print(f"   ✗ Panels not fully collapsed (L:{left_width_fs}, R:{right_width_fs})")
-                test_results.append(
-                    ("Panels Collapsed", "FAIL", f"L:{left_width_fs}, R:{right_width_fs}")
-                )
+                print(f"   ✗ Panel not fully collapsed (L:{left_width_fs})")
+                test_results.append(("Panel Collapsed", "FAIL", f"L:{left_width_fs}"))
 
             # Step 7: Test ESC key to exit fullscreen
             print("\n[Step 7] Testing ESC key to exit fullscreen...")
@@ -233,11 +223,9 @@ async def test_workspace_fullscreen(
             # Step 8: Verify panel state restored
             print("\n[Step 8] Verifying panel state restored...")
             left_width_restored = await left_panel.evaluate("el => el.offsetWidth")
-            right_width_restored = await right_panel.evaluate("el => el.offsetWidth")
             print(f"   Left panel width (restored): {left_width_restored}px")
-            print(f"   Right panel width (restored): {right_width_restored}px")
 
-            if left_width_restored == left_width and right_width_restored == right_width:
+            if left_width_restored == left_width:
                 print("   ✓ Panel state restored correctly")
                 test_results.append(("Panel State Restored", "PASS", ""))
             else:
@@ -246,7 +234,7 @@ async def test_workspace_fullscreen(
                     (
                         "Panel State Restored",
                         "WARN",
-                        f"Original L:{left_width},R:{right_width} vs Restored L:{left_width_restored},R:{right_width_restored}",
+                        f"Original L:{left_width} vs Restored L:{left_width_restored}",
                     )
                 )
 

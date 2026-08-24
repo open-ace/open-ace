@@ -34,3 +34,16 @@ export function injectProjectsPath(base: string, projectsPathSegment: string): s
   const glue = pathPart.endsWith('/') ? '' : '/';
   return `${pathPart}${glue}${projectsPathSegment}${queryPart}`;
 }
+
+/**
+ * Whether the given pathname is the workspace (chat) route in work mode,
+ * i.e. the route where the workspace iframe is shown and the prompts
+ * drawer is available. Query strings are irrelevant to this check.
+ *
+ * Note: '/work/workspace/' (trailing slash) intentionally does NOT match,
+ * mirroring the historical behavior in App.tsx.
+ */
+export function isWorkspaceRoute(pathname: string): boolean {
+  const path = pathname.split('?')[0];
+  return path === '/work' || path === '/work/' || path === '/work/workspace';
+}

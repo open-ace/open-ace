@@ -88,9 +88,9 @@ def test_tools_panel_display():
             login(page)
             navigate_to(page, "/work")
 
-            # 检查工具面板区域
-            tools_selectors = [".work-right-panel", ".assist-panel", ".tools-panel"]
-            assert check_element_exists(page, tools_selectors), "工具面板区域应存在"
+            # 检查提示词抽屉入口（原右栏 AssistPanel 已移除）
+            tools_selectors = [".prompts-drawer-toggle"]
+            assert check_element_exists(page, tools_selectors), "提示词抽屉入口应存在"
 
             save_screenshot(page, MODULE_NAME, "03_tools_panel")
 

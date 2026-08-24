@@ -286,7 +286,9 @@
     "tests/e2e/ui/test_work_usage_page.py::test_work_usage_page",
     "tests/e2e/ui/test_workspace_fullscreen.py::test_workspace_fullscreen",
     "tests/e2e/ui/test_workspace_remote_icon.py::test_remote_workspace_icon_consistency",
+    "tests/e2e/work/e2e_milestone_fulltext_988.py::test_milestone_fulltext_988",
     "tests/e2e/work/e2e_paused_acceptance_ui_playwright.py::test_paused_acceptance_ui",
+    "tests/e2e/work/e2e_session_topology_983.py::test_session_topology_983",
     "tests/e2e/work/e2e_vscode_websocket.py::test_vscode_websocket"
   ],
   "collection_protocol": {

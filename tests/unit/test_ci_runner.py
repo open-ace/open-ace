@@ -55,7 +55,6 @@ def test_backend_change_selects_production_python_suite():
     assert ci.select_pr_suites(["app/services/auth_service.py"]) == [
         "default-collection",
         "issue-collection",
-        "legacy-pr",
         "python-core",
         "python-min",
     ]
@@ -219,7 +218,10 @@ def test_collection_count_uses_final_pytest_summary():
 
 def test_collection_file_count_honors_default_quarantine():
     assert ci.candidate_test_file_count("tests") >= 250
-    assert ci.candidate_test_file_count("tests/issues") >= 430
+    # Floor mirrors .test-baseline.json issues.min_files (430 -> 413 -> 393 -> 383
+    # -> 371 -> 357 -> 338 -> 316 -> 277 as #2429 batches 1-8 migrated 17 + 20 +
+    # 12 + 19 + 22 + 39 files into canonical layers / e2e and governed the stubs.
+    assert ci.candidate_test_file_count("tests/issues") >= 277
 
 
 def test_missing_push_base_fails_safe_to_policy_change():

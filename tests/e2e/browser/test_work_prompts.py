@@ -110,21 +110,31 @@ def test_prompt_search():
 
 
 def test_prompt_detail():
-    """测试 Prompt 详情查看"""
+    """测试 Prompt 详情查看
+
+    .prompt-item 现在只存在于工作区路由的提示词抽屉中
+    （原右栏 AssistPanel 在所有 /work/* 路由渲染 .prompt-item 的行为已移除）。
+    """
     with sync_playwright() as p:
         browser, context = create_browser_context(p)
         page = context.new_page()
 
         try:
             login(page)
-            navigate_to(page, "/work/prompts")
+            # 工作区路由才有提示词抽屉
+            navigate_to(page, "/work")
+            page.wait_for_timeout(1000)
+
+            # 打开提示词抽屉
+            toggle_selectors = [".prompts-drawer-toggle"]
+            assert check_element_exists(page, toggle_selectors), "提示词抽屉入口应存在"
+            page.locator(".prompts-drawer-toggle").first.click()
+            page.wait_for_timeout(500)
 
             # 尝试点击 Prompt 项查看详情
-            prompt_item_selectors = [".prompt-item", "tr", ".list-item", ".card"]
+            prompt_item_selectors = [".prompts-drawer .prompt-item"]
             if check_element_exists(page, prompt_item_selectors):
-                prompt_item = page.locator(
-                    prompt_item_selectors[0] + ", " + prompt_item_selectors[1]
-                ).first
+                prompt_item = page.locator(".prompts-drawer .prompt-item").first
                 assert prompt_item.is_visible(), "prompt_item not visible (Issue #2189)"
                 prompt_item.click()
                 page.wait_for_timeout(500)

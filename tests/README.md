@@ -26,7 +26,7 @@ CI 会自动消费；issue marker 保留追踪关系。
 
 ```bash
 # 与 GitHub Actions 相同的默认 PR suite
-python scripts/ci.py run default-collection issue-collection legacy-pr python-core
+python scripts/ci.py run default-collection issue-collection python-core
 
 # 检查本地是否使用 CI 的 Python 3.11 / Node 20
 python scripts/ci.py doctor --strict

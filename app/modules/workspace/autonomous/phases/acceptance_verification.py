@@ -29,6 +29,7 @@ import json
 import logging
 import re
 import time
+import uuid
 from typing import cast
 
 from app.modules.workspace.autonomous.acceptance_gates import run_mechanical_gates
@@ -784,6 +785,7 @@ def _acceptance_milestone(
     report,
     session_id: str = "",
     usage: dict | None = None,
+    milestone_id: str = "",
 ) -> dict:
     """Build the acceptance-verification milestone row.
 
@@ -799,11 +801,16 @@ def _acceptance_milestone(
     ``phase_*`` columns every other AI milestone uses, so workflow totals
     (summed from those columns) finally include verification consumption and
     the UI card gets its session button + token/request chips.
+
+    ``milestone_id`` is minted by the caller (#3000) so the session's messages
+    can be tagged before the row is inserted; empty falls back to
+    create_milestone's own uuid.
     """
     summary = _acceptance_summary(status, report)
     usage = usage or {}
     return {
         "workflow_id": workflow_id,
+        "milestone_id": milestone_id or "",
         "phase": "acceptance_verification",
         "dev_round": dev_round,
         "round_number": attempt,
@@ -937,6 +944,11 @@ def handle(ctx, deps) -> PhaseResult:
     # into workflow totals via usage_delta on the settled PhaseResult).
     verifier_session_id = str(agent_out.get("session_id") or "")
     verifier_usage = agent_out.get("usage") or {}
+    # #3003: the in_progress acceptance row minted at spawn (absent when the
+    # merged-main checkout failed before minting) and its already-recorded
+    # usage — a resumed attempt's totals continue from the baseline.
+    early_milestone_id = str(agent_out.get("milestone_id") or "")
+    usage_baseline = agent_out.get("usage_baseline") or {}
     verifier_verdicts: list[ItemVerdict] = []
     for index, raw_verdict in enumerate(agent_out.get("verdicts") or []):
         if not isinstance(raw_verdict, dict):
@@ -1114,15 +1126,56 @@ def handle(ctx, deps) -> PhaseResult:
         "verified_by": verified_by,
         "verification_attempt": (wf.get("verification_attempt") or 0) + 1,
     }
-    milestone = _acceptance_milestone(
-        workflow_id=wf.get("workflow_id"),
-        dev_round=int(wf.get("dev_round") or 1),
-        attempt=common_patch["verification_attempt"],
-        status=status,
-        report=report,
-        session_id=verifier_session_id,
-        usage=verifier_usage,
-    )
+
+    # #3003: with an early milestone (minted at verifier spawn), settle
+    # FINALIZES that row; only the create fallback (checkout failed before the
+    # row existed) builds a milestone_events payload. The two shapes share the
+    # tag target and the usage arithmetic (early rows fold the resume
+    # baseline into their totals).
+    def _merged_usage() -> dict:
+        return {
+            key: int(usage_baseline.get(key, 0) or 0) + int(verifier_usage.get(key, 0) or 0)
+            for key in (
+                "total_tokens",
+                "total_input_tokens",
+                "total_output_tokens",
+                "request_count",
+            )
+        }
+
+    if early_milestone_id:
+        # NO phase_* overwrite here: the row already holds the authoritative
+        # usage — _run_agent's _write_phase_usage writes baseline + the SUM of
+        # every in-run invocation delta, which can exceed baseline + the final
+        # result's own delta when the call retried in-run. Overwriting would
+        # silently drop those burned tokens from the card and the totals.
+        finalize_fields = {
+            "status": status,
+            "title": f"Acceptance verification: {status}",
+            "result_summary": _acceptance_summary(status, report),
+            "metadata": json.dumps(report, ensure_ascii=False),
+            "session_id": verifier_session_id,
+        }
+        milestone = None  # finalize path carries no milestone_events
+        tag_milestone_id = early_milestone_id
+    else:
+        # Create fallback (#3000 semantics): pre-mint the id so the session's
+        # messages can be tagged before the row is inserted (create_milestone
+        # honors a caller-supplied id; session_messages has no FK).
+        settle_milestone_id = str(uuid.uuid4())
+        milestone = _acceptance_milestone(
+            workflow_id=wf.get("workflow_id"),
+            dev_round=int(wf.get("dev_round") or 1),
+            attempt=common_patch["verification_attempt"],
+            status=status,
+            report=report,
+            session_id=verifier_session_id,
+            usage=verifier_usage,
+            milestone_id=settle_milestone_id,
+        )
+        finalize_fields = {}  # unused on the fallback path
+        tag_milestone_id = settle_milestone_id
+
     # A deterministic parse failure that repeats identically across consecutive
     # attempts is certain to keep failing, so cap it below the transient budget
     # (#2867). The first occurrence still gets one retry (a genuine one-off is
@@ -1138,13 +1191,48 @@ def handle(ctx, deps) -> PhaseResult:
         # Infrastructure failures are not acceptance evidence and must not
         # create a terminal milestone. Keep the workflow in its current phase
         # so the scheduler can retry automatically; the attempt report remains
-        # persisted for diagnostics.
+        # persisted for diagnostics. The early row is finalized as a failed
+        # diagnostic card KEEPING its realtime-recorded usage (a partial fix
+        # for #2999: infra-retry attempts finally have somewhere to land), and
+        # this attempt's messages are tagged onto it (#3003 per-attempt
+        # attribution).
+        if early_milestone_id:
+            deps.host.finalize_acceptance_milestone(
+                early_milestone_id,
+                {
+                    "status": "failed",
+                    "title": "Acceptance verification: failed",
+                    "error_message": "Acceptance verifier infrastructure failure; retrying",
+                },
+            )
+            if verifier_session_id:
+                deps.host.tag_session_messages(verifier_session_id, early_milestone_id)
         return PhaseResult.retry(
             workflow_patch={
                 **common_patch,
                 "error_message": "Acceptance verifier infrastructure failure; retrying",
             }
         )
+
+    def _tag_settle_messages() -> None:
+        # Sweep the verifier session's still-untagged messages onto the settle
+        # milestone. Idempotent — per-attempt rows tag their own messages at
+        # infra-retry finalize; this catches anything left untagged.
+        if verifier_session_id:
+            deps.host.tag_session_messages(verifier_session_id, tag_milestone_id)
+
+    def _settle_milestone_events() -> list[dict]:
+        return [milestone] if milestone is not None else []
+
+    def _usage_delta() -> dict | None:
+        # Early path: the row's phase_* already hold the authoritative totals
+        # (written by _run_agent); this value only triggers the idempotent
+        # refresh, so an all-zero delta collapses to None like the fallback.
+        if early_milestone_id:
+            merged = _merged_usage()
+            return merged if any(merged.values()) else None
+        return verifier_usage or None
+
     if agent_out.get("infra_error"):
         exhausted_msg = (
             "Acceptance verifier produced unparseable output "
@@ -1152,14 +1240,20 @@ def handle(ctx, deps) -> PhaseResult:
             if deterministic_repeat
             else "Acceptance verifier infrastructure retries exhausted; awaiting review"
         )
+        if early_milestone_id:
+            deps.host.finalize_acceptance_milestone(
+                early_milestone_id,
+                {**finalize_fields, "error_message": exhausted_msg},
+            )
+        _tag_settle_messages()
         return PhaseResult.pause(
             workflow_patch={
                 **common_patch,
                 "error_message": exhausted_msg,
             },
-            milestone_events=[milestone],
+            milestone_events=_settle_milestone_events(),
             structured_error={"message": "verifier-infrastructure-exhausted", "report": report},
-            usage_delta=verifier_usage or None,
+            usage_delta=_usage_delta(),
         )
 
     if status == "confirmed":
@@ -1170,6 +1264,9 @@ def handle(ctx, deps) -> PhaseResult:
             return PhaseResult.retry()
         gh.close_issue(issue_number)
         common_patch["issue_closed_by_workflow_at"] = _now_iso()
+        if early_milestone_id:
+            deps.host.finalize_acceptance_milestone(early_milestone_id, finalize_fields)
+        _tag_settle_messages()
         return PhaseResult.completed(
             next_phase="completed",
             workflow_patch={
@@ -1177,11 +1274,14 @@ def handle(ctx, deps) -> PhaseResult:
                 "completed_at": _now_iso(),
                 "error_message": None,
             },
-            milestone_events=[milestone],
-            usage_delta=verifier_usage or None,
+            milestone_events=_settle_milestone_events(),
+            usage_delta=_usage_delta(),
         )
     if status == "rejected":
         _post_verdict_comment(deps, issue_number, report)
+        if early_milestone_id:
+            deps.host.finalize_acceptance_milestone(early_milestone_id, finalize_fields)
+        _tag_settle_messages()
         return PhaseResult.pause(
             structured_error={
                 "message": "Acceptance verification rejected",
@@ -1191,17 +1291,20 @@ def handle(ctx, deps) -> PhaseResult:
                 **common_patch,
                 "error_message": "Acceptance verification rejected; awaiting review",
             },
-            milestone_events=[milestone],
-            usage_delta=verifier_usage or None,
+            milestone_events=_settle_milestone_events(),
+            usage_delta=_usage_delta(),
         )
     # indeterminate
     _post_verdict_comment(deps, issue_number, report)
+    if early_milestone_id:
+        deps.host.finalize_acceptance_milestone(early_milestone_id, finalize_fields)
+    _tag_settle_messages()
     return PhaseResult.pause(
         workflow_patch={
             **common_patch,
             "error_message": "Acceptance indeterminate: awaiting evidence",
         },
-        milestone_events=[milestone],
+        milestone_events=_settle_milestone_events(),
         structured_error={"message": "indeterminate", "report": report},
-        usage_delta=verifier_usage or None,
+        usage_delta=_usage_delta(),
     )

@@ -104,6 +104,26 @@ class PhaseHost(Protocol):
     def emit_audit_event(self, name: str, payload: dict) -> None:
         """Emit a generic audit event (e.g. acceptance_reopened_issue)."""
 
+    def finalize_acceptance_milestone(self, milestone_id: str, fields: dict) -> None:
+        """Terminal-update the verifier's in_progress acceptance milestone (#3003).
+
+        The row is minted at verifier spawn so the running verification has a
+        live activity-host card; the handler flips it to its verdict here
+        (update, not create — _create_milestone's dedupe would silently skip).
+        Delegates to repo.update_milestone via the orchestrator and clears the
+        writers' target preference. Empty id is a no-op (create fallback).
+        """
+
+    def tag_session_messages(self, session_id: str, milestone_id: str) -> int:
+        """Tag a session's milestone-less messages with the settle milestone (#3000).
+
+        Verification-line messages persist untagged (the milestone is created
+        at settle); the handler back-fills the tag once the milestone id is
+        known. Delegates to the orchestrator's ``_tag_session_messages``.
+        Best-effort attribution only — the viewer's full-transcript path
+        does not depend on it, so failures must not affect the verdict.
+        """
+
     def ensure_scheduler_lock(self) -> bool:
         """Fence the distributed lease before an irreversible external action."""
 

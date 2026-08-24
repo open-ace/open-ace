@@ -4,12 +4,12 @@
   "created_before_modification": true,
   "layers": {
     "default": {
-      "min_tests": 4150,
+      "min_tests": 5455,
       "min_files": 250,
-      "last_updated": "2026-08-09",
-      "update_reason": "Issue #2429: refresh through isolated shared CI runner",
-      "actual_collected": 4306,
-      "actual_files": 260,
+      "last_updated": "2026-08-23",
+      "update_reason": "Issue #2429 batch 8: P5 group migrated into tests/unit (241 items); min raised by exactly +241 (5214+241); actual 8523 = 8282 + 241",
+      "actual_collected": 8523,
+      "actual_files": 566,
       "threshold_percent": 96
     },
     "critical": {
@@ -30,12 +30,12 @@
       "note": "Currently excluded by norecursedirs"
     },
     "issues": {
-      "min_tests": 4300,
-      "min_files": 430,
-      "last_updated": "2026-08-09",
-      "update_reason": "Issue #2429: required full-suite collection gate and legacy inventory",
-      "actual_collected": 4473,
-      "actual_files": 446,
+      "min_tests": 2639,
+      "min_files": 277,
+      "last_updated": "2026-08-23",
+      "update_reason": "Issue #2429 batch 8: P5 group (38 dirs, final pure-dir batch) \u2014 241 items / 39 glob files migrated to tests/unit (9 scanner findings governed: 2 fixture renames, 5 equivalent asserts, 2 best-effort annotations; 2277 conftest ported to an autouse env fixture; 1169 given hermetic DB seeding + a tz-basis fix; 189/2365 converted to isolated loaders); min lowered by exactly that delta (2880-241, 316-39); actuals from clean checkout",
+      "actual_collected": 2851,
+      "actual_files": 292,
       "threshold_percent": 97
     }
   },
@@ -46,8 +46,8 @@
   "notes": [
     "Baseline created before pytest.ini modification to enable e2e_*.py collection",
     "tests/e2e currently excluded by norecursedirs in pytest.ini",
-    "Default count from: python scripts/ci.py run default-collection (4306 items)",
-    "Issue count from: python scripts/ci.py run issue-collection (4473 items, 446 files)",
+    "Default count from: python scripts/ci.py run default-collection (8523 items after #2429 batch 8)",
+    "Issue count from: clean-checkout issue-collection (2851 items, 292 files after #2429 batch 8; a checkout with the gitignored local tests/issues/89 dir collects +1/+1)",
     "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard"
   ]
 }

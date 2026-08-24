@@ -46,20 +46,6 @@ if shared_path not in sys.path:
 
 # Configure pytest-asyncio
 pytest_plugins = ("pytest_asyncio",)
-LEGACY_PR_GATE_FILE = Path(project_root) / "tests" / "issues" / "pr-gate-directories.txt"
-
-
-def _number_inventory(path):
-    if not path.exists():
-        return set()
-    return {
-        line.strip()
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    }
-
-
-LEGACY_PR_GATE_ISSUES = _number_inventory(LEGACY_PR_GATE_FILE)
 
 
 def pytest_addoption(parser):
@@ -120,8 +106,6 @@ def pytest_collection_modifyitems(config, items):
         if legacy_number:
             item.add_marker(pytest.mark.issue(int(legacy_number)))
             item.add_marker(pytest.mark.regression)
-            if legacy_number in LEGACY_PR_GATE_ISSUES:
-                item.add_marker(pytest.mark.priority_p0)
 
         if selected_issues and not (selected_issues & _marked_issue_numbers(item)):
             deselected.append(item)

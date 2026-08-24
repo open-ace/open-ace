@@ -1,0 +1,403 @@
+/**
+ * PromptsDrawer Styles
+ *
+ * Floating non-modal side sheet for the workspace route. Replaces the
+ * retired right-side AssistPanel.
+ *
+ * Stacking constraint: the drawer and its edge toggle live at z-index 150 —
+ * above workspace content and the fullscreen sticky tab bar (z 100), but
+ * below the header stacking context (z 200, which caps its dropdown menus),
+ * toasts, tooltip/loading-overlay (9999), and the app Modal (10040/10050).
+ */
+
+.prompts-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  border-left: 1px solid var(--border-color);
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.12);
+  z-index: 150;
+}
+
+.prompts-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--border-color-light);
+  flex-shrink: 0;
+}
+
+.prompts-drawer-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-wide);
+}
+
+.prompts-drawer-close {
+  padding: var(--spacing-xs);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--border-radius-sm);
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.prompts-drawer-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: var(--spacing-sm) var(--spacing-md);
+}
+
+.prompts-drawer-footer {
+  flex-shrink: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-top: 1px solid var(--border-color-light);
+}
+
+.prompts-drawer-view-all {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-primary);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+/* Edge toggle button (rendered by WorkLayout, styled here to keep the
+   drawer's look in one place) */
+.prompts-drawer-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--spacing-sm) 4px;
+  border: 1px solid var(--border-color);
+  border-right: none;
+  border-radius: var(--border-radius) 0 0 var(--border-radius);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  z-index: 150;
+  writing-mode: vertical-rl;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--color-primary);
+  }
+}
+
+/* Prompt Search - matches session list style */
+.prompt-search {
+  margin-bottom: var(--spacing-sm);
+
+  .input-group {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    overflow: hidden;
+  }
+
+  .input-group-text {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: var(--spacing-sm) var(--spacing-sm);
+  }
+
+  .form-control {
+    background: transparent;
+    border: none;
+    padding: var(--spacing-sm);
+    font-size: var(--font-size-sm);
+
+    &:focus {
+      outline: none;
+      box-shadow: none;
+    }
+
+    &::placeholder {
+      color: var(--text-muted);
+      opacity: 0.7;
+    }
+  }
+}
+
+/* Category Filters */
+.prompt-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--spacing-sm);
+  flex-shrink: 0;
+}
+
+.category-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+
+  &:hover {
+    background: var(--bg-hover);
+    border-color: var(--color-primary);
+  }
+
+  &.active {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: white;
+
+    .category-count {
+      background: rgba(255, 255, 255, 0.3);
+    }
+  }
+
+  .category-count {
+    font-size: 10px;
+    background: var(--bg-muted);
+    padding: 1px 4px;
+    border-radius: 6px;
+    min-width: 18px;
+    text-align: center;
+  }
+}
+
+/* Prompt List */
+.prompt-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  padding: var(--spacing-xs) 0;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+
+    &:hover {
+      background: var(--text-muted);
+    }
+  }
+}
+
+.prompt-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin-bottom: 4px;
+  background: var(--bg-secondary);
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: 1px solid transparent;
+  min-height: 40px;
+
+  &:hover {
+    background: var(--bg-hover);
+    border-color: var(--color-primary-light);
+
+    .prompt-item-name {
+      color: var(--color-primary);
+    }
+  }
+
+  &:active {
+    background: var(--bg-tertiary);
+  }
+}
+
+/* Prompt Item Name */
+.prompt-item-name-wrapper {
+  flex: 1;
+  min-width: 0;
+}
+
+.prompt-item-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  max-width: 100%;
+  transition: color var(--transition-fast);
+}
+
+/* Prompt Item Actions */
+.prompt-item-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.prompt-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--border-radius-sm);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  overflow: hidden;
+
+  &.active {
+    color: var(--color-primary);
+
+    &:hover {
+      background: var(--color-primary-light);
+    }
+
+    &:active {
+      background: var(--bg-tertiary);
+    }
+  }
+
+  &.copied {
+    color: var(--color-success, #198754);
+    background: rgba(25, 135, 84, 0.15);
+    width: 60px;
+    border-radius: var(--border-radius);
+
+    .copied-text {
+      font-size: 12px;
+      font-weight: 500;
+    }
+  }
+
+  &.disabled {
+    color: var(--text-muted);
+    opacity: 0.5;
+    cursor: not-allowed;
+
+    &:hover {
+      background: transparent;
+    }
+  }
+
+  i {
+    font-size: 14px;
+  }
+}
+
+/* Responsive: keep the drawer usable on narrow screens */
+@media (max-width: 1024px) {
+  .prompts-drawer {
+    width: min(320px, 85vw);
+  }
+}
+
+/* Dark mode support */
+[data-theme='dark'] {
+  .prompts-drawer {
+    background: var(--bg-primary);
+    border-left-color: var(--border-color);
+  }
+
+  .prompts-drawer-toggle {
+    background: var(--bg-primary);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+  }
+
+  .prompt-search .input-group {
+    background: var(--bg-secondary);
+    border-color: var(--border-color);
+  }
+
+  .prompt-search .input-group-text {
+    color: var(--text-muted);
+  }
+
+  .prompt-search .form-control {
+    color: var(--text-primary);
+  }
+
+  .prompt-search .form-control::placeholder {
+    color: var(--text-muted);
+  }
+
+  .category-filter-btn {
+    background: var(--bg-secondary);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+
+    &:hover {
+      background: var(--bg-tertiary);
+    }
+
+    .category-count {
+      background: var(--bg-tertiary);
+    }
+  }
+
+  .prompt-item {
+    background: var(--bg-secondary);
+    border-color: transparent;
+
+    &:hover {
+      background: var(--bg-tertiary);
+      border-color: var(--color-primary-light);
+    }
+  }
+
+  .prompt-item-name {
+    color: var(--text-primary);
+  }
+
+  .prompt-action-btn {
+    &.active {
+      color: var(--color-primary);
+
+      &:hover {
+        background: var(--color-primary-light);
+      }
+    }
+
+    &.disabled {
+      color: var(--text-muted);
+    }
+  }
+}
