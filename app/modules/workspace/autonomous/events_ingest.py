@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 INGEST_SECRET_HEADER = "X-OpenACE-Events-Key"
 DEFAULT_WEB_PORT = 19888  # mirrors scripts/shared/config.py's fallback
+DEFAULT_INGEST_PATH = "/api/autonomous/internal/events/ingest"
 
 # remote_addr values that are always trusted. Under an nginx reverse proxy
 # every external request arrives as 127.0.0.1, which is why the shared secret
@@ -89,7 +90,9 @@ def resolve_ingest_url() -> str | None:
     port = _configured_web_port()
     if port is None:
         return None
-    return f"http://127.0.0.1:{port}"
+    # Origin + path: a bare origin would hit the SPA catch-all (GET-only) and
+    # come back 405 — caught by production verification of the first deploy.
+    return f"http://127.0.0.1:{port}{DEFAULT_INGEST_PATH}"
 
 
 def _configured_web_port() -> int | None:
