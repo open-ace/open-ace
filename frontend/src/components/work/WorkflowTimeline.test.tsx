@@ -8,10 +8,14 @@
 import { format as formatDateTime } from 'date-fns';
 import { fireEvent, render, screen, within } from '@/test/utils';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   WorkflowTimeline,
   formatAcceptanceReport,
   getAcceptanceSummaryDetail,
+  MILESTONE_DISPLAY,
+  MILESTONE_ICON_COLORS,
 } from './WorkflowTimeline';
 import { useMilestoneSession, useWorkflowTimeline } from '@/hooks/useAutonomous';
 import type { AutonomousWorkflow, WorkflowMilestone } from '@/api/autonomous';
@@ -702,6 +706,88 @@ describe('milestone time format (#2985)', () => {
       expect(staleEl?.textContent).toMatch(/2024/);
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+describe('MILESTONE_DISPLAY icon coverage', () => {
+  // Every milestone_type the backend can emit (orchestrator + phases/* +
+  // git_workspace literals) or that exists on historical rows. Unmapped types
+  // fall back to a gray bi-circle, which is how the pre-#3036 gap was spotted.
+  const ALL_TYPES = [
+    'repo_setup',
+    'issue_created',
+    'issue_linked',
+    'branch_created',
+    'branch_mismatch',
+    'plan_created',
+    'plan_reviewed',
+    'plan_refined',
+    'plan_finalized',
+    'dev_started',
+    'dev_completed',
+    'tests_run',
+    'pr_created',
+    'pr_reviewed',
+    'pr_updated',
+    'pr_review_summary',
+    'pr_head_unverified',
+    'pr_zero_check_runs',
+    'conflicts_resolved',
+    'conflicts_pushed',
+    'worktree_restored',
+    'progress_reported',
+    'requirement_received',
+    'round_completed',
+    'merged',
+    'cleaned_up',
+    'cleanup_pending',
+    'wait_started',
+    'no_changes',
+    'timing_issue',
+    'terminal_report_posted',
+    'workflow_forked',
+    'ci_repair_started',
+    'ci_repair_applied',
+    'ci_repair_exhausted',
+    'ci_repair_no_change_exhausted',
+    'ci_repair_transient_exhausted',
+    'ci_repair_escalated_to_development',
+    'ci_repair_environment_mismatch',
+    'ci_diagnostics_pending',
+    'ci_failed_before_report',
+    'acceptance_verification',
+    'acceptance_rejected_cap_exhausted',
+    'acceptance_rejected_reopened',
+    'recovery_evidence_missing',
+    'frontend_node_modules_shim_failed',
+  ] as const;
+
+  it('maps every backend milestone type to a dedicated icon (no bi-circle fallback)', () => {
+    for (const type of ALL_TYPES) {
+      expect(MILESTONE_DISPLAY[type], `unmapped type: ${type}`).toBeDefined();
+    }
+  });
+
+  it('uses unique icon+color pairs and known color keys', () => {
+    const seen = new Set<string>();
+    for (const [type, display] of Object.entries(MILESTONE_DISPLAY)) {
+      expect(MILESTONE_ICON_COLORS[display.color], `unknown color for ${type}`).toBeDefined();
+      const key = `${display.icon}/${display.color}`;
+      expect(seen.has(key), `duplicate icon+color pair: ${key}`).toBe(false);
+      seen.add(key);
+    }
+  });
+
+  it('references only icon classes that exist in bootstrap-icons', () => {
+    const css = readFileSync(
+      join(process.cwd(), 'node_modules/bootstrap-icons/font/bootstrap-icons.css'),
+      'utf8'
+    );
+    for (const [type, display] of Object.entries(MILESTONE_DISPLAY)) {
+      expect(css, `missing bootstrap icon for ${type}: ${display.icon}`).toContain(
+        `.${display.icon}::before`
+      );
     }
   });
 });
