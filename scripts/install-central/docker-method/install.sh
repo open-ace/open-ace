@@ -912,7 +912,8 @@ ${wrapper_rule}
 # env_keep 主要用于 WebUI 启动，移除敏感凭据
 # 【Issue #2298】OPENAI_API_KEY/OPENAI_BASE_URL 不通过 env_keep，
 # 改由 webui_manager 通过 sudo -u user /usr/bin/env KEY=val ... 内联传递
-Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH\"
+# PATH 移除（Issue #2650）：secure_path 已覆盖命令查找，env_keep PATH 是死配置兼隐患
+Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR\"
 Defaults env_keep += \"GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
 Defaults env_keep += \"SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS\"
 Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin

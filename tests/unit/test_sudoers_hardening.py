@@ -770,6 +770,31 @@ openace ALL=(ALL) NOPASSWD: MKDIR_SAFE
             "cannot be entered through a caller-controlled PATH"
         )
 
+    @pytest.mark.parametrize(
+        "label,path",
+        GENERATOR_FILES,
+        ids=[label for label, _ in GENERATOR_FILES],
+    )
+    def test_all_sudoers_generators_drop_caller_path_from_env_keep(self, label, path):
+        """PATH must not be preserved via env_keep (Issue #2650).
+
+        secure_path already governs command lookup, so keeping PATH is dead
+        config; worse, if secure_path is ever removed the caller-controlled
+        PATH would flow into the target-user process and git would resolve
+        ssh/remote helpers through it — re-opening the PATH attack surface the
+        wrapper closes.
+        """
+        for line in path.read_text().splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "env_keep" not in stripped:
+                continue
+            # Token match so substrings like GH_PATH would not false-trip.
+            tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", stripped)
+            assert "PATH" not in tokens, (
+                f"{label}: env_keep must not preserve caller PATH "
+                f"(secure_path governs lookup): {stripped!r}"
+            )
+
     @staticmethod
     def _generate_sudoers() -> str:
         """Run the unified generator in dry-run mode and return its stdout."""

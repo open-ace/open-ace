@@ -185,8 +185,11 @@ ${RUN_USER} ALL=(root) NOPASSWD: OPENACE_UTILS
 # Agent 进程通过 openace-run-as --isolated 使用 env -i，不继承 env_keep
 # env_keep 主要用于 WebUI 启动（sudo -u），需要清理敏感凭据
 # 移除：OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENCLAW_TOKEN, GH_TOKEN
-# 保留：非敏感变量（proxy_token, GIT_*签名变量, PATH）
-Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH\"
+# 移除 PATH（Issue #2650）：secure_path 已覆盖命令查找，保留 env_keep PATH 是死配置，
+#   且是隐患——一旦 secure_path 被删，调用方 PATH 会流入目标用户进程，git 会按其查找
+#   ssh/远程助手，重新打开 PATH 攻击面。
+# 保留：非敏感变量（proxy_token, GIT_*签名变量）
+Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR\"
 Defaults env_keep += \"GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
 Defaults env_keep += \"SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS\"
 Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin

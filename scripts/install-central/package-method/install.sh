@@ -2608,10 +2608,11 @@ ${fetch_rules}"
 # Agent 进程通过 openace-run-as --isolated 使用 env -i，不继承 env_keep
 # env_keep 主要用于 WebUI 启动（sudo -u），需要清理敏感凭据
 # 移除：OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENCLAW_TOKEN, GH_TOKEN
-# 保留：非敏感变量（proxy_token, GIT_*签名变量, PATH）
+# 保留：非敏感变量（proxy_token, GIT_*签名变量）
 # 【Issue #2298】OPENAI_API_KEY/OPENAI_BASE_URL 不再通过 env_keep，
 # 改由 webui_manager 通过 sudo -u user /usr/bin/env KEY=val ... 内联传递
-Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH\"
+# 【Issue #2650】PATH 移除：secure_path 已覆盖命令查找，env_keep PATH 是死配置兼隐患
+Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR\"
 Defaults env_keep += \"GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
 Defaults env_keep += \"SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS\"
 
