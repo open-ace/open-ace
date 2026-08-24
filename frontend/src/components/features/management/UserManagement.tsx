@@ -980,9 +980,7 @@ export const UserManagement: React.FC = () => {
 
                 // Validate password
                 if (restorePassword !== restorePasswordConfirm) {
-                  toast.error(
-                    language === 'zh' ? '密码不匹配' : 'Passwords do not match'
-                  );
+                  toast.error(language === 'zh' ? '密码不匹配' : 'Passwords do not match');
                   return;
                 }
 
@@ -1004,9 +1002,7 @@ export const UserManagement: React.FC = () => {
                     data: restoreData,
                   });
 
-                  toast.success(
-                    language === 'zh' ? '用户已恢复' : 'User restored successfully'
-                  );
+                  toast.success(language === 'zh' ? '用户已恢复' : 'User restored successfully');
                   setShowRestoreModal(false);
                   setSoftDeletedConflict(null);
                   setPendingCreateData(null);

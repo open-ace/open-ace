@@ -499,9 +499,7 @@ class TestCrossTenantRestore:
 
         # Verify tenant_id is still 1 (unchanged)
         user = repo.get_user_by_id(user_id)
-        # Note: The repository may or may not allow tenant_id change,
-        # but the API layer should enforce this restriction
-
+        assert user["tenant_id"] == 1  # Repository preserves original tenant_id
 
 class TestConcurrentRestore:
     """Tests for concurrent restore scenarios (Issue #2755).
