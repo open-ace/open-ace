@@ -20,7 +20,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 # ============================================================================
 # Test fixtures
 # ============================================================================
@@ -88,9 +87,7 @@ class TestPermission700Collection:
         os.geteuid() != 0,
         reason="Requires root access",
     )
-    def test_two_users_permission_700_collected(
-        self, project_root, wrapper_path, temp_test_users
-    ):
+    def test_two_users_permission_700_collected(self, project_root, wrapper_path, temp_test_users):
         """
         Test case 1 from verification plan:
         Two users with permission 700 home directories are collected.

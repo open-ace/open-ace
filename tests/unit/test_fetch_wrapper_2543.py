@@ -20,7 +20,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ============================================================================
 # Test fixtures
 # ============================================================================
@@ -103,7 +102,11 @@ class TestParameterValidation:
         # or the wrapper may reject it. Either way, the result should be failure.
         assert result.returncode != 0
         # Check for rejection in output (either from wrapper or fetch_qwen.py)
-        assert "unrecognized" in result.stderr.lower() or "Invalid" in result.stderr or "ERROR" in result.stderr
+        assert (
+            "unrecognized" in result.stderr.lower()
+            or "Invalid" in result.stderr
+            or "ERROR" in result.stderr
+        )
 
     def test_reject_extra_args(self, wrapper_path, fake_config):
         """Test that extra arguments are rejected."""
@@ -198,7 +201,15 @@ class TestParameterValidation:
 
         # Test path traversal attempt
         result = subprocess.run(
-            ["bash", wrapper_path, "fetch_qwen", "--days", "1", "--config", "/home/../../../etc/passwd"],
+            [
+                "bash",
+                wrapper_path,
+                "fetch_qwen",
+                "--days",
+                "1",
+                "--config",
+                "/home/../../../etc/passwd",
+            ],
             capture_output=True,
             text=True,
         )
@@ -394,8 +405,6 @@ class TestFileSizeLimits:
 
         # Create a large file (this would be > 50MB in real scenario)
         # In test, we just verify the logic would reject it
-        large_size = 51 * 1024 * 1024  # 51MB
-
         # The wrapper should skip files over 50MB
         # This is a conceptual test
 
@@ -410,8 +419,6 @@ class TestAuditLogging:
 
     def test_audit_log_created(self, temp_dir):
         """Test that audit log is created when wrapper runs."""
-        audit_log = temp_dir / "openace" / "fetch-audit.log"
-
         # In real deployment, the wrapper creates this log
         # The test verifies the expected log format
 
@@ -462,7 +469,7 @@ class TestPrivilegeDrop:
             content = f.read()
 
         # Check for root check
-        assert 'id -u' in content or '$(id -u)' in content, "Missing root check"
+        assert "id -u" in content or "$(id -u)" in content, "Missing root check"
 
 
 # ============================================================================

@@ -275,7 +275,10 @@ class SchedulerWorker:
                 try:
                     with open(sudoers_path) as f:
                         content = f.read()
-                        if "FETCH_WRAPPER" not in content and "openace-fetch-wrapper" not in content:
+                        if (
+                            "FETCH_WRAPPER" not in content
+                            and "openace-fetch-wrapper" not in content
+                        ):
                             warnings.append(
                                 "Sudoers file does not contain FETCH_WRAPPER rule. "
                                 "Data collection may fail."
