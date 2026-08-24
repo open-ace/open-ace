@@ -4,12 +4,12 @@
   "created_before_modification": true,
   "layers": {
     "default": {
-      "min_tests": 5710,
+      "min_tests": 5960,
       "min_files": 250,
       "last_updated": "2026-08-24",
-      "update_reason": "Issue #2429 batch 9: I-group db cluster migrated 255 items into tests/unit + tests/integration; min raised by exactly +255 (5455+255); actual 8909 = 8654 (main pre-batch, post #3029/#3034) + 255",
-      "actual_collected": 8909,
-      "actual_files": 613,
+      "update_reason": "Issue #2429 batch 10: db+subprocess cluster migrated 250 items (188 unit + 62 integration); min raised by exactly +250 (5710+250); actual 9159 = 8909 (main pre-batch) + 250",
+      "actual_collected": 9159,
+      "actual_files": 637,
       "threshold_percent": 96
     },
     "critical": {
@@ -30,12 +30,12 @@
       "note": "Currently excluded by norecursedirs"
     },
     "issues": {
-      "min_tests": 2379,
-      "min_files": 244,
+      "min_tests": 2129,
+      "min_files": 221,
       "last_updated": "2026-08-24",
-      "update_reason": "Issue #2429 batch 9: I-group db cluster (26 dirs, 260 items / 33 glob files) — 255 items migrated to tests/unit (178) + tests/integration (flat/routes/concurrency, 77); 5 tautological enrichment tests deleted with audit trail (production daily_messages stats-enrichment was removed by #1125/#1128 single-source unification, commit 8e0b6832); 212 harness converted to real asserts (14 no-assert), 1823 schema swapped to load_schema_from_file + background starters patched, 1782/1790 hermeticized against ambient PG config, 1810 fakes realigned to #2389/#3020 contracts; min lowered by exact deltas (2639-260, 277-33); actuals from clean checkout",
-      "actual_collected": 2591,
-      "actual_files": 259,
+      "update_reason": "Issue #2429 batch 10: I-group db+subprocess cluster (4 dirs: 2022/723/1748/2298, 250 items / 23 glob files) — all 250 migrated (188 -> tests/unit incl. legacy_posix spawn-shape half, 62 -> tests/integration incl. subprocess/ for the real-process half, provider_contract_unified and 1748 entrypoint-eval); 2022 empty __init__.py deleted; 12 no-assert sites given real assertions; 723 TestRequestCountDedupField rewritten against the real _read_stdout reader; 2298 vacuous install.sh loop scan fixed + #1262 chown sudo-path drift patched; min lowered by exact deltas (2379-250, 244-23)",
+      "actual_collected": 2341,
+      "actual_files": 236,
       "threshold_percent": 97
     }
   },
@@ -47,7 +47,7 @@
     "Baseline created before pytest.ini modification to enable e2e_*.py collection",
     "tests/e2e currently excluded by norecursedirs in pytest.ini",
     "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard",
-    "Default count from: python scripts/ci.py run default-collection (8909 items after #2429 batch 9)",
-    "Issue count from: clean-checkout issue-collection (2591 items, 259 files after #2429 batch 9; +1/+1 local gitignored tests/issues/89 noise)"
+    "Default count from: python scripts/ci.py run default-collection (9159 items after #2429 batch 10)",
+    "Issue count from: clean-checkout issue-collection (2341 items, 238 files after #2429 batch 10; +1/+1 local gitignored tests/issues/89 noise)"
   ]
 }

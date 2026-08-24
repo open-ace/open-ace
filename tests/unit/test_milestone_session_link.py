@@ -10,6 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(723)]
+
 
 def _make_workflow(**overrides):
     base = {
@@ -86,6 +88,8 @@ class TestMilestoneTracksWorkflowSession:
         orch._runner._uses_sidebar_session_source.return_value = True
 
         def run_agent_task(**_kwargs):
+            # assert_any_call runs synchronously inside the side_effect (i.e.
+            # mid-_run_agent); a failure here aborts the call and fails the test.
             mock_repo.update_milestone.assert_any_call("ms-active", {"session_id": "main-wrapper"})
             return AgentTaskResult(
                 session_id="main-wrapper",

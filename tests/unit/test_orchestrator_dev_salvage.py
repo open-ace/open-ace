@@ -14,6 +14,8 @@ import pytest
 
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(723)]
+
 
 def _make_workflow(**overrides):
     base = {
@@ -87,6 +89,9 @@ def _make_orchestrator(wf_data, milestones=None):
         orch = AutonomousOrchestrator(wf_data["workflow_id"])
         orch.repo = mock_repo
         orch.emitter = MagicMock()
+        # System-account resolution reads the users table; the mocked repo
+        # covers persistence, so resolve to the workflow's own user instead.
+        orch._resolve_system_account = MagicMock(return_value=None)
         orch._gh = MagicMock()
         orch._gh.get_current_branch.return_value = wf_data.get("branch_name", "")
         orch._gh.get_current_commit.return_value = "abc1234"

@@ -15,8 +15,12 @@ import sys
 from pathlib import Path
 
 # scripts/ is not a package; put the repo's scripts dir on sys.path for import.
-# Test file lives at <repo>/tests/issues/723/ -> parents[3] is the repo root.
-REPO_ROOT = Path(__file__).resolve().parents[3]
+# Test file lives at <repo>/tests/unit/ -> parents[2] is the repo root.
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(723)]
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))

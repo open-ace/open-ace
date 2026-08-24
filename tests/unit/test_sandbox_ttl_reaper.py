@@ -12,7 +12,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.services.autonomous_scheduler import AutonomousScheduler
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2022)]
 
 
 def _make_scheduler(in_progress=()) -> AutonomousScheduler:

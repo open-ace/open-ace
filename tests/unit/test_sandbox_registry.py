@@ -13,6 +13,8 @@ from app.modules.workspace.autonomous.sandbox.provider import SandboxError
 from app.modules.workspace.autonomous.sandbox.registry import provider_for
 from app.modules.workspace.autonomous.sandbox.remote_machine import RemoteMachineProvider
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2022)]
+
 
 class _FakeRSM:
     """Stand-in for RemoteSessionManager (RemoteMachineProvider stores it as-is)."""

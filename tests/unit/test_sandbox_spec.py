@@ -14,14 +14,18 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 
-from app.modules.workspace.autonomous.sandbox.types import SandboxCapability, SandboxSpec
-from app.modules.workspace.autonomous.task_isolation import AgentTaskPolicy
-
 # The capability taxonomy a spec may require. LegacyPosixProvider (Phase 3)
 # satisfies the first four; namespace/network/storage-inode isolation is reserved
 # for the OpenSandbox/Kubernetes backend (#2023) and MUST make Legacy refuse
 # creation (fail-closed, tested in test_sandbox_provider.py /
 # tests/issues/2020/test_storage_inode_capability_fail_closed.py).
+import pytest
+
+from app.modules.workspace.autonomous.sandbox.types import SandboxCapability, SandboxSpec
+from app.modules.workspace.autonomous.task_isolation import AgentTaskPolicy
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2022)]
+
 _EXPECTED_CAPABILITIES = {
     "private_home_tmp_xdg",
     "filesystem_acl",
@@ -46,11 +50,8 @@ def test_sandbox_capability_is_string_enum():
 
 def test_sandbox_spec_is_frozen_dataclass():
     spec = SandboxSpec(task_id="t-1", project_path="/repo", cli_tool="claude-code")
-    try:
+    with pytest.raises(FrozenInstanceError):
         spec.task_id = "tampered"  # type: ignore[misc]
-    except FrozenInstanceError:
-        return
-    raise AssertionError("SandboxSpec must be frozen")
 
 
 def test_sandbox_spec_required_capabilities_defaults_empty():

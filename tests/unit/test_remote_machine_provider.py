@@ -28,6 +28,11 @@ from app.modules.workspace.autonomous.sandbox.types import (
 
 # Remote provides NO verifiable isolation (#2078 P1#1) — the remote-agent
 # executor (dict(os.environ) + plain Popen) has no per-task HOME/ACL/cgroup.
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2022)]
+
+# All stream()-exercising constructions pin poll_interval=0: the production
+# default (5.0s) would time.sleep per poll and stall the unit lane.
+
 _REMOTE_CAPS = frozenset()
 
 

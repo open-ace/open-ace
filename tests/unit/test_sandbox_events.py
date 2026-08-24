@@ -9,6 +9,8 @@ so this is the shared contract test those phases replay against.
 
 from __future__ import annotations
 
+import pytest
+
 from app.modules.workspace.autonomous.sandbox.fake import FakeSandboxProvider
 from app.modules.workspace.autonomous.sandbox.types import (
     ExecHandle,
@@ -17,6 +19,8 @@ from app.modules.workspace.autonomous.sandbox.types import (
     SandboxSpec,
     SandboxStatus,
 )
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2022)]
 
 _EXPECTED_EVENT_KINDS = {
     "process_started",
@@ -42,11 +46,10 @@ def test_sandbox_event_kinds_documented():
 
 def test_sandbox_event_is_frozen():
     event = SandboxEvent(kind=SandboxEventKind.STDOUT_CHUNK, data="hello")
-    try:
+    # SandboxEvent is a custom frozen class (AttributeError, not
+    # FrozenInstanceError from dataclasses).
+    with pytest.raises(AttributeError):
         event.data = "tampered"  # type: ignore[misc]
-    except AttributeError:
-        return
-    raise AssertionError("SandboxEvent must be frozen")
 
 
 def test_exec_returns_exec_handle_bound_to_sandbox():
