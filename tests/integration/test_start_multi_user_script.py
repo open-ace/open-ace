@@ -82,9 +82,9 @@ class TestStartMultiUserScript:
 
         # Should fail because overlay file is missing
         assert result.returncode != 0, "Script should fail when overlay file is missing"
-        assert "not found" in result.stderr.lower() or "not found" in result.stdout.lower(), (
-            f"Script should report missing file: {result.stdout} {result.stderr}"
-        )
+        assert (
+            "not found" in result.stderr.lower() or "not found" in result.stdout.lower()
+        ), f"Script should report missing file: {result.stdout} {result.stderr}"
 
     def test_docker_compose_command_detection(self):
         """Test that Docker Compose command detection logic exists in script."""
@@ -98,9 +98,9 @@ class TestStartMultiUserScript:
         """Test that script includes version compatibility check."""
         script_content = SCRIPT_PATH.read_text()
         # Check for version comparison logic
-        assert "version" in script_content.lower() or "VERSION" in script_content, (
-            "Script should have version checking logic"
-        )
+        assert (
+            "version" in script_content.lower() or "VERSION" in script_content
+        ), "Script should have version checking logic"
 
     def test_script_outputs_access_url(self):
         """Test that script outputs access URL information."""
@@ -122,9 +122,9 @@ class TestStartMultiUserScript:
     def test_script_references_documentation(self):
         """Test that script references documentation."""
         script_content = SCRIPT_PATH.read_text()
-        assert "DEPLOYMENT" in script_content or "docs" in script_content, (
-            "Script should reference documentation"
-        )
+        assert (
+            "DEPLOYMENT" in script_content or "docs" in script_content
+        ), "Script should reference documentation"
 
 
 @pytest.mark.integration
@@ -134,30 +134,28 @@ class TestMultiUserConfiguration:
     def test_overlay_file_sets_user_root(self):
         """Test that overlay file sets user to root."""
         overlay_content = OVERLAY_COMPOSE.read_text()
-        assert 'user: "0"' in overlay_content or "user: '0'" in overlay_content, (
-            "Overlay should set user to 0 (root)"
-        )
+        assert (
+            'user: "0"' in overlay_content or "user: '0'" in overlay_content
+        ), "Overlay should set user to 0 (root)"
 
     def test_overlay_file_sets_multi_user_mode(self):
         """Test that overlay file enables multi-user mode."""
         overlay_content = OVERLAY_COMPOSE.read_text()
-        assert "WORKSPACE_MULTI_USER_MODE=true" in overlay_content, (
-            "Overlay should set WORKSPACE_MULTI_USER_MODE=true"
-        )
+        assert (
+            "WORKSPACE_MULTI_USER_MODE=true" in overlay_content
+        ), "Overlay should set WORKSPACE_MULTI_USER_MODE=true"
 
     def test_overlay_file_sets_allow_root(self):
         """Test that overlay file sets explicit root authorization."""
         overlay_content = OVERLAY_COMPOSE.read_text()
-        assert "OPENACE_ALLOW_ROOT_MULTI_USER=1" in overlay_content, (
-            "Overlay should set OPENACE_ALLOW_ROOT_MULTI_USER=1"
-        )
+        assert (
+            "OPENACE_ALLOW_ROOT_MULTI_USER=1" in overlay_content
+        ), "Overlay should set OPENACE_ALLOW_ROOT_MULTI_USER=1"
 
     def test_overlay_file_sets_config_dir(self):
         """Test that overlay file sets config directory."""
         overlay_content = OVERLAY_COMPOSE.read_text()
-        assert "OPENACE_CONFIG_DIR" in overlay_content, (
-            "Overlay should set OPENACE_CONFIG_DIR"
-        )
+        assert "OPENACE_CONFIG_DIR" in overlay_content, "Overlay should set OPENACE_CONFIG_DIR"
 
 
 @pytest.mark.integration
@@ -175,12 +173,12 @@ class TestEntrypointValidation:
         entrypoint_content = entrypoint_path.read_text()
 
         # Check for configuration validation
-        assert "WORKSPACE_MULTI_USER_MODE" in entrypoint_content, (
-            "Entrypoint should validate WORKSPACE_MULTI_USER_MODE"
-        )
-        assert "OPENACE_ALLOW_ROOT_MULTI_USER" in entrypoint_content, (
-            "Entrypoint should validate OPENACE_ALLOW_ROOT_MULTI_USER"
-        )
+        assert (
+            "WORKSPACE_MULTI_USER_MODE" in entrypoint_content
+        ), "Entrypoint should validate WORKSPACE_MULTI_USER_MODE"
+        assert (
+            "OPENACE_ALLOW_ROOT_MULTI_USER" in entrypoint_content
+        ), "Entrypoint should validate OPENACE_ALLOW_ROOT_MULTI_USER"
 
     def test_entrypoint_outputs_config_summary(self):
         """Test that entrypoint outputs configuration summary."""
@@ -188,9 +186,9 @@ class TestEntrypointValidation:
         entrypoint_content = entrypoint_path.read_text()
 
         # Check for configuration summary output
-        assert "Configuration Summary" in entrypoint_content or "config" in entrypoint_content.lower(), (
-            "Entrypoint should output configuration summary"
-        )
+        assert (
+            "Configuration Summary" in entrypoint_content or "config" in entrypoint_content.lower()
+        ), "Entrypoint should output configuration summary"
 
     def test_entrypoint_logs_config_check(self):
         """Test that entrypoint logs configuration check results."""
@@ -198,9 +196,9 @@ class TestEntrypointValidation:
         entrypoint_content = entrypoint_path.read_text()
 
         # Check for logging to file
-        assert "config-check.log" in entrypoint_content or "CONFIG_CHECK_LOG" in entrypoint_content, (
-            "Entrypoint should log configuration check results"
-        )
+        assert (
+            "config-check.log" in entrypoint_content or "CONFIG_CHECK_LOG" in entrypoint_content
+        ), "Entrypoint should log configuration check results"
 
     def test_entrypoint_has_error_suggestions(self):
         """Test that entrypoint provides error suggestions."""
@@ -208,9 +206,9 @@ class TestEntrypointValidation:
         entrypoint_content = entrypoint_path.read_text()
 
         # Check for quick fix suggestions
-        assert "QUICK FIX" in entrypoint_content or "quick fix" in entrypoint_content.lower(), (
-            "Entrypoint should provide quick fix suggestions"
-        )
-        assert "start-multi-user.sh" in entrypoint_content, (
-            "Entrypoint should reference the startup script"
-        )
+        assert (
+            "QUICK FIX" in entrypoint_content or "quick fix" in entrypoint_content.lower()
+        ), "Entrypoint should provide quick fix suggestions"
+        assert (
+            "start-multi-user.sh" in entrypoint_content
+        ), "Entrypoint should reference the startup script"
