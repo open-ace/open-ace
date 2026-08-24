@@ -674,7 +674,11 @@ class FeishuOrgSyncService:
                 continue
 
             direct_users = self._fetch_department_users(
-                token, current_department_id, warnings=warnings, errors=errors, is_root_department=is_root
+                token,
+                current_department_id,
+                warnings=warnings,
+                errors=errors,
+                is_root_department=is_root,
             )
             for user in direct_users:
                 existing = users.get(user.open_id)

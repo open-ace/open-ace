@@ -561,7 +561,11 @@ def test_sync_status_end_to_end_partial_failure(sync_env):
                             "result": {
                                 "has_more": False,
                                 "list": [
-                                    {"userid": "root_user", "name": "Root User", "dept_id_list": [1]}
+                                    {
+                                        "userid": "root_user",
+                                        "name": "Root User",
+                                        "dept_id_list": [1],
+                                    }
                                 ],
                             },
                         }

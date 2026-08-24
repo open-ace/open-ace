@@ -661,7 +661,10 @@ class DingTalkOrgSyncService:
                     queue.append(department.department_id)
 
             direct_users, dept_complete = self._fetch_department_users(
-                token, current_department_id, warnings=warnings, errors=errors,
+                token,
+                current_department_id,
+                warnings=warnings,
+                errors=errors,
                 is_root_department=is_root,
             )
             if not dept_complete:
