@@ -177,7 +177,14 @@ class AutonomousEventEmitter:
         with self._forward_lock:
             self._forward_url = url
             self._forward_secret = secret
-            start_thread = self._forward_thread is None or not self._forward_thread.is_alive()
+            # is_set() covers disable→quick-enable: the old thread may still
+            # be alive while winding down, but with the stop flag set — reuse
+            # would leave forwarding "enabled" with no live sender.
+            start_thread = (
+                self._forward_thread is None
+                or not self._forward_thread.is_alive()
+                or self._forward_stop.is_set()
+            )
             if start_thread:
                 self._forward_stop.clear()
                 self._forward_thread = threading.Thread(

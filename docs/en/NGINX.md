@@ -110,7 +110,6 @@ server {
         sub_filter_once off;
     }
 
-    # Main Open ACE application.
     # Internal SSE event ingest (deny externally). The scheduler
     # forwards events to the web process over loopback (#3046); behind this
     # proxy every external request arrives as 127.0.0.1, so the route is
@@ -119,6 +118,7 @@ server {
         return 403;
     }
 
+    # Main Open ACE application.
     location / {
         client_max_body_size 50m;      # Agent session sync payloads can exceed the 1MB default.
         proxy_pass         http://127.0.0.1:19888;
