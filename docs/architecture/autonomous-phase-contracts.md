@@ -8,7 +8,7 @@
 
 ## Purpose
 
-`AutonomousOrchestrator` (9.6k lines) historically let each `_do_*` phase method
+`AutonomousOrchestrator` (13k lines) historically let each `_do_*` phase method
 mutate `current_phase` / `status` inline via `_update_workflow`. That made it
 possible for a phase to **partially succeed and then write the next phase's
 state** before its own side effects were confirmed — the core hazard #2044
@@ -215,10 +215,11 @@ DB/API state.
 
 Synchronizes the base, resolves conflicts (with the SIGKILL-resilient worktree
 transition from #2050), merges the PR, and cleans up. May fork a conflict-
-resolution sub-workflow. Uses the **test session line** for conflict resolution.
+resolution sub-workflow. Uses a throwaway `fresh` session for conflict
+resolution.
 
-- **preconditions**: `current_phase == "merge"`; PR exists and is mergeable;
-  `current_phase == "merge"`, `status == "merging"`.
+- **preconditions**: `current_phase == "merge"`, `status == "merging"`; PR
+  exists and is mergeable.
 - **inputs**: `github_pr_number`, `branch_name`, `worktree_transition_state`
   (mid-flight conflict transition), CI status.
 - **authoritative evidence**: `merge_completed` / `merge_failed` milestones;
@@ -266,8 +267,7 @@ immediately without running the verifier.
 - **inputs**: merge SHA (`verification_merge_sha`, resolved from the PR's
   merge commit when absent), base SHA (`base_commit_sha`), the issue's
   acceptance snapshot (`issue_acceptance_hash`), `verification_status`,
-  `verification_attempt`, prior `acceptance_verification` milestones,
-  `content_language`.
+  `verification_attempt`, prior `acceptance_verification` milestones.
 - **authoritative evidence**: the `acceptance_verification` milestone — minted
   `in_progress` ("Acceptance verification: running") at verifier start on the
   `verification` session line, settled in place with the verdict (#3003).
@@ -289,11 +289,12 @@ immediately without running the verifier.
   failed("interrupted"); a quota pause mid-verification terminalizes the row
   only after writing its burned usage.
 - **recovery behavior**: infrastructure failure → same-phase retry; verifier
-  quota pause → workflow `paused` (resumable); shutdown → row stays
-  `in_progress` and the same attempt reuses it on resume.
-- **terminal outcomes**: `completed` (confirmed verdict, human override, or
-  phase disabled); `pause` (rejected / indeterminate / retries exhausted);
-  `retry` (infrastructure failure under the cap).
+  quota pause → workflow `paused` (resumable); shutdown → the row is
+  terminalized to `cancelled` and resurrected by the same attempt on resume
+  (a hard kill leaves it `in_progress`, also reused).
+- **terminal outcomes**: `completed` (confirmed verdict or phase disabled);
+  `pause` (rejected / indeterminate / retries exhausted); `retry`
+  (infrastructure failure under the cap).
 
 ---
 
