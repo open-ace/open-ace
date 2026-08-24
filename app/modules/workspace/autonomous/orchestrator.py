@@ -10083,14 +10083,6 @@ class AutonomousOrchestrator:
 
         if strategy == "new-branch" or strategy == "worktree":
             try:
-                # Validate project_path before git operations (#2963)
-                if not project_path:
-                    raise GitHubOpsError("project_path is not set for branch creation")
-                if not os.path.isdir(project_path):
-                    raise GitHubOpsError(f"project_path {project_path} does not exist")
-                if not os.path.isdir(os.path.join(project_path, ".git")):
-                    raise GitHubOpsError(f"{project_path} is not a valid git repository")
-
                 # Ensure we branch from latest origin/main
                 gh._run_git(["fetch", "origin", "main"])
 
