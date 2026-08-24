@@ -388,6 +388,8 @@ class AnalysisService:
         Get key metrics for the dashboard.
 
         Issue #1852: Added tenant_id for tenant isolation.
+        Issue #3030: Merge agent_sessions data with daily_messages to include
+        WebUI local/remote/terminal sessions.
 
         Args:
             start_date: Optional start date filter.
@@ -423,6 +425,20 @@ class AnalysisService:
             total_input = sum(u.get("total_input_tokens", 0) for u in user_tokens)
             total_output = sum(u.get("total_output_tokens", 0) for u in user_tokens)
 
+        # Issue #3030: Also get session data from agent_sessions
+        session_metrics = self.usage_repo.get_session_key_metrics(
+            start_date=start_date,
+            end_date=end_date,
+            host_name=host_name,
+            tenant_id=tenant_id,
+        )
+
+        # Merge session data into totals
+        total_tokens += session_metrics.get("total_tokens", 0)
+        total_input += session_metrics.get("total_input_tokens", 0)
+        total_output += session_metrics.get("total_output_tokens", 0)
+        total_requests += session_metrics.get("total_requests", 0)
+
         # Get unique tools and hosts (normalize tool names)
         tools = set()
         hosts = set()
@@ -431,6 +447,10 @@ class AnalysisService:
                 tools.add(normalize_tool_name(u["tool_name"]))
             if u.get("host_name"):
                 hosts.add(u["host_name"])
+
+        # Issue #3030: Include unique tools/hosts from session metrics
+        tools_count = max(len(tools), session_metrics.get("unique_tools", 0))
+        hosts_count = max(len(hosts), session_metrics.get("unique_hosts", 0))
 
         # Get top tools by token usage from messages (has real token data)
         tool_stats = self.message_repo.get_tool_token_totals(
@@ -490,8 +510,8 @@ class AnalysisService:
             "total_output_tokens": total_output,
             "total_requests": total_requests,
             "total_messages": total_messages,
-            "unique_tools": len(tools) if tools else 1,
-            "unique_hosts": len(hosts) if hosts else 1,
+            "unique_tools": tools_count if tools_count > 0 else 1,
+            "unique_hosts": hosts_count if hosts_count > 0 else 1,
             "top_tools": top_tools,
             "top_hosts": [{"host": h, "count": 0} for h in hosts][:5] if hosts else [],
             "total_sessions": total_sessions,

@@ -311,12 +311,50 @@ class UsageService:
         """
         Get usage trend data aggregated by date and tool.
 
+        Issue #3030: Merge daily_stats (CLI data) with agent_sessions (WebUI data)
+        to ensure trend charts include all session types.
+
         Args:
             start_date: Start date string (YYYY-MM-DD).
             end_date: End date string (YYYY-MM-DD).
             host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter.
 
         Returns:
             List[Dict]: List of usage records by date and tool.
         """
-        return self.usage_repo.get_daily_by_tool(start_date, end_date, host_name, tenant_id)
+        # 1. Get trend data from daily_stats (CLI fetch scripts data)
+        dm_trend = self.usage_repo.get_daily_by_tool(start_date, end_date, host_name, tenant_id)
+
+        # 2. Get trend data from agent_sessions (WebUI local/remote/terminal sessions)
+        session_trend = self.usage_repo.get_session_trend_by_tool(
+            start_date, end_date, host_name, tenant_id
+        )
+
+        # 3. Merge both data sources
+        merged: dict[tuple, dict] = {}
+        for entry in dm_trend:
+            key = (entry["date"], entry["tool_name"])
+            if key in merged:
+                merged[key]["tokens"] += entry.get("tokens", 0)
+            else:
+                merged[key] = {
+                    "date": entry["date"],
+                    "tool_name": entry["tool_name"],
+                    "tokens": entry.get("tokens", 0),
+                }
+
+        for entry in session_trend:
+            key = (entry["date"], entry["tool_name"])
+            if key in merged:
+                merged[key]["tokens"] += entry.get("tokens", 0)
+            else:
+                merged[key] = {
+                    "date": entry["date"],
+                    "tool_name": entry["tool_name"],
+                    "tokens": entry.get("tokens", 0),
+                }
+
+        # Sort by date, then by tool_name
+        result = sorted(merged.values(), key=lambda x: (x["date"], x["tool_name"]))
+        return result

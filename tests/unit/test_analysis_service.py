@@ -38,6 +38,15 @@ class TestAnalysisService:
                 "host_name": "h1",
             }
         ]
+        # Issue #3030: Mock the new session metrics method
+        mock_usage.get_session_key_metrics.return_value = {
+            "total_tokens": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_requests": 0,
+            "unique_tools": 0,
+            "unique_hosts": 0,
+        }
         mock_msg.get_user_token_totals.return_value = [
             {
                 "total_tokens": 1000,
@@ -62,6 +71,15 @@ class TestAnalysisService:
     def test_get_key_metrics_no_data(self):
         svc, mock_usage, mock_msg, _ = self._make_service()
         mock_usage.get_daily_range.return_value = []
+        # Issue #3030: Mock the new session metrics method
+        mock_usage.get_session_key_metrics.return_value = {
+            "total_tokens": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_requests": 0,
+            "unique_tools": 0,
+            "unique_hosts": 0,
+        }
         mock_msg.get_user_token_totals.return_value = []
         mock_msg.get_tool_token_totals.return_value = []
         mock_msg.get_conversation_stats_summary.return_value = {

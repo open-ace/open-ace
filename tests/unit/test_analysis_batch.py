@@ -392,6 +392,15 @@ class TestSameSourceConsistency:
         self.usage_repo.get_daily_range.return_value = []
         self.message_repo.get_user_token_totals.return_value = []
         self.message_repo.get_tool_token_totals.return_value = []
+        # Issue #3030: Mock get_session_key_metrics for key_metrics
+        self.usage_repo.get_session_key_metrics.return_value = {
+            "total_tokens": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_requests": 0,
+            "unique_tools": 0,
+            "unique_hosts": 0,
+        }
 
         batch = self.service.get_batch_analysis("2026-05-01", "2026-05-23")
         conv = self.service.get_conversation_stats("2026-05-01", "2026-05-23")
