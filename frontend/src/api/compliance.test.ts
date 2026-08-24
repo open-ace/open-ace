@@ -90,10 +90,7 @@ describe('complianceApi', () => {
 
       await complianceApi.runCleanup(false);
 
-      expect(fetch).toHaveBeenCalledWith(
-        '/api/compliance/retention/cleanup',
-        expect.any(Object)
-      );
+      expect(fetch).toHaveBeenCalledWith('/api/compliance/retention/cleanup', expect.any(Object));
     });
   });
 });
