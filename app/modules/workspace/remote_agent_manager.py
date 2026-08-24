@@ -35,6 +35,35 @@ from app.repositories.database import DB_PATH, Database, _param, adapt_boolean_v
 
 logger = logging.getLogger(__name__)
 
+# Issue #2596: Prometheus metrics for deregistration monitoring
+try:
+    from prometheus_client import Counter
+
+    DEREGISTER_SESSIONS_TERMINATED = Counter(
+        'deregister_sessions_terminated_total',
+        'Total number of sessions terminated during machine deregistration'
+    )
+    DEREGISTER_COMMANDS_DELETED = Counter(
+        'deregister_commands_deleted_total',
+        'Total number of runtime commands deleted during machine deregistration'
+    )
+    DEREGISTER_OUTPUTS_DELETED = Counter(
+        'deregister_outputs_deleted_total',
+        'Total number of runtime outputs deleted during machine deregistration'
+    )
+    DEREGISTER_FAILURES = Counter(
+        'deregister_failures_total',
+        'Total number of failed batches during machine deregistration'
+    )
+    PROMETHEUS_AVAILABLE = True
+except ImportError:
+    # Prometheus not available, use no-op counters
+    DEREGISTER_SESSIONS_TERMINATED = None
+    DEREGISTER_COMMANDS_DELETED = None
+    DEREGISTER_OUTPUTS_DELETED = None
+    DEREGISTER_FAILURES = None
+    PROMETHEUS_AVAILABLE = False
+
 # Token rotation configuration (Issue #2499)
 # Default timeout for pending revocation (5 minutes)
 DEFAULT_TOKEN_REVOKE_TIMEOUT = int(os.getenv("AGENT_TOKEN_REVOKE_TIMEOUT_SEC", "300"))
@@ -53,11 +82,11 @@ _PERSIST_OUTPUT_MAX_RETRIES = 8
 SESSION_STATES_TO_TERMINATE = ["active", "paused", "pending", "starting", "stopping"]
 SESSION_STATES_TERMINAL = ["completed", "stopped", "error", "timeout"]
 
-# Batch size for terminating sessions during deregistration
-DEREGISTER_BATCH_SIZE = 100
+# Batch size for terminating sessions during deregistration (Issue #2596)
+DEREGISTER_BATCH_SIZE = int(os.getenv("DEREGISTER_BATCH_SIZE", "100"))
 
-# Maximum retries for failed batch termination compensation
-DEREGISTER_COMPENSATION_MAX_RETRIES = 3
+# Maximum retries for failed batch termination compensation (Issue #2596)
+DEREGISTER_COMPENSATION_MAX_RETRIES = int(os.getenv("DEREGISTER_COMPENSATION_MAX_RETRIES", "3"))
 
 # Output batching configuration (Issue #1823)
 # Batch size for aggregated writes
@@ -978,23 +1007,31 @@ class RemoteAgentManager:
         agent_notified = False
         lock_acquired = False
         lock_key = 0
+        lock_conn = None
 
         # Step 0: Acquire Advisory Lock for PostgreSQL (prevent concurrent deregistration)
-        # Use session-level lock (pg_advisory_lock) so it persists across transactions
+        # Use session-level lock with proper connection management
         if is_postgresql():
             try:
                 # Use SHA256 hash for consistent lock key across processes
                 lock_key = int(hashlib.sha256(machine_id.encode()).hexdigest()[:16], 16)
-                with self.db.connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("SET LOCAL lock_timeout = '30s'")
-                    cursor.execute("SELECT pg_advisory_lock(%s)", (lock_key,))
-                    lock_acquired = True
-                    logger.debug("Acquired advisory lock for machine %s", machine_id[:8])
+                lock_conn = self.db.connection()
+                cursor = lock_conn.cursor()
+                cursor.execute("SET lock_timeout = '30s'")
+                cursor.execute("SELECT pg_advisory_lock(%s)", (lock_key,))
+                lock_acquired = True
+                logger.debug("Acquired advisory lock for machine %s", machine_id[:8])
             except Exception as e:
                 logger.warning(
                     "Failed to acquire advisory lock for machine %s: %s", machine_id[:8], e
                 )
+                # Close lock connection on failure
+                if lock_conn:
+                    try:
+                        lock_conn.close()
+                    except Exception:
+                        pass
+                    lock_conn = None
                 # Continue without lock for SQLite or if lock fails
                 # Another concurrent deregistration may still be in progress
 
@@ -1069,7 +1106,7 @@ class RemoteAgentManager:
                     len(failed_batches),
                 )
 
-            # Step 8: Log deregistration result (for audit)
+            # Step 8: Log deregistration result (for audit) and record metrics
             logger.info(
                 "Machine %s deregistered: sessions_terminated=%d, commands_deleted=%d, outputs_deleted=%d, agent_notified=%s, failed_batches=%d",
                 machine_id[:8],
@@ -1080,20 +1117,35 @@ class RemoteAgentManager:
                 len(failed_batches),
             )
 
+            # Issue #2596: Record Prometheus metrics
+            if PROMETHEUS_AVAILABLE:
+                try:
+                    DEREGISTER_SESSIONS_TERMINATED.inc(sessions_terminated)
+                    DEREGISTER_COMMANDS_DELETED.inc(commands_deleted)
+                    DEREGISTER_OUTPUTS_DELETED.inc(outputs_deleted)
+                    DEREGISTER_FAILURES.inc(len(failed_batches))
+                except Exception as e:
+                    logger.warning("Failed to record Prometheus metrics: %s", e)
+
             return cast("bool", success)
 
         finally:
             # Step 9: Release Advisory Lock if acquired
-            if lock_acquired and is_postgresql():
+            if lock_acquired and lock_conn:
                 try:
-                    with self.db.connection() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_key,))
-                        logger.debug("Released advisory lock for machine %s", machine_id[:8])
+                    cursor = lock_conn.cursor()
+                    cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_key,))
+                    logger.debug("Released advisory lock for machine %s", machine_id[:8])
                 except Exception as e:
                     logger.warning(
                         "Failed to release advisory lock for machine %s: %s", machine_id[:8], e
                     )
+                finally:
+                    # Always close the lock connection
+                    try:
+                        lock_conn.close()
+                    except Exception:
+                        pass
 
     def _notify_agent_deregister(self, machine_id: str) -> bool:
         """Try to notify agent that sessions will be terminated.
