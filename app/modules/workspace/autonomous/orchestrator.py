@@ -9855,21 +9855,22 @@ class AutonomousOrchestrator:
         repo_url = ""  # Track newly created repo URL for issue creation (#2963)
         if wf.get("is_new_project"):
             existing_repo = wf.get("project_repo_url", "") or ""
-            # A resolved GitHub repo URL starts with http(s)://; a bare
-            # creation-request name (user input or auto-project-<hex>) does
-            # not. project_repo_url is overloaded (input name OR resolved
-            # URL — routes/autonomous.py accepts it as input), so the URL
-            # shape is the reliable "repo already created" signal.
-            if existing_repo.startswith(("http://", "https://")):
-                repo_url = existing_repo  # Already resolved, use for issue (#2963)
-                logger.info(
-                    "Workflow %s: project_repo_url already a resolved repo URL "
-                    "(%s); skipping create_repo",
-                    self._workflow_id[:8],
-                    existing_repo,
-                )
-            else:
-                try:
+            created_repo = False
+            try:
+                # A resolved GitHub repo URL starts with http(s)://; a bare
+                # creation-request name (user input or auto-project-<hex>) does
+                # not. project_repo_url is overloaded (input name OR resolved
+                # URL — routes/autonomous.py accepts it as input), so the URL
+                # shape is the reliable "repo already created" signal.
+                if existing_repo.startswith(("http://", "https://")):
+                    repo_url = existing_repo  # Already resolved, use for issue (#2963)
+                    logger.info(
+                        "Workflow %s: project_repo_url already a resolved repo URL "
+                        "(%s); skipping create_repo",
+                        self._workflow_id[:8],
+                        existing_repo,
+                    )
+                else:
                     gh = GitHubOps(project_path or ".", system_account=system_account)
                     repo_data = gh.create_repo(
                         name=existing_repo or f"auto-project-{uuid.uuid4().hex[:8]}",
@@ -9877,8 +9878,7 @@ class AutonomousOrchestrator:
                         description=wf.get("title", ""),
                     )
                     repo_url = repo_data.get("url", "")
-                    project_path = project_path or "."
-                    self._gh = GitHubOps(project_path, system_account=system_account)
+                    created_repo = True
                     # Single durable checkpoint: this ONE write persists the
                     # resolved URL (the retry guard above) AND the repo
                     # identity. The repo_setup milestone below is informational
@@ -9888,61 +9888,66 @@ class AutonomousOrchestrator:
                     self._update_workflow({"project_repo_url": repo_url})
                     wf["project_repo_url"] = repo_url  # Sync in-memory wf (#2963)
 
-                    # Clone the newly created repo to local workspace (#2963)
-                    # This ensures the local directory is a valid git repository
-                    # before subsequent git operations (fetch, branch, worktree).
-                    if not project_path:
-                        user_workspace = self._get_user_workspace(system_account)
-                        repo_name = repo_url.rstrip("/").split("/")[-1]
-                        project_path = os.path.join(user_workspace, repo_name)
+                # Clone the resolved repo to local workspace (#2963). This also
+                # runs on re-entry after project_repo_url was checkpointed but
+                # project_path was not, closing the between-writes window.
+                if not project_path:
+                    user_workspace = self._get_user_workspace(system_account)
+                    repo_name = repo_url.rstrip("/").split("/")[-1]
+                    project_path = os.path.join(user_workspace, repo_name)
+                gh = GitHubOps(project_path, system_account=system_account)
+                self._gh = gh
 
-                    if os.path.exists(project_path):
-                        if os.path.isdir(os.path.join(project_path, ".git")):
-                            existing_url = gh.get_repo_url()
-                            if existing_url == repo_url:
-                                logger.info(
-                                    "Project already cloned at %s, skipping",
-                                    project_path,
-                                )
-                            else:
-                                raise GitHubOpsError(
-                                    f"Directory {project_path} is a different git repo"
-                                )
+                if os.path.exists(project_path):
+                    if os.path.isdir(os.path.join(project_path, ".git")):
+                        existing_url = gh.get_repo_url()
+                        if existing_url == repo_url:
+                            logger.info(
+                                "Project already cloned at %s, skipping",
+                                project_path,
+                            )
                         else:
-                            if os.listdir(project_path):
-                                raise GitHubOpsError(
-                                    f"Directory {project_path} exists but is not empty "
-                                    "and not a git repo"
-                                )
+                            raise GitHubOpsError(
+                                f"Directory {project_path} is a different git repo"
+                            )
                     else:
-                        os.makedirs(os.path.dirname(project_path), exist_ok=True)
+                        if os.listdir(project_path):
+                            raise GitHubOpsError(
+                                f"Directory {project_path} exists but is not empty "
+                                "and not a git repo"
+                            )
+                else:
+                    os.makedirs(os.path.dirname(project_path), exist_ok=True)
 
-                    if not os.path.isdir(os.path.join(project_path, ".git")):
-                        gh._run_git(["clone", repo_url, project_path])
+                if not os.path.isdir(os.path.join(project_path, ".git")):
+                    gh._run_git(["clone", repo_url, project_path])
 
-                    self._update_workflow({"project_path": project_path})
-                    wf["project_path"] = project_path
-                    self._gh = GitHubOps(project_path, system_account=system_account)
+                self._update_workflow({"project_path": project_path})
+                wf["project_path"] = project_path
 
-                    self._create_milestone(
-                        phase="preparation",
-                        milestone_type="repo_setup",
-                        status="completed",
-                        title="Repository created",
-                        result_summary=f"Created repo: {repo_url}",
-                    )
-                except GitHubOpsError as e:
-                    # Failure path preserves legacy semantics: record the failed
-                    # milestone inline then re-raise so advance()'s exception
-                    # handler runs _mark_failed. See method docstring.
-                    self._create_milestone(
-                        phase="preparation",
-                        milestone_type="repo_setup",
-                        status="failed",
-                        title="Repo creation failed",
-                        error_message=str(e),
-                    )
-                    raise
+                self._create_milestone(
+                    phase="preparation",
+                    milestone_type="repo_setup",
+                    status="completed",
+                    title="Repository created" if created_repo else "Repository ready",
+                    result_summary=(
+                        f"Created repo: {repo_url}"
+                        if created_repo
+                        else f"Prepared repo: {repo_url}"
+                    ),
+                )
+            except GitHubOpsError as e:
+                # Failure path preserves legacy semantics: record the failed
+                # milestone inline then re-raise so advance()'s exception
+                # handler runs _mark_failed. See method docstring.
+                self._create_milestone(
+                    phase="preparation",
+                    milestone_type="repo_setup",
+                    status="failed",
+                    title="Repo creation failed",
+                    error_message=str(e),
+                )
+                raise
 
         gh = self._get_gh()
 

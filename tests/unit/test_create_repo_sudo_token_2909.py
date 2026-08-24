@@ -108,7 +108,7 @@ class TestCreateRepoNoTokenFallback:
 
         cmd = mock_run.call_args.args[0]
         assert cmd[:3] == ["sudo", "-u", "alice"]
-        assert cmd[3] == "gh"
+        assert cmd[3] == "/usr/local/bin/openace-gh"
 
     @patch.object(GitHubOps, "_get_env", return_value=None)
     @patch.object(GitHubOps, "_needs_sudo", return_value=True)
@@ -199,3 +199,35 @@ class TestGitOpsStillSudoUnderCrossUser:
 
         cmd = mock_run.call_args.args[0]
         assert cmd[:3] == ["sudo", "-u", "alice"]
+
+    @patch.object(GitHubOps, "_get_env", return_value=_FAKE_ENV)
+    @patch.object(GitHubOps, "_needs_sudo", return_value=True)
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_cross_user_clone_runs_from_existing_parent(self, mock_run, _needs, _env):
+        """Clone targets do not exist yet, so sudo git must run from the parent."""
+        mock_run.return_value = _completed(stdout="")
+        project_path = "/workspace/alice/new-repo"
+        gh = GitHubOps(project_path, system_account="alice")
+
+        gh._run_git(["clone", "https://github.com/open-ace/new-repo.git", project_path])
+
+        cmd = mock_run.call_args.args[0]
+        assert "-C" in cmd
+        assert cmd[cmd.index("-C") + 1] == "/workspace/alice"
+        assert project_path in cmd
+
+    @patch.object(GitHubOps, "_get_env", return_value=_FAKE_ENV)
+    @patch.object(GitHubOps, "_needs_sudo", return_value=False)
+    @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
+    def test_same_user_clone_runs_from_existing_parent(self, mock_run, _needs, _env):
+        """Same-user clone must not set subprocess cwd to the missing target."""
+        mock_run.return_value = _completed(stdout="")
+        project_path = "/workspace/alice/new-repo"
+        gh = GitHubOps(project_path, system_account="alice")
+
+        gh._run_git(["clone", "https://github.com/open-ace/new-repo.git", project_path])
+
+        assert mock_run.call_args.kwargs.get("cwd") == "/workspace/alice"
+        cmd = mock_run.call_args.args[0]
+        assert "-C" not in cmd
+        assert project_path in cmd

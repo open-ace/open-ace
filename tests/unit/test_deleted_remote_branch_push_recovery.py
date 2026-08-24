@@ -80,7 +80,7 @@ class TestDeletedRemoteBranchPushRecovery:
         assert "auto-dev/abc12345" in cmds[2]
         assert "--force-with-lease" not in cmds[2]
         # The recovery branch (not a bypass) produced the plain push.
-        assert "plain-pushing validated auto-dev branch to recreate it" in caplog.text
+        assert "plain-pushing validated workflow branch to recreate it" in caplog.text
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
     def test_stale_info_with_fetch_success_keeps_force_with_lease_retry(self, mock_run):
@@ -114,8 +114,8 @@ class TestDeletedRemoteBranchPushRecovery:
         assert all("fetch" not in call_args[0][0] for call_args in mock_run.call_args_list)
 
     @patch("app.modules.workspace.autonomous.github_ops.subprocess.run")
-    def test_non_auto_dev_force_with_lease_is_still_refused_before_push(self, mock_run):
-        with pytest.raises(GitHubOpsError, match="non-auto-dev branch 'main'"):
+    def test_non_workflow_force_with_lease_is_still_refused_before_push(self, mock_run):
+        with pytest.raises(GitHubOpsError, match="non-workflow branch 'main'"):
             self.gh.git_push(branch="main", force_with_lease=True)
 
         mock_run.assert_not_called()
