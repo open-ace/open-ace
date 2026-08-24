@@ -8,6 +8,7 @@ import {
   useCreateUser,
   useUpdateUser,
   useDeleteUser,
+  useRestoreUser,
   useResetUserPassword,
   useSyncFeishuOrg,
   usePageRefresh,
@@ -33,7 +34,13 @@ import { ToolAccountsEditor } from './ToolAccountsEditor';
 import { MappingRulesEditor } from './MappingRulesEditor';
 import { AutoMappingPanel } from './AutoMappingPanel';
 import { createMatcherConfig } from '@/utils';
-import type { AdminUser, CreateUserRequest, UpdateUserRequest } from '@/api';
+import type {
+  AdminUser,
+  CreateUserRequest,
+  UpdateUserRequest,
+  SoftDeletedUserConflict,
+  RestoreUserRequest,
+} from '@/api';
 
 export const UserManagement: React.FC = () => {
   const language = useLanguage();
@@ -44,8 +51,18 @@ export const UserManagement: React.FC = () => {
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
+  const restoreUser = useRestoreUser();
   const resetUserPassword = useResetUserPassword();
   const syncFeishuOrg = useSyncFeishuOrg();
+
+  // Soft-deleted user conflict state (Issue #2755)
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
+  const [softDeletedConflict, setSoftDeletedConflict] = useState<SoftDeletedUserConflict | null>(
+    null
+  );
+  const [pendingCreateData, setPendingCreateData] = useState<CreateUserRequest | null>(null);
+  const [restorePassword, setRestorePassword] = useState('');
+  const [restorePasswordConfirm, setRestorePasswordConfirm] = useState('');
 
   // Reset password modal state (three-step)
   const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
@@ -300,6 +317,29 @@ export const UserManagement: React.FC = () => {
       handleCloseModal();
     } catch (err: unknown) {
       console.error('Failed to save user:', err);
+
+      // Check for soft-deleted user conflict (Issue #2755)
+      const errorObj = err as Record<string, unknown>;
+      const errorData = errorObj?.response?.data as Record<string, unknown> | undefined;
+
+      if (errorData?.error === 'USER_SOFT_DELETED' && errorData.soft_deleted_user) {
+        // Soft-deleted user conflict - show restore modal
+        const conflictInfo: SoftDeletedUserConflict = {
+          user_id: errorData.soft_deleted_user.user_id as number,
+          username: errorData.soft_deleted_user.username as string,
+          email: errorData.soft_deleted_user.email as string,
+          deleted_at: errorData.soft_deleted_user.deleted_at as string,
+          tenant_id: errorData.soft_deleted_user.tenant_id as number | undefined,
+          conflicts: errorData.soft_deleted_user.conflicts as ('username' | 'email')[],
+        };
+
+        setSoftDeletedConflict(conflictInfo);
+        setPendingCreateData(formData);
+        setShowModal(false);
+        setShowRestoreModal(true);
+        return;
+      }
+
       // Display error message to user
       const errorMessage =
         (err as Error)?.message ??
@@ -901,6 +941,176 @@ export const UserManagement: React.FC = () => {
                     ? (t('copied', language) ?? 'Copied')
                     : (t('copy', language) ?? 'Copy')}
                 </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Restore User Modal (Issue #2755) */}
+      <Modal
+        isOpen={showRestoreModal}
+        onClose={() => {
+          setShowRestoreModal(false);
+          setSoftDeletedConflict(null);
+          setPendingCreateData(null);
+          setRestorePassword('');
+          setRestorePasswordConfirm('');
+        }}
+        title={language === 'zh' ? '恢复已删除用户' : 'Restore Deleted User'}
+        size="lg"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowRestoreModal(false);
+                setSoftDeletedConflict(null);
+                setPendingCreateData(null);
+                setRestorePassword('');
+                setRestorePasswordConfirm('');
+              }}
+            >
+              {t('cancel', language)}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={async () => {
+                if (!softDeletedConflict) return;
+
+                // Validate password
+                if (restorePassword !== restorePasswordConfirm) {
+                  toast.error(
+                    language === 'zh' ? '密码不匹配' : 'Passwords do not match'
+                  );
+                  return;
+                }
+
+                const passwordError = validatePasswordPolicy(restorePassword);
+                if (passwordError) {
+                  toast.error(passwordError);
+                  return;
+                }
+
+                try {
+                  const restoreData: RestoreUserRequest = {
+                    password: restorePassword,
+                    username: pendingCreateData?.username,
+                    email: pendingCreateData?.email,
+                  };
+
+                  await restoreUser.mutateAsync({
+                    userId: softDeletedConflict.user_id,
+                    data: restoreData,
+                  });
+
+                  toast.success(
+                    language === 'zh' ? '用户已恢复' : 'User restored successfully'
+                  );
+                  setShowRestoreModal(false);
+                  setSoftDeletedConflict(null);
+                  setPendingCreateData(null);
+                  setRestorePassword('');
+                  setRestorePasswordConfirm('');
+                  await refetch();
+                } catch (err) {
+                  console.error('Failed to restore user:', err);
+                  toast.error(
+                    (err as Error)?.message ??
+                      (language === 'zh' ? '恢复用户失败' : 'Failed to restore user')
+                  );
+                }
+              }}
+              loading={restoreUser.isPending}
+              disabled={!restorePassword || restorePassword !== restorePasswordConfirm}
+            >
+              {language === 'zh' ? '确认恢复' : 'Confirm Restore'}
+            </Button>
+          </>
+        }
+      >
+        {softDeletedConflict && (
+          <div>
+            {/* Warning about historical associations */}
+            <div className="alert alert-warning mb-3">
+              <i className="bi bi-exclamation-triangle-fill me-2" aria-hidden="true" />
+              <strong>
+                {language === 'zh'
+                  ? '警告：恢复用户将重新激活历史关联'
+                  : 'Warning: Restoring this user will reactivate historical associations'}
+              </strong>
+              <ul className="mb-0 mt-2 small">
+                <li>
+                  {language === 'zh'
+                    ? '用户将重新获得之前的项目所有权和权限'
+                    : 'The user will regain previous project ownerships and permissions'}
+                </li>
+                <li>
+                  {language === 'zh'
+                    ? '工作区访问权限将被恢复'
+                    : 'Workspace access will be restored'}
+                </li>
+                <li>
+                  {language === 'zh'
+                    ? 'SSO 映射关联将被重新激活'
+                    : 'SSO mapping associations will be reactivated'}
+                </li>
+                <li>
+                  {language === 'zh'
+                    ? '所有历史会话将被撤销，用户需要重新登录'
+                    : 'All historical sessions will be revoked; the user must log in again'}
+                </li>
+              </ul>
+            </div>
+
+            {/* User info */}
+            <div className="mb-3">
+              <div className="row mb-1">
+                <div className="col-4 text-muted">{t('tableUsername', language)}</div>
+                <div className="col-8">
+                  <strong>{softDeletedConflict.username}</strong>
+                </div>
+              </div>
+              <div className="row mb-1">
+                <div className="col-4 text-muted">{t('tableEmail', language)}</div>
+                <div className="col-8">{softDeletedConflict.email}</div>
+              </div>
+              <div className="row">
+                <div className="col-4 text-muted">
+                  {language === 'zh' ? '删除时间' : 'Deleted at'}
+                </div>
+                <div className="col-8">
+                  {new Date(softDeletedConflict.deleted_at).toLocaleString()}
+                </div>
+              </div>
+            </div>
+
+            {/* New password for restored user */}
+            <div className="row g-3">
+              <div className="col-md-6">
+                <label className="form-label">
+                  {language === 'zh' ? '新密码' : 'New Password'}
+                  <span className="text-danger ms-1">*</span>
+                </label>
+                <TextInput
+                  type="password"
+                  value={restorePassword}
+                  onChange={(value: string) => setRestorePassword(value)}
+                  placeholder={language === 'zh' ? '输入新密码' : 'Enter new password'}
+                />
+                <PasswordPolicyHint />
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">
+                  {language === 'zh' ? '确认密码' : 'Confirm Password'}
+                  <span className="text-danger ms-1">*</span>
+                </label>
+                <TextInput
+                  type="password"
+                  value={restorePasswordConfirm}
+                  onChange={(value: string) => setRestorePasswordConfirm(value)}
+                  placeholder={language === 'zh' ? '确认新密码' : 'Confirm new password'}
+                />
               </div>
             </div>
           </div>
