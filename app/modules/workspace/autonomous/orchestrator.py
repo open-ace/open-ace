@@ -92,6 +92,7 @@ from app.modules.workspace.autonomous.terminal_report_i18n import render_ci_repa
 from app.repositories.autonomous_repo import DEFAULT_CONTENT_LANGUAGE, AutonomousWorkflowRepository
 from app.repositories.database import Database
 from app.repositories.user_repo import UserRepository
+from app.utils.workspace import get_workspace_base_dir
 
 logger = logging.getLogger(__name__)
 
@@ -2826,6 +2827,24 @@ class AutonomousOrchestrator:
             return None
         user = UserRepository().get_user_by_id(user_id)
         return user.get("system_account") if user else None
+
+    @staticmethod
+    def _get_user_workspace(system_account: str | None) -> str:
+        """Return the user's workspace directory path.
+
+        Constructs the path as ``{base_dir}/{system_account}`` where base_dir
+        comes from WORKSPACE_BASE_DIR env (Docker) or home directory (Package).
+
+        Args:
+            system_account: The system account name for the user.
+
+        Returns:
+            The user's workspace directory path.
+        """
+        base_dir = get_workspace_base_dir()
+        if system_account:
+            return os.path.join(base_dir, system_account)
+        return base_dir
 
     @staticmethod
     def _resolve_isolated_agent_account() -> str:
