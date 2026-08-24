@@ -26,16 +26,17 @@ pytestmark = [pytest.mark.regression, pytest.mark.issue(1787)]
 
 
 class FakeDingTalkOrgSyncService(DingTalkOrgSyncService):
-    def __init__(self, *args, departments=None, users=None, **kwargs):
+    def __init__(self, *args, departments=None, users=None, snapshot_complete=True, **kwargs):
         super().__init__(*args, **kwargs)
         self._departments = list(departments or [])
         self._users = list(users or [])
+        self._snapshot_complete = snapshot_complete
 
     def _get_access_token(self, app_key, app_secret):
         return "test-token"
 
     def _fetch_directory_snapshot(self, token, root_department_id, **kwargs):
-        return self._departments, self._users
+        return self._departments, self._users, self._snapshot_complete
 
 
 @pytest.fixture
@@ -238,6 +239,11 @@ def test_departed_users_are_deactivated(sync_env):
     """Users present in a prior sync but absent from the current snapshot must be
     deactivated (and their DingTalk SSO identity unlinked) so a recycled DingTalk
     userid cannot re-resolve to the previous local account.
+
+    Note: the second sync must have at least one user in the snapshot so that
+    ``seen_provider_user_ids`` is non-empty. Issue #3020 added an empty-set
+    guard to prevent mass-deactivation when the snapshot is empty (likely an
+    API outage).
     """
     db, config = sync_env
     user_repo = UserRepository(db=db)
@@ -253,7 +259,12 @@ def test_departed_users_are_deactivated(sync_env):
                 user_id="dt_dave",
                 name="Dave DingTalk",
                 department_ids=["100"],
-            )
+            ),
+            DingTalkUser(
+                user_id="dt_eve",
+                name="Eve DingTalk",
+                department_ids=["100"],
+            ),
         ],
     )
     service.sync_org()
@@ -265,13 +276,20 @@ def test_departed_users_are_deactivated(sync_env):
     )
     assert sso_before, "expected Dave to have a dingtalk SSO identity after first sync"
 
-    # Second sync: Dave is no longer in the directory.
+    # Second sync: Dave is no longer in the directory, but Eve is still present.
+    # The non-empty snapshot ensures the departed-user cleanup runs.
     service2 = FakeDingTalkOrgSyncService(
         db=db,
         user_repo=user_repo,
         config_override=config,
         departments=[dept],
-        users=[],
+        users=[
+            DingTalkUser(
+                user_id="dt_eve",
+                name="Eve DingTalk",
+                department_ids=["100"],
+            ),
+        ],
     )
     service2.sync_org()
 
@@ -331,8 +349,9 @@ def test_transient_user_lookup_errcode_warns_and_skips(monkeypatch):
 
     warnings: list[str] = []
     # Must NOT raise.
-    users = service._fetch_department_users("token", "100", warnings=warnings)
+    users, complete = service._fetch_department_users("token", "100", warnings=warnings)
     assert users == [], "expected the flaky department's users to be skipped, not returned"
+    assert complete is False, "expected incomplete snapshot when page fetch fails"
     assert any(
         "100" in w and "errcode=-1" in w for w in warnings
     ), f"expected a warning about the failed department; got {warnings}"
