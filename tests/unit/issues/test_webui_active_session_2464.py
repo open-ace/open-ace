@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
-Tests for Issue #2464: WebUI 会话消息记录与历史会话显示分离
+Tests for Issue #2464 / #3025: WebUI aggregate session fallback behavior.
 
-Test coverage:
-1. LLM proxy uses webui aggregate session when no active non-webui session exists
-2. LLM proxy uses user's active non-webui session when available
-3. LLM proxy uses most recently updated session when multiple active sessions exist
+Issue #2464 originally added fallback from webui:* aggregate to user's active session.
+Issue #3025 removed that fallback because it caused cross-session data contamination.
+
+Test coverage (post #3025 fix):
+1. LLM proxy uses webui aggregate session directly (no active-session lookup)
+2. LLM proxy does NOT call get_active_sessions for webui:* tokens without X-Session-Id
+3. X-Session-Id header still takes precedence (ownership validation unchanged)
+4. webui:* aggregate sessions are used as-is, never replaced by regular sessions
 """
 
 import json
@@ -90,16 +94,29 @@ _PROXY_PATH = "app.routes.workspace.get_api_key_proxy_service"
 _QUOTA_PATH = "app.modules.governance.quota_manager.QuotaManager"
 _HTTP_PATH = "requests.request"
 _SESSION_MGR_PATH = "app.modules.workspace.session_manager.get_session_manager"
+_GATEWAY_PATH = "app.modules.workspace.llm_proxy_handler.get_gateway_planner"
+
+
+def _make_noop_gateway():
+    """Return a mock gateway planner with is_noop=True (direct-provider mode)."""
+    gw = MagicMock()
+    gw.is_noop = True
+    return gw
 
 
 # ===================================================================
-# A. No active non-webui session → use webui aggregate
+# A. No X-Session-Id → use webui aggregate directly (no fallback)
 # ===================================================================
 
 
 class TestNoActiveNonWebuiSession:
-    """Test LLM proxy behavior when user has no active non-webui session."""
+    """Test LLM proxy behavior when webui:* token has no X-Session-Id header.
 
+    Issue #3025: The old fallback to active sessions was removed.
+    Now, requests always use the webui:* aggregate session directly.
+    """
+
+    @patch(_GATEWAY_PATH, side_effect=lambda: _make_noop_gateway())
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_SESSION_MGR_PATH)
@@ -114,9 +131,10 @@ class TestNoActiveNonWebuiSession:
         mock_session_mgr,
         mock_quota_cls,
         mock_http,
+        mock_gateway,
         workspace_app,
     ):
-        """Should use webui aggregate session when user has no active non-webui session."""
+        """Should use webui aggregate session directly without calling get_active_sessions."""
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
         mock_proxy.get_tool_model_pool.return_value = {
@@ -133,9 +151,7 @@ class TestNoActiveNonWebuiSession:
         )
         mock_get_proxy.return_value = mock_proxy
 
-        # No active sessions
         mock_sm = MagicMock()
-        mock_sm.get_active_sessions.return_value = []
         mock_session_mgr.return_value = mock_sm
 
         mock_quota_cls.return_value = _make_quota_ok()
@@ -148,16 +164,23 @@ class TestNoActiveNonWebuiSession:
             headers={"Authorization": "Bearer tok"},
         )
         assert resp.status_code == 200
+        # Issue #3025: get_active_sessions must NOT be called (fallback removed)
+        mock_sm.get_active_sessions.assert_not_called()
 
 
 # ===================================================================
-# B. Active non-webui session → use that session
+# B. Active non-webui session exists → still use webui aggregate (no fallback)
 # ===================================================================
 
 
 class TestActiveNonWebuiSession:
-    """Test LLM proxy behavior when user has an active non-webui session."""
+    """Test LLM proxy behavior when user has an active non-webui session.
 
+    Issue #3025: Even when active sessions exist, webui:* tokens without
+    X-Session-Id must NOT route to them. The old fallback was removed.
+    """
+
+    @patch(_GATEWAY_PATH, side_effect=lambda: _make_noop_gateway())
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_SESSION_MGR_PATH)
@@ -166,15 +189,16 @@ class TestActiveNonWebuiSession:
         "app.utils.llm_proxy_url_validator.validate_llm_proxy_url",
         _mock_validate_llm_proxy_url,
     )
-    def test_uses_active_session_when_available(
+    def test_does_not_fallback_to_active_session(
         self,
         mock_get_proxy,
         mock_session_mgr,
         mock_quota_cls,
         mock_http,
+        mock_gateway,
         workspace_app,
     ):
-        """Should use user's active non-webui session when available."""
+        """Should NOT call get_active_sessions; must use webui aggregate directly."""
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
         mock_proxy.get_tool_model_pool.return_value = {
@@ -191,7 +215,7 @@ class TestActiveNonWebuiSession:
         )
         mock_get_proxy.return_value = mock_proxy
 
-        # User has one active non-webui session
+        # User has one active non-webui session (but it must be ignored)
         active_session = _mock_session("uuid-session-123")
         mock_sm = MagicMock()
         mock_sm.get_active_sessions.return_value = [active_session]
@@ -207,18 +231,23 @@ class TestActiveNonWebuiSession:
             headers={"Authorization": "Bearer tok"},
         )
         assert resp.status_code == 200
-        # Verify get_active_sessions was called
-        mock_sm.get_active_sessions.assert_called_once()
+        # Issue #3025: get_active_sessions must NOT be called (fallback removed)
+        mock_sm.get_active_sessions.assert_not_called()
 
 
 # ===================================================================
-# C. Multiple active sessions → use most recently updated
+# C. Multiple active sessions → still use webui aggregate (no fallback)
 # ===================================================================
 
 
 class TestMultipleActiveSessions:
-    """Test LLM proxy behavior when user has multiple active non-webui sessions."""
+    """Test LLM proxy behavior when user has multiple active non-webui sessions.
 
+    Issue #3025: Multiple active sessions must NOT trigger fallback selection.
+    The old behavior of picking the most recently updated session was removed.
+    """
+
+    @patch(_GATEWAY_PATH, side_effect=lambda: _make_noop_gateway())
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_SESSION_MGR_PATH)
@@ -227,15 +256,16 @@ class TestMultipleActiveSessions:
         "app.utils.llm_proxy_url_validator.validate_llm_proxy_url",
         _mock_validate_llm_proxy_url,
     )
-    def test_uses_most_recently_updated_session(
+    def test_does_not_select_from_multiple_sessions(
         self,
         mock_get_proxy,
         mock_session_mgr,
         mock_quota_cls,
         mock_http,
+        mock_gateway,
         workspace_app,
     ):
-        """Should use the most recently updated session when multiple active sessions exist."""
+        """Should NOT call get_active_sessions even when multiple sessions exist."""
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
         mock_proxy.get_tool_model_pool.return_value = {
@@ -252,10 +282,9 @@ class TestMultipleActiveSessions:
         )
         mock_get_proxy.return_value = mock_proxy
 
-        # User has multiple active non-webui sessions
+        # User has multiple active non-webui sessions (all must be ignored)
         now = datetime.now(timezone.utc)
         older_session = _mock_session("uuid-session-old", updated_at=now)
-        # Newer session: 1 minute later
         from datetime import timedelta
 
         newer_time = now + timedelta(minutes=1)
@@ -274,6 +303,8 @@ class TestMultipleActiveSessions:
             headers={"Authorization": "Bearer tok"},
         )
         assert resp.status_code == 200
+        # Issue #3025: get_active_sessions must NOT be called (fallback removed)
+        mock_sm.get_active_sessions.assert_not_called()
 
 
 # ===================================================================
@@ -284,6 +315,7 @@ class TestMultipleActiveSessions:
 class TestXSessionIdHeaderOverride:
     """Test that X-Session-Id header still takes precedence."""
 
+    @patch(_GATEWAY_PATH, side_effect=lambda: _make_noop_gateway())
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_SESSION_MGR_PATH)
@@ -298,6 +330,7 @@ class TestXSessionIdHeaderOverride:
         mock_session_mgr,
         mock_quota_cls,
         mock_http,
+        mock_gateway,
         workspace_app,
     ):
         """X-Session-Id header should take precedence over active session lookup."""
@@ -344,13 +377,17 @@ class TestXSessionIdHeaderOverride:
 
 
 # ===================================================================
-# E. Webui session filter
+# E. Webui aggregate used directly (no session lookup)
 # ===================================================================
 
 
 class TestWebuiSessionFilter:
-    """Test that webui aggregate sessions are filtered from active session lookup."""
+    """Test that webui:* tokens without X-Session-Id use aggregate session directly.
 
+    Issue #3025: No active-session lookup is performed for webui:* tokens.
+    """
+
+    @patch(_GATEWAY_PATH, side_effect=lambda: _make_noop_gateway())
     @patch(_HTTP_PATH)
     @patch(_QUOTA_PATH)
     @patch(_SESSION_MGR_PATH)
@@ -359,15 +396,16 @@ class TestWebuiSessionFilter:
         "app.utils.llm_proxy_url_validator.validate_llm_proxy_url",
         _mock_validate_llm_proxy_url,
     )
-    def test_filters_webui_sessions_from_lookup(
+    def test_no_session_lookup_for_webui_aggregate(
         self,
         mock_get_proxy,
         mock_session_mgr,
         mock_quota_cls,
         mock_http,
+        mock_gateway,
         workspace_app,
     ):
-        """Webui aggregate sessions should be filtered from active session lookup."""
+        """Webui:* tokens without X-Session-Id must not trigger session lookup."""
         mock_proxy = MagicMock()
         mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
         mock_proxy.get_tool_model_pool.return_value = {
@@ -384,11 +422,7 @@ class TestWebuiSessionFilter:
         )
         mock_get_proxy.return_value = mock_proxy
 
-        # User has both webui and non-webui sessions
-        webui_session = _mock_session("webui:1")
-        non_webui_session = _mock_session("uuid-session-123")
         mock_sm = MagicMock()
-        mock_sm.get_active_sessions.return_value = [webui_session, non_webui_session]
         mock_session_mgr.return_value = mock_sm
 
         mock_quota_cls.return_value = _make_quota_ok()
@@ -401,3 +435,5 @@ class TestWebuiSessionFilter:
             headers={"Authorization": "Bearer tok"},
         )
         assert resp.status_code == 200
+        # Issue #3025: No session lookup for webui:* tokens without X-Session-Id
+        mock_sm.get_active_sessions.assert_not_called()
