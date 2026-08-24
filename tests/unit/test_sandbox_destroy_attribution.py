@@ -11,9 +11,13 @@ gVisor (#2023) will kill its sandbox by id here.
 
 from __future__ import annotations
 
+import pytest
+
 from app.modules.workspace.autonomous.sandbox.fake import FakeSandboxProvider
 from app.modules.workspace.autonomous.sandbox.legacy_posix import LegacyPosixProvider
 from app.modules.workspace.autonomous.sandbox.remote_machine import RemoteMachineProvider
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2022)]
 
 
 class _FakeRSM:
@@ -31,9 +35,11 @@ class _FakeRSM:
 
 
 def test_legacy_destroy_attribution_is_noop() -> None:
-    # Local proc died with the server; nothing to destroy. Must not raise.
+    # Local proc died with the server; nothing to destroy. Must not raise,
+    # and legacy attribution is a pure no-op (no state to consult).
     provider = LegacyPosixProvider()
     provider.destroy_attribution("any-sandbox-id", None)
+    assert provider._status == {}  # noqa: SLF001 - no bookkeeping was touched
 
 
 def test_remote_destroy_attribution_stops_session_by_id() -> None:
@@ -60,6 +66,9 @@ def test_remote_destroy_attribution_swallows_stop_errors() -> None:
     rsm.stop_raises = True
     provider = RemoteMachineProvider(rsm)
     provider.destroy_attribution("sandbox-1", "remote-session-42")
+    # The stop was attempted (and recorded) even though it raised — the
+    # swallow must not mean "silently skipped".
+    assert rsm.stop_calls == ["remote-session-42"]
     provider.destroy_attribution("sandbox-1", "remote-session-42")
 
 

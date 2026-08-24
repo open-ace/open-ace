@@ -20,6 +20,9 @@ from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 # ── _parse_single_shot_line ───────────────────────────────────────────
 
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(723)]
+
+
 class TestParseSingleShotLine:
     """The per-line normalizer must emit dict events the extractors expect."""
 

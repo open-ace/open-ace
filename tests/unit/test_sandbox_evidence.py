@@ -11,7 +11,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from app.modules.workspace.autonomous.command_evidence.recorder import CommandEvidenceRecorder
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2022)]
 
 
 def _capturing_recorder() -> tuple[CommandEvidenceRecorder, list]:

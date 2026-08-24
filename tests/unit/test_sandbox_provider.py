@@ -18,6 +18,8 @@ from app.modules.workspace.autonomous.sandbox.types import (
     SandboxStatus,
 )
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2022)]
+
 _FAKE_CAPS = frozenset(
     {
         SandboxCapability.PRIVATE_HOME_TMP_XDG,
@@ -119,6 +121,9 @@ def test_destroy_unknown_handle_is_idempotent():
         spec=_spec(),
     )
     provider.destroy(orphan)  # no raise
+    # Reconciliation retries destroy on the NEXT pass too — the unknown id
+    # must keep inspecting as destroyed rather than raising or resurrecting.
+    assert provider.inspect(orphan) == SandboxStatus.DESTROYED
 
 
 def test_upload_workspace_is_noop_in_p1():
@@ -128,7 +133,10 @@ def test_upload_workspace_is_noop_in_p1():
     # place. P1 just pins the method exists and does not raise.
     provider = FakeSandboxProvider()
     handle = provider.create(_spec())
+    before = provider.inspect(handle)
     provider.upload_workspace(handle, snapshot=None)  # must not raise
+    # No-op must leave the sandbox state unmodified.
+    assert provider.inspect(handle) == before
 
 
 def test_collect_changes_returns_placeholder_in_p1():

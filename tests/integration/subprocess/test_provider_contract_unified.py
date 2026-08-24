@@ -28,6 +28,8 @@ from app.modules.workspace.autonomous.sandbox.types import (
 )
 from app.modules.workspace.autonomous.task_isolation import AgentTaskPolicy
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2022)]
+
 _LEGACY_CAPS = frozenset(
     {
         SandboxCapability.PRIVATE_HOME_TMP_XDG,
@@ -61,13 +63,14 @@ class _LegacyHarness:
     provider_name = "legacy_posix"
     expected_caps = _LEGACY_CAPS
 
-    def __init__(self) -> None:
+    def __init__(self, project_path: str) -> None:
         self.provider = LegacyPosixProvider()
+        self._project_path = project_path
 
     def spec(self, **overrides: Any) -> SandboxSpec:
         base: dict[str, Any] = {
             "task_id": "t",
-            "project_path": tempfile.gettempdir(),
+            "project_path": self._project_path,
             "cli_tool": "c",
         }
         base.update(overrides)
@@ -88,7 +91,7 @@ class _LegacyHarness:
         inspects a distinct facet of ``build_launch_argv`` for a cross-user spec
         — the launcher entry point is the signal that ACL/cgroup/HOME-TMP/
         privilege-drop are wired (the cgroup write itself is integration-tested
-        in tests/issues/2020 Phase A). Non-flaky: build_launch_argv is pure, no
+        in the legacy issue-2020 suite, Phase A). Non-flaky: build_launch_argv is pure, no
         spawn, no root.
         """
 
@@ -145,7 +148,7 @@ class _RemoteHarness:
     # be a fail-closed lie.
     expected_caps = frozenset()
 
-    def __init__(self) -> None:
+    def __init__(self, project_path: str | None = None) -> None:  # noqa: ARG002
         self.provider = RemoteMachineProvider(_FakeRemoteSessionManager(), poll_interval=0)
 
     def spec(self, **overrides: Any) -> SandboxSpec:
@@ -187,8 +190,9 @@ HARNESSES = [_LegacyHarness, _RemoteHarness]
 
 
 @pytest.fixture(params=HARNESSES, ids=[h.name for h in HARNESSES])
-def harness(request):
-    return request.param()
+def harness(request, tmp_path):
+    # tmp_path is the Legacy arm's real-Popen cwd; the Remote arm ignores it.
+    return request.param(str(tmp_path))
 
 
 # ── shared contract assertions ──
@@ -292,8 +296,14 @@ def test_every_declared_capability_has_a_realism_probe(harness):
 
 def test_realism_probes_pass(harness):
     """Each declared cap's enforcement wiring is exercised and holds."""
+    exercised: list[str] = []
     for cap, probe in harness.realism_probes().items():
+        # Probes assert internally; failures re-raise naming the provider+cap.
         try:
             probe()
         except AssertionError as e:
             raise AssertionError(f"{harness.name} realism probe for {cap.value} failed: {e}") from e
+        exercised.append(cap.value)
+    # Every declared capability got its probe run — none skipped or swallowed.
+    declared_values = {c.value for c in harness.provider.capabilities()}
+    assert set(exercised) == declared_values

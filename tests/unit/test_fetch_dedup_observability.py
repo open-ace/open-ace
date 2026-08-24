@@ -16,7 +16,11 @@ import logging
 import sys
 from pathlib import Path
 
-SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(723)]
+
+SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
@@ -103,4 +107,6 @@ class TestWarnIfSkippedMessageHasText:
         warn_if_skipped_message_has_text("not-a-row", {"content": None}, "s", "m", "x")
         warn_if_skipped_message_has_text((1,), {}, "s", "m", "x")
         warn_if_skipped_message_has_text(None, None, "s", "m", "x")
-        # No exception raised == pass.
+        # No exception raised AND the degenerate inputs produced no warnings
+        # (nothing observable to report for contentless rows).
+        assert not [r for r in caplog.records if "fetch_dedup" in r.name]

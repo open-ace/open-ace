@@ -29,6 +29,8 @@ from app.modules.workspace.autonomous.agent_runner import (
     _LocalSession,
 )
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(723)]
+
 
 def _make_session(**kwargs):
     """Build a _LocalSession with only the fields the unit tests touch."""
@@ -58,40 +60,76 @@ class TestIsoToEpoch:
         assert _iso_to_epoch("not-a-date") is None
 
 
+class _FakeStdout:
+    """Deterministic stdout for driving the REAL ``_read_stdout`` loop.
+
+    Yields the given JSON lines one readline() at a time, then EOF ("").
+    """
+
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = list(lines)
+
+    def readline(self) -> str:
+        return self._lines.pop(0) if self._lines else ""
+
+
+def _assistant_line(message_id: str | None, text: str = "hi") -> str:
+    """One stream-json assistant event, shaped as the CLI emits it."""
+    import json as _json
+
+    msg: dict = {"content": text}
+    if message_id is not None:
+        msg["id"] = message_id
+    return _json.dumps({"type": "assistant", "message": msg})
+
+
+_RESULT_LINE = '{"type": "result", "subtype": "success", "result": "done"}'
+
+
+def _drive_read_stdout(lines: list[str]):
+    """Feed stream-json lines through the real reader; return the session."""
+    # _run_local resolves the usage-parser seam before reading; do the same
+    # here so the result-event branch has its helpers (built-in fallback OK).
+    import app.modules.workspace.autonomous.agent_runner as ar_mod
+
+    ar_mod._ensure_usage_parser()
+    runner = AutonomousAgentRunner()
+    session = _make_session()
+    session.process.stdout = _FakeStdout(lines)
+    runner._read_stdout(session)
+    return session
+
+
 class TestRequestCountDedupField:
     """The _counted_message_ids set is what makes request_count per-turn-correct.
 
-    _read_stdout adds a message_id to this set the first time it's seen and bumps
-    request_count; subsequent events for the same message_id (thinking then text
-    for one assistant message) do NOT bump it. We simulate that logic here to
-    lock the invariant the production code relies on.
+    The tests drive the REAL ``AutonomousAgentRunner._read_stdout`` with a fake
+    stdout replaying stream-json lines: a message_id is added to the set the
+    first time it's seen and bumps request_count; subsequent events for the
+    same message_id (thinking then text for one assistant message) do NOT bump
+    it. The result-event fallback only fires when no ids were seen at all.
     """
 
     def test_distinct_ids_each_bump(self):
-        session = _make_session()
-        for mid in ["msg_a", "msg_b", "msg_c"]:
-            if mid not in session._counted_message_ids:
-                session._counted_message_ids.add(mid)
-                session.request_count += 1
+        session = _drive_read_stdout([_assistant_line(mid) for mid in ("msg_a", "msg_b", "msg_c")])
         assert session.request_count == 3
+        assert session._counted_message_ids == {"msg_a", "msg_b", "msg_c"}
 
     def test_repeated_id_bumps_once(self):
-        session = _make_session()
-        for mid in ["msg_1", "msg_1", "msg_1"]:
-            if mid not in session._counted_message_ids:
-                session._counted_message_ids.add(mid)
-                session.request_count += 1
+        session = _drive_read_stdout(
+            [_assistant_line("msg_1"), _assistant_line("msg_1"), _assistant_line("msg_1")]
+        )
         assert session.request_count == 1
+        assert session._counted_message_ids == {"msg_1"}
 
     def test_thinking_then_text_same_id_one_request(self):
         """The #723 shape: a message split into thinking + text events sharing
         one message_id must count as a single request."""
-        session = _make_session()
-        for mid in ["msg_1", "msg_1"]:  # thinking event, then text event
-            if mid not in session._counted_message_ids:
-                session._counted_message_ids.add(mid)
-                session.request_count += 1
+        session = _drive_read_stdout(
+            [_assistant_line("msg_1", text="thinking..."), _assistant_line("msg_1", text="answer")]
+        )
         assert session.request_count == 1
+        assert session._counted_message_ids == {"msg_1"}
 
     def test_field_defaults_to_empty_set(self):
         session = _make_session()
@@ -102,24 +140,21 @@ class TestRequestCountDedupField:
         """Regression guard (review on #1270): when assistant events carry NO
         message.id (older/non-Claude adapters, e.g. tests/issues/716), the turn
         is counted via the result-event fallback so request_count isn't dropped
-        to 0. Simulates the result-handler fallback logic."""
-        session = _make_session()
-        # An assistant turn with no message.id → _counted_message_ids stays empty.
-        # The result fallback: if no ids were counted, bump request_count to 1.
-        if not session._counted_message_ids and session.request_count == 0:
-            session.request_count += 1
+        to 0."""
+        session = _drive_read_stdout(
+            [_assistant_line(None), _RESULT_LINE],
+        )
         assert session.request_count == 1
+        assert session._counted_message_ids == set()
 
     def test_id_assistant_turn_disables_result_fallback(self):
         """When ids WERE seen, the result fallback must NOT bump (turns already
         counted per-id; result summarizes the whole run)."""
-        session = _make_session()
-        session._counted_message_ids.add("msg_a")
-        session.request_count = 1
-        before = session.request_count
-        if not session._counted_message_ids and session.request_count == 0:
-            session.request_count += 1
-        assert session.request_count == before  # unchanged
+        session = _drive_read_stdout(
+            [_assistant_line("msg_a"), _RESULT_LINE],
+        )
+        assert session.request_count == 1
+        assert session._counted_message_ids == {"msg_a"}
 
 
 class TestReplayUsageFromJsonl:
