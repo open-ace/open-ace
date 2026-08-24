@@ -121,7 +121,9 @@ def test_non_comment_gh_command_still_sudos_cross_user():
         gh._run_gh(["pr", "view", "1", "--json", "number"])
     cmd = run.call_args.args[0]
     assert cmd[:3] == ["sudo", "-u", "repoowner"], f"non-comment must keep sudo (got {cmd[:4]})"
-    assert "gh" in cmd
+    # Cross-user gh now runs through the root-owned validating wrapper (#2650),
+    # never the bare ``gh`` binary.
+    assert cmd[3] == "/usr/local/bin/openace-gh"
 
 
 def test_comment_degrades_to_sudo_when_no_bot_token_cross_user():

@@ -2228,6 +2228,29 @@ _install_wrapper() {
     return 0
 }
 
+install_git_gh_wrappers() {
+    local install_dir="$1"
+    local config_src_dir="$install_dir/config/openace"
+
+    if [ ! -f "$install_dir/scripts/openace-git.py" ] || [ ! -f "$install_dir/scripts/openace-gh.py" ]; then
+        print_warning "openace git/gh wrappers not found under $install_dir/scripts; skipping"
+        return 1
+    fi
+    if [ ! -f "$config_src_dir/git-wrapper.json" ] || [ ! -f "$config_src_dir/gh-wrapper.json" ]; then
+        print_warning "openace git/gh wrapper config not found under $config_src_dir; skipping"
+        return 1
+    fi
+
+    install -o root -g root -m 0755 "$install_dir/scripts/openace-git.py" /usr/local/bin/openace-git || return 1
+    install -o root -g root -m 0755 "$install_dir/scripts/openace-gh.py" /usr/local/bin/openace-gh || return 1
+    install -d -o root -g root -m 0755 /etc/openace || return 1
+    install -o root -g root -m 0644 "$config_src_dir/git-wrapper.json" /etc/openace/git-wrapper.json || return 1
+    install -o root -g root -m 0644 "$config_src_dir/gh-wrapper.json" /etc/openace/gh-wrapper.json || return 1
+
+    print_success "Installed openace git/gh wrappers and config"
+    return 0
+}
+
 # Install the chown wrapper BEFORE configure_sudoers (Issue #2349):
 # the sudoers rule keys off `[ -x /usr/local/bin/openace-chown ]`.
 install_chown_wrapper() {
@@ -2585,10 +2608,11 @@ ${fetch_rules}"
 # Agent 进程通过 openace-run-as --isolated 使用 env -i，不继承 env_keep
 # env_keep 主要用于 WebUI 启动（sudo -u），需要清理敏感凭据
 # 移除：OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENCLAW_TOKEN, GH_TOKEN
-# 保留：非敏感变量（proxy_token, GIT_*签名变量, PATH）
+# 保留：非敏感变量（proxy_token, GIT_*签名变量）
 # 【Issue #2298】OPENAI_API_KEY/OPENAI_BASE_URL 不再通过 env_keep，
 # 改由 webui_manager 通过 sudo -u user /usr/bin/env KEY=val ... 内联传递
-Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH\"
+# 【Issue #2650】PATH 移除：secure_path 已覆盖命令查找，env_keep PATH 是死配置兼隐患
+Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR\"
 Defaults env_keep += \"GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
 Defaults env_keep += \"SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS\"
 
@@ -2612,108 +2636,9 @@ Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
     local GH_PATH=$(which gh 2>/dev/null || echo "/usr/bin/gh")
 
     local cmnd_alias_section="# 【安全加固 Issue #2334】安全命令别名定义
-# git命令白名单（动词优先条目 + #2635 前缀锚定条目）
-# 【安全边界说明（诚实版）】动词优先白名单只约束裸 'git <verb>'/'gh <verb>' 形态；
-# #2635 前缀锚定条目（-c core.hooksPath=/dev/null * / --git-dir=* / -R * / api *）
-# 在 (ALL) runas 下实际上恢复了接近 #2334 之前的 git/gh 能力。前缀是公开常量，
-# 仅作命令形态兼容锚点，不是安全边界；真正的收紧由后续 hardened wrapper
-# （openace-git/openace-gh，follow-up issue）承接。
-# 【Issue #2334】使用 (ALL) runas 以允许 github_ops 跨用户 git 操作
-# 【Issue #2635】前缀锚定条目：github_ops._run_git 的 sudo 路径在子命令前携带
-# git 全局选项（-c core.hooksPath=/dev/null ... 或 --git-dir=... --work-tree=...），
-# git 语法要求全局选项必须位于子命令之前，因此命令永不以 'git <subcommand>' 开头，
-# 动词优先白名单一条都匹配不上。
-# 注意：前缀锚定条目在 (ALL) runas 下近似恢复旧版 'git *' 能力（非更窄）；
-# 前缀是公开常量 = 形态兼容锚点，非安全边界；真正的收紧由后续
-# hardened wrapper（openace-git）承接（follow-up issue）。
-Cmnd_Alias GIT_SAFE = \\
-    ${GIT_PATH} -c core.hooksPath=/dev/null *, \\
-    ${GIT_PATH} --git-dir=*, \\
-    ${GIT_PATH} config --global --add safe.directory *, \\
-    ${GIT_PATH} remote get-url origin, \\
-    ${GIT_PATH} remote add *, \\
-    ${GIT_PATH} checkout *, \\
-    ${GIT_PATH} checkout -b *, \\
-    ${GIT_PATH} checkout -b * *, \\
-    ${GIT_PATH} push *, \\
-    ${GIT_PATH} push -u *, \\
-    ${GIT_PATH} push origin *, \\
-    ${GIT_PATH} push origin --delete *, \\
-    ${GIT_PATH} push origin * --force-with-lease, \\
-    ${GIT_PATH} fetch *, \\
-    ${GIT_PATH} pull *, \\
-    ${GIT_PATH} merge *, \\
-    ${GIT_PATH} rebase *, \\
-    ${GIT_PATH} reset --hard HEAD, \\
-    ${GIT_PATH} branch *, \\
-    ${GIT_PATH} branch --show-current, \\
-    ${GIT_PATH} branch -D *, \\
-    ${GIT_PATH} rev-parse *, \\
-    ${GIT_PATH} rev-list --count *, \\
-    ${GIT_PATH} worktree add *, \\
-    ${GIT_PATH} worktree add -b *, \\
-    ${GIT_PATH} worktree remove *, \\
-    ${GIT_PATH} worktree remove * --force, \\
-    ${GIT_PATH} worktree list --porcelain, \\
-    ${GIT_PATH} diff *, \\
-    ${GIT_PATH} diff --numstat *, \\
-    ${GIT_PATH} show *, \\
-    ${GIT_PATH} show --format= *, \\
-    ${GIT_PATH} show --numstat --format= *, \\
-    ${GIT_PATH} status --porcelain, \\
-    ${GIT_PATH} status *, \\
-    ${GIT_PATH} log *, \\
-    ${GIT_PATH} add *, \\
-    ${GIT_PATH} add -A, \\
-    ${GIT_PATH} commit *, \\
-    ${GIT_PATH} commit -m *, \\
-    ${GIT_PATH} commit -m * --no-verify, \\
-    ${GIT_PATH} init
-
-# gh命令白名单（动词优先条目 + #2635 前缀锚定条目）
-# Issue #1855: --admin 仅在 OPENACE_ALLOW_ADMIN_MERGE=1 时启用
-# 【Issue #2334】使用 (ALL) runas 以允许 github_ops 跨用户 gh 操作
-# 【Issue #2635】前缀锚定条目：github_ops._run_gh 的 sudo 路径总是在子命令前插入
-# '-R owner/repo'（gh 无 -C，sudo 下靠 -R 定位仓库）；且 gh api 拒绝 -R、以
-# 'gh api repos/...' 裸形态运行。
-# 注意：'gh api *' 允许任意 REST 调用（含 -X DELETE），'-R *' 下的动词同样
-# 不受白名单约束——此两条在 (ALL) runas 下近似恢复旧版 'gh *' 能力（非更窄）；
-# 前缀是公开常量 = 形态兼容锚点，非安全边界；真正的收紧由后续
-# hardened wrapper（openace-gh）承接（follow-up issue）。
-Cmnd_Alias GH_SAFE = \\
-    ${GH_PATH} -R *, \\
-    ${GH_PATH} api *, \\
-    ${GH_PATH} repo create *, \\
-    ${GH_PATH} repo create * --private, \\
-    ${GH_PATH} repo create * --public, \\
-    ${GH_PATH} repo create * --description *, \\
-    ${GH_PATH} repo view --json *, \\
-    ${GH_PATH} issue create --title * --body *, \\
-    ${GH_PATH} issue create --title * --body * --label *, \\
-    ${GH_PATH} issue view * --json *, \\
-    ${GH_PATH} issue comment * --body *, \\
-    ${GH_PATH} issue view * --comments --json *, \\
-    ${GH_PATH} issue edit * --title *, \\
-    ${GH_PATH} issue edit * --body *, \\
-    ${GH_PATH} issue close *, \\
-    ${GH_PATH} issue reopen *, \\
-    ${GH_PATH} pr create --title * --body * --base *, \\
-    ${GH_PATH} pr create --title * --body * --base * --head *, \\
-    ${GH_PATH} pr create --title * --body * --base * --head * --draft, \\
-    ${GH_PATH} pr view * --json *, \\
-    ${GH_PATH} pr comment * --body *, \\
-    ${GH_PATH} pr merge *, \\
-    ${GH_PATH} pr merge * --merge, \\
-    ${GH_PATH} pr merge * --squash, \\
-    ${GH_PATH} pr merge * --rebase, \\
-    ${GH_PATH} pr merge * --auto, \\
-    ${GH_PATH} pr view * --json commits, \\
-    ${GH_PATH} pr checks * --json *, \\
-    ${GH_PATH} pr diff *, \\
-    ${GH_PATH} pr list *, \\
-    ${GH_PATH} api user, \\
-    ${GH_PATH} api repos/*/pulls/*/comments --jq *, \\
-    ${GH_PATH} api repos/*/issues/*/comments --jq *
+# git/gh cross-user operations are validated by root-owned wrappers (#2650).
+Cmnd_Alias GIT_SAFE = /usr/local/bin/openace-git *
+Cmnd_Alias GH_SAFE = /usr/local/bin/openace-gh *
 
 # 【安全加固 Issue #2334】OPENACE_UTILS 收紧
 # 移除 git/gh 通配（改用 GIT_SAFE/GH_SAFE），消除 runas 漂移
@@ -2816,6 +2741,29 @@ ${line}"
         if ! grep -q "Cmnd_Alias MKDIR_SAFE" "$sudoers_file" 2>/dev/null || \
            ! grep -E "^${run_user} ALL=\(ALL\) NOPASSWD: MKDIR_SAFE" "$sudoers_file" 2>/dev/null; then
             print_warning "Sudoers missing MKDIR_SAFE cross-user mkdir rule for user '$run_user'"
+            need_update=true
+        fi
+
+        # 【安全加固 Issue #2650】Check git/gh wrapper-only aliases on upgrade.
+        # Existing package deployments may already satisfy the unrelated
+        # webui/fetch/mkdir/secure_path probes while still carrying the old
+        # direct wildcard sudoers boundary:
+        #   git -c core.hooksPath=/dev/null *
+        #   git --git-dir=*
+        #   gh -R *
+        #   gh api *
+        # Those prefix wildcards are compatibility anchors, not validators.
+        # Require exact wrapper-only aliases and current-user rules before the
+        # "already correct" early return so upgrades rewrite stale sudoers.
+        if ! grep -E '^Cmnd_Alias[[:space:]]+GIT_SAFE[[:space:]]*=[[:space:]]*/usr/local/bin/openace-git[[:space:]]+\*[[:space:]]*$' "$sudoers_file" 2>/dev/null || \
+           ! grep -E "^${run_user} ALL=\(ALL\) NOPASSWD: GIT_SAFE([[:space:]]|$)" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing wrapper-only GIT_SAFE rule for user '$run_user'"
+            need_update=true
+        fi
+
+        if ! grep -E '^Cmnd_Alias[[:space:]]+GH_SAFE[[:space:]]*=[[:space:]]*/usr/local/bin/openace-gh[[:space:]]+\*[[:space:]]*$' "$sudoers_file" 2>/dev/null || \
+           ! grep -E "^${run_user} ALL=\(ALL\) NOPASSWD: GH_SAFE([[:space:]]|$)" "$sudoers_file" 2>/dev/null; then
+            print_warning "Sudoers missing wrapper-only GH_SAFE rule for user '$run_user'"
             need_update=true
         fi
 
@@ -4414,6 +4362,10 @@ install_local() {
         install_cat_wrapper "$sudoers_install_dir"
         install_mkdir_wrapper "$sudoers_install_dir"
         install_rm_wrapper "$sudoers_install_dir"
+        if ! install_git_gh_wrappers "$sudoers_install_dir"; then
+            print_error "Failed to install git/gh wrappers; refusing to write wrapper-only sudoers"
+            return 1
+        fi
 
         configure_sudoers "$sudoers_run_user" "$sudoers_install_dir"
         if [ $? -ne 0 ]; then

@@ -1,0 +1,16 @@
+{
+  "allow_admin_merge": false,
+  "workflow_branch_patterns": [
+    "^(auto-dev|review-fix|ci-repair|fork)/[A-Za-z0-9._/-]+$"
+  ],
+  "real_gh_paths": [
+    "/usr/bin/gh",
+    "/usr/local/bin/gh"
+  ],
+  "fixed_jq_filters": {
+    "issue_comment": ".[] | {id, body, createdAt: .created_at, author: {login: .user.login}}",
+    "paginated_issue_comment": ".[] | {id, body, created_at, user: .user.login}",
+    "closure": ".[] | select(.event == \"closed\") | {closed_at: .created_at, closer_login: .actor.login}",
+    "review_comment": ".[] | {id, path, body, line, created_at, user: .user.login}"
+  }
+}

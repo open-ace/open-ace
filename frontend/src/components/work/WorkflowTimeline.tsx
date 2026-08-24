@@ -104,7 +104,7 @@ const formatSessionTimestamp = (value?: string | null): string => {
 };
 
 // Milestone type display config
-const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
+export const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
   repo_setup: { icon: 'bi-github', color: 'dark' },
   issue_created: { icon: 'bi-card-text', color: 'info' },
   branch_created: { icon: 'bi-git', color: 'success' },
@@ -115,7 +115,11 @@ const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
   dev_started: { icon: 'bi-code-slash', color: 'primary' },
   dev_completed: { icon: 'bi-check2-square', color: 'success' },
   tests_run: { icon: 'bi-activity', color: 'info' },
-  pr_created: { icon: 'bi-git-pull-request', color: 'success' },
+  // bi-git-pull-request does not exist in bootstrap-icons (no PR icons in
+  // the set) — the pre-fix class rendered an empty glyph since the map's
+  // introduction. bi-file-earmark-diff carries the "proposed code change"
+  // meaning instead.
+  pr_created: { icon: 'bi-file-earmark-diff', color: 'success' },
   pr_reviewed: { icon: 'bi-chat-left-text', color: 'warning' },
   pr_updated: { icon: 'bi-pencil-square', color: 'primary' },
   pr_review_summary: { icon: 'bi-check2-circle', color: 'success' },
@@ -125,6 +129,39 @@ const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
   round_completed: { icon: 'bi-flag-fill', color: 'success' },
   merged: { icon: 'bi-sign-merge-right', color: 'success' },
   cleaned_up: { icon: 'bi-trash', color: 'secondary' },
+  // CI repair family (merge phase). Exhausted/failed variants stay warning so
+  // the "needs attention" tone is visible at a glance in the timeline.
+  ci_repair_started: { icon: 'bi-wrench', color: 'warning' },
+  ci_repair_applied: { icon: 'bi-wrench-adjustable-circle', color: 'primary' },
+  ci_repair_exhausted: { icon: 'bi-exclamation-triangle', color: 'warning' },
+  ci_repair_no_change_exhausted: { icon: 'bi-clipboard-x', color: 'warning' },
+  ci_repair_transient_exhausted: { icon: 'bi-lightning-charge', color: 'warning' },
+  ci_repair_escalated_to_development: { icon: 'bi-arrow-up-right-square', color: 'warning' },
+  ci_repair_environment_mismatch: { icon: 'bi-hdd-network', color: 'warning' },
+  ci_diagnostics_pending: { icon: 'bi-search', color: 'info' },
+  ci_failed_before_report: { icon: 'bi-x-circle', color: 'warning' },
+  timing_issue: { icon: 'bi-clock-history', color: 'warning' },
+  pr_zero_check_runs: { icon: 'bi-slash-circle', color: 'warning' },
+  // Conflict / worktree family.
+  conflicts_pushed: { icon: 'bi-box-arrow-up', color: 'success' },
+  worktree_restored: { icon: 'bi-arrow-counterclockwise', color: 'info' },
+  branch_mismatch: { icon: 'bi-shuffle', color: 'warning' },
+  // Acceptance family. The verdict itself is carried by the status badge and
+  // the ✅/❌/⚠️ tone in the card summary; these icons mark the action.
+  acceptance_verification: { icon: 'bi-shield-check', color: 'primary' },
+  acceptance_rejected_cap_exhausted: { icon: 'bi-shield-exclamation', color: 'warning' },
+  acceptance_rejected_reopened: { icon: 'bi-bootstrap-reboot', color: 'warning' },
+  pr_head_unverified: { icon: 'bi-question-circle', color: 'warning' },
+  // Wait / bookkeeping family. frontend_node_modules_shim_failed only exists
+  // on historical rows (producer reverted in #2694) but still needs an icon.
+  wait_started: { icon: 'bi-hourglass', color: 'secondary' },
+  issue_linked: { icon: 'bi-link-45deg', color: 'info' },
+  no_changes: { icon: 'bi-dash-circle', color: 'secondary' },
+  cleanup_pending: { icon: 'bi-trash3', color: 'secondary' },
+  terminal_report_posted: { icon: 'bi-file-earmark-check', color: 'success' },
+  frontend_node_modules_shim_failed: { icon: 'bi-exclamation-diamond', color: 'warning' },
+  recovery_evidence_missing: { icon: 'bi-journal-x', color: 'warning' },
+  workflow_forked: { icon: 'bi-diagram-3', color: 'info' },
 };
 
 // Milestone types whose `plan_content` / `review_content` holds full-text output
@@ -294,7 +331,7 @@ export const formatAcceptanceReport = (metadata: string, language: Language): st
   }
   return lines.join('\n').trim();
 };
-const MILESTONE_ICON_COLORS: Record<string, string> = {
+export const MILESTONE_ICON_COLORS: Record<string, string> = {
   dark: 'var(--text-primary)',
   info: 'var(--color-info)',
   success: 'var(--color-success)',
@@ -2329,7 +2366,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     rel="noopener noreferrer"
                     className="timeline-pill-link"
                   >
-                    <i className="bi bi-git-pull-request"></i>
+                    <i className="bi bi-file-earmark-diff"></i>
                     <span>
                       {t('autoPrBadge', language)}
                       {workflow.github_pr_number}
@@ -2337,7 +2374,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   </a>
                 ) : (
                   <span className="timeline-chip timeline-chip--subtle">
-                    <i className="bi bi-git-pull-request me-1"></i>
+                    <i className="bi bi-file-earmark-diff me-1"></i>
                     {t('autoPrBadge', language)}
                     {workflow.github_pr_number}
                   </span>
