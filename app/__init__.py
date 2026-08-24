@@ -1088,8 +1088,8 @@ def start_background_services():
 
     # Issue #2596: Start deregister compensation worker
     try:
-        from app.services.deregister_compensation_worker import start_deregister_compensation_worker
         from app.repositories.database import Database
+        from app.services.deregister_compensation_worker import start_deregister_compensation_worker
 
         db = Database()
         start_deregister_compensation_worker(db)

@@ -28,9 +28,7 @@ logger = logging.getLogger(__name__)
 COMPENSATION_CHECK_INTERVAL = int(
     os.getenv("DEREGISTER_COMPENSATION_INTERVAL_SEC", "300")
 )  # 5 minutes
-COMPENSATION_MAX_RETRIES = int(
-    os.getenv("DEREGISTER_COMPENSATION_MAX_RETRIES", "3")
-)
+COMPENSATION_MAX_RETRIES = int(os.getenv("DEREGISTER_COMPENSATION_MAX_RETRIES", "3"))
 COMPENSATION_BACKOFF_BASE = int(
     os.getenv("DEREGISTER_COMPENSATION_BACKOFF_BASE", "60")
 )  # 1 minute base, doubles each retry
@@ -254,10 +252,7 @@ class DeregisterCompensationWorker:
         fails after max retries.
         """
         try:
-            from app.modules.governance.alert_notifier import (
-                AlertSeverity,
-                create_system_alert,
-            )
+            from app.modules.governance.alert_notifier import AlertSeverity, create_system_alert
 
             create_system_alert(
                 title=f"Session termination permanently failed (failure_id={failure_id})",
@@ -267,7 +262,9 @@ class DeregisterCompensationWorker:
                 ),
                 severity=AlertSeverity.CRITICAL.value,
             )
-            logger.info("Sent alert for permanently failed session termination (failure_id=%d)", failure_id)
+            logger.info(
+                "Sent alert for permanently failed session termination (failure_id=%d)", failure_id
+            )
         except Exception as e:
             logger.error("Failed to send failure alert for failure_id %d: %s", failure_id, e)
 

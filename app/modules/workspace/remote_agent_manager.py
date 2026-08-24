@@ -40,20 +40,19 @@ try:
     from prometheus_client import Counter
 
     DEREGISTER_SESSIONS_TERMINATED = Counter(
-        'deregister_sessions_terminated_total',
-        'Total number of sessions terminated during machine deregistration'
+        "deregister_sessions_terminated_total",
+        "Total number of sessions terminated during machine deregistration",
     )
     DEREGISTER_COMMANDS_DELETED = Counter(
-        'deregister_commands_deleted_total',
-        'Total number of runtime commands deleted during machine deregistration'
+        "deregister_commands_deleted_total",
+        "Total number of runtime commands deleted during machine deregistration",
     )
     DEREGISTER_OUTPUTS_DELETED = Counter(
-        'deregister_outputs_deleted_total',
-        'Total number of runtime outputs deleted during machine deregistration'
+        "deregister_outputs_deleted_total",
+        "Total number of runtime outputs deleted during machine deregistration",
     )
     DEREGISTER_FAILURES = Counter(
-        'deregister_failures_total',
-        'Total number of failed batches during machine deregistration'
+        "deregister_failures_total", "Total number of failed batches during machine deregistration"
     )
     PROMETHEUS_AVAILABLE = True
 except ImportError:

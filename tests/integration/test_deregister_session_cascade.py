@@ -250,9 +250,7 @@ class TestDeregisterSessionTermination:
         """Test that compensation worker retries failed session terminations."""
         from datetime import timedelta
 
-        from app.services.deregister_compensation_worker import (
-            DeregisterCompensationWorker,
-        )
+        from app.services.deregister_compensation_worker import DeregisterCompensationWorker
 
         machine_id = "test-machine-comp"
         session_id = "session-comp"
