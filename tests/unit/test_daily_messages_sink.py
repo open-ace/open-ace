@@ -8,10 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.modules.workspace.usage_evidence import UsageEvidence
-from app.modules.workspace.usage_sink import (
-    DailyMessagesSink,
-    _parse_messages_for_daily_messages,
-)
+from app.modules.workspace.usage_sink import DailyMessagesSink, _parse_messages_for_daily_messages
 
 
 class TestParseMessagesForDailyMessages:
