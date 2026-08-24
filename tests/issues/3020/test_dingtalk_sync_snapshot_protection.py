@@ -241,7 +241,9 @@ def test_mid_pagination_failure_does_not_deactivate(sync_env):
 
     # Existing user should not be deactivated
     existing = db.fetch_one("SELECT is_active FROM users WHERE id = ?", (existing_user_id,))
-    assert bool(existing["is_active"]), "Existing user should remain active after partial pagination"
+    assert bool(
+        existing["is_active"]
+    ), "Existing user should remain active after partial pagination"
 
     # SSO identity preserved
     identities = db.fetch_all(
@@ -310,7 +312,11 @@ def test_complete_snapshot_still_deactivates_departed_users(sync_env):
 
     # Leaver should be deactivated
     leaver_after = db.fetch_one("SELECT is_active FROM users WHERE id = ?", (leaving_id,))
-    is_active = bool(leaver_after["is_active"]) if isinstance(leaver_after["is_active"], int) else leaver_after["is_active"]
+    is_active = (
+        bool(leaver_after["is_active"])
+        if isinstance(leaver_after["is_active"], int)
+        else leaver_after["is_active"]
+    )
     assert not is_active, "Departed user should be deactivated with complete snapshot"
 
     # Leaver's SSO identity should be deleted
@@ -356,9 +362,9 @@ def test_complete_empty_directory_does_not_deactivate(sync_env):
 
     # Defensive guard: even with complete snapshot, empty seen-set skips cleanup
     existing_after = db.fetch_one("SELECT is_active FROM users WHERE id = ?", (existing_id,))
-    assert bool(existing_after["is_active"]), (
-        "Empty complete snapshot should NOT deactivate users (defensive guard)"
-    )
+    assert bool(
+        existing_after["is_active"]
+    ), "Empty complete snapshot should NOT deactivate users (defensive guard)"
 
     identities = db.fetch_all(
         "SELECT provider_user_id FROM sso_identities WHERE user_id = ?", (existing_id,)
@@ -428,13 +434,15 @@ def test_fetch_department_users_returns_completeness_tuple(monkeypatch):
     # Test successful fetch returns (users, True)
     class OkHttp:
         def post(self, url, **kwargs):
-            return FakeResponse({
-                "errcode": 0,
-                "result": {
-                    "has_more": False,
-                    "list": [{"userid": "u1", "name": "User 1", "dept_id_list": [100]}],
-                },
-            })
+            return FakeResponse(
+                {
+                    "errcode": 0,
+                    "result": {
+                        "has_more": False,
+                        "list": [{"userid": "u1", "name": "User 1", "dept_id_list": [100]}],
+                    },
+                }
+            )
 
     service_ok = DingTalkOrgSyncService(
         config_override={"dingtalk": {"app_key": "k", "app_secret": "s"}},
