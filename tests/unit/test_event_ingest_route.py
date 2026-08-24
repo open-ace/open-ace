@@ -33,6 +33,9 @@ def client(monkeypatch, tmp_path):
     monkeypatch.delenv("SECRET_KEY", raising=False)
     monkeypatch.setattr("scripts.shared.config._load_user_config", lambda: {})
     events_ingest._parse_trusted_sources.cache_clear()
+    # The blueprint's before_request gate reads the REAL config on this
+    # machine; force it so the route tests are hermetic everywhere.
+    monkeypatch.setattr("app.utils.config.is_autonomous_enabled", lambda: True)
 
     # Fresh emitter singleton so subscriber state never leaks across tests.
     AutonomousEventEmitter._instance = None
@@ -134,8 +137,74 @@ def test_event_count_over_limit_rejected(client, monkeypatch):
 
 def test_malformed_events_rejected(client, monkeypatch):
     monkeypatch.setenv("SECRET_KEY", SECRET)
-    response = _post(client, [])
-    assert response.status_code == 413
+    assert _post(client, []).status_code == 400
+    assert _post(client, "not-a-list").status_code == 400
+
+
+def test_empty_body_rejected(client, monkeypatch):
+    monkeypatch.setenv("SECRET_KEY", SECRET)
+    response = client.post(
+        "/api/autonomous/internal/events/ingest",
+        headers={"X-OpenACE-Events-Key": SECRET},
+        environ_base={"REMOTE_ADDR": "127.0.0.1"},
+    )
+    assert response.status_code == 400
+
+
+def test_ipv6_loopback_forms_accepted(client, monkeypatch):
+    monkeypatch.setenv("SECRET_KEY", SECRET)
+    for addr in ("::1", "::ffff:127.0.0.1"):
+        assert _post(client, [_event()], addr=addr).status_code == 200, addr
+
+
+def test_secret_priority_dedicated_key_wins(monkeypatch):
+    monkeypatch.setattr(
+        events_ingest,
+        "get_config_value",
+        lambda section, key, default=None: "k" * 40 if key == "events_ingest_key" else default,
+    )
+    monkeypatch.setenv("SECRET_KEY", "env-secret-should-lose")
+    assert events_ingest.resolve_ingest_secret() == "k" * 40
+
+
+def test_secret_priority_weak_dedicated_key_falls_through(monkeypatch):
+    monkeypatch.setattr(
+        events_ingest,
+        "get_config_value",
+        lambda section, key, default=None: "short" if key == "events_ingest_key" else default,
+    )
+    monkeypatch.setenv("SECRET_KEY", "env-secret-should-win")
+    assert events_ingest.resolve_ingest_secret() == "env-secret-should-win"
+
+
+def test_secret_priority_root_config_fallback(monkeypatch):
+    monkeypatch.setattr(
+        events_ingest, "get_config_value", lambda section, key, default=None: default
+    )
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.setattr("scripts.shared.config._load_user_config", lambda: {"secret_key": "root"})
+    assert events_ingest.resolve_ingest_secret() == "root"
+
+
+def test_ingest_url_explicit_override(monkeypatch):
+    monkeypatch.setattr(
+        events_ingest,
+        "get_config_value",
+        lambda section, key, default=None: (
+            "http://web:8000/ingest" if key == "events_ingest_url" else default
+        ),
+    )
+    assert events_ingest.resolve_ingest_url() == "http://web:8000/ingest"
+
+
+def test_ingest_url_default_uses_configured_web_port(monkeypatch):
+    monkeypatch.setattr(
+        events_ingest,
+        "get_config_value",
+        lambda section, key, default=None: 5000 if key == "web_port" else default,
+    )
+    monkeypatch.setattr("scripts.shared.config._get_web_port", lambda: 5000, raising=False)
+    assert events_ingest.resolve_ingest_url() == "http://127.0.0.1:5000"
 
 
 def test_route_is_marked_public_endpoint(client):

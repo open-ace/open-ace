@@ -2046,12 +2046,16 @@ def ingest_internal_events():
         return jsonify({"error": "Access denied"}), 403
 
     content_length = request.content_length
-    if content_length is None or content_length <= 0 or content_length > INGEST_MAX_BODY_BYTES:
+    if content_length is None or content_length <= 0:
+        return jsonify({"error": "Empty or missing request body"}), 400
+    if content_length > INGEST_MAX_BODY_BYTES:
         return jsonify({"error": "Payload too large"}), 413
 
     payload = request.get_json(silent=True) or {}
     events = payload.get("events")
-    if not isinstance(events, list) or not events or len(events) > INGEST_MAX_EVENTS:
+    if not isinstance(events, list) or not events:
+        return jsonify({"error": "Invalid events payload"}), 400
+    if len(events) > INGEST_MAX_EVENTS:
         return jsonify({"error": "Payload too large"}), 413
 
     emitter = _get_event_emitter()

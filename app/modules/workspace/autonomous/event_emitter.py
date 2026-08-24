@@ -40,6 +40,7 @@ FORWARD_BATCH_MAX_ITEMS = 50
 FORWARD_BATCH_MAX_BYTES = 512 * 1024
 FORWARD_EVENT_MAX_BYTES = 256 * 1024
 FORWARD_EVENT_TTL_SECONDS = 60.0
+FORWARD_BUFFER_MAX_BYTES_TOTAL = 8 * 1024 * 1024
 FORWARD_BACKOFF_START = 1.0
 FORWARD_BACKOFF_MAX = 5.0
 
@@ -74,6 +75,7 @@ class AutonomousEventEmitter:
         self._forward_url: str | None = None
         self._forward_secret: str = ""
         self._forward_buffer: list[tuple[float, str, int]] = []  # (ts, json, bytes)
+        self._forward_buffer_bytes = 0
         self._forward_lock = threading.Lock()
         self._forward_thread: threading.Thread | None = None
         self._forward_stop = threading.Event()
@@ -184,6 +186,16 @@ class AutonomousEventEmitter:
                 self._forward_thread.start()
         return True
 
+    def disable_remote_forwarding(self) -> None:
+        """Stop forwarding and drop buffered events (tests, shutdown)."""
+        with self._forward_lock:
+            self._forward_url = None
+            self._forward_secret = ""
+            self._forward_buffer = []
+            self._forward_buffer_bytes = 0
+        self._forward_stop.set()
+        self._forward_wakeup.set()
+
     def _forward_enqueue(self, event_payload: dict) -> None:
         """Queue an event for the sender thread. Bounded, never raises."""
         try:
@@ -199,15 +211,23 @@ class AutonomousEventEmitter:
                 )
                 return
             with self._forward_lock:
-                if len(self._forward_buffer) >= FORWARD_BUFFER_MAX_EVENTS:
-                    self._forward_buffer.pop(0)
+                while (
+                    len(self._forward_buffer) >= FORWARD_BUFFER_MAX_EVENTS
+                    or self._forward_buffer_bytes + size > FORWARD_BUFFER_MAX_BYTES_TOTAL
+                ):
+                    if not self._forward_buffer:
+                        break
+                    _dropped_ts, _dropped_blob, dropped_size = self._forward_buffer.pop(0)
+                    self._forward_buffer_bytes -= dropped_size
                     _ratelimited_log(
                         "forward_overflow",
                         logging.WARNING,
-                        "Forward buffer full (%d), dropping oldest event",
+                        "Forward buffer full (%d events / %d bytes), dropping oldest event",
                         FORWARD_BUFFER_MAX_EVENTS,
+                        FORWARD_BUFFER_MAX_BYTES_TOTAL,
                     )
                 self._forward_buffer.append((time.time(), blob, size))
+                self._forward_buffer_bytes += size
             self._forward_wakeup.set()
         except Exception as exc:
             # Delivery is best-effort realtime data; the local broadcast above
@@ -243,6 +263,7 @@ class AutonomousEventEmitter:
                     int(FORWARD_EVENT_TTL_SECONDS),
                 )
             self._forward_buffer = kept
+            self._forward_buffer_bytes = sum(entry[2] for entry in kept)
             batch: list[tuple[float, str, int]] = []
             total = 0
             while self._forward_buffer and len(batch) < FORWARD_BATCH_MAX_ITEMS:
@@ -251,15 +272,23 @@ class AutonomousEventEmitter:
                     break
                 batch.append(self._forward_buffer.pop(0))
                 total += candidate[2]
+                self._forward_buffer_bytes -= candidate[2]
             return batch
 
     def _forward_requeue(self, batch: list[tuple[float, str, int]]) -> None:
         """Return an undelivered batch to the front without evicting newer events."""
         with self._forward_lock:
             merged = list(batch) + self._forward_buffer
-            if len(merged) > FORWARD_BUFFER_MAX_EVENTS:
-                dropped = len(merged) - FORWARD_BUFFER_MAX_EVENTS
-                merged = merged[-FORWARD_BUFFER_MAX_EVENTS:]
+            dropped = 0
+            while (
+                len(merged) > FORWARD_BUFFER_MAX_EVENTS
+                or sum(entry[2] for entry in merged) > FORWARD_BUFFER_MAX_BYTES_TOTAL
+            ):
+                if not merged:
+                    break
+                merged.pop(0)
+                dropped += 1
+            if dropped:
                 _ratelimited_log(
                     "forward_requeue_drop",
                     logging.WARNING,
@@ -267,6 +296,7 @@ class AutonomousEventEmitter:
                     dropped,
                 )
             self._forward_buffer = merged
+            self._forward_buffer_bytes = sum(entry[2] for entry in merged)
 
     def _forward_post(self, batch: list[tuple[float, str, int]]) -> None:
         import requests
@@ -274,13 +304,22 @@ class AutonomousEventEmitter:
         from app.modules.workspace.autonomous.events_ingest import INGEST_SECRET_HEADER
 
         url = self._forward_url
-        if url is None:  # forwarding disabled between loop iterations
+        if url is None:  # disable_remote_forwarding() raced us
             return
         events = [json.loads(blob) for _ts, blob, _size in batch]
+        # Serialize ourselves with ensure_ascii=False: requests' json= helper
+        # re-serializes with ensure_ascii=True, inflating CJK (2x) and emoji
+        # (3x) payloads on the wire beyond the byte caps the buffer accounts
+        # for — exactly the large non-ASCII activity events this pipe exists
+        # to deliver. data= keeps wire bytes == accounted bytes.
+        body = json.dumps({"events": events}, ensure_ascii=False).encode("utf-8")
         response = requests.post(
             url,
-            json={"events": events},
-            headers={INGEST_SECRET_HEADER: self._forward_secret},
+            data=body,
+            headers={
+                INGEST_SECRET_HEADER: self._forward_secret,
+                "Content-Type": "application/json",
+            },
             timeout=2,
         )
         if response.status_code >= 400:
@@ -304,18 +343,20 @@ class AutonomousEventEmitter:
     def _forward_loop(self) -> None:
         backoff = FORWARD_BACKOFF_START
         while not self._forward_stop.is_set():
-            batch = self._forward_take_batch()
-            if not batch:
-                self._forward_wakeup.wait(0.25)
-                self._forward_wakeup.clear()
-                continue
+            batch: list[tuple[float, str, int]] = []
             try:
+                batch = self._forward_take_batch()
+                if not batch:
+                    self._forward_wakeup.wait(0.25)
+                    self._forward_wakeup.clear()
+                    continue
                 self._forward_post(batch)
                 backoff = FORWARD_BACKOFF_START
             except Exception as exc:
                 # Connection-type failure (web restarting): retry the batch
                 # after backoff. At-least-once — see module docstring.
-                self._forward_requeue(batch)
+                if batch:
+                    self._forward_requeue(batch)
                 _ratelimited_log(
                     "forward_conn_error",
                     logging.ERROR,

@@ -35,7 +35,9 @@ SECRET = "test-ingest-secret"
 def emitter():
     em = AutonomousEventEmitter()
     yield em
-    em._forward_stop.set()
+    em.disable_remote_forwarding()
+    if em._forward_thread is not None:
+        em._forward_thread.join(timeout=2)
 
 
 def _wait_for(condition, timeout=5.0):
@@ -65,9 +67,71 @@ def test_disabled_forwarder_never_posts(monkeypatch):
     try:
         em.emit("wf-1", "status_change", {"status": "planning"})
     finally:
-        em._forward_stop.set()
+        em.disable_remote_forwarding()
     assert em._forward_url is None
     assert _buffer_len(em) == 0
+
+
+def test_wire_body_is_not_ascii_escaped(monkeypatch, emitter):
+    # requests' json= helper re-serializes with ensure_ascii=True, inflating
+    # CJK/emoji payloads 2-3x past the byte caps the buffer accounts for. The
+    # sender must serialize with ensure_ascii=False so wire bytes == accounted
+    # bytes (review MAJOR on PR #3047).
+    posted = []
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda url, **kwargs: (posted.append((url, kwargs)), MagicMock(status_code=200))[1],
+    )
+    emitter.enable_remote_forwarding(URL, SECRET)
+    emitter.emit("wf-1", "agent_activity", {"text": "中文活动 ✓"})
+    assert _wait_for(lambda: len(posted) >= 1)
+    _url, kwargs = posted[0]
+    body = kwargs["data"]
+    assert "中文活动".encode() in body  # raw UTF-8, not \uXXXX escapes
+    assert b"\\u4e2d" not in body
+    assert kwargs["headers"]["Content-Type"] == "application/json"
+
+
+def test_buffer_total_byte_cap_drops_oldest(emitter):
+    emitter._forward_url = URL
+    chunk = "z" * 100_000
+    # 100 events × ~100KB ≈ 10MB > 8MB total cap → oldest dropped along the way
+    for i in range(100):
+        _enqueue(emitter, {"workflow_id": f"wf-{i}", "event_type": "e", "data": {"text": chunk}})
+    with emitter._forward_lock:
+        total = emitter._forward_buffer_bytes
+        first = jsonlib.loads(emitter._forward_buffer[0][1])["workflow_id"]
+    assert total <= em_mod.FORWARD_BUFFER_MAX_BYTES_TOTAL
+    assert first != "wf-0"  # the very oldest entries were evicted
+
+
+def test_disable_clears_state_and_stops_thread(monkeypatch, emitter):
+    emitter.enable_remote_forwarding(URL, SECRET)
+    thread = emitter._forward_thread
+    emitter.disable_remote_forwarding()
+    assert emitter._forward_url is None
+    assert emitter._forward_buffer == []
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+    # After disable, emit must not enqueue anything.
+    emitter.emit("wf-1", "status_change", {"status": "planning"})
+    assert _buffer_len(emitter) == 0
+
+
+def test_connection_failure_backs_off_between_attempts(monkeypatch, emitter):
+    timestamps = []
+
+    def _fail(url, **kwargs):
+        timestamps.append(time.time())
+        raise requests.ConnectionError("web restarting")
+
+    monkeypatch.setattr(requests, "post", _fail)
+    emitter.enable_remote_forwarding(URL, SECRET)
+    emitter.emit("wf-1", "status_change", {"status": "planning"})
+    assert _wait_for(lambda: len(timestamps) >= 2)
+    # The retry after a connection failure waits ≥ FORWARD_BACKOFF_START (1s).
+    assert timestamps[1] - timestamps[0] >= 0.9
 
 
 def test_enabled_emit_forwards_event_with_defaults(monkeypatch, emitter):
@@ -83,7 +147,7 @@ def test_enabled_emit_forwards_event_with_defaults(monkeypatch, emitter):
     url, kwargs = posted[0]
     assert url == URL
     assert kwargs["headers"]["X-OpenACE-Events-Key"] == SECRET
-    events = kwargs["json"]["events"]
+    events = jsonlib.loads(kwargs["data"])["events"]
     assert len(events) == 1
     assert events[0]["workflow_id"] == "wf-1"
     assert events[0]["event_type"] == "agent_activity"
@@ -99,7 +163,7 @@ def test_enable_requires_url_and_secret():
         assert em.enable_remote_forwarding(URL, "") is False
         assert em._forward_thread is None
     finally:
-        em._forward_stop.set()
+        em.disable_remote_forwarding()
 
 
 def test_double_enable_reuses_single_thread():
@@ -110,7 +174,7 @@ def test_double_enable_reuses_single_thread():
         assert em.enable_remote_forwarding(URL, SECRET)
         assert em._forward_thread is first
     finally:
-        em._forward_stop.set()
+        em.disable_remote_forwarding()
 
 
 def test_oversized_event_is_skipped(emitter):

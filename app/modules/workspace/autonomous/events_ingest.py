@@ -41,23 +41,36 @@ _LOOPBACK_ADDRS = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1"})
 def resolve_ingest_secret() -> str:
     """Resolve the shared ingest secret identically in both processes.
 
-    Priority: dedicated ``server.events_ingest_key`` > ``SECRET_KEY`` env >
-    root-level ``secret_key`` in config.json. ``get_secret_key()`` from
-    scripts.shared.config is deliberately NOT used: it returns None when the
-    SECRET_KEY env var is set ("don't override the operator"), which would
-    make the two sides resolve different values and 403 forever. An empty
-    result must disable forwarding / return 503 from the route (fail-closed).
+    Priority: dedicated ``server.events_ingest_key`` (must be ≥32 chars — an
+    ingest key is the only defense on a LAN-reachable port, so a weak one is
+    rejected with an error and the chain falls through to the strong keys) >
+    ``SECRET_KEY`` env > root-level ``secret_key`` in config.json.
+
+    ``get_secret_key()`` from scripts.shared.config is deliberately NOT used:
+    it returns None when the SECRET_KEY env var is set ("don't override the
+    operator"), which would make the two sides resolve different values and
+    403 forever. The env and config reads intentionally do NOT strip: the web
+    process consumes those same values unstripped, and asymmetric stripping
+    would desync the two sides.
+
+    An empty result must disable forwarding / return 503 from the route
+    (fail-closed).
     """
     dedicated = str(get_config_value("server", "events_ingest_key", "") or "").strip()
-    if dedicated:
+    if len(dedicated) >= 32:
         return dedicated
-    env_secret = (os.environ.get("SECRET_KEY") or "").strip()
+    if dedicated:
+        logger.error(
+            "server.events_ingest_key is shorter than 32 characters; ignoring it "
+            "and falling back to SECRET_KEY/secret_key"
+        )
+    env_secret = os.environ.get("SECRET_KEY") or ""
     if env_secret:
         return env_secret
     try:
         from scripts.shared.config import _load_user_config
 
-        root_secret = str(_load_user_config().get("secret_key") or "").strip()
+        root_secret = str(_load_user_config().get("secret_key") or "")
     except Exception:  # pragma: no cover - scripts/ always deployed with app
         root_secret = ""
     return root_secret
