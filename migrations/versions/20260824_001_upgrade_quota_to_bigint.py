@@ -84,8 +84,15 @@ def downgrade() -> None:
 
     # Check for values exceeding INTEGER range before downgrading
     tables_and_columns = [
-        ("users", ["daily_token_quota", "monthly_token_quota",
-                   "daily_request_quota", "monthly_request_quota"]),
+        (
+            "users",
+            [
+                "daily_token_quota",
+                "monthly_token_quota",
+                "daily_request_quota",
+                "monthly_request_quota",
+            ],
+        ),
         ("tenant_quotas", ["daily_request_limit", "monthly_request_limit"]),
     ]
 
