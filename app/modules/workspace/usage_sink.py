@@ -543,6 +543,346 @@ class DailyUsageSink:
             return False
 
 
+class DailyMessagesSink:
+    """Sink for writing messages to daily_messages table.
+
+    Issue #3027: Write message data to daily_messages for trend analysis.
+    Implements dual-write with session_messages for Workspace AI conversations.
+    """
+
+    def __init__(
+        self,
+        request_body: bytes | None = None,
+        response_body: bytes | None = None,
+        output_tokens: int = 0,
+        model: str | None = None,
+    ):
+        """Initialize daily messages sink.
+
+        Args:
+            request_body: Raw request body bytes (for user message extraction).
+            response_body: Raw response body bytes (for assistant message extraction).
+            output_tokens: Output tokens count.
+            model: Model name.
+        """
+        self.request_body = request_body
+        self.response_body = response_body
+        self.output_tokens = output_tokens
+        self.model = model
+
+    def consume(self, evidence: UsageEvidence) -> bool:
+        """Write messages to daily_messages table.
+
+        Args:
+            evidence: Usage evidence.
+
+        Returns:
+            True if successful or skipped (not a failure), False if failed.
+        """
+        # Skip if no session_id (not a failure, just skip)
+        if not evidence.session_id:
+            logger.debug("Skipping daily_messages record: no session_id")
+            return True
+
+        # Skip if no response body (no messages to record)
+        if not self.response_body:
+            logger.debug("Skipping daily_messages record: no response_body")
+            return True
+
+        try:
+            _write_messages_to_daily_messages(
+                evidence=evidence,
+                request_body=self.request_body,
+                response_body=self.response_body,
+                output_tokens=self.output_tokens or evidence.output_tokens,
+                model=self.model or evidence.model,
+            )
+            return True
+        except Exception as e:
+            # Log error with dedup to avoid log storm
+            error_key = f"DailyMessagesSink:{type(e).__name__}:{str(e)[:100]}"
+            if _should_log_error(error_key):
+                logger.error(
+                    "DailyMessagesSink failed: %s",
+                    e,
+                    extra={
+                        "session_id": evidence.session_id,
+                        "tenant_id": evidence.tenant_id,
+                        "error_type": type(e).__name__,
+                    },
+                    exc_info=True,
+                )
+            return True  # Non-critical, don't fail the whole pipeline
+
+
+def _write_messages_to_daily_messages(
+    evidence: UsageEvidence,
+    request_body: bytes | None,
+    response_body: bytes,
+    output_tokens: int,
+    model: str | None,
+) -> None:
+    """Write user and assistant messages to daily_messages table.
+
+    Args:
+        evidence: Usage evidence with session/user context.
+        request_body: Raw request body bytes.
+        response_body: Raw response body bytes.
+        output_tokens: Output tokens count.
+        model: Model name.
+    """
+    import json
+    from datetime import datetime
+
+    from app.repositories.database import get_db_connection, is_postgresql
+
+    # Parse messages from request/response
+    messages_to_write = _parse_messages_for_daily_messages(
+        request_body=request_body,
+        response_body=response_body,
+        output_tokens=output_tokens,
+        model=model,
+    )
+
+    if not messages_to_write:
+        return
+
+    # Generate timestamp and date
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    date_str = timestamp[:10]
+    timestamp_ms = int(time.time() * 1000)
+
+    # Get user_id from evidence or session
+    user_id = evidence.user_id
+    if not user_id or user_id <= 0:
+        # Try to get from session
+        try:
+            from app.modules.workspace.session_manager import get_session_manager
+
+            sm = get_session_manager()
+            session = sm.get_session(evidence.session_id)
+            if session:
+                user_id = getattr(session, "user_id", None)
+        except Exception:
+            pass
+
+    # Write each message
+    for seq, msg_data in enumerate(messages_to_write):
+        role = msg_data["role"]
+        content = msg_data["content"]
+
+        # Generate message_id: {session_id}-{timestamp_ms}-{sequence}
+        message_id = f"{evidence.session_id}-{timestamp_ms}-{seq}"
+
+        # Build full_entry JSON
+        full_entry_json = json.dumps(
+            {
+                "session_id": evidence.session_id,
+                "role": role,
+                "content": content,
+            },
+            ensure_ascii=False,
+        )
+
+        # Get token values
+        msg_input_tokens = msg_data.get("input_tokens", 0)
+        msg_output_tokens = msg_data.get("output_tokens", 0)
+        tokens_used = msg_input_tokens + msg_output_tokens
+
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+
+                if is_postgresql():
+                    cursor.execute(
+                        """INSERT INTO daily_messages
+                        (date, tool_name, host_name, message_id, role, content,
+                         full_entry, tokens_used, input_tokens, output_tokens,
+                         model, timestamp, message_source,
+                         conversation_id, agent_session_id, user_id, project_path, tenant_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (date, tool_name, message_id, host_name) DO NOTHING""",
+                        (
+                            date_str,
+                            evidence.tool_name or "qwen-code",
+                            evidence.host_name or "localhost",
+                            message_id,
+                            role,
+                            content[:10000],
+                            full_entry_json,
+                            tokens_used,
+                            msg_input_tokens,
+                            msg_output_tokens,
+                            model,
+                            timestamp,
+                            "llm_proxy",
+                            evidence.session_id,
+                            evidence.session_id,
+                            user_id,
+                            "",
+                            evidence.tenant_id,
+                        ),
+                    )
+                else:
+                    cursor.execute(
+                        """INSERT OR IGNORE INTO daily_messages
+                        (date, tool_name, host_name, message_id, role, content,
+                         full_entry, tokens_used, input_tokens, output_tokens,
+                         model, timestamp, message_source,
+                         conversation_id, agent_session_id, user_id, project_path, tenant_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            date_str,
+                            evidence.tool_name or "qwen-code",
+                            evidence.host_name or "localhost",
+                            message_id,
+                            role,
+                            content[:10000],
+                            full_entry_json,
+                            tokens_used,
+                            msg_input_tokens,
+                            msg_output_tokens,
+                            model,
+                            timestamp,
+                            "llm_proxy",
+                            evidence.session_id,
+                            evidence.session_id,
+                            user_id,
+                            "",
+                            evidence.tenant_id,
+                        ),
+                    )
+                conn.commit()
+        except Exception as e:
+            logger.debug(
+                "Failed to write message to daily_messages: %s (session_id=%s, message_id=%s)",
+                e,
+                evidence.session_id[:8] if evidence.session_id else "unknown",
+                message_id,
+            )
+
+
+def _parse_messages_for_daily_messages(
+    request_body: bytes | None,
+    response_body: bytes,
+    output_tokens: int,
+    model: str | None,
+) -> list[dict]:
+    """Parse user and assistant messages from request/response bodies.
+
+    Args:
+        request_body: Raw request body bytes.
+        response_body: Raw response body bytes.
+        output_tokens: Output tokens count.
+        model: Model name.
+
+    Returns:
+        List of message dicts with role, content, input_tokens, output_tokens.
+    """
+    import json
+
+    messages = []
+
+    # Parse user message from request body
+    if request_body:
+        try:
+            req_data = json.loads(request_body)
+            req_messages = req_data.get("messages", [])
+            if isinstance(req_messages, list) and req_messages:
+                # Get the last user message
+                user_content = None
+                for msg in reversed(req_messages):
+                    if not isinstance(msg, dict):
+                        continue
+                    if msg.get("role") == "user":
+                        content = msg.get("content", "")
+                        if isinstance(content, list):
+                            # Handle multi-part content
+                            text_parts = []
+                            for part in content:
+                                if isinstance(part, dict) and part.get("type") == "text":
+                                    text_parts.append(part.get("text", ""))
+                            user_content = " ".join(text_parts)
+                        elif isinstance(content, str):
+                            user_content = content
+                        if user_content:
+                            break
+
+                if user_content:
+                    # Filter Qwen system context
+                    try:
+                        from scripts.shared.qwen_context import is_qwen_system_context
+
+                        if not is_qwen_system_context(user_content):
+                            messages.append({
+                                "role": "user",
+                                "content": user_content[:10000],
+                                "input_tokens": 0,
+                                "output_tokens": 0,
+                            })
+                    except ImportError:
+                        # If qwen_context not available, include the message
+                        messages.append({
+                            "role": "user",
+                            "content": user_content[:10000],
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                        })
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Parse assistant message from response body
+    if response_body:
+        try:
+            resp_data = json.loads(response_body)
+            choices = resp_data.get("choices", [])
+            if isinstance(choices, list) and choices:
+                choice = choices[0]
+                if isinstance(choice, dict):
+                    msg = choice.get("message", {})
+                    if isinstance(msg, dict) and msg.get("role") == "assistant":
+                        content = msg.get("content", "")
+                        if isinstance(content, str) and content:
+                            messages.append({
+                                "role": "assistant",
+                                "content": content[:10000],
+                                "input_tokens": 0,
+                                "output_tokens": output_tokens,
+                            })
+        except (json.JSONDecodeError, ValueError):
+            # Handle SSE streaming response - accumulate delta content
+            assistant_content_parts = []
+            for line in response_body.split(b"\n"):
+                line = line.strip()
+                if not line or not line.startswith(b"data:"):
+                    continue
+                payload = line[len(b"data:") :].strip()
+                if payload == b"[DONE]":
+                    continue
+                try:
+                    chunk = json.loads(payload)
+                    choices = chunk.get("choices", [])
+                    if choices:
+                        delta = choices[0].get("delta", {})
+                        content_part = delta.get("content")
+                        if content_part:
+                            assistant_content_parts.append(content_part)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+            if assistant_content_parts:
+                full_content = "".join(assistant_content_parts)
+                if full_content:
+                    messages.append({
+                        "role": "assistant",
+                        "content": full_content[:10000],
+                        "input_tokens": 0,
+                        "output_tokens": output_tokens,
+                    })
+
+    return messages
+
+
 def create_default_sink(
     request_body: bytes | None = None,
     response_body: bytes | None = None,
@@ -580,5 +920,16 @@ def create_default_sink(
 
     # Issue #2732: Add DailyUsageSink for Dashboard "today's usage"
     sinks.append(DailyUsageSink())
+
+    # Issue #3027: Add DailyMessagesSink for trend analysis
+    if response_body:
+        sinks.append(
+            DailyMessagesSink(
+                request_body=request_body,
+                response_body=response_body,
+                output_tokens=output_tokens,
+                model=model,
+            )
+        )
 
     return CompositeSink(sinks)
