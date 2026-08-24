@@ -399,14 +399,19 @@ function Clear-CodeServerResidue {
         return
     }
 
-    # Check for running code-server processes
-    $codeServerProcesses = Get-Process -Name "node" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -and $_.CommandLine -match "code-server" }
+    # Check for running code-server processes using WMI (compatible with PowerShell 5.1)
+    # CommandLine property on Get-Process only works in PowerShell 7+
+    try {
+        $codeServerProcesses = Get-WmiObject Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -and $_.CommandLine -match 'code-server' }
 
-    if ($codeServerProcesses) {
-        Write-Host "[WARN] Detected running code-server process(es). Please close them before reinstalling." -ForegroundColor Yellow
-        Write-Host "       PIDs: $($codeServerProcesses.ProcessId -join ', ')" -ForegroundColor Yellow
-        Write-Host "       You can close them manually or they will be replaced on next install." -ForegroundColor Yellow
+        if ($codeServerProcesses) {
+            Write-Host "[WARN] Detected running code-server process(es). Please close them before reinstalling." -ForegroundColor Yellow
+            Write-Host "       PIDs: $($codeServerProcesses.ProcessId -join ', ')" -ForegroundColor Yellow
+            Write-Host "       You can close them manually or they will be replaced on next install." -ForegroundColor Yellow
+        }
+    } catch {
+        # WMI query failed, skip process detection (not critical)
     }
 
     # Clean up residual files
@@ -509,6 +514,13 @@ function Invoke-NpmInstall {
                 $process.Kill()
             } catch {
                 Write-Host "[WARN] Could not terminate npm process: $_" -ForegroundColor Yellow
+            }
+
+            # Wait for async tasks to complete (max 5 seconds) to capture any output
+            try {
+                $null = [System.Threading.Tasks.Task]::WaitAll(@($stdoutTask, $stderrTask), 5000)
+            } catch {
+                # Ignore task wait errors
             }
 
             return @{
@@ -681,7 +693,7 @@ if ($SkipCodeServer) {
                 Write-Host "       Options:" -ForegroundColor White
                 Write-Host "         1. Run PowerShell as Administrator" -ForegroundColor Gray
                 Write-Host "         2. Configure npm to use user directory:" -ForegroundColor Gray
-                Write-Host "            npm config set prefix `"`$env:USERPROFILE\npm-global`"" -ForegroundColor Gray
+                Write-Host "            npm config set prefix "`$env:USERPROFILE\npm-global"" -ForegroundColor Gray
                 Write-Host "" -ForegroundColor White
                 Write-Host "       Skipping code-server installation." -ForegroundColor Yellow
             } else {
