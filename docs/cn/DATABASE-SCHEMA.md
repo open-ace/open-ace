@@ -21,8 +21,8 @@ Open ACE 同时支持 SQLite（单机）和 PostgreSQL（生产环境）。模�
 | role | varchar | CHECK IN ('admin','manager','user') |
 | daily_token_quota | bigint | 存储单位为 M（Issue #3018） |
 | monthly_token_quota | bigint | 存储单位为 M（Issue #3018） |
-| daily_request_quota | bigint | Issue #3018 |
-| monthly_request_quota | bigint | Issue #3018 |
+| daily_request_quota | bigint | 存储单位为实际请求数（Issue #3018） |
+| monthly_request_quota | bigint | 存储单位为实际请求数（Issue #3018） |
 | tenant_id | integer | FK → tenants(id) ON DELETE SET NULL |
 | must_change_password | boolean | DEFAULT false |
 | system_account | text | 多用户模式下的 OS 用户名 |

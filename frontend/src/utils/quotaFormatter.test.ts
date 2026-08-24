@@ -296,7 +296,9 @@ describe('quotaFormatter - available quota functions', () => {
       it('should cap at max when remaining + current exceeds max for token types', () => {
         // Issue #3018: New max is 100000M
         expect(calculateAvailableQuota(QuotaType.DAILY_TOKEN, 200000, 0)).toBe(MAX_TOKEN_QUOTA);
-        expect(calculateAvailableQuota(QuotaType.MONTHLY_TOKEN, 150000, 50000)).toBe(MAX_TOKEN_QUOTA);
+        expect(calculateAvailableQuota(QuotaType.MONTHLY_TOKEN, 150000, 50000)).toBe(
+          MAX_TOKEN_QUOTA
+        );
       });
 
       it('should cap at max when remaining + current exceeds max for request types', () => {

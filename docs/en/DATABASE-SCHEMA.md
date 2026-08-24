@@ -21,8 +21,8 @@ Core user table with role-based access control.
 | role | varchar | CHECK IN ('admin','manager','user') |
 | daily_token_quota | bigint | Stored in M units (Issue #3018) |
 | monthly_token_quota | bigint | Stored in M units (Issue #3018) |
-| daily_request_quota | bigint | Issue #3018 |
-| monthly_request_quota | bigint | Issue #3018 |
+| daily_request_quota | bigint | Stored as actual count (Issue #3018) |
+| monthly_request_quota | bigint | Stored as actual count (Issue #3018) |
 | tenant_id | integer | FK → tenants(id) ON DELETE SET NULL |
 | must_change_password | boolean | DEFAULT false |
 | system_account | text | OS username for multi-user mode |
