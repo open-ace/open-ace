@@ -25,6 +25,33 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-for-machine-permission-test
 TMP_DB = tempfile.mktemp(suffix=".db")
 
 
+@pytest.fixture(autouse=True)
+def _restore_auth_loader_bindings():
+    """Restore auth loader globals that route-level tests patch by assignment."""
+    import app.modules.workspace.session_access as session_access_mod
+    from app.auth import decorators as auth_dec
+    from app.routes import remote as remote_mod
+
+    missing = object()
+    originals = {
+        (auth_dec, "_load_user_from_token"): auth_dec._load_user_from_token,
+        (remote_mod, "_load_user_from_token"): getattr(
+            remote_mod, "_load_user_from_token", missing
+        ),
+        (
+            session_access_mod,
+            "_load_user_from_token",
+        ): session_access_mod._load_user_from_token,
+    }
+    yield
+    for (module, attr), original in originals.items():
+        if original is missing:
+            with contextlib.suppress(AttributeError):
+                delattr(module, attr)
+        else:
+            setattr(module, attr, original)
+
+
 # ── Setup ──
 
 _test_counter = 0
