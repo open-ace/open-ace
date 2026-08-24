@@ -69,7 +69,7 @@ class TestSyncWfAfterCreateRepo:
             # Track updates to verify wf sync
             updates_applied = []
 
-            def capture_update(patch):
+            def capture_update(workflow_id, patch):
                 updates_applied.append(patch)
                 # Simulate in-memory update
                 wf.update(patch)
