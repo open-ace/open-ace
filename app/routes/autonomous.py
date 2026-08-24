@@ -7,6 +7,7 @@ API routes for AI autonomous development workflow management.
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import os
@@ -26,6 +27,7 @@ from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 from app.auth.decorators import (
     auth_required,
     check_machine_admin_permission,
+    public_endpoint,
     validate_session_token,
 )
 from app.models.user import User
@@ -1997,6 +1999,79 @@ def get_workflow_pr_stats(workflow_id):
 
 
 # ── Real-Time Events (SSE) ─────────────────────────────────────────
+
+
+INGEST_MAX_BODY_BYTES = 1024 * 1024
+INGEST_MAX_EVENTS = 100
+_ingest_log_state = {"last": 0.0}
+
+
+@autonomous_bp.route("/internal/events/ingest", methods=["POST"])
+@public_endpoint
+def ingest_internal_events():
+    """Cross-process SSE ingest: scheduler process → this web process.
+
+    #2187 split the scheduler into its own process; the emitter is an
+    in-process singleton, so scheduler-side events must be handed over here to
+    reach SSE subscribers. Delivery is at-least-once (a timed-out POST may be
+    retried after we already broadcast).
+
+    Security model — the shared secret is the PRIMARY control, fail-closed:
+    an unconfigured/empty secret returns 503 (never a no-auth fallback),
+    mirroring require_upload_auth. The loopback/trusted-source check is
+    defense-in-depth: it does NOT help under an nginx reverse proxy, where
+    every external request arrives as 127.0.0.1 — hence the secret
+    requirement. X-Forwarded-For is intentionally ignored (client-controlled).
+    """
+    from app.modules.workspace.autonomous.events_ingest import (
+        INGEST_SECRET_HEADER,
+        is_trusted_source,
+        resolve_ingest_secret,
+    )
+
+    secret = resolve_ingest_secret()
+    if not secret:
+        logger.error(
+            "Events ingest rejected: no shared secret configured "
+            "(server.events_ingest_key / SECRET_KEY / config secret_key)"
+        )
+        return jsonify({"error": "Events ingest not configured"}), 503
+
+    provided = request.headers.get(INGEST_SECRET_HEADER, "")
+    if (
+        not provided
+        or not hmac.compare_digest(provided.encode("utf-8"), secret.encode("utf-8"))
+        or not is_trusted_source(request.remote_addr)
+    ):
+        return jsonify({"error": "Access denied"}), 403
+
+    content_length = request.content_length
+    if content_length is None or content_length <= 0 or content_length > INGEST_MAX_BODY_BYTES:
+        return jsonify({"error": "Payload too large"}), 413
+
+    payload = request.get_json(silent=True) or {}
+    events = payload.get("events")
+    if not isinstance(events, list) or not events or len(events) > INGEST_MAX_EVENTS:
+        return jsonify({"error": "Payload too large"}), 413
+
+    emitter = _get_event_emitter()
+    accepted = 0
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        workflow_id = event.get("workflow_id") or ""
+        event_type = event.get("event_type") or ""
+        data = event.get("data")
+        if not workflow_id or not event_type or not isinstance(data, dict):
+            continue
+        emitter.emit(workflow_id, event_type, data)
+        accepted += 1
+
+    now = time.time()
+    if now - _ingest_log_state["last"] >= 60.0:
+        _ingest_log_state["last"] = now
+        logger.info("Events ingest accepted %d event(s)", accepted)
+    return jsonify({"success": True, "accepted": accepted})
 
 
 @autonomous_bp.route("/workflows/<workflow_id>/events/stream", methods=["GET"])

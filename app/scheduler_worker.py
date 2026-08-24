@@ -398,6 +398,34 @@ class SchedulerWorker:
 
                 init_autonomous_scheduler()
                 logger.info("Autonomous scheduler initialized")
+
+                # Cross-process SSE forwarding (scheduler → web ingest). The
+                # emitter is an in-process singleton (#2187 split), so without
+                # this the web process's SSE subscribers never see scheduler
+                # events and the AI activity panel stays in "waiting". Enabled
+                # HERE ONLY — never from an env check inside the emitter or
+                # create_app: a combined process (SCHEDULER_MODE=scheduler
+                # serving web too) would loop ingest → emit → forward → ingest.
+                from app.modules.workspace.autonomous.event_emitter import AutonomousEventEmitter
+                from app.modules.workspace.autonomous.events_ingest import (
+                    resolve_ingest_secret,
+                    resolve_ingest_url,
+                )
+
+                ingest_url = resolve_ingest_url()
+                ingest_secret = resolve_ingest_secret()
+                if ingest_url and ingest_secret:
+                    if AutonomousEventEmitter.instance().enable_remote_forwarding(
+                        ingest_url, ingest_secret
+                    ):
+                        logger.info("SSE event forwarding enabled → %s", ingest_url)
+                else:
+                    logger.error(
+                        "SSE event forwarding disabled (url=%s, secret=%s); "
+                        "AI activity SSE will stay in waiting state",
+                        "resolved" if ingest_url else "missing",
+                        "resolved" if ingest_secret else "missing",
+                    )
             else:
                 logger.info("Autonomous scheduler disabled by configuration")
         except Exception as e:
