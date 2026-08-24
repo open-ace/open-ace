@@ -27,7 +27,7 @@ def wrapper():
 def make_config(**overrides):
     config = {
         "allowed_path_roots": ["/tmp", "/private/tmp", "/home", "/workspace", "/srv"],
-        "workflow_branch_patterns": [r"^(auto-dev|review-fix|ci-repair)/[A-Za-z0-9._/-]+$"],
+        "workflow_branch_patterns": [r"^(auto-dev|review-fix|ci-repair|fork)/[A-Za-z0-9._/-]+$"],
         "require_owned_paths": False,
         "safe_configs": {
             "core.hooksPath": ["/dev/null"],
@@ -227,6 +227,13 @@ def test_relative_path_operands_cannot_escape_worktree(wrapper):
     )
 
 
+def test_show_tree_paths_allow_real_filenames_but_not_escapes(wrapper):
+    assert_allowed(wrapper, sudo_git_prefix() + ["show", "HEAD:docs/file name.md"])
+    assert_allowed(wrapper, sudo_git_prefix() + ["show", "HEAD:src/package[data].py"])
+    assert_denied(wrapper, sudo_git_prefix() + ["show", "HEAD:../secret"])
+    assert_denied(wrapper, sudo_git_prefix() + ["show", "HEAD:/tmp/secret"])
+
+
 @pytest.mark.parametrize(
     "argv",
     [
@@ -236,6 +243,7 @@ def test_relative_path_operands_cannot_escape_worktree(wrapper):
         ["push", "origin", "--delete", "auto-dev/abc"],
         ["push", "origin", "auto-dev/abc"],
         ["push", "origin", "auto-dev/abc", "--force-with-lease"],
+        ["push", "origin", "fork/from-12345678", "--force-with-lease"],
         ["branch", "--show-current"],
         ["branch", "-D", "auto-dev/abc"],
         ["rev-parse", "HEAD"],
@@ -253,12 +261,16 @@ def test_relative_path_operands_cannot_escape_worktree(wrapper):
         ["checkout", "-b", "auto-dev/abc", "origin/main"],
         ["show-ref", "--verify", "--quiet", "refs/heads/auto-dev/abc"],
         ["show-ref", "--verify", "--quiet", "refs/remotes/origin/auto-dev/abc"],
+        ["show-ref", "--verify", "--quiet", "refs/heads/fork/from-12345678"],
+        ["show-ref", "--verify", "--quiet", "refs/remotes/origin/fork/from-12345678"],
         ["reset", "--hard", "HEAD"],
         ["reset", "--hard", "origin/main"],
         ["reset", "-q", "HEAD", "--", "app/file.py"],
         ["ls-remote", "origin", "main"],
         ["worktree", "add", "-b", "auto-dev/abc", "/tmp/wt", "origin/main"],
         ["worktree", "add", "/tmp/wt", "auto-dev/abc"],
+        ["worktree", "add", "-b", "fork/from-12345678", "/tmp/wt", "origin/main"],
+        ["worktree", "add", "/tmp/wt", "fork/from-12345678"],
         ["worktree", "add", "--detach", "/tmp/wt", "a" * 40],
         ["worktree", "remove", "/tmp/wt", "--force"],
         ["worktree", "list", "--porcelain", "-z"],
@@ -283,6 +295,7 @@ def test_relative_path_operands_cannot_escape_worktree(wrapper):
         ["show", "--numstat", "--format=", "HEAD"],
         ["show", "--name-only", "--format=", "HEAD"],
         ["show", "HEAD:pyproject.toml"],
+        ["show", "HEAD:docs/file name.md"],
         ["merge", "a" * 40],
         ["merge-base", "origin/main", "auto-dev/abc"],
         ["merge-base", "--is-ancestor", "origin/main", "auto-dev/abc"],

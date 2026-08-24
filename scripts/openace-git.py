@@ -16,7 +16,7 @@ CONFIG_PATH = Path("/etc/openace/git-wrapper.json")
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "allowed_path_roots": ["/home", "/workspace", "/srv", "/tmp", "/private/tmp"],
-    "workflow_branch_patterns": [r"^(auto-dev|review-fix|ci-repair)/[A-Za-z0-9._/-]+$"],
+    "workflow_branch_patterns": [r"^(auto-dev|review-fix|ci-repair|fork)/[A-Za-z0-9._/-]+$"],
     "require_owned_paths": True,
     "real_git_paths": ["/usr/bin/git", "/usr/local/bin/git"],
 }
@@ -94,6 +94,13 @@ def _path_operand(path: str, config: dict[str, Any]) -> bool:
     if os.path.isabs(path):
         return _under_allowed_root(path, config)
     return _plain_relative_path(path)
+
+
+def _show_target(value: str) -> bool:
+    if ":" not in value:
+        return _ref(value)
+    ref, path = value.split(":", 1)
+    return _ref(ref) and _plain_relative_path(path)
 
 
 def _ref(value: str) -> bool:
@@ -370,7 +377,7 @@ def _validate_command(args: list[str], config: dict[str, Any]) -> ValidationResu
         if len(args) == 3 and args[1] == "--oneline" and ".." in args[2] and _ref(args[2]):
             return _allow()
     elif verb == "show":
-        if len(args) == 2 and _ref(args[1]):
+        if len(args) == 2 and _show_target(args[1]):
             return _allow()
         if len(args) == 3 and args[1] == "--format=" and _ref(args[2]):
             return _allow()

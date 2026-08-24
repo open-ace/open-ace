@@ -1,7 +1,7 @@
 {
   "allow_admin_merge": false,
   "workflow_branch_patterns": [
-    "^(auto-dev|review-fix|ci-repair)/[A-Za-z0-9._/-]+$"
+    "^(auto-dev|review-fix|ci-repair|fork)/[A-Za-z0-9._/-]+$"
   ],
   "real_gh_paths": [
     "/usr/bin/gh",

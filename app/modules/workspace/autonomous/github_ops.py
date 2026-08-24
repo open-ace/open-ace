@@ -166,6 +166,11 @@ _TRANSIENT_ERROR_KEYWORDS = [
 
 OPENACE_GIT_WRAPPER = "/usr/local/bin/openace-git"
 OPENACE_GH_WRAPPER = "/usr/local/bin/openace-gh"
+_WORKFLOW_BRANCH_RE = re.compile(r"^(auto-dev|review-fix|ci-repair|fork)/[A-Za-z0-9._/-]+$")
+
+
+def _is_workflow_branch(value: str) -> bool:
+    return bool(_WORKFLOW_BRANCH_RE.fullmatch(value or ""))
 
 
 def _is_transient_error(stderr: str, returncode: int) -> bool:
@@ -2812,7 +2817,7 @@ class GitHubOps:
         auto-dev branch (review-fix / CI-repair / dev round 2+ re-committing
         already-pushed work) can overwrite the remote tip without a
         non-fast-forward rejection. It is refused unless the resolved branch
-        starts with ``auto-dev/`` — defense-in-depth so no caller can ever
+        is a managed workflow branch — defense-in-depth so no caller can ever
         force-push main/release/user branches (Issue #1854).
         """
         if force_with_lease:
@@ -2822,15 +2827,15 @@ class GitHubOps:
                     target = self.get_current_branch()
                 except Exception as e:
                     raise GitHubOpsError(
-                        "force_with_lease requires an auto-dev/* branch but the "
+                        "force_with_lease requires a managed workflow branch but the "
                         f"current branch could not be resolved: {e}"
                     )
-            if not target.startswith("auto-dev/"):
+            if not _is_workflow_branch(target):
                 raise GitHubOpsError(
-                    f"force_with_lease refused on non-auto-dev branch '{target}' "
-                    "(only auto-dev/* workflow branches may be force-pushed)"
+                    f"force_with_lease refused on non-workflow branch '{target}' "
+                    "(only managed workflow branches may be force-pushed)"
                 )
-            # Never leave a validated force-push target implicit. An auto-dev
+            # Never leave a validated force-push target implicit. A workflow
             # worktree can inherit ``main`` as its upstream, and
             # ``push.default=simple`` then rejects a plain ``git push`` even
             # though the current local branch is safe and was validated above.
@@ -2848,7 +2853,7 @@ class GitHubOps:
             # The push was rejected because our remote-tracking ref is stale
             # relative to the actual remote (recreated worktree / concurrent
             # push). Refresh the lease with a targeted fetch and retry once —
-            # the local auto-dev branch is authoritative for this workflow, so
+            # the local workflow branch is authoritative for this workflow, so
             # overwriting the remote after a fresh fetch is the intended
             # semantics. Without this recovery the orchestrator's Layer-2 retry
             # re-runs the identical push and loops to exhaustion (reproducer:
@@ -2871,7 +2876,7 @@ class GitHubOps:
                         plain_push_args.append(branch)
                     logger.warning(
                         "force-with-lease stale lease for %s but remote ref is "
-                        "absent; plain-pushing validated auto-dev branch to "
+                        "absent; plain-pushing validated workflow branch to "
                         "recreate it",
                         target,
                     )

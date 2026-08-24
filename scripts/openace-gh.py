@@ -16,7 +16,7 @@ CONFIG_PATH = Path("/etc/openace/gh-wrapper.json")
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "allow_admin_merge": False,
-    "workflow_branch_patterns": [r"^(auto-dev|review-fix|ci-repair)/[A-Za-z0-9._/-]+$"],
+    "workflow_branch_patterns": [r"^(auto-dev|review-fix|ci-repair|fork)/[A-Za-z0-9._/-]+$"],
     "real_gh_paths": ["/usr/bin/gh", "/usr/local/bin/gh"],
     "fixed_jq_filters": {
         "issue_comment": ".[] | {id, body, createdAt: .created_at, author: {login: .user.login}}",
