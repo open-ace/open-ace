@@ -670,9 +670,6 @@ class FeishuOrgSyncService:
                     departments[department.department_id] = department
                     queue.append(department.department_id)
 
-            if is_root:
-                continue
-
             direct_users = self._fetch_department_users(
                 token,
                 current_department_id,
