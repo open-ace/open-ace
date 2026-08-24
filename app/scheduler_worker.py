@@ -128,6 +128,9 @@ class SchedulerWorker:
         # Check database schema version
         self._check_schema_version()
 
+        # 【Issue #2543】检查配置漂移
+        self._check_fetch_config_drift()
+
         # Check scheduler tables exist
         self._db = Database()
         if not check_scheduler_tables_exist(self._db):
@@ -215,6 +218,114 @@ class SchedulerWorker:
         except Exception as e:
             logger.error(f"Failed to check schema version: {e}")
             sys.exit(1)
+
+    def _check_fetch_config_drift(self) -> None:
+        """检查数据采集配置是否存在漂移。
+
+        【Issue #2543】确保 scheduler 和 web 服务的 FETCH_USE_SUDO 配置一致，
+        检查 wrapper 是否存在，sudoers 规则是否正确。
+
+        漂移级别：
+        - 警告级：记录日志，标记 degraded，继续运行
+        - 错误级：记录日志，标记 failed，可能影响功能
+        """
+        import stat
+
+        # 获取当前环境的 FETCH_USE_SUDO
+        scheduler_fetch_sudo = os.environ.get("FETCH_USE_SUDO", "false").lower() == "true"
+
+        # 检查结果
+        issues = []
+        warnings = []
+
+        # 1. 检查 wrapper 存在性
+        wrapper_path = "/usr/local/bin/openace-fetch-wrapper"
+        if scheduler_fetch_sudo:
+            if not os.path.exists(wrapper_path):
+                issues.append(f"Wrapper not found: {wrapper_path}")
+            else:
+                # 检查权限
+                try:
+                    st = os.stat(wrapper_path)
+                    if st.st_uid != 0:  # root
+                        warnings.append(f"Wrapper not owned by root: {wrapper_path}")
+                    if not (st.st_mode & stat.S_IXOTH):  # others execute
+                        warnings.append(f"Wrapper not executable by others: {wrapper_path}")
+                except Exception as e:
+                    warnings.append(f"Failed to check wrapper permissions: {e}")
+
+        # 2. 检查 sudoers 规则
+        sudoers_path = "/etc/sudoers.d/open-ace"
+        if scheduler_fetch_sudo:
+            if not os.path.exists(sudoers_path):
+                # 也检查其他可能的路径
+                alt_paths = ["/etc/sudoers.d/openace", "/etc/sudoers.d/10-open-ace"]
+                found = False
+                for alt in alt_paths:
+                    if os.path.exists(alt):
+                        found = True
+                        break
+                if not found:
+                    warnings.append(
+                        "Sudoers file not found. Data collection may fail. "
+                        "Run generate-sudoers.sh to create it."
+                    )
+            else:
+                # 检查 sudoers 是否包含 FETCH_WRAPPER
+                try:
+                    with open(sudoers_path) as f:
+                        content = f.read()
+                        if (
+                            "FETCH_WRAPPER" not in content
+                            and "openace-fetch-wrapper" not in content
+                        ):
+                            warnings.append(
+                                "Sudoers file does not contain FETCH_WRAPPER rule. "
+                                "Data collection may fail."
+                            )
+                except Exception as e:
+                    warnings.append(f"Failed to check sudoers content: {e}")
+
+        # 3. 检查审计日志目录
+        audit_log_dir = "/var/log/openace"
+        if scheduler_fetch_sudo:
+            if not os.path.exists(audit_log_dir):
+                warnings.append(
+                    f"Audit log directory not found: {audit_log_dir}. "
+                    "It will be created on first run."
+                )
+
+        # 输出结果
+        if issues:
+            logger.error("=" * 60)
+            logger.error("FETCH CONFIGURATION ISSUES DETECTED (Issue #2543)")
+            logger.error("=" * 60)
+            for issue in issues:
+                logger.error(f"  ERROR: {issue}")
+            logger.error(
+                "Data collection may fail. Please install openace-fetch-wrapper "
+                "and configure sudoers."
+            )
+            logger.error("=" * 60)
+
+        if warnings:
+            logger.warning("=" * 60)
+            logger.warning("FETCH CONFIGURATION WARNINGS (Issue #2543)")
+            logger.warning("=" * 60)
+            for warning in warnings:
+                logger.warning(f"  WARNING: {warning}")
+            logger.warning("=" * 60)
+
+        # 总结
+        if not issues and not warnings:
+            if scheduler_fetch_sudo:
+                logger.info("FETCH configuration check passed (FETCH_USE_SUDO=true)")
+            else:
+                logger.info("FETCH configuration: using non-sudo mode")
+        elif warnings and not issues:
+            logger.warning("FETCH configuration: degraded mode - some checks failed")
+        else:
+            logger.error("FETCH configuration: failed - critical issues detected")
 
     def _start_metrics_server(self) -> None:
         """Start Prometheus metrics HTTP server with custom endpoints.

@@ -155,6 +155,11 @@ Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr
 # 裸 mkdir，/usr/bin 与 /bin 两种解析路径都必须匹配。
 Cmnd_Alias MKDIR_SAFE = /usr/bin/mkdir *, /bin/mkdir *
 
+# 【Issue #2543】跨用户数据采集：用于读取权限 700 的用户 home 目录下的工具数据
+# wrapper 内部严格校验参数和路径，sudoers 只控制可执行文件
+# 不限制参数，由 wrapper 内部精确校验
+Cmnd_Alias FETCH_WRAPPER = /usr/local/bin/openace-fetch-wrapper
+
 # ============================================================================
 # 用户权限配置
 # ============================================================================
@@ -165,6 +170,8 @@ ${RUN_USER} ALL=(ALL) NOPASSWD: GIT_SAFE
 ${RUN_USER} ALL=(ALL) NOPASSWD: GH_SAFE
 # 【Issue #2674】跨用户 mkdir：github_ops verifier worktree 目录创建
 ${RUN_USER} ALL=(ALL) NOPASSWD: MKDIR_SAFE
+# 【Issue #2543】跨用户数据采集：读取权限 700 的用户 home 目录
+${RUN_USER} ALL=(root) NOPASSWD: FETCH_WRAPPER
 
 # WebUI launcher - wrapper required (no fallback per Issue #2334)
 ${WEBUI_RULES}
