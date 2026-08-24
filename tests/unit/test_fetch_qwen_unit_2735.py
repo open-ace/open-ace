@@ -70,8 +70,6 @@ class TestDirectoryDiscovery:
                 import fetch_qwen
 
                 # Patch the home_base logic
-                original_find = fetch_qwen.find_all_qwen_project_dirs
-
                 def mocked_find():
                     result = {"accessible": [], "denied": [], "errors": []}
                     for user_dir in home_dir.iterdir():
