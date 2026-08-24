@@ -759,6 +759,32 @@ CONF_EOF
     return 0
 }
 
+install_git_gh_wrappers() {
+    local script_dir
+    script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    local source_dir
+    source_dir=$(cd "$script_dir/../../.." && pwd)
+    local config_src_dir="$source_dir/config/openace"
+
+    if [ ! -f "$source_dir/scripts/openace-git.py" ] || [ ! -f "$source_dir/scripts/openace-gh.py" ]; then
+        print_warning "未找到 openace git/gh wrappers（搜索 $source_dir/scripts），跳过安装"
+        return 1
+    fi
+    if [ ! -f "$config_src_dir/git-wrapper.json" ] || [ ! -f "$config_src_dir/gh-wrapper.json" ]; then
+        print_warning "未找到 openace git/gh wrapper 配置（搜索 $config_src_dir），跳过安装"
+        return 1
+    fi
+
+    install -o root -g root -m 0755 "$source_dir/scripts/openace-git.py" /usr/local/bin/openace-git || return 1
+    install -o root -g root -m 0755 "$source_dir/scripts/openace-gh.py" /usr/local/bin/openace-gh || return 1
+    install -d -o root -g root -m 0755 /etc/openace || return 1
+    install -o root -g root -m 0644 "$config_src_dir/git-wrapper.json" /etc/openace/git-wrapper.json || return 1
+    install -o root -g root -m 0644 "$config_src_dir/gh-wrapper.json" /etc/openace/gh-wrapper.json || return 1
+
+    print_success "已安装 openace git/gh wrappers 和配置"
+    return 0
+}
+
 # Configure sudoers for multi-user workspace mode
 configure_sudoers() {
     print_header "配置 Sudo 权限"
@@ -852,16 +878,26 @@ $RUN_USER ALL=(root) NOPASSWD: $wrapper_bin *"
 # Allows the service account to run qwen-code-webui as other users
 # 【安全加固 Issue #2181】删除高风险通配规则
 
+# git/gh cross-user operations are validated by root-owned wrappers (#2650).
+Cmnd_Alias GIT_SAFE = /usr/local/bin/openace-git *
+Cmnd_Alias GH_SAFE = /usr/local/bin/openace-gh *
+
+# 低风险工具（Issue #2181：移除 cat/chown/rm，改用 wrapper）
+Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/id *, /usr/bin/find *
+
+# 跨用户 mkdir：github_ops 创建 verifier worktree 时执行 sudo -u <account> mkdir ...
+Cmnd_Alias MKDIR_SAFE = /usr/bin/mkdir *, /bin/mkdir *
+
 # WebUI 启动规则：通过 openace-webui-launch wrapper 以任意用户运行
 # Issue #2298: wrapper 内联传递 LLM 配置环境变量，绕过 sudo env_keep 过滤。
 # Issue #2313: 允许环境变量参数（KEY=VAL）出现在 webui_path 之前。
 $RUN_USER ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path" *
 
-# 低风险工具（Issue #2181：移除 cat/chown/rm，改用 wrapper）
-$RUN_USER ALL=(root) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/find *
-
-# Git/gh commands for autonomous development (Issue #1395)
-$RUN_USER ALL=(root) NOPASSWD: /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
+# 低风险工具和 autonomous git/gh wrappers
+$RUN_USER ALL=(ALL) NOPASSWD: OPENACE_UTILS
+$RUN_USER ALL=(ALL) NOPASSWD: GIT_SAFE
+$RUN_USER ALL=(ALL) NOPASSWD: GH_SAFE
+$RUN_USER ALL=(ALL) NOPASSWD: MKDIR_SAFE
 
 # 【Issue #2181】安全 wrapper 规则（替代原 cat/chown/useradd/rm 通配）
 ${security_wrapper_rules}
@@ -879,26 +915,34 @@ ${wrapper_rule}
 Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH\"
 Defaults env_keep += \"GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
 Defaults env_keep += \"SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS\"
+Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 "
 
     # Check if sudoers file already exists
     if [ -f "$sudoers_file" ]; then
         # 【修复 PR #1467 评论】旧逻辑只看 webui_path 命中就 return，导致已有部署
-        # 升级时不会补齐本 PR 新增的 git/gh / CLI / run-as wrapper 规则。改为校验
-        # 关键标记是否齐备：git 规则（Issue #1395 起所有版本都有），以及 wrapper
-        # 规则（仅在 wrapper 已安装时才要求）。任一缺失即重写。
+        # 升级时不会补齐本 PR 新增的 CLI / run-as wrapper 规则。改为校验关键
+        # 标记是否齐备。任一缺失即重写。
         local needs_update=false
-        if ! grep -qF '/usr/bin/git *' "$sudoers_file" 2>/dev/null; then
+        if ! grep -E '^Cmnd_Alias[[:space:]]+GIT_SAFE[[:space:]]*=[[:space:]]*/usr/local/bin/openace-git[[:space:]]+\*[[:space:]]*$' "$sudoers_file" 2>/dev/null || \
+           ! grep -E "^${RUN_USER} ALL=\(ALL\) NOPASSWD: GIT_SAFE([[:space:]]|$)" "$sudoers_file" 2>/dev/null; then
+            needs_update=true
+        fi
+        if ! grep -E '^Cmnd_Alias[[:space:]]+GH_SAFE[[:space:]]*=[[:space:]]*/usr/local/bin/openace-gh[[:space:]]+\*[[:space:]]*$' "$sudoers_file" 2>/dev/null || \
+           ! grep -E "^${RUN_USER} ALL=\(ALL\) NOPASSWD: GH_SAFE([[:space:]]|$)" "$sudoers_file" 2>/dev/null; then
             needs_update=true
         fi
         if [ -n "$wrapper_rule" ] && ! grep -qF 'openace-run-as --isolated *' "$sudoers_file" 2>/dev/null; then
+            needs_update=true
+        fi
+        if ! grep -q "secure_path.*usr/local/bin" "$sudoers_file" 2>/dev/null; then
             needs_update=true
         fi
         if [ "$needs_update" = false ]; then
             print_success "Sudoers 规则已是最新"
             return 0
         fi
-        print_info "更新现有 sudoers 文件（补齐 git/gh/CLI/wrapper 规则）..."
+        print_info "更新现有 sudoers 文件（补齐 git/gh wrappers/CLI/wrapper 规则）..."
     fi
 
     # Back up the existing sudoers file before overwriting so a visudo
@@ -2633,6 +2677,10 @@ upgrade_deployment() {
         print_info "更新 sudoers 配置..."
         stop_webui_systemd_service
         install_run_as_wrapper || print_warning "run-as wrapper 安装失败，跨用户 agent 启动可能受限"
+        if ! install_git_gh_wrappers; then
+            print_error "git/gh wrappers 安装失败，拒绝写入 wrapper-only sudoers"
+            return 1
+        fi
         configure_sudoers
         if [ $? -ne 0 ]; then
             print_warning "Sudoers 配置失败，但继续升级"
@@ -3975,6 +4023,10 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
     # Stop existing qwen-code-webui systemd service first
     stop_webui_systemd_service
     install_run_as_wrapper || print_warning "run-as wrapper 安装失败，跨用户 agent 启动可能受限"
+    if ! install_git_gh_wrappers; then
+        print_error "git/gh wrappers 安装失败，拒绝写入 wrapper-only sudoers"
+        exit 1
+    fi
     configure_sudoers
     if [ $? -ne 0 ]; then
         print_warning "Sudoers 配置失败，多用户模式可能无法正常工作"

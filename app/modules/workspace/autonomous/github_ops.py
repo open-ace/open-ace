@@ -164,6 +164,9 @@ _TRANSIENT_ERROR_KEYWORDS = [
     "empty response",
 ]
 
+OPENACE_GIT_WRAPPER = "/usr/local/bin/openace-git"
+OPENACE_GH_WRAPPER = "/usr/local/bin/openace-gh"
+
 
 def _is_transient_error(stderr: str, returncode: int) -> bool:
     """Whether a git/gh subprocess failure looks like a transient network issue.
@@ -674,12 +677,12 @@ class GitHubOps:
             cmd: list[str] = ["sudo", "-u", account]
             owner_repo = self._resolve_owner_repo() if repo_scoped else None
             if owner_repo:
-                cmd += ["gh", "-R", owner_repo] + args
+                cmd += [OPENACE_GH_WRAPPER, "-R", owner_repo] + args
             else:
                 # No resolvable remote, or a command (repo create/view) that
                 # rejects -R. Run plain gh; commands that need repo context
                 # (issue/pr) will already have a resolvable owner_repo above.
-                cmd += ["gh"] + args
+                cmd += [OPENACE_GH_WRAPPER] + args
             kwargs.pop("cwd", None)  # cwd under sudo triggers Permission denied (Issue #1421)
         else:
             # Same-user (or no system_account), OR an api_only command running as
@@ -771,11 +774,10 @@ class GitHubOps:
         # only guard shim; the harness exposes the real binary via
         # OPENACE_REAL_GIT for code that must run git directly (tests,
         # tooling). Unset everywhere else, so this defaults to plain "git".
-        # The sudo branch deliberately keeps the literal "git": prod sudoers
-        # whitelist only the bare command name, and a resolved absolute path
-        # under ``sudo -u <account>`` would be silently denied.
         needs_sudo = self._needs_sudo()
-        git_bin = os.environ.get("OPENACE_REAL_GIT", "git") if not needs_sudo else "git"
+        git_bin = (
+            os.environ.get("OPENACE_REAL_GIT", "git") if not needs_sudo else OPENACE_GIT_WRAPPER
+        )
         # Trust the canonical repo via per-command ``-c`` (never the global
         # ``safe.directory *`` that used to be written via
         # _ensure_safe_directory). git's dubious-ownership check covers every
@@ -2016,8 +2018,11 @@ class GitHubOps:
         checks — used after conflict resolution when the only blocker is CI
         not yet catching up to the freshly-pushed merge commit.
 
-        Security Note (Issue #1855): ``--admin`` bypasses branch protection
-        and requires explicit opt-in via ``OPENACE_ALLOW_ADMIN_MERGE=1``.
+        Security Note (Issue #1855/#2650): ``--admin`` bypasses branch
+        protection. Same-user direct ``gh`` still requires
+        ``OPENACE_ALLOW_ADMIN_MERGE=1``; cross-user sudo runs are authorized by
+        the root-owned ``openace-gh`` wrapper config instead of sudo-preserved
+        environment.
         """
         args = ["pr", "merge", str(number)]
         if strategy == "squash":
@@ -2029,12 +2034,11 @@ class GitHubOps:
         if auto:
             args.append("--auto")
         if admin:
-            # Issue #1855: Check for explicit opt-in before using --admin
-            if os.environ.get("OPENACE_ALLOW_ADMIN_MERGE") != "1":
+            if not self._needs_sudo() and os.environ.get("OPENACE_ALLOW_ADMIN_MERGE") != "1":
                 raise PermissionError(
                     "gh pr merge --admin requires explicit opt-in. "
-                    "Set OPENACE_ALLOW_ADMIN_MERGE=1 to enable admin merge, "
-                    "which bypasses branch protection checks."
+                    "Set OPENACE_ALLOW_ADMIN_MERGE=1 for direct gh execution; "
+                    "cross-user sudo execution is gated by /etc/openace/gh-wrapper.json."
                 )
             args.append("--admin")
 
@@ -2754,9 +2758,7 @@ class GitHubOps:
         parts = path.split("/")
         if "__pycache__" in parts:
             return True
-        if parts and parts[0] == ".pytest_cache":
-            return True
-        return False
+        return bool(parts and parts[0] == ".pytest_cache")
 
     def _unstage_test_artifacts(self) -> None:
         """Unstage test-pollution artifacts from the git index.

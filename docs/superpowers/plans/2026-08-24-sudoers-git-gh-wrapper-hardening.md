@@ -72,9 +72,10 @@ assert not validate_git_argv(["push", "origin", "main", "--force"]).allowed
 assert not validate_git_argv(["push", "origin", "main", "--force-with-lease"]).allowed
 assert not validate_git_argv(["branch", "-D", "main"]).allowed
 assert not validate_git_argv(["checkout", "-b", "main"]).allowed
+assert not validate_git_argv(["-C", "/tmp/repo", "commit", "-m", "x"]).allowed
 assert not validate_git_argv(["reset", "-q", "HEAD", "--", "../secret"]).allowed
 assert not validate_git_argv(["grep", "--no-index", "-l", "-I", "-E", "-e", r"^<{7,}( |$)", "-e", r"^={7,}$", "-e", r"^>{7,}( |$)", "--", "a/../b"]).allowed
-assert validate_git_argv(["push", "origin", "auto-dev/abc", "--force-with-lease"]).allowed
+assert validate_git_argv(_sudo_git_prefix() + ["push", "origin", "auto-dev/abc", "--force-with-lease"]).allowed
 ```
 
 Add an exhaustive accepted-shapes table matching the spec's canonical git command inventory:
@@ -144,7 +145,9 @@ For `gh`:
 assert not validate_gh_argv(["repo", "delete", "owner/repo"]).allowed
 assert not validate_gh_argv(["api", "-X", "DELETE", "repos/owner/repo"]).allowed
 assert not validate_gh_argv(["pr", "merge", "1", "--admin"]).allowed
-assert validate_gh_argv(["pr", "merge", "1", "--admin"], config=test_config(allow_admin_merge=True)).allowed
+assert not validate_gh_argv(["pr", "merge", "1", "--admin"], config=test_config(allow_admin_merge=True)).allowed
+assert not validate_gh_argv(["pr", "merge", "1", "--auto"]).allowed
+assert validate_gh_argv(["pr", "merge", "1", "--merge", "--admin"], config=test_config(allow_admin_merge=True)).allowed
 assert not validate_gh_argv(["pr", "view", "1", "--web"]).allowed
 assert validate_gh_argv(["run", "view", "123", "--log-failed", "--allow-escape-sequences"]).allowed
 assert not validate_gh_argv(["api", "repos/owner/repo/issues/1/comments", "--jq", ".[]"]).allowed
@@ -186,6 +189,8 @@ Add an exhaustive accepted-shapes table matching the spec's canonical gh command
     ["api", "repos/owner/repo/branches/main/protection"],
     ["api", "--paginate", "repos/owner/repo/rules/branches/main"],
     ["api", "repos/owner/repo/issues/1/comments", "--jq", FIXED_ISSUE_COMMENT_FILTER],
+    ["api", "--paginate", "repos/owner/repo/issues/1/comments", "--jq", FIXED_ISSUE_COMMENT_FILTER],
+    ["api", "repos/owner/repo/issues/1/comments", "--jq", FIXED_PAGINATED_ISSUE_COMMENT_FILTER],
     ["api", "--paginate", "repos/owner/repo/issues/1/comments", "--jq", FIXED_PAGINATED_ISSUE_COMMENT_FILTER],
     ["api", "--paginate", "repos/owner/repo/issues/1/timeline", "--jq", FIXED_CLOSURE_FILTER],
     ["api", "repos/owner/repo/pulls/1/comments", "--jq", FIXED_REVIEW_COMMENT_FILTER],

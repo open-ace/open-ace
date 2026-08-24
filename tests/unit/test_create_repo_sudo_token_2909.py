@@ -108,7 +108,7 @@ class TestCreateRepoNoTokenFallback:
 
         cmd = mock_run.call_args.args[0]
         assert cmd[:3] == ["sudo", "-u", "alice"]
-        assert cmd[3] == "gh"
+        assert cmd[3] == "/usr/local/bin/openace-gh"
 
     @patch.object(GitHubOps, "_get_env", return_value=None)
     @patch.object(GitHubOps, "_needs_sudo", return_value=True)

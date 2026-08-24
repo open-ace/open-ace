@@ -1,0 +1,17 @@
+{
+  "allowed_path_roots": [
+    "/home",
+    "/workspace",
+    "/srv",
+    "/tmp",
+    "/private/tmp"
+  ],
+  "workflow_branch_patterns": [
+    "^(auto-dev|review-fix|ci-repair)/[A-Za-z0-9._/-]+$"
+  ],
+  "require_owned_paths": true,
+  "real_git_paths": [
+    "/usr/bin/git",
+    "/usr/local/bin/git"
+  ]
+}
