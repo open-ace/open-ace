@@ -62,6 +62,11 @@ def _make_client():
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM users")
+        cursor.execute("DELETE FROM tenants")
+        cursor.execute(
+            "INSERT INTO tenants (id, name, slug) VALUES (?, ?, ?)",
+            (7, "Tenant Seven", "tenant-seven"),
+        )
         cursor.execute(
             "INSERT INTO users (id, username, email, password_hash, role, tenant_id) "
             "VALUES (?, ?, ?, ?, ?, ?)",

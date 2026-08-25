@@ -46,6 +46,16 @@ def manager(tmp_path):
 
     with mgr.db.connection() as conn:
         load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO tenants (id, name, slug) VALUES (?, ?, ?)",
+            (1, "Default Tenant", "default"),
+        )
+        cursor.execute(
+            "INSERT INTO users (id, username, email, password_hash, role, tenant_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (1, "admin", "admin@test.com", "hash", "platform_admin", None),
+        )
         conn.commit()
 
     return mgr
