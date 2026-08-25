@@ -285,7 +285,12 @@ class TestContentFilterRules:
         # Second call: after create, fetch the new record
         self.db.fetch_one.side_effect = [
             None,  # First call: pattern doesn't exist
-            {"id": 42, "pattern": "secret", "type": "keyword", "is_enabled": 1},  # Second call: fetch by id
+            {
+                "id": 42,
+                "pattern": "secret",
+                "type": "keyword",
+                "is_enabled": 1,
+            },  # Second call: fetch by id
         ]
         mock_cursor = MagicMock()
         mock_cursor.lastrowid = 42
