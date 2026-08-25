@@ -436,12 +436,10 @@ export const SecurityCenter: React.FC = () => {
   const validateKeyword = (keyword: string): string | null => {
     const trimmed = keyword.trim();
     if (!trimmed) {
-      return language === 'zh' ? '关键词不能为空' : 'Keyword cannot be empty';
+      return t('keywordEmpty', language);
     }
     if (trimmed.length > 255) {
-      return language === 'zh'
-        ? '关键词长度不能超过 255 个字符'
-        : 'Keyword cannot exceed 255 characters';
+      return t('keywordTooLong', language);
     }
     return null;
   };
