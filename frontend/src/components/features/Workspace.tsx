@@ -1085,31 +1085,50 @@ export const Workspace: React.FC = () => {
         // Issue #2953: Smart URL restore - check if session already exists in store
         const existingTab = safeStoredTabs.find((t) => t.sessionId === restoreSessionId);
         if (existingTab) {
-          // Session already exists in store, just activate it instead of creating new tab
-          console.log('[Workspace] Found existing tab for session, activating:', restoreSessionId);
-          initialActiveTabId = existingTab.id;
-          // Regenerate URL for existing tab
-          const remoteParams = existingTab.workspaceType
-            ? {
-                workspaceType: existingTab.workspaceType,
-                machineId: existingTab.machineId,
-                machineName: existingTab.machineName,
-              }
-            : undefined;
-          const effectiveUrl = getEffectiveUrl(
-            existingTab.sessionId,
-            existingTab.encodedProjectName,
-            existingTab.toolName,
-            existingTab.settings,
-            remoteParams
+          // Session already exists in store, restore ALL tabs and activate this one
+          console.log(
+            '[Workspace] Found existing tab for session, restoring all tabs and activating:',
+            restoreSessionId
           );
-          initialTabs = [
-            {
-              ...existingTab,
+          initialActiveTabId = existingTab.id;
+
+          // Issue #3071: Restore ALL tabs from localStorage, not just the matched one
+          initialTabs = safeStoredTabs.map((storedTab) => {
+            // Terminal tabs don't need URL regeneration
+            if (storedTab.tabType === 'terminal') {
+              return {
+                ...storedTab,
+                url: '',
+                token: '',
+                terminalWsUrl: '',
+                terminalToken: '',
+              };
+            }
+
+            // Regenerate URL for each tab
+            const remoteParams = storedTab.workspaceType
+              ? {
+                  workspaceType: storedTab.workspaceType,
+                  machineId: storedTab.machineId,
+                  machineName: storedTab.machineName,
+                }
+              : undefined;
+            const effectiveUrl = storedTab.sessionId
+              ? getEffectiveUrl(
+                  storedTab.sessionId,
+                  storedTab.encodedProjectName,
+                  storedTab.toolName,
+                  storedTab.settings,
+                  remoteParams
+                )
+              : getEffectiveUrl(undefined, undefined, undefined, undefined, remoteParams);
+
+            return {
+              ...storedTab,
               url: effectiveUrl ?? '',
               token: userWebUI?.token ?? '',
-            },
-          ];
+            };
+          });
         } else {
           // No existing tab, create new one
           // Build settings from URL params
@@ -1179,7 +1198,7 @@ export const Workspace: React.FC = () => {
               urlResumeHint
             );
             if (effectiveUrl) {
-              const tab: WorkspaceTab = {
+              const newTab: WorkspaceTab = {
                 id: generateTabId(),
                 title: t('restoredSession', language),
                 url: effectiveUrl,
@@ -1198,24 +1217,64 @@ export const Workspace: React.FC = () => {
                 waitingForUser: false,
                 waitingType: null,
               };
-              initialTabs = [tab];
-              initialActiveTabId = tab.id;
+
+              // Issue #3071: Restore ALL tabs from localStorage and APPEND the new tab
+              initialTabs = [
+                ...safeStoredTabs.map((storedTab) => {
+                  // Terminal tabs don't need URL regeneration
+                  if (storedTab.tabType === 'terminal') {
+                    return {
+                      ...storedTab,
+                      url: '',
+                      token: '',
+                      terminalWsUrl: '',
+                      terminalToken: '',
+                    };
+                  }
+
+                  // Regenerate URL for each tab
+                  const remoteParams = storedTab.workspaceType
+                    ? {
+                        workspaceType: storedTab.workspaceType,
+                        machineId: storedTab.machineId,
+                        machineName: storedTab.machineName,
+                      }
+                    : undefined;
+                  const effectiveUrl = storedTab.sessionId
+                    ? getEffectiveUrl(
+                        storedTab.sessionId,
+                        storedTab.encodedProjectName,
+                        storedTab.toolName,
+                        storedTab.settings,
+                        remoteParams
+                      )
+                    : getEffectiveUrl(undefined, undefined, undefined, undefined, remoteParams);
+
+                  return {
+                    ...storedTab,
+                    url: effectiveUrl ?? '',
+                    token: userWebUI?.token ?? '',
+                  };
+                }),
+                newTab, // Append new tab
+              ];
+              initialActiveTabId = newTab.id;
 
               // Save to store (append, don't clear existing tabs)
               // Issue #2953: Smart append instead of replacing all tabs
               addStoredTab({
-                id: tab.id,
-                title: tab.title,
-                sessionId: tab.sessionId,
-                encodedProjectName: tab.encodedProjectName,
-                toolName: tab.toolName,
-                settings: tab.settings,
-                workspaceType: tab.workspaceType,
-                machineId: tab.machineId,
-                machineName: tab.machineName,
-                createdAt: tab.createdAt,
-                waitingForUser: tab.waitingForUser,
-                waitingType: tab.waitingType,
+                id: newTab.id,
+                title: newTab.title,
+                sessionId: newTab.sessionId,
+                encodedProjectName: newTab.encodedProjectName,
+                toolName: newTab.toolName,
+                settings: newTab.settings,
+                workspaceType: newTab.workspaceType,
+                machineId: newTab.machineId,
+                machineName: newTab.machineName,
+                createdAt: newTab.createdAt,
+                waitingForUser: newTab.waitingForUser,
+                waitingType: newTab.waitingType,
               });
             }
           }
