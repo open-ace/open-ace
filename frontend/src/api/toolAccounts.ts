@@ -111,10 +111,25 @@ export const toolAccountsApi = {
       tool_type?: string;
       description?: string;
     }>
-  ): Promise<{ created_count: number; mappings: ToolAccount[] }> {
-    return apiClient.post<{ created_count: number; mappings: ToolAccount[] }>(
-      `/api/tool-accounts/user/${userId}/batch`,
-      { tool_accounts: toolAccounts }
-    );
+  ): Promise<{
+    created_count: number;
+    failed_count: number;
+    created: ToolAccount[];
+    failed: Array<{
+      tool_account: string;
+      error: string;
+      existing_user_id?: number;
+    }>;
+  }> {
+    return apiClient.post<{
+      created_count: number;
+      failed_count: number;
+      created: ToolAccount[];
+      failed: Array<{
+        tool_account: string;
+        error: string;
+        existing_user_id?: number;
+      }>;
+    }>(`/api/tool-accounts/user/${userId}/batch`, { tool_accounts: toolAccounts });
   },
 };

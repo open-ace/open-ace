@@ -170,13 +170,36 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
         };
       });
 
-      await toolAccountsApi.batchCreate(userId, accounts);
+      const result = await toolAccountsApi.batchCreate(userId, accounts);
+
+      // Handle failures
+      if (result.failed_count > 0) {
+        const errorMessages = result.failed
+          .map((f) => `${f.tool_account}: ${f.error}`)
+          .join('\n');
+        toast.error(
+          language === 'zh'
+            ? `映射失败 ${result.failed_count} 个账号：\n${errorMessages}`
+            : `Failed to map ${result.failed_count} accounts:\n${errorMessages}`
+        );
+      }
+
+      // Show success message only when there are successes
+      if (result.created_count > 0) {
+        toast.success(
+          language === 'zh'
+            ? `成功映射 ${result.created_count} 个账号`
+            : `Successfully mapped ${result.created_count} accounts`
+        );
+      }
+
       setSelectedUnmapped([]);
       setShowUnmappedModal(false);
       loadData();
       onChange?.();
     } catch (err) {
       console.error('Failed to map accounts:', err);
+      toast.error(language === 'zh' ? '映射操作失败' : 'Failed to map accounts');
     }
   };
 
