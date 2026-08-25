@@ -1283,6 +1283,23 @@
       "notes": "initial disposition (issue #2491 P1 draft)"
     },
     {
+      "path": "tests/e2e/remote/test_deregister_e2e.py",
+      "mode": "pytest-automated",
+      "owner": "e2e-governance",
+      "issue": 2596,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "E2E tests for Issue #2596: Machine deregistration with active sessions. Skipped by default (requires ENABLE_E2E_DEREGISTER_TESTS=true)"
+    },
+    {
       "path": "tests/e2e/terminal/e2e_quota_recovery.py",
       "mode": "pytest-automated",
       "owner": "e2e-governance",

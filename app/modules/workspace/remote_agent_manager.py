@@ -1006,7 +1006,8 @@ class RemoteAgentManager:
         agent_notified = False
         lock_acquired = False
         lock_key = 0
-        lock_conn = None
+        lock_conn_cm = None  # Context manager
+        lock_conn = None  # Actual connection
 
         # Step 0: Acquire Advisory Lock for PostgreSQL (prevent concurrent deregistration)
         # Use session-level lock with proper connection management
@@ -1014,7 +1015,8 @@ class RemoteAgentManager:
             try:
                 # Use SHA256 hash for consistent lock key across processes
                 lock_key = int(hashlib.sha256(machine_id.encode()).hexdigest()[:16], 16)
-                lock_conn = self.db.connection()
+                lock_conn_cm = self.db.connection()
+                lock_conn = lock_conn_cm.__enter__()  # Get actual connection from context manager
                 cursor = lock_conn.cursor()
                 cursor.execute("SET lock_timeout = '30s'")
                 cursor.execute("SELECT pg_advisory_lock(%s)", (lock_key,))
@@ -1025,11 +1027,12 @@ class RemoteAgentManager:
                     "Failed to acquire advisory lock for machine %s: %s", machine_id[:8], e
                 )
                 # Close lock connection on failure
-                if lock_conn:
+                if lock_conn_cm:
                     try:
-                        lock_conn.close()
+                        lock_conn_cm.__exit__(None, None, None)
                     except Exception:
                         pass
+                    lock_conn_cm = None
                     lock_conn = None
                 # Continue without lock for SQLite or if lock fails
                 # Another concurrent deregistration may still be in progress
@@ -1130,7 +1133,7 @@ class RemoteAgentManager:
 
         finally:
             # Step 9: Release Advisory Lock if acquired
-            if lock_acquired and lock_conn:
+            if lock_acquired and lock_conn_cm and lock_conn:
                 try:
                     cursor = lock_conn.cursor()
                     cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_key,))
@@ -1140,9 +1143,9 @@ class RemoteAgentManager:
                         "Failed to release advisory lock for machine %s: %s", machine_id[:8], e
                     )
                 finally:
-                    # Always close the lock connection
+                    # Always close the lock connection (exit context manager)
                     try:
-                        lock_conn.close()
+                        lock_conn_cm.__exit__(None, None, None)
                     except Exception:
                         pass
 
