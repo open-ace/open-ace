@@ -723,8 +723,9 @@ const WorkspaceDetailContent: React.FC<{
         const endDate = getToday();
         const response = await getProjectDailyStats(workspace.project_id, startDate, endDate);
         setDailyStats(response.stats || []);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to load daily stats';
+      } catch (err: unknown) {
+        const errorMessage =
+          err instanceof Error ? (err as Error).message : 'Failed to load daily stats';
         setDailyError(errorMessage);
       } finally {
         setIsLoadingDaily(false);
