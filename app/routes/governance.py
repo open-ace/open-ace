@@ -518,13 +518,22 @@ def _validate_filter_rule_input(
 
     # Validate enum values
     if rule_type not in VALID_RULE_TYPES:
-        return False, f"Invalid type '{rule_type}'. Must be one of: {', '.join(sorted(VALID_RULE_TYPES))}"
+        return (
+            False,
+            f"Invalid type '{rule_type}'. Must be one of: {', '.join(sorted(VALID_RULE_TYPES))}",
+        )
 
     if severity not in VALID_SEVERITIES:
-        return False, f"Invalid severity '{severity}'. Must be one of: {', '.join(sorted(VALID_SEVERITIES))}"
+        return (
+            False,
+            f"Invalid severity '{severity}'. Must be one of: {', '.join(sorted(VALID_SEVERITIES))}",
+        )
 
     if action not in VALID_ACTIONS:
-        return False, f"Invalid action '{action}'. Must be one of: {', '.join(sorted(VALID_ACTIONS))}"
+        return (
+            False,
+            f"Invalid action '{action}'. Must be one of: {', '.join(sorted(VALID_ACTIONS))}",
+        )
 
     # Validate regex pattern if type is 'regex'
     if rule_type == "regex":
@@ -574,10 +583,24 @@ def api_get_filter_rules():
 
     # Validate filter parameters if provided
     if rule_type is not None and rule_type not in VALID_RULE_TYPES:
-        return jsonify({"error": f"Invalid type '{rule_type}'. Must be one of: {', '.join(sorted(VALID_RULE_TYPES))}"}), 400
+        return (
+            jsonify(
+                {
+                    "error": f"Invalid type '{rule_type}'. Must be one of: {', '.join(sorted(VALID_RULE_TYPES))}"
+                }
+            ),
+            400,
+        )
 
     if severity is not None and severity not in VALID_SEVERITIES:
-        return jsonify({"error": f"Invalid severity '{severity}'. Must be one of: {', '.join(sorted(VALID_SEVERITIES))}"}), 400
+        return (
+            jsonify(
+                {
+                    "error": f"Invalid severity '{severity}'. Must be one of: {', '.join(sorted(VALID_SEVERITIES))}"
+                }
+            ),
+            400,
+        )
 
     # Get rules from repository
     rules, total = governance_repo.get_filter_rules_paginated(
@@ -588,12 +611,14 @@ def api_get_filter_rules():
         is_enabled=is_enabled,
     )
 
-    return jsonify({
-        "rules": rules,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    })
+    return jsonify(
+        {
+            "rules": rules,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
 @governance_bp.route("/filter-rules/<int:rule_id>", methods=["GET"])
@@ -738,7 +763,9 @@ def api_update_filter_rule(rule_id):
     # Use existing values for validation if not provided
     validate_pattern = new_pattern if new_pattern is not None else existing.get("pattern", "")
     validate_type = new_type if new_type is not None else existing.get("type", "keyword")
-    validate_severity = new_severity if new_severity is not None else existing.get("severity", "medium")
+    validate_severity = (
+        new_severity if new_severity is not None else existing.get("severity", "medium")
+    )
     validate_action = new_action if new_action is not None else existing.get("action", "warn")
 
     # Validate if any relevant field is being changed

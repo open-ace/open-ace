@@ -8,7 +8,12 @@ Tests for validating filter rule input including:
 
 import pytest
 
-from app.routes.governance import _validate_filter_rule_input, VALID_RULE_TYPES, VALID_SEVERITIES, VALID_ACTIONS
+from app.routes.governance import (
+    _validate_filter_rule_input,
+    VALID_RULE_TYPES,
+    VALID_SEVERITIES,
+    VALID_ACTIONS,
+)
 
 
 class TestFilterRuleValidation:
