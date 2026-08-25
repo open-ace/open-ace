@@ -523,7 +523,10 @@ export const TrendAnalysis: React.FC = () => {
             <div className="btn-group mb-3" role="group" style={{ width: '100%' }}>
               <button
                 type="button"
-                className={cn('btn', segmentationType === 'usage' ? 'btn-primary' : 'btn-outline-primary')}
+                className={cn(
+                  'btn',
+                  segmentationType === 'usage' ? 'btn-primary' : 'btn-outline-primary'
+                )}
                 onClick={() => setSegmentationType('usage')}
                 style={{ flex: 1 }}
               >
@@ -531,7 +534,10 @@ export const TrendAnalysis: React.FC = () => {
               </button>
               <button
                 type="button"
-                className={cn('btn', segmentationType === 'role' ? 'btn-primary' : 'btn-outline-primary')}
+                className={cn(
+                  'btn',
+                  segmentationType === 'role' ? 'btn-primary' : 'btn-outline-primary'
+                )}
                 onClick={() => setSegmentationType('role')}
                 style={{ flex: 1 }}
               >
@@ -605,7 +611,7 @@ export const TrendAnalysis: React.FC = () => {
                       userRoleDistribution.unknown?.count || 0,
                     ]}
                     backgroundColor={[
-                      'rgba(220, 53, 69, 0.8)',  // Red for admin
+                      'rgba(220, 53, 69, 0.8)', // Red for admin
                       'rgba(255, 193, 7, 0.8)', // Yellow for manager
                       'rgba(13, 110, 253, 0.8)', // Blue for user
                       'rgba(108, 117, 125, 0.8)', // Gray for unknown
