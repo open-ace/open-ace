@@ -20,6 +20,8 @@ import type {
   CreatePolicyRuleRequest,
   PolicyRule,
   RestoreUserRequest,
+  SensitiveKeywordsFilters,
+  CreateSensitiveKeywordRequest,
 } from '@/api';
 
 // User Management Hooks
@@ -353,5 +355,63 @@ export function usePolicyDecisions(sessionId: string | null, limit: number = 100
     queryKey: ['admin', 'policy-decisions', sessionId, limit],
     queryFn: () => policyApi.getDecisions(sessionId!, limit),
     enabled: !!sessionId,
+  });
+}
+
+// Sensitive Keywords Hooks (Issue #3059)
+export function useSensitiveKeywords(tenantId: number | null, filters?: SensitiveKeywordsFilters) {
+  return useQuery({
+    queryKey: ['admin', 'sensitive-keywords', tenantId, filters],
+    queryFn: () => governanceApi.getSensitiveKeywords(tenantId!, filters),
+    enabled: !!tenantId,
+  });
+}
+
+export function useCreateSensitiveKeyword() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ tenantId, data }: { tenantId: number; data: CreateSensitiveKeywordRequest }) =>
+      governanceApi.createSensitiveKeyword(tenantId, data),
+    onSuccess: (_, { tenantId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ['admin', 'sensitive-keywords', tenantId],
+      });
+    },
+  });
+}
+
+export function useUpdateSensitiveKeyword() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      tenantId,
+      keywordId,
+      data,
+    }: {
+      tenantId: number;
+      keywordId: number;
+      data: { is_enabled: boolean };
+    }) => governanceApi.updateSensitiveKeyword(tenantId, keywordId, data),
+    onSuccess: (_, { tenantId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ['admin', 'sensitive-keywords', tenantId],
+      });
+    },
+  });
+}
+
+export function useDeleteSensitiveKeyword() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ tenantId, keywordId }: { tenantId: number; keywordId: number }) =>
+      governanceApi.deleteSensitiveKeyword(tenantId, keywordId),
+    onSuccess: (_, { tenantId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ['admin', 'sensitive-keywords', tenantId],
+      });
+    },
   });
 }
