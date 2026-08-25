@@ -78,6 +78,15 @@ export function useUserSegmentation(startDate?: string, endDate?: string, host?:
   });
 }
 
+// Issue #3079: Hook for user role distribution
+export function useUserRoleDistribution(startDate?: string, endDate?: string, host?: string) {
+  return useQuery({
+    queryKey: ['analysis', 'user-role-distribution', startDate, endDate, host],
+    queryFn: () => analysisApi.getUserRoleDistribution(startDate, endDate, host),
+    staleTime: 60 * 1000,
+  });
+}
+
 export function useRecommendations(host?: string) {
   return useQuery({
     queryKey: ['analysis', 'recommendations', host],

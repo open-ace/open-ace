@@ -78,6 +78,20 @@ export interface UserSegmentation {
   dormant: number; // No activity
 }
 
+// Issue #3079: User role distribution for role-based grouping
+export interface UserRoleDistributionItem {
+  count: number;
+  label: string;
+  description: string;
+}
+
+export interface UserRoleDistribution {
+  admin: UserRoleDistributionItem;
+  manager: UserRoleDistributionItem;
+  user: UserRoleDistributionItem;
+  unknown: UserRoleDistributionItem;
+}
+
 export interface Anomaly {
   date: string;
   tokens: number;
@@ -134,6 +148,7 @@ export interface BatchAnalysisResponse {
   conversation_stats: ConversationStats;
   tool_comparison: ToolComparison;
   user_segmentation: UserSegmentation;
+  user_role_distribution?: UserRoleDistribution; // Issue #3079
   data_range?: DataRange;
 }
 
@@ -353,6 +368,20 @@ export const analysisApi = {
     if (host) params.host = host;
 
     return apiClient.get<UserSegmentation>('/api/analysis/user-segmentation', params);
+  },
+
+  // Issue #3079: Get user role distribution for role-based grouping
+  async getUserRoleDistribution(
+    startDate?: string,
+    endDate?: string,
+    host?: string
+  ): Promise<UserRoleDistribution> {
+    const params: Record<string, string> = {};
+    if (startDate) params.start = startDate;
+    if (endDate) params.end = endDate;
+    if (host) params.host = host;
+
+    return apiClient.get<UserRoleDistribution>('/api/analysis/user-role-distribution', params);
   },
 
   async getRecommendations(host?: string): Promise<Recommendation[]> {

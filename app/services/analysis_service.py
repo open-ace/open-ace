@@ -342,6 +342,23 @@ class AnalysisService:
 
         user_segmentation = segments
 
+        # Issue #3079: User role distribution
+        # Count users by role group based on the role_group field from repository
+        role_distribution: dict[str, int] = {
+            "admin": 0,
+            "manager": 0,
+            "user": 0,
+            "unknown": 0,
+        }
+        for user_data in user_tokens:
+            role_group = user_data.get("role_group", "unknown") or "unknown"
+            if role_group in role_distribution:
+                role_distribution[role_group] += 1
+            else:
+                role_distribution["unknown"] += 1
+
+        user_role_distribution = role_distribution
+
         duration_ms = (time.time() - start_time) * 1000
         logger.info(f"get_batch_analysis took {duration_ms:.2f}ms")
 
@@ -353,6 +370,7 @@ class AnalysisService:
             "conversation_stats": conversation_stats,
             "tool_comparison": tool_comparison,
             "user_segmentation": user_segmentation,
+            "user_role_distribution": user_role_distribution,
             "data_range": data_range,
         }
 
@@ -1044,6 +1062,88 @@ class AnalysisService:
                 segments["low"] += 1
 
         return segments
+
+    @cached(ttl=60, key_prefix="analysis", skip_args=[0])
+    def get_user_role_distribution(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> dict:
+        """
+        Get user distribution by role group.
+
+        Groups users by their role (admin, manager, user, unknown) based on
+        the role_group field returned by the repository. This provides a
+        complementary view to the usage-based segmentation.
+
+        Issue #3079: Support role-based user grouping in trend analysis.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
+
+        Returns:
+            Dict: User role distribution with count, label, and description for each group.
+            Example: {
+                "admin": {"count": 2, "label": "管理员", "description": "系统管理员"},
+                "manager": {"count": 3, "label": "经理", "description": "团队管理员"},
+                "user": {"count": 15, "label": "用户", "description": "普通用户"},
+                "unknown": {"count": 5, "label": "未分配", "description": "未绑定账号"}
+            }
+        """
+        if not start_date:
+            start_date = get_days_ago(30)
+        if not end_date:
+            end_date = get_today()
+
+        # Get user token usage from messages (includes role_group field)
+        user_tokens = self.message_repo.get_user_token_totals(
+            start_date=start_date, end_date=end_date, host_name=host_name, tenant_id=tenant_id
+        )
+
+        # Count users by role group
+        role_counts: dict[str, int] = {
+            "admin": 0,
+            "manager": 0,
+            "user": 0,
+            "unknown": 0,
+        }
+
+        for user_data in user_tokens:
+            role_group = user_data.get("role_group", "unknown") or "unknown"
+            if role_group in role_counts:
+                role_counts[role_group] += 1
+            else:
+                role_counts["unknown"] += 1
+
+        # Build enhanced response with labels and descriptions
+        # Labels are in Chinese as the primary language; frontend will handle i18n
+        return {
+            "admin": {
+                "count": role_counts["admin"],
+                "label": "管理员",
+                "description": "系统管理员",
+            },
+            "manager": {
+                "count": role_counts["manager"],
+                "label": "经理",
+                "description": "团队管理员",
+            },
+            "user": {
+                "count": role_counts["user"],
+                "label": "用户",
+                "description": "普通用户",
+            },
+            "unknown": {
+                "count": role_counts["unknown"],
+                "label": "未分配",
+                "description": "未绑定账号",
+            },
+        }
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def detect_anomalies(
