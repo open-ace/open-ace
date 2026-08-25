@@ -16,7 +16,7 @@ from app.modules.governance.alert_notifier import (
     NotificationPreference,
 )
 
-pytestmark = pytest.mark.issue(2063)
+pytestmark = [pytest.mark.issue(2063), pytest.mark.regression]
 
 
 class _SyncThread:
