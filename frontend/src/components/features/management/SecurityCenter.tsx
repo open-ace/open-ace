@@ -20,6 +20,7 @@ import {
   useAuditThresholds,
   useUpdateAuditThresholds,
   usePageRefresh,
+  useFilterStats,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -34,6 +35,8 @@ import {
   EmptyState,
   Badge,
   PageRefreshControl,
+  StatCard,
+  Progress,
 } from '@/components/common';
 import { useToast, useConfirm } from '@/components/common';
 import { FilterRuleTableHeader } from './FilterRuleTableHeader';
@@ -63,7 +66,9 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   redact: 'actionRedact',
 };
 
-type TabType = 'filter' | 'settings' | 'audit';
+type TabType = 'filter' | 'settings' | 'audit' | 'stats';
+
+const MAX_DISPLAY_PATTERNS = 20;
 
 const AUDIT_THRESHOLD_DEFAULTS: AuditThresholdsType = {
   audit_failed_login_threshold: 5,
@@ -170,6 +175,18 @@ export const SecurityCenter: React.FC = () => {
   const [thresholdsErrors, setThresholdsErrors] = useState<
     Partial<Record<keyof AuditThresholdsType, string>>
   >({});
+
+  // --- Filter Stats State ---
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    isError: statsError,
+    error: statsErrorObj,
+    refetch: refetchStats,
+    isFetching: isFetchingStats,
+  } = useFilterStats({ enabled: activeTab === 'stats' });
+
+  const [showAllPatterns, setShowAllPatterns] = useState(false);
 
   // --- Filter Rules Handlers ---
   const handleOpenCreateRule = () => {
@@ -908,6 +925,180 @@ export const SecurityCenter: React.FC = () => {
     );
   };
 
+  // --- Render Stats Tab ---
+  const getHitRateVariant = (rate: number): 'success' | 'warning' | 'danger' => {
+    if (rate >= 90) return 'success';
+    if (rate >= 70) return 'warning';
+    return 'danger';
+  };
+
+  const renderStatsTab = () => {
+    if (statsLoading) {
+      return <Loading size="lg" text={t('loading', language)} />;
+    }
+
+    if (statsError) {
+      return (
+        <Error
+          message={statsErrorObj?.message || t('error', language)}
+          onRetry={() => refetchStats()}
+        />
+      );
+    }
+
+    if (!stats) {
+      return <EmptyState icon="bi-bar-chart" title={t('noData', language)} />;
+    }
+
+    const displayPatterns = showAllPatterns
+      ? stats.patterns
+      : stats.patterns.slice(0, MAX_DISPLAY_PATTERNS);
+    const hasMorePatterns = stats.patterns.length > MAX_DISPLAY_PATTERNS;
+
+    return (
+      <>
+        {/* Status Row */}
+        <div className="row g-3 mb-4">
+          <div className="col-md-4">
+            <Card>
+              <div className="d-flex justify-content-between align-items-center">
+                <span>{t('filterStatus', language)}</span>
+                <Badge variant={stats.enabled ? 'success' : 'secondary'}>
+                  {stats.enabled ? t('filterEnabled', language) : t('filterDisabled', language)}
+                </Badge>
+              </div>
+            </Card>
+          </div>
+          <div className="col-md-4">
+            <Card>
+              <div className="d-flex justify-content-between align-items-center">
+                <span>{t('piiRedaction', language)}</span>
+                <Badge variant={stats.redact_pii ? 'success' : 'secondary'}>
+                  {stats.redact_pii ? t('filterEnabled', language) : t('filterDisabled', language)}
+                </Badge>
+              </div>
+            </Card>
+          </div>
+          <div className="col-md-4">
+            <Card>
+              <div className="d-flex justify-content-between align-items-center">
+                <span>{t('highRiskBlock', language)}</span>
+                <Badge variant={stats.block_high_risk ? 'success' : 'secondary'}>
+                  {stats.block_high_risk
+                    ? t('filterEnabled', language)
+                    : t('filterDisabled', language)}
+                </Badge>
+              </div>
+            </Card>
+          </div>
+        </div>
+
+        {/* Rules Count Row */}
+        <div className="row g-3 mb-4">
+          <div className="col-md-6">
+            <StatCard
+              label={t('patternRules', language)}
+              value={stats.pattern_count}
+              icon={<i className="bi bi-regex" />}
+              variant="info"
+            />
+          </div>
+          <div className="col-md-6">
+            <StatCard
+              label={t('keywordRules', language)}
+              value={stats.keyword_count}
+              icon={<i className="bi bi-key" />}
+              variant="primary"
+            />
+          </div>
+        </div>
+
+        {/* Cache Performance Card */}
+        <Card
+          title={t('cachePerformance', language)}
+          className="mb-4"
+          actions={
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              onClick={() => refetchStats()}
+              loading={isFetchingStats}
+            >
+              <i className="bi bi-arrow-clockwise me-1" />
+              {t('refreshStats', language)}
+            </Button>
+          }
+        >
+          <div className="mb-3">
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <span>{t('cacheHitRate', language)}</span>
+              <strong>{stats.compiled_cache_hit_rate.toFixed(2)}%</strong>
+            </div>
+            <Progress
+              value={stats.compiled_cache_hit_rate}
+              max={100}
+              variant={getHitRateVariant(stats.compiled_cache_hit_rate)}
+            />
+          </div>
+          <div className="row g-3">
+            <div className="col-md-4">
+              <div className="text-muted">{t('cacheHits', language)}</div>
+              <div className="fs-4">{stats.compiled_cache_hits.toLocaleString()}</div>
+            </div>
+            <div className="col-md-4">
+              <div className="text-muted">{t('cacheMisses', language)}</div>
+              <div className="fs-4">{stats.compiled_cache_misses.toLocaleString()}</div>
+            </div>
+            <div className="col-md-4">
+              <div className="text-muted">{t('cacheSize', language)}</div>
+              <div className="fs-4">
+                {stats.compiled_cache_size.toLocaleString()} /{' '}
+                {stats.compiled_cache_max_size.toLocaleString()}
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        {/* Loaded Patterns */}
+        <Card title={t('loadedPatterns', language)}>
+          {stats.patterns.length === 0 ? (
+            <EmptyState icon="bi-code-square" title={t('noPatternsLoaded', language)} />
+          ) : (
+            <>
+              <div className="d-flex flex-wrap gap-2">
+                {displayPatterns.map((pattern, index) => (
+                  <Badge key={index} variant="secondary">
+                    {pattern}
+                  </Badge>
+                ))}
+              </div>
+              {hasMorePatterns && !showAllPatterns && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="mt-2 p-0"
+                  onClick={() => setShowAllPatterns(true)}
+                >
+                  {t('viewAllPatterns', language, { count: stats.patterns.length })}
+                </Button>
+              )}
+              {showAllPatterns && hasMorePatterns && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="mt-2 p-0"
+                  onClick={() => setShowAllPatterns(false)}
+                >
+                  {t('showLess', language)}
+                </Button>
+              )}
+            </>
+          )}
+        </Card>
+      </>
+    );
+  };
+
   return (
     <div className="security-center">
       {/* Header */}
@@ -960,12 +1151,22 @@ export const SecurityCenter: React.FC = () => {
             {t('auditThresholds', language)}
           </button>
         </li>
+        <li className="nav-item">
+          <button
+            className={cn('nav-link', activeTab === 'stats' && 'active')}
+            onClick={() => setActiveTab('stats')}
+          >
+            <i className="bi bi-bar-chart me-1" />
+            {t('filterStats', language)}
+          </button>
+        </li>
       </ul>
 
       {/* Tab Content */}
       {activeTab === 'filter' && renderFilterTab()}
       {activeTab === 'settings' && renderSettingsTab()}
       {activeTab === 'audit' && renderAuditThresholdsTab()}
+      {activeTab === 'stats' && renderStatsTab()}
     </div>
   );
 };

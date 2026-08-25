@@ -158,6 +158,18 @@ export function useFilterRules() {
   });
 }
 
+export function useFilterStats(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ['admin', 'filter-stats'],
+    queryFn: () => governanceApi.getFilterStats(),
+    staleTime: 30000, // 30 seconds - stats don't change frequently
+    gcTime: 300000, // 5 minutes
+    refetchOnWindowFocus: false,
+    retry: 1,
+    enabled: options?.enabled ?? true,
+  });
+}
+
 export function useCreateFilterRule() {
   const queryClient = useQueryClient();
 
@@ -165,6 +177,7 @@ export function useCreateFilterRule() {
     mutationFn: (data: CreateFilterRuleRequest) => governanceApi.createFilterRule(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'filter-rules'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'filter-stats'] });
     },
   });
 }
@@ -177,6 +190,7 @@ export function useUpdateFilterRule() {
       governanceApi.updateFilterRule(ruleId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'filter-rules'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'filter-stats'] });
     },
   });
 }
@@ -188,6 +202,7 @@ export function useDeleteFilterRule() {
     mutationFn: (ruleId: number) => governanceApi.deleteFilterRule(ruleId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'filter-rules'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'filter-stats'] });
     },
   });
 }

@@ -19,7 +19,7 @@ vi.mock('@/store', () => ({
 }));
 
 vi.mock('@/i18n', () => ({
-  t: (key: string) => {
+  t: (key: string, _lang?: string, params?: Record<string, unknown>) => {
     const translations: Record<string, string> = {
       securityCenter: 'Security Center',
       contentFilter: 'Content Filter',
@@ -90,8 +90,34 @@ vi.mock('@/i18n', () => ({
       roleChangeThresholdHelp: 'Role change threshold help',
       permissionChangeThreshold: 'Permission Change Threshold',
       permissionChangeThresholdHelp: 'Permission change threshold help',
+      // Filter Statistics
+      filterStats: 'Filter Statistics',
+      filterStatus: 'Filter Status',
+      filterEnabled: 'Enabled',
+      filterDisabled: 'Disabled',
+      piiRedaction: 'PII Redaction',
+      highRiskBlock: 'High Risk Block',
+      patternRules: 'Pattern Rules',
+      keywordRules: 'Keyword Rules',
+      cachePerformance: 'Cache Performance',
+      cacheHitRate: 'Cache Hit Rate',
+      cacheHits: 'Cache Hits',
+      cacheMisses: 'Cache Misses',
+      cacheSize: 'Cache Size',
+      loadedPatterns: 'Loaded Patterns',
+      noPatternsLoaded: 'No patterns loaded',
+      viewAllPatterns: 'View all ({count})',
+      showLess: 'Show less',
+      refreshStats: 'Refresh',
+      noData: 'No data available',
     };
-    return translations[key] || key;
+    let text = translations[key] || key;
+    if (params) {
+      Object.entries(params).forEach(([paramKey, paramValue]) => {
+        text = text.replace(`{${paramKey}}`, String(paramValue));
+      });
+    }
+    return text;
   },
 }));
 
@@ -199,6 +225,26 @@ vi.mock('@/hooks', () => ({
     refresh: vi.fn(),
     lastRefreshTime: null,
     isRefreshing: false,
+  })),
+  useFilterStats: vi.fn(() => ({
+    data: {
+      enabled: true,
+      redact_pii: true,
+      block_high_risk: true,
+      pattern_count: 5,
+      keyword_count: 10,
+      patterns: ['password', 'ssn', 'credit_card'],
+      compiled_cache_size: 100,
+      compiled_cache_hits: 500,
+      compiled_cache_misses: 50,
+      compiled_cache_hit_rate: 90.91,
+      compiled_cache_max_size: 1000,
+    },
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+    isFetching: false,
   })),
 }));
 
@@ -322,13 +368,40 @@ vi.mock('@/components/common', () => ({
       )}
     </div>
   ),
-  EmptyState: ({ title }: { title: string }) => <div data-testid="empty-state">{title}</div>,
+  EmptyState: ({
+    title,
+    icon: _icon,
+    size: _size,
+  }: {
+    title: string;
+    icon?: string;
+    size?: string;
+  }) => <div data-testid="empty-state">{title}</div>,
   Badge: ({ children, variant }: { children: React.ReactNode; variant: string }) => (
     <span data-testid="badge" data-variant={variant}>
       {children}
     </span>
   ),
   PageRefreshControl: () => <div data-testid="page-refresh-control" />,
+  StatCard: ({
+    label,
+    value,
+    variant,
+  }: {
+    label: string;
+    value: number | string;
+    variant?: string;
+  }) => (
+    <div data-testid="stat-card" data-variant={variant}>
+      <span>{label}</span>
+      <span>{value}</span>
+    </div>
+  ),
+  Progress: ({ value, max, variant }: { value: number; max?: number; variant?: string }) => (
+    <div data-testid="progress" data-value={value} data-max={max} data-variant={variant}>
+      Progress: {value}%
+    </div>
+  ),
   useToast: () => mockToast,
   useConfirm: () => mockConfirm,
 }));

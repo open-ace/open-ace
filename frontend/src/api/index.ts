@@ -47,6 +47,7 @@ export type {
   FilterCheckResult,
   SecuritySettings,
   PasswordPolicy,
+  FilterStats,
 } from './governance';
 export { reportApi } from './report';
 export type { MyUsageReport, DailyUsage } from './report';
