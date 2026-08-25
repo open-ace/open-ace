@@ -796,6 +796,18 @@ export const translations: Record<Language, Translations> = {
     userSegmentationDormantDesc: 'Inactive Recently',
     userSegmentationStandard:
       'User Segmentation Standard: Based on Token usage. High Usage (>10K), Medium Usage (1K-10K), Low Usage (<1K), Dormant (no recent activity)',
+    // Issue #3079: Role-based user distribution
+    userRoleDistribution: 'User Role Distribution',
+    userRoleAdmin: 'Admin',
+    userRoleManager: 'Manager',
+    userRoleUser: 'User',
+    userRoleUnknown: 'Unassigned',
+    userRoleAdminDesc: 'System administrators',
+    userRoleManagerDesc: 'Team managers',
+    userRoleUserDesc: 'Regular users',
+    userRoleUnknownDesc: 'Users without account binding',
+    segmentByUsage: 'By Usage',
+    segmentByRole: 'By Role',
     toolComparison: 'Tool Comparison',
 
     // Request Statistics
@@ -2966,6 +2978,18 @@ export const translations: Record<Language, Translations> = {
     userSegmentationDormantDesc: '近期未使用',
     userSegmentationStandard:
       '用户分层标准：基于 Token 使用量划分。高使用量（>10K）、中等使用量（1K-10K）、低使用量（<1K）、休眠用户（近期无活动）',
+    // Issue #3079: Role-based user distribution
+    userRoleDistribution: '用户角色分布',
+    userRoleAdmin: '管理员',
+    userRoleManager: '经理',
+    userRoleUser: '用户',
+    userRoleUnknown: '未分配',
+    userRoleAdminDesc: '系统管理员',
+    userRoleManagerDesc: '团队管理员',
+    userRoleUserDesc: '普通用户',
+    userRoleUnknownDesc: '未绑定账号的用户',
+    segmentByUsage: '按使用量',
+    segmentByRole: '按角色',
     toolComparison: '工具对比',
 
     // Request Statistics
@@ -5374,6 +5398,18 @@ export const translations: Record<Language, Translations> = {
     userSegmentationDormantDesc: '最近未使用',
     userSegmentationStandard:
       'ユーザー層別基準：Token使用量に基づく。高使用量（>10K）、中程度（1K-10K）、低使用量（<1K）、休眠（最近の活動なし）',
+    // Issue #3079: Role-based user distribution
+    userRoleDistribution: 'ユーザーロール分布',
+    userRoleAdmin: '管理者',
+    userRoleManager: 'マネージャー',
+    userRoleUser: 'ユーザー',
+    userRoleUnknown: '未割り当て',
+    userRoleAdminDesc: 'システム管理者',
+    userRoleManagerDesc: 'チーム管理者',
+    userRoleUserDesc: '一般ユーザー',
+    userRoleUnknownDesc: 'アカウント未連携ユーザー',
+    segmentByUsage: '使用量別',
+    segmentByRole: 'ロール別',
     toolComparison: 'ツール比較',
 
     // Sessions
@@ -7357,6 +7393,18 @@ export const translations: Record<Language, Translations> = {
     userSegmentationDormantDesc: '최근 미사용',
     userSegmentationStandard:
       '사용자 세그먼테이션 기준: Token 사용량 기반. 높은 사용량 (>10K), 보통 (1K-10K), 낮은 사용량 (<1K), 휴면 (최근 활동 없음)',
+    // Issue #3079: Role-based user distribution
+    userRoleDistribution: '사용자 역할 분포',
+    userRoleAdmin: '관리자',
+    userRoleManager: '매니저',
+    userRoleUser: '사용자',
+    userRoleUnknown: '미할당',
+    userRoleAdminDesc: '시스템 관리자',
+    userRoleManagerDesc: '팀 관리자',
+    userRoleUserDesc: '일반 사용자',
+    userRoleUnknownDesc: '계정 미연결 사용자',
+    segmentByUsage: '사용량별',
+    segmentByRole: '역할별',
     toolComparison: '도구 비교',
 
     // Sessions
