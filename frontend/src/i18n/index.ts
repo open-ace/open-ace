@@ -492,7 +492,7 @@ export const translations: Record<Language, Translations> = {
     loadedPatterns: 'Loaded Patterns',
     noPatternsLoaded: 'No patterns loaded',
     noCacheData: 'No cache data yet',
-    viewAllPatterns: 'View all',
+    viewAllPatterns: 'View all ({count})',
     refreshStats: 'Refresh',
 
     // Audit Log
@@ -2626,7 +2626,7 @@ export const translations: Record<Language, Translations> = {
     loadedPatterns: '已加载规则',
     noPatternsLoaded: '暂无已加载规则',
     noCacheData: '暂无缓存数据',
-    viewAllPatterns: '查看全部',
+    viewAllPatterns: '查看全部 ({count})',
     refreshStats: '刷新',
 
     // Audit Log
@@ -4978,7 +4978,7 @@ export const translations: Record<Language, Translations> = {
     loadedPatterns: '読み込み済みパターン',
     noPatternsLoaded: 'パターンが読み込まれていません',
     noCacheData: 'キャッシュデータがありません',
-    viewAllPatterns: 'すべて表示',
+    viewAllPatterns: 'すべて表示 ({count})',
     refreshStats: '更新',
 
     // Audit Log
@@ -6932,7 +6932,7 @@ export const translations: Record<Language, Translations> = {
     loadedPatterns: '로드된 패턴',
     noPatternsLoaded: '로드된 패턴 없음',
     noCacheData: '캐시 데이터 없음',
-    viewAllPatterns: '전체 보기',
+    viewAllPatterns: '전체 보기 ({count})',
     refreshStats: '새로고침',
 
     // Audit Log

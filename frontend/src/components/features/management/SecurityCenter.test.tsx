@@ -19,7 +19,7 @@ vi.mock('@/store', () => ({
 }));
 
 vi.mock('@/i18n', () => ({
-  t: (key: string) => {
+  t: (key: string, _lang?: string, params?: Record<string, unknown>) => {
     const translations: Record<string, string> = {
       securityCenter: 'Security Center',
       contentFilter: 'Content Filter',
@@ -106,11 +106,18 @@ vi.mock('@/i18n', () => ({
       cacheSize: 'Cache Size',
       loadedPatterns: 'Loaded Patterns',
       noPatternsLoaded: 'No patterns loaded',
-      viewAllPatterns: 'View all',
+      viewAllPatterns: 'View all ({count})',
+      showLess: 'Show less',
       refreshStats: 'Refresh',
       noData: 'No data available',
     };
-    return translations[key] || key;
+    let text = translations[key] || key;
+    if (params) {
+      Object.entries(params).forEach(([paramKey, paramValue]) => {
+        text = text.replace(`{${paramKey}}`, String(paramValue));
+      });
+    }
+    return text;
   },
 }));
 
