@@ -1930,7 +1930,7 @@ export const Workspace: React.FC = () => {
 
   // Close a tab
   const closeTab = useCallback(
-    (tabId: string, e: React.MouseEvent) => {
+    async (tabId: string, e: React.MouseEvent) => {
       e.stopPropagation();
 
       const tab = tabs.find((t) => t.id === tabId);
@@ -1940,12 +1940,20 @@ export const Workspace: React.FC = () => {
         // Cancel any pending terminal status polling
         terminalPollCancelRefs.current.set(tabId, true);
         if (tab.terminalId && tab.machineId) {
-          remoteApi
-            .stopTerminal({
+          try {
+            const result = await remoteApi.stopTerminal({
               terminal_id: tab.terminalId,
               machine_id: tab.machineId,
-            })
-            .catch((err) => console.error('Failed to stop terminal:', err));
+            });
+            if (result.success) {
+              toast.success(t('terminalStopRequestSent', language));
+            } else {
+              toast.error(t('terminalStopFailed', language));
+            }
+          } catch (err) {
+            console.error('Failed to stop terminal:', err);
+            toast.error(t('terminalStopFailed', language));
+          }
         }
         doCloseTab(tabId);
         return;
@@ -1959,7 +1967,7 @@ export const Workspace: React.FC = () => {
 
       doCloseTab(tabId);
     },
-    [tabs, doCloseTab]
+    [tabs, doCloseTab, toast, language]
   );
 
   // Handle remote tab close with session stop
