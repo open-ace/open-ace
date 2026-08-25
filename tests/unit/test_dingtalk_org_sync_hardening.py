@@ -50,6 +50,10 @@ def sync_env(tmp_path, monkeypatch):
 
     db = Database(db_url=f"sqlite:///{tmp_path / 'dingtalk-hardening.db'}")
     load_schema_from_file(db_url=db.db_url, dialect="sqlite")
+    db.execute(
+        "INSERT INTO tenants (id, name, slug, quota) VALUES (?, ?, ?, ?)",
+        (8, "DingTalk Hardening Tenant", "dingtalk-hardening", '{"max_users": 100}'),
+    )
 
     config = {
         "dingtalk": {
