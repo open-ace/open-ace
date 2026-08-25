@@ -12,6 +12,7 @@
 - [Remote Agent Installation](#remote-agent-installation)
 - [Managing Remote Machines](#managing-remote-machines)
 - [Management UI](#management-ui)
+- [Central Policy & Approval](#central-policy--approval)
 - [User Guide](#user-guide)
 - [API Reference](#api-reference)
 - [Security Design](#security-design)
@@ -629,6 +630,146 @@ curl -b cookies.txt -X POST \
 
 ---
 
+## Central Policy & Approval
+
+Open ACE can evaluate remote-agent actions against centralized server-side
+policy rules before a human sees the request. Instead of treating every CLI
+`permission_request` as a manual prompt, the server can now make one of three
+deterministic decisions:
+
+| Effect | Result |
+|--------|--------|
+| `allow` | Auto-allow the action and continue without interruption |
+| `deny` | Auto-deny the action before it reaches the user |
+| `require_approval` | Escalate to the existing human approval flow |
+
+This feature is part of the Remote Workspace control plane, so it applies to
+remote-session model selection, tool actions, protected files, and command
+patterns.
+
+### Enable the Feature
+
+Edit `~/.open-ace/config.json` on the server:
+
+```json
+{
+  "policy": {
+    "enabled": true,
+    "approval_ttl_seconds": 3600
+  }
+}
+```
+
+- `enabled`: master switch for the whole module. When `false`, policy APIs
+  return `{success: false, disabled: true}` and remote sessions fall back to
+  the legacy behavior.
+- `approval_ttl_seconds`: default lifetime for approval decisions. A specific
+  rule can override it with its own `approval_ttl_seconds`.
+
+After changing the config, restart the Open ACE service so every web process
+loads the updated setting.
+
+### Rule Types and Match Scope
+
+Rules are versioned snapshots: editing a rule does not mutate history, it
+creates a new current version for the same `rule_key`.
+
+| Policy Type | Matches On |
+|-------------|------------|
+| `model` | Model name during remote session creation or model switch |
+| `provider` | Provider name during remote session creation or model switch |
+| `tool_action` | Tool name + action pair from a permission request |
+| `file_path` | Normalized file paths in tool arguments |
+| `command` | Normalized command strings such as shell execution |
+
+Rules can be scoped by tenant, project path, machine, user, or team. Pattern
+matching supports `glob` and `regex`, and model/provider/file/command rules
+must include a matcher (`pattern` and/or `value_list`) so an empty deny rule
+cannot accidentally block everything.
+
+### Management UI (System Admin)
+
+**Path**: Manage Mode → Policy Rules (`/manage/policy/rules`)
+
+The page is only visible when `policy.enabled=true`. It currently has two tabs:
+
+- **Rules**: list current rules, create rules, edit a rule as a new version,
+  and enable or disable the current version.
+- **Decisions**: query policy decisions by `session_id` to inspect what the
+  server decided for a given remote session.
+
+The rule form supports the main fields used by the evaluator:
+
+- `rule_key`, `name`, `policy_type`, `effect`
+- `pattern_type`, `pattern`, `value_list`
+- `tool_name`, `action` for `tool_action` rules
+- `tenant_id`, `project_path`, `machine_id`, `user_id`, `team_id`
+- `priority`, `approval_ttl_seconds`, `enabled`, `is_default`, `description`
+
+### Runtime Behavior
+
+1. **Remote session create / model switch**: the server evaluates `model` and
+   `provider` rules. A denied model/provider cannot be selected.
+2. **Incoming CLI permission request**: the server evaluates `tool_action`,
+   `file_path`, and `command` rules.
+3. **Immediate effects**:
+   - `allow` and `deny` are persisted and returned to the Agent immediately.
+   - `require_approval` enters the existing human approval flow.
+4. **Approval consumption**: when a human responds, the server re-checks the
+   stored fingerprint and expiry before consuming the approval, preventing
+   replay or "request X, execute Y" drift.
+
+If the evaluator fails unexpectedly, the system fails closed: tool actions fall
+back to approval, and model/provider checks fall back to deny.
+
+### Audit and Visibility
+
+Every decision is stored in the authoritative `policy_decisions` table and is
+also emitted into the Run Timeline as a `policy_decision` event. This gives
+both administrators and ordinary users a visible record of:
+
+- the decision (`allow`, `deny`, `require_approval`)
+- the reason
+- matched `rule_key` and rule version
+- fingerprint hash
+- `request_id`, model, provider, timestamps, and approval expiry
+
+### Admin API
+
+All policy endpoints are admin-only and live under `/api`:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/policy/rules?include_disabled=true` | List current rules |
+| `POST` | `/api/policy/rules` | Create a new rule |
+| `PUT` | `/api/policy/rules/<rule_key>` | Create a new version of an existing rule |
+| `PATCH` | `/api/policy/rules/<rule_id>/enabled` | Enable or disable the current version |
+| `GET` | `/api/policy/decisions?session_id=<id>` | Query decision records for a remote session |
+
+Example: block `rm -rf` for every remote session:
+
+```bash
+curl -b cookies.txt -X POST http://<server>:19888/api/policy/rules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rule_key": "block-rm-rf",
+    "name": "Block recursive force delete",
+    "policy_type": "command",
+    "pattern_type": "regex",
+    "pattern": "rm\\s+-.*rf",
+    "effect": "deny"
+  }'
+```
+
+Example: inspect the decision history for one session:
+
+```bash
+curl -b cookies.txt \
+  "http://<server>:19888/api/policy/decisions?session_id=<session_id>"
+```
+
+---
+
 ## User Guide
 
 ### Using Remote Workspace in the Web UI
@@ -805,6 +946,16 @@ curl -b cookies.txt -X POST \
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/remote/machines/<id>/browse` | Browse the remote machine filesystem (requires WebSocket support; currently reserved) |
+
+### Central Policy & Approval (Admin)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/policy/rules?include_disabled=true` | List current policy rules |
+| `POST` | `/api/policy/rules` | Create a new policy rule |
+| `PUT` | `/api/policy/rules/<rule_key>` | Create a new version for an existing rule |
+| `PATCH` | `/api/policy/rules/<rule_id>/enabled` | Enable or disable the current rule version |
+| `GET` | `/api/policy/decisions?session_id=<id>` | Query policy decisions for a remote session |
 
 ---
 

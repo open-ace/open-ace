@@ -12,6 +12,7 @@
 - [远程 Agent 安装](#远程-agent-安装)
 - [管理远程机器](#管理远程机器)
 - [管理界面](#管理界面)
+- [中央策略与审批](#中央策略与审批)
 - [用户使用指南](#用户使用指南)
 - [API 参考](#api-参考)
 - [安全设计](#安全设计)
@@ -629,6 +630,136 @@ curl -b cookies.txt -X POST \
 
 ---
 
+## 中央策略与审批
+
+Open ACE 现在可以在人工审批之前，先由服务端对远程 Agent 的动作执行集中式策略评估。
+这样 CLI 发来的 `permission_request` 不再只能逐条人工处理，而是由服务器先给出确定性的
+三类决策：
+
+| Effect | 含义 |
+|--------|------|
+| `allow` | 自动放行，动作继续执行，不打扰用户 |
+| `deny` | 自动拒绝，请求在到达用户前就被挡住 |
+| `require_approval` | 升级为现有的人工审批流程 |
+
+这套能力属于 Remote Workspace 的控制面，因此会作用于远程会话的模型选择、工具动作、
+受保护文件和命令模式匹配。
+
+### 开启功能
+
+在服务器上编辑 `~/.open-ace/config.json`：
+
+```json
+{
+  "policy": {
+    "enabled": true,
+    "approval_ttl_seconds": 3600
+  }
+}
+```
+
+- `enabled`：整个策略模块的总开关。为 `false` 时，policy API 会返回
+  `{success: false, disabled: true}`，远程会话退回到旧的人工审批行为。
+- `approval_ttl_seconds`：审批决策的默认有效期。单条规则也可以通过自己的
+  `approval_ttl_seconds` 覆盖这个默认值。
+
+修改配置后请重启 Open ACE 服务，让各个 Web 进程加载到新的开关状态。
+
+### 规则类型与匹配范围
+
+策略规则采用版本化快照。编辑规则时不会原地改历史记录，而是为同一个 `rule_key`
+创建一个新的当前版本。
+
+| 策略类型 | 匹配对象 |
+|----------|----------|
+| `model` | 创建远程会话或切换模型时的模型名 |
+| `provider` | 创建远程会话或切换模型时的 provider 名 |
+| `tool_action` | 权限请求里的工具名和动作组合 |
+| `file_path` | 工具参数中的规范化文件路径 |
+| `command` | 规范化后的命令字符串，例如 shell 执行 |
+
+规则还可以按租户、项目路径、机器、用户或团队做 scope。匹配器支持 `glob` 和
+`regex`；其中 model/provider/file/command 规则必须携带匹配条件
+（`pattern` 和/或 `value_list`），避免空规则意外挡住所有请求。
+
+### 管理界面（系统管理员）
+
+**路径**：管理模式 → 策略规则（`/manage/policy/rules`）
+
+只有在 `policy.enabled=true` 时，这个页面才会显示。当前页面包含两个标签页：
+
+- **规则**：查看当前规则、创建规则、把已有规则编辑成新版本，以及启用/禁用当前版本。
+- **决策记录**：按 `session_id` 查询某个远程会话的策略决策结果。
+
+规则表单支持评估器使用的主要字段：
+
+- `rule_key`、`name`、`policy_type`、`effect`
+- `pattern_type`、`pattern`、`value_list`
+- `tool_name`、`action`（仅 `tool_action` 规则使用）
+- `tenant_id`、`project_path`、`machine_id`、`user_id`、`team_id`
+- `priority`、`approval_ttl_seconds`、`enabled`、`is_default`、`description`
+
+### 运行时行为
+
+1. **创建远程会话 / 切换模型**：服务器先评估 `model` 和 `provider` 规则。
+   被拒绝的模型或 provider 不能被选中。
+2. **CLI 发来权限请求**：服务器评估 `tool_action`、`file_path` 和 `command` 规则。
+3. **即时决策**：
+   - `allow` 和 `deny` 会先落库，再立刻回给 Agent。
+   - `require_approval` 才会进入现有的人审流程。
+4. **消费审批时**：服务器会重新校验已保存的请求指纹和过期时间，再允许消费审批，
+   防止重放或“申请做 X，实际执行 Y”的漂移绕过。
+
+如果评估器本身异常，系统会按 fail-closed 处理：工具动作回退到人工审批，模型 /
+provider 检查回退到拒绝。
+
+### 审计与可见性
+
+每一条决策都会写入权威表 `policy_decisions`，同时也会在 Run Timeline 中额外发出
+`policy_decision` 事件。这样管理员和普通用户都可以看到：
+
+- 决策结果（`allow`、`deny`、`require_approval`）
+- 决策原因
+- 命中的 `rule_key` 和规则版本
+- 指纹哈希
+- `request_id`、model、provider、时间戳、审批过期时间
+
+### 管理 API
+
+所有 policy 接口都要求管理员权限，并挂在 `/api` 前缀下：
+
+| 方法 | 路径 | 作用 |
+|------|------|------|
+| `GET` | `/api/policy/rules?include_disabled=true` | 列出当前规则 |
+| `POST` | `/api/policy/rules` | 新建规则 |
+| `PUT` | `/api/policy/rules/<rule_key>` | 为已有规则创建新版本 |
+| `PATCH` | `/api/policy/rules/<rule_id>/enabled` | 启用或禁用当前规则版本 |
+| `GET` | `/api/policy/decisions?session_id=<id>` | 查询某个远程会话的决策记录 |
+
+示例：禁止任何远程会话执行 `rm -rf`：
+
+```bash
+curl -b cookies.txt -X POST http://<server>:19888/api/policy/rules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rule_key": "block-rm-rf",
+    "name": "Block recursive force delete",
+    "policy_type": "command",
+    "pattern_type": "regex",
+    "pattern": "rm\\s+-.*rf",
+    "effect": "deny"
+  }'
+```
+
+示例：查看某个会话的决策历史：
+
+```bash
+curl -b cookies.txt \
+  "http://<server>:19888/api/policy/decisions?session_id=<session_id>"
+```
+
+---
+
 ## 用户使用指南
 
 ### 在 Web 界面使用远程工作区
@@ -805,6 +936,16 @@ curl -b cookies.txt -X POST \
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET` | `/api/remote/machines/<id>/browse` | 浏览远程机器文件系统（需要 WebSocket 支持，当前为预留接口） |
+
+### 中央策略与审批（管理员）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/policy/rules?include_disabled=true` | 列出当前策略规则 |
+| `POST` | `/api/policy/rules` | 创建新的策略规则 |
+| `PUT` | `/api/policy/rules/<rule_key>` | 为已有规则创建新版本 |
+| `PATCH` | `/api/policy/rules/<rule_id>/enabled` | 启用或禁用当前规则版本 |
+| `GET` | `/api/policy/decisions?session_id=<id>` | 查询远程会话的策略决策记录 |
 
 ---
 

@@ -21,7 +21,7 @@ Documentation files are in the [en/](en/) directory.
 | [**PERMISSION-MODEL**](en/PERMISSION-MODEL.md) | Role-based access control, authentication, and authorization |
 | [**FRONTEND-GUIDE**](en/FRONTEND-GUIDE.md) | React/TypeScript frontend development guide |
 | [**REMOTE-AGENT**](en/REMOTE-AGENT.md) | Remote agent client — installation, configuration, CLI tools |
-| [**REMOTE-WORKSPACE**](en/REMOTE-WORKSPACE.md) | Remote workspace from server perspective — deployment, management UI, API |
+| [**REMOTE-WORKSPACE**](en/REMOTE-WORKSPACE.md) | Remote workspace from server perspective — deployment, management UI, API, and central policy/approval |
 | [**DEPLOYMENT**](en/DEPLOYMENT.md) | Docker deployment and multi-user workspace setup |
 | [**KUBERNETES**](en/KUBERNETES.md) | Single-instance Kubernetes deployment guide with manifests reference |
 | [**NGINX**](en/NGINX.md) | Nginx reverse proxy configuration for HTTPS and WebSocket |
@@ -65,7 +65,7 @@ Documentation files are in the [en/](en/) directory.
 | [**PERMISSION-MODEL**](cn/PERMISSION-MODEL.md) | 基于角色的访问控制、认证和授权 |
 | [**FRONTEND-GUIDE**](cn/FRONTEND-GUIDE.md) | React/TypeScript 前端开发指南 |
 | [**REMOTE-AGENT**](cn/REMOTE-AGENT.md) | 远程代理客户端 — 安装、配置、CLI 工具 |
-| [**REMOTE-WORKSPACE**](cn/REMOTE-WORKSPACE.md) | 服务端视角的远程工作区 — 部署、管理界面、API |
+| [**REMOTE-WORKSPACE**](cn/REMOTE-WORKSPACE.md) | 服务端视角的远程工作区 — 部署、管理界面、API 与中央策略 / 审批 |
 | [**DEPLOYMENT**](cn/DEPLOYMENT.md) | Docker 部署和多用户工作空间配置 |
 | [**KUBERNETES**](cn/KUBERNETES.md) | 单实例 Kubernetes 部署指南及 manifests 参考 |
 | [**NGINX**](cn/NGINX.md) | Nginx 反向代理配置（HTTPS 和 WebSocket） |
