@@ -580,7 +580,7 @@ def batch_create_user_tool_accounts(user_id: int):
             mapping_source=mapping_source,
             mapping_status=mapping_status,
             created_by=created_by,
-            tenant_id=target_user.tenant_id if target_user else None,
+            tenant_id=target_user.get("tenant_id") if target_user else None,
         )
 
         if mapping:
@@ -743,7 +743,7 @@ def resolve_conflict(id: int):
 
         # Get the owner user to check tenant
         owner_user = user_repo.get_user_by_id(mapping.user_id)
-        if not owner_user or owner_user.tenant_id != user_tenant_id:
+        if not owner_user or owner_user.get("tenant_id") != user_tenant_id:
             return jsonify({"error": "Mapping not found"}), 404
 
     data = request.get_json()
@@ -802,7 +802,7 @@ def touch_mapping_activity(id: int):
 
         # Get the owner user to check tenant
         owner_user = user_repo.get_user_by_id(mapping.user_id)
-        if not owner_user or owner_user.tenant_id != user_tenant_id:
+        if not owner_user or owner_user.get("tenant_id") != user_tenant_id:
             return jsonify({"error": "Mapping not found"}), 404
 
     success = tool_account_repo.touch_activity(id)
