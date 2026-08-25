@@ -63,6 +63,13 @@ export type {
   ConversationStats,
   ToolComparison,
   Recommendation,
+  EnterpriseReportResponse,
+  TrendItem,
+  AnomalyItem,
+  ToolBreakdown,
+  HostBreakdown,
+  EfficiencyMetricsResponse,
+  ExportResponse,
 } from './analysis';
 export { promptsApi } from './prompts';
 export type {

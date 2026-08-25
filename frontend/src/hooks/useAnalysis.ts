@@ -143,3 +143,29 @@ export function useUsageForecast(days: number = 7) {
     staleTime: 60 * 1000, // 1 minute
   });
 }
+
+/**
+ * Hook for enterprise analytics report.
+ * Fetches comprehensive usage report data.
+ */
+export function useEnterpriseReport(startDate: string, endDate: string) {
+  return useQuery({
+    queryKey: ['analytics', 'report', startDate, endDate],
+    queryFn: () => analysisApi.getEnterpriseReport({ startDate, endDate }),
+    staleTime: 5 * 60 * 1000, // 5 minutes - report data changes infrequently
+    enabled: !!startDate && !!endDate,
+  });
+}
+
+/**
+ * Hook for efficiency metrics.
+ * Fetches efficiency indicators like output_ratio, tokens_per_request.
+ */
+export function useEfficiencyMetrics(startDate: string, endDate: string) {
+  return useQuery({
+    queryKey: ['analytics', 'efficiency', startDate, endDate],
+    queryFn: () => analysisApi.getEfficiencyMetrics({ startDate, endDate }),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    enabled: !!startDate && !!endDate,
+  });
+}
