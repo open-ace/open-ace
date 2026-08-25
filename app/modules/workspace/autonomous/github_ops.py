@@ -164,6 +164,14 @@ _TRANSIENT_ERROR_KEYWORDS = [
     "empty response",
 ]
 
+OPENACE_GIT_WRAPPER = "/usr/local/bin/openace-git"
+OPENACE_GH_WRAPPER = "/usr/local/bin/openace-gh"
+_WORKFLOW_BRANCH_RE = re.compile(r"^(auto-dev|review-fix|ci-repair|fork)/[A-Za-z0-9._/-]+$")
+
+
+def _is_workflow_branch(value: str) -> bool:
+    return bool(_WORKFLOW_BRANCH_RE.fullmatch(value or ""))
+
 
 def _is_transient_error(stderr: str, returncode: int) -> bool:
     """Whether a git/gh subprocess failure looks like a transient network issue.
@@ -674,12 +682,12 @@ class GitHubOps:
             cmd: list[str] = ["sudo", "-u", account]
             owner_repo = self._resolve_owner_repo() if repo_scoped else None
             if owner_repo:
-                cmd += ["gh", "-R", owner_repo] + args
+                cmd += [OPENACE_GH_WRAPPER, "-R", owner_repo] + args
             else:
                 # No resolvable remote, or a command (repo create/view) that
                 # rejects -R. Run plain gh; commands that need repo context
                 # (issue/pr) will already have a resolvable owner_repo above.
-                cmd += ["gh"] + args
+                cmd += [OPENACE_GH_WRAPPER] + args
             kwargs.pop("cwd", None)  # cwd under sudo triggers Permission denied (Issue #1421)
         else:
             # Same-user (or no system_account), OR an api_only command running as
@@ -771,11 +779,16 @@ class GitHubOps:
         # only guard shim; the harness exposes the real binary via
         # OPENACE_REAL_GIT for code that must run git directly (tests,
         # tooling). Unset everywhere else, so this defaults to plain "git".
-        # The sudo branch deliberately keeps the literal "git": prod sudoers
-        # whitelist only the bare command name, and a resolved absolute path
-        # under ``sudo -u <account>`` would be silently denied.
         needs_sudo = self._needs_sudo()
-        git_bin = os.environ.get("OPENACE_REAL_GIT", "git") if not needs_sudo else "git"
+        git_bin = (
+            os.environ.get("OPENACE_REAL_GIT", "git") if not needs_sudo else OPENACE_GIT_WRAPPER
+        )
+        clone_cwd = ""
+        if not trusted_args and len(args) == 3 and args[0] == "clone" and os.path.isabs(args[2]):
+            clone_cwd = os.path.dirname(os.path.realpath(args[2]))
+            if clone_cwd and not needs_sudo:
+                kwargs["cwd"] = clone_cwd
+        command_context_path = clone_cwd or self.repo_path
         # Trust the canonical repo via per-command ``-c`` (never the global
         # ``safe.directory *`` that used to be written via
         # _ensure_safe_directory). git's dubious-ownership check covers every
@@ -788,7 +801,7 @@ class GitHubOps:
         # deployments they can be owned by different accounts. Issue #2021.
         safe_paths: list[str] = []
         for p in (
-            self._trusted_work_tree or os.path.realpath(self.repo_path),
+            self._trusted_work_tree or os.path.realpath(command_context_path),
             self._trusted_git_dir,
             self._trusted_common_dir,
         ):
@@ -816,7 +829,7 @@ class GitHubOps:
                     "core.fsmonitor=false",
                     *safe_cfgs,
                 ]
-                + ([] if trusted_args else ["-C", self.repo_path])
+                + ([] if trusted_args else ["-C", command_context_path])
                 + args
             )
             kwargs.pop("cwd", None)  # Remove cwd to avoid Python permission check
@@ -2016,8 +2029,11 @@ class GitHubOps:
         checks — used after conflict resolution when the only blocker is CI
         not yet catching up to the freshly-pushed merge commit.
 
-        Security Note (Issue #1855): ``--admin`` bypasses branch protection
-        and requires explicit opt-in via ``OPENACE_ALLOW_ADMIN_MERGE=1``.
+        Security Note (Issue #1855/#2650): ``--admin`` bypasses branch
+        protection. Same-user direct ``gh`` still requires
+        ``OPENACE_ALLOW_ADMIN_MERGE=1``; cross-user sudo runs are authorized by
+        the root-owned ``openace-gh`` wrapper config instead of sudo-preserved
+        environment.
         """
         args = ["pr", "merge", str(number)]
         if strategy == "squash":
@@ -2029,12 +2045,11 @@ class GitHubOps:
         if auto:
             args.append("--auto")
         if admin:
-            # Issue #1855: Check for explicit opt-in before using --admin
-            if os.environ.get("OPENACE_ALLOW_ADMIN_MERGE") != "1":
+            if not self._needs_sudo() and os.environ.get("OPENACE_ALLOW_ADMIN_MERGE") != "1":
                 raise PermissionError(
                     "gh pr merge --admin requires explicit opt-in. "
-                    "Set OPENACE_ALLOW_ADMIN_MERGE=1 to enable admin merge, "
-                    "which bypasses branch protection checks."
+                    "Set OPENACE_ALLOW_ADMIN_MERGE=1 for direct gh execution; "
+                    "cross-user sudo execution is gated by /etc/openace/gh-wrapper.json."
                 )
             args.append("--admin")
 
@@ -2754,9 +2769,7 @@ class GitHubOps:
         parts = path.split("/")
         if "__pycache__" in parts:
             return True
-        if parts and parts[0] == ".pytest_cache":
-            return True
-        return False
+        return bool(parts and parts[0] == ".pytest_cache")
 
     def _unstage_test_artifacts(self) -> None:
         """Unstage test-pollution artifacts from the git index.
@@ -2810,7 +2823,7 @@ class GitHubOps:
         auto-dev branch (review-fix / CI-repair / dev round 2+ re-committing
         already-pushed work) can overwrite the remote tip without a
         non-fast-forward rejection. It is refused unless the resolved branch
-        starts with ``auto-dev/`` — defense-in-depth so no caller can ever
+        is a managed workflow branch — defense-in-depth so no caller can ever
         force-push main/release/user branches (Issue #1854).
         """
         if force_with_lease:
@@ -2820,15 +2833,15 @@ class GitHubOps:
                     target = self.get_current_branch()
                 except Exception as e:
                     raise GitHubOpsError(
-                        "force_with_lease requires an auto-dev/* branch but the "
+                        "force_with_lease requires a managed workflow branch but the "
                         f"current branch could not be resolved: {e}"
                     )
-            if not target.startswith("auto-dev/"):
+            if not _is_workflow_branch(target):
                 raise GitHubOpsError(
-                    f"force_with_lease refused on non-auto-dev branch '{target}' "
-                    "(only auto-dev/* workflow branches may be force-pushed)"
+                    f"force_with_lease refused on non-workflow branch '{target}' "
+                    "(only managed workflow branches may be force-pushed)"
                 )
-            # Never leave a validated force-push target implicit. An auto-dev
+            # Never leave a validated force-push target implicit. A workflow
             # worktree can inherit ``main`` as its upstream, and
             # ``push.default=simple`` then rejects a plain ``git push`` even
             # though the current local branch is safe and was validated above.
@@ -2846,7 +2859,7 @@ class GitHubOps:
             # The push was rejected because our remote-tracking ref is stale
             # relative to the actual remote (recreated worktree / concurrent
             # push). Refresh the lease with a targeted fetch and retry once —
-            # the local auto-dev branch is authoritative for this workflow, so
+            # the local workflow branch is authoritative for this workflow, so
             # overwriting the remote after a fresh fetch is the intended
             # semantics. Without this recovery the orchestrator's Layer-2 retry
             # re-runs the identical push and loops to exhaustion (reproducer:
@@ -2869,7 +2882,7 @@ class GitHubOps:
                         plain_push_args.append(branch)
                     logger.warning(
                         "force-with-lease stale lease for %s but remote ref is "
-                        "absent; plain-pushing validated auto-dev branch to "
+                        "absent; plain-pushing validated workflow branch to "
                         "recreate it",
                         target,
                     )

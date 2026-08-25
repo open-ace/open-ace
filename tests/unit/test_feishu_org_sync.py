@@ -29,7 +29,7 @@ class FakeFeishuOrgSyncService(FeishuOrgSyncService):
         assert app_secret == "test-app-secret"
         return "test-token"
 
-    def _fetch_directory_snapshot(self, token: str):
+    def _fetch_directory_snapshot(self, token: str, **kwargs):
         assert token == "test-token"
         return self._departments, self._users
 

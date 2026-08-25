@@ -1248,36 +1248,26 @@ def handle_llm_proxy_request(
     else:
         session_id = token_session_id
 
-        # Issue #2464: If using webui aggregate session, check for user's active session
-        # When user creates a session via /work, route WebUI messages to that session
+        # Issue #3025: Remove active-session fallback for webui:* tokens.
+        # Previously, when a webui:* aggregate token lacked X-Session-Id, the code
+        # queried the user's active sessions and picked the most recently updated
+        # non-webui session. This caused cross-session data contamination: requests
+        # from one workspace were written into an unrelated session, inflating its
+        # message/request/token counts while the intended session remained empty.
+        #
+        # Now, the session_id stays as the webui:* aggregate session. The existing
+        # auto-create logic in _record_llm_usage (lines ~464-479) handles creating
+        # the aggregate session if needed. When upstream sends X-Session-Id, the
+        # header-based routing above (lines ~1128-1247) takes precedence.
         if session_id.startswith("webui:"):
-            # Issue #2727: Log WARNING for webui:* fallback behavior
             logger.warning(
-                "Using webui aggregate session without X-Session-Id header, "
-                "fallback to user's active session (user_id=%s, tenant_id=%s)",
+                "Using webui aggregate session without X-Session-Id header; "
+                "requests will be recorded to the aggregate session "
+                "(user_id=%s, tenant_id=%s). "
+                "Upstream should send X-Session-Id to route to a specific session.",
                 user_id,
                 tenant_id,
             )
-            try:
-                from app.modules.workspace.session_manager import get_session_manager
-
-                sm = get_session_manager()
-                active_sessions = sm.get_active_sessions(user_id=user_id, tenant_id=tenant_id)
-                # Filter out webui aggregate sessions, get the most recent non-webui session
-                # get_active_sessions already returns sessions sorted by updated_at DESC
-                non_webui_sessions = [
-                    s for s in active_sessions if not s.session_id.startswith("webui:")
-                ]
-                if non_webui_sessions:
-                    # First result is the most recently updated (SQL ORDER BY updated_at DESC)
-                    session_id = non_webui_sessions[0].session_id
-                    logger.debug(
-                        "Using user's active session %s instead of webui aggregate",
-                        session_id[:8],
-                    )
-            except Exception as e:
-                # On any error, fall back to webui aggregate session
-                logger.warning("Failed to get active sessions, using webui aggregate: %s", e)
 
     # Issue #2547: Circuit breaking for stopped sessions
     # Reject requests from orphan processes that may still be retrying

@@ -10,11 +10,14 @@ Issue #2963: AI 自主开发创建新项目时首次创建 Issue 失败，重试
 """
 
 import os
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.modules.workspace.autonomous.github_ops import GitHubOpsError
+from app.modules.workspace.autonomous.phase_contract import WorkflowContext
+from app.modules.workspace.autonomous.phase_host import PhaseDeps
 
 
 def _make_test_workflow():
@@ -171,6 +174,261 @@ class TestCloneAfterCreateRepo:
 
         # Should NOT call clone
         assert ["clone", repo_url, project_path] not in git_calls
+
+    def test_preparation_without_project_path_clones_into_user_workspace(self):
+        """Route-permitted new projects without a path use the workspace fallback."""
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        wf = _make_test_workflow()
+        wf.update(
+            {
+                "workflow_id": "wf-no-path-2963",
+                "user_id": 1,
+                "project_path": None,
+                "branch_strategy": "current",
+                "github_issue_number": 123,
+                "requirements_text": "Build a REST API service",
+            }
+        )
+        repo_url = "https://github.com/owner/new-repo"
+        fallback_path = "/workspace/alice/new-repo"
+
+        mock_gh = MagicMock()
+        mock_gh.create_repo.return_value = {"name": "new-repo", "url": repo_url}
+        mock_gh._run_git.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_gh.get_current_branch.return_value = "main"
+
+        repo = MagicMock()
+        repo.get_workflow.return_value = wf
+
+        orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+        orch.repo = repo
+        orch._workflow_id = wf["workflow_id"]
+        orch._gh = None
+        orch._shutdown_requested = threading.Event()
+        orch._session_usage_offsets = {}
+        orch._update_workflow = MagicMock(side_effect=lambda updates: wf.update(updates))
+        orch._create_milestone = MagicMock(return_value={"milestone_id": "ms"})
+        orch._get_gh = MagicMock(return_value=mock_gh)
+        orch.emit_phase_change = MagicMock()
+
+        def fake_exists(path):
+            return path == "."
+
+        def fake_isdir(path):
+            return False
+
+        with (
+            patch("app.modules.workspace.autonomous.orchestrator.GitHubOps", return_value=mock_gh),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.UserRepository"
+            ) as mock_user_repo_cls,
+            patch.object(
+                AutonomousOrchestrator, "_get_user_workspace", return_value="/workspace/alice"
+            ),
+            patch("app.modules.workspace.autonomous.orchestrator.os.path.exists", fake_exists),
+            patch("app.modules.workspace.autonomous.orchestrator.os.path.isdir", fake_isdir),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.os.listdir", return_value=["file"]
+            ),
+            patch("app.modules.workspace.autonomous.orchestrator.os.makedirs") as makedirs,
+        ):
+            mock_user_repo_cls.return_value.get_user_by_id.return_value = {
+                "system_account": "alice"
+            }
+            ctx = WorkflowContext(
+                workflow=wf,
+                definition_snapshot=None,
+                repository_context=None,
+                session_bindings={},
+                cancellation=threading.Event(),
+            )
+            deps = PhaseDeps(
+                host=orch,
+                gh=mock_gh,
+                git_workspace=MagicMock(),
+                evidence=MagicMock(),
+                sandbox=MagicMock(),
+                repo=repo,
+                agent_runner=MagicMock(),
+            )
+
+            result = orch._do_preparation(ctx, deps)
+
+        mock_gh._run_git.assert_any_call(["clone", repo_url, fallback_path])
+        makedirs.assert_any_call("/workspace/alice", exist_ok=True)
+        orch._update_workflow.assert_any_call({"project_path": fallback_path})
+        assert result.next_phase == "planning"
+
+    def test_preparation_reentry_without_project_path_clones_into_user_workspace(self):
+        """A resolved URL checkpoint still ensures the local clone on re-entry."""
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        repo_url = "https://github.com/owner/new-repo"
+        fallback_path = "/workspace/alice/new-repo"
+        wf = _make_test_workflow()
+        wf.update(
+            {
+                "workflow_id": "wf-reentry-no-path-2963",
+                "user_id": 1,
+                "project_repo_url": repo_url,
+                "project_path": None,
+                "branch_strategy": "current",
+                "github_issue_number": 123,
+                "requirements_text": "Build a REST API service",
+            }
+        )
+
+        local_gh = MagicMock(name="local_gh")
+        local_gh._run_git.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        local_gh.get_current_branch.return_value = "main"
+
+        repo = MagicMock()
+        repo.get_workflow.return_value = wf
+
+        orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+        orch.repo = repo
+        orch._workflow_id = wf["workflow_id"]
+        orch._gh = None
+        orch._shutdown_requested = threading.Event()
+        orch._session_usage_offsets = {}
+        orch._update_workflow = MagicMock(side_effect=lambda updates: wf.update(updates))
+        orch._create_milestone = MagicMock(return_value={"milestone_id": "ms"})
+        orch.emit_phase_change = MagicMock()
+
+        def fake_isdir(path):
+            return False
+
+        with (
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.GitHubOps", return_value=local_gh
+            ) as git_hub_ops,
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.UserRepository"
+            ) as mock_user_repo_cls,
+            patch.object(
+                AutonomousOrchestrator, "_get_user_workspace", return_value="/workspace/alice"
+            ),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.os.path.exists", return_value=False
+            ),
+            patch("app.modules.workspace.autonomous.orchestrator.os.path.isdir", fake_isdir),
+            patch("app.modules.workspace.autonomous.orchestrator.os.makedirs") as makedirs,
+        ):
+            mock_user_repo_cls.return_value.get_user_by_id.return_value = {
+                "system_account": "alice"
+            }
+            ctx = WorkflowContext(
+                workflow=wf,
+                definition_snapshot=None,
+                repository_context=None,
+                session_bindings={},
+                cancellation=threading.Event(),
+            )
+            deps = PhaseDeps(
+                host=orch,
+                gh=local_gh,
+                git_workspace=MagicMock(),
+                evidence=MagicMock(),
+                sandbox=MagicMock(),
+                repo=repo,
+                agent_runner=MagicMock(),
+            )
+
+            result = orch._do_preparation(ctx, deps)
+
+        local_gh.create_repo.assert_not_called()
+        git_hub_ops.assert_any_call(fallback_path, system_account="alice")
+        local_gh._run_git.assert_any_call(["clone", repo_url, fallback_path])
+        makedirs.assert_any_call("/workspace/alice", exist_ok=True)
+        orch._update_workflow.assert_any_call({"project_path": fallback_path})
+        assert result.next_phase == "planning"
+
+    def test_preparation_without_project_path_checks_existing_fallback_repo(self):
+        """Existing fallback repos are validated using the fallback-bound GitHubOps."""
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        wf = _make_test_workflow()
+        wf.update(
+            {
+                "workflow_id": "wf-existing-fallback-2963",
+                "user_id": 1,
+                "project_path": None,
+                "branch_strategy": "current",
+                "github_issue_number": 123,
+                "requirements_text": "Build a REST API service",
+            }
+        )
+        repo_url = "https://github.com/owner/new-repo"
+        fallback_path = "/workspace/alice/new-repo"
+
+        create_gh = MagicMock(name="create_gh")
+        create_gh.create_repo.return_value = {"name": "new-repo", "url": repo_url}
+        create_gh.get_repo_url.return_value = "https://github.com/wrong/repo"
+        local_gh = MagicMock(name="local_gh")
+        local_gh.get_repo_url.return_value = repo_url
+        local_gh.get_current_branch.return_value = "main"
+
+        repo = MagicMock()
+        repo.get_workflow.return_value = wf
+
+        orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+        orch.repo = repo
+        orch._workflow_id = wf["workflow_id"]
+        orch._gh = None
+        orch._shutdown_requested = threading.Event()
+        orch._session_usage_offsets = {}
+        orch._update_workflow = MagicMock(side_effect=lambda updates: wf.update(updates))
+        orch._create_milestone = MagicMock(return_value={"milestone_id": "ms"})
+        orch.emit_phase_change = MagicMock()
+
+        def fake_exists(path):
+            return path == fallback_path
+
+        def fake_isdir(path):
+            return path == os.path.join(fallback_path, ".git")
+
+        with (
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.GitHubOps",
+                side_effect=[create_gh, local_gh],
+            ),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.UserRepository"
+            ) as mock_user_repo_cls,
+            patch.object(
+                AutonomousOrchestrator, "_get_user_workspace", return_value="/workspace/alice"
+            ),
+            patch("app.modules.workspace.autonomous.orchestrator.os.path.exists", fake_exists),
+            patch("app.modules.workspace.autonomous.orchestrator.os.path.isdir", fake_isdir),
+        ):
+            mock_user_repo_cls.return_value.get_user_by_id.return_value = {
+                "system_account": "alice"
+            }
+            ctx = WorkflowContext(
+                workflow=wf,
+                definition_snapshot=None,
+                repository_context=None,
+                session_bindings={},
+                cancellation=threading.Event(),
+            )
+            deps = PhaseDeps(
+                host=orch,
+                gh=create_gh,
+                git_workspace=MagicMock(),
+                evidence=MagicMock(),
+                sandbox=MagicMock(),
+                repo=repo,
+                agent_runner=MagicMock(),
+            )
+
+            result = orch._do_preparation(ctx, deps)
+
+        create_gh.get_repo_url.assert_not_called()
+        local_gh.get_repo_url.assert_called_once()
+        local_gh._run_git.assert_not_called()
+        orch._update_workflow.assert_any_call({"project_path": fallback_path})
+        assert result.next_phase == "planning"
 
     def test_error_if_different_repo(self, tmp_path):
         """Verify error if directory exists but is a different repo."""

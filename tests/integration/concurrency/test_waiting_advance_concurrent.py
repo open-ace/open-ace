@@ -1,0 +1,123 @@
+"""Waiting-workflow cleanup under a REAL heartbeat thread (Issue #1002).
+
+``_advance_single`` starts a genuine daemon heartbeat thread per advance and
+joins it in the finally teardown; these tests exercise that interleaving
+(cleanup must not clobber another workflow's locks). The pure filter
+companions live in tests/unit/test_waiting_bypass.py.
+"""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from app.services.autonomous_scheduler import AutonomousScheduler
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1002)]
+
+
+def _scheduler() -> AutonomousScheduler:
+    """A fresh, non-singleton scheduler instance for isolation."""
+    return AutonomousScheduler()
+
+
+class TestAdvanceSingleWaitingCleanup:
+    """Verify _advance_single does not discard conflict keys for waiting
+    workflows, preventing clobbering of a concurrently running sibling's
+    locks."""
+
+    def _run_advance_single(self, wf: dict, sched: AutonomousScheduler, lock_ok: bool = True):
+        """Helper: run _advance_single with all external deps mocked."""
+        repo = MagicMock()
+        repo.get_workflow.return_value = wf
+        repo.acquire_lock.return_value = lock_ok
+
+        with (
+            patch("app.routes.autonomous._get_repo", return_value=repo),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.AutonomousOrchestrator"
+            ) as mock_orch_cls,
+            patch("app.modules.governance.quota_manager.QuotaManager") as mock_qm,
+        ):
+            mock_orch_cls.return_value = MagicMock()
+            mock_qm.return_value.check_quota.return_value = {"allowed": True, "reason": ""}
+            sched._advance_single(wf["workflow_id"])
+        return repo
+
+    def test_waiting_does_not_discard_batch_id(self):
+        """A waiting workflow's finally must not remove another workflow's
+        batch_id from _in_progress_batch_ids."""
+        sched = _scheduler()
+        # Simulate a running sibling holding the batch lock
+        sched._in_progress_batch_ids.add("batch-1")
+        sched._in_progress_workspaces.add("/proj")
+        sched._in_progress_branches.add("shared/branch")
+
+        waiting_wf = {
+            "workflow_id": "w-wait",
+            "status": "waiting",
+            "batch_id": "batch-1",
+            "project_path": "/proj",
+            "branch_name": "shared/branch",
+            "user_id": 1,
+        }
+
+        self._run_advance_single(waiting_wf, sched)
+
+        # The waiting workflow's cleanup must NOT have removed the sibling's keys
+        assert "batch-1" in sched._in_progress_batch_ids
+        assert "/proj" in sched._in_progress_workspaces
+        assert "shared/branch" in sched._in_progress_branches
+        # workflow_id IS removed (the advance completed)
+        assert "w-wait" not in sched._in_progress_ids
+
+    def test_developing_does_discard_batch_id(self):
+        """A non-waiting workflow's finally DOES remove its own batch_id."""
+        sched = _scheduler()
+        sched._in_progress_batch_ids.add("batch-1")
+        sched._in_progress_workspaces.add("/proj")
+        sched._in_progress_branches.add("shared/branch")
+        # Teardown discards exactly the keys the entry reserved at selection
+        # time (c0ebbf7f key map); a map-less entry is a pre-deploy legacy
+        # shape nobody owns, so register w-dev's keys the way selection does
+        sched._in_progress_key_map["w-dev"] = ("batch-1", "/proj", "shared/branch")
+
+        developing_wf = {
+            "workflow_id": "w-dev",
+            "status": "developing",
+            "batch_id": "batch-1",
+            "project_path": "/proj",
+            "branch_name": "shared/branch",
+            "user_id": 1,
+        }
+
+        self._run_advance_single(developing_wf, sched)
+
+        # Non-waiting workflow's cleanup DOES remove its keys
+        assert "batch-1" not in sched._in_progress_batch_ids
+        assert "/proj" not in sched._in_progress_workspaces
+        assert "shared/branch" not in sched._in_progress_branches
+        assert "w-dev" not in sched._in_progress_ids
+
+    def test_waiting_lock_failure_does_not_discard(self):
+        """Even on lock-failure early return, a waiting workflow must not
+        clobber another workflow's keys."""
+        sched = _scheduler()
+        sched._in_progress_batch_ids.add("batch-1")
+        sched._in_progress_workspaces.add("/proj")
+        sched._in_progress_branches.add("shared/branch")
+
+        waiting_wf = {
+            "workflow_id": "w-wait",
+            "status": "waiting",
+            "batch_id": "batch-1",
+            "project_path": "/proj",
+            "branch_name": "shared/branch",
+            "user_id": 1,
+        }
+
+        self._run_advance_single(waiting_wf, sched, lock_ok=False)
+
+        assert "batch-1" in sched._in_progress_batch_ids
+        assert "/proj" in sched._in_progress_workspaces
+        assert "shared/branch" in sched._in_progress_branches
+        assert "w-wait" not in sched._in_progress_ids

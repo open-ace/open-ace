@@ -25,6 +25,9 @@ Environment=HOME=__HOME__
 Environment=SECRET_KEY=__SECRET_KEY__
 Environment=WORKSPACE_BASE_DIR=__WORKSPACE_BASE_DIR__
 Environment=OPENACE_SECURITY_MODE=__SECURITY_MODE__
+# 【Issue #2543】启用 sudo 进行跨用户数据采集
+# fetch 脚本需要 root 权限读取权限 700 的用户 home 目录
+Environment=FETCH_USE_SUDO=true
 
 # Secrets (OPENACE_ENCRYPTION_KEY at minimum; encrypts API keys / SMTP
 # passwords). The leading '-' makes the file OPTIONAL: installs without it

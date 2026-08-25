@@ -275,16 +275,24 @@ COPY scripts/openace-rm.sh /usr/local/bin/openace-rm
 COPY scripts/openace-write-as.sh /usr/local/bin/openace-write-as
 COPY scripts/openace-restore-sudoers.sh /usr/local/bin/openace-restore-sudoers
 COPY scripts/openace-webui-launch.sh /usr/local/bin/openace-webui-launch
+COPY scripts/openace-git.py /usr/local/bin/openace-git
+COPY scripts/openace-gh.py /usr/local/bin/openace-gh
+COPY config/openace/git-wrapper.json /etc/openace/git-wrapper.json
+COPY config/openace/gh-wrapper.json /etc/openace/gh-wrapper.json
 RUN chmod 755 /usr/local/bin/openace-chown /usr/local/bin/openace-useradd \
              /usr/local/bin/openace-cat /usr/local/bin/openace-mkdir \
              /usr/local/bin/openace-rm /usr/local/bin/openace-write-as \
              /usr/local/bin/openace-restore-sudoers \
-             /usr/local/bin/openace-webui-launch && \
+             /usr/local/bin/openace-webui-launch \
+             /usr/local/bin/openace-git /usr/local/bin/openace-gh && \
     chown root:root /usr/local/bin/openace-chown /usr/local/bin/openace-useradd \
                     /usr/local/bin/openace-cat /usr/local/bin/openace-mkdir \
                     /usr/local/bin/openace-rm /usr/local/bin/openace-write-as \
                     /usr/local/bin/openace-restore-sudoers \
-                    /usr/local/bin/openace-webui-launch && \
+                    /usr/local/bin/openace-webui-launch \
+                    /usr/local/bin/openace-git /usr/local/bin/openace-gh \
+                    /etc/openace/git-wrapper.json /etc/openace/gh-wrapper.json && \
+    chmod 0644 /etc/openace/git-wrapper.json /etc/openace/gh-wrapper.json && \
     mkdir -p /var/lock && chmod 1777 /var/lock
 
 # NOTE: The image defaults to the non-root open-ace user (uid 1000) so that

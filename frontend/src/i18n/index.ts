@@ -93,6 +93,10 @@ export const translations: Record<Language, Translations> = {
       'Recommended to configure keys per user/tenant; system-level keys serve only as compatibility fallback for legacy setups. Prefer tenant-level keys for new configurations.',
     integrationTestSendHint:
       'Test send: temporary URL input, single-use only, does not alter user notification preferences, operations logged',
+    integrationTestCheckResults: 'Connection test details',
+    integrationCheckAccessToken: 'Credential authentication',
+    integrationCheckDeptList: 'Department read',
+    integrationCheckUserList: 'Member read',
     integrationConfigureAlertTarget: 'Configure your alert targets and personal preferences',
     integrationFeishuBotSubtitle:
       'Feishu bot has no required system-level parameters; target addresses are set per user/tenant',
@@ -200,6 +204,16 @@ export const translations: Record<Language, Translations> = {
     workspaceNotConfiguredHelp: 'Please contact administrator to configure workspace URL',
     workspaceUnavailable: 'Workspace unavailable',
     workspaceUnavailableHelp: 'Please log in to access your workspace',
+    workspaceLoadFailed: 'Workspace failed to load',
+    workspaceLoadFailedHelp:
+      'The workspace iframe failed to load. This may be due to network issues or server configuration problems.',
+    workspaceLoadFailedTroubleshoot: 'Troubleshooting steps:',
+    workspaceLoadFailedStep1: '1. Check if the Docker container is running properly',
+    workspaceLoadFailedStep2:
+      '2. Verify multi-user mode configuration (if using multi-user workspace)',
+    workspaceLoadFailedStep3: '3. Check container logs for errors',
+    workspaceLoadFailedStep4: '4. Restart the container and try again',
+    workspaceLoadFailedDocs: 'View deployment documentation',
     sessionNotFound: 'Session does not exist or has been deleted',
     projectNotFound: 'Project path does not exist',
     security: 'Security',
@@ -2201,6 +2215,10 @@ export const translations: Record<Language, Translations> = {
       '推荐按用户/租户配置密钥；系统级密钥仅作为旧配置的兼容回退，新配置请优先使用租户级密钥',
     integrationTestSendHint:
       '测试发送：临时输入 URL，仅本次使用、不保存、不改变用户通知偏好，操作写审计',
+    integrationTestCheckResults: '连接测试详情',
+    integrationCheckAccessToken: '凭证认证',
+    integrationCheckDeptList: '通讯录部门读取',
+    integrationCheckUserList: '成员信息读取',
     integrationConfigureAlertTarget: '配置你的告警目标与个人偏好',
     integrationFeishuBotSubtitle: '飞书机器人无系统级必填参数，目标地址按用户/租户设置',
     integrationFeishuBotNoConfigDetail:
@@ -2303,6 +2321,14 @@ export const translations: Record<Language, Translations> = {
     workspaceNotConfiguredHelp: '请联系管理员配置工作区 URL',
     workspaceUnavailable: '工作区不可用',
     workspaceUnavailableHelp: '请登录后访问您的工作区',
+    workspaceLoadFailed: '工作区加载失败',
+    workspaceLoadFailedHelp: '工作区 iframe 加载失败。可能是网络问题或服务器配置问题。',
+    workspaceLoadFailedTroubleshoot: '排查步骤：',
+    workspaceLoadFailedStep1: '1. 检查 Docker 容器是否正常运行',
+    workspaceLoadFailedStep2: '2. 验证多用户模式配置（如使用多用户工作区）',
+    workspaceLoadFailedStep3: '3. 查看容器日志中的错误信息',
+    workspaceLoadFailedStep4: '4. 重启容器后重试',
+    workspaceLoadFailedDocs: '查看部署文档',
     sessionNotFound: '会话不存在或已被删除',
     projectNotFound: '项目路径不存在',
     security: '安全',
@@ -4244,6 +4270,10 @@ export const translations: Record<Language, Translations> = {
       'ユーザー/テナントごとにキーを設定することを推奨；システムレベルのキーはレガシー設定の互換フォールバックのみ。新設定はテナントレベルキーを優先。',
     integrationTestSendHint:
       'テスト送信：一時的URL入力、1回のみ、ユーザー通知設定は変更しません、操作は監査ログに記録',
+    integrationTestCheckResults: '接続テスト詳細',
+    integrationCheckAccessToken: 'クレデンシャル認証',
+    integrationCheckDeptList: '部門読み取り',
+    integrationCheckUserList: 'メンバー読み取り',
     integrationConfigureAlertTarget: 'アラート宛先と個人設定を構成',
     integrationFeishuBotSubtitle:
       'Feishuボットにシステムレベルの必須パラメータはありません；宛先アドレスはユーザー/テナントごとに設定',
@@ -6178,6 +6208,10 @@ export const translations: Record<Language, Translations> = {
       '사용자/테넌트별로 키를 구성하는 것을 권장; 시스템 수준 키는 레거시 설정에 대한 호환 폴백 역할만 합니다. 새 설정은 테넌트 수준 키를 우선 사용하세요.',
     integrationTestSendHint:
       '테스트 발송: 일시적 URL 입력, 1회만 사용, 사용자 알림 환경설정을 변경하지 않음, 작업 감사 기록',
+    integrationTestCheckResults: '연결 테스트 상세',
+    integrationCheckAccessToken: '자격 증명 인증',
+    integrationCheckDeptList: '부서 읽기',
+    integrationCheckUserList: '멤버 읽기',
     integrationConfigureAlertTarget: '알림 대상 및 개인 환경설정 구성',
     integrationFeishuBotSubtitle:
       'Feishu 봇은 시스템 수준 필수 매개변수가 없습니다; 대상 주소는 사용자/테넌트별로 설정',

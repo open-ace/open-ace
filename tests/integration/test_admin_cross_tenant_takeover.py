@@ -916,7 +916,8 @@ class TestOrgSyncIsNotACrossTenantWrite:
         """Omitting tenant_id must not mean 'whatever the service defaults to'."""
         with patch(service) as mock_service:
             mock_service.return_value.sync_org.return_value = SimpleNamespace(
-                to_dict=lambda: {"ok": True}
+                to_dict=lambda: {"ok": True},
+                status="success",
             )
             response, _ = _request(TENANT_A_ADMIN, "POST", path, json_body={})
 

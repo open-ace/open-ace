@@ -57,10 +57,11 @@ export const notificationChannelsApi = {
     ).data;
   },
   async testDingTalk(data: { app_key?: string; app_secret?: string }) {
-    return await apiClient.post<{ success: boolean; message: string }>(
-      '/api/management/dingtalk-config/test',
-      data
-    );
+    return await apiClient.post<{
+      success: boolean;
+      message: string;
+      checks?: Record<string, { status: string; message: string }>;
+    }>('/api/management/dingtalk-config/test', data);
   },
   async syncDingTalk(tenantId: number) {
     return await apiClient.post<{ success: boolean; result: Record<string, unknown> }>(

@@ -108,7 +108,7 @@ class TestFetchDirectorySnapshotRootUsers:
                 return [child_dept]
             return []
 
-        def fake_fetch_users(token, dept_id):
+        def fake_fetch_users(token, dept_id, **kwargs):
             if dept_id == FEISHU_ROOT_DEPARTMENT_ID:
                 return root_users
             if dept_id == "dep-eng":
@@ -175,7 +175,7 @@ class TestFetchDirectorySnapshotRootUsers:
                 return [backend_dept]
             return []
 
-        def fake_fetch_users(token, dept_id):
+        def fake_fetch_users(token, dept_id, **kwargs):
             mapping = {
                 FEISHU_ROOT_DEPARTMENT_ID: root_users,
                 "dep-eng": eng_users,
@@ -223,7 +223,7 @@ class TestFetchDirectorySnapshotRootUsers:
                 return [child_dept]
             return []
 
-        def fake_fetch_users(token, dept_id):
+        def fake_fetch_users(token, dept_id, **kwargs):
             if dept_id == FEISHU_ROOT_DEPARTMENT_ID:
                 return [user_as_root]
             if dept_id == "dep-eng":

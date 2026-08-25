@@ -156,13 +156,27 @@ def run_fetch_scripts():
         # with type annotation syntax (e.g., str | None requires Python 3.10+)
         python_path = sys.executable
 
+        # 【Issue #2543】使用安全 wrapper 进行跨用户数据采集
+        # wrapper 会校验参数白名单，记录审计日志，防止符号链接攻击
+        wrapper_path = "/usr/local/bin/openace-fetch-wrapper"
+        use_wrapper = use_sudo and os.path.exists(wrapper_path)
+
         def _build_cmd(script_path, args):
             cmd = []
-            if use_sudo:
+            if use_wrapper:
+                # 使用安全 wrapper（推荐）
+                # wrapper 内部会校验参数和路径，记录审计日志
+                cmd.extend(["sudo", "-n", wrapper_path])
+                # 从脚本路径提取工具名称
+                tool_name = os.path.basename(script_path).replace(".py", "")
+                cmd.append(tool_name)
+            elif use_sudo:
+                # 直接使用 sudo（旧方式，仅作为兼容后备）
                 cmd.extend(["sudo", "-n", python_path])
+                cmd.append(script_path)
             else:
                 cmd.append(python_path)
-            cmd.append(script_path)
+                cmd.append(script_path)
             cmd.extend(args)
             return cmd
 

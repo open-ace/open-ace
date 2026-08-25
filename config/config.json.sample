@@ -9,6 +9,9 @@
     "upload_auth_key": "<UPLOAD_AUTH_KEY>",
     "server_url": "http://localhost:19888",
     "web_port": 19888,
+    "events_ingest_key": "",
+    "events_ingest_url": "",
+    "events_ingest_trusted_sources": [],
     "web_host": "0.0.0.0"
   },
   "workspace": {
