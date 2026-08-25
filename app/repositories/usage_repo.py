@@ -1329,7 +1329,7 @@ class UsageRepository:
             tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
-            List[Dict]: List of usage records by date and tool.
+            List[Dict]: Trend data with date, tool_name, tokens fields.
 
         Note:
             Issue #1852: Added tenant_id parameter for tenant filtering.
