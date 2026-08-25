@@ -2203,14 +2203,8 @@ export const translations: Record<Language, Translations> = {
     noKeywords: 'No sensitive keywords configured',
     noPermission: 'No permission to access',
     filterByStatus: 'Filter by status',
-    all: 'All',
-    enabled: 'Enabled',
-    disabled: 'Disabled',
-    createdAt: 'Created At',
     keywordEmpty: 'Keyword cannot be empty',
     keywordTooLong: 'Keyword cannot exceed 255 characters',
-    status: 'Status',
-    actions: 'Actions',
   },
   zh: {
     // Common
@@ -4330,14 +4324,8 @@ export const translations: Record<Language, Translations> = {
     noKeywords: '未配置敏感关键词',
     noPermission: '无权限访问',
     filterByStatus: '按状态筛选',
-    all: '全部',
-    enabled: '已启用',
-    disabled: '已禁用',
-    createdAt: '创建时间',
     keywordEmpty: '关键词不能为空',
     keywordTooLong: '关键词长度不能超过 255 个字符',
-    status: '状态',
-    actions: '操作',
   },
   ja: {
     // Common

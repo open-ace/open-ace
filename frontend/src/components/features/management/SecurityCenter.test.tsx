@@ -110,6 +110,24 @@ vi.mock('@/i18n', () => ({
       showLess: 'Show less',
       refreshStats: 'Refresh',
       noData: 'No data available',
+      // Sensitive Keywords (Issue #3059)
+      sensitiveKeywords: 'Sensitive Keywords',
+      sensitiveKeywordsDesc: 'Manage sensitive keywords for content filtering',
+      addKeyword: 'Add Keyword',
+      keyword: 'Keyword',
+      keywordPlaceholder: 'Enter sensitive keyword',
+      keywordHelp: 'Keyword will be used for content filtering',
+      confirmDeleteKeyword: 'Are you sure you want to delete this keyword?',
+      keywordCreated: 'Keyword created successfully',
+      keywordAlreadyExists: 'Keyword already exists',
+      keywordCreateFailed: 'Failed to create keyword',
+      keywordUpdateFailed: 'Failed to update keyword',
+      keywordDeleteFailed: 'Failed to delete keyword',
+      noKeywords: 'No sensitive keywords configured',
+      noPermission: 'No permission to access',
+      filterByStatus: 'Filter by status',
+      keywordEmpty: 'Keyword cannot be empty',
+      keywordTooLong: 'Keyword cannot exceed 255 characters',
     };
     let text = translations[key] || key;
     if (params) {
@@ -245,6 +263,43 @@ vi.mock('@/hooks', () => ({
     error: null,
     refetch: vi.fn(),
     isFetching: false,
+  })),
+  useAdminTenant: vi.fn(() => ({
+    effectiveTenantId: 1,
+  })),
+  useSensitiveKeywords: vi.fn(() => ({
+    data: {
+      keywords: [
+        {
+          id: 1,
+          tenant_id: 1,
+          keyword: 'password',
+          is_enabled: true,
+          created_by: 1,
+          created_at: '2025-01-01T00:00:00Z',
+        },
+      ],
+      total: 1,
+      limit: 20,
+      offset: 0,
+      tenant_id: 1,
+    },
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
+  useCreateSensitiveKeyword: vi.fn(() => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  })),
+  useUpdateSensitiveKeyword: vi.fn(() => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  })),
+  useDeleteSensitiveKeyword: vi.fn(() => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
   })),
 }));
 

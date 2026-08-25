@@ -359,10 +359,7 @@ export function usePolicyDecisions(sessionId: string | null, limit: number = 100
 }
 
 // Sensitive Keywords Hooks (Issue #3059)
-export function useSensitiveKeywords(
-  tenantId: number | null,
-  filters?: SensitiveKeywordsFilters
-) {
+export function useSensitiveKeywords(tenantId: number | null, filters?: SensitiveKeywordsFilters) {
   return useQuery({
     queryKey: ['admin', 'sensitive-keywords', tenantId, filters],
     queryFn: () => governanceApi.getSensitiveKeywords(tenantId!, filters),
@@ -374,13 +371,8 @@ export function useCreateSensitiveKeyword() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      tenantId,
-      data,
-    }: {
-      tenantId: number;
-      data: CreateSensitiveKeywordRequest;
-    }) => governanceApi.createSensitiveKeyword(tenantId, data),
+    mutationFn: ({ tenantId, data }: { tenantId: number; data: CreateSensitiveKeywordRequest }) =>
+      governanceApi.createSensitiveKeyword(tenantId, data),
     onSuccess: (_, { tenantId }) => {
       queryClient.invalidateQueries({
         queryKey: ['admin', 'sensitive-keywords', tenantId],
@@ -414,13 +406,8 @@ export function useDeleteSensitiveKeyword() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      tenantId,
-      keywordId,
-    }: {
-      tenantId: number;
-      keywordId: number;
-    }) => governanceApi.deleteSensitiveKeyword(tenantId, keywordId),
+    mutationFn: ({ tenantId, keywordId }: { tenantId: number; keywordId: number }) =>
+      governanceApi.deleteSensitiveKeyword(tenantId, keywordId),
     onSuccess: (_, { tenantId }) => {
       queryClient.invalidateQueries({
         queryKey: ['admin', 'sensitive-keywords', tenantId],

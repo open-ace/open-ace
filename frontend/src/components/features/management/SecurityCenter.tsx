@@ -51,7 +51,6 @@ import type {
   SecuritySettings as SecuritySettingsType,
   AuditThresholds as AuditThresholdsType,
   SensitiveKeyword,
-  CreateSensitiveKeywordRequest,
   SensitiveKeywordsFilters,
 } from '@/api';
 
@@ -199,7 +198,8 @@ export const SecurityCenter: React.FC = () => {
   // --- Sensitive Keywords State (Issue #3059) ---
   const { effectiveTenantId } = useAdminTenant();
 
-  const [keywordFilters, setKeywordFilters] = useState<SensitiveKeywordsFilters>({
+  // TODO: Add filter controls in future iteration
+  const [keywordFilters] = useState<SensitiveKeywordsFilters>({
     limit: 20,
     offset: 0,
   });
@@ -1228,7 +1228,7 @@ export const SecurityCenter: React.FC = () => {
       );
     }
 
-    const keywords = keywordsData?.keywords || [];
+    const keywords = keywordsData?.keywords ?? [];
 
     return (
       <>

@@ -214,10 +214,7 @@ export const governanceApi = {
     tenantId: number,
     data: CreateSensitiveKeywordRequest
   ): Promise<SensitiveKeyword> {
-    return apiClient.post<SensitiveKeyword>(
-      `/api/tenants/${tenantId}/sensitive-keywords`,
-      data
-    );
+    return apiClient.post<SensitiveKeyword>(`/api/tenants/${tenantId}/sensitive-keywords`, data);
   },
 
   async updateSensitiveKeyword(
@@ -231,10 +228,7 @@ export const governanceApi = {
     );
   },
 
-  async deleteSensitiveKeyword(
-    tenantId: number,
-    keywordId: number
-  ): Promise<{ success: boolean }> {
+  async deleteSensitiveKeyword(tenantId: number, keywordId: number): Promise<{ success: boolean }> {
     return apiClient.delete<{ success: boolean }>(
       `/api/tenants/${tenantId}/sensitive-keywords/${keywordId}`
     );
