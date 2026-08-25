@@ -22,7 +22,13 @@ def sqlite_db(tmp_path, monkeypatch):
     db_path = tmp_path / "tenant_boundaries.db"
     db_url = f"sqlite:///{db_path}"
     load_schema_from_file(db_url=db_url, dialect="sqlite")
-    return db_path, Database(db_url=db_url)
+    db = Database(db_url=db_url)
+    for tenant_id in (1, 2):
+        db.execute(
+            "INSERT INTO tenants (id, name, slug) VALUES (?, ?, ?)",
+            (tenant_id, f"Tenant {tenant_id}", f"tenant-{tenant_id}"),
+        )
+    return db_path, db
 
 
 def _session_manager(db_path) -> SessionManager:
