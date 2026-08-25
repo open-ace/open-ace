@@ -23,6 +23,7 @@ of silently shipping an unpatched bundle.
 """
 
 import sys
+import re
 
 BUNDLE = "/usr/lib/node_modules/qwen-code-webui/dist/static/assets/index-DO2hmkKX.js"
 INDEX_HTML = "/usr/lib/node_modules/qwen-code-webui/dist/static/index.html"
@@ -123,12 +124,11 @@ def main() -> int:
                 f.write(html)
             print("[patch-qwen-webui-local-permission] index.html cache-bust applied")
         else:
-            # Check for older cache-bust version
-            old_bust_pattern = f'src="/assets/{basename}?v=local-perm-'
-            idx = html.find(old_bust_pattern)
-            if idx >= 0:
-                end = html.find('"', idx)
-                html = html[:idx] + busted_src + html[end:]
+            # Use regex to find and update any existing cache-bust parameter
+            pattern = rf'src="/assets/{re.escape(basename)}\?[^"]*"'
+            match = re.search(pattern, html)
+            if match:
+                html = html.replace(match.group(0), busted_src + '"')
                 with open(INDEX_HTML, "w", encoding="utf-8") as f:
                     f.write(html)
                 print("[patch-qwen-webui-local-permission] index.html cache-bust bumped")
