@@ -20,15 +20,15 @@ class TestFilterRuleValidation:
 
     def test_valid_rule_types(self):
         """Verify valid rule types."""
-        assert VALID_RULE_TYPES == {"keyword", "regex", "pii"}
+        assert {"keyword", "regex", "pii"} == VALID_RULE_TYPES
 
     def test_valid_severities(self):
         """Verify valid severities."""
-        assert VALID_SEVERITIES == {"low", "medium", "high"}
+        assert {"low", "medium", "high"} == VALID_SEVERITIES
 
     def test_valid_actions(self):
         """Verify valid actions."""
-        assert VALID_ACTIONS == {"warn", "block", "redact"}
+        assert {"warn", "block", "redact"} == VALID_ACTIONS
 
     # -------------------------------------------------------------------------
     # Valid input

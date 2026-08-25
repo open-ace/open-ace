@@ -729,6 +729,12 @@ def api_update_filter_rule(rule_id):
     new_severity = data.get("severity")
     new_action = data.get("action")
 
+    # Validate and normalize pattern if being updated
+    if new_pattern is not None:
+        new_pattern = new_pattern.strip()
+        if not new_pattern:
+            return jsonify({"error": "Pattern cannot be empty"}), 400
+
     # Use existing values for validation if not provided
     validate_pattern = new_pattern if new_pattern is not None else existing.get("pattern", "")
     validate_type = new_type if new_type is not None else existing.get("type", "keyword")

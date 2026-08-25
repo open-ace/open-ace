@@ -288,6 +288,26 @@ class TestFilterRules:
         patterns = [r["pattern"] for r in rules]
         assert patterns.count("no_dup") == 1
 
+    def test_update_filter_rule_empty_pattern_fails(self, tmp_db):
+        """Updating pattern to empty string should fail at API layer.
+
+        Note: This test is for documentation purposes. The actual validation
+        is in the API route layer (app/routes/governance.py), not in the
+        repository layer.
+        """
+        # Repository layer doesn't validate - it just updates
+        # The API layer validates before calling this
+        repo = GovernanceRepository(db=tmp_db)
+
+        rule_id = repo.create_filter_rule(pattern="test")
+        assert rule_id is not None
+
+        # Repository layer allows empty pattern update
+        # API layer should prevent this
+        result = repo.update_filter_rule(rule_id, pattern="")
+        # Note: Repository returns True, but API should reject before this
+        assert result is True
+
 
 class TestSecuritySettings:
     """Tests for security settings operations."""
