@@ -43,6 +43,14 @@ def mgr(tmp_path, monkeypatch):
     import sqlite3
 
     conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT OR REPLACE INTO tenants (id, name, slug, quota) VALUES (?, ?, ?, ?)",
+        (1, "Hostname Tenant 1", "hostname-tenant-1", '{"max_users": 100}'),
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO tenants (id, name, slug, quota) VALUES (?, ?, ?, ?)",
+        (2, "Hostname Tenant 2", "hostname-tenant-2", '{"max_users": 100}'),
+    )
     for uid, name in ((1, "admin"), (2, "user2"), (3, "user3")):
         conn.execute(
             "INSERT OR REPLACE INTO users (id, username, password_hash) VALUES (?, ?, ?)",

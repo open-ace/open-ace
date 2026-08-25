@@ -129,6 +129,11 @@ def sync_env(tmp_path, monkeypatch):
 
     db = Database(db_url=f"sqlite:///{db_path}")
     load_schema_from_file(db_url=db.db_url, dialect="sqlite")
+    for tenant_id in (8, 9):
+        db.execute(
+            "INSERT INTO tenants (id, name, slug) VALUES (?, ?, ?)",
+            (tenant_id, f"Tenant {tenant_id}", f"tenant-{tenant_id}"),
+        )
 
     try:
         yield db

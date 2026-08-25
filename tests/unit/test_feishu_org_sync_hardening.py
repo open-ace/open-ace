@@ -59,6 +59,10 @@ def sync_env(tmp_path, monkeypatch):
 
     db = Database(db_url=f"sqlite:///{tmp_path / 'feishu-sync.db'}")
     load_schema_from_file(db_url=db.db_url, dialect="sqlite")
+    db.execute(
+        "INSERT INTO tenants (id, name, slug, quota) VALUES (?, ?, ?, ?)",
+        (7, "Feishu Hardening Tenant", "feishu-hardening", '{"max_users": 100}'),
+    )
 
     config = {
         "feishu": {

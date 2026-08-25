@@ -52,7 +52,12 @@ def _make_client():
     db = db_mod.Database(db_url=_DB_URL)
     with db.get_connection() as conn:
         cursor = conn.cursor()
+        cursor.execute("DELETE FROM tenants")
         cursor.execute("DELETE FROM users")
+        cursor.execute(
+            "INSERT INTO tenants (id, name, slug, quota) VALUES (?, ?, ?, ?)",
+            (7, "Analysis Test Tenant", "analysis-test", '{"max_users": 100}'),
+        )
         cursor.execute(
             "INSERT INTO users (id, username, email, password_hash, role, tenant_id) "
             "VALUES (?, ?, ?, ?, ?, ?)",

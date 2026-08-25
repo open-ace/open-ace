@@ -232,7 +232,7 @@ class TestReaper:
         conn.close()
 
         with patch.object(
-            notifier, "_deliver_to_prefs", return_value=DeliveryResult(delivered=True)
+            notifier, "_post_webhook_snapshot", return_value=DeliveryResult(delivered=True)
         ):
             attempted = notifier.process_due_deliveries()
 
@@ -254,7 +254,7 @@ class TestReaper:
 
         with patch.object(
             notifier,
-            "_deliver_to_prefs",
+            "_post_webhook_snapshot",
             return_value=DeliveryResult(retriable=True, error_type="timeout"),
         ):
             notifier.process_due_deliveries()
@@ -284,7 +284,7 @@ class TestReaper:
 
         with patch.object(
             notifier,
-            "_deliver_to_prefs",
+            "_post_webhook_snapshot",
             return_value=DeliveryResult(retriable=True, error_type="connection"),
         ):
             notifier.process_due_deliveries()
@@ -315,7 +315,7 @@ class TestReaper:
         conn.commit()
         conn.close()
 
-        with patch.object(notifier, "_deliver_to_prefs") as mock_send:
+        with patch.object(notifier, "_post_webhook_snapshot") as mock_send:
             attempted = notifier.process_due_deliveries()
             mock_send.assert_not_called()  # no POST for a missing alert
 
@@ -414,7 +414,7 @@ class TestDeliveryIdentity:
         )
         self._force_due(notifier, did)
 
-        with patch.object(notifier, "_deliver_to_prefs") as mock_send:
+        with patch.object(notifier, "_post_webhook_snapshot") as mock_send:
             attempted = notifier.process_due_deliveries()
             # No POST — the historical alert is NOT forwarded to the new receiver.
             mock_send.assert_not_called()
@@ -437,7 +437,7 @@ class TestDeliveryIdentity:
         self._force_due(notifier, did)
 
         with patch.object(
-            notifier, "_deliver_to_prefs", return_value=DeliveryResult(delivered=True)
+            notifier, "_post_webhook_snapshot", return_value=DeliveryResult(delivered=True)
         ):
             notifier.process_due_deliveries()
 
@@ -469,7 +469,7 @@ class TestDeliveryIdentity:
         conn.commit()
         conn.close()
 
-        with patch.object(notifier, "_deliver_to_prefs") as mock_deliver:
+        with patch.object(notifier, "_post_webhook_snapshot") as mock_deliver:
             notifier.process_due_deliveries()
             # No POST — the row can't be verified, so it is dead-lettered.
             mock_deliver.assert_not_called()
@@ -493,8 +493,8 @@ class TestDeliveryIdentity:
 
         sent_urls: list[str] = []
 
-        def fake_send(_alert, prefs):
-            sent_urls.append(prefs.webhook_url)
+        def fake_send(_alert, snapshot):
+            sent_urls.append(snapshot.webhook_url)
             return DeliveryResult(retriable=True, error_type="timeout")
 
         def switch_receiver(_secs):
@@ -512,18 +512,18 @@ class TestDeliveryIdentity:
                 self._target()
 
         with (
-            patch.object(notifier, "_deliver_to_prefs", side_effect=fake_send),
+            patch.object(notifier, "_post_webhook_snapshot", side_effect=fake_send),
             patch("app.modules.governance.alert_notifier.time.sleep", side_effect=switch_receiver),
             patch("app.modules.governance.alert_notifier.threading.Thread", _SyncThread),
         ):
             notifier._dispatch_webhook_async(alert, 1)
 
-        # Only attempt 1 POSTed (to X); attempt 2 saw the receiver change and
-        # dead-lettered without POSTing to Y.
-        assert sent_urls == [url_x]
+        # Immediate retry uses the original immutable receiver snapshot; it must
+        # not POST to Y after the preference change.
+        assert sent_urls == [url_x, url_x]
         row = _all_delivery_rows(notifier)[0]
-        assert row["status"] == "dead"
-        assert row["last_error_type"] == "config_changed"
+        assert row["status"] == "pending"
+        assert row["last_error_type"] == "timeout"
         assert row["webhook_url_hash"] == _hash_webhook_url(url_x)
 
     def test_enqueue_uses_pinned_hash_not_current_preferences(self, notifier):
@@ -562,8 +562,8 @@ class TestDeliveryIdentity:
 
         delivered: list[str] = []
 
-        def fake_deliver(_alert, prefs):
-            delivered.append(prefs.webhook_url)
+        def fake_deliver(_alert, snapshot):
+            delivered.append(snapshot.webhook_url)
             return DeliveryResult(delivered=True)
 
         # If the worker refetched prefs after the identity check, a later read
@@ -587,7 +587,7 @@ class TestDeliveryIdentity:
 
         with (
             patch.object(notifier, "get_notification_preferences", side_effect=mutating_get),
-            patch.object(notifier, "_deliver_to_prefs", side_effect=fake_deliver),
+            patch.object(notifier, "_post_webhook_snapshot", side_effect=fake_deliver),
             patch("app.modules.governance.alert_notifier.threading.Thread", _SyncThread),
         ):
             notifier._dispatch_webhook_async(alert, 1)
@@ -633,7 +633,7 @@ class TestDeliveryIdentity:
 
         with (
             patch.object(notifier, "get_notification_preferences", side_effect=mutating_get),
-            patch.object(notifier, "_deliver_to_prefs", side_effect=fake_deliver),
+            patch.object(notifier, "_post_webhook_snapshot", side_effect=fake_deliver),
         ):
             notifier.process_due_deliveries()
 
@@ -708,7 +708,7 @@ class TestDeliveryIdentity:
             patch.object(notifier, "get_notification_preferences", side_effect=flaky_prefs),
             patch.object(
                 notifier,
-                "_deliver_to_prefs",
+                "_post_webhook_snapshot",
                 return_value=DeliveryResult(retriable=True, error_type="timeout"),
             ),
             patch("app.modules.governance.alert_notifier.time.sleep"),
@@ -719,7 +719,7 @@ class TestDeliveryIdentity:
         row = _all_delivery_rows(notifier)[0]
         assert row["status"] == "pending"  # handed to reaper, not dropped
         assert row["webhook_url_hash"] == _hash_webhook_url(url_x)  # pinned to X
-        assert row["last_error_type"] == "prefs_unreadable"
+        assert row["last_error_type"] == "timeout"
 
     def test_reaper_prefs_failure_at_attempt_budget_does_not_strand_pending_row(self, notifier):
         """P1-2: a control-plane prefs read failure does not consume a delivery
@@ -778,7 +778,7 @@ class TestDeliveryIdentity:
         with (
             patch.object(
                 notifier,
-                "_deliver_to_prefs",
+                "_post_webhook_snapshot",
                 return_value=DeliveryResult(retriable=False, error_type="http_4xx"),
             ),
             patch("app.modules.governance.alert_notifier.threading.Thread", _SyncThread),
@@ -813,7 +813,7 @@ class TestDeliveryIdentity:
                 self._target()
 
         with (
-            patch.object(notifier, "_deliver_to_prefs", side_effect=results),
+            patch.object(notifier, "_post_webhook_snapshot", side_effect=results),
             patch("app.modules.governance.alert_notifier.time.sleep"),
             patch("app.modules.governance.alert_notifier.threading.Thread", _SyncThread),
         ):

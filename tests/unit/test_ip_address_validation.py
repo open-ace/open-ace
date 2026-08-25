@@ -18,6 +18,23 @@ import pytest
 pytestmark = [pytest.mark.regression, pytest.mark.issue(486)]
 
 
+def _seed_remote_manager_refs(db_path: str) -> None:
+    """Seed the tenant/user rows required by RemoteAgentManager FK constraints."""
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT OR REPLACE INTO tenants (id, name, slug, quota) VALUES (?, ?, ?, ?)",
+        (1, "IP Validation Tenant", "ip-validation", '{"max_users": 100}'),
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO users (id, username, password_hash) VALUES (?, ?, ?)",
+        (1, "admin", "seed-hash"),
+    )
+    conn.commit()
+    conn.close()
+
+
 # ==================== Unit Tests: validate_ip() ====================
 
 
@@ -294,6 +311,7 @@ class TestIPRegistrationIntegration(unittest.TestCase):
         load_schema_from_file(db_url=f"sqlite:///{self.db_file}", dialect="sqlite")
         conn.commit()
         conn.close()
+        _seed_remote_manager_refs(self.db_file)
 
         self.mgr = RemoteAgentManager(db_path=self.db_file)
 
@@ -380,6 +398,7 @@ class TestUpdateMachineIP(unittest.TestCase):
 
         self.db_file = tempfile.mktemp(suffix=".db")
         load_schema_from_file(db_url=f"sqlite:///{self.db_file}", dialect="sqlite")
+        _seed_remote_manager_refs(self.db_file)
 
         self.mgr = RemoteAgentManager(db_path=self.db_file)
         # Register a test machine first
@@ -445,6 +464,7 @@ class TestAgentMessageRegisterLogic(unittest.TestCase):
 
         self.db_file = tempfile.mktemp(suffix=".db")
         load_schema_from_file(db_url=f"sqlite:///{self.db_file}", dialect="sqlite")
+        _seed_remote_manager_refs(self.db_file)
 
         self.mgr = RemoteAgentManager(db_path=self.db_file)
         # Register a test machine
