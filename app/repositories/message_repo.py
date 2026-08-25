@@ -809,16 +809,17 @@ class MessageRepository:
         # Use MAX/MIN for sender_name and sender_id as PostgreSQL requires all non-grouped
         # columns to be in GROUP BY or aggregated
         # Issue #3079: Add role_group for role-based user distribution
+        # Use MAX to aggregate role_group - a user has one role, so MAX returns that role
         query = f"""
             SELECT
                 COALESCE(dm.user_id, -1) as user_id,
                 COALESCE(u.username, dm.sender_name) as unified_username,
-                CASE
+                MAX(CASE
                     WHEN u.role IN ('admin', 'platform_admin', 'tenant_admin') THEN 'admin'
                     WHEN u.role = 'manager' THEN 'manager'
                     WHEN u.role IN ('user', 'readonly') THEN 'user'
                     ELSE 'unknown'
-                END as role_group,
+                END) as role_group,
                 MAX(dm.sender_name) as sender_name,
                 MAX(dm.sender_id) as sender_id,
                 SUM(dm.tokens_used) as total_tokens,
@@ -828,7 +829,7 @@ class MessageRepository:
             FROM daily_messages dm
             LEFT JOIN users u ON dm.user_id = u.id
             {where_clause}
-            GROUP BY COALESCE(dm.user_id, -1), COALESCE(u.username, dm.sender_name), role_group
+            GROUP BY COALESCE(dm.user_id, -1), COALESCE(u.username, dm.sender_name)
             ORDER BY total_tokens DESC
         """
 

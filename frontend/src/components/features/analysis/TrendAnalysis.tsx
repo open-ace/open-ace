@@ -592,10 +592,10 @@ export const TrendAnalysis: React.FC = () => {
             {segmentationType === 'role' && (
               <>
                 {userRoleDistribution &&
-                (userRoleDistribution.admin?.count || 0) +
-                  (userRoleDistribution.manager?.count || 0) +
-                  (userRoleDistribution.user?.count || 0) +
-                  (userRoleDistribution.unknown?.count || 0) >
+                (userRoleDistribution.admin || 0) +
+                  (userRoleDistribution.manager || 0) +
+                  (userRoleDistribution.user || 0) +
+                  (userRoleDistribution.unknown || 0) >
                   0 ? (
                   <DoughnutChart
                     labels={[
@@ -605,10 +605,10 @@ export const TrendAnalysis: React.FC = () => {
                       t('userRoleUnknown', language),
                     ]}
                     data={[
-                      userRoleDistribution.admin?.count || 0,
-                      userRoleDistribution.manager?.count || 0,
-                      userRoleDistribution.user?.count || 0,
-                      userRoleDistribution.unknown?.count || 0,
+                      userRoleDistribution.admin || 0,
+                      userRoleDistribution.manager || 0,
+                      userRoleDistribution.user || 0,
+                      userRoleDistribution.unknown || 0,
                     ]}
                     backgroundColor={[
                       'rgba(220, 53, 69, 0.8)', // Red for admin

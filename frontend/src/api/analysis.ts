@@ -79,17 +79,12 @@ export interface UserSegmentation {
 }
 
 // Issue #3079: User role distribution for role-based grouping
-export interface UserRoleDistributionItem {
-  count: number;
-  label: string;
-  description: string;
-}
-
+// Simple format: just counts, frontend handles i18n labels
 export interface UserRoleDistribution {
-  admin: UserRoleDistributionItem;
-  manager: UserRoleDistributionItem;
-  user: UserRoleDistributionItem;
-  unknown: UserRoleDistributionItem;
+  admin: number;
+  manager: number;
+  user: number;
+  unknown: number;
 }
 
 export interface Anomaly {

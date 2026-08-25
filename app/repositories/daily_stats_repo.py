@@ -381,6 +381,7 @@ class DailyStatsRepository:
             # PostgreSQL: use subquery for user_id resolution
             # Issue #1573: Use hash fallback for unresolved senders (each counts as unique user)
             # Issue #3079: Add role_group for role-based user distribution
+            # Use MAX to aggregate role_group - a user has one role, so MAX returns that role
             query = f"""
                 SELECT
                     COALESCE(ds.user_id,
@@ -397,12 +398,12 @@ class DailyStatsRepository:
                         CASE WHEN ds.sender_name LIKE '%%-%%-%%'
                              THEN SUBSTRING(ds.sender_name FROM '^[^-]+')
                              ELSE ds.sender_name END) as unified_username,
-                    CASE
+                    MAX(CASE
                         WHEN u.role IN ('admin', 'platform_admin', 'tenant_admin') THEN 'admin'
                         WHEN u.role = 'manager' THEN 'manager'
                         WHEN u.role IN ('user', 'readonly') THEN 'user'
                         ELSE 'unknown'
-                    END as role_group,
+                    END) as role_group,
                     SUM(ds.total_tokens) as total_tokens,
                     SUM(ds.total_input_tokens) as total_input_tokens,
                     SUM(ds.total_output_tokens) as total_output_tokens,
@@ -412,7 +413,7 @@ class DailyStatsRepository:
                     OR ds.sender_name LIKE (u.system_account || '-%%')
                     OR ds.sender_name = u.username
                 {where_clause}
-                GROUP BY resolved_user_id, unified_username, role_group
+                GROUP BY resolved_user_id, unified_username
                 ORDER BY total_tokens DESC
             """
         else:
@@ -422,6 +423,7 @@ class DailyStatsRepository:
             # then compute hash in application layer for each unresolved sender.
             # This ensures each unresolved sender appears as a distinct user in rankings.
             # Issue #3079: Add role_group for role-based user distribution
+            # Use MAX to aggregate role_group - a user has one role, so MAX returns that role
             query = f"""
                 SELECT
                     COALESCE(ds.user_id,
@@ -434,12 +436,12 @@ class DailyStatsRepository:
                         CASE WHEN ds.sender_name LIKE '%%-%%-%%'
                              THEN SUBSTR(ds.sender_name, 1, INSTR(ds.sender_name, '-') - 1)
                              ELSE ds.sender_name END) as unified_username,
-                    CASE
+                    MAX(CASE
                         WHEN u.role IN ('admin', 'platform_admin', 'tenant_admin') THEN 'admin'
                         WHEN u.role = 'manager' THEN 'manager'
                         WHEN u.role IN ('user', 'readonly') THEN 'user'
                         ELSE 'unknown'
-                    END as role_group,
+                    END) as role_group,
                     SUM(ds.total_tokens) as total_tokens,
                     SUM(ds.total_input_tokens) as total_input_tokens,
                     SUM(ds.total_output_tokens) as total_output_tokens,
@@ -449,7 +451,7 @@ class DailyStatsRepository:
                     OR ds.sender_name LIKE (u.system_account || '-%%')
                     OR ds.sender_name = u.username
                 {where_clause}
-                GROUP BY resolved_user_id, ds.sender_name, unified_username, role_group
+                GROUP BY resolved_user_id, ds.sender_name, unified_username
                 ORDER BY total_tokens DESC
             """
 

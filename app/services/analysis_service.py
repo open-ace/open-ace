@@ -1087,13 +1087,9 @@ class AnalysisService:
             tenant_id: Optional tenant filter (None for admin/global scope).
 
         Returns:
-            Dict: User role distribution with count, label, and description for each group.
-            Example: {
-                "admin": {"count": 2, "label": "管理员", "description": "系统管理员"},
-                "manager": {"count": 3, "label": "经理", "description": "团队管理员"},
-                "user": {"count": 15, "label": "用户", "description": "普通用户"},
-                "unknown": {"count": 5, "label": "未分配", "description": "未绑定账号"}
-            }
+            Dict: User role distribution with count for each group.
+            Example: {"admin": 2, "manager": 3, "user": 15, "unknown": 5}
+            Frontend handles internationalization of labels.
         """
         if not start_date:
             start_date = get_days_ago(30)
@@ -1120,30 +1116,7 @@ class AnalysisService:
             else:
                 role_counts["unknown"] += 1
 
-        # Build enhanced response with labels and descriptions
-        # Labels are in Chinese as the primary language; frontend will handle i18n
-        return {
-            "admin": {
-                "count": role_counts["admin"],
-                "label": "管理员",
-                "description": "系统管理员",
-            },
-            "manager": {
-                "count": role_counts["manager"],
-                "label": "经理",
-                "description": "团队管理员",
-            },
-            "user": {
-                "count": role_counts["user"],
-                "label": "用户",
-                "description": "普通用户",
-            },
-            "unknown": {
-                "count": role_counts["unknown"],
-                "label": "未分配",
-                "description": "未绑定账号",
-            },
-        }
+        return role_counts
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def detect_anomalies(

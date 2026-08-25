@@ -9,12 +9,24 @@ Role groups consolidate granular roles into display-friendly categories:
 - manager: Team managers (manager)
 - user: Regular users (user, readonly)
 - unknown: Unassigned or unrecognized roles
+
+Note on SQL vs Python usage:
+SQL queries (in message_repo.py and daily_stats_repo.py) use CASE WHEN expressions
+for role grouping because:
+1. It allows the database to aggregate data efficiently in a single query
+2. It avoids the need for N+1 queries (fetching users then calling Python function)
+3. The MAX(CASE WHEN ... END) pattern correctly aggregates roles per user
+
+The `normalize_role_to_group` function is provided for Python-side processing
+when needed (e.g., validation, testing, or future use cases where SQL aggregation
+is not involved).
 """
 
 from typing import Literal
 
 # Role group definitions
 # Maps display group names to the set of underlying roles they represent
+# Note: Keep in sync with CASE WHEN expressions in SQL queries
 ROLE_GROUPS: dict[str, frozenset[str]] = {
     "admin": frozenset({"admin", "platform_admin", "tenant_admin"}),
     "manager": frozenset({"manager"}),
@@ -28,6 +40,9 @@ RoleGroup = Literal["admin", "manager", "user", "unknown"]
 def normalize_role_to_group(role: str | None) -> str:
     """
     Normalize a specific role to its display group.
+
+    This function mirrors the CASE WHEN logic used in SQL queries.
+    Keep it in sync with the SQL expressions in message_repo.py and daily_stats_repo.py.
 
     Args:
         role: The specific role string (e.g., 'admin', 'platform_admin', 'user').

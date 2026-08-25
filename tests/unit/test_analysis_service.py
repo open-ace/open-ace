@@ -402,21 +402,17 @@ class TestAnalysisService:
         ]
         result = svc.get_user_role_distribution("2026-05-01", "2026-05-23")
 
-        # Verify structure
+        # Verify structure - now returns simple counts, not nested objects
         assert "admin" in result
         assert "manager" in result
         assert "user" in result
         assert "unknown" in result
 
-        # Verify counts
-        assert result["admin"]["count"] == 2
-        assert result["manager"]["count"] == 1
-        assert result["user"]["count"] == 2
-        assert result["unknown"]["count"] == 1
-
-        # Verify labels and descriptions exist
-        assert result["admin"]["label"] is not None
-        assert result["admin"]["description"] is not None
+        # Verify counts (direct integers, not nested objects)
+        assert result["admin"] == 2
+        assert result["manager"] == 1
+        assert result["user"] == 2
+        assert result["unknown"] == 1
 
     def test_get_user_role_distribution_no_data(self):
         """Test that get_user_role_distribution handles empty data gracefully."""
@@ -424,11 +420,11 @@ class TestAnalysisService:
         mock_msg.get_user_token_totals.return_value = []
         result = svc.get_user_role_distribution("2026-05-01", "2026-05-23")
 
-        # All counts should be 0
-        assert result["admin"]["count"] == 0
-        assert result["manager"]["count"] == 0
-        assert result["user"]["count"] == 0
-        assert result["unknown"]["count"] == 0
+        # All counts should be 0 (direct integers)
+        assert result["admin"] == 0
+        assert result["manager"] == 0
+        assert result["user"] == 0
+        assert result["unknown"] == 0
 
     def test_get_user_role_distribution_unknown_role(self):
         """Test that unrecognized roles are counted as unknown."""
@@ -439,7 +435,7 @@ class TestAnalysisService:
         result = svc.get_user_role_distribution("2026-05-01", "2026-05-23")
 
         # Invalid role should be counted as unknown
-        assert result["unknown"]["count"] == 1
+        assert result["unknown"] == 1
 
     def test_get_user_role_distribution_null_role_group(self):
         """Test that None role_group is treated as unknown."""
@@ -449,4 +445,4 @@ class TestAnalysisService:
         ]
         result = svc.get_user_role_distribution("2026-05-01", "2026-05-23")
 
-        assert result["unknown"]["count"] == 1
+        assert result["unknown"] == 1
