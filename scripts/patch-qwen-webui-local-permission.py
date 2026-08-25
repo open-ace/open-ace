@@ -22,8 +22,8 @@ bundle changes, this script exits non-zero so the build fails loudly instead
 of silently shipping an unpatched bundle.
 """
 
-import sys
 import re
+import sys
 
 BUNDLE = "/usr/lib/node_modules/qwen-code-webui/dist/static/assets/index-DO2hmkKX.js"
 INDEX_HTML = "/usr/lib/node_modules/qwen-code-webui/dist/static/index.html"
