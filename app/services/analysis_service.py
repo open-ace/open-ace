@@ -12,6 +12,7 @@ from typing import Any
 
 from app.repositories.daily_stats_repo import DailyStatsRepository
 from app.repositories.message_repo import MessageRepository
+from app.repositories.response_time_repo import ResponseTimeRepository
 from app.repositories.usage_repo import UsageRepository
 from app.utils.cache import cached
 from app.utils.helpers import get_days_ago, get_today
@@ -32,6 +33,7 @@ class AnalysisService:
         usage_repo: UsageRepository | None = None,
         message_repo: MessageRepository | None = None,
         daily_stats_repo: DailyStatsRepository | None = None,
+        response_time_repo: ResponseTimeRepository | None = None,
     ):
         """
         Initialize service.
@@ -40,10 +42,12 @@ class AnalysisService:
             usage_repo: Optional UsageRepository instance.
             message_repo: Optional MessageRepository instance.
             daily_stats_repo: Optional DailyStatsRepository instance.
+            response_time_repo: Optional ResponseTimeRepository instance.
         """
         self.usage_repo = usage_repo or UsageRepository()
         self.message_repo = message_repo or MessageRepository()
         self.daily_stats_repo = daily_stats_repo or DailyStatsRepository()
+        self.response_time_repo = response_time_repo or ResponseTimeRepository()
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_batch_analysis(
@@ -114,6 +118,20 @@ class AnalysisService:
                 self.usage_repo.get_request_count_total, start_date, end_date, host_name, tenant_id
             ): "total_requests",
             _executor.submit(self.daily_stats_repo.get_data_range, tenant_id): "data_range",
+            _executor.submit(
+                self.response_time_repo.get_response_time_stats,
+                start_date,
+                end_date,
+                host_name,
+                tenant_id,
+            ): "response_time_stats",
+            _executor.submit(
+                self.response_time_repo.get_percentile_stats,
+                start_date,
+                end_date,
+                host_name,
+                tenant_id,
+            ): "response_time_percentiles",
         }
 
         # Collect results
@@ -136,6 +154,8 @@ class AnalysisService:
         session_summary = results.get("session_summary", {})
         total_requests = results.get("total_requests", 0)
         data_range = results.get("data_range")
+        response_time_stats = results.get("response_time_stats", {})
+        response_time_percentiles = results.get("response_time_percentiles", {})
 
         # Use aggregates directly instead of computing from raw data
         total_tokens = aggregates.get("total_tokens", 0)
@@ -359,6 +379,26 @@ class AnalysisService:
 
         user_role_distribution = role_distribution
 
+        # Issue #3080: Response time metrics
+        # Calculate coverage ratio
+        coverage_ratio = 0.0
+        if response_time_stats.get("sample_count", 0) > 0:
+            if total_messages > 0:
+                coverage_ratio = min(1.0, response_time_stats.get("sample_count", 0) / total_messages)
+
+        response_time_metrics = {
+            "avg_response_time_ms": response_time_stats.get("avg_response_time_ms"),
+            "p50_response_time_ms": response_time_percentiles.get("p50_response_time_ms"),
+            "p95_response_time_ms": response_time_percentiles.get("p95_response_time_ms"),
+            "tool_call_avg_ms": response_time_stats.get("tool_call_avg_ms"),
+            "tool_call_ratio": response_time_stats.get("tool_call_ratio"),
+            "sample_count": response_time_stats.get("sample_count", 0),
+            "success_count": response_time_stats.get("success_count", 0),
+            "failed_count": response_time_stats.get("failed_count", 0),
+            "coverage_ratio": coverage_ratio,
+            "data_available": response_time_stats.get("data_available", False),
+        }
+
         duration_ms = (time.time() - start_time) * 1000
         logger.info(f"get_batch_analysis took {duration_ms:.2f}ms")
 
@@ -371,6 +411,7 @@ class AnalysisService:
             "tool_comparison": tool_comparison,
             "user_segmentation": user_segmentation,
             "user_role_distribution": user_role_distribution,
+            "response_time_metrics": response_time_metrics,
             "data_range": data_range,
         }
 
@@ -1343,3 +1384,105 @@ class AnalysisService:
         trend = sorted(trend_by_date.values(), key=lambda x: x["date"])
 
         return {"trend": trend, "total_anomalies": len(anomalies)}
+
+    @cached(ttl=60, key_prefix="analysis", skip_args=[0])
+    def get_response_time_metrics(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> dict:
+        """
+        Get response time metrics for trend analysis.
+
+        Issue #3080: Response time tracking for trend analysis.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
+
+        Returns:
+            Dict: Response time metrics including avg, p50, p95, sample count.
+        """
+        if not start_date:
+            start_date = get_days_ago(30)
+        if not end_date:
+            end_date = get_today()
+
+        # Get aggregated statistics
+        stats = self.response_time_repo.get_response_time_stats(
+            start_date=start_date,
+            end_date=end_date,
+            host_name=host_name,
+            tenant_id=tenant_id,
+        )
+
+        # Get percentile statistics
+        percentiles = self.response_time_repo.get_percentile_stats(
+            start_date=start_date,
+            end_date=end_date,
+            host_name=host_name,
+            tenant_id=tenant_id,
+        )
+
+        # Calculate coverage ratio (samples / total requests)
+        # Note: This is an approximation based on available data
+        coverage_ratio = 0.0
+        if stats.get("sample_count", 0) > 0:
+            # Get total requests for the same period
+            total_requests = self.daily_stats_repo.get_batch_aggregates(
+                start_date, end_date, host_name, tenant_id
+            ).get("total_messages", 0)
+
+            if total_requests > 0:
+                coverage_ratio = min(1.0, stats.get("sample_count", 0) / total_requests)
+
+        return {
+            "avg_response_time_ms": stats.get("avg_response_time_ms"),
+            "p50_response_time_ms": percentiles.get("p50_response_time_ms"),
+            "p95_response_time_ms": percentiles.get("p95_response_time_ms"),
+            "tool_call_avg_ms": stats.get("tool_call_avg_ms"),
+            "tool_call_ratio": stats.get("tool_call_ratio"),
+            "sample_count": stats.get("sample_count", 0),
+            "success_count": stats.get("success_count", 0),
+            "failed_count": stats.get("failed_count", 0),
+            "coverage_ratio": coverage_ratio,
+            "data_available": stats.get("data_available", False),
+        }
+
+    @cached(ttl=60, key_prefix="analysis", skip_args=[0])
+    def get_response_time_trend(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get response time trend by date.
+
+        Issue #3080: Response time tracking for trend analysis.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
+
+        Returns:
+            List[Dict]: Daily response time statistics.
+        """
+        if not start_date:
+            start_date = get_days_ago(30)
+        if not end_date:
+            end_date = get_today()
+
+        return self.response_time_repo.get_response_time_trend(
+            start_date=start_date,
+            end_date=end_date,
+            host_name=host_name,
+            tenant_id=tenant_id,
+        )

@@ -134,6 +134,20 @@ export interface DataRange {
   max_date: string;
 }
 
+// Issue #3080: Response time metrics for trend analysis
+export interface ResponseTimeMetrics {
+  avg_response_time_ms: number | null;
+  p50_response_time_ms: number | null;
+  p95_response_time_ms: number | null;
+  tool_call_avg_ms: number | null;
+  tool_call_ratio: number | null; // 0-1
+  sample_count: number;
+  success_count: number;
+  failed_count: number;
+  coverage_ratio: number; // 0-1
+  data_available: boolean;
+}
+
 // Batch response type
 export interface BatchAnalysisResponse {
   key_metrics: KeyMetrics;
@@ -144,6 +158,7 @@ export interface BatchAnalysisResponse {
   tool_comparison: ToolComparison;
   user_segmentation: UserSegmentation;
   user_role_distribution?: UserRoleDistribution; // Issue #3079
+  response_time_metrics?: ResponseTimeMetrics; // Issue #3080
   data_range?: DataRange;
 }
 

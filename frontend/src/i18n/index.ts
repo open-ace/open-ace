@@ -686,6 +686,12 @@ export const translations: Record<Language, Translations> = {
       'System is healthy. Score based on: avg tokens per session ≥ 1000, conversation length ≥ 2 turns.',
     healthScoreTooltip_warning:
       'Optimization recommended. Deductions: avg tokens < 1000 (-20pts), conversation length < 2 (-15pts).',
+    avgResponseTime: 'Avg Response Time',
+    avgResponseTimeTooltip:
+      'Average Time to First Token (TTFT), excluding tool calls. Sample count: {count}, coverage: {coverage}%',
+    toolCallAvg: 'Tool call avg: {time}',
+    toolCallRatio: 'Tool call ratio: {ratio}%',
+    notAvailable: 'N/A',
     usageHeatmap: 'Usage Heatmap (24 Hours)',
     usageHeatmapDescription:
       'Shows token usage distribution by hour (0-23). Darker blue = higher usage. Hover over a cell to see exact token count.',
@@ -2857,6 +2863,12 @@ export const translations: Record<Language, Translations> = {
     healthScoreTooltip_healthy: '系统运行良好。评分标准：会话平均 tokens ≥ 1000，对话长度 ≥ 2 轮。',
     healthScoreTooltip_warning:
       '存在优化空间。扣分项：会话平均 tokens < 1000（-20分），对话长度 < 2（-15分）。',
+    avgResponseTime: '平均响应时间',
+    avgResponseTimeTooltip:
+      '首个 Token 平均响应时间（TTFT），不含工具调用。样本数：{count}，覆盖率：{coverage}%',
+    toolCallAvg: '工具调用平均：{time}',
+    toolCallRatio: '工具调用占比：{ratio}%',
+    notAvailable: '暂无数据',
     usageHeatmap: '使用热力图（24小时）',
     usageHeatmapDescription:
       '显示一天中各时段（0-23点）的 Token 使用分布。颜色越深表示使用量越高。鼠标悬停可查看具体数值。',
@@ -5273,6 +5285,12 @@ export const translations: Record<Language, Translations> = {
       'システムは正常です。スコア基準：セッション平均トークン ≥ 1000、会話長 ≥ 2ラウンド。',
     healthScoreTooltip_warning:
       '最適化をお勧めします。減点項目：セッション平均トークン < 1000（-20点）、会話長 < 2（-15点）。',
+    avgResponseTime: '平均応答時間',
+    avgResponseTimeTooltip:
+      '最初のトークンまでの平均時間（TTFT）、ツール呼び出しを除く。サンプル数：{count}、カバレッジ：{coverage}%',
+    toolCallAvg: 'ツール呼び出し平均：{time}',
+    toolCallRatio: 'ツール呼び出し比率：{ratio}%',
+    notAvailable: 'N/A',
     usageHeatmap: '使用ヒートマップ（24時間）',
     usageHeatmapDescription:
       '時間帯別（0-23時）のトークン使用分布を表示。色が濃いほど使用量が多い。セルにホバーすると詳細が表示されます。',
@@ -7268,6 +7286,12 @@ export const translations: Record<Language, Translations> = {
       '시스템이 정상입니다. 점수 기준: 세션당 평균 토큰 ≥ 1000, 대화 길이 ≥ 2회.',
     healthScoreTooltip_warning:
       '최적화가 권장됩니다. 감점 항목: 세션당 평균 토큰 < 1000(-20점), 대화 길이 < 2(-15점).',
+    avgResponseTime: '평균 응답 시간',
+    avgResponseTimeTooltip:
+      '첫 번째 토큰까지의 평균 시간(TTFT), 도구 호출 제외. 샘플 수: {count}, 커버리지: {coverage}%',
+    toolCallAvg: '도구 호출 평균: {time}',
+    toolCallRatio: '도구 호출 비율: {ratio}%',
+    notAvailable: 'N/A',
     usageHeatmap: '사용 히트맵 (24시간)',
     usageHeatmapDescription:
       '시간대별(0-23시) 토큰 사용 분포를 표시합니다. 색이 짙을수록 사용량이 많습니다. 셀에 마우스를 올리면 상세 정보가 표시됩니다.',
