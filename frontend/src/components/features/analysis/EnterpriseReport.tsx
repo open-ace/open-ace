@@ -18,7 +18,16 @@ import React, { useState, useMemo } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
-import { Card, StatCard, Button, Error, EmptyState, DatePicker, Modal, useToast } from '@/components/common';
+import {
+  Card,
+  StatCard,
+  Button,
+  Error,
+  EmptyState,
+  DatePicker,
+  Modal,
+  useToast,
+} from '@/components/common';
 import { formatTokens } from '@/utils';
 import { useEnterpriseReport, useEfficiencyMetrics, useAuth } from '@/hooks';
 import { analysisApi } from '@/api';
