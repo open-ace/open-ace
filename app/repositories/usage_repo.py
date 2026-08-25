@@ -1373,7 +1373,7 @@ class UsageRepository:
             else:
                 merged[key] = {
                     "date": row["date"],
-                    "tool": normalize_tool_name(row["tool_name"]),
+                    "tool_name": normalize_tool_name(row["tool_name"]),
                     "tokens": int(row["tokens"] or 0),
                 }
 
