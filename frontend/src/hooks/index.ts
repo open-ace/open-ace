@@ -52,6 +52,10 @@ export {
   useUpdatePolicyRule,
   useTogglePolicyRule,
   usePolicyDecisions,
+  useSensitiveKeywords,
+  useCreateSensitiveKeyword,
+  useUpdateSensitiveKeyword,
+  useDeleteSensitiveKeyword,
 } from './useAdmin';
 export { useMyUsage } from './useReport';
 export {

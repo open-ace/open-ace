@@ -21,6 +21,11 @@ import {
   useUpdateAuditThresholds,
   usePageRefresh,
   useFilterStats,
+  useAdminTenant,
+  useSensitiveKeywords,
+  useCreateSensitiveKeyword,
+  useUpdateSensitiveKeyword,
+  useDeleteSensitiveKeyword,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -45,6 +50,9 @@ import type {
   CreateFilterRuleRequest,
   SecuritySettings as SecuritySettingsType,
   AuditThresholds as AuditThresholdsType,
+  SensitiveKeyword,
+  CreateSensitiveKeywordRequest,
+  SensitiveKeywordsFilters,
 } from '@/api';
 
 // Translation key mappings for filter rule values
@@ -66,7 +74,7 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   redact: 'actionRedact',
 };
 
-type TabType = 'filter' | 'settings' | 'audit' | 'stats';
+type TabType = 'filter' | 'settings' | 'audit' | 'stats' | 'sensitive-keywords';
 
 const MAX_DISPLAY_PATTERNS = 20;
 
@@ -187,6 +195,29 @@ export const SecurityCenter: React.FC = () => {
   } = useFilterStats({ enabled: activeTab === 'stats' });
 
   const [showAllPatterns, setShowAllPatterns] = useState(false);
+
+  // --- Sensitive Keywords State (Issue #3059) ---
+  const { effectiveTenantId } = useAdminTenant();
+
+  const [keywordFilters, setKeywordFilters] = useState<SensitiveKeywordsFilters>({
+    limit: 20,
+    offset: 0,
+  });
+
+  const {
+    data: keywordsData,
+    isLoading: keywordsLoading,
+    isError: keywordsError,
+    error: keywordsErrorObj,
+    refetch: refetchKeywords,
+  } = useSensitiveKeywords(effectiveTenantId, keywordFilters);
+
+  const createKeyword = useCreateSensitiveKeyword();
+  const updateKeyword = useUpdateSensitiveKeyword();
+  const deleteKeyword = useDeleteSensitiveKeyword();
+
+  const [showKeywordModal, setShowKeywordModal] = useState(false);
+  const [keywordInput, setKeywordInput] = useState('');
 
   // --- Filter Rules Handlers ---
   const handleOpenCreateRule = () => {
@@ -399,6 +430,82 @@ export const SecurityCenter: React.FC = () => {
     ...AUDIT_THRESHOLD_DEFAULTS,
     ...thresholds,
     ...thresholdsFormData,
+  };
+
+  // --- Sensitive Keywords Handlers (Issue #3059) ---
+  const validateKeyword = (keyword: string): string | null => {
+    const trimmed = keyword.trim();
+    if (!trimmed) {
+      return language === 'zh' ? '关键词不能为空' : 'Keyword cannot be empty';
+    }
+    if (trimmed.length > 255) {
+      return language === 'zh'
+        ? '关键词长度不能超过 255 个字符'
+        : 'Keyword cannot exceed 255 characters';
+    }
+    return null;
+  };
+
+  const handleOpenCreateKeyword = () => {
+    setKeywordInput('');
+    setShowKeywordModal(true);
+  };
+
+  const handleCloseKeywordModal = () => {
+    setShowKeywordModal(false);
+    setKeywordInput('');
+  };
+
+  const handleSubmitKeyword = async () => {
+    const error = validateKeyword(keywordInput);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+
+    try {
+      const result = await createKeyword.mutateAsync({
+        tenantId: effectiveTenantId!,
+        data: { keyword: keywordInput.trim() },
+      });
+
+      if (result.is_new) {
+        toast.success(t('keywordCreated', language));
+      } else {
+        toast.info(t('keywordAlreadyExists', language));
+      }
+      handleCloseKeywordModal();
+    } catch (err) {
+      console.error('Failed to create keyword:', err);
+      toast.error(t('keywordCreateFailed', language));
+    }
+  };
+
+  const handleToggleKeywordEnabled = async (keyword: SensitiveKeyword) => {
+    try {
+      await updateKeyword.mutateAsync({
+        tenantId: effectiveTenantId!,
+        keywordId: keyword.id,
+        data: { is_enabled: !keyword.is_enabled },
+      });
+    } catch (err) {
+      console.error('Failed to toggle keyword:', err);
+      toast.error(t('keywordUpdateFailed', language));
+    }
+  };
+
+  const handleDeleteKeyword = async (keywordId: number) => {
+    if (await confirm({ message: t('confirmDeleteKeyword', language), variant: 'danger' })) {
+      try {
+        await deleteKeyword.mutateAsync({
+          tenantId: effectiveTenantId!,
+          keywordId,
+        });
+      } catch (err) {
+        console.error('Failed to delete keyword:', err);
+        toast.error(t('keywordDeleteFailed', language));
+      }
+    }
   };
 
   // Merge current settings with form changes
@@ -1099,6 +1206,129 @@ export const SecurityCenter: React.FC = () => {
     );
   };
 
+  // --- Render Sensitive Keywords Tab (Issue #3059) ---
+  const renderSensitiveKeywordsTab = () => {
+    // Permission check
+    if (!effectiveTenantId) {
+      return <Error message={t('noPermission', language)} />;
+    }
+
+    // Loading state
+    if (keywordsLoading) {
+      return <Loading size="lg" text={t('loading', language)} />;
+    }
+
+    // Error state
+    if (keywordsError) {
+      return (
+        <Error
+          message={keywordsErrorObj?.message || t('error', language)}
+          onRetry={() => refetchKeywords()}
+        />
+      );
+    }
+
+    const keywords = keywordsData?.keywords || [];
+
+    return (
+      <>
+        {/* Keywords Table */}
+        {!keywords || keywords.length === 0 ? (
+          <EmptyState icon="bi-key" title={t('noKeywords', language)} />
+        ) : (
+          <div className="table-responsive">
+            <table className="table table-hover">
+              <thead>
+                <tr>
+                  <th>{t('keyword', language)}</th>
+                  <th>{t('status', language)}</th>
+                  <th>{t('createdAt', language)}</th>
+                  <th>{t('actions', language)}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {keywords.map((keyword) => (
+                  <tr key={keyword.id}>
+                    <td>
+                      <code>{keyword.keyword}</code>
+                    </td>
+                    <td>
+                      <div className="form-check form-switch">
+                        <input
+                          className="form-check-input"
+                          type="checkbox"
+                          checked={keyword.is_enabled}
+                          onChange={() => handleToggleKeywordEnabled(keyword)}
+                          disabled={updateKeyword.isPending}
+                        />
+                      </div>
+                    </td>
+                    <td>
+                      <small className="text-muted">
+                        {new Date(keyword.created_at).toLocaleString(
+                          language === 'zh' ? 'zh-CN' : 'en-US'
+                        )}
+                      </small>
+                    </td>
+                    <td>
+                      <Button
+                        variant="outline-danger"
+                        size="sm"
+                        onClick={() => handleDeleteKeyword(keyword.id)}
+                        disabled={deleteKeyword.isPending}
+                      >
+                        <i className="bi bi-trash" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Create Keyword Modal */}
+        <Modal
+          isOpen={showKeywordModal}
+          onClose={handleCloseKeywordModal}
+          title={t('addKeyword', language)}
+          size="md"
+          footer={
+            <>
+              <Button variant="secondary" onClick={handleCloseKeywordModal}>
+                {t('cancel', language)}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleSubmitKeyword}
+                loading={createKeyword.isPending}
+              >
+                {t('save', language)}
+              </Button>
+            </>
+          }
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmitKeyword();
+            }}
+          >
+            <div className="mb-3">
+              <label className="form-label">{t('keyword', language)}</label>
+              <TextInput
+                value={keywordInput}
+                onChange={(value: string) => setKeywordInput(value)}
+                placeholder={t('keywordPlaceholder', language)}
+              />
+              <small className="text-muted">{t('keywordHelp', language)}</small>
+            </div>
+          </form>
+        </Modal>
+      </>
+    );
+  };
+
   return (
     <div className="security-center">
       {/* Header */}
@@ -1117,6 +1347,12 @@ export const SecurityCenter: React.FC = () => {
             <Button variant="primary" size="sm" onClick={handleOpenCreateRule}>
               <i className="bi bi-plus-lg me-1" />
               {t('addRule', language)}
+            </Button>
+          )}
+          {activeTab === 'sensitive-keywords' && effectiveTenantId && (
+            <Button variant="primary" size="sm" onClick={handleOpenCreateKeyword}>
+              <i className="bi bi-plus-lg me-1" />
+              {t('addKeyword', language)}
             </Button>
           )}
         </div>
@@ -1160,6 +1396,15 @@ export const SecurityCenter: React.FC = () => {
             {t('filterStats', language)}
           </button>
         </li>
+        <li className="nav-item">
+          <button
+            className={cn('nav-link', activeTab === 'sensitive-keywords' && 'active')}
+            onClick={() => setActiveTab('sensitive-keywords')}
+          >
+            <i className="bi bi-key me-1" />
+            {t('sensitiveKeywords', language)}
+          </button>
+        </li>
       </ul>
 
       {/* Tab Content */}
@@ -1167,6 +1412,7 @@ export const SecurityCenter: React.FC = () => {
       {activeTab === 'settings' && renderSettingsTab()}
       {activeTab === 'audit' && renderAuditThresholdsTab()}
       {activeTab === 'stats' && renderStatsTab()}
+      {activeTab === 'sensitive-keywords' && renderSensitiveKeywordsTab()}
     </div>
   );
 };
