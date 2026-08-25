@@ -786,7 +786,7 @@ class RemoteAgentManager:
                 if hostname:
                     cursor.execute(
                         f"""
-                        SELECT machine_id, status FROM remote_machines
+                        SELECT * FROM remote_machines
                         WHERE hostname = {_param()} AND tenant_id = {_param()}
                         ORDER BY updated_at DESC
                         """,
@@ -828,7 +828,8 @@ class RemoteAgentManager:
                     # Offline merge: only match explicit offline status
                     offline_match = [r for r in existing if r["status"] == self._STATUS_OFFLINE]
                     if offline_match:
-                        old_machine_id = offline_match[0]["machine_id"]
+                        old_machine = offline_match[0]
+                        old_machine_id = old_machine["machine_id"]
                         merged = True
                         logger.info(
                             "Merging re-registered machine: hostname=%s, old_id=%s, new_id=%s",
@@ -837,31 +838,31 @@ class RemoteAgentManager:
                             machine_id[:8],
                         )
 
-                        # Update the existing record with new machine_id and metadata
+                        # Insert the replacement machine row first so dependent foreign
+                        # keys can move over without ever pointing at a missing parent.
                         cursor.execute(
                             f"""
-                            UPDATE remote_machines
-                            SET machine_id = {_param()}, machine_name = {_param()},
-                                os_type = {_param()}, os_version = {_param()},
-                                ip_address = {_param()}, status = {_param()},
-                                agent_version = {_param()}, capabilities = {_param()},
-                                updated_at = {_param()}, last_heartbeat = {_param()},
-                                created_by = {_param()}
-                            WHERE machine_id = {_param()}
+                            INSERT INTO remote_machines
+                            (machine_id, machine_name, hostname, os_type, os_version, ip_address,
+                             status, agent_version, capabilities, tenant_id, created_by, created_at,
+                             updated_at, last_heartbeat)
+                            VALUES ({_params(14)})
                             """,
                             (
                                 machine_id,
                                 machine_name,
+                                hostname,
                                 os_type,
                                 os_version,
                                 ip_address,
                                 "online",
                                 agent_version,
                                 json.dumps(capabilities) if capabilities else None,
-                                now,
-                                now,
+                                old_machine["tenant_id"],
                                 token_info["created_by"],
-                                old_machine_id,
+                                old_machine["created_at"],
+                                now,
+                                now,
                             ),
                         )
 
@@ -898,6 +899,11 @@ class RemoteAgentManager:
                             logger.debug(
                                 "agent_sessions table not available during merge, skipping"
                             )
+
+                        cursor.execute(
+                            f"DELETE FROM remote_machines WHERE machine_id = {_param()}",
+                            (old_machine_id,),
+                        )
 
                         # Clean up in-memory state for old machine_id
                         self._connections.pop(old_machine_id, None)
