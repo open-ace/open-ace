@@ -87,6 +87,20 @@ export interface PasswordPolicy {
   password_require_special: boolean;
 }
 
+export interface FilterStats {
+  enabled: boolean;
+  redact_pii: boolean;
+  block_high_risk: boolean;
+  pattern_count: number;
+  keyword_count: number;
+  patterns: string[];
+  compiled_cache_size: number;
+  compiled_cache_hits: number;
+  compiled_cache_misses: number;
+  compiled_cache_hit_rate: number;
+  compiled_cache_max_size: number;
+}
+
 // API
 export const governanceApi = {
   // Audit Logs
@@ -130,6 +144,11 @@ export const governanceApi = {
 
   async checkContent(content: string): Promise<FilterCheckResult> {
     return apiClient.post<FilterCheckResult>('/api/content/check', { content });
+  },
+
+  // Filter Statistics
+  async getFilterStats(): Promise<FilterStats> {
+    return apiClient.get<FilterStats>('/api/content/filter/stats');
   },
 
   // Security Settings

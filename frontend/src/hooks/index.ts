@@ -35,6 +35,7 @@ export {
   useUpdateQuota,
   useAuditLogs,
   useFilterRules,
+  useFilterStats,
   useCreateFilterRule,
   useUpdateFilterRule,
   useDeleteFilterRule,
