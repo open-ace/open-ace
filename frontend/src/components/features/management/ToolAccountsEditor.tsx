@@ -174,9 +174,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
 
       // Handle failures
       if (result.failed_count > 0) {
-        const errorMessages = result.failed
-          .map((f) => `${f.tool_account}: ${f.error}`)
-          .join('\n');
+        const errorMessages = result.failed.map((f) => `${f.tool_account}: ${f.error}`).join('\n');
         toast.error(
           language === 'zh'
             ? `映射失败 ${result.failed_count} 个账号：\n${errorMessages}`
