@@ -76,6 +76,11 @@ const UsageForecast = lazy(() =>
     default: m.UsageForecast,
   }))
 );
+const EnterpriseReport = lazy(() =>
+  import('@/components/features/analysis/EnterpriseReport').then((m) => ({
+    default: m.EnterpriseReport,
+  }))
+);
 const ConversationHistory = lazy(() =>
   import('@/components/features/ConversationHistory').then((m) => ({
     default: m.ConversationHistory,
@@ -436,6 +441,7 @@ const ManageRoutes: React.FC = () => {
           <Route path="analysis/anomaly" element={<AnomalyDetection />} />
           <Route path="analysis/roi" element={<ROIAnalysis />} />
           <Route path="analysis/forecast" element={<UsageForecast />} />
+          <Route path="analysis/enterprise-report" element={<EnterpriseReport />} />
           <Route path="analysis/conversation-history" element={<ConversationHistory />} />
           <Route path="messages" element={<Messages />} />
 
