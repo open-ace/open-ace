@@ -218,6 +218,116 @@ class TestContentFilterRules:
         result = self.repo.delete_filter_rule(1)
         assert result is False
 
+    # -------------------------------------------------------------------------
+    # get_filter_rule_by_pattern
+    # -------------------------------------------------------------------------
+
+    def test_get_filter_rule_by_pattern_found(self):
+        self.db.fetch_one.return_value = {"id": 1, "pattern": "secret", "is_enabled": 1}
+        result = self.repo.get_filter_rule_by_pattern("secret")
+        assert result is not None
+        assert result["pattern"] == "secret"
+        assert result["is_enabled"] is True
+
+    def test_get_filter_rule_by_pattern_not_found(self):
+        self.db.fetch_one.return_value = None
+        result = self.repo.get_filter_rule_by_pattern("nonexistent")
+        assert result is None
+
+    # -------------------------------------------------------------------------
+    # get_filter_rules_paginated
+    # -------------------------------------------------------------------------
+
+    def test_get_filter_rules_paginated_returns_list_and_total(self):
+        self.db.fetch_one.return_value = {"count": 10}
+        self.db.fetch_all.return_value = [
+            {"id": 1, "pattern": "secret", "type": "keyword", "is_enabled": 1},
+            {"id": 2, "pattern": "password", "type": "keyword", "is_enabled": 0},
+        ]
+        rules, total = self.repo.get_filter_rules_paginated(limit=10, offset=0)
+        assert len(rules) == 2
+        assert total == 10
+        assert rules[0]["is_enabled"] is True
+        assert rules[1]["is_enabled"] is False
+
+    def test_get_filter_rules_paginated_clamps_limit(self):
+        self.db.fetch_one.return_value = {"count": 0}
+        self.db.fetch_all.return_value = []
+        rules, total = self.repo.get_filter_rules_paginated(limit=5000, offset=0)
+        # Limit should be clamped to 1000
+        assert total == 0
+
+    def test_get_filter_rules_paginated_with_filters(self):
+        self.db.fetch_one.return_value = {"count": 1}
+        self.db.fetch_all.return_value = [
+            {"id": 1, "pattern": "secret", "type": "regex", "is_enabled": 1},
+        ]
+        rules, total = self.repo.get_filter_rules_paginated(
+            limit=10, offset=0, rule_type="regex", severity="high", is_enabled=True
+        )
+        assert len(rules) == 1
+        assert total == 1
+
+    def test_get_filter_rules_paginated_empty(self):
+        self.db.fetch_one.return_value = {"count": 0}
+        self.db.fetch_all.return_value = []
+        rules, total = self.repo.get_filter_rules_paginated(limit=10, offset=100)
+        assert rules == []
+        assert total == 0
+
+    # -------------------------------------------------------------------------
+    # create_filter_rule_idempotent
+    # -------------------------------------------------------------------------
+
+    def test_create_filter_rule_idempotent_new(self):
+        # First call: check if exists - returns None
+        self.db.fetch_one.return_value = None
+        # Second call: after create, fetch the new record
+        self.db.fetch_one.side_effect = [
+            None,  # First call: pattern doesn't exist
+            {
+                "id": 42,
+                "pattern": "secret",
+                "type": "keyword",
+                "is_enabled": 1,
+            },  # Second call: fetch by id
+        ]
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 42
+        self.db.execute.return_value = mock_cursor
+
+        with patch("app.repositories.database.is_postgresql", return_value=False):
+            record, is_new = self.repo.create_filter_rule_idempotent(pattern="secret")
+
+        assert is_new is True
+        assert record is not None
+        assert record["id"] == 42
+
+    def test_create_filter_rule_idempotent_existing(self):
+        # Existing pattern found
+        self.db.fetch_one.return_value = {
+            "id": 42,
+            "pattern": "secret",
+            "type": "keyword",
+            "is_enabled": 1,
+        }
+
+        record, is_new = self.repo.create_filter_rule_idempotent(pattern="secret")
+
+        assert is_new is False
+        assert record["id"] == 42
+        assert record["pattern"] == "secret"
+
+    def test_create_filter_rule_idempotent_create_fails(self):
+        self.db.fetch_one.return_value = None  # Pattern doesn't exist
+        self.db.execute.side_effect = Exception("DB error")
+
+        with patch("app.repositories.database.is_postgresql", return_value=False):
+            record, is_new = self.repo.create_filter_rule_idempotent(pattern="secret")
+
+        assert record is None
+        assert is_new is False
+
 
 class TestSecuritySettings:
     """Tests for security settings with 3-tier fallback."""
