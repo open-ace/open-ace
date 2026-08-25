@@ -95,6 +95,13 @@ const navSections: NavSection[] = [
         adminOnly: true,
       },
       {
+        id: 'enterprise-report',
+        label: 'enterpriseReport',
+        icon: 'bi-file-earmark-bar-graph',
+        path: '/manage/analysis/enterprise-report',
+        adminOnly: true,
+      },
+      {
         id: 'conversation-history',
         label: 'conversationHistory',
         icon: 'bi-chat-square-text',
