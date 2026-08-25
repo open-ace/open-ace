@@ -20,7 +20,6 @@ import type {
   CreatePolicyRuleRequest,
   PolicyRule,
   RestoreUserRequest,
-  FilterStats,
 } from '@/api';
 
 // User Management Hooks

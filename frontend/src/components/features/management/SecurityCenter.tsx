@@ -45,7 +45,6 @@ import type {
   CreateFilterRuleRequest,
   SecuritySettings as SecuritySettingsType,
   AuditThresholds as AuditThresholdsType,
-  FilterStats,
 } from '@/api';
 
 // Translation key mappings for filter rule values
@@ -1063,11 +1062,7 @@ export const SecurityCenter: React.FC = () => {
         {/* Loaded Patterns */}
         <Card title={t('loadedPatterns', language)}>
           {stats.patterns.length === 0 ? (
-            <EmptyState
-              icon="bi-code-square"
-              title={t('noPatternsLoaded', language)}
-              size="sm"
-            />
+            <EmptyState icon="bi-code-square" title={t('noPatternsLoaded', language)} />
           ) : (
             <>
               <div className="d-flex flex-wrap gap-2">

@@ -363,8 +363,8 @@ vi.mock('@/components/common', () => ({
   ),
   EmptyState: ({
     title,
-    icon,
-    size,
+    icon: _icon,
+    size: _size,
   }: {
     title: string;
     icon?: string;
@@ -390,15 +390,7 @@ vi.mock('@/components/common', () => ({
       <span>{value}</span>
     </div>
   ),
-  Progress: ({
-    value,
-    max,
-    variant,
-  }: {
-    value: number;
-    max?: number;
-    variant?: string;
-  }) => (
+  Progress: ({ value, max, variant }: { value: number; max?: number; variant?: string }) => (
     <div data-testid="progress" data-value={value} data-max={max} data-variant={variant}>
       Progress: {value}%
     </div>
