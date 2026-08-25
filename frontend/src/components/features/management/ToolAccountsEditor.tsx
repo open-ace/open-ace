@@ -83,6 +83,7 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
   const [showUnmappedModal, setShowUnmappedModal] = useState(false);
   const [selectedUnmapped, setSelectedUnmapped] = useState<string[]>([]);
   const [isAdding, setIsAdding] = useState(false);
+  const [isMapping, setIsMapping] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [showPredeclaredConfirm, setShowPredeclaredConfirm] = useState(false);
   const toast = useToast();
@@ -159,8 +160,9 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
   };
 
   const handleMapUnmapped = async () => {
-    if (selectedUnmapped.length === 0) return;
+    if (isMapping || selectedUnmapped.length === 0) return;
 
+    setIsMapping(true);
     try {
       const accounts = selectedUnmapped.map((name) => {
         const account = unmappedAccounts.find((a) => a.sender_name === name);
@@ -198,6 +200,8 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
     } catch (err) {
       console.error('Failed to map accounts:', err);
       toast.error(language === 'zh' ? '映射操作失败' : 'Failed to map accounts');
+    } finally {
+      setIsMapping(false);
     }
   };
 
@@ -414,7 +418,8 @@ export const ToolAccountsEditor: React.FC<ToolAccountsEditorProps> = ({ userId, 
             <Button
               variant="primary"
               onClick={handleMapUnmapped}
-              disabled={selectedUnmapped.length === 0}
+              loading={isMapping}
+              disabled={isMapping || selectedUnmapped.length === 0}
             >
               {t('mapToUser', language)} ({selectedUnmapped.length})
             </Button>
