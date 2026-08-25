@@ -956,7 +956,8 @@ export const translations: Record<Language, Translations> = {
     breakdownByHost: 'Breakdown by Host',
     daysActive: 'Days Active',
     costRoiNotAvailable: 'Cost and ROI Not Available',
-    costRoiNotAvailableDesc: 'Cost and ROI metrics are not supported in this version. Please contact the development team if you need this feature.',
+    costRoiNotAvailableDesc:
+      'Cost and ROI metrics are not supported in this version. Please contact the development team if you need this feature.',
     jsonExportPreview: 'JSON Export Preview',
 
     // Projects
@@ -5487,7 +5488,8 @@ export const translations: Record<Language, Translations> = {
     breakdownByHost: 'ホスト別内訳',
     daysActive: '稼働日数',
     costRoiNotAvailable: 'コストと ROI は利用できません',
-    costRoiNotAvailableDesc: 'このバージョンではコストと ROI 指標はサポートされていません。この機能が必要な場合は開発チームにお問い合わせください。',
+    costRoiNotAvailableDesc:
+      'このバージョンではコストと ROI 指標はサポートされていません。この機能が必要な場合は開発チームにお問い合わせください。',
     jsonExportPreview: 'JSON エクスポートプレビュー',
 
     roiAppliedAssumptions: '現在の基準',

@@ -18,15 +18,7 @@ import React, { useState, useMemo } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
-import {
-  Card,
-  StatCard,
-  Button,
-  Error,
-  EmptyState,
-  DatePicker,
-  Modal,
-} from '@/components/common';
+import { Card, StatCard, Button, Error, EmptyState, DatePicker, Modal } from '@/components/common';
 import { formatTokens } from '@/utils';
 import { useEnterpriseReport, useEfficiencyMetrics, useAuth } from '@/hooks';
 import { analysisApi } from '@/api';
@@ -47,14 +39,8 @@ const MetricsSkeleton: React.FC<{ count?: number }> = ({ count = 6 }) => (
       <div key={i} className="col-md-2">
         <div className="card">
           <div className="card-body">
-            <div
-              className="skeleton"
-              style={{ height: 16, width: '60%', marginBottom: 8 }}
-            />
-            <div
-              className="skeleton"
-              style={{ height: 32, width: '80%', marginBottom: 4 }}
-            />
+            <div className="skeleton" style={{ height: 16, width: '60%', marginBottom: 8 }} />
+            <div className="skeleton" style={{ height: 32, width: '80%', marginBottom: 4 }} />
             <div className="skeleton" style={{ height: 12, width: '40%' }} />
           </div>
         </div>
@@ -98,12 +84,7 @@ interface JsonPreviewModalProps {
   title: string;
 }
 
-const JsonPreviewModal: React.FC<JsonPreviewModalProps> = ({
-  isOpen,
-  onClose,
-  data,
-  title,
-}) => {
+const JsonPreviewModal: React.FC<JsonPreviewModalProps> = ({ isOpen, onClose, data, title }) => {
   const language = useLanguage();
   const [copySuccess, setCopySuccess] = useState(false);
 
@@ -224,7 +205,7 @@ const SummaryCards: React.FC<SummaryCardsProps> = ({ summary, language }) => (
     <div className="col-md-2">
       <StatCard
         label={t('peakUsagePeriods', language)}
-        value={summary.peak_day || '-'}
+        value={summary.peak_day ?? '-'}
         icon={<i className="bi bi-calendar-check fs-4" />}
         variant="secondary"
       />
@@ -251,11 +232,7 @@ interface EfficiencyCardsProps {
   language: Language;
 }
 
-const EfficiencyCards: React.FC<EfficiencyCardsProps> = ({
-  efficiency,
-  isLoading,
-  language,
-}) => {
+const EfficiencyCards: React.FC<EfficiencyCardsProps> = ({ efficiency, isLoading, language }) => {
   if (isLoading) {
     return (
       <Card title={t('efficiencyMetrics', language)} className="mb-4">
@@ -267,10 +244,7 @@ const EfficiencyCards: React.FC<EfficiencyCardsProps> = ({
   if (!efficiency.efficiency_available) {
     return (
       <Card title={t('efficiencyMetrics', language)} className="mb-4">
-        <EmptyState
-          icon="bi-speedometer"
-          title={t('noEfficiencyData', language)}
-        />
+        <EmptyState icon="bi-speedometer" title={t('noEfficiencyData', language)} />
       </Card>
     );
   }
@@ -281,7 +255,7 @@ const EfficiencyCards: React.FC<EfficiencyCardsProps> = ({
         <div className="col-md-3">
           <StatCard
             label={t('outputRatio', language)}
-            value={`${efficiency.output_ratio?.toFixed(1) || 0}%`}
+            value={`${efficiency.output_ratio?.toFixed(1) ?? 0}%`}
             icon={<i className="bi bi-arrow-up-right fs-4" />}
             variant="primary"
             helpTooltip={t('outputRatioHelp', language)}
@@ -290,7 +264,7 @@ const EfficiencyCards: React.FC<EfficiencyCardsProps> = ({
         <div className="col-md-3">
           <StatCard
             label={t('tokensPerRequest', language)}
-            value={efficiency.tokens_per_request?.toFixed(0) || '0'}
+            value={efficiency.tokens_per_request?.toFixed(0) ?? '0'}
             icon={<i className="bi bi-hash fs-4" />}
             variant="success"
           />
@@ -298,7 +272,7 @@ const EfficiencyCards: React.FC<EfficiencyCardsProps> = ({
         <div className="col-md-3">
           <StatCard
             label={t('outputPerRequest', language)}
-            value={efficiency.output_per_request?.toFixed(0) || '0'}
+            value={efficiency.output_per_request?.toFixed(0) ?? '0'}
             icon={<i className="bi bi-output fs-4" />}
             variant="info"
           />
@@ -306,7 +280,7 @@ const EfficiencyCards: React.FC<EfficiencyCardsProps> = ({
         <div className="col-md-3">
           <StatCard
             label={t('inputOutputRatio', language)}
-            value={efficiency.input_output_ratio?.toFixed(2) || '0'}
+            value={efficiency.input_output_ratio?.toFixed(2) ?? '0'}
             icon={<i className="bi bi-arrows fs-4" />}
             variant="warning"
             helpTooltip={t('inputOutputRatioHelp', language)}
@@ -376,9 +350,7 @@ const TrendsTable: React.FC<TrendsTableProps> = ({ trends, language }) => {
                 </td>
                 <td className="text-end">
                   <span
-                    className={cn(
-                      trend.change_percentage > 0 ? 'text-success' : 'text-danger'
-                    )}
+                    className={cn(trend.change_percentage > 0 ? 'text-success' : 'text-danger')}
                   >
                     {trend.change_percentage > 0 ? '+' : ''}
                     {trend.change_percentage.toFixed(1)}%
@@ -452,18 +424,14 @@ const AnomaliesTable: React.FC<AnomaliesTableProps> = ({ anomalies, language }) 
               <tr key={index}>
                 <td>{anomaly.date}</td>
                 <td>
-                  <span className={cn('badge', getTypeBadge(anomaly.type))}>
-                    {anomaly.type}
-                  </span>
+                  <span className={cn('badge', getTypeBadge(anomaly.type))}>{anomaly.type}</span>
                 </td>
                 <td>{anomaly.metric}</td>
                 <td className="text-end">{anomaly.expected_value.toLocaleString()}</td>
                 <td className="text-end">{anomaly.actual_value.toLocaleString()}</td>
                 <td className="text-end">
                   <span
-                    className={cn(
-                      anomaly.deviation_percentage > 0 ? 'text-danger' : 'text-info'
-                    )}
+                    className={cn(anomaly.deviation_percentage > 0 ? 'text-danger' : 'text-info')}
                   >
                     {anomaly.deviation_percentage.toFixed(1)}%
                   </span>
@@ -704,12 +672,7 @@ export const EnterpriseReport: React.FC = () => {
 
   // Error state
   if (isReportError) {
-    return (
-      <Error
-        message={reportError?.message || t('error', language)}
-        onRetry={handleRefresh}
-      />
-    );
+    return <Error message={reportError?.message || t('error', language)} onRetry={handleRefresh} />;
   }
 
   return (
@@ -738,30 +701,21 @@ export const EnterpriseReport: React.FC = () => {
             <div className="btn-group" role="group">
               <button
                 type="button"
-                className={cn(
-                  'btn',
-                  quickRange === '7' ? 'btn-primary' : 'btn-outline-primary'
-                )}
+                className={cn('btn', quickRange === '7' ? 'btn-primary' : 'btn-outline-primary')}
                 onClick={() => handleQuickRangeChange('7')}
               >
                 7 {t('days', language)}
               </button>
               <button
                 type="button"
-                className={cn(
-                  'btn',
-                  quickRange === '30' ? 'btn-primary' : 'btn-outline-primary'
-                )}
+                className={cn('btn', quickRange === '30' ? 'btn-primary' : 'btn-outline-primary')}
                 onClick={() => handleQuickRangeChange('30')}
               >
                 30 {t('days', language)}
               </button>
               <button
                 type="button"
-                className={cn(
-                  'btn',
-                  quickRange === '90' ? 'btn-primary' : 'btn-outline-primary'
-                )}
+                className={cn('btn', quickRange === '90' ? 'btn-primary' : 'btn-outline-primary')}
                 onClick={() => handleQuickRangeChange('90')}
               >
                 90 {t('days', language)}
@@ -797,7 +751,7 @@ export const EnterpriseReport: React.FC = () => {
 
       {/* Efficiency Cards */}
       <EfficiencyCards
-        efficiency={efficiencyData || { efficiency_available: false }}
+        efficiency={efficiencyData ?? { efficiency_available: false }}
         isLoading={isEfficiencyLoading}
         language={language}
       />
