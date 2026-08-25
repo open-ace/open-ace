@@ -1,8 +1,8 @@
 """Add webhook delivery cooldown coordination columns.
 
-Revision ID: 20260824_001
-Revises: 20260821_001
-Create Date: 2026-08-24
+Revision ID: 20260825_001
+Revises: 20260824_001
+Create Date: 2026-08-25
 
 Issue: #2063
 """
@@ -14,8 +14,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260824_001"
-down_revision: str | None = "20260821_001"
+revision: str = "20260825_001"
+down_revision: str | None = "20260824_001"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

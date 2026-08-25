@@ -60,7 +60,7 @@ def _create_prior_schema(conn):
 
 def test_webhook_delivery_cooldown_migration_upgrade_and_downgrade():
     migration = importlib.import_module(
-        "migrations.versions.20260824_001_add_webhook_delivery_cooldown"
+        "migrations.versions.20260825_001_add_webhook_delivery_cooldown"
     )
     engine = create_engine("sqlite:///:memory:")
     with engine.connect() as conn:
