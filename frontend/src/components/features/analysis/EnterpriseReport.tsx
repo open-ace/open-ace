@@ -18,7 +18,7 @@ import React, { useState, useMemo } from 'react';
 import { cn } from '@/utils';
 import { useLanguage } from '@/store';
 import { t, type Language } from '@/i18n';
-import { Card, StatCard, Button, Error, EmptyState, DatePicker, Modal } from '@/components/common';
+import { Card, StatCard, Button, Error, EmptyState, DatePicker, Modal, useToast } from '@/components/common';
 import { formatTokens } from '@/utils';
 import { useEnterpriseReport, useEfficiencyMetrics, useAuth } from '@/hooks';
 import { analysisApi } from '@/api';
@@ -544,6 +544,7 @@ const CostRoiPlaceholder: React.FC<{ language: Language }> = ({ language }) => (
 // Main Component
 export const EnterpriseReport: React.FC = () => {
   const language = useLanguage();
+  const toast = useToast();
   const { user } = useAuth();
   const userIsAdmin = isAdmin(user);
 
@@ -619,6 +620,7 @@ export const EnterpriseReport: React.FC = () => {
       }
     } catch (error) {
       console.error('Export CSV failed:', error);
+      toast.error(t('exportFailed', language));
     } finally {
       setIsExporting(false);
     }
@@ -640,6 +642,7 @@ export const EnterpriseReport: React.FC = () => {
       }
     } catch (error) {
       console.error('Export JSON failed:', error);
+      toast.error(t('exportFailed', language));
     } finally {
       setIsExporting(false);
     }
