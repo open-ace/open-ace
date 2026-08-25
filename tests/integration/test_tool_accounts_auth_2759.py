@@ -5,8 +5,8 @@ Issue #2759: Verifies authorization and tenant isolation for tool account APIs.
 Issue #3055: Tests for RealDictRow-compatible dict access in batch endpoint.
 """
 
-from unittest.mock import MagicMock, patch
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 from flask import Flask
@@ -495,13 +495,15 @@ class TestBatchEndpointWithDictLikeRow:
 
         # Create a DictLikeRow that mimics RealDictRow behavior
         # It supports .get() but NOT attribute access like .tenant_id
-        target_user_row = DictLikeRow({
-            "id": 2,
-            "tenant_id": 1,
-            "role": "user",
-            "username": "target_user",
-            "email": "target@example.com",
-        })
+        target_user_row = DictLikeRow(
+            {
+                "id": 2,
+                "tenant_id": 1,
+                "role": "user",
+                "username": "target_user",
+                "email": "target@example.com",
+            }
+        )
 
         with patch("app.auth.decorators._load_user_from_token", return_value=user):
             from app.routes.tool_accounts import tool_accounts_bp
