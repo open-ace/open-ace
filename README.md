@@ -185,7 +185,8 @@ git clone https://github.com/open-ace/open-ace.git
 cd open-ace
 
 # 使用 overlay 文件启动
-docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+./scripts/bootstrap-compose-env.sh
+docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d --wait
 
 # 访问 http://localhost:19888
 ```

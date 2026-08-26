@@ -79,7 +79,8 @@ uid 1000 执行入口脚本，而不再仅依赖清单中的 `securityContext`�
 
 ```bash
 # 一键启用多用户模式
-docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+./scripts/bootstrap-compose-env.sh
+docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d --wait
 ```
 
 docker-compose.multi-user.yml 会自动配置：

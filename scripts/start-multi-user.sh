@@ -117,16 +117,18 @@ else
 fi
 
 # ============================================================================
-# Step 4: Environment Variable Check
+# Step 4: Environment Bootstrap / Check
 # ============================================================================
 echo -e "${BLUE}[4/5] Checking environment configuration...${NC}"
 
-# Check for .env file
-if [ -f "$PROJECT_ROOT/.env" ]; then
-    echo -e "${GREEN}✓ Found: .env file${NC}"
-else
-    echo -e "${YELLOW}ℹ No .env file found (using defaults)${NC}"
-    echo "  For production deployment, create .env from .env.example"
+# Only commands that start services may create/update .env. Read-only and
+# lifecycle commands such as config/logs/down never mutate configuration.
+START_REQUEST=false
+if [ $# -eq 0 ] || [ "${1:-}" = "--build" ] || [ "${1:-}" = "up" ]; then
+    START_REQUEST=true
+fi
+if [ "$START_REQUEST" = true ]; then
+    "$PROJECT_ROOT/scripts/bootstrap-compose-env.sh"
 fi
 
 # Multi-user mode is configured in the overlay file
@@ -158,10 +160,20 @@ cd "$PROJECT_ROOT"
 COMPOSE_ARGS=("-f" "docker-compose.yml" "-f" "docker-compose.multi-user.yml")
 
 # Add any user-provided arguments
-if [ $# -gt 0 ]; then
-    COMPOSE_ARGS+=("$@")
-else
+if [ $# -eq 0 ]; then
     COMPOSE_ARGS+=("up" "-d")
+    if $COMPOSE_CMD up --help 2>&1 | grep -q -- '--wait'; then
+        COMPOSE_ARGS+=("--wait")
+    fi
+elif [ "$1" = "--build" ]; then
+    COMPOSE_ARGS+=("up" "-d" "--build")
+    shift
+    COMPOSE_ARGS+=("$@")
+    if $COMPOSE_CMD up --help 2>&1 | grep -q -- '--wait'; then
+        COMPOSE_ARGS+=("--wait")
+    fi
+else
+    COMPOSE_ARGS+=("$@")
 fi
 
 # Execute
@@ -171,9 +183,13 @@ echo ""
 if $COMPOSE_CMD "${COMPOSE_ARGS[@]}"; then
     echo ""
     echo -e "${GREEN}=========================================="
-    echo -e "  ✓ Multi-User Mode Started Successfully"
+    echo -e "  ✓ Multi-User Compose Command Completed"
     echo -e "==========================================${NC}"
     echo ""
+    if [[ " ${COMPOSE_ARGS[*]} " != *" --wait "* ]]; then
+        echo -e "${YELLOW}Health was not awaited by this Compose version; verify with compose ps.${NC}"
+        echo ""
+    fi
     echo -e "${BLUE}Access Open ACE:${NC}"
     echo "  URL: http://localhost:${PORT:-19888}"
     echo ""
