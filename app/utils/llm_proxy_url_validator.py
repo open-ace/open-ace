@@ -44,6 +44,9 @@ class LlmProxyValidationResult:
     error: str | None = None
     resolved_ips: tuple[IPAddress, ...] = ()
     is_allowlist_match: bool = False
+    # Mirrors OutboundUrlValidationResult.transient: True for a DNS-resolution
+    # failure (retryable) vs a policy block (permanent). #3116.
+    transient: bool = False
 
 
 @dataclass(frozen=True)
@@ -359,7 +362,7 @@ def validate_llm_proxy_url(
     # Standard SSRF validation
     result = validate_public_http_url(url, resolver=resolver)
     if not result.allowed:
-        return LlmProxyValidationResult(False, result.error)
+        return LlmProxyValidationResult(False, result.error, transient=result.transient)
 
     return LlmProxyValidationResult(True, resolved_ips=result.resolved_addresses)
 
