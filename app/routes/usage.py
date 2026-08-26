@@ -263,7 +263,12 @@ def api_hosts():
         machines = agent_mgr.list_machines(user_id=g.user["id"])
 
     # 提取 machine_name 并合并到主机列表
-    machine_names = {m.get("machine_name") for m in machines if m.get("machine_name")}
+    # Type: ensure machine_name is str, not str | None
+    machine_names: set[str] = set()
+    for m in machines:
+        name = m.get("machine_name")
+        if name:  # Only add non-empty strings
+            machine_names.add(name)
 
     # 合并两个列表并去重
     all_hosts = sorted(set(hosts) | machine_names)
