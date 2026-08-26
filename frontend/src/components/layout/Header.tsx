@@ -2,13 +2,14 @@
  * Header Component - Top navigation header
  */
 
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { cn } from '@/utils';
 import { useAuth, useTheme, useLanguage } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t, setLanguage as setI18nLanguage } from '@/i18n';
-import { UserSettingsModal, Avatar } from '@/components/common';
+import { alertsApi } from '@/api';
+import { UserSettingsModal, Avatar, CountBadge } from '@/components/common';
 import { DocumentViewer, helpDocs, getDocTitle } from '@/components/work/DocumentViewer';
 
 interface HeaderProps {
@@ -19,8 +20,47 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
   const { user, isAuthenticated, logout } = useAuth();
   const theme = useTheme();
   const language = useLanguage();
+  const navigate = useNavigate();
   const [showSettings, setShowSettings] = useState(false);
   const [helpDocId, setHelpDocId] = useState<string>('');
+  const [unreadAlertCount, setUnreadAlertCount] = useState(0);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Fetch unread alert count
+  const fetchUnreadCount = useCallback(async () => {
+    if (!isAuthenticated) return;
+    try {
+      const count = await alertsApi.getUnreadCount();
+      setUnreadAlertCount(count);
+    } catch {
+      // Graceful degradation: keep previous count on error
+    }
+  }, [isAuthenticated]);
+
+  // Poll unread alert count every 30 seconds
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setUnreadAlertCount(0);
+      return;
+    }
+
+    // Initial fetch
+    fetchUnreadCount();
+
+    // Start polling
+    pollingRef.current = setInterval(fetchUnreadCount, 30000);
+
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [isAuthenticated, fetchUnreadCount]);
+
+  const handleNotificationClick = () => {
+    navigate('/manage/quota');
+  };
 
   const handleThemeToggle = () => {
     const newTheme = theme === 'light' ? 'dark' : 'light';
@@ -40,6 +80,19 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
   // Content for right side (help, language, theme, user menu)
   const rightContent = (
     <div className="d-flex align-items-center gap-2">
+      {/* Notification bell with unread count badge */}
+      {isAuthenticated && (
+        <button
+          className="btn btn-link header-icon-btn p-0 position-relative"
+          onClick={handleNotificationClick}
+          title={t('unreadAlerts', language)}
+          aria-label={t('unreadAlerts', language)}
+        >
+          <i className="bi bi-bell" />
+          <CountBadge count={unreadAlertCount} />
+        </button>
+      )}
+
       {/* Help menu */}
       <div className="dropdown">
         <button
