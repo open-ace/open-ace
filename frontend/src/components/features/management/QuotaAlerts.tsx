@@ -67,7 +67,10 @@ export const QuotaAlerts: React.FC = () => {
   const language = useLanguage();
   const user = useUser();
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState<TabType>('quota');
+  // Issue #3082: Manager 默认展示 Alerts tab，Admin 默认展示 Quota tab
+  const [activeTab, setActiveTab] = useState<TabType>(() => {
+    return isAdmin(user) ? 'quota' : 'alerts';
+  });
 
   // --- Quota State ---
   const { data: quotaData, isLoading: quotaLoading, isError, error, refetch } = useQuotaUsage();
@@ -123,14 +126,23 @@ export const QuotaAlerts: React.FC = () => {
     setAlertsLoading(true);
     setAlertsError(null);
     try {
-      // Use admin API for quota alerts when user is admin
+      // Issue #3082: 根据角色选择不同的 API
       if (isAdmin(user) && typeFilter === 'quota') {
+        // Admin: 查看租户告警或全局告警
         const result = await alertsApi.getAdminQuotaAlerts({
           limit: 100,
         });
         setAlerts(result.alerts);
         setUnreadCount(result.unread_count);
+      } else if (user?.role === 'manager') {
+        // Manager: 查看租户用户告警（Issue #3082 阶段二）
+        const result = await alertsApi.getTenantAlerts({
+          limit: 100,
+        });
+        setAlerts(result.alerts);
+        setUnreadCount(result.unread_count);
       } else {
+        // 普通用户: 查看自己的告警
         const result = await alertsApi.getAlerts({
           type: typeFilter || undefined,
           severity: severityFilter || undefined,
@@ -533,14 +545,17 @@ export const QuotaAlerts: React.FC = () => {
                         <h6 className="mb-1">{user.username}</h6>
                         <small className="text-muted">{user.email}</small>
                       </div>
-                      <Button
-                        variant="outline-primary"
-                        size="sm"
-                        onClick={() => handleOpenEdit(user)}
-                        title={t('editQuota', language) ?? 'Edit Quota'}
-                      >
-                        <i className="bi bi-pencil" />
-                      </Button>
+                      {/* Issue #3082: 仅 Admin 可编辑配额 */}
+                      {isAdmin(user) && (
+                        <Button
+                          variant="outline-primary"
+                          size="sm"
+                          onClick={() => handleOpenEdit(user)}
+                          title={t('editQuota', language) ?? 'Edit Quota'}
+                        >
+                          <i className="bi bi-pencil" />
+                        </Button>
+                      )}
                     </div>
 
                     {/* Daily Token Quota */}
