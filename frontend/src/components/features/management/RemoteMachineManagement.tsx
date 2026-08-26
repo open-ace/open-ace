@@ -1014,11 +1014,73 @@ const MachineDetailsDialog: React.FC<MachineDetailsDialogProps> = ({
         </div>
       </div>
 
+      {/* Hardware Resources - Issue #3066 */}
+      {machine.capabilities && Object.keys(machine.capabilities).length > 0 && (() => {
+        const caps = machine.capabilities as Record<string, unknown>;
+        const cpuCores = typeof caps.cpu_cores === 'number' ? caps.cpu_cores : undefined;
+        const memoryMb = typeof caps.memory_mb === 'number' ? caps.memory_mb : undefined;
+        const diskFreeGb = typeof caps.disk_free_gb === 'number' ? caps.disk_free_gb : undefined;
+
+        // Show hardware cards only if at least one hardware field is present
+        if (cpuCores !== undefined || memoryMb !== undefined || diskFreeGb !== undefined) {
+          return (
+            <div className="mb-4">
+              <label className="text-muted small d-block mb-2">
+                <i className="bi bi-hdd-network me-1" />
+                {t('hardwareInfo', language)}
+              </label>
+              <div className="row g-2">
+                {cpuCores !== undefined && cpuCores > 0 && (
+                  <div className="col-md-4">
+                    <div className="card border-0 bg-light">
+                      <div className="card-body text-center py-2 px-3">
+                        <i className="bi bi-cpu text-primary mb-1" style={{ fontSize: '1.5rem' }} />
+                        <div className="text-muted small">{t('cpuCores', language)}</div>
+                        <div className="fw-bold">
+                          {cpuCores} {t('cores', language)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {memoryMb !== undefined && memoryMb > 0 && (
+                  <div className="col-md-4">
+                    <div className="card border-0 bg-light">
+                      <div className="card-body text-center py-2 px-3">
+                        <i className="bi bi-memory text-success mb-1" style={{ fontSize: '1.5rem' }} />
+                        <div className="text-muted small">{t('memorySize', language)}</div>
+                        <div className="fw-bold">
+                          {(memoryMb / 1024).toFixed(1)} {t('gb', language)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {diskFreeGb !== undefined && diskFreeGb > 0 && (
+                  <div className="col-md-4">
+                    <div className="card border-0 bg-light">
+                      <div className="card-body text-center py-2 px-3">
+                        <i className="bi bi-hdd text-info mb-1" style={{ fontSize: '1.5rem' }} />
+                        <div className="text-muted small">{t('diskFreeSpace', language)}</div>
+                        <div className="fw-bold">
+                          {diskFreeGb.toFixed(1)} {t('gb', language)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        }
+        return null;
+      })()}
+
       {/* Capabilities - Collapsible */}
       {machine.capabilities && Object.keys(machine.capabilities).length > 0 && (
         <div className="mb-4">
           <div
-            className="d-flex align-items-center cursor-pointer"
+            className="d-flex align-items-center"
             onClick={() => setCapabilitiesExpanded(!capabilitiesExpanded)}
             style={{ cursor: 'pointer' }}
           >
