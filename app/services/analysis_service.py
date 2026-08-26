@@ -342,6 +342,23 @@ class AnalysisService:
 
         user_segmentation = segments
 
+        # Issue #3079: User role distribution
+        # Count users by role group based on the role_group field from repository
+        role_distribution: dict[str, int] = {
+            "admin": 0,
+            "manager": 0,
+            "user": 0,
+            "unknown": 0,
+        }
+        for user_data in user_tokens:
+            role_group = user_data.get("role_group", "unknown") or "unknown"
+            if role_group in role_distribution:
+                role_distribution[role_group] += 1
+            else:
+                role_distribution["unknown"] += 1
+
+        user_role_distribution = role_distribution
+
         duration_ms = (time.time() - start_time) * 1000
         logger.info(f"get_batch_analysis took {duration_ms:.2f}ms")
 
@@ -353,6 +370,7 @@ class AnalysisService:
             "conversation_stats": conversation_stats,
             "tool_comparison": tool_comparison,
             "user_segmentation": user_segmentation,
+            "user_role_distribution": user_role_distribution,
             "data_range": data_range,
         }
 
@@ -1044,6 +1062,61 @@ class AnalysisService:
                 segments["low"] += 1
 
         return segments
+
+    @cached(ttl=60, key_prefix="analysis", skip_args=[0])
+    def get_user_role_distribution(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> dict:
+        """
+        Get user distribution by role group.
+
+        Groups users by their role (admin, manager, user, unknown) based on
+        the role_group field returned by the repository. This provides a
+        complementary view to the usage-based segmentation.
+
+        Issue #3079: Support role-based user grouping in trend analysis.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
+
+        Returns:
+            Dict: User role distribution with count for each group.
+            Example: {"admin": 2, "manager": 3, "user": 15, "unknown": 5}
+            Frontend handles internationalization of labels.
+        """
+        if not start_date:
+            start_date = get_days_ago(30)
+        if not end_date:
+            end_date = get_today()
+
+        # Get user token usage from messages (includes role_group field)
+        user_tokens = self.message_repo.get_user_token_totals(
+            start_date=start_date, end_date=end_date, host_name=host_name, tenant_id=tenant_id
+        )
+
+        # Count users by role group
+        role_counts: dict[str, int] = {
+            "admin": 0,
+            "manager": 0,
+            "user": 0,
+            "unknown": 0,
+        }
+
+        for user_data in user_tokens:
+            role_group = user_data.get("role_group", "unknown") or "unknown"
+            if role_group in role_counts:
+                role_counts[role_group] += 1
+            else:
+                role_counts["unknown"] += 1
+
+        return role_counts
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def detect_anomalies(

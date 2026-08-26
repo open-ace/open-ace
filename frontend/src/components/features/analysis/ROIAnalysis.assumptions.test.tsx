@@ -103,6 +103,7 @@ const mockedGetDailyCosts = vi.fn();
 const mockedGetOptimizationSuggestions = vi.fn();
 const mockedGetEfficiencyReport = vi.fn();
 const mockedGetROISummary = vi.fn();
+const mockedGetROIByUser = vi.fn();
 
 vi.mock('@/api', () => ({
   roiApi: {
@@ -113,6 +114,7 @@ vi.mock('@/api', () => ({
     getOptimizationSuggestions: (...args: unknown[]) => mockedGetOptimizationSuggestions(...args),
     getEfficiencyReport: (...args: unknown[]) => mockedGetEfficiencyReport(...args),
     getROISummary: (...args: unknown[]) => mockedGetROISummary(...args),
+    getROIByUser: (...args: unknown[]) => mockedGetROIByUser(...args),
   },
 }));
 
@@ -162,6 +164,7 @@ describe('ROIAnalysis assumptions', () => {
       recommendation_items: [],
     });
     mockedGetROISummary.mockResolvedValue({ assumptions: defaultAssumptions });
+    mockedGetROIByUser.mockResolvedValue({});
   });
 
   it('shows baseline assumptions, applies overrides, and resets the draft', async () => {

@@ -78,6 +78,15 @@ export function useUserSegmentation(startDate?: string, endDate?: string, host?:
   });
 }
 
+// Issue #3079: Hook for user role distribution
+export function useUserRoleDistribution(startDate?: string, endDate?: string, host?: string) {
+  return useQuery({
+    queryKey: ['analysis', 'user-role-distribution', startDate, endDate, host],
+    queryFn: () => analysisApi.getUserRoleDistribution(startDate, endDate, host),
+    staleTime: 60 * 1000,
+  });
+}
+
 export function useRecommendations(host?: string) {
   return useQuery({
     queryKey: ['analysis', 'recommendations', host],
@@ -141,5 +150,31 @@ export function useUsageForecast(days: number = 7) {
     queryKey: ['analysis', 'forecast', days],
     queryFn: () => analysisApi.getForecast(days),
     staleTime: 60 * 1000, // 1 minute
+  });
+}
+
+/**
+ * Hook for enterprise analytics report.
+ * Fetches comprehensive usage report data.
+ */
+export function useEnterpriseReport(startDate: string, endDate: string) {
+  return useQuery({
+    queryKey: ['analytics', 'report', startDate, endDate],
+    queryFn: () => analysisApi.getEnterpriseReport({ startDate, endDate }),
+    staleTime: 5 * 60 * 1000, // 5 minutes - report data changes infrequently
+    enabled: !!startDate && !!endDate,
+  });
+}
+
+/**
+ * Hook for efficiency metrics.
+ * Fetches efficiency indicators like output_ratio, tokens_per_request.
+ */
+export function useEfficiencyMetrics(startDate: string, endDate: string) {
+  return useQuery({
+    queryKey: ['analytics', 'efficiency', startDate, endDate],
+    queryFn: () => analysisApi.getEfficiencyMetrics({ startDate, endDate }),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    enabled: !!startDate && !!endDate,
   });
 }

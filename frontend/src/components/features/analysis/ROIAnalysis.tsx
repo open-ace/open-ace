@@ -65,6 +65,7 @@ interface CachedData {
   dailyCosts: DailyCost[];
   suggestions: OptimizationSuggestion[];
   efficiency: EfficiencyReport | null;
+  roiByUser: Record<string, ROIMetrics>;
 }
 
 interface AssumptionDraft {
@@ -185,6 +186,7 @@ export const ROIAnalysis: React.FC = () => {
   const [dailyCosts, setDailyCosts] = useState<DailyCost[]>([]);
   const [suggestions, setSuggestions] = useState<OptimizationSuggestion[]>([]);
   const [efficiency, setEfficiency] = useState<EfficiencyReport | null>(null);
+  const [roiByUser, setRoiByUser] = useState<Record<string, ROIMetrics>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -407,6 +409,7 @@ export const ROIAnalysis: React.FC = () => {
         setDailyCosts(data.dailyCosts);
         setSuggestions(data.suggestions);
         setEfficiency(data.efficiency);
+        setRoiByUser(data.roiByUser);
         setIsLoading(false);
         return;
       }
@@ -417,7 +420,7 @@ export const ROIAnalysis: React.FC = () => {
       setError(null);
 
       try {
-        const [roi, trend, breakdown, daily, sugg, eff] = await Promise.all([
+        const [roi, trend, breakdown, daily, sugg, eff, byUser] = await Promise.all([
           roiApi.getROI({
             start_date: startDate,
             end_date: endDate,
@@ -439,6 +442,11 @@ export const ROIAnalysis: React.FC = () => {
           }),
           roiApi.getOptimizationSuggestions(30, selectedTool || undefined),
           roiApi.getEfficiencyReport({ days: 30, tool_name: selectedTool || undefined }),
+          roiApi.getROIByUser({
+            start_date: startDate,
+            end_date: endDate,
+            assumptions: overrideAssumptions ?? undefined,
+          }),
         ]);
 
         const data: CachedData = {
@@ -448,6 +456,7 @@ export const ROIAnalysis: React.FC = () => {
           dailyCosts: daily,
           suggestions: sugg,
           efficiency: eff,
+          roiByUser: byUser,
         };
 
         // Update cache
@@ -459,6 +468,7 @@ export const ROIAnalysis: React.FC = () => {
         setDailyCosts(daily);
         setSuggestions(sugg);
         setEfficiency(eff);
+        setRoiByUser(byUser);
         isInitialLoad.current = false;
       } catch (err) {
         const errorMessage = err instanceof Error ? (err as Error).message : 'Failed to fetch data';
@@ -578,6 +588,10 @@ export const ROIAnalysis: React.FC = () => {
             </Card>
           </div>
         </div>
+
+        <Card title={t('roiByUser', language)} className="mb-4">
+          <ChartSkeleton height={200} />
+        </Card>
 
         <Card title={t('dailyCosts', language)} className="mb-4">
           <ChartSkeleton height={200} />
@@ -803,6 +817,48 @@ export const ROIAnalysis: React.FC = () => {
           </Card>
         </div>
       </div>
+
+      {/* ROI by User */}
+      <Card title={t('roiByUser', language)} className="mb-4">
+        {Object.keys(roiByUser).length > 0 ? (
+          <div className="table-responsive">
+            <table className="table table-hover">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>{t('userIdentifier', language)}</th>
+                  <th className="text-end">{t('totalCost', language)}</th>
+                  <th className="text-end">{t('totalRequests', language)}</th>
+                  <th className="text-end">{t('tokensUsed', language)}</th>
+                  <th className="text-end">{t('roiPercentage', language)}</th>
+                  <th className="text-end">{t('efficiencyScore', language)}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(roiByUser)
+                  .sort(([, a], [, b]) => b.roi_percentage - a.roi_percentage)
+                  .map(([hostName, metrics], index) => (
+                    <tr key={hostName}>
+                      <td>{index + 1}</td>
+                      <td>{hostName}</td>
+                      <td className="text-end">${metrics.total_cost.toFixed(2)}</td>
+                      <td className="text-end">{metrics.requests_made}</td>
+                      <td className="text-end">{formatTokens(metrics.tokens_used)}</td>
+                      <td className="text-end">
+                        {metrics.roi_percentage < -1000
+                          ? 'N/A'
+                          : `${metrics.roi_percentage.toFixed(1)}%`}
+                      </td>
+                      <td className="text-end">{(metrics.efficiency_score ?? 0).toFixed(0)}%</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState icon="bi-people" title={t('noData', language)} />
+        )}
+      </Card>
 
       {/* Daily Costs */}
       <Card title={t('dailyCosts', language)} className="mb-4">

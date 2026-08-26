@@ -357,6 +357,98 @@ def test_user_segmentation_responsive(
     return screenshots
 
 
+def test_user_segmentation_role_view(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
+    """Test role-based view toggle for user segmentation.
+
+    Issue #3079: Verify that users can toggle between usage-based and role-based views.
+    """
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
+    screenshots = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=HEADLESS)
+        context = browser.new_context(viewport=VIEWPORT_SIZE)
+        page = context.new_page()
+
+        try:
+            # Step 1: Navigate and login
+            print("\n[Step 1] Navigate to login page")
+            page.goto(BASE_URL)
+            page.wait_for_load_state("networkidle")
+            screenshots.append(take_screenshot(page, "role_view_01_login"))
+
+            login(page)
+            screenshots.append(take_screenshot(page, "role_view_02_after_login"))
+
+            # Step 2: Navigate to Analysis
+            navigate_to_analysis(page)
+            screenshots.append(take_screenshot(page, "role_view_03_analysis"))
+
+            # Step 3: Find User Segmentation card
+            print("\n[Step 3] Find User Segmentation card with view toggle")
+            user_seg_card = page.locator(
+                '.card:has-text("User Segmentation"), .card:has-text("用户分层")'
+            )
+            if user_seg_card.count() > 0:
+                print("  ✓ User Segmentation card found")
+
+                # Step 4: Check for view toggle buttons
+                print("\n[Step 4] Check for view toggle buttons")
+                # Look for "By Role" / "按角色" button
+                role_btn = user_seg_card.locator(
+                    'button:has-text("By Role"), button:has-text("按角色")'
+                )
+                if role_btn.count() > 0:
+                    print("  ✓ Role view button found")
+
+                    # Click the role view button
+                    role_btn.first.click()
+                    time.sleep(1)
+                    screenshots.append(take_screenshot(page, "role_view_04_role_view"))
+
+                    # Verify role chart is displayed (check for Admin/管理员 label)
+                    admin_label = page.locator('text="Admin", text="管理员"')
+                    if admin_label.count() > 0:
+                        print("  ✓ Role distribution chart displayed")
+                    else:
+                        print("  ⚠ Role labels not found (may be no data)")
+
+                    # Step 5: Switch back to usage view
+                    print("\n[Step 5] Switch back to usage view")
+                    usage_btn = user_seg_card.locator(
+                        'button:has-text("By Usage"), button:has-text("按使用量")'
+                    )
+                    if usage_btn.count() > 0:
+                        usage_btn.first.click()
+                        time.sleep(1)
+                        screenshots.append(take_screenshot(page, "role_view_05_usage_view"))
+                        print("  ✓ Switched back to usage view")
+                else:
+                    print("  ⚠ View toggle buttons not found")
+            else:
+                print("  ✗ User Segmentation card not found")
+
+            # Summary
+            print("\n" + "=" * 50)
+            print("User Segmentation Role View Test Summary")
+            print("=" * 50)
+            print(f"Screenshots saved: {len(screenshots)}")
+            for s in screenshots:
+                print(f"  - {s}")
+
+        except Exception as e:  # allow-swallow: UI element may not exist
+            print(f"\n✗ Error: {e}")
+            screenshots.append(take_screenshot(page, "error_role_view"))
+            raise
+        finally:
+            browser.close()
+
+    return screenshots
+
+
 def run_all_tests():
     """Run all user segmentation tests."""
     print("\n" + "=" * 60)

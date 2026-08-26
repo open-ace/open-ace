@@ -280,6 +280,7 @@
     "tests/e2e/ui/test_user_enter_save.py::test_user_enter_save",
     "tests/e2e/ui/test_user_segmentation_chart.py::test_user_segmentation_i18n",
     "tests/e2e/ui/test_user_segmentation_chart.py::test_user_segmentation_responsive",
+    "tests/e2e/ui/test_user_segmentation_chart.py::test_user_segmentation_role_view",
     "tests/e2e/ui/test_user_segmentation_chart.py::test_user_segmentation_tooltip",
     "tests/e2e/ui/test_work_assist_panel_prompts.py::test_assist_panel_prompts",
     "tests/e2e/ui/test_work_page_loads.py::test_work_page_loads",

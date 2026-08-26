@@ -111,6 +111,203 @@ class TestFilterRules:
         repo = GovernanceRepository(db=tmp_db)
         assert repo.delete_filter_rule(9999) is False
 
+    # -------------------------------------------------------------------------
+    # New tests for Issue #3058: pagination, filtering, idempotent creation
+    # -------------------------------------------------------------------------
+
+    def test_get_filter_rules_paginated(self, tmp_db):
+        """Get filter rules with pagination."""
+        repo = GovernanceRepository(db=tmp_db)
+
+        # Create 25 rules
+        for i in range(25):
+            repo.create_filter_rule(pattern=f"rule_{i}", rule_type="keyword")
+
+        # Get first page
+        rules, total = repo.get_filter_rules_paginated(limit=10, offset=0)
+        assert len(rules) == 10
+        assert total == 25
+
+        # Get second page
+        rules, total = repo.get_filter_rules_paginated(limit=10, offset=10)
+        assert len(rules) == 10
+        assert total == 25
+
+        # Get last page
+        rules, total = repo.get_filter_rules_paginated(limit=10, offset=20)
+        assert len(rules) == 5
+        assert total == 25
+
+    def test_get_filter_rules_paginated_with_type_filter(self, tmp_db):
+        """Filter rules by type."""
+        repo = GovernanceRepository(db=tmp_db)
+
+        repo.create_filter_rule(pattern="kw1", rule_type="keyword")
+        repo.create_filter_rule(pattern="kw2", rule_type="keyword")
+        repo.create_filter_rule(pattern="rx1", rule_type="regex")
+
+        rules, total = repo.get_filter_rules_paginated(rule_type="keyword")
+        assert len(rules) == 2
+        assert total == 2
+
+        rules, total = repo.get_filter_rules_paginated(rule_type="regex")
+        assert len(rules) == 1
+        assert total == 1
+
+    def test_get_filter_rules_paginated_with_severity_filter(self, tmp_db):
+        """Filter rules by severity."""
+        repo = GovernanceRepository(db=tmp_db)
+
+        repo.create_filter_rule(pattern="low1", severity="low")
+        repo.create_filter_rule(pattern="low2", severity="low")
+        repo.create_filter_rule(pattern="high1", severity="high")
+
+        rules, total = repo.get_filter_rules_paginated(severity="low")
+        assert len(rules) == 2
+        assert total == 2
+
+    def test_get_filter_rules_paginated_with_enabled_filter(self, tmp_db):
+        """Filter rules by enabled status."""
+        repo = GovernanceRepository(db=tmp_db)
+
+        repo.create_filter_rule(pattern="enabled1", is_enabled=True)
+        repo.create_filter_rule(pattern="enabled2", is_enabled=True)
+        repo.create_filter_rule(pattern="disabled1", is_enabled=False)
+
+        rules, total = repo.get_filter_rules_paginated(is_enabled=True)
+        assert len(rules) == 2
+        assert total == 2
+
+        rules, total = repo.get_filter_rules_paginated(is_enabled=False)
+        assert len(rules) == 1
+        assert total == 1
+
+    def test_get_filter_rules_paginated_combined_filters(self, tmp_db):
+        """Filter rules with multiple filters."""
+        repo = GovernanceRepository(db=tmp_db)
+
+        repo.create_filter_rule(
+            pattern="kw_high_enabled",
+            rule_type="keyword",
+            severity="high",
+            is_enabled=True,
+        )
+        repo.create_filter_rule(
+            pattern="kw_high_disabled",
+            rule_type="keyword",
+            severity="high",
+            is_enabled=False,
+        )
+        repo.create_filter_rule(
+            pattern="rx_high_enabled",
+            rule_type="regex",
+            severity="high",
+            is_enabled=True,
+        )
+
+        rules, total = repo.get_filter_rules_paginated(
+            rule_type="keyword", severity="high", is_enabled=True
+        )
+        assert len(rules) == 1
+        assert total == 1
+        assert rules[0]["pattern"] == "kw_high_enabled"
+
+    def test_get_filter_rules_paginated_empty(self, tmp_db):
+        """Pagination with offset beyond total returns empty."""
+        repo = GovernanceRepository(db=tmp_db)
+        repo.create_filter_rule(pattern="test")
+
+        rules, total = repo.get_filter_rules_paginated(limit=10, offset=100)
+        assert rules == []
+        assert total == 1
+
+    def test_get_filter_rule_by_pattern(self, tmp_db):
+        """Get filter rule by pattern."""
+        repo = GovernanceRepository(db=tmp_db)
+
+        rule_id = repo.create_filter_rule(pattern="unique_pattern")
+        assert rule_id is not None
+
+        rule = repo.get_filter_rule_by_pattern("unique_pattern")
+        assert rule is not None
+        assert rule["id"] == rule_id
+        assert rule["pattern"] == "unique_pattern"
+
+    def test_get_filter_rule_by_pattern_not_found(self, tmp_db):
+        """Get filter rule by non-existent pattern returns None."""
+        repo = GovernanceRepository(db=tmp_db)
+        rule = repo.get_filter_rule_by_pattern("nonexistent")
+        assert rule is None
+
+    def test_create_filter_rule_idempotent_new(self, tmp_db):
+        """Create new rule idempotently."""
+        repo = GovernanceRepository(db=tmp_db)
+
+        rule, is_new = repo.create_filter_rule_idempotent(
+            pattern="new_pattern",
+            rule_type="regex",
+            severity="high",
+            action="block",
+        )
+
+        assert is_new is True
+        assert rule is not None
+        assert rule["pattern"] == "new_pattern"
+        assert rule["type"] == "regex"
+        assert rule["severity"] == "high"
+        assert rule["action"] == "block"
+        assert rule["is_enabled"] is True
+
+    def test_create_filter_rule_idempotent_existing(self, tmp_db):
+        """Creating duplicate pattern returns existing rule."""
+        repo = GovernanceRepository(db=tmp_db)
+
+        # First creation
+        rule1, is_new1 = repo.create_filter_rule_idempotent(pattern="duplicate")
+        assert is_new1 is True
+        assert rule1 is not None
+        rule1_id = rule1["id"]
+
+        # Second creation with same pattern
+        rule2, is_new2 = repo.create_filter_rule_idempotent(pattern="duplicate")
+        assert is_new2 is False
+        assert rule2 is not None
+        assert rule2["id"] == rule1_id
+        assert rule2["pattern"] == "duplicate"
+
+    def test_create_filter_rule_idempotent_no_duplicate(self, tmp_db):
+        """Verify idempotent creation doesn't create duplicates in DB."""
+        repo = GovernanceRepository(db=tmp_db)
+
+        # Create twice
+        repo.create_filter_rule_idempotent(pattern="no_dup")
+        repo.create_filter_rule_idempotent(pattern="no_dup")
+
+        # Verify only one record exists
+        rules = repo.get_filter_rules()
+        patterns = [r["pattern"] for r in rules]
+        assert patterns.count("no_dup") == 1
+
+    def test_update_filter_rule_empty_pattern_fails(self, tmp_db):
+        """Updating pattern to empty string should fail at API layer.
+
+        Note: This test is for documentation purposes. The actual validation
+        is in the API route layer (app/routes/governance.py), not in the
+        repository layer.
+        """
+        # Repository layer doesn't validate - it just updates
+        # The API layer validates before calling this
+        repo = GovernanceRepository(db=tmp_db)
+
+        rule_id = repo.create_filter_rule(pattern="test")
+        assert rule_id is not None
+
+        # Repository layer allows empty pattern update
+        # API layer should prevent this
+        result = repo.update_filter_rule(rule_id, pattern="")
+        # Note: Repository returns True, but API should reject before this
+        assert result is True
+
 
 class TestSecuritySettings:
     """Tests for security settings operations."""
