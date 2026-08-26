@@ -8,7 +8,6 @@ Issue #3080: Response time metrics for trend analysis.
 """
 
 import logging
-from datetime import datetime, timedelta
 
 from app.repositories.response_time_repo import ResponseTimeRepository
 

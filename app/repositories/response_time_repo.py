@@ -6,7 +6,7 @@ Repository for response time statistics data access.
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 from app.repositories.database import Database
 from app.utils.cache import cached

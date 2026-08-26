@@ -8,7 +8,6 @@ Runs periodically to populate the response_time_stats table.
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Any, Optional
 
 from app.repositories.database import Database, is_postgresql
 from app.utils.cache import get_cache
@@ -33,7 +32,7 @@ class ResponseTimeAggregator:
         """
         self.db = db or Database()
 
-    def aggregate(self, target_date: Optional[str] = None) -> dict:
+    def aggregate(self, target_date: str | None = None) -> dict:
         """
         Aggregate performance data for a specific date.
 
