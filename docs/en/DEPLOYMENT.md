@@ -63,7 +63,8 @@ system users (`useradd`), fixes ownership (`chown`), and switches identity
 
 ```bash
 # One-command multi-user mode
-docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+./scripts/bootstrap-compose-env.sh
+docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d --wait
 ```
 
 The docker-compose.multi-user.yml automatically configures:

@@ -27,6 +27,7 @@ __pycache__/
 *.so
 .Python
 .env
+.env.bootstrap.lock
 .venv
 env/
 venv/
