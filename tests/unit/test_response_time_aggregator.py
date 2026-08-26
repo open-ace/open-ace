@@ -46,7 +46,9 @@ class TestResponseTimeAggregator(unittest.TestCase):
     def test_calculate_percentiles(self):
         """Test percentile calculation."""
         # Create 100 values from 1 to 100
-        rows = [{"ttft_ms": i, "status": "success", "tool_call_duration_ms": 0} for i in range(1, 101)]
+        rows = [
+            {"ttft_ms": i, "status": "success", "tool_call_duration_ms": 0} for i in range(1, 101)
+        ]
 
         stats = self.aggregator._calculate_group_stats(rows)
 

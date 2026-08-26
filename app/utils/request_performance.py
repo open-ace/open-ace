@@ -12,9 +12,10 @@ import random
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -31,21 +32,21 @@ class PerformanceEvent:
     """A single performance event to be recorded."""
 
     request_id: str
-    session_id: Optional[str] = None
-    conversation_id: Optional[str] = None
-    tenant_id: Optional[int] = None
+    session_id: str | None = None
+    conversation_id: str | None = None
+    tenant_id: int | None = None
     tool_name: str = "unknown"
     host_name: str = "localhost"
-    user_id: Optional[int] = None
+    user_id: int | None = None
 
     # Event type: 'start', 'first_response', 'complete'
     event_type: str = "start"
-    timestamp: Optional[float] = None  # Monotonic time
+    timestamp: float | None = None  # Monotonic time
 
     # For complete events
     status: str = "success"
     sample_type: str = "streaming"
-    model: Optional[str] = None
+    model: str | None = None
     tool_call_count: int = 0
     tool_call_duration_ms: int = 0
 
@@ -55,30 +56,30 @@ class RequestRecord:
     """Aggregated record for a single request."""
 
     request_id: str
-    session_id: Optional[str] = None
-    conversation_id: Optional[str] = None
+    session_id: str | None = None
+    conversation_id: str | None = None
     tenant_id: int = 1  # Default tenant
     tool_name: str = "unknown"
     host_name: str = "localhost"
-    user_id: Optional[int] = None
+    user_id: int | None = None
 
-    started_at: Optional[datetime] = None
-    started_at_monotonic: Optional[float] = None
-    first_response_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    started_at_monotonic: float | None = None
+    first_response_at: datetime | None = None
+    completed_at: datetime | None = None
 
-    ttft_ms: Optional[int] = None
+    ttft_ms: int | None = None
     tool_call_duration_ms: int = 0
-    total_duration_ms: Optional[int] = None
+    total_duration_ms: int | None = None
 
     status: str = "success"
     sample_type: str = "streaming"
-    model: Optional[str] = None
+    model: str | None = None
     tool_call_count: int = 0
 
     # For tracking
-    first_response_monotonic: Optional[float] = None
-    completed_monotonic: Optional[float] = None
+    first_response_monotonic: float | None = None
+    completed_monotonic: float | None = None
 
 
 class PerformanceMetrics:
@@ -135,7 +136,7 @@ class RequestPerformanceRecorder:
 
     def __init__(
         self,
-        db_writer: Optional[Callable] = None,
+        db_writer: Callable | None = None,
         queue_max_size: int = QUEUE_MAX_SIZE,
         batch_size: int = BATCH_SIZE,
         flush_interval: float = FLUSH_INTERVAL_SECONDS,
@@ -175,7 +176,7 @@ class RequestPerformanceRecorder:
         self._db_writer = db_writer or self._default_db_writer
 
         # Background flush thread
-        self._flush_thread: Optional[threading.Thread] = None
+        self._flush_thread: threading.Thread | None = None
         self._shutdown_event = threading.Event()
 
         if self.enabled:
@@ -324,7 +325,9 @@ class RequestPerformanceRecorder:
             elif attempt < MAX_RETRIES - 1:
                 time.sleep(0.1 * (attempt + 1))  # Exponential backoff
             else:
-                logger.warning(f"Failed to write {len(records)} records after {MAX_RETRIES} retries")
+                logger.warning(
+                    f"Failed to write {len(records)} records after {MAX_RETRIES} retries"
+                )
 
     def _process_events(self, events: list[PerformanceEvent]) -> list[RequestRecord]:
         """Process events into database records."""
@@ -381,8 +384,7 @@ class RequestPerformanceRecorder:
                     # Calculate TTFT
                     if record.started_at_monotonic and record.first_response_monotonic:
                         record.ttft_ms = int(
-                            (record.first_response_monotonic - record.started_at_monotonic)
-                            * 1000
+                            (record.first_response_monotonic - record.started_at_monotonic) * 1000
                         )
                         # TTFT should be non-negative
                         if record.ttft_ms < 0:
@@ -411,7 +413,9 @@ class RequestPerformanceRecorder:
 
                     # Adjust TTFT to exclude tool call time if not already set
                     if record.ttft_ms is None and record.total_duration_ms is not None:
-                        record.ttft_ms = max(0, record.total_duration_ms - record.tool_call_duration_ms)
+                        record.ttft_ms = max(
+                            0, record.total_duration_ms - record.tool_call_duration_ms
+                        )
 
                     # Mark for write
                     records_to_write.append(record)
@@ -436,9 +440,7 @@ class RequestPerformanceRecorder:
         # Check queue size
         if len(self.event_queue) >= self.queue_max_size:
             self.metrics.increment("queue_overflow_count")
-            logger.warning(
-                f"Performance queue overflow, dropping event for {event.request_id}"
-            )
+            logger.warning(f"Performance queue overflow, dropping event for {event.request_id}")
             return False
 
         # Set timestamp if not provided
@@ -452,14 +454,14 @@ class RequestPerformanceRecorder:
     def record_request_start(
         self,
         request_id: str,
-        session_id: Optional[str] = None,
-        conversation_id: Optional[str] = None,
-        tenant_id: Optional[int] = None,
+        session_id: str | None = None,
+        conversation_id: str | None = None,
+        tenant_id: int | None = None,
         tool_name: str = "unknown",
         host_name: str = "localhost",
-        user_id: Optional[int] = None,
+        user_id: int | None = None,
         sample_type: str = "streaming",
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> bool:
         """
         Record the start of a request.

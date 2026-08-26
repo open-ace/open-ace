@@ -7,8 +7,6 @@ Creates two tables:
 """
 
 from alembic import op
-import sqlalchemy as sa
-
 
 # revision identifiers
 revision = "20260825_002"

@@ -394,7 +394,9 @@ class AnalysisService:
         coverage_ratio = 0.0
         if response_time_stats.get("sample_count", 0) > 0:
             if total_messages > 0:
-                coverage_ratio = min(1.0, response_time_stats.get("sample_count", 0) / total_messages)
+                coverage_ratio = min(
+                    1.0, response_time_stats.get("sample_count", 0) / total_messages
+                )
 
         response_time_metrics = {
             "avg_response_time_ms": response_time_stats.get("avg_response_time_ms"),

@@ -20,7 +20,7 @@ from app.modules.workspace.model_gateway import get_gateway_planner
 from app.utils.outbound_url_guard import safe_request
 
 # Issue #3080: Response time tracking
-from app.utils.request_performance import get_recorder, generate_request_id
+from app.utils.request_performance import generate_request_id, get_recorder
 
 logger = logging.getLogger(__name__)
 
