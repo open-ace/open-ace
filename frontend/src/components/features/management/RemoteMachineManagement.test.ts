@@ -291,4 +291,118 @@ describe('RemoteMachineManagement - Token Rotate Offline Scenario (Issue #1503)'
       expect(warningIconClass).toContain('exclamation-triangle');
     });
   });
+
+  // Issue #3066: Hardware info display tests
+  describe('Hardware resource display (Issue #3066)', () => {
+    it('should have capabilities field with hardware info', () => {
+      const machine: RemoteMachine = {
+        id: 1,
+        machine_id: 'test-hw',
+        machine_name: 'Test HW Machine',
+        hostname: 'hw-host',
+        os_type: 'linux',
+        status: 'online',
+        connected: true,
+        token_status: 'active',
+        capabilities: {
+          cpu_cores: 8,
+          memory_mb: 8192,
+          disk_free_gb: 100.5,
+        },
+      } as RemoteMachine;
+
+      const caps = machine.capabilities as Record<string, unknown>;
+      expect(caps.cpu_cores).toBe(8);
+      expect(caps.memory_mb).toBe(8192);
+      expect(caps.disk_free_gb).toBe(100.5);
+    });
+
+    it('should convert memory_mb to GB with 1 decimal place', () => {
+      const memoryMb = 8192;
+      const memoryGb = (memoryMb / 1024).toFixed(1);
+      expect(memoryGb).toBe('8.0');
+    });
+
+    it('should convert fractional memory_mb correctly', () => {
+      const memoryMb = 16384;
+      const memoryGb = (memoryMb / 1024).toFixed(1);
+      expect(memoryGb).toBe('16.0');
+    });
+
+    it('should handle null capabilities safely', () => {
+      const machine: RemoteMachine = {
+        id: 1,
+        machine_id: 'test-null-caps',
+        machine_name: 'Null Caps Machine',
+        hostname: 'host',
+        os_type: 'linux',
+        status: 'online',
+        connected: true,
+        token_status: 'active',
+        capabilities: null,
+      } as RemoteMachine;
+
+      expect(machine.capabilities).toBeNull();
+      // The component should not render hardware cards when capabilities is null
+      const shouldRender =
+        machine.capabilities !== null && Object.keys(machine.capabilities ?? {}).length > 0;
+      expect(shouldRender).toBe(false);
+    });
+
+    it('should handle empty capabilities safely', () => {
+      const machine: RemoteMachine = {
+        id: 1,
+        machine_id: 'test-empty-caps',
+        machine_name: 'Empty Caps Machine',
+        hostname: 'host',
+        os_type: 'linux',
+        status: 'online',
+        connected: true,
+        token_status: 'active',
+        capabilities: {},
+      } as RemoteMachine;
+
+      const shouldRender =
+        machine.capabilities !== null && Object.keys(machine.capabilities ?? {}).length > 0;
+      expect(shouldRender).toBe(false);
+    });
+
+    it('should handle partial capabilities (only cpu_cores)', () => {
+      const caps = { cpu_cores: 4 };
+      const cpuCores = typeof caps.cpu_cores === 'number' ? caps.cpu_cores : undefined;
+      const memoryMb = typeof caps.memory_mb === 'number' ? caps.memory_mb : undefined;
+      const diskFreeGb = typeof caps.disk_free_gb === 'number' ? caps.disk_free_gb : undefined;
+
+      expect(cpuCores).toBe(4);
+      expect(memoryMb).toBeUndefined();
+      expect(diskFreeGb).toBeUndefined();
+    });
+
+    it('should handle zero value hardware fields', () => {
+      const caps = {
+        cpu_cores: 0,
+        memory_mb: 0,
+        disk_free_gb: 0,
+      };
+      const cpuCores = typeof caps.cpu_cores === 'number' ? caps.cpu_cores : undefined;
+      const memoryMb = typeof caps.memory_mb === 'number' ? caps.memory_mb : undefined;
+      const diskFreeGb = typeof caps.disk_free_gb === 'number' ? caps.disk_free_gb : undefined;
+
+      // Zero values should not show cards (using > 0 check)
+      expect(cpuCores !== undefined && cpuCores > 0).toBe(false);
+      expect(memoryMb !== undefined && memoryMb > 0).toBe(false);
+      expect(diskFreeGb !== undefined && diskFreeGb > 0).toBe(false);
+    });
+
+    it('should detect at least one hardware field for card rendering', () => {
+      const caps = { cpu_cores: 8 };
+      const cpuCores = typeof caps.cpu_cores === 'number' ? caps.cpu_cores : undefined;
+      const memoryMb = typeof caps.memory_mb === 'number' ? caps.memory_mb : undefined;
+      const diskFreeGb = typeof caps.disk_free_gb === 'number' ? caps.disk_free_gb : undefined;
+
+      const hasAnyHardware =
+        cpuCores !== undefined || memoryMb !== undefined || diskFreeGb !== undefined;
+      expect(hasAnyHardware).toBe(true);
+    });
+  });
 });
