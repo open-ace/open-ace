@@ -226,7 +226,9 @@ export const TrendAnalysis: React.FC = () => {
   // Issue #3080: Build response time tooltip
   const getResponseTimeTooltip = (): string => {
     if (!responseTimeMetrics?.data_available) {
-      return t('avgResponseTimeTooltip', language).replace('{count}', '0').replace('{coverage}', '0');
+      return t('avgResponseTimeTooltip', language)
+        .replace('{count}', '0')
+        .replace('{coverage}', '0');
     }
     const count = responseTimeMetrics.sample_count ?? 0;
     const coverage = Math.round((responseTimeMetrics.coverage_ratio ?? 0) * 100);
