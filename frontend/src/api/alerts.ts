@@ -108,10 +108,7 @@ export const alertsApi = {
   },
 
   // Issue #3082: Manager 获取租户范围告警
-  async getTenantAlerts(params?: {
-    limit?: number;
-    offset?: number;
-  }): Promise<AlertListResponse> {
+  async getTenantAlerts(params?: { limit?: number; offset?: number }): Promise<AlertListResponse> {
     const queryParams: Record<string, string> = {};
     if (params?.limit) queryParams.limit = String(params.limit);
     if (params?.offset) queryParams.offset = String(params.offset);
