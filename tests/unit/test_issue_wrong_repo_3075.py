@@ -243,8 +243,7 @@ class TestPreparationIssueCreation:
         mock_gh.create_issue.assert_called_once()
         call_kwargs = mock_gh.create_issue.call_args
         assert call_kwargs.kwargs.get("repo") == "blueberry521/123", (
-            f"Expected repo='blueberry521/123', got "
-            f"repo={call_kwargs.kwargs.get('repo')!r}"
+            f"Expected repo='blueberry521/123', got " f"repo={call_kwargs.kwargs.get('repo')!r}"
         )
         assert result.next_phase == "planning"
 
@@ -313,7 +312,7 @@ class TestPreparationIssueCreation:
                 agent_runner=MagicMock(),
             )
 
-            result = orch._do_preparation(ctx, deps)
+            orch._do_preparation(ctx, deps)
 
         # Verify create_issue was called with the correct GHES repo
         mock_gh.create_issue.assert_called_once()
