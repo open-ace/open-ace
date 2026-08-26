@@ -31,7 +31,7 @@ import {
 } from '@/components/common';
 import { useConfirm } from '@/components/common';
 import { formatTokens, formatDateTime, formatNumber, createMatcherConfig } from '@/utils';
-import { parseApiError } from '@/utils/error';
+import { parseApiError, getErrorMessage } from '@/utils/error';
 import { QuotaType, TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
 import {
   parseAndValidateQuota,
@@ -112,6 +112,9 @@ export const QuotaAlerts: React.FC = () => {
   const [readFilter, setReadFilter] = useState('');
 
   const [showPrefsModal, setShowPrefsModal] = useState(false);
+  // Issue #3083: Test alert state
+  const [testAlertLoading, setTestAlertLoading] = useState(false);
+  const [lastTestAlertTime, setLastTestAlertTime] = useState(0);
   const [preferences, setPreferences] = useState<NotificationPreferences>({
     email_enabled: true,
     push_enabled: true,
@@ -480,6 +483,38 @@ export const QuotaAlerts: React.FC = () => {
       setShowPrefsModal(false);
     } catch (err) {
       console.error('Failed to save preferences:', err);
+    }
+  };
+
+  // Issue #3083: Send test alert handler
+  const TEST_ALERT_COOLDOWN_MS = 60_000; // 60 seconds
+  const isRateLimited = Date.now() - lastTestAlertTime < TEST_ALERT_COOLDOWN_MS;
+  const remainingSeconds = Math.ceil(
+    (TEST_ALERT_COOLDOWN_MS - (Date.now() - lastTestAlertTime)) / 1000
+  );
+
+  const handleSendTestAlert = async () => {
+    if (Date.now() - lastTestAlertTime < TEST_ALERT_COOLDOWN_MS) {
+      toast.warning(t('testAlertCooldown', language, { seconds: remainingSeconds }));
+      return;
+    }
+    setTestAlertLoading(true);
+    try {
+      await alertsApi.createTestAlert({
+        type: 'system',
+        severity: 'info',
+        title: '[TEST] Test Alert',
+        message: 'This is a test alert to verify your notification channels are working correctly.',
+      });
+      toast.success(t('testAlertCreated', language), t('testAlertCreatedDesc', language));
+      setLastTestAlertTime(Date.now());
+      fetchAlerts();
+    } catch (err) {
+      console.error('Failed to send test alert:', err);
+      const errorMessage = getErrorMessage(err, t('testAlertFailed', language));
+      toast.error(t('testAlertFailed', language), errorMessage);
+    } finally {
+      setTestAlertLoading(false);
     }
   };
 
@@ -1149,6 +1184,23 @@ export const QuotaAlerts: React.FC = () => {
                 <i className="bi bi-gear me-1" />
                 {t('preferences', language)}
               </Button>
+              {isAdmin(user) && (
+                <Button
+                  variant="outline-primary"
+                  size="sm"
+                  onClick={handleSendTestAlert}
+                  loading={testAlertLoading}
+                  disabled={isRateLimited}
+                  title={
+                    isRateLimited
+                      ? t('testAlertCooldown', language, { seconds: remainingSeconds })
+                      : undefined
+                  }
+                >
+                  <i className="bi bi-megaphone me-1" />
+                  {t('sendTestAlert', language)}
+                </Button>
+              )}
               <Button variant="primary" size="sm" onClick={handleMarkAllAsRead}>
                 <i className="bi bi-check-all me-1" />
                 {t('markAllRead', language)}
