@@ -69,6 +69,7 @@ def upgrade() -> None:
 
         op.execute("""
             CREATE TABLE IF NOT EXISTS response_time_stats (
+                id SERIAL PRIMARY KEY,
                 date TEXT NOT NULL,
                 tool_name TEXT NOT NULL,
                 host_name TEXT DEFAULT 'localhost',
@@ -92,7 +93,7 @@ def upgrade() -> None:
 
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-                PRIMARY KEY (date, tool_name, host_name, tenant_id)
+                UNIQUE (date, tool_name, host_name, tenant_id)
             )
         """)
 
@@ -154,6 +155,7 @@ def upgrade() -> None:
 
         op.execute("""
             CREATE TABLE IF NOT EXISTS response_time_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 date TEXT NOT NULL,
                 tool_name TEXT NOT NULL,
                 host_name TEXT DEFAULT 'localhost',
@@ -177,7 +179,7 @@ def upgrade() -> None:
 
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-                PRIMARY KEY (date, tool_name, host_name, tenant_id)
+                UNIQUE (date, tool_name, host_name, tenant_id)
             )
         """)
 
