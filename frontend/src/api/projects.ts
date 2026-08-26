@@ -109,6 +109,20 @@ export async function getProjectUsers(
 }
 
 /**
+ * Update project information
+ * Issue #3064: Frontend project edit functionality
+ */
+export async function updateProject(
+  projectId: number,
+  data: Partial<{ name: string; description: string; is_shared: boolean }>
+): Promise<{ success: boolean; project: Project }> {
+  return apiClient.put<{ success: boolean; project: Project }>(
+    `/api/projects/${projectId}`,
+    data
+  );
+}
+
+/**
  * Delete a project
  */
 export async function deleteProject(projectId: number): Promise<{ success: boolean }> {
