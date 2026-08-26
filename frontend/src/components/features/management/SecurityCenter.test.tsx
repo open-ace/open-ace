@@ -1,10 +1,12 @@
 /**
  * SecurityCenter Component Tests
  *
- * Tests cover three sub-pages:
+ * Tests cover four sub-pages:
  * 1. Content Filter (Filter Rules) - CRUD operations, toggle, table display
  * 2. Security Settings - session/password/IP whitelist configuration
  * 3. Audit Thresholds - threshold input validation, save, reset
+ * 4. Sensitive Keywords - CRUD operations, permission check, validation (Issue #3059)
+ * 5. Filter Statistics - filter status, cache performance, loaded patterns
  */
 
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -128,6 +130,8 @@ vi.mock('@/i18n', () => ({
       filterByStatus: 'Filter by status',
       keywordEmpty: 'Keyword cannot be empty',
       keywordTooLong: 'Keyword cannot exceed 255 characters',
+      status: 'Status',
+      actions: 'Actions',
     };
     let text = translations[key] || key;
     if (params) {
@@ -491,6 +495,11 @@ import {
   useUpdateSecuritySettings,
   useAuditThresholds,
   useUpdateAuditThresholds,
+  useAdminTenant,
+  useSensitiveKeywords,
+  useCreateSensitiveKeyword,
+  useUpdateSensitiveKeyword,
+  useDeleteSensitiveKeyword,
   useFilterStats,
 } from '@/hooks';
 
@@ -607,11 +616,12 @@ describe('SecurityCenter', () => {
       expect(screen.getByText('Security Center')).toBeInTheDocument();
     });
 
-    it('renders four tab buttons', () => {
+    it('renders five tab buttons', () => {
       render(<SecurityCenter />);
       expect(screen.getByText('Content Filter')).toBeInTheDocument();
       expect(screen.getByText('Security Settings')).toBeInTheDocument();
       expect(screen.getByText('Audit Thresholds')).toBeInTheDocument();
+      expect(screen.getByText('Sensitive Keywords')).toBeInTheDocument();
       expect(screen.getByText('Filter Statistics')).toBeInTheDocument();
     });
 
@@ -1271,6 +1281,380 @@ describe('SecurityCenter', () => {
       await waitFor(() => {
         expect(screen.getByText('Value must be at least 1')).toBeInTheDocument();
       });
+    });
+  });
+
+  // ─── Sensitive Keywords Tab (Issue #3059) ────────────────────────────────────
+
+  describe('Sensitive Keywords Tab', () => {
+    const mockMutateAsyncCreateKeyword = vi.fn();
+    const mockMutateAsyncUpdateKeyword = vi.fn();
+    const mockMutateAsyncDeleteKeyword = vi.fn();
+    const mockRefetchKeywords = vi.fn();
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockMutateAsyncCreateKeyword.mockResolvedValue({ id: 2, is_new: true });
+      mockMutateAsyncUpdateKeyword.mockResolvedValue({ success: true });
+      mockMutateAsyncDeleteKeyword.mockResolvedValue({ success: true });
+
+      // Reset useAdminTenant to return valid tenant ID
+      vi.mocked(useAdminTenant).mockReturnValue({
+        effectiveTenantId: 1,
+      } as ReturnType<typeof useAdminTenant>);
+
+      // Reset useSensitiveKeywords to return default data
+      vi.mocked(useSensitiveKeywords).mockReturnValue({
+        data: {
+          keywords: [
+            {
+              id: 1,
+              tenant_id: 1,
+              keyword: 'password',
+              is_enabled: true,
+              created_by: 1,
+              created_at: '2025-01-01T00:00:00Z',
+            },
+          ],
+          total: 1,
+          limit: 20,
+          offset: 0,
+          tenant_id: 1,
+        },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: mockRefetchKeywords,
+      } as ReturnType<typeof useSensitiveKeywords>);
+
+      // Reset mutation hooks
+      vi.mocked(useCreateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncCreateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useCreateSensitiveKeyword>);
+
+      vi.mocked(useUpdateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncUpdateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useUpdateSensitiveKeyword>);
+
+      vi.mocked(useDeleteSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncDeleteKeyword,
+        isPending: false,
+      } as ReturnType<typeof useDeleteSensitiveKeyword>);
+
+      mockConfirm.mockResolvedValue(true);
+    });
+
+    it('shows Sensitive Keywords tab button', () => {
+      render(<SecurityCenter />);
+      expect(screen.getByText('Sensitive Keywords')).toBeInTheDocument();
+    });
+
+    it('switches to Sensitive Keywords tab when clicked', () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      const keywordTab = screen.getByText('Sensitive Keywords').closest('button');
+      expect(keywordTab).toHaveClass('active');
+    });
+
+    it('shows Add Keyword button only on Sensitive Keywords tab when tenant is selected', () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      expect(screen.getByText('Add Keyword')).toBeInTheDocument();
+    });
+
+    it('shows error when no tenant is selected (no permission)', () => {
+      vi.mocked(useAdminTenant).mockReturnValue({
+        effectiveTenantId: null,
+      } as ReturnType<typeof useAdminTenant>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      expect(screen.getByTestId('error')).toBeInTheDocument();
+      expect(screen.getByText('No permission to access')).toBeInTheDocument();
+    });
+
+    it('shows loading state for keywords', () => {
+      vi.mocked(useSensitiveKeywords).mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useSensitiveKeywords>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      expect(screen.getByTestId('loading')).toBeInTheDocument();
+    });
+
+    it('shows error state for keywords', () => {
+      vi.mocked(useSensitiveKeywords).mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        isError: true,
+        error: new Error('Keywords fetch failed'),
+        refetch: vi.fn(),
+      } as ReturnType<typeof useSensitiveKeywords>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      expect(screen.getByTestId('error')).toBeInTheDocument();
+    });
+
+    it('shows empty state when no keywords exist', () => {
+      vi.mocked(useSensitiveKeywords).mockReturnValue({
+        data: { keywords: [], total: 0, limit: 20, offset: 0, tenant_id: 1 },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useSensitiveKeywords>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      expect(screen.getByTestId('empty-state')).toBeInTheDocument();
+      expect(screen.getByText('No sensitive keywords configured')).toBeInTheDocument();
+    });
+
+    it('renders keywords table with data', () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      expect(screen.getByText('password')).toBeInTheDocument();
+    });
+
+    it('opens create modal when Add Keyword is clicked', () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      expect(screen.queryByTestId('modal')).not.toBeInTheDocument();
+      const addKeywordElements = screen.getAllByText('Add Keyword');
+      fireEvent.click(addKeywordElements[0]);
+      expect(screen.getByTestId('modal')).toBeInTheDocument();
+    });
+
+    it('validates empty keyword with error message', async () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      fireEvent.click(screen.getByText('Add Keyword'));
+
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith('Keyword cannot be empty');
+      });
+    });
+
+    it('validates keyword exceeding 255 characters', async () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      fireEvent.click(screen.getByText('Add Keyword'));
+
+      const longKeyword = 'a'.repeat(256);
+      const input = screen.getByPlaceholderText('Enter sensitive keyword');
+      fireEvent.change(input, { target: { value: longKeyword } });
+
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith('Keyword cannot exceed 255 characters');
+      });
+    });
+
+    it('trims whitespace from keyword input', async () => {
+      vi.mocked(useCreateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncCreateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useCreateSensitiveKeyword>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      fireEvent.click(screen.getByText('Add Keyword'));
+
+      const input = screen.getByPlaceholderText('Enter sensitive keyword');
+      fireEvent.change(input, { target: { value: '  test-keyword  ' } });
+
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockMutateAsyncCreateKeyword).toHaveBeenCalledWith(
+          expect.objectContaining({
+            tenantId: 1,
+            data: { keyword: 'test-keyword' },
+          })
+        );
+      });
+    });
+
+    it('shows success toast when keyword is created (is_new: true)', async () => {
+      vi.mocked(useCreateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncCreateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useCreateSensitiveKeyword>);
+      mockMutateAsyncCreateKeyword.mockResolvedValue({ id: 2, is_new: true });
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      fireEvent.click(screen.getByText('Add Keyword'));
+
+      const input = screen.getByPlaceholderText('Enter sensitive keyword');
+      fireEvent.change(input, { target: { value: 'new-keyword' } });
+
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockToast.success).toHaveBeenCalledWith('Keyword created successfully');
+      });
+    });
+
+    it('shows info toast when keyword already exists (is_new: false)', async () => {
+      vi.mocked(useCreateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncCreateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useCreateSensitiveKeyword>);
+      mockMutateAsyncCreateKeyword.mockResolvedValue({ id: 1, is_new: false });
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      fireEvent.click(screen.getByText('Add Keyword'));
+
+      const input = screen.getByPlaceholderText('Enter sensitive keyword');
+      fireEvent.change(input, { target: { value: 'existing-keyword' } });
+
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockToast.info).toHaveBeenCalledWith('Keyword already exists');
+      });
+    });
+
+    it('shows error toast when keyword creation fails', async () => {
+      vi.mocked(useCreateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncCreateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useCreateSensitiveKeyword>);
+      mockMutateAsyncCreateKeyword.mockRejectedValue(new Error('Create failed'));
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      fireEvent.click(screen.getByText('Add Keyword'));
+
+      const input = screen.getByPlaceholderText('Enter sensitive keyword');
+      fireEvent.change(input, { target: { value: 'test-keyword' } });
+
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith('Failed to create keyword');
+      });
+    });
+
+    it('toggles keyword enabled state when switch is clicked', async () => {
+      vi.mocked(useUpdateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncUpdateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useUpdateSensitiveKeyword>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+
+      const checkboxes = screen.getAllByRole('checkbox');
+      // Find the keyword enabled toggle (first checkbox in sensitive keywords tab)
+      const keywordCheckbox = checkboxes[0];
+      fireEvent.click(keywordCheckbox);
+
+      await waitFor(() => {
+        expect(mockMutateAsyncUpdateKeyword).toHaveBeenCalledWith(
+          expect.objectContaining({
+            tenantId: 1,
+            keywordId: 1,
+            data: { is_enabled: false },
+          })
+        );
+      });
+    });
+
+    it('shows error toast when toggling keyword fails', async () => {
+      vi.mocked(useUpdateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncUpdateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useUpdateSensitiveKeyword>);
+      mockMutateAsyncUpdateKeyword.mockRejectedValue(new Error('Update failed'));
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+
+      const checkboxes = screen.getAllByRole('checkbox');
+      fireEvent.click(checkboxes[0]);
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith('Failed to update keyword');
+      });
+    });
+
+    it('calls delete API when delete is confirmed', async () => {
+      mockConfirm.mockResolvedValue(true);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+
+      // Find the delete button by its variant (outline-danger)
+      const buttons = screen.getAllByRole('button');
+      const deleteBtn = buttons.find(
+        (btn) => btn.getAttribute('data-variant') === 'outline-danger'
+      );
+      expect(deleteBtn).toBeDefined();
+      fireEvent.click(deleteBtn!);
+
+      await waitFor(() => {
+        expect(mockConfirm).toHaveBeenCalledWith(expect.objectContaining({ variant: 'danger' }));
+        expect(mockMutateAsyncDeleteKeyword).toHaveBeenCalledWith({
+          tenantId: 1,
+          keywordId: 1,
+        });
+      });
+    });
+
+    it('does not delete when confirmation is rejected', async () => {
+      mockConfirm.mockResolvedValue(false);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+
+      const buttons = screen.getAllByRole('button');
+      const deleteBtn = buttons.find(
+        (btn) => btn.getAttribute('data-variant') === 'outline-danger'
+      );
+      expect(deleteBtn).toBeDefined();
+      fireEvent.click(deleteBtn!);
+
+      await waitFor(() => {
+        expect(mockConfirm).toHaveBeenCalled();
+        expect(mockMutateAsyncDeleteKeyword).not.toHaveBeenCalled();
+      });
+    });
+
+    it('shows error toast when delete fails', async () => {
+      mockMutateAsyncDeleteKeyword.mockRejectedValue(new Error('Delete failed'));
+      mockConfirm.mockResolvedValue(true);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+
+      const buttons = screen.getAllByRole('button');
+      const deleteBtn = buttons.find(
+        (btn) => btn.getAttribute('data-variant') === 'outline-danger'
+      );
+      expect(deleteBtn).toBeDefined();
+      fireEvent.click(deleteBtn!);
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith('Failed to delete keyword');
+      });
+    });
+
+    it('closes modal when cancel is clicked', () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      const addKeywordElements = screen.getAllByText('Add Keyword');
+      fireEvent.click(addKeywordElements[0]);
+      expect(screen.getByTestId('modal')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText('Cancel'));
+      expect(screen.queryByTestId('modal')).not.toBeInTheDocument();
     });
   });
 
