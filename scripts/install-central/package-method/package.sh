@@ -368,11 +368,31 @@ if [ -d "$FRONTEND_DIR" ]; then
 
     cd "$FRONTEND_DIR"
 
-    # Install dependencies if node_modules doesn't exist or package.json changed
+    # Install/sync dependencies based on lockfile (Issue #3096)
+    # Use npm ci to ensure dependencies match package-lock.json exactly.
+    # Fallback: if npm ci fails (e.g. offline) and node_modules already
+    # exists, warn and continue; if node_modules is missing, abort.
     # Set HUSKY=0 to skip git hooks setup (package directory is not a git repo)
-    if [ ! -d "node_modules" ] || [ "$(find package.json -newer node_modules 2>/dev/null | head -1)" ]; then
-        echo -e "${BLUE}Installing frontend dependencies...${NC}"
-        HUSKY=0 npm install --silent 2>/dev/null || HUSKY=0 npm install
+    if [ -f "package-lock.json" ]; then
+        echo -e "${BLUE}Syncing frontend dependencies (npm ci)...${NC}"
+        if HUSKY=0 npm ci --silent 2>/dev/null || HUSKY=0 npm ci; then
+            :
+        else
+            if [ -d "node_modules" ]; then
+                echo -e "${YELLOW}Warning: npm ci failed, continuing with existing node_modules${NC}"
+            else
+                echo -e "${RED}Error: Frontend dependency installation failed and node_modules is missing${NC}"
+                exit 1
+            fi
+        fi
+    else
+        echo -e "${BLUE}Installing frontend dependencies (npm install)...${NC}"
+        if HUSKY=0 npm install --silent 2>/dev/null || HUSKY=0 npm install; then
+            :
+        else
+            echo -e "${RED}Error: Frontend dependency installation failed${NC}"
+            exit 1
+        fi
     fi
 
     # Build frontend
