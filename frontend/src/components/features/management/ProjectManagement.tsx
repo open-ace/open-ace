@@ -43,6 +43,7 @@ import { isAdmin } from '@/utils/permissions';
 import { matchesPatterns } from '@/utils/categoryConflictDetection';
 import { CategoryManageModal } from './CategoryManageModal';
 import { CategoryFilter } from './CategoryFilter';
+import { ProjectEditModal } from './ProjectEditModal';
 
 type CategorySortKey = 'name' | 'total_workspaces' | 'total_users' | 'total_tokens' | 'last_access';
 type SortDirection = 'asc' | 'desc';
@@ -205,6 +206,7 @@ export const ProjectManagement: React.FC = () => {
   const [selectedWorkspace, setSelectedWorkspace] = useState<ProjectStats | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectStats | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [editTarget, setEditTarget] = useState<ProjectStats | null>(null);
   const [sortKey, setSortKey] = useState<CategorySortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
@@ -609,6 +611,17 @@ export const ProjectManagement: React.FC = () => {
                                             {t('viewDetails', language)}
                                           </Button>
                                           <Button
+                                            variant="outline-secondary"
+                                            size="sm"
+                                            onClick={(e) => {
+                                              e?.stopPropagation();
+                                              setEditTarget(workspace);
+                                            }}
+                                          >
+                                            <i className="bi bi-pencil me-1" />
+                                            {t('editProject', language)}
+                                          </Button>
+                                          <Button
                                             variant="outline-danger"
                                             size="sm"
                                             onClick={(e) => {
@@ -676,6 +689,14 @@ export const ProjectManagement: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Project Edit Modal */}
+      <ProjectEditModal
+        isOpen={editTarget !== null}
+        onClose={() => setEditTarget(null)}
+        onSuccess={fetchData}
+        project={editTarget}
+      />
 
       {/* Category Management Modal */}
       <CategoryManageModal
