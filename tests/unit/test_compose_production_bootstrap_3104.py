@@ -58,12 +58,37 @@ def test_preserves_comments_unknown_keys_and_existing_secrets(tmp_path):
     assert values(tmp_path / ".env")["DB_PASSWORD"] == original_password
 
 
+@pytest.mark.parametrize("last_line", ["# final comment", "UNKNOWN=value", "DB_PASSWORD=existing-strong-password"])
+def test_existing_env_without_final_newline_remains_valid(tmp_path, last_line):
+    fake_docker(tmp_path)
+    (tmp_path / ".env").write_text(last_line)
+    result = run_bootstrap(tmp_path, tmp_path)
+    assert result.returncode == 0, result.stderr
+    content = (tmp_path / ".env").read_text()
+    assert content.startswith(last_line + "\n")
+    assert "\nOPENACE_SECURITY_MODE=production\n" in "\n" + content
+
+
 def test_existing_project_volume_blocks_missing_password(tmp_path):
     fake_docker(tmp_path, "project_postgres-data\\n")
     result = run_bootstrap(tmp_path, tmp_path)
     assert result.returncode != 0
     assert "existing postgres-data volume" in result.stderr
     assert not (tmp_path / ".env").exists()
+
+
+def test_project_name_from_env_file_is_used_for_volume_lookup(tmp_path):
+    log = tmp_path / "docker.args"
+    docker = tmp_path / "docker"
+    docker.write_text(
+        f"#!/bin/sh\nprintf '%s' \"$*\" > '{log}'\nprintf 'custom_postgres-data\\n'\n"
+    )
+    docker.chmod(0o755)
+    (tmp_path / ".env").write_text("COMPOSE_PROJECT_NAME=custom\n")
+    result = run_bootstrap(tmp_path, tmp_path)
+    assert result.returncode != 0
+    assert "com.docker.compose.project=custom" in log.read_text()
+    assert "existing postgres-data volume" in result.stderr
 
 
 def test_unknown_volume_state_fails_closed(tmp_path):

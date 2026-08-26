@@ -50,9 +50,9 @@ def validate(values: dict[str, str]) -> list[str]:
     return errors
 
 
-def compose_project_name(project_root: Path) -> str:
+def compose_project_name(project_root: Path, env_values: dict[str, str]) -> str:
     explicit = os.environ.get("COMPOSE_PROJECT_NAME", "").strip()
-    raw = explicit or project_root.name
+    raw = explicit or env_values.get("COMPOSE_PROJECT_NAME", "").strip() or project_root.name
     normalized = re.sub(r"[^a-z0-9_-]", "", raw.lower())
     normalized = re.sub(r"^[^a-z0-9]+", "", normalized)
     if not normalized:
@@ -60,11 +60,11 @@ def compose_project_name(project_root: Path) -> str:
     return normalized
 
 
-def find_postgres_volumes(project_root: Path) -> list[str]:
+def find_postgres_volumes(project_root: Path, env_values: dict[str, str]) -> list[str]:
     docker = shutil.which("docker")
     if not docker:
         raise RuntimeError("Docker CLI is unavailable; existing volume state is unknown")
-    project = compose_project_name(project_root)
+    project = compose_project_name(project_root, env_values)
     result = subprocess.run(
         [docker, "volume", "ls", "-q", "--filter", f"label=com.docker.compose.project={project}",
          "--filter", "label=com.docker.compose.volume=postgres-data"],
@@ -94,6 +94,8 @@ def generated_value(name: str) -> str:
 
 def update_lines(lines: list[str], values: dict[str, str]) -> list[str]:
     result = list(lines)
+    if result and not result[-1].endswith(("\n", "\r")):
+        result[-1] += "\n"
     positions: dict[str, int] = {}
     for index, line in enumerate(result):
         match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=", line)
@@ -152,7 +154,7 @@ def bootstrap(project_root: Path, check_only: bool = False) -> None:
                 return
             missing_persisted_db = not current.get("DB_PASSWORD")
             if missing_persisted_db:
-                volumes = find_postgres_volumes(project_root)
+                volumes = find_postgres_volumes(project_root, current)
                 if volumes:
                     raise RuntimeError(
                         "an existing postgres-data volume was detected while DB_PASSWORD is missing; "

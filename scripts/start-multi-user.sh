@@ -124,11 +124,29 @@ echo -e "${BLUE}[4/5] Checking environment configuration...${NC}"
 # Only commands that start services may create/update .env. Read-only and
 # lifecycle commands such as config/logs/down never mutate configuration.
 START_REQUEST=false
-if [ $# -eq 0 ] || [ "${1:-}" = "--build" ] || [ "${1:-}" = "up" ]; then
+BOOTSTRAP_PROJECT_NAME=""
+if [ $# -eq 0 ] || [ "${1:-}" = "--build" ]; then
     START_REQUEST=true
 fi
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+    case "${args[$i]}" in
+        up) START_REQUEST=true; break ;;
+        -p|--project-name)
+            if (( i + 1 < ${#args[@]} )); then
+                BOOTSTRAP_PROJECT_NAME="${args[$((i + 1))]}"
+                i=$((i + 1))
+            fi
+            ;;
+        --project-name=*) BOOTSTRAP_PROJECT_NAME="${args[$i]#*=}" ;;
+    esac
+done
 if [ "$START_REQUEST" = true ]; then
-    "$PROJECT_ROOT/scripts/bootstrap-compose-env.sh"
+    if [ -n "$BOOTSTRAP_PROJECT_NAME" ]; then
+        COMPOSE_PROJECT_NAME="$BOOTSTRAP_PROJECT_NAME" "$PROJECT_ROOT/scripts/bootstrap-compose-env.sh"
+    else
+        "$PROJECT_ROOT/scripts/bootstrap-compose-env.sh"
+    fi
 fi
 
 # Multi-user mode is configured in the overlay file
