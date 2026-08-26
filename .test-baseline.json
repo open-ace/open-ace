@@ -4,12 +4,12 @@
   "created_before_modification": true,
   "layers": {
     "default": {
-      "min_tests": 4150,
+      "min_tests": 6233,
       "min_files": 250,
-      "last_updated": "2026-08-09",
-      "update_reason": "Issue #2429: refresh through isolated shared CI runner",
-      "actual_collected": 4306,
-      "actual_files": 260,
+      "last_updated": "2026-08-24",
+      "update_reason": "Issue #2429 batch 11: subprocess-core cluster migrated 273 items (251 unit + 22 integration); min raised by exactly +273 (5960+273); actual 9432 = 9159 (main pre-batch) + 273",
+      "actual_collected": 9432,
+      "actual_files": 653,
       "threshold_percent": 96
     },
     "critical": {
@@ -30,12 +30,12 @@
       "note": "Currently excluded by norecursedirs"
     },
     "issues": {
-      "min_tests": 4300,
-      "min_files": 430,
-      "last_updated": "2026-08-09",
-      "update_reason": "Issue #2429: required full-suite collection gate and legacy inventory",
-      "actual_collected": 4473,
-      "actual_files": 446,
+      "min_tests": 1856,
+      "min_files": 207,
+      "last_updated": "2026-08-24",
+      "update_reason": "Issue #2429 batch 11: I-group subprocess-core cluster (8 dirs: 559/1395/1002/786/1005/1461/2339/2340, 273 items / 14 glob files) — all 273 migrated (251 -> tests/unit incl. dedup filter swapped to the real production predicate, 22 -> tests/integration: subprocess/ for the 559 loopback-WS self-subprocess script [renamed off the e2e_ prefix] and the 1395 wrapper cluster, concurrency/ for 1005 pause-budget wall-clock and the 1002 heartbeat-thread cleanup half); 4 empty __init__.py deleted; 559 e2e's two vacuous rejection checks given real outcome assertions; 1005 wait-routing test hermeticized against build_secure_agent_env; min lowered by exact deltas (2129-273, 221-14)",
+      "actual_collected": 2068,
+      "actual_files": 222,
       "threshold_percent": 97
     }
   },
@@ -46,8 +46,8 @@
   "notes": [
     "Baseline created before pytest.ini modification to enable e2e_*.py collection",
     "tests/e2e currently excluded by norecursedirs in pytest.ini",
-    "Default count from: python scripts/ci.py run default-collection (4306 items)",
-    "Issue count from: python scripts/ci.py run issue-collection (4473 items, 446 files)",
-    "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard"
+    "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard",
+    "Default count from: python scripts/ci.py run default-collection (9432 items after #2429 batch 11)",
+    "Issue count from: clean-checkout issue-collection (2341 items, 238 files after #2429 batch 10; +1/+1 local gitignored tests/issues/89 noise)"
   ]
 }

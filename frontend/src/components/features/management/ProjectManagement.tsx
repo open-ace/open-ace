@@ -28,7 +28,14 @@ import {
   Divider,
   PageRefreshControl,
 } from '@/components/common';
-import { getAllProjectStats, deleteProject, type ProjectStats } from '@/api/projects';
+import { LazyLineChart } from '@/components/common/LazyCharts';
+import {
+  getAllProjectStats,
+  deleteProject,
+  getProjectDailyStats,
+  type ProjectStats,
+  type ProjectDailyStats,
+} from '@/api/projects';
 import { listProjectCategories, type ProjectCategory } from '@/api/projectCategories';
 import { formatDateTime, createMatcherConfig } from '@/utils';
 import { usePageRefresh, useAuth } from '@/hooks';
@@ -36,6 +43,7 @@ import { isAdmin } from '@/utils/permissions';
 import { matchesPatterns } from '@/utils/categoryConflictDetection';
 import { CategoryManageModal } from './CategoryManageModal';
 import { CategoryFilter } from './CategoryFilter';
+import { ProjectEditModal } from './ProjectEditModal';
 
 type CategorySortKey = 'name' | 'total_workspaces' | 'total_users' | 'total_tokens' | 'last_access';
 type SortDirection = 'asc' | 'desc';
@@ -198,6 +206,7 @@ export const ProjectManagement: React.FC = () => {
   const [selectedWorkspace, setSelectedWorkspace] = useState<ProjectStats | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectStats | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [editTarget, setEditTarget] = useState<ProjectStats | null>(null);
   const [sortKey, setSortKey] = useState<CategorySortKey | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
@@ -602,6 +611,17 @@ export const ProjectManagement: React.FC = () => {
                                             {t('viewDetails', language)}
                                           </Button>
                                           <Button
+                                            variant="outline-secondary"
+                                            size="sm"
+                                            onClick={(e) => {
+                                              e?.stopPropagation();
+                                              setEditTarget(workspace);
+                                            }}
+                                          >
+                                            <i className="bi bi-pencil me-1" />
+                                            {t('editProject', language)}
+                                          </Button>
+                                          <Button
                                             variant="outline-danger"
                                             size="sm"
                                             onClick={(e) => {
@@ -670,6 +690,14 @@ export const ProjectManagement: React.FC = () => {
         </div>
       </Modal>
 
+      {/* Project Edit Modal */}
+      <ProjectEditModal
+        isOpen={editTarget !== null}
+        onClose={() => setEditTarget(null)}
+        onSuccess={fetchData}
+        project={editTarget}
+      />
+
       {/* Category Management Modal */}
       <CategoryManageModal
         isOpen={showCategoryManageModal}
@@ -680,6 +708,17 @@ export const ProjectManagement: React.FC = () => {
   );
 };
 
+// Helper function to get date N days ago
+const getDaysAgo = (days: number): string => {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString().split('T')[0];
+};
+
+const getToday = (): string => {
+  return new Date().toISOString().split('T')[0];
+};
+
 // Workspace Detail Content Component
 const WorkspaceDetailContent: React.FC<{
   workspace: ProjectStats;
@@ -687,7 +726,80 @@ const WorkspaceDetailContent: React.FC<{
 }> = ({ workspace, formatDuration }) => {
   const language = useLanguage();
 
+  // Daily trend state
+  const [dailyStats, setDailyStats] = useState<ProjectDailyStats[]>([]);
+  const [isLoadingDaily, setIsLoadingDaily] = useState(true);
+  const [dailyError, setDailyError] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState<'7' | '30'>('7');
+
   const workspaceName = workspace.project_name ?? workspace.project_path.split(/[/\\]/).pop();
+
+  // Fetch daily stats
+  useEffect(() => {
+    const fetchDailyStats = async () => {
+      setIsLoadingDaily(true);
+      setDailyError(null);
+      try {
+        const startDate = getDaysAgo(parseInt(dateRange));
+        const endDate = getToday();
+        const response = await getProjectDailyStats(workspace.project_id, startDate, endDate);
+        setDailyStats(response.stats || []);
+      } catch (err: unknown) {
+        const errorMessage =
+          err instanceof Error ? (err as Error).message : 'Failed to load daily stats';
+        setDailyError(errorMessage);
+      } finally {
+        setIsLoadingDaily(false);
+      }
+    };
+
+    fetchDailyStats();
+  }, [workspace.project_id, dateRange]);
+
+  // Prepare trend chart data
+  const trendChartData = useMemo(() => {
+    if (dailyStats.length === 0) return null;
+
+    const sortedStats = [...dailyStats].sort((a, b) => a.date.localeCompare(b.date));
+
+    return {
+      labels: sortedStats.map((d) => d.date),
+      datasets: [
+        {
+          label: t('tokens', language),
+          data: sortedStats.map((d) => Number(d.total_tokens)),
+          borderColor: 'rgb(34, 197, 94)',
+          backgroundColor: 'rgba(34, 197, 94, 0.1)',
+          fill: false,
+          tension: 0.2,
+        },
+        {
+          label: t('requests', language),
+          data: sortedStats.map((d) => d.total_requests),
+          borderColor: 'rgb(59, 130, 246)',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          fill: false,
+          tension: 0.2,
+        },
+        {
+          label: t('activeUsers', language),
+          data: sortedStats.map((d) => d.active_users),
+          borderColor: 'rgb(168, 85, 247)',
+          backgroundColor: 'rgba(168, 85, 247, 0.1)',
+          fill: false,
+          tension: 0.2,
+        },
+        {
+          label: t('workTime', language),
+          data: sortedStats.map((d) => d.total_duration_hours),
+          borderColor: 'rgb(245, 158, 11)',
+          backgroundColor: 'rgba(245, 158, 11, 0.1)',
+          fill: false,
+          tension: 0.2,
+        },
+      ],
+    };
+  }, [dailyStats, language]);
 
   return (
     <div className="space-y-4">
@@ -786,6 +898,48 @@ const WorkspaceDetailContent: React.FC<{
             </div>
           </div>
         </div>
+      </div>
+
+      <Divider />
+
+      {/* Daily Trend Chart */}
+      <div>
+        <div className="d-flex justify-content-between align-items-center mb-3">
+          <h6 className="mb-0 d-flex align-items-center">
+            <i className="bi bi-graph-up me-2" />
+            {t('dailyTrend', language)}
+          </h6>
+          <div className="d-flex gap-2">
+            <Button
+              variant={dateRange === '7' ? 'primary' : 'outline-secondary'}
+              size="sm"
+              onClick={() => setDateRange('7')}
+            >
+              {t('dateRangeLast7Days', language)}
+            </Button>
+            <Button
+              variant={dateRange === '30' ? 'primary' : 'outline-secondary'}
+              size="sm"
+              onClick={() => setDateRange('30')}
+            >
+              {t('dateRangeLast30Days', language)}
+            </Button>
+          </div>
+        </div>
+
+        {isLoadingDaily ? (
+          <Loading size="sm" text={t('loading', language)} />
+        ) : dailyError ? (
+          <Error message={dailyError} onRetry={() => setDateRange(dateRange)} />
+        ) : trendChartData ? (
+          <LazyLineChart
+            labels={trendChartData.labels}
+            datasets={trendChartData.datasets}
+            height={300}
+          />
+        ) : (
+          <EmptyState icon="bi-graph-up" title={t('noData', language)} />
+        )}
       </div>
 
       <Divider />

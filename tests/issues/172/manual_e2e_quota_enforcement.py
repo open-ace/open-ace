@@ -42,6 +42,16 @@ TEST_USER = os.environ.get("TEST_USERNAME", "admin")
 TEST_PASS = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
+# The psql steps authenticate the local openace DB user through the
+# environment. The credential must be provided at runtime — it used to be
+# hardcoded here, leaking the production password into the repo (issue #2993).
+if not os.environ.get("PGPASSWORD"):
+    print(
+        "FATAL: PGPASSWORD is not set. Export the openace DB credential "
+        "before running (see issue #2993)."
+    )
+    sys.exit(2)
+
 passed = 0
 failed = 0
 errors = []
@@ -158,7 +168,7 @@ def test_quota_manager_daily_stats_fast_path():
         ],
         capture_output=True,
         text=True,
-        env={**os.environ, "PGPASSWORD": "f43379650019d8eb4b206932"},
+        env=dict(os.environ),
     )
     count = int(r.stdout.strip()) if r.stdout.strip() else 0
     if r.returncode != 0:
@@ -258,7 +268,7 @@ def test_remote_session_stats_refresh():
         ],
         capture_output=True,
         text=True,
-        env={**os.environ, "PGPASSWORD": "f43379650019d8eb4b206932"},
+        env=dict(os.environ),
     )
     if r.returncode != 0:
         fail("DB query", r.stderr.strip())
@@ -317,7 +327,7 @@ def test_testuser_quota_data():
         ],
         capture_output=True,
         text=True,
-        env={**os.environ, "PGPASSWORD": "f43379650019d8eb4b206932"},
+        env=dict(os.environ),
     )
     if r.returncode != 0 or not r.stdout.strip():
         fail("test user", f"not found or query failed: {r.stderr.strip()}")

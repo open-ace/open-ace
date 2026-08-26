@@ -87,6 +87,50 @@ export interface PasswordPolicy {
   password_require_special: boolean;
 }
 
+export interface FilterStats {
+  enabled: boolean;
+  redact_pii: boolean;
+  block_high_risk: boolean;
+  pattern_count: number;
+  keyword_count: number;
+  patterns: string[];
+  compiled_cache_size: number;
+  compiled_cache_hits: number;
+  compiled_cache_misses: number;
+  compiled_cache_hit_rate: number;
+  compiled_cache_max_size: number;
+}
+
+// Sensitive Keywords Types (Issue #3059)
+export interface SensitiveKeyword {
+  id: number;
+  tenant_id: number;
+  keyword: string;
+  is_enabled: boolean;
+  created_by: number;
+  created_at: string;
+  updated_at?: string;
+  is_new?: boolean; // Idempotency indicator in POST response
+}
+
+export interface SensitiveKeywordsResponse {
+  keywords: SensitiveKeyword[];
+  total: number;
+  limit: number;
+  offset: number;
+  tenant_id: number;
+}
+
+export interface CreateSensitiveKeywordRequest {
+  keyword: string;
+}
+
+export interface SensitiveKeywordsFilters {
+  limit?: number;
+  offset?: number;
+  is_enabled?: boolean;
+}
+
 // API
 export const governanceApi = {
   // Audit Logs
@@ -132,6 +176,11 @@ export const governanceApi = {
     return apiClient.post<FilterCheckResult>('/api/content/check', { content });
   },
 
+  // Filter Statistics
+  async getFilterStats(): Promise<FilterStats> {
+    return apiClient.get<FilterStats>('/api/content/filter/stats');
+  },
+
   // Security Settings
   async getSecuritySettings(): Promise<SecuritySettings> {
     return apiClient.get<SecuritySettings>('/api/security-settings');
@@ -144,5 +193,44 @@ export const governanceApi = {
   // Password Policy (accessible to all authenticated users)
   async getPasswordPolicy(): Promise<PasswordPolicy> {
     return apiClient.get<PasswordPolicy>('/api/password-policy');
+  },
+
+  // Sensitive Keywords (Issue #3059)
+  async getSensitiveKeywords(
+    tenantId: number,
+    filters?: SensitiveKeywordsFilters
+  ): Promise<SensitiveKeywordsResponse> {
+    const params: Record<string, string> = {};
+    if (filters?.limit) params.limit = String(filters.limit);
+    if (filters?.offset) params.offset = String(filters.offset);
+    if (filters?.is_enabled !== undefined) params.is_enabled = String(filters.is_enabled);
+    return apiClient.get<SensitiveKeywordsResponse>(
+      `/api/tenants/${tenantId}/sensitive-keywords`,
+      params
+    );
+  },
+
+  async createSensitiveKeyword(
+    tenantId: number,
+    data: CreateSensitiveKeywordRequest
+  ): Promise<SensitiveKeyword> {
+    return apiClient.post<SensitiveKeyword>(`/api/tenants/${tenantId}/sensitive-keywords`, data);
+  },
+
+  async updateSensitiveKeyword(
+    tenantId: number,
+    keywordId: number,
+    data: { is_enabled: boolean }
+  ): Promise<{ success: boolean }> {
+    return apiClient.put<{ success: boolean }>(
+      `/api/tenants/${tenantId}/sensitive-keywords/${keywordId}`,
+      data
+    );
+  },
+
+  async deleteSensitiveKeyword(tenantId: number, keywordId: number): Promise<{ success: boolean }> {
+    return apiClient.delete<{ success: boolean }>(
+      `/api/tenants/${tenantId}/sensitive-keywords/${keywordId}`
+    );
   },
 };

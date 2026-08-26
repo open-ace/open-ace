@@ -13,6 +13,7 @@
 
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useQueries } from '@tanstack/react-query';
+import { format as formatDateTime } from 'date-fns';
 import { useAppStore, useLanguage, useWorkspaceFullscreen } from '@/store';
 import { t } from '@/i18n';
 import { Button, Badge, Loading, Modal } from '@/components/common';
@@ -81,10 +82,29 @@ const STATUS_ICONS: Record<string, string> = {
   cancelled: 'bi-slash-circle-fill',
   forked: 'bi-diagram-3-fill',
   pending: 'bi-circle',
+  // acceptance_verification milestones carry the verifier's verdict as their
+  // status; without these entries they all fell through to the pending icon
+  // ("等待中" + hollow circle) even after a confirmed/rejected verdict.
+  confirmed: 'bi-check-circle-fill',
+  rejected: 'bi-x-circle-fill',
+  indeterminate: 'bi-exclamation-circle-fill',
+};
+
+// Session-viewer message limits (#3000): a hard char cap so one giant tool
+// payload cannot take the modal down, and the threshold above which a message
+// gets an expand/collapse toggle (below it the toggle is pointless noise).
+const SESSION_MESSAGE_CHAR_CAP = 200_000;
+const SESSION_MESSAGE_COLLAPSE_AT = 800;
+
+/** ISO → 'MM-dd HH:mm' for the session viewer; '' for absent/invalid values. */
+const formatSessionTimestamp = (value?: string | null): string => {
+  if (!value) return '';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? '' : formatDateTime(parsed, 'MM-dd HH:mm');
 };
 
 // Milestone type display config
-const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
+export const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
   repo_setup: { icon: 'bi-github', color: 'dark' },
   issue_created: { icon: 'bi-card-text', color: 'info' },
   branch_created: { icon: 'bi-git', color: 'success' },
@@ -95,7 +115,11 @@ const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
   dev_started: { icon: 'bi-code-slash', color: 'primary' },
   dev_completed: { icon: 'bi-check2-square', color: 'success' },
   tests_run: { icon: 'bi-activity', color: 'info' },
-  pr_created: { icon: 'bi-git-pull-request', color: 'success' },
+  // bi-git-pull-request does not exist in bootstrap-icons (no PR icons in
+  // the set) — the pre-fix class rendered an empty glyph since the map's
+  // introduction. bi-file-earmark-diff carries the "proposed code change"
+  // meaning instead.
+  pr_created: { icon: 'bi-file-earmark-diff', color: 'success' },
   pr_reviewed: { icon: 'bi-chat-left-text', color: 'warning' },
   pr_updated: { icon: 'bi-pencil-square', color: 'primary' },
   pr_review_summary: { icon: 'bi-check2-circle', color: 'success' },
@@ -105,6 +129,39 @@ const MILESTONE_DISPLAY: Record<string, { icon: string; color: string }> = {
   round_completed: { icon: 'bi-flag-fill', color: 'success' },
   merged: { icon: 'bi-sign-merge-right', color: 'success' },
   cleaned_up: { icon: 'bi-trash', color: 'secondary' },
+  // CI repair family (merge phase). Exhausted/failed variants stay warning so
+  // the "needs attention" tone is visible at a glance in the timeline.
+  ci_repair_started: { icon: 'bi-wrench', color: 'warning' },
+  ci_repair_applied: { icon: 'bi-wrench-adjustable-circle', color: 'primary' },
+  ci_repair_exhausted: { icon: 'bi-exclamation-triangle', color: 'warning' },
+  ci_repair_no_change_exhausted: { icon: 'bi-clipboard-x', color: 'warning' },
+  ci_repair_transient_exhausted: { icon: 'bi-lightning-charge', color: 'warning' },
+  ci_repair_escalated_to_development: { icon: 'bi-arrow-up-right-square', color: 'warning' },
+  ci_repair_environment_mismatch: { icon: 'bi-hdd-network', color: 'warning' },
+  ci_diagnostics_pending: { icon: 'bi-search', color: 'info' },
+  ci_failed_before_report: { icon: 'bi-x-circle', color: 'warning' },
+  timing_issue: { icon: 'bi-clock-history', color: 'warning' },
+  pr_zero_check_runs: { icon: 'bi-slash-circle', color: 'warning' },
+  // Conflict / worktree family.
+  conflicts_pushed: { icon: 'bi-box-arrow-up', color: 'success' },
+  worktree_restored: { icon: 'bi-arrow-counterclockwise', color: 'info' },
+  branch_mismatch: { icon: 'bi-shuffle', color: 'warning' },
+  // Acceptance family. The verdict itself is carried by the status badge and
+  // the ✅/❌/⚠️ tone in the card summary; these icons mark the action.
+  acceptance_verification: { icon: 'bi-shield-check', color: 'primary' },
+  acceptance_rejected_cap_exhausted: { icon: 'bi-shield-exclamation', color: 'warning' },
+  acceptance_rejected_reopened: { icon: 'bi-bootstrap-reboot', color: 'warning' },
+  pr_head_unverified: { icon: 'bi-question-circle', color: 'warning' },
+  // Wait / bookkeeping family. frontend_node_modules_shim_failed only exists
+  // on historical rows (producer reverted in #2694) but still needs an icon.
+  wait_started: { icon: 'bi-hourglass', color: 'secondary' },
+  issue_linked: { icon: 'bi-link-45deg', color: 'info' },
+  no_changes: { icon: 'bi-dash-circle', color: 'secondary' },
+  cleanup_pending: { icon: 'bi-trash3', color: 'secondary' },
+  terminal_report_posted: { icon: 'bi-file-earmark-check', color: 'success' },
+  frontend_node_modules_shim_failed: { icon: 'bi-exclamation-diamond', color: 'warning' },
+  recovery_evidence_missing: { icon: 'bi-journal-x', color: 'warning' },
+  workflow_forked: { icon: 'bi-diagram-3', color: 'info' },
 };
 
 // Milestone types whose `plan_content` / `review_content` holds full-text output
@@ -123,12 +180,102 @@ const VERDICT_TONE: Record<string, string> = {
   confirmed: '✅',
   rejected: '❌',
   indeterminate: '⚠️',
+  advisory: 'ℹ️',
 };
 
 const ACCEPTANCE_STATUS_KEYS: Record<string, string> = {
   confirmed: 'autoAcceptanceStatusConfirmed',
   rejected: 'autoAcceptanceStatusRejected',
   indeterminate: 'autoAcceptanceStatusIndeterminate',
+};
+
+interface AcceptanceEntryLike {
+  item?: unknown;
+  verdict?: unknown;
+}
+
+const truncateSummaryName = (name: string): string =>
+  name.length > 40 ? `${name.slice(0, 39)}…` : name;
+
+/**
+ * One-line, UI-language summary of an acceptance_verification milestone,
+ * computed from the full report JSON in `milestone.metadata` (#2985).
+ *
+ * The backend `result_summary` ("status=confirmed; scope=1 gates=0 verifier=3")
+ * is a compact diagnostic string; users cannot tell what scope/gates/verifier
+ * mean. This renders e.g. "必需路径 1/1 已变更 · 语义检查 3/3 确认" for a
+ * confirmed report, or "未过项: quotaFormatter.ts、… (+1 项)" for a rejected
+ * one. Returns null when metadata is absent/malformed so the caller falls
+ * back to the persisted raw summary.
+ */
+export const getAcceptanceSummaryDetail = (
+  metadata: string | null | undefined,
+  language: Language
+): string | null => {
+  if (!metadata?.trim()) return null;
+  let report: Record<string, unknown>;
+  try {
+    report = JSON.parse(metadata) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const status = String(report.status ?? '');
+  if (!(status in ACCEPTANCE_STATUS_KEYS)) return null;
+  const translate = (key: string, fallback: string) => {
+    const value = t(key, language);
+    return value === key ? fallback : value;
+  };
+  const itemsSuffix = translate('autoAcceptanceItemsSuffix', 'items');
+  const collect = (key: string): AcceptanceEntryLike[] => {
+    const value = report[key];
+    return Array.isArray(value)
+      ? (value.filter((e) => e && typeof e === 'object') as AcceptanceEntryLike[])
+      : [];
+  };
+  const scope = collect('scope');
+  const gates = collect('gates');
+  const verifier = collect('verifier');
+  const advisoryCount = [scope, gates, verifier]
+    .flat()
+    .filter((e) => e.verdict === 'advisory').length;
+  const failed = [scope, gates, verifier]
+    .flat()
+    .filter((e) => e.verdict !== 'confirmed' && e.verdict !== 'advisory')
+    .map((e) => String(e.item ?? '').trim())
+    .filter(Boolean);
+
+  const parts: string[] = [];
+  if (status === 'confirmed') {
+    const groups: Array<[string, string, AcceptanceEntryLike[]]> = [
+      ['autoAcceptancePathsLabel', 'Required paths', scope],
+      ['autoAcceptanceGatesLabel', 'Mechanical gates', gates],
+      ['autoAcceptanceChecksLabel', 'Semantic checks', verifier],
+    ];
+    for (const [labelKey, labelFallback, entries] of groups) {
+      if (entries.length === 0) continue;
+      const confirmed = entries.filter((e) => e.verdict === 'confirmed').length;
+      parts.push(`${translate(labelKey, labelFallback)} ${confirmed}/${entries.length}`);
+    }
+  } else {
+    const label =
+      status === 'rejected'
+        ? translate('autoAcceptanceFailedLabel', 'Failed')
+        : translate('autoAcceptanceUnresolvedLabel', 'Unresolved');
+    const nameJoin = language === 'zh' || language === 'ja' ? '、' : ', ';
+    if (failed.length > 0) {
+      const shown = failed.slice(0, 3).map(truncateSummaryName);
+      const extra = failed.length - shown.length;
+      parts.push(
+        `${label}: ${shown.join(nameJoin)}${extra > 0 ? ` (+${extra} ${itemsSuffix})` : ''}`
+      );
+    } else {
+      parts.push(label);
+    }
+  }
+  if (advisoryCount > 0) {
+    parts.push(`${translate('autoAcceptanceAdvisoryLabel', 'advisory')} ${advisoryCount}`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
 };
 
 export const formatAcceptanceReport = (metadata: string, language: Language): string => {
@@ -184,7 +331,7 @@ export const formatAcceptanceReport = (metadata: string, language: Language): st
   }
   return lines.join('\n').trim();
 };
-const MILESTONE_ICON_COLORS: Record<string, string> = {
+export const MILESTONE_ICON_COLORS: Record<string, string> = {
   dark: 'var(--text-primary)',
   info: 'var(--color-info)',
   success: 'var(--color-success)',
@@ -387,6 +534,11 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     milestoneId: string;
     sessionId: string;
   } | null>(null);
+  // Session-viewer per-message expansion (#3000), keyed `${milestoneId}:${idx}`
+  // so stale entries from a previously viewed milestone are harmless.
+  const [expandedSessionMessages, setExpandedSessionMessages] = useState<Record<string, boolean>>(
+    {}
+  );
   const [showBranchSelector, setShowBranchSelector] = useState(false);
   const [viewingDiff, setViewingDiff] = useState<string | null>(null);
   const [selectedDiffFileId, setSelectedDiffFileId] = useState<string | null>(null);
@@ -880,6 +1032,28 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     if (!value) return '';
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime())) return '';
+    // Time alone cannot tell which DAY a milestone belongs to — workflows
+    // span multiple days, so always show month-day (plus year when it
+    // differs from the current year).
+    const sameYear = parsed.getFullYear() === new Date().getFullYear();
+    return new Intl.DateTimeFormat(undefined, {
+      ...(sameYear ? {} : { year: 'numeric' }),
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(parsed);
+  };
+
+  // Live-activity rows live in a fixed-width (58px) time column laid out for
+  // HH:mm:ss (#1025) and stream same-session events — keep them time-only so
+  // the longer date-bearing string cannot wrap the row.
+  const formatActivityTime = (value: string | null) => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
     return new Intl.DateTimeFormat(undefined, {
       hour: '2-digit',
       minute: '2-digit',
@@ -898,7 +1072,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     subtype?: string;
     attempt?: number;
   }) => {
-    const timestamp = formatMilestoneTime(activity.timestamp ?? null) || '--:--:--';
+    const timestamp = formatActivityTime(activity.timestamp ?? null) || '--:--:--';
     if (activity.type === 'tool_use') {
       const snippet = activity.tool_input?.trim();
       return {
@@ -1627,6 +1801,13 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
       ''
     ).trim();
     const milestoneSummary = rawSummary ? truncateInlineText(rawSummary, compact ? 120 : 220) : '';
+    // acceptance_verification cards prefer the structured, UI-language summary
+    // computed from the report JSON over the backend's diagnostic string
+    // ("status=confirmed; scope=1 gates=0 verifier=3").
+    const acceptanceSummaryDetail =
+      milestone.milestone_type === 'acceptance_verification'
+        ? getAcceptanceSummaryDetail(milestone.metadata, language)
+        : null;
     const statusDisplay = (() => {
       if (milestone.status === 'completed') {
         return {
@@ -1663,6 +1844,30 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
           tone: 'warning' as const,
         };
       }
+      // acceptance_verification verdicts (labels reuse the #2658 report-viewer
+      // keys): confirmed is a terminal green check, rejected a red cross,
+      // indeterminate a warning awaiting human review.
+      if (milestone.status === 'confirmed') {
+        return {
+          icon: STATUS_ICONS.confirmed,
+          label: t('autoAcceptanceStatusConfirmed', language),
+          tone: 'success' as const,
+        };
+      }
+      if (milestone.status === 'rejected') {
+        return {
+          icon: STATUS_ICONS.rejected,
+          label: t('autoAcceptanceStatusRejected', language),
+          tone: 'danger' as const,
+        };
+      }
+      if (milestone.status === 'indeterminate') {
+        return {
+          icon: STATUS_ICONS.indeterminate,
+          label: t('autoAcceptanceStatusIndeterminate', language),
+          tone: 'warning' as const,
+        };
+      }
       return {
         icon: STATUS_ICONS.pending,
         label: t('autoStatusPending', language),
@@ -1675,7 +1880,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
         : '';
     const showDetailSections = isExpanded && canExpand;
     const showLiveActivitySection = isActivityHost;
-    const showInlinePreview = !compact && milestoneSummary;
+    const showInlinePreview = !compact && (acceptanceSummaryDetail ?? milestoneSummary);
     const showInlineSessionButton = !compact && !!llmSessionId;
     const showInlineActionGroup =
       showInlineSessionButton ||
@@ -1722,9 +1927,15 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               {showInlinePreview && (
                 <p
                   className="timeline-milestone-preview"
-                  title={rawSummary.length > 220 ? rawSummary : undefined}
+                  title={
+                    acceptanceSummaryDetail
+                      ? undefined
+                      : rawSummary.length > 220
+                        ? rawSummary
+                        : undefined
+                  }
                 >
-                  {milestoneSummary}
+                  {acceptanceSummaryDetail ?? milestoneSummary}
                 </p>
               )}
               <div className="timeline-milestone-meta-row">
@@ -2155,7 +2366,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                     rel="noopener noreferrer"
                     className="timeline-pill-link"
                   >
-                    <i className="bi bi-git-pull-request"></i>
+                    <i className="bi bi-file-earmark-diff"></i>
                     <span>
                       {t('autoPrBadge', language)}
                       {workflow.github_pr_number}
@@ -2163,7 +2374,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
                   </a>
                 ) : (
                   <span className="timeline-chip timeline-chip--subtle">
-                    <i className="bi bi-git-pull-request me-1"></i>
+                    <i className="bi bi-file-earmark-diff me-1"></i>
                     {t('autoPrBadge', language)}
                     {workflow.github_pr_number}
                   </span>
@@ -2224,7 +2435,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               <Button
                 size="sm"
                 variant="outline-secondary"
-                onClick={() => toggleWorkspaceFullscreen(false, false)}
+                onClick={() => toggleWorkspaceFullscreen(false)}
               >
                 <i className="bi bi-fullscreen-exit me-1"></i>
                 {t('exitFullscreen', language)}
@@ -2674,48 +2885,95 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
               </Badge>
             </div>
             {Array.isArray(session.messages) &&
-              session.messages.map((msg, idx) => (
-                <div key={idx} className="mb-2">
-                  <Badge
-                    variant={
-                      msg.role === 'assistant'
-                        ? 'primary'
-                        : msg.role === 'user'
-                          ? 'success'
-                          : 'secondary'
-                    }
-                  >
-                    {(() => {
-                      switch (msg.role) {
-                        case 'user':
-                          return t('messageRoleUser', language);
-                        case 'assistant':
-                          return t('messageRoleAssistant', language);
-                        case 'system':
-                          return t('messageRoleSystem', language);
-                        case 'toolResult':
-                          return t('messageRoleToolResult', language);
-                        default:
-                          return msg.role;
-                      }
-                    })()}
-                  </Badge>
-                  {typeof msg.content === 'string' ? (
-                    <pre
-                      className="p-2 rounded mt-1 mb-0"
-                      style={{
-                        backgroundColor: 'var(--bg-secondary)',
-                        fontSize: '0.8rem',
-                        maxHeight: '200px',
-                        overflow: 'auto',
-                        whiteSpace: 'pre-wrap',
-                      }}
-                    >
-                      {formatSessionMessageContent(msg.content).slice(0, 4000)}
-                    </pre>
-                  ) : null}
-                </div>
-              ))}
+              session.messages.map((msg, idx) => {
+                // Conversational turns render as markdown; tool/system output
+                // stays monospace (commands/JSON — rendering it as markdown
+                // would mangle it). #3000.
+                const isConversational = msg.role === 'assistant' || msg.role === 'user';
+                const normalized =
+                  typeof msg.content === 'string' ? formatSessionMessageContent(msg.content) : '';
+                const overLimit = normalized.length > SESSION_MESSAGE_CHAR_CAP;
+                const body = overLimit
+                  ? `${normalized.slice(0, SESSION_MESSAGE_CHAR_CAP)}\n\n… ${t(
+                      'autoMessageTruncated',
+                      language
+                    )}`
+                  : normalized;
+                const expandKey = `${viewingSession?.milestoneId ?? ''}:${idx}`;
+                const expanded = !!expandedSessionMessages[expandKey];
+                const toggleExpanded = () =>
+                  setExpandedSessionMessages((prev) => ({
+                    ...prev,
+                    [expandKey]: !prev[expandKey],
+                  }));
+                const timestampTitle = msg.timestamp ?? '';
+                const timestampText = formatSessionTimestamp(msg.timestamp);
+                return (
+                  <div key={idx} className="mb-2">
+                    <div className="d-flex align-items-center gap-2 flex-wrap">
+                      <Badge
+                        variant={
+                          msg.role === 'assistant'
+                            ? 'primary'
+                            : msg.role === 'user'
+                              ? 'success'
+                              : 'secondary'
+                        }
+                      >
+                        {(() => {
+                          switch (msg.role) {
+                            case 'user':
+                              return t('messageRoleUser', language);
+                            case 'assistant':
+                              return t('messageRoleAssistant', language);
+                            case 'system':
+                              return t('messageRoleSystem', language);
+                            case 'toolResult':
+                              return t('messageRoleToolResult', language);
+                            default:
+                              return msg.role;
+                          }
+                        })()}
+                      </Badge>
+                      {timestampText && (
+                        <span className="timeline-session-msg-time" title={timestampTitle}>
+                          {timestampText}
+                        </span>
+                      )}
+                    </div>
+                    {body ? (
+                      isConversational ? (
+                        <div
+                          className={`timeline-session-msg-md ${
+                            expanded ? 'timeline-session-msg-md--expanded' : ''
+                          }`}
+                        >
+                          <MarkdownContent content={body} />
+                        </div>
+                      ) : (
+                        <pre
+                          className="timeline-session-msg-pre"
+                          style={expanded ? { maxHeight: 'none' } : undefined}
+                        >
+                          {body}
+                        </pre>
+                      )
+                    ) : null}
+                    {body.length > SESSION_MESSAGE_COLLAPSE_AT && (
+                      <Button
+                        size="sm"
+                        variant="outline-secondary"
+                        className="mt-1 py-0 px-2"
+                        onClick={toggleExpanded}
+                      >
+                        {expanded
+                          ? t('autoCollapseMessage', language)
+                          : t('autoExpandMessage', language)}
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
             {!Array.isArray(session.messages) && (
               <p className="text-muted">{t('autoNoMessagesAvailable', language)}</p>
             )}

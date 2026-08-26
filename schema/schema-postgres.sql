@@ -524,7 +524,8 @@ CREATE TABLE autonomous_workflows (
     verified_by text,
     verification_session_id text,
     issue_closed_by_workflow_at timestamp with time zone,
-    merge_fail_dev_rounds integer DEFAULT 0
+    merge_fail_dev_rounds integer DEFAULT 0,
+    merge_policy_settle_retries integer DEFAULT 0
 );
 
 CREATE SEQUENCE autonomous_workflows_id_seq
@@ -1455,6 +1456,65 @@ CREATE SEQUENCE remote_runtime_outputs_id_seq
     CACHE 1;
 
 ALTER SEQUENCE remote_runtime_outputs_id_seq OWNED BY remote_runtime_outputs.id;
+CREATE TABLE request_performance (
+    id integer NOT NULL,
+    request_id text NOT NULL,
+    session_id text,
+    conversation_id text,
+    tenant_id integer NOT NULL,
+    tool_name text NOT NULL,
+    host_name text DEFAULT 'localhost'::text,
+    user_id integer,
+    started_at timestamp without time zone NOT NULL,
+    first_response_at timestamp without time zone,
+    completed_at timestamp without time zone,
+    ttft_ms integer,
+    tool_call_duration_ms integer DEFAULT 0,
+    total_duration_ms integer,
+    status text DEFAULT 'success'::text NOT NULL,
+    sample_type text DEFAULT 'streaming'::text,
+    model text,
+    tool_call_count integer DEFAULT 0,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE request_performance_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE request_performance_id_seq OWNED BY request_performance.id;
+CREATE TABLE response_time_stats (
+    id integer NOT NULL,
+    date text NOT NULL,
+    tool_name text NOT NULL,
+    host_name text DEFAULT 'localhost'::text,
+    tenant_id integer NOT NULL,
+    avg_ms real,
+    p50_ms integer,
+    p95_ms integer,
+    min_ms integer,
+    max_ms integer,
+    tool_call_avg_ms real,
+    tool_call_ratio real,
+    sample_count integer DEFAULT 0 NOT NULL,
+    success_count integer DEFAULT 0 NOT NULL,
+    failed_count integer DEFAULT 0 NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE SEQUENCE response_time_stats_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE response_time_stats_id_seq OWNED BY response_time_stats.id;
 CREATE TABLE retention_evidence (
     id integer NOT NULL,
     execution_id character varying(64) NOT NULL,
@@ -1977,8 +2037,8 @@ CREATE TABLE tenant_quotas (
     tenant_id integer NOT NULL,
     daily_token_limit bigint DEFAULT 1000000,
     monthly_token_limit bigint DEFAULT 30000000,
-    daily_request_limit integer DEFAULT 10000,
-    monthly_request_limit integer DEFAULT 300000,
+    daily_request_limit bigint DEFAULT 10000,
+    monthly_request_limit bigint DEFAULT 300000,
     max_users integer DEFAULT 100,
     max_sessions_per_user integer DEFAULT 5,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
@@ -2325,10 +2385,10 @@ CREATE TABLE users (
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     last_login timestamp without time zone,
     role character varying DEFAULT 'user'::character varying,
-    daily_token_quota integer,
-    monthly_token_quota integer,
-    daily_request_quota integer,
-    monthly_request_quota integer,
+    daily_token_quota bigint,
+    monthly_token_quota bigint,
+    daily_request_quota bigint,
+    monthly_request_quota bigint,
     deleted_at timestamp without time zone,
     system_account text,
     tenant_id integer,
@@ -2379,6 +2439,11 @@ CREATE TABLE webhook_deliveries (
     last_error_at timestamp without time zone,
     created_at timestamp without time zone NOT NULL,
     updated_at timestamp without time zone NOT NULL,
+    receiver_identity_hash character varying(64),
+    cooldown_key character varying(64),
+    cooldown_expires_at timestamp without time zone,
+    delivery_claim_token character varying(64),
+    delivery_claim_expires_at timestamp without time zone,
     CONSTRAINT ck_webhook_deliveries_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'in_flight'::character varying, 'delivered'::character varying, 'dead'::character varying])::text[])))
 );
 
@@ -2566,6 +2631,10 @@ ALTER TABLE ONLY remote_machines ALTER COLUMN id SET DEFAULT nextval('remote_mac
 ALTER TABLE ONLY remote_runtime_commands ALTER COLUMN id SET DEFAULT nextval('remote_runtime_commands_id_seq'::regclass);
 
 ALTER TABLE ONLY remote_runtime_outputs ALTER COLUMN id SET DEFAULT nextval('remote_runtime_outputs_id_seq'::regclass);
+
+ALTER TABLE ONLY request_performance ALTER COLUMN id SET DEFAULT nextval('request_performance_id_seq'::regclass);
+
+ALTER TABLE ONLY response_time_stats ALTER COLUMN id SET DEFAULT nextval('response_time_stats_id_seq'::regclass);
 
 ALTER TABLE ONLY retention_evidence ALTER COLUMN id SET DEFAULT nextval('retention_evidence_id_seq'::regclass);
 
@@ -2849,6 +2918,18 @@ ALTER TABLE ONLY remote_runtime_commands
 
 ALTER TABLE ONLY remote_runtime_outputs
     ADD CONSTRAINT remote_runtime_outputs_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY request_performance
+    ADD CONSTRAINT request_performance_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY request_performance
+    ADD CONSTRAINT request_performance_request_id_key UNIQUE (request_id);
+
+ALTER TABLE ONLY response_time_stats
+    ADD CONSTRAINT response_time_stats_date_tool_name_host_name_tenant_id_key UNIQUE (date, tool_name, host_name, tenant_id);
+
+ALTER TABLE ONLY response_time_stats
+    ADD CONSTRAINT response_time_stats_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY retention_evidence
     ADD CONSTRAINT retention_evidence_pkey PRIMARY KEY (id);
@@ -3692,375 +3773,407 @@ CREATE INDEX idx_remote_runtime_outputs_expires ON remote_runtime_outputs USING 
 
 CREATE INDEX idx_remote_runtime_outputs_session_index ON remote_runtime_outputs USING btree (session_id, event_index);
 
+CREATE INDEX idx_request_performance_date ON request_performance USING btree (started_at);
+
+
+--
+--
+
+CREATE INDEX idx_request_performance_tenant ON request_performance USING btree (tenant_id);
+
+CREATE INDEX idx_request_performance_tool ON request_performance USING btree (tool_name, started_at);
+
+
+--
+--
+
+CREATE INDEX idx_response_time_stats_date ON response_time_stats USING btree (date);
+
+CREATE INDEX idx_response_time_stats_tenant ON response_time_stats USING btree (tenant_id, date);
+
+
+--
+--
+
 CREATE INDEX idx_retention_evidence_execution ON retention_evidence USING btree (execution_id);
-
-
---
---
 
 CREATE INDEX idx_retention_evidence_tenant ON retention_evidence USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_retention_evidence_timestamp ON retention_evidence USING btree (created_at);
-
-
---
---
 
 CREATE INDEX idx_retention_executions_execution_id ON retention_executions USING btree (execution_id);
 
+
+--
+--
+
 CREATE INDEX idx_retention_executions_lock ON retention_executions USING btree (lock_acquired_at, lock_expires_at);
-
-
---
---
 
 CREATE INDEX idx_retention_executions_status ON retention_executions USING btree (status);
 
+
+--
+--
+
 CREATE INDEX idx_retention_executions_tenant ON retention_executions USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_retention_policies_data_type ON retention_policies USING btree (data_type);
 
+
+--
+--
+
 CREATE INDEX idx_retention_policies_enabled ON retention_policies USING btree (enabled);
-
-
---
---
 
 CREATE INDEX idx_retention_policies_tenant ON retention_policies USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_run_events_created_at ON agent_run_events USING btree (created_at);
-
-
---
---
 
 CREATE INDEX idx_run_events_event_type ON agent_run_events USING btree (event_type);
 
+
+--
+--
+
 CREATE INDEX idx_run_events_run_id ON agent_run_events USING btree (run_id);
-
-
---
---
 
 CREATE INDEX idx_run_events_session_id ON agent_run_events USING btree (session_id, id);
 
+
+--
+--
+
 CREATE INDEX idx_scheduler_leaders_expires ON scheduler_leaders USING btree (expires_at);
-
-
---
---
 
 CREATE INDEX idx_scheduler_leaders_heartbeat ON scheduler_leaders USING btree (heartbeat_at);
 
+
+--
+--
+
 CREATE INDEX idx_scheduler_runs_job_time ON scheduler_runs USING btree (job_name, started_at DESC);
-
-
---
---
 
 CREATE INDEX idx_scheduler_runs_status ON scheduler_runs USING btree (status);
 
+
+--
+--
+
 CREATE INDEX idx_security_settings_key ON security_settings USING btree (setting_key);
-
-
---
---
 
 CREATE INDEX idx_session_messages_external_message_id ON session_messages USING btree (session_id, external_message_id);
 
+
+--
+--
+
 CREATE INDEX idx_session_messages_session_id ON session_messages USING btree (session_id);
-
-
---
---
 
 CREATE INDEX idx_session_messages_session_timestamp ON session_messages USING btree (session_id, "timestamp", id);
 
+
+--
+--
+
 CREATE INDEX idx_session_messages_source ON session_messages USING btree (session_id, source);
-
-
---
---
 
 CREATE INDEX idx_session_messages_tenant_session ON session_messages USING btree (tenant_id, session_id);
 
+
+--
+--
+
 CREATE INDEX idx_session_messages_tenant_session_timestamp ON session_messages USING btree (tenant_id, session_id, "timestamp", id);
-
-
---
---
 
 CREATE INDEX idx_session_stats_session_id ON session_stats USING btree (session_id);
 
+
+--
+--
+
 CREATE INDEX idx_session_stats_tool_host ON session_stats USING btree (tool_name, host_name);
-
-
---
---
 
 CREATE INDEX idx_session_stats_updated_at ON session_stats USING btree (updated_at DESC);
 
+
+--
+--
+
 CREATE INDEX idx_sessions_active ON sessions USING btree (is_active, expires_at);
-
-
---
---
 
 CREATE INDEX idx_sessions_expires ON sessions USING btree (expires_at);
 
+
+--
+--
+
 CREATE INDEX idx_sessions_token ON sessions USING btree (token);
-
-
---
---
 
 CREATE INDEX idx_sessions_user_id ON sessions USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_shared_sessions_session ON shared_sessions USING btree (session_id);
-
-
---
---
 
 CREATE INDEX idx_shared_sessions_target ON shared_sessions USING btree (target_id);
 
+
+--
+--
+
 CREATE INDEX idx_sso_auth_states_expires ON sso_auth_states USING btree (expires_at);
-
-
---
---
 
 CREATE INDEX idx_sso_identities_provider ON sso_identities USING btree (provider_name, provider_user_id);
 
+
+--
+--
+
 CREATE INDEX idx_sso_identities_user ON sso_identities USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_sso_providers_tenant ON sso_providers USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_sso_sessions_token ON sso_sessions USING btree (session_token);
-
-
---
---
 
 CREATE INDEX idx_sso_sessions_user ON sso_sessions USING btree (user_id);
 
+
+--
+--
+
 CREATE INDEX idx_sync_events_session_id ON sync_events USING btree (session_id);
-
-
---
---
 
 CREATE INDEX idx_sync_events_timestamp ON sync_events USING btree ("timestamp");
 
+
+--
+--
+
 CREATE INDEX idx_sync_events_user_id ON sync_events USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_tac_mapping ON tool_account_conflicts USING btree (mapping_id);
 
+
+--
+--
+
 CREATE INDEX idx_tac_unresolved ON tool_account_conflicts USING btree (detected_at) WHERE (resolved_at IS NULL);
-
-
---
---
 
 CREATE INDEX idx_team_members_team ON team_members USING btree (team_id);
 
+
+--
+--
+
 CREATE INDEX idx_team_members_user ON team_members USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_teams_owner ON teams USING btree (owner_id);
 
+
+--
+--
+
 CREATE INDEX idx_teams_sync_source ON teams USING btree ((((settings)::jsonb ->> 'sync_source'::text)));
-
-
---
---
 
 CREATE INDEX idx_tenant_keywords_enabled ON tenant_sensitive_keywords USING btree (tenant_id, is_enabled) WHERE (is_enabled = true);
 
+
+--
+--
+
 CREATE INDEX idx_tenant_keywords_tenant ON tenant_sensitive_keywords USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_tenant_migrations_status ON tenant_migrations USING btree (status);
 
+
+--
+--
+
 CREATE INDEX idx_tenant_migrations_user ON tenant_migrations USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_tenant_period_history_dates ON tenant_period_history USING btree (period_start, period_end);
 
+
+--
+--
+
 CREATE INDEX idx_tenant_period_history_tenant ON tenant_period_history USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_tenant_plans_active ON tenant_plans USING btree (is_active);
 
+
+--
+--
+
 CREATE INDEX idx_tenant_plans_slug ON tenant_plans USING btree (slug);
-
-
---
---
 
 CREATE INDEX idx_tenant_quotas_tenant ON tenant_quotas USING btree (tenant_id);
 
+
+--
+--
+
 CREATE INDEX idx_tenant_settings_tenant ON tenant_settings USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_tenant_usage_date ON tenant_usage USING btree (date);
 
+
+--
+--
+
 CREATE INDEX idx_tenant_usage_tenant ON tenant_usage USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_tenants_billing_cycle ON tenants USING btree (billing_cycle_end);
 
+
+--
+--
+
 CREATE INDEX idx_tenants_deleted ON tenants USING btree (deleted_at);
-
-
---
---
 
 CREATE INDEX idx_tenants_slug ON tenants USING btree (slug);
 
+
+--
+--
+
 CREATE INDEX idx_tenants_status ON tenants USING btree (status);
-
-
---
---
 
 CREATE INDEX idx_test_evidence_session_command ON test_execution_evidence USING btree (session_id, command_id);
 
+
+--
+--
+
 CREATE INDEX idx_test_evidence_workflow_milestone ON test_execution_evidence USING btree (workflow_id, milestone_id);
-
-
---
---
 
 CREATE INDEX idx_tool_accounts_tool_account ON user_tool_accounts USING btree (tool_account);
 
+
+--
+--
+
 CREATE INDEX idx_tool_accounts_user_id ON user_tool_accounts USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_usage_date ON daily_usage USING btree (date);
 
+
+--
+--
+
 CREATE INDEX idx_usage_date_tool_host ON daily_usage USING btree (tenant_id, date, tool_name, host_name);
-
-
---
---
 
 CREATE INDEX idx_usage_host_name ON daily_usage USING btree (host_name);
 
+
+--
+--
+
 CREATE INDEX idx_usage_report_rate_limits_updated ON usage_report_rate_limits USING btree (updated_at);
-
-
---
---
 
 CREATE INDEX idx_usage_report_receipts_session ON usage_report_receipts USING btree (session_id, created_at);
 
+
+--
+--
+
 CREATE INDEX idx_usage_summary_host ON usage_summary USING btree (host_name);
-
-
---
---
 
 CREATE INDEX idx_usage_summary_host_name_valid ON usage_summary USING btree (host_name) WHERE ((host_name IS NOT NULL) AND ((host_name)::text <> ''::text) AND ((host_name)::text !~~ '<%>'::text) AND ((length((host_name)::text) >= 1) AND (length((host_name)::text) <= 253)));
 
+
+--
+--
+
 CREATE INDEX idx_usage_summary_tool ON usage_summary USING btree (tool_name);
-
-
---
---
 
 CREATE INDEX idx_usage_tenant_date ON daily_usage USING btree (tenant_id, date);
 
+
+--
+--
+
 CREATE INDEX idx_usage_tool_name ON daily_usage USING btree (tool_name);
-
-
---
---
 
 CREATE INDEX idx_user_daily_stats_date ON user_daily_stats USING btree (date DESC);
 
+
+--
+--
+
 CREATE INDEX idx_user_daily_stats_user_date ON user_daily_stats USING btree (user_id, date DESC);
-
-
---
---
 
 CREATE INDEX idx_user_projects_project ON user_projects USING btree (project_id);
 
+
+--
+--
+
 CREATE INDEX idx_user_projects_user ON user_projects USING btree (user_id);
-
-
---
---
 
 CREATE INDEX idx_users_active ON users USING btree (is_active);
 
+
+--
+--
+
 CREATE INDEX idx_users_deleted ON users USING btree (deleted_at);
-
-
---
---
 
 CREATE INDEX idx_users_email ON users USING btree (email);
 
+
+--
+--
+
 CREATE INDEX idx_users_role ON users USING btree (role);
-
-
---
---
 
 CREATE INDEX idx_users_system_account ON users USING btree (system_account) WHERE ((deleted_at IS NULL) AND (is_active = true) AND (system_account IS NOT NULL));
 
+
+--
+--
+
 CREATE INDEX idx_users_tenant ON users USING btree (tenant_id);
-
-
---
---
 
 CREATE INDEX idx_users_username ON users USING btree (username) WHERE ((deleted_at IS NULL) AND (is_active = true));
 
+
+--
+--
+
 CREATE INDEX idx_uta_last_activity ON user_tool_accounts USING btree (last_activity_at) WHERE ((mapping_status)::text = 'active'::text);
-
-
---
---
 
 CREATE INDEX idx_uta_status_account ON user_tool_accounts USING btree (mapping_status, tool_account);
 
+
+--
+--
+
 CREATE INDEX idx_webhook_deliveries_alert ON webhook_deliveries USING btree (alert_id);
+
+CREATE INDEX idx_webhook_deliveries_cooldown_active ON webhook_deliveries USING btree (cooldown_key, status, cooldown_expires_at);
+
+
+--
+--
+
+CREATE INDEX idx_webhook_deliveries_cooldown_expiry ON webhook_deliveries USING btree (cooldown_expires_at);
+
+CREATE INDEX idx_webhook_deliveries_receiver_identity ON webhook_deliveries USING btree (receiver_identity_hash);
 
 
 --

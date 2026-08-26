@@ -12,6 +12,7 @@ from typing import Any
 
 from app.repositories.daily_stats_repo import DailyStatsRepository
 from app.repositories.message_repo import MessageRepository
+from app.repositories.response_time_repo import ResponseTimeRepository
 from app.repositories.usage_repo import UsageRepository
 from app.utils.cache import cached
 from app.utils.helpers import get_days_ago, get_today
@@ -32,6 +33,7 @@ class AnalysisService:
         usage_repo: UsageRepository | None = None,
         message_repo: MessageRepository | None = None,
         daily_stats_repo: DailyStatsRepository | None = None,
+        response_time_repo: ResponseTimeRepository | None = None,
     ):
         """
         Initialize service.
@@ -40,10 +42,12 @@ class AnalysisService:
             usage_repo: Optional UsageRepository instance.
             message_repo: Optional MessageRepository instance.
             daily_stats_repo: Optional DailyStatsRepository instance.
+            response_time_repo: Optional ResponseTimeRepository instance.
         """
         self.usage_repo = usage_repo or UsageRepository()
         self.message_repo = message_repo or MessageRepository()
         self.daily_stats_repo = daily_stats_repo or DailyStatsRepository()
+        self.response_time_repo = response_time_repo or ResponseTimeRepository()
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def get_batch_analysis(
@@ -114,6 +118,20 @@ class AnalysisService:
                 self.usage_repo.get_request_count_total, start_date, end_date, host_name, tenant_id
             ): "total_requests",
             _executor.submit(self.daily_stats_repo.get_data_range, tenant_id): "data_range",
+            _executor.submit(
+                self.response_time_repo.get_response_time_stats,
+                start_date,
+                end_date,
+                host_name,
+                tenant_id,
+            ): "response_time_stats",
+            _executor.submit(
+                self.response_time_repo.get_percentile_stats,
+                start_date,
+                end_date,
+                host_name,
+                tenant_id,
+            ): "response_time_percentiles",
         }
 
         # Collect results
@@ -124,7 +142,17 @@ class AnalysisService:
                 results[key] = future.result()
             except Exception as e:
                 logger.error(f"Query {key} failed: {e}")
-                results[key] = {} if key in ["aggregates", "session_summary"] else []
+                results[key] = (
+                    {}
+                    if key
+                    in [
+                        "aggregates",
+                        "session_summary",
+                        "response_time_stats",
+                        "response_time_percentiles",
+                    ]
+                    else []
+                )
 
         # Extract results
         aggregates = results.get("aggregates", {})
@@ -136,6 +164,8 @@ class AnalysisService:
         session_summary = results.get("session_summary", {})
         total_requests = results.get("total_requests", 0)
         data_range = results.get("data_range")
+        response_time_stats = results.get("response_time_stats", {})
+        response_time_percentiles = results.get("response_time_percentiles", {})
 
         # Use aggregates directly instead of computing from raw data
         total_tokens = aggregates.get("total_tokens", 0)
@@ -342,6 +372,45 @@ class AnalysisService:
 
         user_segmentation = segments
 
+        # Issue #3079: User role distribution
+        # Count users by role group based on the role_group field from repository
+        role_distribution: dict[str, int] = {
+            "admin": 0,
+            "manager": 0,
+            "user": 0,
+            "unknown": 0,
+        }
+        for user_data in user_tokens:
+            role_group = user_data.get("role_group", "unknown") or "unknown"
+            if role_group in role_distribution:
+                role_distribution[role_group] += 1
+            else:
+                role_distribution["unknown"] += 1
+
+        user_role_distribution = role_distribution
+
+        # Issue #3080: Response time metrics
+        # Calculate coverage ratio
+        coverage_ratio = 0.0
+        if response_time_stats.get("sample_count", 0) > 0:
+            if total_messages > 0:
+                coverage_ratio = min(
+                    1.0, response_time_stats.get("sample_count", 0) / total_messages
+                )
+
+        response_time_metrics = {
+            "avg_response_time_ms": response_time_stats.get("avg_response_time_ms"),
+            "p50_response_time_ms": response_time_percentiles.get("p50_response_time_ms"),
+            "p95_response_time_ms": response_time_percentiles.get("p95_response_time_ms"),
+            "tool_call_avg_ms": response_time_stats.get("tool_call_avg_ms"),
+            "tool_call_ratio": response_time_stats.get("tool_call_ratio"),
+            "sample_count": response_time_stats.get("sample_count", 0),
+            "success_count": response_time_stats.get("success_count", 0),
+            "failed_count": response_time_stats.get("failed_count", 0),
+            "coverage_ratio": coverage_ratio,
+            "data_available": response_time_stats.get("data_available", False),
+        }
+
         duration_ms = (time.time() - start_time) * 1000
         logger.info(f"get_batch_analysis took {duration_ms:.2f}ms")
 
@@ -353,6 +422,8 @@ class AnalysisService:
             "conversation_stats": conversation_stats,
             "tool_comparison": tool_comparison,
             "user_segmentation": user_segmentation,
+            "user_role_distribution": user_role_distribution,
+            "response_time_metrics": response_time_metrics,
             "data_range": data_range,
         }
 
@@ -388,6 +459,8 @@ class AnalysisService:
         Get key metrics for the dashboard.
 
         Issue #1852: Added tenant_id for tenant isolation.
+        Issue #3030: Merge agent_sessions data with daily_messages to include
+        WebUI local/remote/terminal sessions.
 
         Args:
             start_date: Optional start date filter.
@@ -423,6 +496,20 @@ class AnalysisService:
             total_input = sum(u.get("total_input_tokens", 0) for u in user_tokens)
             total_output = sum(u.get("total_output_tokens", 0) for u in user_tokens)
 
+        # Issue #3030: Also get session data from agent_sessions
+        session_metrics = self.usage_repo.get_session_key_metrics(
+            start_date=start_date,
+            end_date=end_date,
+            host_name=host_name,
+            tenant_id=tenant_id,
+        )
+
+        # Merge session data into totals
+        total_tokens += session_metrics.get("total_tokens", 0)
+        total_input += session_metrics.get("total_input_tokens", 0)
+        total_output += session_metrics.get("total_output_tokens", 0)
+        total_requests += session_metrics.get("total_requests", 0)
+
         # Get unique tools and hosts (normalize tool names)
         tools = set()
         hosts = set()
@@ -431,6 +518,10 @@ class AnalysisService:
                 tools.add(normalize_tool_name(u["tool_name"]))
             if u.get("host_name"):
                 hosts.add(u["host_name"])
+
+        # Issue #3030: Include unique tools/hosts from session metrics
+        tools_count = max(len(tools), session_metrics.get("unique_tools", 0))
+        hosts_count = max(len(hosts), session_metrics.get("unique_hosts", 0))
 
         # Get top tools by token usage from messages (has real token data)
         tool_stats = self.message_repo.get_tool_token_totals(
@@ -490,8 +581,8 @@ class AnalysisService:
             "total_output_tokens": total_output,
             "total_requests": total_requests,
             "total_messages": total_messages,
-            "unique_tools": len(tools) if tools else 1,
-            "unique_hosts": len(hosts) if hosts else 1,
+            "unique_tools": tools_count if tools_count > 0 else 1,
+            "unique_hosts": hosts_count if hosts_count > 0 else 1,
             "top_tools": top_tools,
             "top_hosts": [{"host": h, "count": 0} for h in hosts][:5] if hosts else [],
             "total_sessions": total_sessions,
@@ -1026,6 +1117,61 @@ class AnalysisService:
         return segments
 
     @cached(ttl=60, key_prefix="analysis", skip_args=[0])
+    def get_user_role_distribution(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> dict:
+        """
+        Get user distribution by role group.
+
+        Groups users by their role (admin, manager, user, unknown) based on
+        the role_group field returned by the repository. This provides a
+        complementary view to the usage-based segmentation.
+
+        Issue #3079: Support role-based user grouping in trend analysis.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
+
+        Returns:
+            Dict: User role distribution with count for each group.
+            Example: {"admin": 2, "manager": 3, "user": 15, "unknown": 5}
+            Frontend handles internationalization of labels.
+        """
+        if not start_date:
+            start_date = get_days_ago(30)
+        if not end_date:
+            end_date = get_today()
+
+        # Get user token usage from messages (includes role_group field)
+        user_tokens = self.message_repo.get_user_token_totals(
+            start_date=start_date, end_date=end_date, host_name=host_name, tenant_id=tenant_id
+        )
+
+        # Count users by role group
+        role_counts: dict[str, int] = {
+            "admin": 0,
+            "manager": 0,
+            "user": 0,
+            "unknown": 0,
+        }
+
+        for user_data in user_tokens:
+            role_group = user_data.get("role_group", "unknown") or "unknown"
+            if role_group in role_counts:
+                role_counts[role_group] += 1
+            else:
+                role_counts["unknown"] += 1
+
+        return role_counts
+
+    @cached(ttl=60, key_prefix="analysis", skip_args=[0])
     def detect_anomalies(
         self,
         start_date: str | None = None,
@@ -1250,3 +1396,106 @@ class AnalysisService:
         trend = sorted(trend_by_date.values(), key=lambda x: x["date"])
 
         return {"trend": trend, "total_anomalies": len(anomalies)}
+
+    @cached(ttl=60, key_prefix="analysis", skip_args=[0])
+    def get_response_time_metrics(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> dict:
+        """
+        Get response time metrics for trend analysis.
+
+        Issue #3080: Response time tracking for trend analysis.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
+
+        Returns:
+            Dict: Response time metrics including avg, p50, p95, sample count.
+        """
+        if not start_date:
+            start_date = get_days_ago(30)
+        if not end_date:
+            end_date = get_today()
+
+        # Get aggregated statistics
+        stats = self.response_time_repo.get_response_time_stats(
+            start_date=start_date,
+            end_date=end_date,
+            host_name=host_name,
+            tenant_id=tenant_id,
+        )
+
+        # Get percentile statistics
+        percentiles = self.response_time_repo.get_percentile_stats(
+            start_date=start_date,
+            end_date=end_date,
+            host_name=host_name,
+            tenant_id=tenant_id,
+        )
+
+        # Calculate coverage ratio (samples / total requests)
+        # Note: This is an approximation based on available data
+        coverage_ratio = 0.0
+        if stats.get("sample_count", 0) > 0:
+            # Get total requests for the same period
+            total_requests = self.daily_stats_repo.get_batch_aggregates(
+                start_date, end_date, host_name, tenant_id
+            ).get("total_messages", 0)
+
+            if total_requests > 0:
+                coverage_ratio = min(1.0, stats.get("sample_count", 0) / total_requests)
+
+        return {
+            "avg_response_time_ms": stats.get("avg_response_time_ms"),
+            "p50_response_time_ms": percentiles.get("p50_response_time_ms"),
+            "p95_response_time_ms": percentiles.get("p95_response_time_ms"),
+            "tool_call_avg_ms": stats.get("tool_call_avg_ms"),
+            "tool_call_ratio": stats.get("tool_call_ratio"),
+            "sample_count": stats.get("sample_count", 0),
+            "success_count": stats.get("success_count", 0),
+            "failed_count": stats.get("failed_count", 0),
+            "coverage_ratio": coverage_ratio,
+            "data_available": stats.get("data_available", False),
+        }
+
+    @cached(ttl=60, key_prefix="analysis", skip_args=[0])
+    def get_response_time_trend(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """
+        Get response time trend by date.
+
+        Issue #3080: Response time tracking for trend analysis.
+
+        Args:
+            start_date: Optional start date filter.
+            end_date: Optional end date filter.
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant filter (None for admin/global scope).
+
+        Returns:
+            List[Dict]: Daily response time statistics.
+        """
+        if not start_date:
+            start_date = get_days_ago(30)
+        if not end_date:
+            end_date = get_today()
+
+        result = self.response_time_repo.get_response_time_trend(
+            start_date=start_date,
+            end_date=end_date,
+            host_name=host_name,
+            tenant_id=tenant_id,
+        )
+        return list(result)  # Ensure correct type for mypy

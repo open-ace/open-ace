@@ -20,14 +20,16 @@ def test_critical_category_selects_pr_gate_targets():
 
 
 def test_issue_numbers_select_specific_issue_directories():
+    # 716/740/559 all live in the long-lived quarantine tail (I/B groups of
+    # the #2429 roadmap); 762 was migrated by batch 7 and no longer exists.
     args = run_extended_tests.parse_args(
-        ["--category", "issues", "--issue", "716", "--issue-numbers", "740,762", "--dry-run"]
+        ["--category", "issues", "--issue", "716", "--issue-numbers", "740,559", "--dry-run"]
     )
 
     assert run_extended_tests.select_targets(args) == [
         "tests/issues/716",
         "tests/issues/740",
-        "tests/issues/762",
+        "tests/issues/559",
     ]
 
 

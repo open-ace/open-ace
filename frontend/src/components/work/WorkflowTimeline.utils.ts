@@ -12,6 +12,10 @@ const AI_MILESTONE_TYPES = new Set([
   'pr_updated',
   'ci_repair_applied',
   'conflicts_resolved',
+  // #2994: the acceptance verifier is a real agent session — with its session
+  // id + usage now recorded on the milestone, the card must render the usage
+  // chips / session button instead of the "system step" fallback.
+  'acceptance_verification',
 ]);
 
 export function isAiMilestoneType(milestoneType: string): boolean {
@@ -63,6 +67,7 @@ export interface WorkflowSessionLinesLike {
   main_session_id?: string;
   review_session_id?: string;
   test_session_id?: string;
+  verification_session_id?: string | null;
 }
 
 /** Return the stable session line that owns an in-flight AI milestone. */
@@ -74,6 +79,13 @@ export function getWorkflowSessionIdForMilestone(
   if (milestoneType === 'plan_reviewed' || milestoneType === 'pr_reviewed') {
     return workflow.review_session_id?.trim() ?? '';
   }
+  // The acceptance line: used when the verifier's in_progress milestone
+  // hosts the live panel during a verification run (#3003; the row is minted
+  // at spawn) — mapped explicitly so the verifier session's activity can
+  // never render under the main session's card.
+  if (milestoneType === 'acceptance_verification') {
+    return workflow.verification_session_id?.trim() ?? '';
+  }
   return workflow.main_session_id?.trim() ?? '';
 }
 
@@ -83,7 +95,13 @@ export function getActivityHostMilestoneId(
   workflowStatus: string
 ): string | null {
   const agentPhaseStatuses = ['planning', 'developing', 'pr_review'];
-  if (![...agentPhaseStatuses, 'merging'].includes(workflowStatus)) return null;
+  // verification_pending: the verifier's in_progress acceptance milestone
+  // (#3003) is a live host. The FALLBACK gate below stays on
+  // agentPhaseStatuses — during verification the merge-SHA retry loop has no
+  // running agent, and pinning the panel to the previous phase's card would
+  // only show stale activity.
+  const hostStatuses = [...agentPhaseStatuses, 'merging', 'verification_pending'];
+  if (!hostStatuses.includes(workflowStatus)) return null;
 
   // Forked workflows can retain a copied in-progress milestone from the
   // parent. Timeline order is oldest-first, so always choose the newest

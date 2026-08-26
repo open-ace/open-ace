@@ -169,7 +169,7 @@ class TestRunGhSudo:
         gh.get_issue(240)
 
         gh_cmd = mock_run.call_args.args[0]
-        assert gh_cmd[:4] == ["sudo", "-u", "alice", "gh"]
+        assert gh_cmd[:4] == ["sudo", "-u", "alice", "/usr/local/bin/openace-gh"]
         assert "-R" in gh_cmd
         assert "open-ace/open-ace" in gh_cmd
         # gh has no -C flag — it must never appear.
@@ -252,7 +252,7 @@ class TestRunGhRepoScoped:
 
         gh_cmd = mock_run.call_args.args[0]
         assert gh_cmd[:3] == ["sudo", "-u", "alice"]
-        assert gh_cmd[3] == "gh"
+        assert gh_cmd[3] == "/usr/local/bin/openace-gh"
         assert "-R" not in gh_cmd
         assert "repo" in gh_cmd and "create" in gh_cmd
 
@@ -309,7 +309,7 @@ class TestGhApiSudo:
 
         gh_cmd = mock_run.call_args.args[0]
         assert gh_cmd[:3] == ["sudo", "-u", "alice"]
-        assert gh_cmd[3] == "gh"
+        assert gh_cmd[3] == "/usr/local/bin/openace-gh"
         assert gh_cmd[4] == "api"
         assert "-R" not in gh_cmd
         # The REST path uses the resolved owner/repo slug.

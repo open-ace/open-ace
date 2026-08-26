@@ -40,6 +40,12 @@ trap {
     exit 1
 }
 
+# Fix Chinese hostname encoding (Issue #3081)
+# PowerShell 5.1 defaults to system encoding (GBK on Chinese Windows),
+# which causes ConvertTo-Json to produce garbled output for non-ASCII characters.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 Write-Host "Open ACE Remote Agent Installer" -ForegroundColor Blue
 Write-Host "================================" -ForegroundColor Blue
 Write-Host "Server: $ServerUrl"
@@ -268,51 +274,504 @@ if ($gitCmd) {
     }
 }
 
+# ============================================================================
+# Helper functions for code-server installation
+# ============================================================================
+
+# Function: Get-NpmGlobalPrefix
+# Description: Dynamically get npm global prefix directory
+function Get-NpmGlobalPrefix {
+    $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+    if (-not $npmCmd) {
+        return $null
+    }
+
+    try {
+        $prefix = (npm config get prefix 2>&1).Trim()
+        if ($prefix -and (Test-Path -Path $prefix -PathType Container)) {
+            return $prefix
+        }
+    } catch {
+        # npm command failed, will use default
+    }
+
+    # Fallback to default
+    $defaultPrefix = "$env:APPDATA\npm"
+    Write-Host "[WARN] Could not determine npm prefix, using default: $defaultPrefix" -ForegroundColor Yellow
+    return $defaultPrefix
+}
+
+# Function: Test-NpmGlobalWritable
+# Description: Check if npm global directory is writable
+function Test-NpmGlobalWritable {
+    param([string]$Prefix)
+
+    if (-not $Prefix) {
+        return $false
+    }
+
+    $nodeModulesPath = Join-Path $Prefix "node_modules"
+
+    # Ensure node_modules directory exists
+    if (-not (Test-Path -Path $nodeModulesPath)) {
+        try {
+            New-Item -ItemType Directory -Path $nodeModulesPath -Force | Out-Null
+        } catch {
+            return $false
+        }
+    }
+
+    # Test write permission by creating a temporary file
+    $testFile = Join-Path $nodeModulesPath ".write_test_$([System.Guid]::NewGuid().ToString())"
+    try {
+        [System.IO.File]::WriteAllText($testFile, "test")
+        Remove-Item -Path $testFile -Force -ErrorAction SilentlyContinue
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+# Function: Test-NodeVersionCompatibility
+# Description: Check Node.js version compatibility for code-server
+# Returns: @{Compatible=$true/$false; Version="v18.17.0"; Major=18; Minor=17; Warning=$null}
+function Test-NodeVersionCompatibility {
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $nodeCmd) {
+        return @{
+            Compatible = $false
+            Version = "not found"
+            Major = 0
+            Minor = 0
+            Warning = "Node.js not found. code-server requires Node.js v18+ (recommended: v20 or v22 LTS)"
+        }
+    }
+
+    try {
+        $versionOutput = (node --version 2>&1).Trim()
+
+        # Parse version string (formats: v18.17.0, 18.17.0, 18.17)
+        if ($versionOutput -match '^v?(\d+)\.(\d+)(?:\.(\d+))?') {
+            $major = [int]$matches[1]
+            $minor = [int]$matches[2]
+
+            $result = @{
+                Compatible = $true
+                Version = $versionOutput
+                Major = $major
+                Minor = $minor
+                Warning = $null
+            }
+
+            if ($major -lt 18) {
+                $result.Compatible = $false
+                $result.Warning = "Node.js version $versionOutput is not compatible with code-server. code-server requires Node.js v18+ (recommended: v20 or v22 LTS)"
+            } elseif ($major -eq 17) {
+                # v17 is a non-LTS interim version
+                $result.Compatible = $false
+                $result.Warning = "Node.js v17.x is a non-LTS interim version and may not be compatible with code-server. Please use Node.js v18+ LTS (recommended: v20 or v22)"
+            } elseif ($major -eq 18) {
+                # v18 is supported but not recommended
+                $result.Warning = "Node.js v18 is compatible but v20 or v22 LTS is recommended for best compatibility with code-server"
+            }
+
+            return $result
+        } else {
+            return @{
+                Compatible = $false
+                Version = $versionOutput
+                Major = 0
+                Minor = 0
+                Warning = "Could not parse Node.js version: $versionOutput"
+            }
+        }
+    } catch {
+        return @{
+            Compatible = $false
+            Version = "error"
+            Major = 0
+            Minor = 0
+            Warning = "Failed to check Node.js version: $_"
+        }
+    }
+}
+
+# Function: Clear-CodeServerResidue
+# Description: Clean up residual code-server files and detect running processes
+function Clear-CodeServerResidue {
+    param([string]$NpmPrefix)
+
+    if (-not $NpmPrefix) {
+        return
+    }
+
+    # Check for running code-server processes using WMI (compatible with PowerShell 5.1)
+    # CommandLine property on Get-Process only works in PowerShell 7+
+    try {
+        $codeServerProcesses = Get-WmiObject Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -and $_.CommandLine -match 'code-server' }
+
+        if ($codeServerProcesses) {
+            Write-Host "[WARN] Detected running code-server process(es). Please close them before reinstalling." -ForegroundColor Yellow
+            Write-Host "       PIDs: $($codeServerProcesses.ProcessId -join ', ')" -ForegroundColor Yellow
+            Write-Host "       You can close them manually or they will be replaced on next install." -ForegroundColor Yellow
+        }
+    } catch {
+        # WMI query failed, skip process detection (not critical)
+    }
+
+    # Clean up residual files
+    $pathsToClean = @(
+        Join-Path $NpmPrefix "node_modules\code-server"
+        Join-Path $NpmPrefix "code-server"
+        Join-Path $NpmPrefix "code-server.cmd"
+        Join-Path $NpmPrefix "code-server.ps1"
+    )
+
+    $cleanedCount = 0
+    foreach ($path in $pathsToClean) {
+        if (Test-Path -Path $path) {
+            try {
+                Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
+                $cleanedCount++
+            } catch {
+                # Ignore cleanup errors
+            }
+        }
+    }
+
+    if ($cleanedCount -gt 0) {
+        Write-Host "[INFO] Cleaned up $cleanedCount previous code-server installation file(s)" -ForegroundColor Cyan
+    }
+}
+
+# Function: Test-CodeServerExecution
+# Description: Verify code-server is actually executable after installation
+function Test-CodeServerExecution {
+    $csCmd = Get-Command code-server -ErrorAction SilentlyContinue
+    if (-not $csCmd) {
+        return @{ Success = $false; Error = "code-server command not found" }
+    }
+
+    try {
+        $versionOutput = code-server --version 2>&1
+        $exitCode = $LASTEXITCODE
+
+        if ($exitCode -eq 0 -and $versionOutput -match '\d+\.\d+') {
+            return @{ Success = $true; Version = ($versionOutput | Select-Object -First 1) }
+        } else {
+            return @{ Success = $false; Error = "Exit code: $exitCode, Output: $versionOutput" }
+        }
+    } catch {
+        return @{ Success = $false; Error = $_.ToString() }
+    }
+}
+
+# Function: Get-NpmRegistry
+# Description: Get current npm registry URL
+function Get-NpmRegistry {
+    try {
+        $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+        if ($npmCmd) {
+            return (npm config get registry 2>&1).Trim()
+        }
+    } catch {
+        # Ignore errors
+    }
+    return "https://registry.npmjs.org"
+}
+
+# Function: Invoke-NpmInstall
+# Description: Run npm install using System.Diagnostics.Process with timeout
+function Invoke-NpmInstall {
+    param(
+        [string]$Package,
+        [int]$TimeoutSeconds = 300
+    )
+
+    $npmPath = (Get-Command npm).Source
+    $stdoutFile = "$env:TEMP\npm_install_stdout_$([System.Guid]::NewGuid()).log"
+    $stderrFile = "$env:TEMP\npm_install_stderr_$([System.Guid]::NewGuid()).log"
+
+    try {
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo.FileName = $npmPath
+        $process.StartInfo.Arguments = "install -g $Package"
+        $process.StartInfo.UseShellExecute = $false
+        $process.StartInfo.RedirectStandardOutput = $true
+        $process.StartInfo.RedirectStandardError = $true
+        $process.StartInfo.CreateNoWindow = $true
+        $process.EnableRaisingEvents = $true
+
+        $null = $process.Start()
+
+        # Read output asynchronously
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+
+        # Wait with timeout
+        $exited = $process.WaitForExit($TimeoutSeconds * 1000)
+
+        if (-not $exited) {
+            # Timeout - kill the process tree
+            Write-Host "[WARN] npm install timed out after $TimeoutSeconds seconds" -ForegroundColor Yellow
+            try {
+                # Kill the process and its children
+                $process.Kill()
+            } catch {
+                Write-Host "[WARN] Could not terminate npm process: $_" -ForegroundColor Yellow
+            }
+
+            # Wait for async tasks to complete (max 5 seconds) to capture any output
+            try {
+                $null = [System.Threading.Tasks.Task]::WaitAll(@($stdoutTask, $stderrTask), 5000)
+            } catch {
+                # Ignore task wait errors
+            }
+
+            return @{
+                Success = $false
+                Timeout = $true
+                Stderr = $stderrTask.Result
+            }
+        }
+
+        # Process completed
+        $stdout = $stdoutTask.Result
+        $stderr = $stderrTask.Result
+
+        # Save output to files for diagnosis
+        $stdout | Out-File -FilePath $stdoutFile -Encoding utf8
+        $stderr | Out-File -FilePath $stderrFile -Encoding utf8
+
+        return @{
+            Success = ($process.ExitCode -eq 0)
+            ExitCode = $process.ExitCode
+            Stdout = $stdout
+            Stderr = $stderr
+            StdoutFile = $stdoutFile
+            StderrFile = $stderrFile
+        }
+    } finally {
+        if ($process -and -not $process.HasExited) {
+            try { $process.Kill() } catch { }
+        }
+    }
+}
+
+# Function: Show-InstallationFailureDiagnosis
+# Description: Print detailed diagnosis for npm install failure
+function Show-InstallationFailureDiagnosis {
+    param(
+        [int]$ExitCode,
+        [string]$Stderr,
+        [string]$Stdout,
+        [bool]$Timeout
+    )
+
+    if ($Timeout) {
+        Write-Host "" -ForegroundColor Yellow
+        Write-Host "[DIAGNOSIS] Installation timed out" -ForegroundColor Yellow
+        Write-Host "  Possible causes:" -ForegroundColor White
+        Write-Host "    - Slow network connection" -ForegroundColor Gray
+        Write-Host "    - Large package size" -ForegroundColor Gray
+        Write-Host "    - npm registry connectivity issues" -ForegroundColor Gray
+        Write-Host "" -ForegroundColor White
+        Write-Host "  Suggestions:" -ForegroundColor White
+        Write-Host "    - Try again later" -ForegroundColor Gray
+        Write-Host "    - Use a npm mirror (China: npm config set registry https://registry.npmmirror.com)" -ForegroundColor Gray
+        return
+    }
+
+    Write-Host "" -ForegroundColor Yellow
+    Write-Host "[DIAGNOSIS] Installation failed (exit code: $ExitCode)" -ForegroundColor Yellow
+
+    # Check for common error patterns
+    $errorPatterns = @{
+        "EACCES|EPERM" = @{
+            Diagnosis = "Permission denied"
+            Suggestion = "Run PowerShell as Administrator or configure npm to use user directory:`n            npm config set prefix `"`$env:USERPROFILE\npm-global`""
+        }
+        "ENOGIT" = @{
+            Diagnosis = "git not found"
+            Suggestion = "Install git from https://git-scm.com/download/win"
+        }
+        "ETIMEDOUT|ECONNREFUSED" = @{
+            Diagnosis = "Network connectivity issue"
+            Suggestion = "Check your network connection and proxy settings"
+        }
+        "gyp ERR!" = @{
+            Diagnosis = "Native module compilation failed"
+            Suggestion = "Install Visual Studio Build Tools:`n            1. Download from https://visualstudio.microsoft.com/downloads/`n            2. Select 'Desktop development with C++' workload`n            Or run: npm install -g windows-build-tools (as Administrator)"
+        }
+        "EPROTO|CERT_HAS_EXPIRED" = @{
+            Diagnosis = "TLS certificate issue"
+            Suggestion = "Update Node.js to the latest version or check your system certificates"
+        }
+        "ENOTFOUND" = @{
+            Diagnosis = "DNS resolution failed"
+            Suggestion = "Check your DNS settings"
+        }
+        "ENOENT" = @{
+            Diagnosis = "File or directory not found"
+            Suggestion = "Try cleaning residual files and reinstalling"
+        }
+    }
+
+    $matched = $false
+    foreach ($pattern in $errorPatterns.Keys) {
+        if ($Stderr -match $pattern) {
+            $matched = $true
+            $info = $errorPatterns[$pattern]
+            Write-Host "  Error: $($info.Diagnosis)" -ForegroundColor White
+            Write-Host "" -ForegroundColor White
+            Write-Host "  Suggestion:" -ForegroundColor White
+            Write-Host "    $($info.Suggestion)" -ForegroundColor Gray
+            break
+        }
+    }
+
+    if (-not $matched) {
+        # Show stderr output (limited)
+        if ($Stderr) {
+            Write-Host "  npm stderr:" -ForegroundColor White
+            $stderrLines = $Stderr -split "`n" | Select-Object -First 10
+            foreach ($line in $stderrLines) {
+                Write-Host "    $line" -ForegroundColor Gray
+            }
+            if (($Stderr -split "`n").Count -gt 10) {
+                Write-Host "    ... (truncated)" -ForegroundColor Gray
+            }
+        }
+    }
+
+    # Check npm registry
+    $registry = Get-NpmRegistry
+    if ($registry -match "registry.npmjs.org") {
+        Write-Host "" -ForegroundColor White
+        Write-Host "  Your npm registry is set to the official source." -ForegroundColor White
+        Write-Host "  If you're in China, try using a mirror:" -ForegroundColor White
+        Write-Host "    npm config set registry https://registry.npmmirror.com" -ForegroundColor Gray
+    }
+}
+
 # Install code-server if not present
+$codeServerAvailable = $false
+
 if ($SkipCodeServer) {
     Write-Host "[INFO] Skipping code-server installation (-SkipCodeServer)" -ForegroundColor Cyan
 } else {
+    # Step 1: Check if already installed
     $csCmd = Get-Command code-server -ErrorAction SilentlyContinue
     if ($csCmd) {
-        $csVer = code-server --version 2>&1 | Select-Object -First 1
-        Write-Host "[OK] code-server already installed: $csVer" -ForegroundColor Green
-    } else {
-        Write-Host "[INFO] code-server not found, attempting to install..." -ForegroundColor Cyan
-        Write-Host "[INFO] This may take a few minutes, please wait..." -ForegroundColor Cyan
-        $csInstalled = $false
-        $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
-        if ($npmCmd) {
-            try {
-                $prevErrorAction = $ErrorActionPreference
-                $ErrorActionPreference = "Continue"
-                # Run npm install with timeout (300s)
-                # Pass full npm path since Start-Job doesn't inherit current session env
-                $npmPath = (Get-Command npm).Source
-                $job = Start-Job -ScriptBlock {
-                    param($p) & $p install -g code-server 2>&1; $LASTEXITCODE
-                } -ArgumentList $npmPath
-                $completed = Wait-Job $job -Timeout 300
-                if ($completed) {
-                    $output = Receive-Job $job
-                    $exitCode = ($output | Select-Object -Last 1)
-                    if ($job.State -eq 'Completed' -and "$exitCode" -eq '0') {
-                        $csInstalled = $true
-                    }
-                } else {
-                    Stop-Job $job
-                    Write-Host "[WARN] code-server install timed out after 300s" -ForegroundColor Yellow
-                }
-                Remove-Job $job -Force -ErrorAction SilentlyContinue
-                $ErrorActionPreference = $prevErrorAction
-            } catch {
-                # npm install failed
-            }
-        }
-        if ($csInstalled -and (Get-Command code-server -ErrorAction SilentlyContinue)) {
-            Write-Host "[OK] code-server installed: $(code-server --version 2>&1 | Select-Object -First 1)" -ForegroundColor Green
+        # Verify it's actually runnable
+        Write-Host "[INFO] code-server command found, verifying installation..." -ForegroundColor Cyan
+        $execTest = Test-CodeServerExecution
+        if ($execTest.Success) {
+            Write-Host "[OK] code-server already installed and working: $($execTest.Version)" -ForegroundColor Green
+            $codeServerAvailable = $true
         } else {
-            Write-Host "[WARN] Failed to install code-server. Remote workspace will be missing VSCode editor." -ForegroundColor Yellow
-            Write-Host "       You can install it manually later: https://coder.com/docs/code-server/latest/install" -ForegroundColor Yellow
+            Write-Host "[WARN] code-server command exists but is not working: $($execTest.Error)" -ForegroundColor Yellow
+            Write-Host "[INFO] Will attempt to reinstall..." -ForegroundColor Cyan
+        }
+    }
+
+    if (-not $codeServerAvailable) {
+        # Step 2: Get npm global prefix
+        Write-Host "[INFO] Checking npm configuration..." -ForegroundColor Cyan
+        $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+        if (-not $npmCmd) {
+            Write-Host "[WARN] npm not found. Skipping code-server installation." -ForegroundColor Yellow
+            Write-Host "       To install code-server:" -ForegroundColor Yellow
+            Write-Host "         1. Install Node.js LTS from https://nodejs.org/" -ForegroundColor Yellow
+            Write-Host "         2. Run: npm install -g code-server" -ForegroundColor Yellow
+        } else {
+            $npmPrefix = Get-NpmGlobalPrefix
+
+            # Step 3: Permission check
+            Write-Host "[INFO] npm global directory: $npmPrefix" -ForegroundColor Cyan
+            $writable = Test-NpmGlobalWritable -Prefix $npmPrefix
+            if (-not $writable) {
+                Write-Host "" -ForegroundColor Yellow
+                Write-Host "[WARN] No write permission to npm global directory: $npmPrefix" -ForegroundColor Yellow
+                Write-Host "       code-server installation requires write access to this directory." -ForegroundColor Yellow
+                Write-Host "" -ForegroundColor White
+                Write-Host "       Options:" -ForegroundColor White
+                Write-Host "         1. Run PowerShell as Administrator" -ForegroundColor Gray
+                Write-Host "         2. Configure npm to use user directory:" -ForegroundColor Gray
+                Write-Host "            npm config set prefix "`$env:USERPROFILE\npm-global"" -ForegroundColor Gray
+                Write-Host "" -ForegroundColor White
+                Write-Host "       Skipping code-server installation." -ForegroundColor Yellow
+            } else {
+                # Step 4: Node.js version check
+                Write-Host "[INFO] Checking Node.js version..." -ForegroundColor Cyan
+                $nodeCheck = Test-NodeVersionCompatibility
+
+                if (-not $nodeCheck.Compatible) {
+                    Write-Host "" -ForegroundColor Yellow
+                    Write-Host "[WARN] $($nodeCheck.Warning)" -ForegroundColor Yellow
+                    Write-Host "       Current Node.js version: $($nodeCheck.Version)" -ForegroundColor Yellow
+                    Write-Host "" -ForegroundColor White
+                    Write-Host "       To install code-server:" -ForegroundColor White
+                    Write-Host "         1. Install Node.js LTS (v20 or v22) from https://nodejs.org/" -ForegroundColor Gray
+                    Write-Host "         2. Run the installer again or: npm install -g code-server" -ForegroundColor Gray
+                    Write-Host "" -ForegroundColor White
+                    Write-Host "       Skipping code-server installation." -ForegroundColor Yellow
+                } else {
+                    if ($nodeCheck.Warning) {
+                        Write-Host "[WARN] $($nodeCheck.Warning)" -ForegroundColor Yellow
+                    } else {
+                        Write-Host "[OK] Node.js version compatible: $($nodeCheck.Version)" -ForegroundColor Green
+                    }
+
+                    # Step 5: Clean up residual files
+                    Write-Host "[INFO] Cleaning up previous installation files..." -ForegroundColor Cyan
+                    Clear-CodeServerResidue -NpmPrefix $npmPrefix
+
+                    # Step 6: Install code-server
+                    Write-Host "[INFO] Installing code-server..." -ForegroundColor Cyan
+                    Write-Host "[INFO] This may take a few minutes, please wait..." -ForegroundColor Cyan
+
+                    $prevErrorAction = $ErrorActionPreference
+                    $ErrorActionPreference = "Continue"
+
+                    $installResult = Invoke-NpmInstall -Package "code-server" -TimeoutSeconds 300
+
+                    $ErrorActionPreference = $prevErrorAction
+
+                    if ($installResult.Success) {
+                        # Step 7: Verify installation
+                        Write-Host "[INFO] Verifying code-server installation..." -ForegroundColor Cyan
+                        $execTest = Test-CodeServerExecution
+
+                        if ($execTest.Success) {
+                            Write-Host "[OK] code-server installed successfully: $($execTest.Version)" -ForegroundColor Green
+                            $codeServerAvailable = $true
+                        } else {
+                            Write-Host "[WARN] code-server installed but not executable" -ForegroundColor Yellow
+                            Write-Host "       Error: $($execTest.Error)" -ForegroundColor Yellow
+                            Write-Host "" -ForegroundColor White
+                            Write-Host "       code-server will be marked as unavailable." -ForegroundColor Yellow
+                            Write-Host "       You may need to upgrade Node.js or reinstall code-server manually." -ForegroundColor Yellow
+                        }
+                    } else {
+                        # Step 8: Show diagnosis
+                        Show-InstallationFailureDiagnosis `
+                            -ExitCode $installResult.ExitCode `
+                            -Stderr $installResult.Stderr `
+                            -Stdout $installResult.Stdout `
+                            -Timeout $installResult.Timeout
+
+                        Write-Host "" -ForegroundColor White
+                        Write-Host "[WARN] Failed to install code-server. Remote workspace will be missing VSCode editor." -ForegroundColor Yellow
+                        Write-Host "       You can install it manually later: https://coder.com/docs/code-server/latest/install" -ForegroundColor Yellow
+                    }
+
+                    # Clean up temp files
+                    if ($installResult.StdoutFile) { Remove-Item $installResult.StdoutFile -ErrorAction SilentlyContinue }
+                    if ($installResult.StderrFile) { Remove-Item $installResult.StderrFile -ErrorAction SilentlyContinue }
+                }
+            }
         }
     }
 }
@@ -332,6 +791,7 @@ $config = @{
     skip_ssl_verify = [bool]$InsecureSkipTlsVerify
     allow_insecure_tls = [bool]$InsecureSkipTlsVerify
     ca_bundle_path = $null
+    code_server_available = $codeServerAvailable
 }
 if ($CaBundlePath) { $config.ca_bundle_path = $CaBundlePath }
 
@@ -367,9 +827,9 @@ foreach ($cli in @("qwen", "claude", "openclaw")) {
     $capabilities["${cli}_installed"] = ($null -ne $cmd)
 }
 
-# Check git and code-server
+# Check git and code-server (use tracked variable for code-server availability)
 $capabilities["has_git"] = ($null -ne (Get-Command git -ErrorAction SilentlyContinue))
-$capabilities["has_code_server"] = ($null -ne (Get-Command code-server -ErrorAction SilentlyContinue))
+$capabilities["has_code_server"] = $codeServerAvailable
 
 $body = @{
     registration_token = $RegistrationToken

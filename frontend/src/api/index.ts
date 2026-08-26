@@ -47,6 +47,11 @@ export type {
   FilterCheckResult,
   SecuritySettings,
   PasswordPolicy,
+  FilterStats,
+  SensitiveKeyword,
+  SensitiveKeywordsResponse,
+  CreateSensitiveKeywordRequest,
+  SensitiveKeywordsFilters,
 } from './governance';
 export { reportApi } from './report';
 export type { MyUsageReport, DailyUsage } from './report';
@@ -62,6 +67,13 @@ export type {
   ConversationStats,
   ToolComparison,
   Recommendation,
+  EnterpriseReportResponse,
+  TrendItem,
+  AnomalyItem,
+  ToolBreakdown,
+  HostBreakdown,
+  EfficiencyMetricsResponse,
+  ExportResponse,
 } from './analysis';
 export { promptsApi } from './prompts';
 export type {

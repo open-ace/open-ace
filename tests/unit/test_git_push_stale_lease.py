@@ -1,6 +1,6 @@
 """``git_push(force_with_lease=True)`` recovers from a stale-lease rejection.
 
-Root cause (reproducer: ee678c63 / #2499 reset path): when an auto-dev worktree
+Root cause (reproducer: ee678c63 / #2499 reset path): when a workflow worktree
 is recreated after a failure cleanup, its remote-tracking ref
 (``refs/remotes/origin/auto-dev/<id>``) is stale relative to the actual remote
 tip. ``git push --force-with-lease`` then rejects with ``! [rejected] ... (stale
@@ -15,8 +15,8 @@ network error".
 Fix: ``git_push`` catches a stale-lease ``GitHubOpsError``, runs a targeted
 ``git fetch <remote> <branch>`` to refresh the lease, and retries the push
 once. Safe because ``force_with_lease`` is already refused unless the branch is
-``auto-dev/*`` (single-workflow-owned, local-authoritative), so overwriting the
-remote after a fresh fetch is the intended semantics. Network errors are not
+managed by a workflow (single-workflow-owned, local-authoritative), so overwriting
+the remote after a fresh fetch is the intended semantics. Network errors are not
 recovered here — fetching cannot fix them and the orchestrator Layer-2 retry
 remains the backstop.
 """

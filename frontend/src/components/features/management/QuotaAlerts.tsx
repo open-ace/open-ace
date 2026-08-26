@@ -31,17 +31,12 @@ import {
 } from '@/components/common';
 import { useConfirm } from '@/components/common';
 import { formatTokens, formatDateTime, formatNumber, createMatcherConfig } from '@/utils';
-import { parseApiError } from '@/utils/error';
-import {
-  QuotaType,
-  TOKEN_QUOTA_MULTIPLIER,
-  MAX_TOKEN_QUOTA,
-  MAX_REQUEST_QUOTA,
-} from '@/constants/quota';
+import { parseApiError, getErrorMessage } from '@/utils/error';
+import { QuotaType, TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
 import {
   parseAndValidateQuota,
   formatQuotaForDisplay,
-  formatNumberAsString,
+  getAvailableQuotaHint,
 } from '@/utils/quotaFormatter';
 import { alertsApi, type Alert, type NotificationPreferences } from '@/api';
 import type { QuotaUsage, UpdateQuotaRequest } from '@/api';
@@ -72,7 +67,10 @@ export const QuotaAlerts: React.FC = () => {
   const language = useLanguage();
   const user = useUser();
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState<TabType>('quota');
+  // Issue #3082: Manager 默认展示 Alerts tab，Admin 默认展示 Quota tab
+  const [activeTab, setActiveTab] = useState<TabType>(() => {
+    return isAdmin(user) ? 'quota' : 'alerts';
+  });
 
   // --- Quota State ---
   const { data: quotaData, isLoading: quotaLoading, isError, error, refetch } = useQuotaUsage();
@@ -114,6 +112,9 @@ export const QuotaAlerts: React.FC = () => {
   const [readFilter, setReadFilter] = useState('');
 
   const [showPrefsModal, setShowPrefsModal] = useState(false);
+  // Issue #3083: Test alert state
+  const [testAlertLoading, setTestAlertLoading] = useState(false);
+  const [lastTestAlertTime, setLastTestAlertTime] = useState(0);
   const [preferences, setPreferences] = useState<NotificationPreferences>({
     email_enabled: true,
     push_enabled: true,
@@ -128,14 +129,27 @@ export const QuotaAlerts: React.FC = () => {
     setAlertsLoading(true);
     setAlertsError(null);
     try {
-      // Use admin API for quota alerts when user is admin
+      // Issue #3082: 根据角色选择不同的 API
       if (isAdmin(user) && typeFilter === 'quota') {
+        // Admin: 查看租户告警或全局告警
         const result = await alertsApi.getAdminQuotaAlerts({
           limit: 100,
         });
         setAlerts(result.alerts);
         setUnreadCount(result.unread_count);
+      } else if (user?.role === 'manager') {
+        // Manager: 查看租户用户告警（Issue #3082 阶段二）
+        // 传递过滤器参数，与其他角色保持一致
+        const result = await alertsApi.getTenantAlerts({
+          type: typeFilter || undefined,
+          severity: severityFilter || undefined,
+          unread_only: readFilter === 'unread',
+          limit: 100,
+        });
+        setAlerts(result.alerts);
+        setUnreadCount(result.unread_count);
       } else {
+        // 普通用户: 查看自己的告警
         const result = await alertsApi.getAlerts({
           type: typeFilter || undefined,
           severity: severityFilter || undefined,
@@ -190,48 +204,29 @@ export const QuotaAlerts: React.FC = () => {
   };
 
   // Get available quota hint for input field (shows actual available quota)
-  const getAvailableQuotaHint = useCallback(
+  // Now uses the utility function from quotaFormatter
+  const getHint = useCallback(
     (quotaType: QuotaType): string => {
-      const typeMap = {
-        [QuotaType.DAILY_TOKEN]: {
-          remaining: quotaStats?.remaining.daily_token ?? 0,
-          current: editingUser?.daily_token_quota ?? 0,
-          max: MAX_TOKEN_QUOTA,
-          isToken: true,
-        },
-        [QuotaType.MONTHLY_TOKEN]: {
-          remaining: quotaStats?.remaining.monthly_token ?? 0,
-          current: editingUser?.monthly_token_quota ?? 0,
-          max: MAX_TOKEN_QUOTA,
-          isToken: true,
-        },
-        [QuotaType.DAILY_REQUEST]: {
-          remaining: quotaStats?.remaining.daily_request ?? 0,
-          current: editingUser?.daily_request_quota ?? 0,
-          max: MAX_REQUEST_QUOTA,
-          isToken: false,
-        },
-        [QuotaType.MONTHLY_REQUEST]: {
-          remaining: quotaStats?.remaining.monthly_request ?? 0,
-          current: editingUser?.monthly_request_quota ?? 0,
-          max: MAX_REQUEST_QUOTA,
-          isToken: false,
-        },
-      };
-
-      const info = typeMap[quotaType];
-      const available = Math.max(0, Math.min(info.remaining + info.current, info.max));
-
-      if (!quotaStats) {
-        return info.isToken ? `Max: ${info.max}M` : `Max: ${formatNumberAsString(info.max)}`;
+      // Determine current quota based on quota type
+      let currentQuota: number | undefined;
+      switch (quotaType) {
+        case QuotaType.DAILY_TOKEN:
+          currentQuota = editingUser?.daily_token_quota;
+          break;
+        case QuotaType.MONTHLY_TOKEN:
+          currentQuota = editingUser?.monthly_token_quota;
+          break;
+        case QuotaType.DAILY_REQUEST:
+          currentQuota = editingUser?.daily_request_quota;
+          break;
+        case QuotaType.MONTHLY_REQUEST:
+          currentQuota = editingUser?.monthly_request_quota;
+          break;
       }
 
-      if (info.isToken) {
-        return `可用: ${available.toFixed(2)}M (上限: ${info.max}M)`;
-      }
-      return `可用: ${formatNumberAsString(available)} (上限: ${formatNumberAsString(info.max)})`;
+      return getAvailableQuotaHint(quotaType, quotaStats, currentQuota, language);
     },
-    [quotaStats, editingUser]
+    [quotaStats, editingUser, language]
   );
 
   // Handle quota input change with validation
@@ -340,8 +335,8 @@ export const QuotaAlerts: React.FC = () => {
       const submitData: UpdateQuotaRequest = {
         daily_token_quota: formData.daily_token_quota ?? undefined,
         monthly_token_quota: formData.monthly_token_quota ?? undefined,
-        daily_request_quota: formData.daily_request_quota,
-        monthly_request_quota: formData.monthly_request_quota,
+        daily_request_quota: formData.daily_request_quota ?? undefined,
+        monthly_request_quota: formData.monthly_request_quota ?? undefined,
       };
       await updateQuota.mutateAsync({ userId: editingUser.id, data: submitData });
       toast.success(t('quotaUpdated', language), t('quotaUpdatedDesc', language));
@@ -491,6 +486,38 @@ export const QuotaAlerts: React.FC = () => {
     }
   };
 
+  // Issue #3083: Send test alert handler
+  const TEST_ALERT_COOLDOWN_MS = 60_000; // 60 seconds
+  const isRateLimited = Date.now() - lastTestAlertTime < TEST_ALERT_COOLDOWN_MS;
+  const remainingSeconds = Math.ceil(
+    (TEST_ALERT_COOLDOWN_MS - (Date.now() - lastTestAlertTime)) / 1000
+  );
+
+  const handleSendTestAlert = async () => {
+    if (Date.now() - lastTestAlertTime < TEST_ALERT_COOLDOWN_MS) {
+      toast.warning(t('testAlertCooldown', language, { seconds: remainingSeconds }));
+      return;
+    }
+    setTestAlertLoading(true);
+    try {
+      await alertsApi.createTestAlert({
+        type: 'system',
+        severity: 'info',
+        title: '[TEST] Test Alert',
+        message: 'This is a test alert to verify your notification channels are working correctly.',
+      });
+      toast.success(t('testAlertCreated', language), t('testAlertCreatedDesc', language));
+      setLastTestAlertTime(Date.now());
+      fetchAlerts();
+    } catch (err) {
+      console.error('Failed to send test alert:', err);
+      const errorMessage = getErrorMessage(err, t('testAlertFailed', language));
+      toast.error(t('testAlertFailed', language), errorMessage);
+    } finally {
+      setTestAlertLoading(false);
+    }
+  };
+
   const getSeverityVariant = (severity: string) => {
     switch (severity) {
       case 'critical':
@@ -529,42 +556,47 @@ export const QuotaAlerts: React.FC = () => {
           <EmptyState icon="bi-sliders" title={t('noQuotaData', language)} />
         ) : (
           <div className="row g-3">
-            {quotaData.map((user) => {
+            {quotaData.map((quotaUser) => {
               const dailyTokenPercentage = getUsagePercentage(
-                user.tokens_used_today,
-                user.daily_token_quota ? user.daily_token_quota * TOKEN_QUOTA_MULTIPLIER : undefined
+                quotaUser.tokens_used_today,
+                quotaUser.daily_token_quota
+                  ? quotaUser.daily_token_quota * TOKEN_QUOTA_MULTIPLIER
+                  : undefined
               );
               const monthlyTokenPercentage = getUsagePercentage(
-                user.tokens_used_month,
-                user.monthly_token_quota
-                  ? user.monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
+                quotaUser.tokens_used_month,
+                quotaUser.monthly_token_quota
+                  ? quotaUser.monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
                   : undefined
               );
               const dailyRequestPercentage = getUsagePercentage(
-                user.requests_today,
-                user.daily_request_quota
+                quotaUser.requests_today,
+                quotaUser.daily_request_quota
               );
               const monthlyRequestPercentage = getUsagePercentage(
-                user.requests_month,
-                user.monthly_request_quota
+                quotaUser.requests_month,
+                quotaUser.monthly_request_quota
               );
 
               return (
-                <div key={user.id} className="col-md-6 col-lg-4">
+                <div key={quotaUser.id} className="col-md-6 col-lg-4">
                   <Card className="h-100">
                     <div className="d-flex justify-content-between align-items-start mb-3">
                       <div>
-                        <h6 className="mb-1">{user.username}</h6>
-                        <small className="text-muted">{user.email}</small>
+                        <h6 className="mb-1">{quotaUser.username}</h6>
+                        <small className="text-muted">{quotaUser.email}</small>
                       </div>
-                      <Button
-                        variant="outline-primary"
-                        size="sm"
-                        onClick={() => handleOpenEdit(user)}
-                        title={t('editQuota', language) ?? 'Edit Quota'}
-                      >
-                        <i className="bi bi-pencil" />
-                      </Button>
+                      {/* Issue #3082: 仅 Admin 可编辑配额 */}
+                      {isAdmin(user) && (
+                        <Button
+                          variant="outline-primary"
+                          size="sm"
+                          onClick={() => handleOpenEdit(quotaUser)}
+                          title={t('editQuota', language) ?? 'Edit Quota'}
+                        >
+                          <i className="bi bi-pencil" />
+                        </Button>
+                      )}
                     </div>
 
                     {/* Daily Token Quota */}
@@ -572,8 +604,8 @@ export const QuotaAlerts: React.FC = () => {
                       <div className="d-flex justify-content-between mb-1">
                         <small>{t('dailyTokenQuota', language)}</small>
                         <small>
-                          {formatTokens(user.tokens_used_today ?? 0)} /{' '}
-                          {formatQuotaForDisplay(user.daily_token_quota, true)}
+                          {formatTokens(quotaUser.tokens_used_today ?? 0)} /{' '}
+                          {formatQuotaForDisplay(quotaUser.daily_token_quota, true)}
                         </small>
                       </div>
                       <Progress
@@ -588,8 +620,8 @@ export const QuotaAlerts: React.FC = () => {
                       <div className="d-flex justify-content-between mb-1">
                         <small>{t('monthlyTokenQuota', language)}</small>
                         <small>
-                          {formatTokens(user.tokens_used_month ?? 0)} /{' '}
-                          {formatQuotaForDisplay(user.monthly_token_quota, true)}
+                          {formatTokens(quotaUser.tokens_used_month ?? 0)} /{' '}
+                          {formatQuotaForDisplay(quotaUser.monthly_token_quota, true)}
                         </small>
                       </div>
                       <Progress
@@ -604,8 +636,10 @@ export const QuotaAlerts: React.FC = () => {
                       <div className="d-flex justify-content-between mb-1">
                         <small>{t('dailyRequestQuota', language)}</small>
                         <small>
-                          {formatNumber(user.requests_today ?? 0)} /{' '}
-                          {user.daily_request_quota ? formatNumber(user.daily_request_quota) : '∞'}
+                          {formatNumber(quotaUser.requests_today ?? 0)} /{' '}
+                          {quotaUser.daily_request_quota
+                            ? formatNumber(quotaUser.daily_request_quota)
+                            : '∞'}
                         </small>
                       </div>
                       <Progress
@@ -620,9 +654,9 @@ export const QuotaAlerts: React.FC = () => {
                       <div className="d-flex justify-content-between mb-1">
                         <small>{t('monthlyRequestQuota', language)}</small>
                         <small>
-                          {formatNumber(user.requests_month ?? 0)} /{' '}
-                          {user.monthly_request_quota
-                            ? formatNumber(user.monthly_request_quota)
+                          {formatNumber(quotaUser.requests_month ?? 0)} /{' '}
+                          {quotaUser.monthly_request_quota
+                            ? formatNumber(quotaUser.monthly_request_quota)
                             : '∞'}
                         </small>
                       </div>
@@ -752,9 +786,7 @@ export const QuotaAlerts: React.FC = () => {
                 <div className="col-md-6">
                   <label className="form-label">
                     {t('dailyTokenQuota', language)} (M)
-                    <small className="text-muted ms-1">
-                      ({getAvailableQuotaHint(QuotaType.DAILY_TOKEN)})
-                    </small>
+                    <small className="text-muted ms-1">({getHint(QuotaType.DAILY_TOKEN)})</small>
                   </label>
                   <TextInput
                     type="text"
@@ -778,9 +810,7 @@ export const QuotaAlerts: React.FC = () => {
                 <div className="col-md-6">
                   <label className="form-label">
                     {t('monthlyTokenQuota', language)} (M)
-                    <small className="text-muted ms-1">
-                      ({getAvailableQuotaHint(QuotaType.MONTHLY_TOKEN)})
-                    </small>
+                    <small className="text-muted ms-1">({getHint(QuotaType.MONTHLY_TOKEN)})</small>
                   </label>
                   <TextInput
                     type="text"
@@ -804,9 +834,7 @@ export const QuotaAlerts: React.FC = () => {
                 <div className="col-md-6">
                   <label className="form-label">
                     {t('dailyRequestQuota', language)}
-                    <small className="text-muted ms-1">
-                      ({getAvailableQuotaHint(QuotaType.DAILY_REQUEST)})
-                    </small>
+                    <small className="text-muted ms-1">({getHint(QuotaType.DAILY_REQUEST)})</small>
                   </label>
                   <TextInput
                     type="text"
@@ -831,7 +859,7 @@ export const QuotaAlerts: React.FC = () => {
                   <label className="form-label">
                     {t('monthlyRequestQuota', language)}
                     <small className="text-muted ms-1">
-                      ({getAvailableQuotaHint(QuotaType.MONTHLY_REQUEST)})
+                      ({getHint(QuotaType.MONTHLY_REQUEST)})
                     </small>
                   </label>
                   <TextInput
@@ -1156,6 +1184,23 @@ export const QuotaAlerts: React.FC = () => {
                 <i className="bi bi-gear me-1" />
                 {t('preferences', language)}
               </Button>
+              {isAdmin(user) && (
+                <Button
+                  variant="outline-primary"
+                  size="sm"
+                  onClick={handleSendTestAlert}
+                  loading={testAlertLoading}
+                  disabled={isRateLimited}
+                  title={
+                    isRateLimited
+                      ? t('testAlertCooldown', language, { seconds: remainingSeconds })
+                      : undefined
+                  }
+                >
+                  <i className="bi bi-megaphone me-1" />
+                  {t('sendTestAlert', language)}
+                </Button>
+              )}
               <Button variant="primary" size="sm" onClick={handleMarkAllAsRead}>
                 <i className="bi bi-check-all me-1" />
                 {t('markAllRead', language)}

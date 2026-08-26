@@ -38,6 +38,15 @@ class TestAnalysisService:
                 "host_name": "h1",
             }
         ]
+        # Issue #3030: Mock the new session metrics method
+        mock_usage.get_session_key_metrics.return_value = {
+            "total_tokens": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_requests": 0,
+            "unique_tools": 0,
+            "unique_hosts": 0,
+        }
         mock_msg.get_user_token_totals.return_value = [
             {
                 "total_tokens": 1000,
@@ -62,6 +71,15 @@ class TestAnalysisService:
     def test_get_key_metrics_no_data(self):
         svc, mock_usage, mock_msg, _ = self._make_service()
         mock_usage.get_daily_range.return_value = []
+        # Issue #3030: Mock the new session metrics method
+        mock_usage.get_session_key_metrics.return_value = {
+            "total_tokens": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_requests": 0,
+            "unique_tools": 0,
+            "unique_hosts": 0,
+        }
         mock_msg.get_user_token_totals.return_value = []
         mock_msg.get_tool_token_totals.return_value = []
         mock_msg.get_conversation_stats_summary.return_value = {
@@ -369,3 +387,62 @@ class TestAnalysisService:
         result = svc.get_recommendations()
         assert len(result) == 1
         assert result[0]["type"] == "info"
+
+    # Issue #3079: Tests for get_user_role_distribution
+    def test_get_user_role_distribution(self):
+        """Test that get_user_role_distribution returns correct counts by role group."""
+        svc, _, mock_msg, _ = self._make_service()
+        mock_msg.get_user_token_totals.return_value = [
+            {"user_id": 1, "role_group": "admin", "total_tokens": 5000},
+            {"user_id": 2, "role_group": "admin", "total_tokens": 3000},
+            {"user_id": 3, "role_group": "manager", "total_tokens": 2000},
+            {"user_id": 4, "role_group": "user", "total_tokens": 1000},
+            {"user_id": 5, "role_group": "user", "total_tokens": 500},
+            {"user_id": -1, "role_group": "unknown", "total_tokens": 100},
+        ]
+        result = svc.get_user_role_distribution("2026-05-01", "2026-05-23")
+
+        # Verify structure - now returns simple counts, not nested objects
+        assert "admin" in result
+        assert "manager" in result
+        assert "user" in result
+        assert "unknown" in result
+
+        # Verify counts (direct integers, not nested objects)
+        assert result["admin"] == 2
+        assert result["manager"] == 1
+        assert result["user"] == 2
+        assert result["unknown"] == 1
+
+    def test_get_user_role_distribution_no_data(self):
+        """Test that get_user_role_distribution handles empty data gracefully."""
+        svc, _, mock_msg, _ = self._make_service()
+        mock_msg.get_user_token_totals.return_value = []
+        result = svc.get_user_role_distribution("2026-05-01", "2026-05-23")
+
+        # All counts should be 0 (direct integers)
+        assert result["admin"] == 0
+        assert result["manager"] == 0
+        assert result["user"] == 0
+        assert result["unknown"] == 0
+
+    def test_get_user_role_distribution_unknown_role(self):
+        """Test that unrecognized roles are counted as unknown."""
+        svc, _, mock_msg, _ = self._make_service()
+        mock_msg.get_user_token_totals.return_value = [
+            {"user_id": 1, "role_group": "invalid_role", "total_tokens": 100},
+        ]
+        result = svc.get_user_role_distribution("2026-05-01", "2026-05-23")
+
+        # Invalid role should be counted as unknown
+        assert result["unknown"] == 1
+
+    def test_get_user_role_distribution_null_role_group(self):
+        """Test that None role_group is treated as unknown."""
+        svc, _, mock_msg, _ = self._make_service()
+        mock_msg.get_user_token_totals.return_value = [
+            {"user_id": 1, "role_group": None, "total_tokens": 100},
+        ]
+        result = svc.get_user_role_distribution("2026-05-01", "2026-05-23")
+
+        assert result["unknown"] == 1

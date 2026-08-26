@@ -1,15 +1,19 @@
 """
-Test Work Mode Assist Panel Prompts List Improvements
+Test Work Mode Prompts Drawer Functionality
+
+The retired always-visible right AssistPanel was replaced by a floating
+prompts drawer on the workspace route (opened via .prompts-drawer-toggle).
 
 Tests the following features:
-1. Search box for prompts
-2. Category filters
-3. Prompt list displays all prompts (sorted by use_count)
-4. Tooltip shows prompt content on hover
-5. Variable fill button (active if has required variables)
-6. Copy button (disabled if has required variables)
-7. Click opens prompt detail modal
-8. Modal shows prompt details and allows variable filling
+1. Drawer toggle opens the drawer
+2. Search box for prompts
+3. Category filters
+4. Prompt list displays prompts
+5. Tooltip shows prompt content on hover
+6. Variable fill button (active if has required variables)
+7. Copy button (disabled if has required variables)
+8. Click opens prompt detail modal
+9. Modal shows prompt details and allows variable filling
 """
 
 import os
@@ -19,6 +23,7 @@ sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 )
 
+import re
 import time
 
 from playwright.sync_api import expect, sync_playwright
@@ -31,7 +36,7 @@ VIEWPORT = {"width": 1400, "height": 900}
 
 
 def test_assist_panel_prompts():
-    """Test Assist Panel prompts functionality."""
+    """Test prompts drawer functionality."""
     results = []
 
     with sync_playwright() as p:
@@ -54,19 +59,20 @@ def test_assist_panel_prompts():
         page.wait_for_selector(".work-layout", timeout=10000)
         results.append(("Navigate to Work mode", "Passed"))
 
-        # Step 3: Check right panel exists
-        print("Step 3: Check right panel...")
-        right_panel = page.locator(".work-right-panel")
-        expect(right_panel).to_be_visible()
-        results.append(("Right panel visible", "Passed"))
+        # Step 3: Open the prompts drawer via the edge toggle
+        print("Step 3: Open prompts drawer...")
+        toggle = page.locator(".prompts-drawer-toggle")
+        expect(toggle).to_be_visible()
+        toggle.click()
+        drawer = page.locator(".prompts-drawer")
+        expect(drawer).to_be_visible()
+        results.append(("Prompts drawer opens from toggle", "Passed"))
 
-        # Step 4: Check prompts tab is active by default
-        print("Step 4: Check prompts tab...")
-        prompts_tab = page.locator(".nav-tabs .nav-link").first
-        # Check if tab has 'active' in class name
-        tab_class = prompts_tab.get_attribute("class") or ""
-        assert "active" in tab_class, "Prompts tab should be active"
-        results.append(("Prompts tab active", "Passed"))
+        # Step 4: Check drawer header
+        print("Step 4: Check drawer header...")
+        drawer_title = page.locator(".prompts-drawer-title")
+        expect(drawer_title).to_be_visible()
+        results.append(("Drawer header visible", "Passed"))
 
         # Step 5: Check search box exists
         print("Step 5: Check search box...")
@@ -79,14 +85,23 @@ def test_assist_panel_prompts():
         # Step 6: Check category filters
         print("Step 6: Check category filters...")
         category_filters = page.locator(".category-filter-btn")
+        # Categories arrive via a separate async query; wait for the prompt
+        # data to load so the filter branch is not skipped by a data race.
+        page.wait_for_selector(".prompt-list", timeout=10000)
+        for _ in range(10):
+            if category_filters.count() > 0:
+                break
+            page.wait_for_timeout(500)
         count = category_filters.count()
         if count > 0:
             results.append(("Category filters exist", "Passed"))
             # Click a category filter
             category_filters.first.click()
             page.wait_for_timeout(500)
-            # Check if category filter is active
-            expect(category_filters.first).to_have_class(".*active.*")
+            # Check if category filter is active. A string argument would be
+            # an exact-match against the full class attribute
+            # ("category-filter-btn active"), so pass a regex.
+            expect(category_filters.first).to_have_class(re.compile(r"\bactive\b"))
             results.append(("Category filter clickable", "Passed"))
         else:
             results.append(("Category filters (no categories)", "Passed"))
@@ -162,7 +177,7 @@ def test_assist_panel_prompts():
         screenshot_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "screenshots",
-            "work_assist_panel_prompts.png",
+            "work_prompts_drawer.png",
         )
         page.screenshot(path=screenshot_path)
         results.append(("Screenshot saved", screenshot_path))
@@ -171,7 +186,7 @@ def test_assist_panel_prompts():
 
     # Print results
     print("\n" + "=" * 50)
-    print("UI Test Report: Work Assist Panel Prompts")
+    print("UI Test Report: Work Prompts Drawer")
     print("=" * 50)
     for name, status in results:
         print(f"  ✓ {name}: {status}")

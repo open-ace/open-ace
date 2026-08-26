@@ -191,6 +191,8 @@ def _governance_request(
         gov_repo.create_filter_rule.return_value = 123
         gov_repo.update_filter_rule.return_value = True
         gov_repo.delete_filter_rule.return_value = True
+        # Issue #3058: New idempotent creation method returns tuple (rule, is_new)
+        gov_repo.create_filter_rule_idempotent.return_value = ({"id": 123}, True)
     content_filter = content_filter if content_filter is not None else MagicMock()
 
     with (

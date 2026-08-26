@@ -7,6 +7,7 @@ API routes for AI autonomous development workflow management.
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import os
@@ -26,6 +27,7 @@ from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 from app.auth.decorators import (
     auth_required,
     check_machine_admin_permission,
+    public_endpoint,
     validate_session_token,
 )
 from app.models.user import User
@@ -1260,6 +1262,9 @@ def retry_workflow(workflow_id):
         # PR-C (#2443): reset the Tier1 dev-round escalation budget too, so a
         # retried workflow gets a fresh MAX_MERGE_FAIL_DEV_ROUNDS allowance.
         "merge_fail_dev_rounds": 0,
+        # Bounded merge-policy settle budget; reset on retry so a resumed
+        # workflow gets a fresh merge-settle allowance.
+        "merge_policy_settle_retries": 0,
     }
     # Optional per-workflow scope bump (#2309): a failed round whose only
     # blocker was the changed-files cap can be retried with a higher limit
@@ -1771,6 +1776,22 @@ def resume_with_feedback(workflow_id):
     return jsonify({"success": True})
 
 
+def _session_payload(session_data):
+    """Normalize a SessionManager result for the milestone-session viewer.
+
+    AgentSession objects are serialized via ``to_dict()`` so each message
+    carries an ISO ``timestamp`` and its ``milestone_id`` (Flask's dataclass
+    asdict would emit http-date datetimes instead). Anything else — dicts,
+    None, test doubles — passes through untouched. isinstance (not hasattr)
+    so MagicMock doubles never take the to_dict branch (#3000).
+    """
+    from app.modules.workspace.session_manager import AgentSession
+
+    if isinstance(session_data, AgentSession):
+        return session_data.to_dict()
+    return session_data
+
+
 @autonomous_bp.route("/workflows/<workflow_id>/milestones/<milestone_id>/session", methods=["GET"])
 @auth_required
 def get_milestone_session(workflow_id, milestone_id):
@@ -1807,13 +1828,17 @@ def get_milestone_session(workflow_id, milestone_id):
             include_messages=True,
         )
         if session_data:
-            return jsonify({"success": True, "session": session_data})
+            return jsonify({"success": True, "session": _session_payload(session_data)})
 
-    session_data = sm.get_session(
-        session_id, include_messages=True, message_milestone_id=milestone_id
-    )
+    # The mapped CLI session row may not exist (this deployment persists the
+    # transcript under the tracking id), and milestone tagging is unreliable
+    # (verification-line messages are 100% untagged — the settle-time milestone
+    # does not exist while the verifier runs). Return the tracking session's
+    # FULL transcript unfiltered; a filtered view here once left the viewer
+    # rendering only the status badge (#3000).
+    session_data = sm.get_session(session_id, include_messages=True)
 
-    return jsonify({"success": True, "session": session_data})
+    return jsonify({"success": True, "session": _session_payload(session_data)})
 
 
 @autonomous_bp.route("/workflows/<workflow_id>/milestones/<milestone_id>/diff", methods=["GET"])
@@ -1974,6 +1999,83 @@ def get_workflow_pr_stats(workflow_id):
 
 
 # ── Real-Time Events (SSE) ─────────────────────────────────────────
+
+
+INGEST_MAX_BODY_BYTES = 1024 * 1024
+INGEST_MAX_EVENTS = 100
+_ingest_log_state = {"last": 0.0}
+
+
+@autonomous_bp.route("/internal/events/ingest", methods=["POST"])
+@public_endpoint
+def ingest_internal_events():
+    """Cross-process SSE ingest: scheduler process → this web process.
+
+    #2187 split the scheduler into its own process; the emitter is an
+    in-process singleton, so scheduler-side events must be handed over here to
+    reach SSE subscribers. Delivery is at-least-once (a timed-out POST may be
+    retried after we already broadcast).
+
+    Security model — the shared secret is the PRIMARY control, fail-closed:
+    an unconfigured/empty secret returns 503 (never a no-auth fallback),
+    mirroring require_upload_auth. The loopback/trusted-source check is
+    defense-in-depth: it does NOT help under an nginx reverse proxy, where
+    every external request arrives as 127.0.0.1 — hence the secret
+    requirement. X-Forwarded-For is intentionally ignored (client-controlled).
+    """
+    from app.modules.workspace.autonomous.events_ingest import (
+        INGEST_SECRET_HEADER,
+        is_trusted_source,
+        resolve_ingest_secret,
+    )
+
+    secret = resolve_ingest_secret()
+    if not secret:
+        logger.error(
+            "Events ingest rejected: no shared secret configured "
+            "(server.events_ingest_key / SECRET_KEY / config secret_key)"
+        )
+        return jsonify({"error": "Events ingest not configured"}), 503
+
+    provided = request.headers.get(INGEST_SECRET_HEADER, "")
+    if (
+        not provided
+        or not hmac.compare_digest(provided.encode("utf-8"), secret.encode("utf-8"))
+        or not is_trusted_source(request.remote_addr)
+    ):
+        return jsonify({"error": "Access denied"}), 403
+
+    content_length = request.content_length
+    if content_length is None or content_length <= 0:
+        return jsonify({"error": "Empty or missing request body"}), 400
+    if content_length > INGEST_MAX_BODY_BYTES:
+        return jsonify({"error": "Payload too large"}), 413
+
+    payload = request.get_json(silent=True) or {}
+    events = payload.get("events")
+    if not isinstance(events, list) or not events:
+        return jsonify({"error": "Invalid events payload"}), 400
+    if len(events) > INGEST_MAX_EVENTS:
+        return jsonify({"error": "Payload too large"}), 413
+
+    emitter = _get_event_emitter()
+    accepted = 0
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        workflow_id = event.get("workflow_id") or ""
+        event_type = event.get("event_type") or ""
+        data = event.get("data")
+        if not workflow_id or not event_type or not isinstance(data, dict):
+            continue
+        emitter.emit(workflow_id, event_type, data)
+        accepted += 1
+
+    now = time.time()
+    if now - _ingest_log_state["last"] >= 60.0:
+        _ingest_log_state["last"] = now
+        logger.info("Events ingest accepted %d event(s)", accepted)
+    return jsonify({"success": True, "accepted": accepted})
 
 
 @autonomous_bp.route("/workflows/<workflow_id>/events/stream", methods=["GET"])

@@ -65,6 +65,9 @@ export const TrendAnalysis: React.FC = () => {
   const [selectedTool, setSelectedTool] = useState<string>('');
   const [selectedHost, setSelectedHost] = useState<string>('');
 
+  // Issue #3079: Segmentation view type for user segmentation card
+  const [segmentationType, setSegmentationType] = useState<'usage' | 'role'>('usage');
+
   // Get hosts for filter
   const { data: hostsData } = useHosts();
   const hosts = useMemo(() => hostsData ?? [], [hostsData]);
@@ -199,6 +202,8 @@ export const TrendAnalysis: React.FC = () => {
   const conversationStats = batchData?.conversation_stats;
   const toolComparison = batchData?.tool_comparison;
   const userSegmentation = batchData?.user_segmentation;
+  const userRoleDistribution = batchData?.user_role_distribution; // Issue #3079
+  const responseTimeMetrics = batchData?.response_time_metrics; // Issue #3080
   // Note: dataRange is already extracted above (before useMemo for dateRange)
 
   // Prepare chart data
@@ -209,6 +214,37 @@ export const TrendAnalysis: React.FC = () => {
   // Calculate additional metrics
   const activeUsers = userRanking?.users?.length ?? 0;
   const healthScoreResult = calculateHealthScore(keyMetrics, conversationStats);
+
+  // Issue #3080: Format response time display
+  const formatResponseTime = (ms: number | null | undefined): string => {
+    if (ms === null || ms === undefined) return t('notAvailable', language);
+    if (ms < 1000) return `${ms} ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
+    return `${(ms / 60000).toFixed(1)} min`;
+  };
+
+  // Issue #3080: Build response time tooltip
+  const getResponseTimeTooltip = (): string => {
+    if (!responseTimeMetrics?.data_available) {
+      return t('avgResponseTimeTooltip', language)
+        .replace('{count}', '0')
+        .replace('{coverage}', '0');
+    }
+    const count = responseTimeMetrics.sample_count ?? 0;
+    const coverage = Math.round((responseTimeMetrics.coverage_ratio ?? 0) * 100);
+    let tooltip = t('avgResponseTimeTooltip', language)
+      .replace('{count}', count.toString())
+      .replace('{coverage}', coverage.toString());
+
+    // Add tool call info if available
+    if (responseTimeMetrics.tool_call_avg_ms && responseTimeMetrics.tool_call_ratio) {
+      const toolTime = formatResponseTime(responseTimeMetrics.tool_call_avg_ms);
+      const toolRatio = Math.round(responseTimeMetrics.tool_call_ratio * 100);
+      tooltip += `\n${t('toolCallAvg', language).replace('{time}', toolTime)}`;
+      tooltip += `\n${t('toolCallRatio', language).replace('{ratio}', toolRatio.toString())}`;
+    }
+    return tooltip;
+  };
 
   // Show skeleton on initial load
   if (isLoading && isInitialLoad.current) {
@@ -392,6 +428,19 @@ export const TrendAnalysis: React.FC = () => {
         </div>
       </div>
 
+      {/* Issue #3080: Response Time Card */}
+      <div className="row g-3 mb-4">
+        <div className="col-12">
+          <StatCard
+            label={t('avgResponseTime', language)}
+            value={formatResponseTime(responseTimeMetrics?.avg_response_time_ms)}
+            icon={<i className="bi bi-speedometer fs-4" />}
+            variant={responseTimeMetrics?.data_available ? 'info' : 'secondary'}
+            helpTooltip={getResponseTimeTooltip()}
+          />
+        </div>
+      </div>
+
       {/* Usage Heatmap */}
       <div className="row mb-4">
         <div className="col-12">
@@ -515,42 +564,116 @@ export const TrendAnalysis: React.FC = () => {
             title={t('userSegmentation', language)}
             helpTooltip={t('userSegmentationStandard', language)}
           >
-            {userSegmentation &&
-            userSegmentation.high +
-              userSegmentation.medium +
-              userSegmentation.low +
-              userSegmentation.dormant >
-              0 ? (
-              <DoughnutChart
-                labels={[
-                  `${t('userSegmentationHigh', language)} (>10K)`,
-                  `${t('userSegmentationMedium', language)} (1K-10K)`,
-                  `${t('userSegmentationLow', language)} (<1K)`,
-                  t('userSegmentationDormant', language),
-                ]}
-                data={[
-                  userSegmentation.high || 0,
-                  userSegmentation.medium || 0,
-                  userSegmentation.low || 0,
-                  userSegmentation.dormant || 0,
-                ]}
-                backgroundColor={[
-                  'rgba(255, 99, 132, 0.8)',
-                  'rgba(255, 206, 86, 0.8)',
-                  'rgba(75, 192, 192, 0.8)',
-                  'rgba(201, 203, 207, 0.8)',
-                ]}
-                descriptions={[
-                  t('userSegmentationHighDesc', language),
-                  t('userSegmentationMediumDesc', language),
-                  t('userSegmentationLowDesc', language),
-                  t('userSegmentationDormantDesc', language),
-                ]}
-                showPercentage={true}
-                height={200}
-              />
-            ) : (
-              <EmptyState icon="bi-people" title={t('noData', language)} />
+            {/* Issue #3079: View toggle buttons */}
+            <div className="btn-group mb-3" role="group" style={{ width: '100%' }}>
+              <button
+                type="button"
+                className={cn(
+                  'btn',
+                  segmentationType === 'usage' ? 'btn-primary' : 'btn-outline-primary'
+                )}
+                onClick={() => setSegmentationType('usage')}
+                style={{ flex: 1 }}
+              >
+                {t('segmentByUsage', language)}
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  'btn',
+                  segmentationType === 'role' ? 'btn-primary' : 'btn-outline-primary'
+                )}
+                onClick={() => setSegmentationType('role')}
+                style={{ flex: 1 }}
+              >
+                {t('segmentByRole', language)}
+              </button>
+            </div>
+
+            {/* Usage-based segmentation chart */}
+            {segmentationType === 'usage' && (
+              <>
+                {userSegmentation &&
+                userSegmentation.high +
+                  userSegmentation.medium +
+                  userSegmentation.low +
+                  userSegmentation.dormant >
+                  0 ? (
+                  <DoughnutChart
+                    labels={[
+                      `${t('userSegmentationHigh', language)} (>10K)`,
+                      `${t('userSegmentationMedium', language)} (1K-10K)`,
+                      `${t('userSegmentationLow', language)} (<1K)`,
+                      t('userSegmentationDormant', language),
+                    ]}
+                    data={[
+                      userSegmentation.high || 0,
+                      userSegmentation.medium || 0,
+                      userSegmentation.low || 0,
+                      userSegmentation.dormant || 0,
+                    ]}
+                    backgroundColor={[
+                      'rgba(255, 99, 132, 0.8)',
+                      'rgba(255, 206, 86, 0.8)',
+                      'rgba(75, 192, 192, 0.8)',
+                      'rgba(201, 203, 207, 0.8)',
+                    ]}
+                    descriptions={[
+                      t('userSegmentationHighDesc', language),
+                      t('userSegmentationMediumDesc', language),
+                      t('userSegmentationLowDesc', language),
+                      t('userSegmentationDormantDesc', language),
+                    ]}
+                    showPercentage={true}
+                    height={200}
+                  />
+                ) : (
+                  <EmptyState icon="bi-people" title={t('noData', language)} />
+                )}
+              </>
+            )}
+
+            {/* Role-based distribution chart */}
+            {segmentationType === 'role' && (
+              <>
+                {userRoleDistribution &&
+                (userRoleDistribution.admin || 0) +
+                  (userRoleDistribution.manager || 0) +
+                  (userRoleDistribution.user || 0) +
+                  (userRoleDistribution.unknown || 0) >
+                  0 ? (
+                  <DoughnutChart
+                    labels={[
+                      t('userRoleAdmin', language),
+                      t('userRoleManager', language),
+                      t('userRoleUser', language),
+                      t('userRoleUnknown', language),
+                    ]}
+                    data={[
+                      userRoleDistribution.admin || 0,
+                      userRoleDistribution.manager || 0,
+                      userRoleDistribution.user || 0,
+                      userRoleDistribution.unknown || 0,
+                    ]}
+                    backgroundColor={[
+                      'rgba(220, 53, 69, 0.8)', // Red for admin
+                      'rgba(255, 193, 7, 0.8)', // Yellow for manager
+                      'rgba(13, 110, 253, 0.8)', // Blue for user
+                      'rgba(108, 117, 125, 0.8)', // Gray for unknown
+                    ]}
+                    descriptions={[
+                      t('userRoleAdminDesc', language),
+                      t('userRoleManagerDesc', language),
+                      t('userRoleUserDesc', language),
+                      t('userRoleUnknownDesc', language),
+                    ]}
+                    showPercentage={true}
+                    height={200}
+                  />
+                ) : (
+                  <EmptyState icon="bi-people" title={t('noData', language)} />
+                )}
+              </>
             )}
           </Card>
         </div>

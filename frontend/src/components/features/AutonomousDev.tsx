@@ -225,7 +225,7 @@ export const AutonomousDev: React.FC = () => {
           <div className="d-flex align-items-center gap-2">
             <button
               className="btn btn-sm btn-outline-secondary autonomous-dev-fullscreen-btn"
-              onClick={() => toggleWorkspaceFullscreen(false, false)}
+              onClick={() => toggleWorkspaceFullscreen(false)}
               title={
                 workspaceFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)
               }

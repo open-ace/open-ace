@@ -199,6 +199,8 @@ _METRICS: dict[str, dict[str, int]] = {
     "llm_proxy_usage_parse_errors_total": {},
     "llm_proxy_usage_events_total": {},
     "llm_proxy_usage_dedup_hits_total": {},
+    # Issue #1995: HA failover counter for gateway errors (502/503/504)
+    "llm_proxy_ha_failover_total": {},
 }
 
 

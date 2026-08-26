@@ -373,8 +373,12 @@ def compare_sqlite_snapshots(
     """Compare two SQLite schema snapshots."""
     actual_tables = set(actual.tables)
     expected_tables = set(expected.tables)
-    actual_indexes = set(actual.indexes)
-    expected_indexes = set(expected.indexes)
+    # Filter out sqlite_autoindex_* indexes - these are automatically created by SQLite
+    # for PRIMARY KEY and UNIQUE constraints and should not be compared
+    actual_indexes = {name for name in actual.indexes if not name.startswith("sqlite_autoindex_")}
+    expected_indexes = {
+        name for name in expected.indexes if not name.startswith("sqlite_autoindex_")
+    }
 
     column_diffs: dict[str, dict[str, Any]] = {}
     for table_name in sorted(actual_tables & expected_tables):

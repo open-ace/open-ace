@@ -315,13 +315,13 @@ def test_get_daily_by_tool_filters_by_tenant(tmp_db):
     # Query for tenant 1 - should only see tenant 1's data
     tenant_one_trend = repo.get_daily_by_tool("2026-07-17", "2026-07-17", tenant_id=1)
     assert len(tenant_one_trend) == 1
-    assert tenant_one_trend[0]["tool"] == "codex"
+    assert tenant_one_trend[0]["tool_name"] == "codex"
     assert tenant_one_trend[0]["tokens"] == 100
 
     # Query for tenant 2 - should only see tenant 2's data
     tenant_two_trend = repo.get_daily_by_tool("2026-07-17", "2026-07-17", tenant_id=2)
     assert len(tenant_two_trend) == 1
-    assert tenant_two_trend[0]["tool"] == "qwen"
+    assert tenant_two_trend[0]["tool_name"] == "qwen"
     assert tenant_two_trend[0]["tokens"] == 200
 
     # Query for admin (no tenant filter) - should see all

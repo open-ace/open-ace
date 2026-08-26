@@ -1264,6 +1264,65 @@ def any_admin_required(f=None):
     return decorator
 
 
+# ── Tenant Member Decorator (Issue #3082) ────────────────────────────────
+
+
+# 租户成员角色定义（独立于 is_any_admin_role）
+TENANT_MEMBER_ROLES = ("admin", "platform_admin", "tenant_admin", "manager")
+
+
+def tenant_member_required(f=None):
+    """
+    Decorator: require tenant member role.
+
+    Accepts roles:
+    - admin / platform_admin: global scope
+    - tenant_admin: tenant scope
+    - manager: tenant scope (read-only for alerts)
+
+    Difference from any_admin_required:
+    - any_admin_required: accepts admin roles only (admin, platform_admin, tenant_admin)
+    - tenant_member_required: accepts admin roles + manager role
+
+    Issue #3082: Allow Manager role to access tenant-scoped alert endpoints.
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # First try session token from cookie/header only
+            token = _extract_session_token()
+            if not token:
+                return jsonify({"error": "Authentication required"}), 401
+
+            user = _load_user_from_token(token)
+            if not user:
+                return jsonify({"error": "Invalid or expired session"}), 401
+
+            user_role = user.get("role")
+
+            # Check for tenant member role using independent constant
+            if user_role not in TENANT_MEMBER_ROLES:
+                return jsonify({"error": "Tenant member access required"}), 403
+
+            g.user = user
+            g.user_id = user.get("id")
+            g.user_role = user_role
+            g.tenant_id = user.get("tenant_id")
+
+            password_change_response = enforce_password_change_requirement(user)
+            if password_change_response is not None:
+                return password_change_response
+
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    if f is not None:
+        return decorator(f)
+    return decorator
+
+
 def _log_cross_tenant_operation(
     actor_user_id: int,
     actor_tenant_id: int | None,

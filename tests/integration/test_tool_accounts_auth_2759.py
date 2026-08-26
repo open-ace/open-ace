@@ -2,8 +2,10 @@
 Integration tests for tool account management authorization.
 
 Issue #2759: Verifies authorization and tenant isolation for tool account APIs.
+Issue #3055: Tests for RealDictRow-compatible dict access in batch endpoint.
 """
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,6 +17,40 @@ from app.auth.tool_account_auth import (
     validate_target_user_for_write,
     validate_user_in_tenant,
 )
+
+
+class DictLikeRow:
+    """A dict-like object that mimics psycopg2.extras.RealDictRow behavior.
+
+    This class supports dict-style access (get, __getitem__) but NOT attribute
+    access. This matches the behavior of RealDictRow in PostgreSQL environment.
+
+    Issue #3055: Used to test that code uses .get() instead of attribute access.
+    """
+
+    def __init__(self, data: dict[str, Any]):
+        self._data = data
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Dict-style get method."""
+        return self._data.get(key, default)
+
+    def __getitem__(self, key: str) -> Any:
+        """Dict-style item access."""
+        return self._data[key]
+
+    def __contains__(self, key: str) -> bool:
+        """Support 'in' operator."""
+        return key in self._data
+
+    def __bool__(self) -> bool:
+        """Truthiness - non-empty dict is truthy."""
+        return bool(self._data)
+
+    def __repr__(self) -> str:
+        return f"DictLikeRow({self._data})"
+
+    # Intentionally NOT implementing __getattr__ to ensure .tenant_id fails
 
 
 class TestValidateUserInTenant:
@@ -434,3 +470,92 @@ class TestBatchEndpointAuthorization:
                 )
                 # Should be forbidden (403)
                 assert response.status_code == 403
+
+
+class TestBatchEndpointWithDictLikeRow:
+    """Tests for batch endpoint with RealDictRow-like dict objects.
+
+    Issue #3055: Ensures code uses .get() instead of attribute access,
+    matching PostgreSQL RealDictRow behavior.
+    """
+
+    def test_batch_create_with_dict_like_row_succeeds(self):
+        """Batch create should succeed with dict-like row (no attribute access).
+
+        This test would FAIL on the old code that used target_user.tenant_id
+        because DictLikeRow does not support attribute access.
+        """
+        user = {
+            "id": 1,
+            "role": "platform_admin",
+            "tenant_id": None,
+            "username": "admin",
+            "email": "admin@example.com",
+        }
+
+        # Create a DictLikeRow that mimics RealDictRow behavior
+        # It supports .get() but NOT attribute access like .tenant_id
+        target_user_row = DictLikeRow(
+            {
+                "id": 2,
+                "tenant_id": 1,
+                "role": "user",
+                "username": "target_user",
+                "email": "target@example.com",
+            }
+        )
+
+        with patch("app.auth.decorators._load_user_from_token", return_value=user):
+            from app.routes.tool_accounts import tool_accounts_bp
+
+            app = Flask(__name__)
+            app.config["TESTING"] = True
+            app.register_blueprint(tool_accounts_bp)
+
+            with patch("app.routes.tool_accounts.user_repo") as mock_user_repo:
+                with patch("app.routes.tool_accounts.tool_account_repo") as mock_tool_repo:
+                    # Return DictLikeRow instead of plain dict
+                    mock_user_repo.get_user_by_id.return_value = target_user_row
+                    mock_tool_repo.get_by_tool_account.return_value = None  # No existing mapping
+
+                    # Mock the created mapping
+                    mock_mapping = MagicMock()
+                    mock_mapping.id = 1
+                    mock_mapping.user_id = 2
+                    mock_mapping.tool_account = "test-sender"
+                    mock_mapping.to_dict.return_value = {
+                        "id": 1,
+                        "user_id": 2,
+                        "tool_account": "test-sender",
+                    }
+                    mock_tool_repo.create.return_value = mock_mapping
+                    mock_tool_repo.update_daily_messages_user_id.return_value = 0
+
+                    client = app.test_client()
+                    response = client.post(
+                        "/tool-accounts/user/2/batch",
+                        json={"tool_accounts": [{"tool_account": "test-sender"}]},
+                        headers={"Authorization": "Bearer token"},
+                    )
+
+                    # Should succeed (200), not throw AttributeError (500)
+                    assert response.status_code == 200
+                    data = response.json
+                    assert data["created_count"] == 1
+                    assert data["failed_count"] == 0
+
+    def test_dict_like_row_attribute_access_raises_attributeerror(self):
+        """Verify DictLikeRow does NOT support attribute access.
+
+        This documents the key difference from regular dict that causes
+        the bug in the old code.
+        """
+        row = DictLikeRow({"tenant_id": 1})
+
+        # Dict access works
+        assert row.get("tenant_id") == 1
+        assert row["tenant_id"] == 1
+
+        # Attribute access raises AttributeError - this is what the bug was
+        with pytest.raises(AttributeError):
+            _ = row.tenant_id  # noqa: B018

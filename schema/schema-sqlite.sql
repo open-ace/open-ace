@@ -363,7 +363,8 @@ CREATE TABLE autonomous_workflows (
  verified_by text,
  verification_session_id text,
  issue_closed_by_workflow_at TIMESTAMP,
- merge_fail_dev_rounds integer DEFAULT 0
+ merge_fail_dev_rounds integer DEFAULT 0,
+ merge_policy_settle_retries integer DEFAULT 0
 );
 
 CREATE TABLE backfill_logs (
@@ -965,6 +966,47 @@ CREATE TABLE remote_runtime_outputs (
  expires_at TIMESTAMP
 );
 
+CREATE TABLE request_performance (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ request_id text NOT NULL,
+ session_id text,
+ conversation_id text,
+ tenant_id integer NOT NULL,
+ tool_name text NOT NULL,
+ host_name text DEFAULT 'localhost',
+ user_id integer,
+ started_at TIMESTAMP NOT NULL,
+ first_response_at TIMESTAMP,
+ completed_at TIMESTAMP,
+ ttft_ms integer,
+ tool_call_duration_ms integer DEFAULT 0,
+ total_duration_ms integer,
+ status text DEFAULT 'success' NOT NULL,
+ sample_type text DEFAULT 'streaming',
+ model text,
+ tool_call_count integer DEFAULT 0,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE response_time_stats (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ date text NOT NULL,
+ tool_name text NOT NULL,
+ host_name text DEFAULT 'localhost',
+ tenant_id integer NOT NULL,
+ avg_ms real,
+ p50_ms integer,
+ p95_ms integer,
+ min_ms integer,
+ max_ms integer,
+ tool_call_avg_ms real,
+ tool_call_ratio real,
+ sample_count integer DEFAULT 0 NOT NULL,
+ success_count integer DEFAULT 0 NOT NULL,
+ failed_count integer DEFAULT 0 NOT NULL,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE retention_evidence (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  execution_id TEXT NOT NULL,
@@ -1274,8 +1316,8 @@ CREATE TABLE tenant_quotas (
  tenant_id integer NOT NULL,
  daily_token_limit INTEGER DEFAULT 1000000,
  monthly_token_limit INTEGER DEFAULT 30000000,
- daily_request_limit integer DEFAULT 10000,
- monthly_request_limit integer DEFAULT 300000,
+ daily_request_limit INTEGER DEFAULT 10000,
+ monthly_request_limit INTEGER DEFAULT 300000,
  max_users integer DEFAULT 100,
  max_sessions_per_user integer DEFAULT 5,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1504,10 +1546,10 @@ CREATE TABLE users (
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  last_login TIMESTAMP,
  role TEXT DEFAULT 'user',
- daily_token_quota integer,
- monthly_token_quota integer,
- daily_request_quota integer,
- monthly_request_quota integer,
+ daily_token_quota INTEGER,
+ monthly_token_quota INTEGER,
+ daily_request_quota INTEGER,
+ monthly_request_quota INTEGER,
  deleted_at TIMESTAMP,
  system_account text,
  tenant_id integer,
@@ -1540,6 +1582,11 @@ CREATE TABLE webhook_deliveries (
  last_error_at TIMESTAMP,
  created_at TIMESTAMP NOT NULL,
  updated_at TIMESTAMP NOT NULL,
+ receiver_identity_hash TEXT,
+ cooldown_key TEXT,
+ cooldown_expires_at TIMESTAMP,
+ delivery_claim_token TEXT,
+ delivery_claim_expires_at TIMESTAMP,
     CONSTRAINT ck_webhook_deliveries_status CHECK ((status IN ('pending', 'in_flight', 'delivered', 'dead')))
 );
 
@@ -1633,6 +1680,10 @@ CREATE UNIQUE INDEX registration_tokens_token_hash_key ON registration_tokens (t
 CREATE UNIQUE INDEX remote_machines_machine_id_key ON remote_machines (machine_id);
 
 CREATE UNIQUE INDEX remote_runtime_commands_command_id_key ON remote_runtime_commands (command_id);
+
+CREATE UNIQUE INDEX request_performance_request_id_key ON request_performance (request_id);
+
+CREATE UNIQUE INDEX response_time_stats_date_tool_name_host_name_tenant_id_key ON response_time_stats (date, tool_name, host_name, tenant_id);
 
 CREATE UNIQUE INDEX retention_executions_execution_id_key ON retention_executions (execution_id);
 
@@ -2008,6 +2059,16 @@ CREATE INDEX idx_remote_runtime_outputs_expires ON remote_runtime_outputs (expir
 
 CREATE INDEX idx_remote_runtime_outputs_session_index ON remote_runtime_outputs (session_id, event_index);
 
+CREATE INDEX idx_request_performance_date ON request_performance (started_at);
+
+CREATE INDEX idx_request_performance_tenant ON request_performance (tenant_id);
+
+CREATE INDEX idx_request_performance_tool ON request_performance (tool_name, started_at);
+
+CREATE INDEX idx_response_time_stats_date ON response_time_stats (date);
+
+CREATE INDEX idx_response_time_stats_tenant ON response_time_stats (tenant_id, date);
+
 CREATE INDEX idx_retention_evidence_execution ON retention_evidence (execution_id);
 
 CREATE INDEX idx_retention_evidence_tenant ON retention_evidence (tenant_id);
@@ -2187,6 +2248,12 @@ CREATE INDEX idx_uta_last_activity ON user_tool_accounts (last_activity_at) WHER
 CREATE INDEX idx_uta_status_account ON user_tool_accounts (mapping_status, tool_account);
 
 CREATE INDEX idx_webhook_deliveries_alert ON webhook_deliveries (alert_id);
+
+CREATE INDEX idx_webhook_deliveries_cooldown_active ON webhook_deliveries (cooldown_key, status, cooldown_expires_at);
+
+CREATE INDEX idx_webhook_deliveries_cooldown_expiry ON webhook_deliveries (cooldown_expires_at);
+
+CREATE INDEX idx_webhook_deliveries_receiver_identity ON webhook_deliveries (receiver_identity_hash);
 
 CREATE INDEX idx_webhook_deliveries_status_retry ON webhook_deliveries (status, next_retry_at);
 

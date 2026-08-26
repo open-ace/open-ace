@@ -56,13 +56,12 @@ def login(page):
 
 
 def navigate_to_analysis(page):
-    """Navigate to Analysis page."""
+    """Navigate to the Trend Analysis page hosting the user segmentation card."""
     print("\n[Navigate] Going to Analysis page...")
-    analysis_nav = page.locator('a:has-text("Analysis"), #nav-analysis, [href="#/analysis"]')
-    if analysis_nav.count() > 0:
-        analysis_nav.first.click()
-    else:
-        page.goto(f"{BASE_URL}#/analysis")
+    # The manage sidebar groups nav items under collapsible sections; clicking
+    # the section-hidden link is intercepted by the section header. Navigate
+    # straight to the current route instead.
+    page.goto(f"{BASE_URL.rstrip('/')}/manage/analysis/trend")
     page.wait_for_load_state("networkidle")
     time.sleep(3)
 
@@ -70,27 +69,33 @@ def navigate_to_analysis(page):
 def change_language(page, language_code):
     """Change the language setting."""
     print(f"\n[Language] Changing to {language_code}...")
-    # Find language dropdown in header (globe icon dropdown)
-    globe_icon = page.locator(".bi-globe").first
-    if globe_icon.is_visible():
-        globe_icon.click()
-        time.sleep(0.5)
+    # Language dropdown lives in the header: a dropdown-toggle button with a
+    # globe icon. Clicking the icon itself does not open the menu; the toggle
+    # button does. Items are labeled in the CURRENT language, so try both.
+    language_names = {
+        "en": ["English", "英语"],
+        "zh": ["Chinese", "中文"],
+        "ja": ["Japanese", "日语"],
+        # Items are labeled in the CURRENT language: reaching ko goes
+        # en -> zh -> ja -> ko, so the ja-state label 韓国語 is the one
+        # that has to match here.
+        "ko": ["Korean", "韩语", "韓国語"],
+    }
 
-        # Find the dropdown item for the specified language
-        # Language codes: en, zh, ja, ko
-        language_names = {
-            "en": ["English", "英语"],
-            "zh": ["Chinese", "中文"],
-            "ja": ["Japanese", "日语"],
-            "ko": ["Korean", "韩语"],
-        }
+    lang_toggle = page.locator("button.header-icon-btn.dropdown-toggle:has(i.bi-globe)").first
+    if not lang_toggle.is_visible():
+        print("  ⚠ Language toggle not found")
+        return False
+    lang_toggle.click()
+    page.wait_for_timeout(300)
 
-        for name in language_names.get(language_code, [language_code]):
-            lang_option = page.locator(".dropdown-item").filter(has_text=name)
-            if lang_option.count() > 0:
-                lang_option.first.click()
-                time.sleep(1)
-                print(f"  ✓ Language changed to {language_code}")
+    for name in language_names.get(language_code, [language_code]):
+        lang_option = page.locator("button.dropdown-item").filter(has_text=name).first
+        if lang_option.count() > 0 and lang_option.is_visible():
+            lang_option.click()
+            time.sleep(1)
+            print(f"  ✓ Language changed to {language_code}")
+            return True
 
     print("  ⚠ Language change not successful")
     return False
@@ -345,6 +350,98 @@ def test_user_segmentation_responsive(
         except Exception as e:  # allow-swallow: UI element may not exist
             print(f"\n✗ Error: {e}")
             screenshots.append(take_screenshot(page, "error_responsive"))
+            raise
+        finally:
+            browser.close()
+
+    return screenshots
+
+
+def test_user_segmentation_role_view(
+    ui_screenshot_dir,
+):  # allow-no-assert: smoke test - visual verification only
+    """Test role-based view toggle for user segmentation.
+
+    Issue #3079: Verify that users can toggle between usage-based and role-based views.
+    """
+    global SCREENSHOT_DIR
+    SCREENSHOT_DIR = ui_screenshot_dir
+    screenshots = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=HEADLESS)
+        context = browser.new_context(viewport=VIEWPORT_SIZE)
+        page = context.new_page()
+
+        try:
+            # Step 1: Navigate and login
+            print("\n[Step 1] Navigate to login page")
+            page.goto(BASE_URL)
+            page.wait_for_load_state("networkidle")
+            screenshots.append(take_screenshot(page, "role_view_01_login"))
+
+            login(page)
+            screenshots.append(take_screenshot(page, "role_view_02_after_login"))
+
+            # Step 2: Navigate to Analysis
+            navigate_to_analysis(page)
+            screenshots.append(take_screenshot(page, "role_view_03_analysis"))
+
+            # Step 3: Find User Segmentation card
+            print("\n[Step 3] Find User Segmentation card with view toggle")
+            user_seg_card = page.locator(
+                '.card:has-text("User Segmentation"), .card:has-text("用户分层")'
+            )
+            if user_seg_card.count() > 0:
+                print("  ✓ User Segmentation card found")
+
+                # Step 4: Check for view toggle buttons
+                print("\n[Step 4] Check for view toggle buttons")
+                # Look for "By Role" / "按角色" button
+                role_btn = user_seg_card.locator(
+                    'button:has-text("By Role"), button:has-text("按角色")'
+                )
+                if role_btn.count() > 0:
+                    print("  ✓ Role view button found")
+
+                    # Click the role view button
+                    role_btn.first.click()
+                    time.sleep(1)
+                    screenshots.append(take_screenshot(page, "role_view_04_role_view"))
+
+                    # Verify role chart is displayed (check for Admin/管理员 label)
+                    admin_label = page.locator('text="Admin", text="管理员"')
+                    if admin_label.count() > 0:
+                        print("  ✓ Role distribution chart displayed")
+                    else:
+                        print("  ⚠ Role labels not found (may be no data)")
+
+                    # Step 5: Switch back to usage view
+                    print("\n[Step 5] Switch back to usage view")
+                    usage_btn = user_seg_card.locator(
+                        'button:has-text("By Usage"), button:has-text("按使用量")'
+                    )
+                    if usage_btn.count() > 0:
+                        usage_btn.first.click()
+                        time.sleep(1)
+                        screenshots.append(take_screenshot(page, "role_view_05_usage_view"))
+                        print("  ✓ Switched back to usage view")
+                else:
+                    print("  ⚠ View toggle buttons not found")
+            else:
+                print("  ✗ User Segmentation card not found")
+
+            # Summary
+            print("\n" + "=" * 50)
+            print("User Segmentation Role View Test Summary")
+            print("=" * 50)
+            print(f"Screenshots saved: {len(screenshots)}")
+            for s in screenshots:
+                print(f"  - {s}")
+
+        except Exception as e:  # allow-swallow: UI element may not exist
+            print(f"\n✗ Error: {e}")
+            screenshots.append(take_screenshot(page, "error_role_view"))
             raise
         finally:
             browser.close()

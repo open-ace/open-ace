@@ -7,8 +7,7 @@ Issue #2628. This module intentionally contains no config.json read/write path.
 import logging
 from typing import Any
 
-import requests
-
+from app.utils.outbound_url_guard import OutboundUrlBlockedError, safe_request
 from app.utils.placeholder import is_placeholder_value
 
 logger = logging.getLogger(__name__)
@@ -28,7 +27,9 @@ class FeishuConfigService:
                 "message": "App ID or App Secret appears to be a placeholder value",
             }
         try:
-            response = requests.post(
+            # Issue #2237: Use safe_request to avoid gevent RecursionError and get SSRF protection
+            response = safe_request(
+                "POST",
                 FEISHU_AUTH_URL,
                 json={"app_id": app_id, "app_secret": app_secret},
                 timeout=15,
@@ -48,12 +49,10 @@ class FeishuConfigService:
                 "message": "Feishu connection test successful",
                 "token_expire_seconds": data.get("expire", 7200),
             }
-        except requests.exceptions.Timeout:
-            return {
-                "success": False,
-                "message": "Connection timeout: unable to connect within 15 seconds",
-            }
-        except requests.exceptions.RequestException:
+        except OutboundUrlBlockedError as e:
+            logger.error("Feishu connection test blocked by SSRF protection: %s", e)
+            return {"success": False, "message": f"Request blocked by security policy: {e}"}
+        except Exception:
             logger.warning("Feishu connection test failed", exc_info=True)
             return {"success": False, "message": "Feishu connection test failed"}
 

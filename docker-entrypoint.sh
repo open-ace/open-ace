@@ -5,6 +5,97 @@
 set -e
 
 # ============================================================================
+# 0. Configuration Validation and Logging (Issue #2242)
+# ============================================================================
+# Validates configuration consistency and logs results for debugging.
+# Outputs a summary to stdout and writes detailed results to a log file.
+
+CONFIG_CHECK_LOG="/tmp/config-check.log"
+
+log_config_check() {
+    local status="$1"
+    local message="$2"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+    # Append to log file
+    mkdir -p "$(dirname "$CONFIG_CHECK_LOG")" 2>/dev/null || true
+    echo "[$timestamp] $status: $message" >> "$CONFIG_CHECK_LOG" 2>/dev/null || true
+}
+
+output_config_summary() {
+    local mode
+    local uid
+    uid=$(id -u)
+
+    # Determine mode
+    if [ "${WORKSPACE_MULTI_USER_MODE}" = "true" ]; then
+        mode="multi-user"
+    else
+        mode="single-user"
+    fi
+
+    echo ""
+    echo "=========================================="
+    echo "  Configuration Summary (Issue #2242)"
+    echo "=========================================="
+    echo ""
+    echo "Mode: $mode"
+    echo "Running as: $(id -un) (uid=$uid)"
+    echo ""
+
+    if [ "$mode" = "multi-user" ]; then
+        echo "Multi-user configuration:"
+        echo "  • WORKSPACE_MULTI_USER_MODE: ${WORKSPACE_MULTI_USER_MODE:-<not set>}"
+        echo "  • OPENACE_ALLOW_ROOT_MULTI_USER: ${OPENACE_ALLOW_ROOT_MULTI_USER:-<not set>}"
+        echo "  • OPENACE_CONFIG_DIR: ${OPENACE_CONFIG_DIR:-<not set>}"
+        echo "  • WORKSPACE_BASE_DIR: ${WORKSPACE_BASE_DIR:-/workspace}"
+        echo ""
+
+        # Validate configuration consistency
+        local config_ok=true
+
+        if [ "$uid" != "0" ]; then
+            echo "  ❌ ERROR: Running as non-root user but multi-user mode requires root"
+            config_ok=false
+        fi
+
+        if [ "${OPENACE_ALLOW_ROOT_MULTI_USER}" != "1" ]; then
+            echo "  ❌ ERROR: OPENACE_ALLOW_ROOT_MULTI_USER=1 not set"
+            config_ok=false
+        fi
+
+        if [ "$config_ok" = true ]; then
+            echo "  ✅ Configuration validated successfully"
+            log_config_check "INFO" "Multi-user mode configuration validated"
+        else
+            echo ""
+            echo "  💡 Quick fix: Use the one-click startup script:"
+            echo "     ./scripts/start-multi-user.sh"
+            echo ""
+            echo "  💡 Or use Docker Compose overlay:"
+            echo "     docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d"
+            log_config_check "ERROR" "Multi-user mode configuration invalid"
+        fi
+    else
+        echo "Single-user mode (default)"
+        echo "  • Container runs as non-root user (uid 1000)"
+        echo "  • No system user creation needed"
+        echo ""
+        echo "  ✅ Configuration OK"
+        log_config_check "INFO" "Single-user mode configuration validated"
+    fi
+
+    echo ""
+    echo "Config check log: $CONFIG_CHECK_LOG"
+    echo "=========================================="
+    echo ""
+}
+
+# Run configuration summary early (after basic validation)
+# This is called later in the script after security mode validation
+
+# ============================================================================
 # 0. Non-root runtime guard (PR #1780 review / docker-root)
 # ============================================================================
 # The image defaults to the non-root open-ace user (uid 1000). Single-user
@@ -18,19 +109,56 @@ require_root_for_multi_user() {
     if [ "$(id -u)" != "0" ]; then
         echo "ERROR: multi-user workspace mode requires root to create system users."
         echo "       The image defaults to the non-root open-ace user (uid 1000)."
-        echo "       To run multi-user mode, start the container as root AND set"
-        echo "       OPENACE_ALLOW_ROOT_MULTI_USER=1, e.g.:"
-        echo "         docker run --user 0 -e OPENACE_ALLOW_ROOT_MULTI_USER=1 ..."
-        echo "       or set runAsUser: 0 in your manifest. Otherwise keep"
-        echo "       single-user mode (the default)."
+        echo ""
+        echo "=========================================="
+        echo "  💡 QUICK FIX (Recommended)"
+        echo "=========================================="
+        echo ""
+        echo "Use the one-click startup script:"
+        echo "  ./scripts/start-multi-user.sh"
+        echo ""
+        echo "Or use Docker Compose overlay:"
+        echo "  docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d"
+        echo ""
+        echo "=========================================="
+        echo "  🔧 MANUAL FIX"
+        echo "=========================================="
+        echo ""
+        echo "Start the container as root AND set required variables:"
+        echo "  docker run --user 0 \\"
+        echo "    -e WORKSPACE_MULTI_USER_MODE=true \\"
+        echo "    -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \\"
+        echo "    -e OPENACE_CONFIG_DIR=/home/open-ace/.open-ace ..."
+        echo ""
+        echo "Or keep single-user mode (the default):"
+        echo "  - If set via environment: unset WORKSPACE_MULTI_USER_MODE"
+        echo "  - If set via config.json: set 'multi_user_mode': false"
+        log_config_check "ERROR" "Multi-user mode requires root but running as non-root"
         exit 1
     fi
     if [ "${OPENACE_ALLOW_ROOT_MULTI_USER}" != "1" ]; then
         echo "ERROR: multi-user workspace mode is running as root but the explicit"
         echo "       opt-in OPENACE_ALLOW_ROOT_MULTI_USER=1 is not set."
-        echo "       Set OPENACE_ALLOW_ROOT_MULTI_USER=1 (and run as uid 0) to"
-        echo "       acknowledge that multi-user mode requires root, or keep"
-        echo "       single-user mode (the default, non-root)."
+        echo ""
+        echo "=========================================="
+        echo "  💡 QUICK FIX (Recommended)"
+        echo "=========================================="
+        echo ""
+        echo "Use the one-click startup script:"
+        echo "  ./scripts/start-multi-user.sh"
+        echo ""
+        echo "Or use Docker Compose overlay:"
+        echo "  docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d"
+        echo ""
+        echo "=========================================="
+        echo "  🔧 MANUAL FIX"
+        echo "=========================================="
+        echo ""
+        echo "Set OPENACE_ALLOW_ROOT_MULTI_USER=1 when running as root:"
+        echo "  docker run --user 0 -e OPENACE_ALLOW_ROOT_MULTI_USER=1 ..."
+        echo ""
+        echo "Or keep single-user mode (the default, non-root)."
+        log_config_check "ERROR" "Root user without OPENACE_ALLOW_ROOT_MULTI_USER=1"
         exit 1
     fi
 }
@@ -411,6 +539,12 @@ check_security_baseline() {
 
 # Run security baseline check before any other initialization
 check_security_baseline
+
+# ============================================================================
+# 0. Output Configuration Summary (Issue #2242)
+# ============================================================================
+# Output configuration summary after security checks pass
+output_config_summary
 
 # ============================================================================
 # 0. Pre-flight Setup
@@ -1358,20 +1492,11 @@ openace ALL=(root) NOPASSWD: ${wrapper_path} *
             fi
         done
 
-        # 【安全加固 Issue #1855】gh pr merge --admin opt-in 机制
-        # 默认不授权 --admin，需设置 OPENACE_ALLOW_ADMIN_MERGE=1 启用
-        GH_ADMIN_RULE=""
-        if [ "${OPENACE_ALLOW_ADMIN_MERGE}" = "1" ]; then
-            GH_ADMIN_RULE="${GH_PATH} pr merge * --admin, \\
-    "
-            echo "  WARNING: gh pr merge --admin is ENABLED via OPENACE_ALLOW_ADMIN_MERGE=1"
-        fi
-
         # Record sudoers generation to audit log (Issue #1855)
         AUDIT_LOG="/app/logs/sudoers-audit.log"
         mkdir -p /app/logs 2>/dev/null || true
         SUDOERS_CHECKSUM=$(echo "sudoers-$(date +%s)" | sha256sum | cut -d' ' -f1)
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [openace-sudoers] Generated sudoers file, checksum=${SUDOERS_CHECKSUM}, ADMIN_MERGE=${OPENACE_ALLOW_ADMIN_MERGE:-0}" >> "$AUDIT_LOG" 2>/dev/null || true
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [openace-sudoers] Generated sudoers file, checksum=${SUDOERS_CHECKSUM}" >> "$AUDIT_LOG" 2>/dev/null || true
 
         # 【安全加固 Issue #2334】Resolve ALL conditionals BEFORE heredoc
         # WebUI launcher wrapper is REQUIRED - fail closed if missing
@@ -1393,113 +1518,13 @@ openace ALL=(ALL) NOPASSWD: ${WEBUI_LAUNCH_WRAPPER} * \"${WEBUI_PATH}\" *"
 # ============================================================================
 # 【安全加固 Issue #1514 + #1855】精确参数白名单配置
 # ============================================================================
-# 基于sudoers审计报告(docs/sudoers-audit-report.md)，覆盖100%autonomous工作流必需命令
-# 安全边界说明（诚实版）：动词优先白名单只约束裸 'git <verb>'/'gh <verb>' 形态。
-# 【Issue #2635】前缀锚定条目（-c core.hooksPath=/dev/null * / --git-dir=* /
-# -R * / api *）在 (ALL) runas 下实际上恢复了接近 #2334 之前的 git/gh 能力：
-# 'gh api *' 允许任意 REST 调用（含 -X DELETE），'git -c core.hooksPath=/dev/null *'
-# 允许 clean -fd、reset --hard <任意> 及任意内联 -c 配置（含 alias RCE）。
-# 前缀是公开常量，仅作命令形态兼容锚点，不是安全边界；真正的收紧由
-# 后续 hardened wrapper（openace-git/openace-gh，follow-up issue）承接。
+# git/gh cross-user command grammar is enforced by openace-git/openace-gh.
+# sudoers authorizes only those wrapper binaries; direct git/gh wildcards are not a security boundary.
 # Issue #1855: 移除 cat/chown/useradd 通配，改用安全 wrapper
 
-# git命令白名单（动词优先条目 + #2635 前缀锚定条目）
-# 【Issue #2334】补充 github_ops 使用的 fetch/pull/merge/rebase 等动词
-# 【Issue #2635】前缀锚定条目：github_ops._run_git 的 sudo 路径在子命令前携带
-# git 全局选项（-c core.hooksPath=/dev/null ... 或 --git-dir=... --work-tree=...），
-# git 语法要求全局选项必须位于子命令之前，因此命令永不以 'git <subcommand>' 开头，
-# 动词优先白名单一条都匹配不上。
-# 注意：前缀锚定条目在 (ALL) runas 下近似恢复旧版 'git *' 能力（非更窄）；
-# 前缀是公开常量 = 形态兼容锚点，非安全边界；真正的收紧由后续
-# hardened wrapper（openace-git）承接（follow-up issue）。
-Cmnd_Alias GIT_SAFE = \
-    ${GIT_PATH} -c core.hooksPath=/dev/null *, \
-    ${GIT_PATH} --git-dir=*, \
-    ${GIT_PATH} config --global --add safe.directory *, \
-    ${GIT_PATH} remote get-url origin, \
-    ${GIT_PATH} remote add *, \
-    ${GIT_PATH} checkout *, \
-    ${GIT_PATH} checkout -b *, \
-    ${GIT_PATH} checkout -b * *, \
-    ${GIT_PATH} push *, \
-    ${GIT_PATH} push -u *, \
-    ${GIT_PATH} push origin *, \
-    ${GIT_PATH} push origin --delete *, \
-    ${GIT_PATH} push origin * --force-with-lease, \
-    ${GIT_PATH} fetch *, \
-    ${GIT_PATH} pull *, \
-    ${GIT_PATH} merge *, \
-    ${GIT_PATH} rebase *, \
-    ${GIT_PATH} reset --hard HEAD, \
-    ${GIT_PATH} branch *, \
-    ${GIT_PATH} branch --show-current, \
-    ${GIT_PATH} branch -D *, \
-    ${GIT_PATH} rev-parse *, \
-    ${GIT_PATH} rev-list --count *, \
-    ${GIT_PATH} worktree add *, \
-    ${GIT_PATH} worktree add -b *, \
-    ${GIT_PATH} worktree remove *, \
-    ${GIT_PATH} worktree remove * --force, \
-    ${GIT_PATH} worktree list --porcelain, \
-    ${GIT_PATH} diff *, \
-    ${GIT_PATH} diff --numstat *, \
-    ${GIT_PATH} show *, \
-    ${GIT_PATH} show --format= *, \
-    ${GIT_PATH} show --numstat --format= *, \
-    ${GIT_PATH} status --porcelain, \
-    ${GIT_PATH} status *, \
-    ${GIT_PATH} log *, \
-    ${GIT_PATH} add *, \
-    ${GIT_PATH} add -A, \
-    ${GIT_PATH} commit *, \
-    ${GIT_PATH} commit -m *, \
-    ${GIT_PATH} commit -m * --no-verify, \
-    ${GIT_PATH} init
-
-# gh命令白名单（动词优先条目 + #2635 前缀锚定条目）
-# Issue #1855: --admin 仅在 OPENACE_ALLOW_ADMIN_MERGE=1 时启用
-# 【Issue #2334】补充 issue close/reopen, pr list 等动词
-# 【Issue #2635】前缀锚定条目：github_ops._run_gh 的 sudo 路径总是在子命令前插入
-# '-R owner/repo'（gh 无 -C，sudo 下靠 -R 定位仓库）；且 gh api 拒绝 -R、以
-# 'gh api repos/...' 裸形态运行。
-# 注意：'gh api *' 允许任意 REST 调用（含 -X DELETE），'-R *' 下的动词同样
-# 不受白名单约束——此两条在 (ALL) runas 下近似恢复旧版 'gh *' 能力（非更窄）；
-# 前缀是公开常量 = 形态兼容锚点，非安全边界；真正的收紧由后续
-# hardened wrapper（openace-gh）承接（follow-up issue）。
-Cmnd_Alias GH_SAFE = \
-    ${GH_PATH} -R *, \
-    ${GH_PATH} api *, \
-    ${GH_PATH} repo create *, \
-    ${GH_PATH} repo create * --private, \
-    ${GH_PATH} repo create * --public, \
-    ${GH_PATH} repo create * --description *, \
-    ${GH_PATH} repo view --json *, \
-    ${GH_PATH} issue create --title * --body *, \
-    ${GH_PATH} issue create --title * --body * --label *, \
-    ${GH_PATH} issue view * --json *, \
-    ${GH_PATH} issue comment * --body *, \
-    ${GH_PATH} issue view * --comments --json *, \
-    ${GH_PATH} issue edit * --title *, \
-    ${GH_PATH} issue edit * --body *, \
-    ${GH_PATH} issue close *, \
-    ${GH_PATH} issue reopen *, \
-    ${GH_PATH} pr create --title * --body * --base *, \
-    ${GH_PATH} pr create --title * --body * --base * --head *, \
-    ${GH_PATH} pr create --title * --body * --base * --head * --draft, \
-    ${GH_PATH} pr view * --json *, \
-    ${GH_PATH} pr comment * --body *, \
-    ${GH_PATH} pr merge *, \
-    ${GH_PATH} pr merge * --merge, \
-    ${GH_PATH} pr merge * --squash, \
-    ${GH_PATH} pr merge * --rebase, \
-    ${GH_PATH} pr merge * --auto, \
-    ${GH_ADMIN_RULE}${GH_PATH} pr view * --json commits, \
-    ${GH_PATH} pr checks * --json *, \
-    ${GH_PATH} pr diff *, \
-    ${GH_PATH} pr list *, \
-    ${GH_PATH} api user, \
-    ${GH_PATH} api repos/*/pulls/*/comments --jq *, \
-    ${GH_PATH} api repos/*/issues/*/comments --jq *
+# git/gh cross-user operations are validated by root-owned wrappers (#2650).
+Cmnd_Alias GIT_SAFE = /usr/local/bin/openace-git *
+Cmnd_Alias GH_SAFE = /usr/local/bin/openace-gh *
 
 # 【安全加固 Issue #2334】OPENACE_UTILS 收紧
 # 移除 git/gh 通配（改用 GIT_SAFE/GH_SAFE），消除 runas 漂移
@@ -1558,10 +1583,12 @@ ${SECURITY_WRAPPERS_RULE}
 # Agent 进程通过 openace-run-as --isolated 使用 env -i，不继承 env_keep
 # env_keep 主要用于 WebUI 启动（sudo -u），需要清理敏感凭据
 # 移除：OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENCLAW_TOKEN, GH_TOKEN
-# 保留：非敏感变量（proxy_token, GIT_*签名变量, PATH）
-Defaults env_keep += "OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH"
+# 保留：非敏感变量（proxy_token, GIT_*签名变量）
+# 【Issue #2650】PATH 移除：secure_path 已覆盖命令查找，env_keep PATH 是死配置兼隐患
+Defaults env_keep += "OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR"
 Defaults env_keep += "GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL"
 Defaults env_keep += "SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS"
+Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 SUDOERS_EOF
         chmod 440 /etc/sudoers.d/open-ace-webui
 

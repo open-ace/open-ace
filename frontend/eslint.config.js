@@ -50,6 +50,9 @@ export default [
         React: 'readonly',
         crypto: 'readonly',
         Crypto: 'readonly',
+        // Vite injected globals
+        __BUILD_VERSION__: 'readonly',
+        __COMMIT_SHA__: 'readonly',
       },
     },
     plugins: {

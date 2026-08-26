@@ -1023,6 +1023,10 @@ def register_blueprints(app):
 
     app.register_blueprint(feature_flags_bp)
     app.register_blueprint(pages_bp)
+    # Frontend error reporting endpoint
+    from app.routes.frontend_errors import frontend_errors_bp
+
+    app.register_blueprint(frontend_errors_bp, url_prefix="/api")
 
     logger.info("All blueprints registered")
 
@@ -1081,5 +1085,15 @@ def start_background_services():
         init_sso_cleanup()
     except Exception as e:
         logger.warning(f"Failed to start SSO auth state cleanup: {e}")
+
+    # Issue #2596: Start deregister compensation worker
+    try:
+        from app.repositories.database import Database
+        from app.services.deregister_compensation_worker import start_deregister_compensation_worker
+
+        db = Database()
+        start_deregister_compensation_worker(db)
+    except Exception as e:
+        logger.warning(f"Failed to start deregister compensation worker: {e}")
 
     logger.info("Background services started")

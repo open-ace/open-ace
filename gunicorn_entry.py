@@ -15,10 +15,17 @@ import sys
 # ============================================================================
 # Must be the first thing before any urllib3 or related imports
 try:
+    import ssl
+
     import gevent.monkey
 
     gevent.monkey.patch_all()
+    # Mark that patching is done for verification in gunicorn_worker
+    ssl._gevent_patched = True  # type: ignore[attr-defined]
+    # Log successful patching (will appear in gunicorn logs)
+    print("[gunicorn_entry] gevent monkey-patch applied successfully", file=sys.stderr)
 except ImportError:
+    print("[gunicorn_entry] gevent not available, skipping monkey-patch", file=sys.stderr)
     pass
 
 # Now import gunicorn and run it

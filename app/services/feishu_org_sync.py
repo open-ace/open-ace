@@ -16,6 +16,7 @@ from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Any, cast
 
 import requests
@@ -98,11 +99,30 @@ class FeishuUser:
     status: dict[str, Any] = field(default_factory=dict)
 
 
+class SyncStatus(str, Enum):
+    """Sync status for organization synchronization results."""
+
+    SUCCESS = "success"  # Complete success with no critical errors
+    PARTIAL = "partial"  # Partial success, some directories/data failed
+    FAILED = "failed"  # Critical failure, no reliable snapshot obtained
+
+
+@dataclass
+class _FetchError:
+    """Internal error info for directory fetch failures."""
+
+    department_id: str
+    error_type: str  # "permission_denied", "api_error", "transport_error", "retries_exhausted"
+    message: str
+    is_critical: bool = False  # True if root department or complete failure
+
+
 @dataclass
 class FeishuOrgSyncResult:
     """Summary returned to admin/API callers after a sync run."""
 
     tenant_id: int
+    status: SyncStatus = SyncStatus.SUCCESS
     departments_seen: int = 0
     users_seen: int = 0
     teams_created: int = 0
@@ -115,11 +135,13 @@ class FeishuOrgSyncResult:
     started_at: str | None = None
     finished_at: str | None = None
     warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert result to a JSON-friendly dictionary."""
         return {
             "tenant_id": self.tenant_id,
+            "status": self.status.value,
             "departments_seen": self.departments_seen,
             "users_seen": self.users_seen,
             "teams_created": self.teams_created,
@@ -132,6 +154,7 @@ class FeishuOrgSyncResult:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "warnings": list(self.warnings),
+            "errors": list(self.errors),
         }
 
 
@@ -216,9 +239,21 @@ class FeishuOrgSyncService:
                 try:
                     self._ensure_supporting_tables()
                     token = self._get_tenant_access_token(app_id, app_secret)
-                    departments, users = self._fetch_directory_snapshot(token)
+                    fetch_errors: list[_FetchError] = []
+                    departments, users = self._fetch_directory_snapshot(
+                        token, warnings=result.warnings, errors=fetch_errors
+                    )
                     result.departments_seen = len(departments)
                     result.users_seen = len(users)
+
+                    # Set status based on fetch errors
+                    if fetch_errors:
+                        critical_errors = [e for e in fetch_errors if e.is_critical]
+                        if critical_errors or not departments:
+                            result.status = SyncStatus.FAILED
+                        else:
+                            result.status = SyncStatus.PARTIAL
+                        result.errors = [e.message for e in fetch_errors]
 
                     # Cache the synced-team index once per run instead of re-scanning
                     # the whole teams table per department (WP-1). Newly created teams
@@ -310,7 +345,9 @@ class FeishuOrgSyncService:
             self._check_stale_sync(max_runtime_seconds, auto_recover)
 
             result = self.sync_org(tenant_id=config.get("org_sync_tenant_id"))
-            self.__class__._last_scheduled_sync_at = now
+            # Only update last_scheduled_sync_at on complete success
+            if result and result.status == SyncStatus.SUCCESS:
+                self.__class__._last_scheduled_sync_at = now
             return result
         finally:
             self._schedule_lock.release()
@@ -592,7 +629,10 @@ class FeishuOrgSyncService:
         self._token_cache.pop(app_id, None)
 
     def _fetch_directory_snapshot(
-        self, token: str
+        self,
+        token: str,
+        warnings: list[str] | None = None,
+        errors: list[_FetchError] | None = None,
     ) -> tuple[list[FeishuDepartment], list[FeishuUser]]:
         """Recursively fetch departments and users starting from the root department."""
         departments: dict[str, FeishuDepartment] = {}
@@ -607,16 +647,36 @@ class FeishuOrgSyncService:
                 continue
             visited.add(current_department_id)
 
-            child_departments = self._fetch_child_departments(token, current_department_id)
+            is_root = current_department_id == FEISHU_ROOT_DEPARTMENT_ID
+            try:
+                child_departments = self._fetch_child_departments(token, current_department_id)
+            except Exception as exc:
+                msg = f"Skipped Feishu department {current_department_id} children: {exc}"
+                logger.warning(msg)
+                if warnings is not None:
+                    warnings.append(msg)
+                if errors is not None:
+                    errors.append(
+                        _FetchError(
+                            department_id=current_department_id,
+                            error_type="api_error",
+                            message=msg,
+                            is_critical=is_root,
+                        )
+                    )
+                continue
             for department in child_departments:
                 if department.department_id not in departments:
                     departments[department.department_id] = department
                     queue.append(department.department_id)
 
-            if current_department_id == FEISHU_ROOT_DEPARTMENT_ID:
-                continue
-
-            direct_users = self._fetch_department_users(token, current_department_id)
+            direct_users = self._fetch_department_users(
+                token,
+                current_department_id,
+                warnings=warnings,
+                errors=errors,
+                is_root_department=is_root,
+            )
             for user in direct_users:
                 existing = users.get(user.open_id)
                 if existing is None:
@@ -701,7 +761,14 @@ class FeishuOrgSyncService:
 
         return departments
 
-    def _fetch_department_users(self, token: str, department_id: str) -> list[FeishuUser]:
+    def _fetch_department_users(
+        self,
+        token: str,
+        department_id: str,
+        warnings: list[str] | None = None,
+        errors: list[_FetchError] | None = None,
+        is_root_department: bool = False,
+    ) -> list[FeishuUser]:
         """Fetch users directly under a Feishu department."""
         items: list[dict[str, Any]] = []
         page_token: str | None = None
@@ -716,12 +783,31 @@ class FeishuOrgSyncService:
             if page_token:
                 params["page_token"] = page_token
 
-            data = self._request_json(
-                method="GET",
-                url="https://open.feishu.cn/open-apis/contact/v3/users/find_by_department",
-                token=token,
-                params=params,
-            )
+            try:
+                data = self._request_json(
+                    method="GET",
+                    url="https://open.feishu.cn/open-apis/contact/v3/users/find_by_department",
+                    token=token,
+                    params=params,
+                )
+            except Exception as exc:
+                msg = f"Skipped Feishu department {department_id} users: {exc}"
+                logger.warning(msg)
+                if warnings is not None:
+                    warnings.append(msg)
+                if errors is not None:
+                    error_type = "api_error"
+                    if isinstance(exc, FeishuApiError) and exc.code in {99991663, 99991668}:
+                        error_type = "permission_denied"
+                    errors.append(
+                        _FetchError(
+                            department_id=department_id,
+                            error_type=error_type,
+                            message=msg,
+                            is_critical=is_root_department,
+                        )
+                    )
+                return []
             items.extend(self._extract_items(data, ("items", "users")))
             if not data.get("has_more"):
                 break

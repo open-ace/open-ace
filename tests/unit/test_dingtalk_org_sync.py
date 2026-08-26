@@ -19,10 +19,11 @@ from app.services.dingtalk_org_sync import (
 class FakeDingTalkOrgSyncService(DingTalkOrgSyncService):
     """Deterministic DingTalk sync service for tests."""
 
-    def __init__(self, *args, departments=None, users=None, **kwargs):
+    def __init__(self, *args, departments=None, users=None, snapshot_complete=True, **kwargs):
         super().__init__(*args, **kwargs)
         self._departments = list(departments or [])
         self._users = list(users or [])
+        self._snapshot_complete = snapshot_complete
 
     def _get_access_token(self, app_key: str, app_secret: str) -> str:
         assert app_key == "test-app-key"
@@ -32,7 +33,7 @@ class FakeDingTalkOrgSyncService(DingTalkOrgSyncService):
     def _fetch_directory_snapshot(self, token: str, root_department_id: str, **kwargs):
         assert token == "test-token"
         assert root_department_id == "1"
-        return self._departments, self._users
+        return self._departments, self._users, self._snapshot_complete
 
 
 @pytest.fixture
@@ -324,7 +325,8 @@ def test_fetch_directory_snapshot_uses_dingtalk_department_and_user_apis():
         http_session=FakeHttp(),
     )
 
-    departments, users = service._fetch_directory_snapshot("token", "1")
+    departments, users, snapshot_complete = service._fetch_directory_snapshot("token", "1")
+    assert snapshot_complete is True
 
     assert departments == [DingTalkDepartment(department_id="100", name="Engineering")]
     assert users == [
@@ -343,3 +345,244 @@ def test_fetch_directory_snapshot_uses_dingtalk_department_and_user_apis():
         not url.endswith("/user/get") and not url.endswith("/user/listid")
         for url, _ in service.http.calls
     )
+
+
+def test_sync_status_success_when_all_succeeds(sync_env):
+    """Successful sync should return status=success."""
+    from app.services.dingtalk_org_sync import SyncStatus
+
+    db, config = sync_env
+    service = FakeDingTalkOrgSyncService(
+        db=db,
+        user_repo=UserRepository(db=db),
+        config_override=config,
+        departments=[DingTalkDepartment(department_id="100", name="Engineering")],
+        users=[
+            DingTalkUser(
+                user_id="user123",
+                name="Test User",
+                department_ids=["100"],
+            )
+        ],
+    )
+
+    result = service.sync_org()
+
+    assert result.status == SyncStatus.SUCCESS
+    assert result.errors == []
+
+
+def test_sync_status_partial_when_some_departments_fail(sync_env):
+    """Partial sync should return status=partial when some departments fail."""
+    from app.services.dingtalk_org_sync import SyncStatus, _FetchError
+
+    class PartialFailService(DingTalkOrgSyncService):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._departments = [DingTalkDepartment(department_id="100", name="Engineering")]
+            self._users = []
+
+        def _get_access_token(self, app_key: str, app_secret: str) -> str:
+            return "test-token"
+
+        def _fetch_directory_snapshot(self, token, root_department_id, warnings=None, errors=None):
+            if errors is not None:
+                errors.append(
+                    _FetchError(
+                        department_id="100",
+                        error_type="permission_denied",
+                        message="Permission denied for department 100",
+                        is_critical=False,
+                    )
+                )
+            return self._departments, self._users, True
+
+    db, config = sync_env
+    service = PartialFailService(db=db, user_repo=UserRepository(db=db), config_override=config)
+
+    result = service.sync_org()
+
+    assert result.status == SyncStatus.PARTIAL
+    assert len(result.errors) == 1
+    assert "Permission denied" in result.errors[0]
+
+
+def test_sync_status_failed_when_root_department_fails(sync_env):
+    """Critical failure should return status=failed when root department fails."""
+    from app.services.dingtalk_org_sync import SyncStatus, _FetchError
+
+    class RootFailService(DingTalkOrgSyncService):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._departments = []
+            self._users = []
+
+        def _get_access_token(self, app_key: str, app_secret: str) -> str:
+            return "test-token"
+
+        def _fetch_directory_snapshot(self, token, root_department_id, warnings=None, errors=None):
+            if errors is not None:
+                errors.append(
+                    _FetchError(
+                        department_id=root_department_id,
+                        error_type="permission_denied",
+                        message="Root department permission denied",
+                        is_critical=True,
+                    )
+                )
+            return self._departments, self._users, False
+
+    db, config = sync_env
+    service = RootFailService(db=db, user_repo=UserRepository(db=db), config_override=config)
+
+    result = service.sync_org()
+
+    assert result.status == SyncStatus.FAILED
+    assert len(result.errors) == 1
+    assert "Root department" in result.errors[0]
+
+
+def test_scheduler_does_not_update_timestamp_on_failure(sync_env):
+    """Scheduler should not update last_scheduled_sync_at on partial/failed sync."""
+    from app.services.dingtalk_org_sync import SyncStatus, _FetchError
+
+    class FailingSchedulerService(DingTalkOrgSyncService):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._departments = []
+
+        def _get_access_token(self, app_key: str, app_secret: str) -> str:
+            return "test-token"
+
+        def _fetch_directory_snapshot(self, token, root_department_id, warnings=None, errors=None):
+            if errors is not None:
+                errors.append(
+                    _FetchError(
+                        department_id=root_department_id,
+                        error_type="api_error",
+                        message="API error",
+                        is_critical=True,
+                    )
+                )
+            return [], [], False
+
+    db, config = sync_env
+    service = FailingSchedulerService(
+        db=db, user_repo=UserRepository(db=db), config_override=config
+    )
+    service.__class__._last_scheduled_sync_at = None
+
+    result = service.maybe_sync_from_scheduler()
+
+    assert result is not None
+    assert result.status == SyncStatus.FAILED
+    assert service.__class__._last_scheduled_sync_at is None
+
+
+def test_sync_status_end_to_end_permission_denied(sync_env):
+    """End-to-end: API permission error on root user fetch should set status=failed."""
+    from app.services.dingtalk_org_sync import SyncStatus
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class FakeHttp:
+        def post(self, url, **kwargs):
+            if url.endswith("/department/listsub"):
+                return FakeResponse(
+                    {"errcode": 0, "result": [{"dept_id": 100, "name": "Engineering"}]}
+                )
+            if url.endswith("/user/list"):
+                dept_id = kwargs["json"]["dept_id"]
+                if dept_id == 1:
+                    return FakeResponse({"errcode": 60021, "errmsg": "permission denied"})
+                return FakeResponse(
+                    {
+                        "errcode": 0,
+                        "result": {
+                            "has_more": False,
+                            "list": [{"userid": "u1", "name": "Test", "dept_id_list": [100]}],
+                        },
+                    }
+                )
+            return FakeResponse({"accessToken": "test-token", "expireIn": 7200})
+
+    db, config = sync_env
+    service = DingTalkOrgSyncService(
+        db=db,
+        user_repo=UserRepository(db=db),
+        config_override=config,
+        http_session=FakeHttp(),
+    )
+
+    result = service.sync_org()
+
+    assert result.status == SyncStatus.FAILED
+    assert len(result.errors) >= 1
+    assert any("permission denied" in e.lower() or "60021" in e for e in result.errors)
+
+
+def test_sync_status_end_to_end_partial_failure(sync_env):
+    """End-to-end: sub-department user fetch failure should set status=partial."""
+    from app.services.dingtalk_org_sync import SyncStatus
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class FakeHttp:
+        def post(self, url, **kwargs):
+            if url.endswith("/department/listsub"):
+                dept_id = kwargs["json"]["dept_id"]
+                if dept_id == 1:
+                    return FakeResponse(
+                        {"errcode": 0, "result": [{"dept_id": 100, "name": "Engineering"}]}
+                    )
+                return FakeResponse({"errcode": 0, "result": []})
+            if url.endswith("/user/list"):
+                dept_id = kwargs["json"]["dept_id"]
+                if dept_id == 1:
+                    return FakeResponse(
+                        {
+                            "errcode": 0,
+                            "result": {
+                                "has_more": False,
+                                "list": [
+                                    {
+                                        "userid": "root_user",
+                                        "name": "Root User",
+                                        "dept_id_list": [1],
+                                    }
+                                ],
+                            },
+                        }
+                    )
+                if dept_id == 100:
+                    return FakeResponse({"errcode": 60021, "errmsg": "permission denied"})
+            return FakeResponse({"accessToken": "test-token", "expireIn": 7200})
+
+    db, config = sync_env
+    service = DingTalkOrgSyncService(
+        db=db,
+        user_repo=UserRepository(db=db),
+        config_override=config,
+        http_session=FakeHttp(),
+    )
+
+    result = service.sync_org()
+
+    assert result.status == SyncStatus.PARTIAL
+    assert len(result.errors) >= 1

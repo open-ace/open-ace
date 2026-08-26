@@ -20,6 +20,7 @@ import pytest
 from app.modules.workspace.autonomous.evidence import Evidence, Verdict
 from app.modules.workspace.autonomous.github_ops import GitHubOpsError
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator, WorkflowPaused
+from app.modules.workspace.autonomous.phases import merge as merge_phase
 
 
 def _make_workflow(**overrides):
@@ -144,8 +145,14 @@ def test_policy_rejection_on_branch_with_main_still_pauses(mock_gh_cls):
     o._branch_contains_main = MagicMock(return_value=True)
     o._resolve_merge_conflicts = MagicMock()
 
+    # The branch-has-main + policy-rejection path falls through to the
+    # merge-policy handler. That handler now defers (not pauses) while the
+    # settle budget is unexhausted, so preset the budget to its cap to keep
+    # asserting that a GENUINE policy block still pauses (regression guard for
+    # the bounded merge-policy settle retry).
+    wf = _make_workflow(merge_policy_settle_retries=merge_phase._MERGE_POLICY_SETTLE_RETRY_MAX)
     with pytest.raises(WorkflowPaused, match="Merge blocked by repository policy"):
-        o._do_merge(_make_workflow())
+        o._do_merge(wf)
 
     # The ancestry probe ran (proving the branch-has-main path was taken, not
     # some other pause route), and no git conflict means resolution never ran.

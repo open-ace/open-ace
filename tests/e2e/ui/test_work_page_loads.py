@@ -93,9 +93,9 @@ def test_work_page_loads(ui_screenshot_dir):
         left_panel = page.locator(".work-left-panel")
         assert left_panel.is_visible(), "Left panel should be visible"
 
-        # Check for right panel (assist panel)
-        right_panel = page.locator(".work-right-panel")
-        assert right_panel.is_visible(), "Right panel should be visible"
+        # Check for prompts drawer toggle (replaces the retired right panel)
+        drawer_toggle = page.locator(".prompts-drawer-toggle")
+        assert drawer_toggle.is_visible(), "Prompts drawer toggle should be visible"
 
         # Check for status bar
         status_bar = page.locator(".work-status-bar")

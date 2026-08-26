@@ -20,6 +20,61 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
+def _get_hostname() -> str:
+    """
+    Get the system hostname with proper Unicode handling.
+
+    Issue #3081: On Windows with Chinese hostnames, socket.gethostname() may
+    return incorrectly encoded strings. Use Windows API GetComputerNameW
+    to ensure correct Unicode hostname retrieval.
+
+    Returns:
+        The hostname as a Unicode string.
+    """
+    if os.name != "nt":
+        return socket.gethostname()
+
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+
+        # GetComputerNameW returns the NetBIOS name as Unicode
+        size = ctypes.c_ulong(256)
+        buffer = ctypes.create_unicode_buffer(size.value)
+        if kernel32.GetComputerNameW(buffer, ctypes.byref(size)):
+            return buffer.value
+    except Exception as e:
+        logger.debug(
+            "Windows API GetComputerNameW failed: %s, falling back to socket.gethostname()", e
+        )
+
+    # Fallback to socket.gethostname() if Windows API fails
+    hostname = socket.gethostname()
+
+    # Try to fix encoding if it looks like corrupted bytes
+    try:
+        if "?" in hostname or any(ord(c) > 65535 for c in hostname):
+            import ctypes
+
+            cp = ctypes.windll.kernel32.GetACP()
+            encoding = f"cp{cp}"
+            try:
+                fixed = hostname.encode(encoding, errors="replace").decode(
+                    "utf-8", errors="replace"
+                )
+                if fixed and fixed != hostname:
+                    logger.info("Fixed hostname encoding: %s -> %s", repr(hostname), repr(fixed))
+                    return fixed
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return hostname
+
+
 # Default configuration values
 DEFAULTS = {
     "server_url": "http://localhost:19888",
@@ -291,12 +346,12 @@ class AgentConfig:
     @property
     def machine_name(self) -> str:
         """Human-readable machine name."""
-        return self._data.get("machine_name", socket.gethostname())
+        return self._data.get("machine_name", _get_hostname())
 
     @property
     def hostname(self) -> str:
         """Machine hostname."""
-        return self._data.get("hostname", socket.gethostname())
+        return self._data.get("hostname", _get_hostname())
 
     # --- Persistence helpers ---
 

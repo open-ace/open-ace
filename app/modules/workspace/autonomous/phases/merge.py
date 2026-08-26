@@ -100,6 +100,11 @@ logger = logging.getLogger(__name__)
 # lag (#2673); half of it here would re-freeze slow-provisioning heads.
 _POLICY_SETTLE_GRACE_SECONDS = 1200
 
+# Extra merge-policy settle polls before a manual-recovery pause. Each is one
+# scheduler cycle (~10s), so a genuine external block (missing review/draft/
+# rule) waits at most a few seconds more before a human is signalled.
+_MERGE_POLICY_SETTLE_RETRY_MAX = 3
+
 
 def _required_contexts(gh, pr_number: int, base_branch: str) -> set[str] | None:
     """Required-check contexts for ``base_branch``, or None if undeterminable.
@@ -557,6 +562,25 @@ def handle(ctx, deps) -> PhaseResult:
                             _POLICY_SETTLE_GRACE_SECONDS,
                         )
                         return PhaseResult.retry()
+                # Residual race (#27 / #2804 follow-up): a bounded settle budget
+                # absorbs a "clean rollup but GitHub still blocked" transient
+                # that outlives the 1200s grace window, before persisting a
+                # manual-recovery pause. Cap is tiny so a genuine external block
+                # (missing review / draft / rule) pauses after at most a few
+                # scheduler cycles.
+                settle_retries = int(wf.get("merge_policy_settle_retries") or 0)
+                if settle_retries < _MERGE_POLICY_SETTLE_RETRY_MAX:
+                    logger.info(
+                        "PR #%s: blocked with a settled rollup (%s); settle "
+                        "retry %d/%d before pausing",
+                        pr_number,
+                        mergeable_state or "unknown",
+                        settle_retries + 1,
+                        _MERGE_POLICY_SETTLE_RETRY_MAX,
+                    )
+                    return PhaseResult.retry(
+                        workflow_patch={"merge_policy_settle_retries": settle_retries + 1}
+                    )
                 # No pending checks and GitHub has finished computing, yet
                 # repository policy still requires external action (approval,
                 # marking ready, or a rule change). Persist a manually
@@ -583,7 +607,12 @@ def handle(ctx, deps) -> PhaseResult:
                 # a pause (see advance()), so a normal return is enough.
                 return PhaseResult.pause(
                     structured_error={"message": message},
-                    workflow_patch={"error_message": message, "agent_pid": None},
+                    workflow_patch={
+                        "error_message": message,
+                        "agent_pid": None,
+                        # Clear the settle budget so a resume gets a fresh one.
+                        "merge_policy_settle_retries": 0,
+                    },
                 )
 
             # A mergeable/blocked/unknown PR is not by itself evidence of

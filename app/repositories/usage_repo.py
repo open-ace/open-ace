@@ -264,10 +264,10 @@ class UsageRepository:
                             WHEN EXCLUDED.models_used IS NULL
                             THEN daily_usage.models_used
                             ELSE (
-                                SELECT json_agg(DISTINCT elem)
-                                FROM json_array_elements(
-                                    COALESCE(daily_usage.models_used::json, '[]')
-                                    || EXCLUDED.models_used::json
+                                SELECT jsonb_agg(DISTINCT elem)::text
+                                FROM jsonb_array_elements(
+                                    COALESCE(daily_usage.models_used::jsonb, '[]'::jsonb)
+                                    || EXCLUDED.models_used::jsonb
                                 ) elem
                             )
                         END
@@ -816,7 +816,7 @@ class UsageRepository:
         Note:
             Issue #1852: Added tenant_id parameter for tenant filtering.
         """
-        conditions = []
+        conditions = ["(agent_session_id IS NULL OR agent_session_id = '')"]
         params: list[Any] = []
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
@@ -844,7 +844,7 @@ class UsageRepository:
                 COUNT(DISTINCT date) as days_count,
                 SUM(tokens_used) as total_tokens,
                 AVG(tokens_used) as avg_tokens,
-                COUNT(*) as total_requests,
+                COUNT(CASE WHEN role = 'assistant' THEN 1 END) as total_requests,
                 SUM(input_tokens) as total_input_tokens,
                 SUM(output_tokens) as total_output_tokens,
                 MIN(date) as first_date,
@@ -858,8 +858,10 @@ class UsageRepository:
         rows = self.db.fetch_all(query, tuple(params))
 
         results: dict[str, dict] = {}
+        raw_names_by_tool: dict[str, set[str]] = {}
         for row in rows:
             tool = normalize_tool_name(row["tool_name"])
+            raw_names_by_tool.setdefault(tool, set()).add(row["tool_name"])
             if tool in results:
                 existing = results[tool]
                 existing["total_tokens"] += row["total_tokens"] or 0
@@ -878,7 +880,294 @@ class UsageRepository:
                     "last_date": row["last_date"],
                 }
 
+        # Aliases merged from several raw names inherit days_count /
+        # first_date / last_date / avg_tokens from ONE alias's grouped row,
+        # which undercounts days, misreports the range, and reports the
+        # dominant alias's average whenever another alias spans further
+        # (migration 038 used to rebuild these during upgrade; the
+        # read-boundary merge must keep the same union semantics —
+        # Issue #1111). Recompute the aggregates over the whole alias family.
+        for tool, raw_names in raw_names_by_tool.items():
+            if len(raw_names) < 2 or tool not in results:
+                continue
+            placeholders = ",".join("?" for _ in raw_names)
+            span_row = self.db.fetch_one(
+                f"""
+                    SELECT COUNT(DISTINCT date) as days_count,
+                           MIN(date) as first_date,
+                           MAX(date) as last_date,
+                           AVG(tokens_used) as avg_tokens
+                    FROM daily_messages
+                    {where_clause} AND tool_name IN ({placeholders})
+                """,
+                tuple(params) + tuple(raw_names),
+            )
+            if span_row:
+                results[tool]["days_count"] = span_row["days_count"]
+                results[tool]["first_date"] = span_row["first_date"]
+                results[tool]["last_date"] = span_row["last_date"]
+                results[tool]["avg_tokens"] = (
+                    round(span_row["avg_tokens"], 2) if span_row["avg_tokens"] else 0
+                )
+
         return results
+
+    def get_session_summary_by_tool(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> dict[str, dict]:
+        """Get summary from agent_sessions for sessions not in daily_messages.
+
+        Issue #2938: /api/summary only queries daily_messages, missing WebUI
+        session data (local/remote/terminal). This method aggregates
+        agent_sessions to supplement the summary. daily_messages side excludes
+        records with agent_session_id (session_sync dual-write) to avoid overlap.
+
+        Args:
+            start_date: Optional start date filter (YYYY-MM-DD).
+            end_date: Optional end date filter (YYYY-MM-DD).
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter.
+
+        Returns:
+            Dict[str, Dict]: Summary data keyed by normalized tool name.
+        """
+        try:
+            conditions = ["workspace_type IN ('local', 'remote', 'terminal')"]
+            params: list[Any] = []
+            normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+            if start_date:
+                conditions.append("CAST(created_at AS DATE) >= ?")
+                params.append(start_date)
+
+            if end_date:
+                conditions.append("CAST(created_at AS DATE) <= ?")
+                params.append(end_date)
+
+            if normalized_tenant_id is not None:
+                conditions.append("tenant_id = ?")
+                params.append(normalized_tenant_id)
+
+            if host_name:
+                conditions.append("host_name = ?")
+                params.append(host_name)
+
+            where_clause = " AND ".join(conditions)
+
+            query = f"""
+                SELECT
+                    COALESCE(tool_name, 'unknown') as tool_name,
+                    COUNT(DISTINCT CAST(created_at AS DATE)) as days_count,
+                    SUM(COALESCE(total_tokens, 0)) as total_tokens,
+                    SUM(COALESCE(request_count, 0)) as total_requests,
+                    SUM(COALESCE(total_input_tokens, 0)) as total_input_tokens,
+                    SUM(COALESCE(total_output_tokens, 0)) as total_output_tokens,
+                    MIN(CAST(created_at AS DATE)) as first_date,
+                    MAX(CAST(created_at AS DATE)) as last_date
+                FROM agent_sessions
+                WHERE {where_clause}
+                GROUP BY COALESCE(tool_name, 'unknown')
+                ORDER BY total_tokens DESC
+            """
+
+            rows = self.db.fetch_all(query, tuple(params))
+
+            results: dict[str, dict] = {}
+            for row in rows:
+                tool = normalize_tool_name(row["tool_name"])
+                if tool in results:
+                    existing = results[tool]
+                    existing["total_tokens"] += row["total_tokens"] or 0
+                    existing["total_requests"] += row["total_requests"] or 0
+                    existing["total_input_tokens"] += row["total_input_tokens"] or 0
+                    existing["total_output_tokens"] += row["total_output_tokens"] or 0
+                    if row["first_date"] and (
+                        not existing["first_date"] or row["first_date"] < existing["first_date"]
+                    ):
+                        existing["first_date"] = row["first_date"]
+                    if row["last_date"] and (
+                        not existing["last_date"] or row["last_date"] > existing["last_date"]
+                    ):
+                        existing["last_date"] = row["last_date"]
+                else:
+                    results[tool] = {
+                        "days_count": row["days_count"] or 0,
+                        "total_tokens": row["total_tokens"] or 0,
+                        "total_requests": row["total_requests"] or 0,
+                        "total_input_tokens": row["total_input_tokens"] or 0,
+                        "total_output_tokens": row["total_output_tokens"] or 0,
+                        "first_date": row["first_date"],
+                        "last_date": row["last_date"],
+                    }
+
+            return results
+        except Exception as e:
+            logger.warning("Failed to get session summary by tool: %s", e)
+            return {}
+
+    def get_session_trend_by_tool(
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> list[dict]:
+        """Get trend data from agent_sessions for WebUI sessions.
+
+        Issue #3030: /api/trend only queries daily_stats, missing WebUI
+        session data (local/remote/terminal). This method aggregates
+        agent_sessions grouped by date + tool to supplement the trend data.
+
+        Args:
+            start_date: Start date filter (YYYY-MM-DD).
+            end_date: End date filter (YYYY-MM-DD).
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter.
+
+        Returns:
+            List[Dict]: Trend data with date, tool_name, tokens fields.
+        """
+        try:
+            conditions = ["workspace_type IN ('local', 'remote', 'terminal')"]
+            params: list[Any] = []
+            normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+            conditions.append("CAST(created_at AS DATE) >= ?")
+            params.append(start_date)
+
+            conditions.append("CAST(created_at AS DATE) <= ?")
+            params.append(end_date)
+
+            if normalized_tenant_id is not None:
+                conditions.append("tenant_id = ?")
+                params.append(normalized_tenant_id)
+
+            if host_name:
+                conditions.append("host_name = ?")
+                params.append(host_name)
+
+            where_clause = " AND ".join(conditions)
+
+            query = f"""
+                SELECT
+                    CAST(created_at AS DATE) as date,
+                    COALESCE(tool_name, 'unknown') as tool_name,
+                    SUM(COALESCE(total_tokens, 0)) as tokens
+                FROM agent_sessions
+                WHERE {where_clause}
+                GROUP BY CAST(created_at AS DATE), COALESCE(tool_name, 'unknown')
+                ORDER BY date ASC, tool_name ASC
+            """
+
+            rows = self.db.fetch_all(query, tuple(params))
+
+            # Normalize tool names and merge duplicates
+            merged: dict[tuple, dict] = {}
+            for row in rows:
+                key = (row["date"], normalize_tool_name(row["tool_name"]))
+                if key in merged:
+                    merged[key]["tokens"] += row["tokens"] or 0
+                else:
+                    merged[key] = {
+                        "date": row["date"],
+                        "tool_name": key[1],
+                        "tokens": row["tokens"] or 0,
+                    }
+
+            return list(merged.values())
+        except Exception as e:
+            logger.warning("Failed to get session trend by tool: %s", e)
+            return []
+
+    def get_session_key_metrics(
+        self,
+        start_date: str,
+        end_date: str,
+        host_name: str | None = None,
+        tenant_id: int | None = None,
+    ) -> dict:
+        """Get key metrics from agent_sessions for WebUI sessions.
+
+        Issue #3030: /api/analysis/batch key_metrics only queries daily_messages,
+        missing WebUI session data. This method aggregates agent_sessions
+        to supplement the key_metrics.
+
+        Args:
+            start_date: Start date filter (YYYY-MM-DD).
+            end_date: End date filter (YYYY-MM-DD).
+            host_name: Optional host name filter.
+            tenant_id: Optional tenant ID filter.
+
+        Returns:
+            Dict: Key metrics with total_tokens, total_input_tokens,
+                  total_output_tokens, total_requests, unique_tools, unique_hosts.
+        """
+        try:
+            conditions = ["workspace_type IN ('local', 'remote', 'terminal')"]
+            params: list[Any] = []
+            normalized_tenant_id = self._normalize_tenant_id(tenant_id)
+
+            conditions.append("CAST(created_at AS DATE) >= ?")
+            params.append(start_date)
+
+            conditions.append("CAST(created_at AS DATE) <= ?")
+            params.append(end_date)
+
+            if normalized_tenant_id is not None:
+                conditions.append("tenant_id = ?")
+                params.append(normalized_tenant_id)
+
+            if host_name:
+                conditions.append("host_name = ?")
+                params.append(host_name)
+
+            where_clause = " AND ".join(conditions)
+
+            query = f"""
+                SELECT
+                    SUM(COALESCE(total_tokens, 0)) as total_tokens,
+                    SUM(COALESCE(total_input_tokens, 0)) as total_input_tokens,
+                    SUM(COALESCE(total_output_tokens, 0)) as total_output_tokens,
+                    SUM(COALESCE(request_count, 0)) as total_requests,
+                    COUNT(DISTINCT tool_name) as unique_tools,
+                    COUNT(DISTINCT host_name) as unique_hosts
+                FROM agent_sessions
+                WHERE {where_clause}
+            """
+
+            row = self.db.fetch_one(query, tuple(params))
+            if not row:
+                return {
+                    "total_tokens": 0,
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                    "total_requests": 0,
+                    "unique_tools": 0,
+                    "unique_hosts": 0,
+                }
+
+            return {
+                "total_tokens": row["total_tokens"] or 0,
+                "total_input_tokens": row["total_input_tokens"] or 0,
+                "total_output_tokens": row["total_output_tokens"] or 0,
+                "total_requests": row["total_requests"] or 0,
+                "unique_tools": row["unique_tools"] or 0,
+                "unique_hosts": row["unique_hosts"] or 0,
+            }
+        except Exception as e:
+            logger.warning("Failed to get session key metrics: %s", e)
+            return {
+                "total_tokens": 0,
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_requests": 0,
+                "unique_tools": 0,
+                "unique_hosts": 0,
+            }
 
     def get_all_tools(self, tenant_id: int | None = None) -> list[str]:
         """
@@ -1040,7 +1329,7 @@ class UsageRepository:
             tenant_id: Optional tenant ID filter. If None, returns all tenants (admin).
 
         Returns:
-            List[Dict]: List of usage records by date and tool.
+            List[Dict]: Trend data with date, tool_name, tokens fields.
 
         Note:
             Issue #1852: Added tenant_id parameter for tenant filtering.
@@ -1084,7 +1373,7 @@ class UsageRepository:
             else:
                 merged[key] = {
                     "date": row["date"],
-                    "tool": normalize_tool_name(row["tool_name"]),
+                    "tool_name": normalize_tool_name(row["tool_name"]),
                     "tokens": int(row["tokens"] or 0),
                 }
 
@@ -1210,6 +1499,10 @@ class UsageRepository:
         """
         Get request count trend data aggregated by date and tool.
 
+        A "request" is defined as an AI assistant response message (role='assistant'),
+        representing a completed user-to-AI interaction. This aligns with
+        get_today_request_stats() and get_request_stats_by_user() for data consistency.
+
         Args:
             start_date: Start date string (YYYY-MM-DD).
             end_date: End date string (YYYY-MM-DD).
@@ -1221,28 +1514,45 @@ class UsageRepository:
 
         Note:
             Issue #1852: Added tenant_id parameter for tenant filtering.
+            Issue #2077: Added NULL user_id fallback via sender_name matching.
+            Issue #2752: Changed data source from daily_usage to daily_messages.
+            Issue #2951: Unified data source with get_today_request_stats() and
+                         get_request_stats_by_user() for consistency.
         """
-        conditions = ["date >= ?", "date <= ?"]
+        # Base conditions: date range and role filter
+        # role='assistant' is hardcoded (not parameterized) to match other methods
+        conditions = ["dm.date >= ?", "dm.date <= ?", "dm.role = 'assistant'"]
         params: list[Any] = [start_date, end_date]
         normalized_tenant_id = self._normalize_tenant_id(tenant_id)
 
         if normalized_tenant_id is not None:
-            conditions.append("tenant_id = ?")
-            params.append(normalized_tenant_id)
+            # Issue #2077: Add NULL user_id fallback via sender_name matching.
+            # When user_id is NULL (e.g., from save_messages_batch which doesn't write user_id),
+            # fall back to matching sender_name against the tenant's users' system_account.
+            # sender_name format: {system_account}-{hostname}-{tool}
+            conditions.append(
+                f"({self._tenant_user_condition('dm.user_id')} "
+                f"OR (dm.user_id IS NULL AND EXISTS ("
+                f"SELECT 1 FROM users u WHERE u.tenant_id = ? "
+                f"AND (dm.sender_name LIKE (u.system_account || '-%%') "
+                f"OR dm.sender_name = u.username))))"
+            )
+            # Two tenant_id parameters: one for user_id IN subquery, one for EXISTS subquery
+            params.extend([normalized_tenant_id, normalized_tenant_id])
 
         if host_name:
-            conditions.append("host_name = ?")
+            conditions.append("dm.host_name = ?")
             params.append(host_name)
 
         query = f"""
             SELECT
-                date,
-                tool_name,
-                SUM(request_count) as requests
-            FROM daily_usage
+                dm.date,
+                dm.tool_name,
+                COUNT(*) as requests
+            FROM daily_messages dm
             WHERE {" AND ".join(conditions)}
-            GROUP BY date, tool_name
-            ORDER BY date ASC, tool_name ASC
+            GROUP BY dm.date, dm.tool_name
+            ORDER BY dm.date ASC, dm.tool_name ASC
         """
 
         rows = self.db.fetch_all(query, tuple(params))

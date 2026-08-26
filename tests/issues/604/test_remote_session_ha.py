@@ -37,6 +37,8 @@ def _connected_machine(machine_id="mac-1", tenant_id=1):
         "tenant_id": tenant_id,
         "machine_name": "test-machine",
         "hostname": "test-host",
+        # #2597 zombie-session gate: creation requires an online-family status
+        "status": "online",
     }
     mgr_mock.check_user_access.return_value = True
     return mgr_mock

@@ -1,10 +1,12 @@
 /**
  * SecurityCenter Component Tests
  *
- * Tests cover three sub-pages:
+ * Tests cover four sub-pages:
  * 1. Content Filter (Filter Rules) - CRUD operations, toggle, table display
  * 2. Security Settings - session/password/IP whitelist configuration
  * 3. Audit Thresholds - threshold input validation, save, reset
+ * 4. Sensitive Keywords - CRUD operations, permission check, validation (Issue #3059)
+ * 5. Filter Statistics - filter status, cache performance, loaded patterns
  */
 
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -19,7 +21,7 @@ vi.mock('@/store', () => ({
 }));
 
 vi.mock('@/i18n', () => ({
-  t: (key: string) => {
+  t: (key: string, _lang?: string, params?: Record<string, unknown>) => {
     const translations: Record<string, string> = {
       securityCenter: 'Security Center',
       contentFilter: 'Content Filter',
@@ -90,8 +92,54 @@ vi.mock('@/i18n', () => ({
       roleChangeThresholdHelp: 'Role change threshold help',
       permissionChangeThreshold: 'Permission Change Threshold',
       permissionChangeThresholdHelp: 'Permission change threshold help',
+      // Filter Statistics
+      filterStats: 'Filter Statistics',
+      filterStatus: 'Filter Status',
+      filterEnabled: 'Enabled',
+      filterDisabled: 'Disabled',
+      piiRedaction: 'PII Redaction',
+      highRiskBlock: 'High Risk Block',
+      patternRules: 'Pattern Rules',
+      keywordRules: 'Keyword Rules',
+      cachePerformance: 'Cache Performance',
+      cacheHitRate: 'Cache Hit Rate',
+      cacheHits: 'Cache Hits',
+      cacheMisses: 'Cache Misses',
+      cacheSize: 'Cache Size',
+      loadedPatterns: 'Loaded Patterns',
+      noPatternsLoaded: 'No patterns loaded',
+      viewAllPatterns: 'View all ({count})',
+      showLess: 'Show less',
+      refreshStats: 'Refresh',
+      noData: 'No data available',
+      // Sensitive Keywords (Issue #3059)
+      sensitiveKeywords: 'Sensitive Keywords',
+      sensitiveKeywordsDesc: 'Manage sensitive keywords for content filtering',
+      addKeyword: 'Add Keyword',
+      keyword: 'Keyword',
+      keywordPlaceholder: 'Enter sensitive keyword',
+      keywordHelp: 'Keyword will be used for content filtering',
+      confirmDeleteKeyword: 'Are you sure you want to delete this keyword?',
+      keywordCreated: 'Keyword created successfully',
+      keywordAlreadyExists: 'Keyword already exists',
+      keywordCreateFailed: 'Failed to create keyword',
+      keywordUpdateFailed: 'Failed to update keyword',
+      keywordDeleteFailed: 'Failed to delete keyword',
+      noKeywords: 'No sensitive keywords configured',
+      noPermission: 'No permission to access',
+      filterByStatus: 'Filter by status',
+      keywordEmpty: 'Keyword cannot be empty',
+      keywordTooLong: 'Keyword cannot exceed 255 characters',
+      status: 'Status',
+      actions: 'Actions',
     };
-    return translations[key] || key;
+    let text = translations[key] || key;
+    if (params) {
+      Object.entries(params).forEach(([paramKey, paramValue]) => {
+        text = text.replace(`{${paramKey}}`, String(paramValue));
+      });
+    }
+    return text;
   },
 }));
 
@@ -200,6 +248,63 @@ vi.mock('@/hooks', () => ({
     lastRefreshTime: null,
     isRefreshing: false,
   })),
+  useFilterStats: vi.fn(() => ({
+    data: {
+      enabled: true,
+      redact_pii: true,
+      block_high_risk: true,
+      pattern_count: 5,
+      keyword_count: 10,
+      patterns: ['password', 'ssn', 'credit_card'],
+      compiled_cache_size: 100,
+      compiled_cache_hits: 500,
+      compiled_cache_misses: 50,
+      compiled_cache_hit_rate: 90.91,
+      compiled_cache_max_size: 1000,
+    },
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+    isFetching: false,
+  })),
+  useAdminTenant: vi.fn(() => ({
+    effectiveTenantId: 1,
+  })),
+  useSensitiveKeywords: vi.fn(() => ({
+    data: {
+      keywords: [
+        {
+          id: 1,
+          tenant_id: 1,
+          keyword: 'password',
+          is_enabled: true,
+          created_by: 1,
+          created_at: '2025-01-01T00:00:00Z',
+        },
+      ],
+      total: 1,
+      limit: 20,
+      offset: 0,
+      tenant_id: 1,
+    },
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  })),
+  useCreateSensitiveKeyword: vi.fn(() => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  })),
+  useUpdateSensitiveKeyword: vi.fn(() => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  })),
+  useDeleteSensitiveKeyword: vi.fn(() => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  })),
 }));
 
 const mockConfirm = vi.fn().mockResolvedValue(true);
@@ -215,13 +320,18 @@ vi.mock('@/components/common', () => ({
     title,
     children,
     className,
+    actions,
   }: {
     title?: string;
     children: React.ReactNode;
     className?: string;
+    actions?: React.ReactNode;
   }) => (
     <div data-testid="card" className={className}>
-      {title && <h5>{title}</h5>}
+      <div className="d-flex justify-content-between align-items-center">
+        {title && <h5>{title}</h5>}
+        {actions && <div className="card-actions">{actions}</div>}
+      </div>
       {children}
     </div>
   ),
@@ -322,13 +432,40 @@ vi.mock('@/components/common', () => ({
       )}
     </div>
   ),
-  EmptyState: ({ title }: { title: string }) => <div data-testid="empty-state">{title}</div>,
+  EmptyState: ({
+    title,
+    icon: _icon,
+    size: _size,
+  }: {
+    title: string;
+    icon?: string;
+    size?: string;
+  }) => <div data-testid="empty-state">{title}</div>,
   Badge: ({ children, variant }: { children: React.ReactNode; variant: string }) => (
     <span data-testid="badge" data-variant={variant}>
       {children}
     </span>
   ),
   PageRefreshControl: () => <div data-testid="page-refresh-control" />,
+  StatCard: ({
+    label,
+    value,
+    variant,
+  }: {
+    label: string;
+    value: number | string;
+    variant?: string;
+  }) => (
+    <div data-testid="stat-card" data-variant={variant}>
+      <span>{label}</span>
+      <span>{value}</span>
+    </div>
+  ),
+  Progress: ({ value, max, variant }: { value: number; max?: number; variant?: string }) => (
+    <div data-testid="progress" data-value={value} data-max={max} data-variant={variant}>
+      Progress: {value}%
+    </div>
+  ),
   useToast: () => mockToast,
   useConfirm: () => mockConfirm,
 }));
@@ -358,6 +495,12 @@ import {
   useUpdateSecuritySettings,
   useAuditThresholds,
   useUpdateAuditThresholds,
+  useAdminTenant,
+  useSensitiveKeywords,
+  useCreateSensitiveKeyword,
+  useUpdateSensitiveKeyword,
+  useDeleteSensitiveKeyword,
+  useFilterStats,
 } from '@/hooks';
 
 // ─── Helper to override hooks for specific tests ──────────────────────────────
@@ -441,6 +584,27 @@ describe('SecurityCenter', () => {
       mutateAsync: mockMutateAsyncUpdateThresholds,
       isPending: false,
     });
+    // Reset useFilterStats to default mock
+    vi.mocked(useFilterStats).mockReturnValue({
+      data: {
+        enabled: true,
+        redact_pii: true,
+        block_high_risk: true,
+        pattern_count: 5,
+        keyword_count: 10,
+        patterns: ['password', 'ssn', 'credit_card'],
+        compiled_cache_size: 100,
+        compiled_cache_hits: 500,
+        compiled_cache_misses: 50,
+        compiled_cache_hit_rate: 90.91,
+        compiled_cache_max_size: 1000,
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+      isFetching: false,
+    } as ReturnType<typeof useFilterStats>);
     mockConfirm.mockResolvedValue(true);
   });
 
@@ -452,11 +616,13 @@ describe('SecurityCenter', () => {
       expect(screen.getByText('Security Center')).toBeInTheDocument();
     });
 
-    it('renders three tab buttons', () => {
+    it('renders five tab buttons', () => {
       render(<SecurityCenter />);
       expect(screen.getByText('Content Filter')).toBeInTheDocument();
       expect(screen.getByText('Security Settings')).toBeInTheDocument();
       expect(screen.getByText('Audit Thresholds')).toBeInTheDocument();
+      expect(screen.getByText('Sensitive Keywords')).toBeInTheDocument();
+      expect(screen.getByText('Filter Statistics')).toBeInTheDocument();
     });
 
     it('shows Content Filter tab as active by default', () => {
@@ -1115,6 +1281,615 @@ describe('SecurityCenter', () => {
       await waitFor(() => {
         expect(screen.getByText('Value must be at least 1')).toBeInTheDocument();
       });
+    });
+  });
+
+  // ─── Sensitive Keywords Tab (Issue #3059) ────────────────────────────────────
+
+  describe('Sensitive Keywords Tab', () => {
+    const mockMutateAsyncCreateKeyword = vi.fn();
+    const mockMutateAsyncUpdateKeyword = vi.fn();
+    const mockMutateAsyncDeleteKeyword = vi.fn();
+    const mockRefetchKeywords = vi.fn();
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockMutateAsyncCreateKeyword.mockResolvedValue({ id: 2, is_new: true });
+      mockMutateAsyncUpdateKeyword.mockResolvedValue({ success: true });
+      mockMutateAsyncDeleteKeyword.mockResolvedValue({ success: true });
+
+      // Reset useAdminTenant to return valid tenant ID
+      vi.mocked(useAdminTenant).mockReturnValue({
+        effectiveTenantId: 1,
+      } as ReturnType<typeof useAdminTenant>);
+
+      // Reset useSensitiveKeywords to return default data
+      vi.mocked(useSensitiveKeywords).mockReturnValue({
+        data: {
+          keywords: [
+            {
+              id: 1,
+              tenant_id: 1,
+              keyword: 'password',
+              is_enabled: true,
+              created_by: 1,
+              created_at: '2025-01-01T00:00:00Z',
+            },
+          ],
+          total: 1,
+          limit: 20,
+          offset: 0,
+          tenant_id: 1,
+        },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: mockRefetchKeywords,
+      } as ReturnType<typeof useSensitiveKeywords>);
+
+      // Reset mutation hooks
+      vi.mocked(useCreateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncCreateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useCreateSensitiveKeyword>);
+
+      vi.mocked(useUpdateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncUpdateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useUpdateSensitiveKeyword>);
+
+      vi.mocked(useDeleteSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncDeleteKeyword,
+        isPending: false,
+      } as ReturnType<typeof useDeleteSensitiveKeyword>);
+
+      mockConfirm.mockResolvedValue(true);
+    });
+
+    it('shows Sensitive Keywords tab button', () => {
+      render(<SecurityCenter />);
+      expect(screen.getByText('Sensitive Keywords')).toBeInTheDocument();
+    });
+
+    it('switches to Sensitive Keywords tab when clicked', () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      const keywordTab = screen.getByText('Sensitive Keywords').closest('button');
+      expect(keywordTab).toHaveClass('active');
+    });
+
+    it('shows Add Keyword button only on Sensitive Keywords tab when tenant is selected', () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      expect(screen.getByText('Add Keyword')).toBeInTheDocument();
+    });
+
+    it('shows error when no tenant is selected (no permission)', () => {
+      vi.mocked(useAdminTenant).mockReturnValue({
+        effectiveTenantId: null,
+      } as ReturnType<typeof useAdminTenant>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      expect(screen.getByTestId('error')).toBeInTheDocument();
+      expect(screen.getByText('No permission to access')).toBeInTheDocument();
+    });
+
+    it('shows loading state for keywords', () => {
+      vi.mocked(useSensitiveKeywords).mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useSensitiveKeywords>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      expect(screen.getByTestId('loading')).toBeInTheDocument();
+    });
+
+    it('shows error state for keywords', () => {
+      vi.mocked(useSensitiveKeywords).mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        isError: true,
+        error: new Error('Keywords fetch failed'),
+        refetch: vi.fn(),
+      } as ReturnType<typeof useSensitiveKeywords>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      expect(screen.getByTestId('error')).toBeInTheDocument();
+    });
+
+    it('shows empty state when no keywords exist', () => {
+      vi.mocked(useSensitiveKeywords).mockReturnValue({
+        data: { keywords: [], total: 0, limit: 20, offset: 0, tenant_id: 1 },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      } as ReturnType<typeof useSensitiveKeywords>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      expect(screen.getByTestId('empty-state')).toBeInTheDocument();
+      expect(screen.getByText('No sensitive keywords configured')).toBeInTheDocument();
+    });
+
+    it('renders keywords table with data', () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      expect(screen.getByText('password')).toBeInTheDocument();
+    });
+
+    it('opens create modal when Add Keyword is clicked', () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      expect(screen.queryByTestId('modal')).not.toBeInTheDocument();
+      const addKeywordElements = screen.getAllByText('Add Keyword');
+      fireEvent.click(addKeywordElements[0]);
+      expect(screen.getByTestId('modal')).toBeInTheDocument();
+    });
+
+    it('validates empty keyword with error message', async () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      fireEvent.click(screen.getByText('Add Keyword'));
+
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith('Keyword cannot be empty');
+      });
+    });
+
+    it('validates keyword exceeding 255 characters', async () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      fireEvent.click(screen.getByText('Add Keyword'));
+
+      const longKeyword = 'a'.repeat(256);
+      const input = screen.getByPlaceholderText('Enter sensitive keyword');
+      fireEvent.change(input, { target: { value: longKeyword } });
+
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith('Keyword cannot exceed 255 characters');
+      });
+    });
+
+    it('trims whitespace from keyword input', async () => {
+      vi.mocked(useCreateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncCreateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useCreateSensitiveKeyword>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      fireEvent.click(screen.getByText('Add Keyword'));
+
+      const input = screen.getByPlaceholderText('Enter sensitive keyword');
+      fireEvent.change(input, { target: { value: '  test-keyword  ' } });
+
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockMutateAsyncCreateKeyword).toHaveBeenCalledWith(
+          expect.objectContaining({
+            tenantId: 1,
+            data: { keyword: 'test-keyword' },
+          })
+        );
+      });
+    });
+
+    it('shows success toast when keyword is created (is_new: true)', async () => {
+      vi.mocked(useCreateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncCreateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useCreateSensitiveKeyword>);
+      mockMutateAsyncCreateKeyword.mockResolvedValue({ id: 2, is_new: true });
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      fireEvent.click(screen.getByText('Add Keyword'));
+
+      const input = screen.getByPlaceholderText('Enter sensitive keyword');
+      fireEvent.change(input, { target: { value: 'new-keyword' } });
+
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockToast.success).toHaveBeenCalledWith('Keyword created successfully');
+      });
+    });
+
+    it('shows info toast when keyword already exists (is_new: false)', async () => {
+      vi.mocked(useCreateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncCreateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useCreateSensitiveKeyword>);
+      mockMutateAsyncCreateKeyword.mockResolvedValue({ id: 1, is_new: false });
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      fireEvent.click(screen.getByText('Add Keyword'));
+
+      const input = screen.getByPlaceholderText('Enter sensitive keyword');
+      fireEvent.change(input, { target: { value: 'existing-keyword' } });
+
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockToast.info).toHaveBeenCalledWith('Keyword already exists');
+      });
+    });
+
+    it('shows error toast when keyword creation fails', async () => {
+      vi.mocked(useCreateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncCreateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useCreateSensitiveKeyword>);
+      mockMutateAsyncCreateKeyword.mockRejectedValue(new Error('Create failed'));
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      fireEvent.click(screen.getByText('Add Keyword'));
+
+      const input = screen.getByPlaceholderText('Enter sensitive keyword');
+      fireEvent.change(input, { target: { value: 'test-keyword' } });
+
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith('Failed to create keyword');
+      });
+    });
+
+    it('toggles keyword enabled state when switch is clicked', async () => {
+      vi.mocked(useUpdateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncUpdateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useUpdateSensitiveKeyword>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+
+      const checkboxes = screen.getAllByRole('checkbox');
+      // Find the keyword enabled toggle (first checkbox in sensitive keywords tab)
+      const keywordCheckbox = checkboxes[0];
+      fireEvent.click(keywordCheckbox);
+
+      await waitFor(() => {
+        expect(mockMutateAsyncUpdateKeyword).toHaveBeenCalledWith(
+          expect.objectContaining({
+            tenantId: 1,
+            keywordId: 1,
+            data: { is_enabled: false },
+          })
+        );
+      });
+    });
+
+    it('shows error toast when toggling keyword fails', async () => {
+      vi.mocked(useUpdateSensitiveKeyword).mockReturnValue({
+        mutateAsync: mockMutateAsyncUpdateKeyword,
+        isPending: false,
+      } as ReturnType<typeof useUpdateSensitiveKeyword>);
+      mockMutateAsyncUpdateKeyword.mockRejectedValue(new Error('Update failed'));
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+
+      const checkboxes = screen.getAllByRole('checkbox');
+      fireEvent.click(checkboxes[0]);
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith('Failed to update keyword');
+      });
+    });
+
+    it('calls delete API when delete is confirmed', async () => {
+      mockConfirm.mockResolvedValue(true);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+
+      // Find the delete button by its variant (outline-danger)
+      const buttons = screen.getAllByRole('button');
+      const deleteBtn = buttons.find(
+        (btn) => btn.getAttribute('data-variant') === 'outline-danger'
+      );
+      expect(deleteBtn).toBeDefined();
+      fireEvent.click(deleteBtn!);
+
+      await waitFor(() => {
+        expect(mockConfirm).toHaveBeenCalledWith(expect.objectContaining({ variant: 'danger' }));
+        expect(mockMutateAsyncDeleteKeyword).toHaveBeenCalledWith({
+          tenantId: 1,
+          keywordId: 1,
+        });
+      });
+    });
+
+    it('does not delete when confirmation is rejected', async () => {
+      mockConfirm.mockResolvedValue(false);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+
+      const buttons = screen.getAllByRole('button');
+      const deleteBtn = buttons.find(
+        (btn) => btn.getAttribute('data-variant') === 'outline-danger'
+      );
+      expect(deleteBtn).toBeDefined();
+      fireEvent.click(deleteBtn!);
+
+      await waitFor(() => {
+        expect(mockConfirm).toHaveBeenCalled();
+        expect(mockMutateAsyncDeleteKeyword).not.toHaveBeenCalled();
+      });
+    });
+
+    it('shows error toast when delete fails', async () => {
+      mockMutateAsyncDeleteKeyword.mockRejectedValue(new Error('Delete failed'));
+      mockConfirm.mockResolvedValue(true);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+
+      const buttons = screen.getAllByRole('button');
+      const deleteBtn = buttons.find(
+        (btn) => btn.getAttribute('data-variant') === 'outline-danger'
+      );
+      expect(deleteBtn).toBeDefined();
+      fireEvent.click(deleteBtn!);
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith('Failed to delete keyword');
+      });
+    });
+
+    it('closes modal when cancel is clicked', () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Sensitive Keywords'));
+      const addKeywordElements = screen.getAllByText('Add Keyword');
+      fireEvent.click(addKeywordElements[0]);
+      expect(screen.getByTestId('modal')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByText('Cancel'));
+      expect(screen.queryByTestId('modal')).not.toBeInTheDocument();
+    });
+  });
+
+  // ─── Filter Statistics Tab ──────────────────────────────────────────────────
+
+  describe('Filter Statistics Tab', () => {
+    it('switches to Filter Statistics tab when clicked', async () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      const statsTab = await waitFor(() => screen.getByText('Filter Statistics').closest('button'));
+      expect(statsTab).toHaveClass('active');
+    });
+
+    it('shows loading state when stats are loading', () => {
+      vi.mocked(useFilterStats).mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+        isFetching: false,
+      } as ReturnType<typeof useFilterStats>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      expect(screen.getByTestId('loading')).toBeInTheDocument();
+    });
+
+    it('shows error state when stats fetch fails', () => {
+      vi.mocked(useFilterStats).mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        isError: true,
+        error: new Error('Stats fetch failed'),
+        refetch: vi.fn(),
+        isFetching: false,
+      } as ReturnType<typeof useFilterStats>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      expect(screen.getByTestId('error')).toBeInTheDocument();
+    });
+
+    it('renders filter status badges', async () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      await waitFor(() => {
+        expect(screen.getByText('Filter Status')).toBeInTheDocument();
+      });
+      expect(screen.getByText('PII Redaction')).toBeInTheDocument();
+      expect(screen.getByText('High Risk Block')).toBeInTheDocument();
+    });
+
+    it('renders pattern and keyword rule counts', async () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      await waitFor(() => {
+        expect(screen.getByText('Pattern Rules')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Keyword Rules')).toBeInTheDocument();
+    });
+
+    it('renders cache performance card', async () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      await waitFor(() => {
+        expect(screen.getByText('Cache Performance')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Cache Hit Rate')).toBeInTheDocument();
+    });
+
+    it('renders loaded patterns section', async () => {
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      await waitFor(() => {
+        expect(screen.getByText('Loaded Patterns')).toBeInTheDocument();
+      });
+    });
+
+    it('calls refetch when refresh button is clicked', async () => {
+      const mockRefetch = vi.fn();
+      vi.mocked(useFilterStats).mockReturnValue({
+        data: {
+          enabled: true,
+          redact_pii: true,
+          block_high_risk: true,
+          pattern_count: 5,
+          keyword_count: 10,
+          patterns: ['password', 'ssn'],
+          compiled_cache_size: 100,
+          compiled_cache_hits: 500,
+          compiled_cache_misses: 50,
+          compiled_cache_hit_rate: 90.91,
+          compiled_cache_max_size: 1000,
+        },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: mockRefetch,
+        isFetching: false,
+      } as ReturnType<typeof useFilterStats>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      await waitFor(() => {
+        expect(screen.getByText('Cache Performance')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText('Refresh'));
+      expect(mockRefetch).toHaveBeenCalled();
+    });
+
+    it('shows empty state when patterns array is empty', async () => {
+      vi.mocked(useFilterStats).mockReturnValue({
+        data: {
+          enabled: true,
+          redact_pii: true,
+          block_high_risk: true,
+          pattern_count: 0,
+          keyword_count: 0,
+          patterns: [],
+          compiled_cache_size: 0,
+          compiled_cache_hits: 0,
+          compiled_cache_misses: 0,
+          compiled_cache_hit_rate: 0,
+          compiled_cache_max_size: 1000,
+        },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+        isFetching: false,
+      } as ReturnType<typeof useFilterStats>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      await waitFor(() => {
+        expect(screen.getByText('Loaded Patterns')).toBeInTheDocument();
+      });
+      expect(screen.getByText('No patterns loaded')).toBeInTheDocument();
+    });
+
+    it('shows view all button when patterns exceed 20 items', async () => {
+      const manyPatterns = Array.from({ length: 25 }, (_, i) => `pattern_${i}`);
+      vi.mocked(useFilterStats).mockReturnValue({
+        data: {
+          enabled: true,
+          redact_pii: true,
+          block_high_risk: true,
+          pattern_count: 25,
+          keyword_count: 0,
+          patterns: manyPatterns,
+          compiled_cache_size: 25,
+          compiled_cache_hits: 100,
+          compiled_cache_misses: 10,
+          compiled_cache_hit_rate: 90.91,
+          compiled_cache_max_size: 1000,
+        },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+        isFetching: false,
+      } as ReturnType<typeof useFilterStats>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      await waitFor(() => {
+        expect(screen.getByText('Loaded Patterns')).toBeInTheDocument();
+      });
+      // Should show "View all (25)" button
+      expect(screen.getByText('View all (25)')).toBeInTheDocument();
+      // Should only show first 20 patterns
+      expect(screen.getByText('pattern_0')).toBeInTheDocument();
+      expect(screen.queryByText('pattern_20')).not.toBeInTheDocument();
+
+      // Click to expand
+      fireEvent.click(screen.getByText('View all (25)'));
+      await waitFor(() => {
+        expect(screen.getByText('pattern_20')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Show less')).toBeInTheDocument();
+    });
+
+    it('shows correct progress bar variant for different hit rates', async () => {
+      // Test high hit rate (>= 90%) -> success
+      vi.mocked(useFilterStats).mockReturnValue({
+        data: {
+          enabled: true,
+          redact_pii: true,
+          block_high_risk: true,
+          pattern_count: 5,
+          keyword_count: 10,
+          patterns: ['password'],
+          compiled_cache_size: 100,
+          compiled_cache_hits: 900,
+          compiled_cache_misses: 100,
+          compiled_cache_hit_rate: 90,
+          compiled_cache_max_size: 1000,
+        },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+        isFetching: false,
+      } as ReturnType<typeof useFilterStats>);
+      const { unmount } = render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      await waitFor(() => {
+        expect(screen.getByTestId('progress')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('progress')).toHaveAttribute('data-variant', 'success');
+      unmount();
+
+      // Test medium hit rate (70-90%) -> warning
+      vi.mocked(useFilterStats).mockReturnValue({
+        data: {
+          enabled: true,
+          redact_pii: true,
+          block_high_risk: true,
+          pattern_count: 5,
+          keyword_count: 10,
+          patterns: ['password'],
+          compiled_cache_size: 100,
+          compiled_cache_hits: 800,
+          compiled_cache_misses: 200,
+          compiled_cache_hit_rate: 80,
+          compiled_cache_max_size: 1000,
+        },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+        isFetching: false,
+      } as ReturnType<typeof useFilterStats>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      await waitFor(() => {
+        expect(screen.getByTestId('progress')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('progress')).toHaveAttribute('data-variant', 'warning');
     });
   });
 });

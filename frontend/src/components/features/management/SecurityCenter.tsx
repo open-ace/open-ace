@@ -20,6 +20,12 @@ import {
   useAuditThresholds,
   useUpdateAuditThresholds,
   usePageRefresh,
+  useFilterStats,
+  useAdminTenant,
+  useSensitiveKeywords,
+  useCreateSensitiveKeyword,
+  useUpdateSensitiveKeyword,
+  useDeleteSensitiveKeyword,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import { t } from '@/i18n';
@@ -34,6 +40,8 @@ import {
   EmptyState,
   Badge,
   PageRefreshControl,
+  StatCard,
+  Progress,
 } from '@/components/common';
 import { useToast, useConfirm } from '@/components/common';
 import { FilterRuleTableHeader } from './FilterRuleTableHeader';
@@ -42,6 +50,8 @@ import type {
   CreateFilterRuleRequest,
   SecuritySettings as SecuritySettingsType,
   AuditThresholds as AuditThresholdsType,
+  SensitiveKeyword,
+  SensitiveKeywordsFilters,
 } from '@/api';
 
 // Translation key mappings for filter rule values
@@ -63,7 +73,9 @@ const ACTION_LABEL_KEYS: Record<string, string> = {
   redact: 'actionRedact',
 };
 
-type TabType = 'filter' | 'settings' | 'audit';
+type TabType = 'filter' | 'settings' | 'audit' | 'stats' | 'sensitive-keywords';
+
+const MAX_DISPLAY_PATTERNS = 20;
 
 const AUDIT_THRESHOLD_DEFAULTS: AuditThresholdsType = {
   audit_failed_login_threshold: 5,
@@ -170,6 +182,42 @@ export const SecurityCenter: React.FC = () => {
   const [thresholdsErrors, setThresholdsErrors] = useState<
     Partial<Record<keyof AuditThresholdsType, string>>
   >({});
+
+  // --- Filter Stats State ---
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    isError: statsError,
+    error: statsErrorObj,
+    refetch: refetchStats,
+    isFetching: isFetchingStats,
+  } = useFilterStats({ enabled: activeTab === 'stats' });
+
+  const [showAllPatterns, setShowAllPatterns] = useState(false);
+
+  // --- Sensitive Keywords State (Issue #3059) ---
+  const { effectiveTenantId } = useAdminTenant();
+
+  // TODO: Add filter controls in future iteration
+  const [keywordFilters] = useState<SensitiveKeywordsFilters>({
+    limit: 20,
+    offset: 0,
+  });
+
+  const {
+    data: keywordsData,
+    isLoading: keywordsLoading,
+    isError: keywordsError,
+    error: keywordsErrorObj,
+    refetch: refetchKeywords,
+  } = useSensitiveKeywords(effectiveTenantId, keywordFilters);
+
+  const createKeyword = useCreateSensitiveKeyword();
+  const updateKeyword = useUpdateSensitiveKeyword();
+  const deleteKeyword = useDeleteSensitiveKeyword();
+
+  const [showKeywordModal, setShowKeywordModal] = useState(false);
+  const [keywordInput, setKeywordInput] = useState('');
 
   // --- Filter Rules Handlers ---
   const handleOpenCreateRule = () => {
@@ -382,6 +430,80 @@ export const SecurityCenter: React.FC = () => {
     ...AUDIT_THRESHOLD_DEFAULTS,
     ...thresholds,
     ...thresholdsFormData,
+  };
+
+  // --- Sensitive Keywords Handlers (Issue #3059) ---
+  const validateKeyword = (keyword: string): string | null => {
+    const trimmed = keyword.trim();
+    if (!trimmed) {
+      return t('keywordEmpty', language);
+    }
+    if (trimmed.length > 255) {
+      return t('keywordTooLong', language);
+    }
+    return null;
+  };
+
+  const handleOpenCreateKeyword = () => {
+    setKeywordInput('');
+    setShowKeywordModal(true);
+  };
+
+  const handleCloseKeywordModal = () => {
+    setShowKeywordModal(false);
+    setKeywordInput('');
+  };
+
+  const handleSubmitKeyword = async () => {
+    const error = validateKeyword(keywordInput);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+
+    try {
+      const result = await createKeyword.mutateAsync({
+        tenantId: effectiveTenantId!,
+        data: { keyword: keywordInput.trim() },
+      });
+
+      if (result.is_new) {
+        toast.success(t('keywordCreated', language));
+      } else {
+        toast.info(t('keywordAlreadyExists', language));
+      }
+      handleCloseKeywordModal();
+    } catch (err) {
+      console.error('Failed to create keyword:', err);
+      toast.error(t('keywordCreateFailed', language));
+    }
+  };
+
+  const handleToggleKeywordEnabled = async (keyword: SensitiveKeyword) => {
+    try {
+      await updateKeyword.mutateAsync({
+        tenantId: effectiveTenantId!,
+        keywordId: keyword.id,
+        data: { is_enabled: !keyword.is_enabled },
+      });
+    } catch (err) {
+      console.error('Failed to toggle keyword:', err);
+      toast.error(t('keywordUpdateFailed', language));
+    }
+  };
+
+  const handleDeleteKeyword = async (keywordId: number) => {
+    if (await confirm({ message: t('confirmDeleteKeyword', language), variant: 'danger' })) {
+      try {
+        await deleteKeyword.mutateAsync({
+          tenantId: effectiveTenantId!,
+          keywordId,
+        });
+      } catch (err) {
+        console.error('Failed to delete keyword:', err);
+        toast.error(t('keywordDeleteFailed', language));
+      }
+    }
   };
 
   // Merge current settings with form changes
@@ -908,6 +1030,303 @@ export const SecurityCenter: React.FC = () => {
     );
   };
 
+  // --- Render Stats Tab ---
+  const getHitRateVariant = (rate: number): 'success' | 'warning' | 'danger' => {
+    if (rate >= 90) return 'success';
+    if (rate >= 70) return 'warning';
+    return 'danger';
+  };
+
+  const renderStatsTab = () => {
+    if (statsLoading) {
+      return <Loading size="lg" text={t('loading', language)} />;
+    }
+
+    if (statsError) {
+      return (
+        <Error
+          message={statsErrorObj?.message || t('error', language)}
+          onRetry={() => refetchStats()}
+        />
+      );
+    }
+
+    if (!stats) {
+      return <EmptyState icon="bi-bar-chart" title={t('noData', language)} />;
+    }
+
+    const displayPatterns = showAllPatterns
+      ? stats.patterns
+      : stats.patterns.slice(0, MAX_DISPLAY_PATTERNS);
+    const hasMorePatterns = stats.patterns.length > MAX_DISPLAY_PATTERNS;
+
+    return (
+      <>
+        {/* Status Row */}
+        <div className="row g-3 mb-4">
+          <div className="col-md-4">
+            <Card>
+              <div className="d-flex justify-content-between align-items-center">
+                <span>{t('filterStatus', language)}</span>
+                <Badge variant={stats.enabled ? 'success' : 'secondary'}>
+                  {stats.enabled ? t('filterEnabled', language) : t('filterDisabled', language)}
+                </Badge>
+              </div>
+            </Card>
+          </div>
+          <div className="col-md-4">
+            <Card>
+              <div className="d-flex justify-content-between align-items-center">
+                <span>{t('piiRedaction', language)}</span>
+                <Badge variant={stats.redact_pii ? 'success' : 'secondary'}>
+                  {stats.redact_pii ? t('filterEnabled', language) : t('filterDisabled', language)}
+                </Badge>
+              </div>
+            </Card>
+          </div>
+          <div className="col-md-4">
+            <Card>
+              <div className="d-flex justify-content-between align-items-center">
+                <span>{t('highRiskBlock', language)}</span>
+                <Badge variant={stats.block_high_risk ? 'success' : 'secondary'}>
+                  {stats.block_high_risk
+                    ? t('filterEnabled', language)
+                    : t('filterDisabled', language)}
+                </Badge>
+              </div>
+            </Card>
+          </div>
+        </div>
+
+        {/* Rules Count Row */}
+        <div className="row g-3 mb-4">
+          <div className="col-md-6">
+            <StatCard
+              label={t('patternRules', language)}
+              value={stats.pattern_count}
+              icon={<i className="bi bi-regex" />}
+              variant="info"
+            />
+          </div>
+          <div className="col-md-6">
+            <StatCard
+              label={t('keywordRules', language)}
+              value={stats.keyword_count}
+              icon={<i className="bi bi-key" />}
+              variant="primary"
+            />
+          </div>
+        </div>
+
+        {/* Cache Performance Card */}
+        <Card
+          title={t('cachePerformance', language)}
+          className="mb-4"
+          actions={
+            <Button
+              variant="outline-secondary"
+              size="sm"
+              onClick={() => refetchStats()}
+              loading={isFetchingStats}
+            >
+              <i className="bi bi-arrow-clockwise me-1" />
+              {t('refreshStats', language)}
+            </Button>
+          }
+        >
+          <div className="mb-3">
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <span>{t('cacheHitRate', language)}</span>
+              <strong>{stats.compiled_cache_hit_rate.toFixed(2)}%</strong>
+            </div>
+            <Progress
+              value={stats.compiled_cache_hit_rate}
+              max={100}
+              variant={getHitRateVariant(stats.compiled_cache_hit_rate)}
+            />
+          </div>
+          <div className="row g-3">
+            <div className="col-md-4">
+              <div className="text-muted">{t('cacheHits', language)}</div>
+              <div className="fs-4">{stats.compiled_cache_hits.toLocaleString()}</div>
+            </div>
+            <div className="col-md-4">
+              <div className="text-muted">{t('cacheMisses', language)}</div>
+              <div className="fs-4">{stats.compiled_cache_misses.toLocaleString()}</div>
+            </div>
+            <div className="col-md-4">
+              <div className="text-muted">{t('cacheSize', language)}</div>
+              <div className="fs-4">
+                {stats.compiled_cache_size.toLocaleString()} /{' '}
+                {stats.compiled_cache_max_size.toLocaleString()}
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        {/* Loaded Patterns */}
+        <Card title={t('loadedPatterns', language)}>
+          {stats.patterns.length === 0 ? (
+            <EmptyState icon="bi-code-square" title={t('noPatternsLoaded', language)} />
+          ) : (
+            <>
+              <div className="d-flex flex-wrap gap-2">
+                {displayPatterns.map((pattern, index) => (
+                  <Badge key={index} variant="secondary">
+                    {pattern}
+                  </Badge>
+                ))}
+              </div>
+              {hasMorePatterns && !showAllPatterns && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="mt-2 p-0"
+                  onClick={() => setShowAllPatterns(true)}
+                >
+                  {t('viewAllPatterns', language, { count: stats.patterns.length })}
+                </Button>
+              )}
+              {showAllPatterns && hasMorePatterns && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="mt-2 p-0"
+                  onClick={() => setShowAllPatterns(false)}
+                >
+                  {t('showLess', language)}
+                </Button>
+              )}
+            </>
+          )}
+        </Card>
+      </>
+    );
+  };
+
+  // --- Render Sensitive Keywords Tab (Issue #3059) ---
+  const renderSensitiveKeywordsTab = () => {
+    // Permission check
+    if (!effectiveTenantId) {
+      return <Error message={t('noPermission', language)} />;
+    }
+
+    // Loading state
+    if (keywordsLoading) {
+      return <Loading size="lg" text={t('loading', language)} />;
+    }
+
+    // Error state
+    if (keywordsError) {
+      return (
+        <Error
+          message={keywordsErrorObj?.message || t('error', language)}
+          onRetry={() => refetchKeywords()}
+        />
+      );
+    }
+
+    const keywords = keywordsData?.keywords ?? [];
+
+    return (
+      <>
+        {/* Keywords Table */}
+        {!keywords || keywords.length === 0 ? (
+          <EmptyState icon="bi-key" title={t('noKeywords', language)} />
+        ) : (
+          <div className="table-responsive">
+            <table className="table table-hover">
+              <thead>
+                <tr>
+                  <th>{t('keyword', language)}</th>
+                  <th>{t('status', language)}</th>
+                  <th>{t('createdAt', language)}</th>
+                  <th>{t('actions', language)}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {keywords.map((keyword) => (
+                  <tr key={keyword.id}>
+                    <td>
+                      <code>{keyword.keyword}</code>
+                    </td>
+                    <td>
+                      <div className="form-check form-switch">
+                        <input
+                          className="form-check-input"
+                          type="checkbox"
+                          checked={keyword.is_enabled}
+                          onChange={() => handleToggleKeywordEnabled(keyword)}
+                          disabled={updateKeyword.isPending}
+                        />
+                      </div>
+                    </td>
+                    <td>
+                      <small className="text-muted">
+                        {new Date(keyword.created_at).toLocaleString(
+                          language === 'zh' ? 'zh-CN' : 'en-US'
+                        )}
+                      </small>
+                    </td>
+                    <td>
+                      <Button
+                        variant="outline-danger"
+                        size="sm"
+                        onClick={() => handleDeleteKeyword(keyword.id)}
+                        disabled={deleteKeyword.isPending}
+                      >
+                        <i className="bi bi-trash" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Create Keyword Modal */}
+        <Modal
+          isOpen={showKeywordModal}
+          onClose={handleCloseKeywordModal}
+          title={t('addKeyword', language)}
+          size="md"
+          footer={
+            <>
+              <Button variant="secondary" onClick={handleCloseKeywordModal}>
+                {t('cancel', language)}
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleSubmitKeyword}
+                loading={createKeyword.isPending}
+              >
+                {t('save', language)}
+              </Button>
+            </>
+          }
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmitKeyword();
+            }}
+          >
+            <div className="mb-3">
+              <label className="form-label">{t('keyword', language)}</label>
+              <TextInput
+                value={keywordInput}
+                onChange={(value: string) => setKeywordInput(value)}
+                placeholder={t('keywordPlaceholder', language)}
+              />
+              <small className="text-muted">{t('keywordHelp', language)}</small>
+            </div>
+          </form>
+        </Modal>
+      </>
+    );
+  };
+
   return (
     <div className="security-center">
       {/* Header */}
@@ -926,6 +1345,12 @@ export const SecurityCenter: React.FC = () => {
             <Button variant="primary" size="sm" onClick={handleOpenCreateRule}>
               <i className="bi bi-plus-lg me-1" />
               {t('addRule', language)}
+            </Button>
+          )}
+          {activeTab === 'sensitive-keywords' && effectiveTenantId && (
+            <Button variant="primary" size="sm" onClick={handleOpenCreateKeyword}>
+              <i className="bi bi-plus-lg me-1" />
+              {t('addKeyword', language)}
             </Button>
           )}
         </div>
@@ -960,12 +1385,32 @@ export const SecurityCenter: React.FC = () => {
             {t('auditThresholds', language)}
           </button>
         </li>
+        <li className="nav-item">
+          <button
+            className={cn('nav-link', activeTab === 'stats' && 'active')}
+            onClick={() => setActiveTab('stats')}
+          >
+            <i className="bi bi-bar-chart me-1" />
+            {t('filterStats', language)}
+          </button>
+        </li>
+        <li className="nav-item">
+          <button
+            className={cn('nav-link', activeTab === 'sensitive-keywords' && 'active')}
+            onClick={() => setActiveTab('sensitive-keywords')}
+          >
+            <i className="bi bi-key me-1" />
+            {t('sensitiveKeywords', language)}
+          </button>
+        </li>
       </ul>
 
       {/* Tab Content */}
       {activeTab === 'filter' && renderFilterTab()}
       {activeTab === 'settings' && renderSettingsTab()}
       {activeTab === 'audit' && renderAuditThresholdsTab()}
+      {activeTab === 'stats' && renderStatsTab()}
+      {activeTab === 'sensitive-keywords' && renderSensitiveKeywordsTab()}
     </div>
   );
 };

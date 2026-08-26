@@ -5,6 +5,7 @@ Provides session persistence and recovery for AI interactions.
 Manages conversation history, state, and context across sessions.
 """
 
+import contextlib
 import json
 import logging
 import sqlite3
@@ -2054,6 +2055,67 @@ class SessionManager:
         if success:
             logger.info(f"Deleted session: {session_id}")
         return success
+
+    def tag_untagged_messages(self, session_id: str, milestone_id: str) -> int:
+        """Tag a session's milestone-less messages with ``milestone_id`` (#3000).
+
+        Verification-line messages persist with ``milestone_id=''`` (the
+        settle-time milestone does not exist while the verifier runs); this
+        back-fills the tag once the milestone is known. Best-effort: failures
+        log a warning and return 0 instead of raising — attribution is
+        auxiliary, the viewer's full-transcript path does not depend on it.
+
+        The tenant is resolved from the session row and the write is scoped
+        fail-closed (``require_tenant=True``) per the module's write
+        convention; ``session_id`` is globally unique so the clause is
+        defense-in-depth. Returns the number of rows retagged.
+        """
+        if not session_id or not milestone_id:
+            return 0
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT tenant_id FROM agent_sessions WHERE session_id = {_param()}",
+                (session_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return 0
+            if isinstance(row, dict):
+                session_tenant = row.get("tenant_id")
+            else:
+                try:
+                    session_tenant = row["tenant_id"]
+                except (KeyError, IndexError, TypeError):
+                    session_tenant = None
+            message_tenant_clause, message_tenant_params = self._tenant_scope_condition(
+                cursor, "session_messages", session_tenant, require_tenant=True
+            )
+            cursor.execute(
+                f"""
+                UPDATE session_messages
+                SET milestone_id = {_param()}
+                WHERE session_id = {_param()}
+                  AND milestone_id = ''{message_tenant_clause}
+                """,
+                (milestone_id, session_id, *message_tenant_params),
+            )
+            retagged = cursor.rowcount
+            conn.commit()
+            return max(0, retagged)
+        except Exception:
+            if conn is not None:
+                with contextlib.suppress(Exception):
+                    conn.rollback()
+            logger.warning(
+                "Failed to tag untagged messages for session %s", session_id, exc_info=True
+            )
+            return 0
+        finally:
+            if conn is not None:
+                conn.close()
 
     def list_sessions(
         self,

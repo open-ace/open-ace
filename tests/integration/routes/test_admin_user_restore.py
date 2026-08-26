@@ -538,7 +538,9 @@ class TestCrossTenantRestore:
 
         # Create and soft-delete user in tenant 1
         deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        user_id = _insert_user(tmp_db, username="cross_tenant_user", tenant_id=1, deleted_at=deleted_at)
+        user_id = _insert_user(
+            tmp_db, username="cross_tenant_user", tenant_id=1, deleted_at=deleted_at
+        )
 
         # Attempt to restore with different tenant_id should preserve original
         # (The API layer should reject tenant_id changes; repository just ignores them)
@@ -547,8 +549,7 @@ class TestCrossTenantRestore:
 
         # Verify tenant_id is still 1 (unchanged)
         user = repo.get_user_by_id(user_id)
-        # Note: The repository may or may not allow tenant_id change,
-        # but the API layer should enforce this restriction
+        assert user["tenant_id"] == 1  # Repository preserves original tenant_id
 
 
 class TestConcurrentRestore:
@@ -670,7 +671,9 @@ class TestUsernameEmailConflictScenarios:
 
         # Create and soft-delete user
         deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        user_id = _insert_user(tmp_db, username="username_conflict", email="unique1@test.com", deleted_at=deleted_at)
+        user_id = _insert_user(
+            tmp_db, username="username_conflict", email="unique1@test.com", deleted_at=deleted_at
+        )
 
         # Should find soft-deleted user by username
         deleted_user = repo.get_soft_deleted_user_by_username("username_conflict")
@@ -687,7 +690,9 @@ class TestUsernameEmailConflictScenarios:
 
         # Create and soft-delete user
         deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        user_id = _insert_user(tmp_db, username="unique_user", email="email_conflict@test.com", deleted_at=deleted_at)
+        user_id = _insert_user(
+            tmp_db, username="unique_user", email="email_conflict@test.com", deleted_at=deleted_at
+        )
 
         # Should find soft-deleted user by email
         deleted_user = repo.get_soft_deleted_user_by_email("email_conflict@test.com")
@@ -721,7 +726,9 @@ class TestUsernameEmailConflictScenarios:
         repo = UserRepository(db=tmp_db)
 
         # Create active user with specific email
-        active_user_id = _insert_user(tmp_db, username="active_partial", email="active_partial@test.com")
+        active_user_id = _insert_user(
+            tmp_db, username="active_partial", email="active_partial@test.com"
+        )
 
         # Create soft-deleted user with different username but same email would fail UNIQUE
         # So we test with different email

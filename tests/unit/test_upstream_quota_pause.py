@@ -1,10 +1,11 @@
 """Regression tests for transient provider limits and manual pause handling."""
 
 import threading
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
+from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.orchestrator import (
     AutonomousOrchestrator,
@@ -339,6 +340,12 @@ def test_verification_agent_re_raise_workflow_pause():
         patch.object(AutonomousOrchestrator, "_checkout_merged_main", return_value="/tmp/vw"),
         patch.object(AutonomousOrchestrator, "_run_agent", side_effect=_raise),
         patch.object(AutonomousOrchestrator, "_remove_verification_worktree") as cleanup,
+        # #3003: the in_progress acceptance row minted before the spawn.
+        patch.object(
+            AutonomousOrchestrator,
+            "_ensure_verification_milestone",
+            return_value={"milestone_id": "ms-early", "phase_total_tokens": 0},
+        ),
     ):
         with pytest.raises(UpstreamQuotaPaused):
             orchestrator._run_verification_agent(
@@ -350,3 +357,74 @@ def test_verification_agent_re_raise_workflow_pause():
             )
 
     cleanup.assert_called_once()  # finally 仍清理 verifier worktree
+
+
+# ── #2999: verifier attempts keep their burned usage on the early row ───────
+
+
+def test_verification_quota_pause_writes_usage_to_early_row_before_raising():
+    """A quota-paused verifier attempt must not lose its burned tokens (#2999).
+
+    Drives the REAL _run_agent (only the runner is mocked) through
+    _run_verification_agent: the usage write (:8009) precedes the quota
+    checks, so the early acceptance row keeps baseline+Σdeltas before
+    _pause_for_upstream_quota terminalizes it and the raise propagates. The
+    #3003 resume then resurrects the row with that usage as its baseline.
+    """
+    orchestrator = _orchestrator_for_run(
+        _result(error=GLM_WINDOW_429, total_tokens=500, request_count=3)
+    )
+    # Keep the usage write REAL — this test pins exactly that write.
+    del orchestrator._write_phase_usage
+    orchestrator._verification_milestone_id = None
+    orchestrator._ensure_verification_milestone = MagicMock(
+        return_value={
+            "milestone_id": "ms-early-2999",
+            # Non-zero baseline: _write_phase_usage must fold prior + result
+            # (a dropped prior_usage term would write 500, not 700).
+            "phase_total_tokens": 200,
+            "phase_input_tokens": 150,
+            "phase_output_tokens": 50,
+            "phase_request_count": 2,
+        }
+    )
+    orchestrator._build_verification_prompt = MagicMock(return_value="verify")
+    orchestrator._get_gh = MagicMock(return_value=None)
+    orchestrator._snapshot_repo_context = MagicMock(return_value={"head": "sha"})
+    orchestrator._checkout_merged_main = MagicMock(return_value="/tmp/merged")
+    orchestrator._remove_verification_worktree = MagicMock()
+
+    # The verification call defaults to the local path, whose isolation probe
+    # is environment-dependent (/usr/local/bin/openace-run-as) — pin it off.
+    with (
+        patch.object(AutonomousAgentRunner, "is_isolated_launcher_available", return_value=False),
+        patch.object(
+            type(orchestrator),
+            "workflow",
+            new_callable=PropertyMock,
+            return_value={"user_id": 1, "content_language": "en", "cli_tool": "claude-code"},
+        ),
+    ):
+        with pytest.raises(UpstreamQuotaPaused):
+            orchestrator._run_verification_agent(
+                snapshot={}, merge_sha="abc", base_sha="def", issue_number=2999, pr_number=1
+            )
+
+    updates = orchestrator.repo.update_milestone.call_args_list
+    usage_idx = next((i for i, c in enumerate(updates) if "phase_total_tokens" in c.args[1]), None)
+    assert usage_idx is not None, "no phase_* usage write observed"
+    failed_idx = next(
+        (i for i, c in enumerate(updates) if c.args[1].get("status") == "failed"), None
+    )
+    assert failed_idx is not None, "no pause terminalization observed"
+    # The burned tokens land on the early row BEFORE the pause terminalizes
+    # THE SAME ROW, folding the resume baseline: 200 prior + 500 burned.
+    assert updates[usage_idx].args[0] == "ms-early-2999"
+    assert updates[usage_idx].args[1]["phase_total_tokens"] == 700
+    assert updates[usage_idx].args[1]["phase_request_count"] == 5
+    assert updates[failed_idx].args[0] == "ms-early-2999"
+    assert usage_idx < failed_idx
+    # The verification call carries the early-row binding (pinned elsewhere
+    # for prior_usage too; asserted here for the composition).
+    run_kwargs = orchestrator._runner.run_agent_task.call_args.kwargs
+    assert run_kwargs.get("milestone_id") == "ms-early-2999"

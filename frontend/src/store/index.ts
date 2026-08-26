@@ -37,6 +37,26 @@ export interface WorkspaceTab {
   terminalToken?: string; // Auth token for terminal WebSocket
 }
 
+/**
+ * Persisted state type - defines what gets stored in localStorage
+ * IMPORTANT: When adding new fields to WorkspaceTab or AppState, ensure they are either:
+ * 1. Safe to persist (add to partialize below)
+ * 2. Sensitive (exclude from partialize and handle specially)
+ * Issue #2953: Added explicit type for safety
+ */
+export interface PersistedState {
+  theme: Theme;
+  language: Language;
+  sidebarCollapsed: boolean;
+  appMode: AppMode;
+  enableTabNotifications: boolean;
+  autoFullscreenOnEnterChat: boolean;
+  showFileChangesPanel: boolean;
+  workspaceTabs: WorkspaceTab[];
+  workspaceActiveTabId: string;
+  workspaceTabsOrder: string[];
+}
+
 interface AppState {
   // Auth state
   user: User | null;
@@ -53,7 +73,9 @@ interface AppState {
   // Workspace fullscreen state
   workspaceFullscreen: boolean;
   previousLeftPanelCollapsed: boolean;
-  previousRightPanelCollapsed: boolean;
+
+  // Prompts drawer (work mode, workspace route only)
+  promptsDrawerOpen: boolean;
 
   // Workspace tabs state (Issue #65: Persist workspace state)
   workspaceTabs: WorkspaceTab[];
@@ -90,9 +112,10 @@ interface AppState {
   logout: () => void;
 
   // Workspace fullscreen actions
-  enterWorkspaceFullscreen: (leftCollapsed: boolean, rightCollapsed: boolean) => void;
+  enterWorkspaceFullscreen: (leftCollapsed: boolean) => void;
   exitWorkspaceFullscreen: () => void;
-  toggleWorkspaceFullscreen: (leftCollapsed: boolean, rightCollapsed: boolean) => void;
+  toggleWorkspaceFullscreen: (leftCollapsed: boolean) => void;
+  setPromptsDrawerOpen: (open: boolean) => void;
 
   // Workspace tabs actions (Issue #65)
   setWorkspaceTabs: (tabs: WorkspaceTab[]) => void;
@@ -124,6 +147,130 @@ interface AppState {
   setConfigLoaded: (loaded: boolean) => void;
 }
 
+/**
+ * Validate workspace tab has required fields
+ * Issue #2953: Defensive validation
+ */
+export const isValidWorkspaceTab = (tab: unknown): tab is WorkspaceTab => {
+  if (typeof tab !== 'object' || tab === null) return false;
+  const t = tab as Record<string, unknown>;
+  return typeof t.id === 'string' && typeof t.title === 'string';
+};
+
+/**
+ * Validate and sanitize stored state
+ * Issue #2953: Schema validation for localStorage data
+ * @param persistedState - The raw state from localStorage
+ * @returns Partial validated state with only valid fields
+ */
+export const validateStoredState = (persistedState: unknown): Partial<PersistedState> => {
+  if (typeof persistedState !== 'object' || persistedState === null) {
+    return {};
+  }
+
+  const state = persistedState as Record<string, unknown>;
+  const validated: Partial<PersistedState> = {};
+
+  // Validate workspaceTabs - must be array with valid structure
+  if (Array.isArray(state.workspaceTabs)) {
+    const validTabs: WorkspaceTab[] = [];
+    for (const tab of state.workspaceTabs) {
+      if (isValidWorkspaceTab(tab)) {
+        validTabs.push(tab);
+      } else {
+        console.warn('[Store] Invalid workspaceTab item removed:', tab);
+      }
+    }
+    validated.workspaceTabs = validTabs;
+  } else if (state.workspaceTabs !== undefined) {
+    console.warn('[Store] Invalid workspaceTabs, resetting to empty array');
+  }
+
+  // Validate workspaceActiveTabId - must be string
+  if (typeof state.workspaceActiveTabId === 'string') {
+    validated.workspaceActiveTabId = state.workspaceActiveTabId;
+  } else if (state.workspaceActiveTabId !== undefined) {
+    console.warn('[Store] Invalid workspaceActiveTabId, resetting to empty string');
+  }
+
+  // Validate workspaceTabsOrder - must be array of strings
+  if (Array.isArray(state.workspaceTabsOrder)) {
+    const validOrder: string[] = [];
+    for (const id of state.workspaceTabsOrder) {
+      if (typeof id === 'string') {
+        validOrder.push(id);
+      } else {
+        console.warn('[Store] Invalid workspaceTabsOrder item removed:', id);
+      }
+    }
+    validated.workspaceTabsOrder = validOrder;
+  } else if (state.workspaceTabsOrder !== undefined) {
+    console.warn('[Store] Invalid workspaceTabsOrder, resetting to empty array');
+  }
+
+  // Validate other persisted fields
+  if (['light', 'dark', 'system'].includes(state.theme as string)) {
+    validated.theme = state.theme as Theme;
+  }
+  if (typeof state.language === 'string') {
+    validated.language = state.language as Language;
+  }
+  if (typeof state.sidebarCollapsed === 'boolean') {
+    validated.sidebarCollapsed = state.sidebarCollapsed;
+  }
+  if (['work', 'history', 'settings', 'analysis'].includes(state.appMode as string)) {
+    validated.appMode = state.appMode as AppMode;
+  }
+  if (typeof state.enableTabNotifications === 'boolean') {
+    validated.enableTabNotifications = state.enableTabNotifications;
+  }
+  if (typeof state.autoFullscreenOnEnterChat === 'boolean') {
+    validated.autoFullscreenOnEnterChat = state.autoFullscreenOnEnterChat;
+  }
+  if (typeof state.showFileChangesPanel === 'boolean') {
+    validated.showFileChangesPanel = state.showFileChangesPanel;
+  }
+
+  return validated;
+};
+
+/**
+ * Migrate from older versions
+ * Issue #2953: Version migration support
+ * @param persistedState - The raw state from localStorage
+ * @param version - The version number of the persisted state
+ * @returns Fully migrated and validated state
+ */
+export const migrate = (persistedState: unknown, version: number): PersistedState => {
+  console.log('[Store] Migrating from version', version, 'to version 1');
+
+  const validated = validateStoredState(persistedState);
+
+  // Migration from version 0 (undefined) to version 1:
+  // Add workspaceTabsOrder if missing
+  const defaultState: PersistedState = {
+    theme: 'light',
+    language: 'en',
+    sidebarCollapsed: false,
+    appMode: 'work',
+    enableTabNotifications: true,
+    autoFullscreenOnEnterChat: false,
+    showFileChangesPanel: true,
+    workspaceTabs: [],
+    workspaceActiveTabId: '',
+    workspaceTabsOrder: [],
+  };
+
+  return {
+    ...defaultState,
+    ...validated,
+    // Ensure workspaceTabsOrder defaults to order of existing tabs if missing
+    workspaceTabsOrder:
+      validated.workspaceTabsOrder ??
+      (Array.isArray(validated.workspaceTabs) ? validated.workspaceTabs.map((t) => t.id) : []),
+  };
+};
+
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
@@ -140,7 +287,9 @@ export const useAppStore = create<AppState>()(
       // Workspace fullscreen state
       workspaceFullscreen: false,
       previousLeftPanelCollapsed: false,
-      previousRightPanelCollapsed: false,
+
+      // Prompts drawer (work mode, workspace route only)
+      promptsDrawerOpen: false,
 
       // Workspace tabs state (Issue #65)
       workspaceTabs: [],
@@ -195,14 +344,13 @@ export const useAppStore = create<AppState>()(
         }),
 
       // Workspace fullscreen actions
-      enterWorkspaceFullscreen: (leftCollapsed, rightCollapsed) =>
+      enterWorkspaceFullscreen: (leftCollapsed) =>
         set({
           workspaceFullscreen: true,
           previousLeftPanelCollapsed: leftCollapsed,
-          previousRightPanelCollapsed: rightCollapsed,
         }),
       exitWorkspaceFullscreen: () => set({ workspaceFullscreen: false }),
-      toggleWorkspaceFullscreen: (leftCollapsed, rightCollapsed) =>
+      toggleWorkspaceFullscreen: (leftCollapsed) =>
         set((state) => {
           if (state.workspaceFullscreen) {
             return { workspaceFullscreen: false };
@@ -210,10 +358,10 @@ export const useAppStore = create<AppState>()(
             return {
               workspaceFullscreen: true,
               previousLeftPanelCollapsed: leftCollapsed,
-              previousRightPanelCollapsed: rightCollapsed,
             };
           }
         }),
+      setPromptsDrawerOpen: (open) => set({ promptsDrawerOpen: open }),
 
       // Workspace tabs actions (Issue #65)
       setWorkspaceTabs: (tabs) => set({ workspaceTabs: tabs }),
@@ -287,7 +435,10 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'open-ace-store',
-      partialize: (state) => ({
+      version: 1, // Issue #2953: Add version for migration support
+      migrate, // Issue #2953: Migration function handles version updates and validation
+      // Issue #2953: Error handling during rehydration is done in migrate function
+      partialize: (state): PersistedState => ({
         theme: state.theme,
         language: state.language,
         sidebarCollapsed: state.sidebarCollapsed,
@@ -296,6 +447,9 @@ export const useAppStore = create<AppState>()(
         autoFullscreenOnEnterChat: state.autoFullscreenOnEnterChat,
         showFileChangesPanel: state.showFileChangesPanel,
         // Issue #65: Persist workspace tabs state (exclude sensitive fields)
+        // IMPORTANT: When adding new WorkspaceTab fields, ensure they are either:
+        // 1. Safe to persist (add to rest spread below)
+        // 2. Sensitive (add to destructuring exclusion)
         workspaceTabs: state.workspaceTabs.map(
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
           ({ terminalToken, terminalWsUrl, waitingForUser, waitingType, ...rest }) => rest
@@ -323,11 +477,8 @@ export const useEnableTabNotifications = () => useAppStore((state) => state.enab
 export const useAutoFullscreenOnEnterChat = () =>
   useAppStore((state) => state.autoFullscreenOnEnterChat);
 export const useShowFileChangesPanel = () => useAppStore((state) => state.showFileChangesPanel);
-export const usePreviousPanelState = () =>
-  useAppStore((state) => ({
-    left: state.previousLeftPanelCollapsed,
-    right: state.previousRightPanelCollapsed,
-  }));
+export const usePreviousPanelState = () => useAppStore((state) => state.previousLeftPanelCollapsed);
+export const usePromptsDrawerOpen = () => useAppStore((state) => state.promptsDrawerOpen);
 
 // Workspace tabs selectors (Issue #65)
 export const useWorkspaceTabs = () => useAppStore((state) => state.workspaceTabs);
@@ -372,3 +523,6 @@ export const useModelGatewayEnabled = () => useAppStore((state) => state.modelGa
 export const useRunTimelineEnabled = () => useAppStore((state) => state.runTimelineEnabled);
 export const usePolicyEnabled = () => useAppStore((state) => state.policyEnabled);
 export const useConfigLoaded = () => useAppStore((state) => state.configLoaded);
+
+// Admin tenant store (Issue #2841)
+export { useAdminTenantStore } from './adminTenantStore';

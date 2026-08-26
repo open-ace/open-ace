@@ -35,6 +35,34 @@ from app.repositories.database import DB_PATH, Database, _param, adapt_boolean_v
 
 logger = logging.getLogger(__name__)
 
+# Issue #2596: Prometheus metrics for deregistration monitoring
+try:
+    from prometheus_client import Counter
+
+    DEREGISTER_SESSIONS_TERMINATED = Counter(
+        "deregister_sessions_terminated_total",
+        "Total number of sessions terminated during machine deregistration",
+    )
+    DEREGISTER_COMMANDS_DELETED = Counter(
+        "deregister_commands_deleted_total",
+        "Total number of runtime commands deleted during machine deregistration",
+    )
+    DEREGISTER_OUTPUTS_DELETED = Counter(
+        "deregister_outputs_deleted_total",
+        "Total number of runtime outputs deleted during machine deregistration",
+    )
+    DEREGISTER_FAILURES = Counter(
+        "deregister_failures_total", "Total number of failed batches during machine deregistration"
+    )
+    PROMETHEUS_AVAILABLE = True
+except ImportError:
+    # Prometheus not available, use no-op counters
+    DEREGISTER_SESSIONS_TERMINATED = None
+    DEREGISTER_COMMANDS_DELETED = None
+    DEREGISTER_OUTPUTS_DELETED = None
+    DEREGISTER_FAILURES = None
+    PROMETHEUS_AVAILABLE = False
+
 # Token rotation configuration (Issue #2499)
 # Default timeout for pending revocation (5 minutes)
 DEFAULT_TOKEN_REVOKE_TIMEOUT = int(os.getenv("AGENT_TOKEN_REVOKE_TIMEOUT_SEC", "300"))
@@ -53,11 +81,11 @@ _PERSIST_OUTPUT_MAX_RETRIES = 8
 SESSION_STATES_TO_TERMINATE = ["active", "paused", "pending", "starting", "stopping"]
 SESSION_STATES_TERMINAL = ["completed", "stopped", "error", "timeout"]
 
-# Batch size for terminating sessions during deregistration
-DEREGISTER_BATCH_SIZE = 100
+# Batch size for terminating sessions during deregistration (Issue #2596)
+DEREGISTER_BATCH_SIZE = int(os.getenv("DEREGISTER_BATCH_SIZE", "100"))
 
-# Maximum retries for failed batch termination compensation
-DEREGISTER_COMPENSATION_MAX_RETRIES = 3
+# Maximum retries for failed batch termination compensation (Issue #2596)
+DEREGISTER_COMPENSATION_MAX_RETRIES = int(os.getenv("DEREGISTER_COMPENSATION_MAX_RETRIES", "3"))
 
 # Output batching configuration (Issue #1823)
 # Batch size for aggregated writes
@@ -125,7 +153,31 @@ class RemoteAgentManager:
     polling commands, command responses, session-machine bindings, and SSE
     output replay are persisted so active remote-session control APIs do not
     depend on hitting the same web process.
+
+    Machine Status Lifecycle (Issue #2537):
+        Registration: machine starts in 'online' state (transient)
+        First heartbeat: 'online' -> 'idle' (no active sessions) or 'busy' (active sessions)
+        Ongoing heartbeats: 'idle' <-> 'busy' based on active_sessions count
+        Timeout/disconnect: 'idle'/'busy' -> 'offline'
+        Re-registration (offline): old machine record merged with new machine_id
+
+        Conflict Detection: hostname re-registration is rejected if existing machine
+        is in any online state ('online', 'idle', or 'busy'). Only 'offline' machines
+        can be merged on re-registration.
     """
+
+    # Machine status constants (Issue #2537)
+    _STATUS_ONLINE = "online"  # Registration transient state
+    _STATUS_IDLE = "idle"  # Online with no active sessions
+    _STATUS_BUSY = "busy"  # Online with active sessions
+    _STATUS_OFFLINE = "offline"  # Disconnected or timed out
+
+    # Online status set for conflict detection (Issue #2537)
+    # This set documents the known valid online states for reference and logging.
+    # The actual conflict detection uses a conservative approach (status != offline)
+    # to also catch NULL and unknown statuses. This ensures safe handling of
+    # unexpected database states without allowing duplicate registrations.
+    _ONLINE_STATUSES = frozenset({_STATUS_ONLINE, _STATUS_IDLE, _STATUS_BUSY})
 
     HEARTBEAT_TIMEOUT_SECONDS = 180  # 3 minutes without heartbeat = offline
     HEARTBEAT_CHECK_INTERVAL = 60  # Check every 60 seconds
@@ -703,6 +755,18 @@ class RemoteAgentManager:
 
         Returns:
             Dict with machine info or None if token invalid.
+            On hostname conflict, returns dict with 'error' key and details:
+            - error: "hostname_conflict"
+            - message: Human-readable conflict description
+            - conflicting_machine_id: ID of conflicting machine
+            - conflicting_status: Status of conflicting machine
+
+        Machine Status Lifecycle (Issue #2537):
+            After registration, machine starts in 'online' state (transient).
+            First heartbeat transitions to 'idle' (no sessions) or 'busy' (active sessions).
+            Re-registration with same hostname:
+            - If existing machine is online/idle/busy: returns 409 conflict
+            - If existing machine is offline: merges old record with new machine_id
         """
         # Consume the one-time registration token (DB-based)
         token_info = self._consume_registration_token(registration_token)
@@ -722,7 +786,7 @@ class RemoteAgentManager:
                 if hostname:
                     cursor.execute(
                         f"""
-                        SELECT machine_id, status FROM remote_machines
+                        SELECT * FROM remote_machines
                         WHERE hostname = {_param()} AND tenant_id = {_param()}
                         ORDER BY updated_at DESC
                         """,
@@ -730,18 +794,42 @@ class RemoteAgentManager:
                     )
                     existing = cursor.fetchall()
 
-                    online_match = [r for r in existing if r["status"] == "online"]
+                    # Issue #2537: Conflict detection - cover all online statuses
+                    # Conservative approach: only allow merge for explicit offline status
+                    # Treat any other status (including NULL/unknown) as online conflict
+                    #
+                    # Transaction protection: This code runs within self._lock and a DB transaction,
+                    # so concurrent registrations with the same hostname are serialized. The first
+                    # registration will succeed (or merge if offline), and the second will see
+                    # the conflict and return 409.
+                    online_match = [r for r in existing if r["status"] != self._STATUS_OFFLINE]
                     if online_match:
                         conn.rollback()
+                        conflict = online_match[0]
+                        logger.warning(
+                            "Hostname conflict rejected: hostname=%s "
+                            "conflicting_machine_id=%s status=%s",
+                            hostname,
+                            conflict["machine_id"][:8],
+                            conflict["status"],
+                        )
                         return {
                             "error": "hostname_conflict",
-                            "message": f"Hostname '{hostname}' is already registered and online. "
-                            f"Contact an admin to resolve the conflict.",
+                            "message": (
+                                f"Hostname '{hostname}' is already registered and active "
+                                f"(status: {conflict['status']}). "
+                                f"Machine ID: {conflict['machine_id'][:8]}. "
+                                f"Contact an admin to resolve the conflict."
+                            ),
+                            "conflicting_machine_id": conflict["machine_id"],
+                            "conflicting_status": conflict["status"],
                         }
 
-                    offline_match = [r for r in existing if r["status"] == "offline"]
+                    # Offline merge: only match explicit offline status
+                    offline_match = [r for r in existing if r["status"] == self._STATUS_OFFLINE]
                     if offline_match:
-                        old_machine_id = offline_match[0]["machine_id"]
+                        old_machine = offline_match[0]
+                        old_machine_id = old_machine["machine_id"]
                         merged = True
                         logger.info(
                             "Merging re-registered machine: hostname=%s, old_id=%s, new_id=%s",
@@ -750,31 +838,31 @@ class RemoteAgentManager:
                             machine_id[:8],
                         )
 
-                        # Update the existing record with new machine_id and metadata
+                        # Insert the replacement machine row first so dependent foreign
+                        # keys can move over without ever pointing at a missing parent.
                         cursor.execute(
                             f"""
-                            UPDATE remote_machines
-                            SET machine_id = {_param()}, machine_name = {_param()},
-                                os_type = {_param()}, os_version = {_param()},
-                                ip_address = {_param()}, status = {_param()},
-                                agent_version = {_param()}, capabilities = {_param()},
-                                updated_at = {_param()}, last_heartbeat = {_param()},
-                                created_by = {_param()}
-                            WHERE machine_id = {_param()}
+                            INSERT INTO remote_machines
+                            (machine_id, machine_name, hostname, os_type, os_version, ip_address,
+                             status, agent_version, capabilities, tenant_id, created_by, created_at,
+                             updated_at, last_heartbeat)
+                            VALUES ({_params(14)})
                             """,
                             (
                                 machine_id,
                                 machine_name,
+                                hostname,
                                 os_type,
                                 os_version,
                                 ip_address,
                                 "online",
                                 agent_version,
                                 json.dumps(capabilities) if capabilities else None,
-                                now,
-                                now,
+                                old_machine["tenant_id"],
                                 token_info["created_by"],
-                                old_machine_id,
+                                old_machine["created_at"],
+                                now,
+                                now,
                             ),
                         )
 
@@ -811,6 +899,11 @@ class RemoteAgentManager:
                             logger.debug(
                                 "agent_sessions table not available during merge, skipping"
                             )
+
+                        cursor.execute(
+                            f"DELETE FROM remote_machines WHERE machine_id = {_param()}",
+                            (old_machine_id,),
+                        )
 
                         # Clean up in-memory state for old machine_id
                         self._connections.pop(old_machine_id, None)
@@ -919,23 +1012,34 @@ class RemoteAgentManager:
         agent_notified = False
         lock_acquired = False
         lock_key = 0
+        lock_conn_cm = None  # Context manager
+        lock_conn = None  # Actual connection
 
         # Step 0: Acquire Advisory Lock for PostgreSQL (prevent concurrent deregistration)
-        # Use session-level lock (pg_advisory_lock) so it persists across transactions
+        # Use session-level lock with proper connection management
         if is_postgresql():
             try:
                 # Use SHA256 hash for consistent lock key across processes
                 lock_key = int(hashlib.sha256(machine_id.encode()).hexdigest()[:16], 16)
-                with self.db.connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("SET LOCAL lock_timeout = '30s'")
-                    cursor.execute("SELECT pg_advisory_lock(%s)", (lock_key,))
-                    lock_acquired = True
-                    logger.debug("Acquired advisory lock for machine %s", machine_id[:8])
+                lock_conn_cm = self.db.connection()
+                lock_conn = lock_conn_cm.__enter__()  # Get actual connection from context manager
+                cursor = lock_conn.cursor()
+                cursor.execute("SET lock_timeout = '30s'")
+                cursor.execute("SELECT pg_advisory_lock(%s)", (lock_key,))
+                lock_acquired = True
+                logger.debug("Acquired advisory lock for machine %s", machine_id[:8])
             except Exception as e:
                 logger.warning(
                     "Failed to acquire advisory lock for machine %s: %s", machine_id[:8], e
                 )
+                # Close lock connection on failure
+                if lock_conn_cm:
+                    try:
+                        lock_conn_cm.__exit__(None, None, None)
+                    except Exception:
+                        pass
+                    lock_conn_cm = None
+                    lock_conn = None
                 # Continue without lock for SQLite or if lock fails
                 # Another concurrent deregistration may still be in progress
 
@@ -1010,7 +1114,7 @@ class RemoteAgentManager:
                     len(failed_batches),
                 )
 
-            # Step 8: Log deregistration result (for audit)
+            # Step 8: Log deregistration result (for audit) and record metrics
             logger.info(
                 "Machine %s deregistered: sessions_terminated=%d, commands_deleted=%d, outputs_deleted=%d, agent_notified=%s, failed_batches=%d",
                 machine_id[:8],
@@ -1021,20 +1125,35 @@ class RemoteAgentManager:
                 len(failed_batches),
             )
 
+            # Issue #2596: Record Prometheus metrics
+            if PROMETHEUS_AVAILABLE:
+                try:
+                    DEREGISTER_SESSIONS_TERMINATED.inc(sessions_terminated)
+                    DEREGISTER_COMMANDS_DELETED.inc(commands_deleted)
+                    DEREGISTER_OUTPUTS_DELETED.inc(outputs_deleted)
+                    DEREGISTER_FAILURES.inc(len(failed_batches))
+                except Exception as e:
+                    logger.warning("Failed to record Prometheus metrics: %s", e)
+
             return cast("bool", success)
 
         finally:
             # Step 9: Release Advisory Lock if acquired
-            if lock_acquired and is_postgresql():
+            if lock_acquired and lock_conn_cm and lock_conn:
                 try:
-                    with self.db.connection() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_key,))
-                        logger.debug("Released advisory lock for machine %s", machine_id[:8])
+                    cursor = lock_conn.cursor()
+                    cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_key,))
+                    logger.debug("Released advisory lock for machine %s", machine_id[:8])
                 except Exception as e:
                     logger.warning(
                         "Failed to release advisory lock for machine %s: %s", machine_id[:8], e
                     )
+                finally:
+                    # Always close the lock connection (exit context manager)
+                    try:
+                        lock_conn_cm.__exit__(None, None, None)
+                    except Exception:
+                        pass
 
     def _notify_agent_deregister(self, machine_id: str) -> bool:
         """Try to notify agent that sessions will be terminated.

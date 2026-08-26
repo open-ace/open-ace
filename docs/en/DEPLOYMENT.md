@@ -57,18 +57,44 @@ matches the filesystem ownership baked into the image and the K8s
 Multi-user workspace mode (`WORKSPACE_MULTI_USER_MODE=true` or
 `workspace.multi_user_mode: true` in config) genuinely needs root — it creates
 system users (`useradd`), fixes ownership (`chown`), and switches identity
-(`sudo -u <user>`) across `/home`. For multi-user deployments you must opt back
-into root explicitly:
+(`sudo -u <user>`) across `/home`.
+
+**Recommended: Use docker-compose.multi-user.yml**
+
+```bash
+# One-command multi-user mode
+./scripts/bootstrap-compose-env.sh
+docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d --wait
+```
+
+The docker-compose.multi-user.yml automatically configures:
+- Container runs as root (`user: "0"`)
+- Explicit authorization (`OPENACE_ALLOW_ROOT_MULTI_USER=1`)
+- Configuration persistence (`OPENACE_CONFIG_DIR=/home/open-ace/.open-ace`)
+
+**Manual Setup**
 
 ```bash
 docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
-  -e OPENACE_ALLOW_ROOT_MULTI_USER=1 ...
+  -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \
+  -e OPENACE_CONFIG_DIR=/home/open-ace/.open-ace ...
 ```
 
-Without both `--user 0` (or manifest `runAsUser: 0`) and
-`OPENACE_ALLOW_ROOT_MULTI_USER=1`, the entrypoint exits with a clear error
-rather than silently swallowing the `useradd`/`chown` permission failures that
-a naive non-root multi-user deployment would hit.
+You must set `--user 0` (or manifest `runAsUser: 0`),
+`OPENACE_ALLOW_ROOT_MULTI_USER=1`, and `OPENACE_CONFIG_DIR` together.
+Otherwise, the entrypoint exits with a clear error rather than silently
+swallowing the `useradd`/`chown` permission failures that a naive non-root
+multi-user deployment would hit.
+
+**Migrating from config.json**
+
+If you previously set `"multi_user_mode": true` in config.json:
+
+1. Recommended: Use docker-compose.multi-user.yml (see above)
+2. Or set `"multi_user_mode": false` in config.json and use environment variables
+
+**Note**: Multi-user mode requires root and is suitable for controlled environments
+only. For production, ensure strong passwords and security keys are set.
 
 ### Initial Deployment
 
@@ -589,6 +615,39 @@ ps aux | grep python
 # Fix permissions
 chmod -R 755 ~/.open-ace/
 ```
+
+### code-server Installation Verification
+
+**Purpose**: code-server is used for the "Open VS Code" button in local workspace sessions. When users click the "Open VS Code" button in a local workspace, the system launches code-server to provide a web-based VS Code editor.
+
+**Verify Installation**:
+
+```bash
+# Verify in Docker container
+docker run --rm <image> which code-server
+docker run --rm <image> code-server --version
+```
+
+**Common Issues**:
+
+| Error Message | Cause | Solution |
+|--------------|-------|----------|
+| `code-server is not installed` | Image version outdated or not built correctly | Rebuild Docker image |
+| `code-server: command not found` | PATH issue | Check if `/usr/bin/code-server` exists |
+| Installation failed | Network issue | Check network connection, consider using proxy |
+
+**Fix History**:
+
+| Issue/PR | Date | Fix Content |
+|----------|------|-------------|
+| #2245 / #2250 | 2026-08-05 | First added code-server installation |
+| #2358 | 2026-08-06 | Fixed verification path (/usr/local/bin → /usr/bin) |
+| #2498 | 2026-08-11 | Removed invalid `--prefix` parameter |
+
+**Installation Method**:
+- Uses official install script: `https://code-server.dev/install.sh`
+- Debian environment uses deb package, installs to `/usr/bin/code-server`
+- Timeout settings: 15s connection, 300s execution
 
 ## Security Considerations
 

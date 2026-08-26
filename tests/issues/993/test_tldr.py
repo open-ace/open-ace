@@ -14,6 +14,66 @@ from app.modules.workspace.autonomous.orchestrator import TLDR_INSTRUCTION, Auto
 
 # ── helpers (mirror tests/issues/987/) ───────────────────────────────────
 
+FEATURE_SHA = "f" * 40
+MAIN_SHA = "m" * 40
+
+
+class _GitResult:
+    def __init__(self, stdout="", returncode=0):
+        self.stdout = stdout
+        self.returncode = returncode
+
+
+def _fake_run_git(args, check=True):
+    """#2457 realignment: pr_review.handle() shells out via gh._run_git to
+    detect branch state before any milestone is written. A bare MagicMock
+    makes stdout.strip() truthy and the REAL _validate_autonomous_change_scope
+    then fails closed on merge-base derivation, returning before the review
+    agent ever runs. Give the subprocess results concrete shapes so the real
+    scope validator executes and passes:
+      - rev-parse feature-x → FEATURE_SHA, rev-parse main → MAIN_SHA
+      - merge-base --is-ancestor → rc!=0 (branch is NOT behind main)
+      - rev-parse SHA^2 → rc!=0 (head is not a merge commit)
+      - merge-base ... origin/main → rc!=0 (derivation fails; the pinned
+        base_commit_sha stays the scope base)
+    """
+    cmd = args[0] if args else ""
+    if cmd == "rev-parse":
+        target = args[1] if len(args) > 1 else ""
+        if target == "main":
+            return _GitResult(stdout=MAIN_SHA + "\n")
+        if target.endswith("^2"):
+            return _GitResult(returncode=128)
+        return _GitResult(stdout=FEATURE_SHA + "\n")
+    if cmd == "merge-base":
+        return _GitResult(returncode=1)
+    return _GitResult(stdout="")
+
+
+def _trusted_repo_context(orch):
+    """Satisfy the pre-agent trusted-git boundary (#2457 realignment).
+
+    _run_agent refuses to execute local agents without a trusted repo context
+    (repo_integrity_violation), so the MagicMock gh can no longer carry a
+    direct _run_agent call into the runner. Provide the regular-repo context
+    shape the 723/826 tests use.
+    """
+    orch._snapshot_repo_context = MagicMock(
+        return_value={
+            "context": {"repo_path": "/tmp/wf993", "expected_branch": "feature-x"},
+            "effective": {
+                "repo_path": "/tmp/wf993",
+                "git_dir": "/tmp/wf993/.git",
+                "git_identity": "test-git",
+                "common_dir": "/tmp/wf993/.git",
+                "common_identity": "test-common",
+                "origin": "",
+            },
+            "main": {},
+        }
+    )
+    orch._validate_repo_context_after_run = MagicMock(return_value="")
+
 
 def _make_workflow(**overrides):
     base = {
@@ -53,6 +113,10 @@ def _make_agent_result(text="代码审查通过\nTL;DR: 修复了登录 bug"):
 
 def _make_gh():
     gh = MagicMock()
+    gh._run_git = MagicMock(side_effect=_fake_run_git)
+    gh.get_current_branch.return_value = "feature-x"
+    gh.get_changed_files.return_value = []
+    gh.has_uncommitted_changes.return_value = False
     gh.get_diff_stats.return_value = {
         "commits": 1,
         "additions": 5,
@@ -158,6 +222,7 @@ class TestTldrInstruction:
         orch._link_session_to_current_milestone = MagicMock()
         orch._is_transient_api_error = MagicMock(return_value=False)
         orch._write_phase_usage = MagicMock()
+        _trusted_repo_context(orch)
 
         orch._run_agent(prompt="基础 prompt")
 
@@ -174,7 +239,13 @@ class TestMilestoneTldrWrite:
     """Phase milestones persist the extracted tldr alongside result_summary."""
 
     def test_pr_reviewed_milestone_carries_tldr(self):
-        wf = _make_workflow(current_round=0, max_pr_review_rounds=1)  # review-only round
+        wf = _make_workflow(
+            current_round=0,
+            max_pr_review_rounds=1,  # review-only round
+            # Scope validation compares against base_commit_sha; pin it to the
+            # branch head so only the current-round range is checked.
+            base_commit_sha=FEATURE_SHA,
+        )
         orch = _make_orchestrator(wf)
         orch._get_gh.return_value = _make_gh()
         orch.repo.list_milestones.return_value = []

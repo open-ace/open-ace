@@ -283,6 +283,14 @@ def _backfill_missing_columns(conn, dialect: str) -> None:
             # default tenant) so the runtime tenant predicate does not silently
             # degrade to global scope (Issue #1832 F8).
             ("tenant_id", "INTEGER", "1"),
+            # Issue #2585 sync flag: idx_agent_sessions_daily_usage_synced in the
+            # authoritative schema references this column, so legacy DBs need it
+            # back-filled before the schema's CREATE INDEX runs (Issue #1128).
+            (
+                "daily_usage_synced",
+                "INTEGER" if not is_postgres else "boolean",
+                "0" if not is_postgres else "false",
+            ),
         ]
         for col_name, col_type, default in agent_sessions_columns:
             if not _column_exists(conn, "agent_sessions", col_name, dialect):

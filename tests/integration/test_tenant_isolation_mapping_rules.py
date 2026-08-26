@@ -303,7 +303,7 @@ class TestTenantIsolationForGenerateDefaultRules:
         concurrently, verifying no cross-tenant rule creation occurs.
         """
         import threading
-        from collections import defaultdict
+        from contextlib import ExitStack
 
         from app.models.tool_account_mapping_rule import ToolAccountMappingRule
         from app.services.tool_account_auto_mapping_service import GenerateDefaultRulesResult
@@ -318,95 +318,122 @@ class TestTenantIsolationForGenerateDefaultRules:
         }
         mock_user_repo.get_user_by_id.side_effect = lambda uid: tenant_user_map.get(uid)
 
-        results = defaultdict(list)
-        errors = []
+        # Each tenant admin's identity is resolved from the request's Bearer
+        # token — thread-safe, because it travels with the request via Flask's
+        # per-thread request proxy. The auth helper is patched ONCE on the main
+        # thread below (fixed for the whole concurrent section), NOT per worker.
+        # A per-thread `with patch(...)` on a module-global auth helper is racy:
+        # one thread's context-manager __exit__ restores the real function while
+        # another thread's request is still in flight, so that request is
+        # silently unauthenticated and the target user 404s (#2265 mock.patch-in-
+        # threads leak; surfaced on py3.10 by the #2868 full-suite lane).
+        identities = {
+            f"tenant-{tid}": {
+                "id": 10 + tid,
+                "role": "tenant_admin",
+                "username": f"tenant_admin_{tid}",
+                "tenant_id": tid,
+            }
+            for tid in (1, 2)
+        }
+        default_result = GenerateDefaultRulesResult(
+            created=[
+                ToolAccountMappingRule(
+                    id=1,
+                    user_id=1,
+                    pattern="user-*",
+                    match_type="prefix",
+                    priority=10,
+                    is_auto=True,
+                    is_active=True,
+                )
+            ],
+            skipped=[],
+            created_count=1,
+            skipped_count=0,
+        )
 
-        def generate_rules_for_tenant(tenant_id, user_id):
-            """Generate rules for a user in a specific tenant."""
+        # Concurrent operations mix legitimate same-tenant generates (expect 2xx)
+        # with cross-tenant attempts (a tenant admin targeting a user in the OTHER
+        # tenant — expect 404 per the isolation contract, to avoid disclosing the
+        # user's existence). Running the denial and success paths together under
+        # concurrency is the point: each request's admin identity must stay pinned
+        # to that request, so the outcome must track the tenant relationship and
+        # never leak across threads.
+        operations = [
+            (1, 11),  # tenant-1 admin -> own user      -> allowed
+            (1, 12),  # tenant-1 admin -> own user      -> allowed
+            (2, 21),  # tenant-2 admin -> own user      -> allowed
+            (2, 22),  # tenant-2 admin -> own user      -> allowed
+            (1, 21),  # tenant-1 admin -> tenant-2 user -> denied (404)
+            (2, 12),  # tenant-2 admin -> tenant-1 user -> denied (404)
+        ]
+        results: list[dict] = []  # list.append is atomic under the GIL
+        errors: list[str] = []
+
+        def run_operation(admin_tenant, target_user):
+            """Authenticate as admin_tenant's admin (Bearer token) and generate."""
             try:
-                test_client = app.test_client()
-
-                with patch("app.auth.decorators._extract_session_token", return_value="test-token"):
-                    with patch(
-                        "app.auth.decorators._load_user_from_token",
-                        return_value={
-                            "id": 10 + tenant_id,
-                            "role": "tenant_admin",
-                            "username": f"tenant_admin_{tenant_id}",
-                            "tenant_id": tenant_id,
-                        },
-                    ):
-                        with patch(
-                            "app.routes.mapping_rules.ToolAccountAutoMappingService"
-                        ) as mock_service:
-                            mock_service_instance = MagicMock()
-                            result = GenerateDefaultRulesResult(
-                                created=[
-                                    ToolAccountMappingRule(
-                                        id=tenant_id * 100 + user_id,
-                                        user_id=user_id,
-                                        pattern=f"user{user_id}-*",
-                                        match_type="prefix",
-                                        priority=10,
-                                        is_auto=True,
-                                        is_active=True,
-                                    )
-                                ],
-                                skipped=[],
-                                created_count=1,
-                                skipped_count=0,
-                            )
-                            mock_service_instance.create_default_rules_for_user.return_value = (
-                                result
-                            )
-                            mock_service.return_value = mock_service_instance
-
-                            response = test_client.post(
-                                f"/api/mapping-rules/user/{user_id}/generate-default",
-                                content_type="application/json",
-                            )
-
-                            results[tenant_id].append(
-                                {
-                                    "user_id": user_id,
-                                    "status": response.status_code,
-                                }
-                            )
-            except (
-                Exception
-            ) as e:  # allow-swallow: collect per-thread errors; the driving test asserts errors is empty
+                response = app.test_client().post(
+                    f"/api/mapping-rules/user/{target_user}/generate-default",
+                    headers={"Authorization": f"Bearer tenant-{admin_tenant}"},
+                    content_type="application/json",
+                )
+                results.append(
+                    {
+                        "admin_tenant": admin_tenant,
+                        "target_user": target_user,
+                        "status": response.status_code,
+                    }
+                )
+            except Exception as e:  # allow-swallow: collect per-thread errors; asserted empty below
                 errors.append(str(e))
 
-        # Create threads for concurrent operations
-        threads = []
-        for tenant_id in [1, 2]:
-            for user_id in range(1, 3):
-                t = threading.Thread(
-                    target=generate_rules_for_tenant, args=(tenant_id, tenant_id * 10 + user_id)
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch(
+                    "app.auth.decorators._load_user_from_token",
+                    side_effect=lambda token: identities.get(token),
                 )
-                threads.append(t)
+            )
+            mock_service = stack.enter_context(
+                patch("app.routes.mapping_rules.ToolAccountAutoMappingService")
+            )
+            mock_service.return_value.create_default_rules_for_user.return_value = default_result
 
-        # Start all threads
-        for t in threads:
-            t.start()
+            threads = [
+                threading.Thread(target=run_operation, args=(admin_tenant, target_user))
+                for admin_tenant, target_user in operations
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=5)
 
-        # Wait for all threads to complete
-        for t in threads:
-            t.join(timeout=5)
-
-        # Verify no errors occurred
+        # No thread errored out, and every operation reported a result.
         assert len(errors) == 0, f"Errors during concurrent execution: {errors}"
+        assert len(results) == len(
+            operations
+        ), f"Expected {len(operations)} results, got {len(results)}"
 
-        # Verify all operations succeeded (status 200 or 201)
-        for tenant_id, tenant_results in results.items():
-            for r in tenant_results:
-                assert r["status"] in (200, 201), (
-                    f"Tenant {tenant_id} operation on user {r['user_id']} "
-                    f"returned status {r['status']}"
+        # Each request's outcome must match its tenant relationship: same-tenant
+        # succeeds, cross-tenant is denied. A cross-thread auth leak would flip a
+        # cross-tenant attempt to 2xx (admin identity bled from another thread) or
+        # a same-tenant attempt to 404 (identity lost) — this asserts neither.
+        status_by_op = {(r["admin_tenant"], r["target_user"]): r["status"] for r in results}
+        for admin_tenant, target_user in operations:
+            status = status_by_op[(admin_tenant, target_user)]
+            same_tenant = tenant_user_map[target_user]["tenant_id"] == admin_tenant
+            if same_tenant:
+                assert status in (
+                    200,
+                    201,
+                ), f"same-tenant admin{admin_tenant} -> user{target_user} returned {status}"
+            else:
+                assert status == 404, (
+                    f"cross-tenant admin{admin_tenant} -> user{target_user} must be denied "
+                    f"(404), got {status}"
                 )
-
-        # Verify each tenant admin operated on correct users
-        assert len(results) == 2, f"Expected 2 tenants in results, got {len(results)}"
 
 
 class TestTenantIsolationForOtherOperations:

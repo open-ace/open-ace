@@ -343,3 +343,150 @@ class TestCoverMissingChecklistItems:
             by_item["Rate limiter caps at 10 requests per minute strictly enforced"]
             is Verdict.REJECTED
         )
+
+
+# -- CJK-aware matching (#2982) ------------------------------------------------
+# Whitespace tokenization made a whole Chinese phrase a single token, so a
+# verbatim-but-shortened verifier item shared ZERO tokens with its checklist
+# elaboration and every similarity path degenerated to 0 (prod evidence:
+# #2537/#2828 fully-confirmed deliveries went indeterminate). CJK runs now
+# tokenize as character bigrams; the pairs below are the real prod strings.
+
+
+class TestCjkFuzzyMatching:
+    pytestmark = [pytest.mark.regression, pytest.mark.issue(2982)]
+
+    # Real prod pair (#2537): checklist is the verifier item plus an
+    # identifier enumeration. Short side is a contiguous bigram prefix of the
+    # long side (7 bigrams + 4 latin tokens, ratio 7/11 >= 0.5) -> 1.0.
+    PROD_2537_VERIFIER = "定义机器状态常量"
+    PROD_2537_CHECKLIST = (
+        "定义机器状态常量（_STATUS_ONLINE, _STATUS_IDLE, _STATUS_BUSY, _STATUS_OFFLINE）"
+    )
+
+    # Real prod pair (#2828): checklist inserts （YYYYMMDD） mid-phrase. The
+    # short side is ONE 17-char run (16 bigrams incl. the 期不 bridge); the
+    # long side is two runs (15 bigrams) + 1 latin token. Weighted Jaccard
+    # (bigrams 1x, latin token 2x): 15 / (15+1+2) = 0.833 — margin over the
+    # 0.8 bar is only 0.033; assert >= 0.8 and keep the exact value in sync
+    # if weights ever change.
+    PROD_2828_VERIFIER = "紧凑日期不再被误识别为国际电话号码"
+    PROD_2828_CHECKLIST = "紧凑日期（YYYYMMDD）不再被误识别为国际电话号码"
+
+    # Real prod pair (#2239): the parenthetical elaboration is long relative
+    # to the base (9 vs 23 tokens), below both the 0.5 containment ratio and
+    # the 0.8 Jaccard bar -> intentionally NOT matched (conservative; the
+    # verifier verbatim-echo prompt is the primary fix for this shape).
+    PROD_2239_VERIFIER = "创建远程目录API接受'busy'状态"
+    PROD_2239_CHECKLIST = "创建远程目录API接受'busy'状态(有活跃会话但仍然连接的机器)"
+
+    def _fuzzy(self):
+        from app.modules.workspace.autonomous.phases.acceptance_verification import (
+            _items_match_fuzzy,
+        )
+
+        return _items_match_fuzzy
+
+    def test_prod_2537_verbatim_shortened_item_matches(self):
+        assert self._fuzzy()(self.PROD_2537_VERIFIER, self.PROD_2537_CHECKLIST) == 1.0
+
+    def test_prod_2828_infix_elaboration_item_matches(self):
+        score = self._fuzzy()(self.PROD_2828_VERIFIER, self.PROD_2828_CHECKLIST)
+        assert score >= 0.8, f"prod #2828 pair must match, got {score}"
+
+    def test_prod_2239_long_elaboration_stays_below_threshold(self):
+        assert self._fuzzy()(self.PROD_2239_VERIFIER, self.PROD_2239_CHECKLIST) < 0.8
+
+    def test_fuzzy_tokens_split_cjk_runs_into_bigrams(self):
+        from app.modules.workspace.autonomous.phases.acceptance_verification import _fuzzy_tokens
+
+        # CJK runs become in-run bigrams; non-CJK segments stay whitespace
+        # tokens, so English sequences are unchanged token-for-token.
+        assert _fuzzy_tokens("定义机器状态常量") == [
+            "定义",
+            "义机",
+            "机器",
+            "器状",
+            "状态",
+            "态常",
+            "常量",
+        ]
+        assert _fuzzy_tokens("rate limiter caps at 10") == [
+            "rate",
+            "limiter",
+            "caps",
+            "at",
+            "10",
+        ]
+        # A 1-char CJK run yields the char itself; a 2-char run one bigram.
+        assert _fuzzy_tokens("重试 retry") == ["重试", "retry"]
+        assert _fuzzy_tokens("点 retry") == ["点", "retry"]
+
+    def test_cjk_negation_flip_never_matches(self):
+        # "不再删除旧记录" vs "再删除旧记录" differ ONLY by the negation head
+        # (Jaccard 5/6 = 0.833 would match without the guard) — the flip must
+        # force 0.0.
+        assert self._fuzzy()("不再删除旧记录", "再删除旧记录") == 0.0
+
+    def test_cjk_single_char_negation_head_flips(self):
+        # 不+verb is the most common Chinese negation; the head-char rule must
+        # catch it even though neither phrase contains a multi-char marker.
+        assert self._fuzzy()("支持重试且不删除数据", "支持重试并删除数据") == 0.0
+
+    def test_cjk_negation_on_both_sides_still_matches(self):
+        # Same 不再 on both sides (marker sets equal): a one-char CJK tail
+        # elaboration keeps the weighted Jaccard at 6/7 = 0.857.
+        assert self._fuzzy()("不再删除旧记录", "不再删除旧记录了") >= 0.8
+
+    def test_cjk_negation_head_false_positive_is_conservative(self):
+        # 未来 opens with the negation head 未 but is NOT a negation. A
+        # one-sided 未来 only makes the pair NOT match (conservative loss of
+        # coverage), never a false confirmation — and when 未来 appears on
+        # both sides the markers cancel and matching is unaffected.
+        assert self._fuzzy()("未来版本支持该参数", "版本支持该参数") == 0.0
+        assert self._fuzzy()("未来版本支持该参数", "未来版本支持该参数。") >= 0.8
+
+    def test_isolated_single_char_negation_segment_flips(self):
+        # An isolated 无 between runs is a single-char token; its head must
+        # still flip (without the guard this pair would score 4/5 = 0.8).
+        assert self._fuzzy()("发送 无限制通知", "发送 限制通知") == 0.0
+
+    def test_distinct_cjk_requirements_sharing_vocabulary_do_not_match(self):
+        # Genuinely different Chinese requirements that share many characters:
+        # token (bigram) Jaccard must stay below 0.8.
+        assert (
+            self._fuzzy()(
+                "导出按钮下载CSV包含所有列",
+                "导出按钮下载XLSX包含所有列",
+            )
+            < 0.8
+        )
+
+    def test_english_behavior_unchanged_token_for_token(self):
+        # The pre-#2982 English outcomes must hold identically.
+        assert self._fuzzy()("Auth", "OAuth2 token refresh flow works") == 0.0
+        assert (
+            self._fuzzy()(
+                "OS type normalization handles Linux, Windows, and Darwin variants",
+                "OS type normalization handles Linux, Windows, Darwin variants",
+            )
+            >= 0.8
+        )
+
+
+class TestCjkCoverageIntegration:
+    pytestmark = [pytest.mark.regression, pytest.mark.issue(2982)]
+
+    def test_prod_2537_confirmed_verdict_covers_checklist(self):
+        from app.modules.workspace.autonomous.phases.acceptance_verification import (
+            _cover_missing_checklist_items,
+        )
+
+        verdicts = [_verdict("定义机器状态常量", Verdict.CONFIRMED, evidence_ref="manager.py:20")]
+        result = _cover_missing_checklist_items(
+            verdicts,
+            ["定义机器状态常量（_STATUS_ONLINE, _STATUS_IDLE, _STATUS_BUSY, _STATUS_OFFLINE）"],
+        )
+        assert len(result) == 2
+        assert result[-1].verdict is Verdict.CONFIRMED
+        assert aggregate_verdicts(result) == "confirmed"

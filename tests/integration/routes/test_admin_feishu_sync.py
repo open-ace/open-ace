@@ -43,8 +43,11 @@ def admin_client(app):
 
 def test_manual_feishu_sync_returns_summary(admin_client):
     """Admin API should return the sync result payload."""
+    from app.services.feishu_org_sync import SyncStatus
 
     class DummyResult:
+        status = SyncStatus.SUCCESS
+
         def to_dict(self):
             return {"tenant_id": 3, "users_seen": 2, "teams_created": 1}
 
@@ -71,8 +74,11 @@ def test_manual_feishu_sync_validates_tenant_id(admin_client):
 
 def test_manual_dingtalk_sync_returns_summary(admin_client):
     """Admin API should return the DingTalk sync result payload."""
+    from app.services.dingtalk_org_sync import SyncStatus
 
     class DummyResult:
+        status = SyncStatus.SUCCESS
+
         def to_dict(self):
             return {"tenant_id": 4, "users_seen": 3, "teams_created": 2}
 

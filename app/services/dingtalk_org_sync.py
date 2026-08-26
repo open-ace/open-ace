@@ -16,6 +16,7 @@ from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Any, cast
 
 import requests
@@ -102,6 +103,24 @@ class DingTalkUser:
     status: dict[str, Any] = field(default_factory=dict)
 
 
+class SyncStatus(str, Enum):
+    """Sync status for organization synchronization results."""
+
+    SUCCESS = "success"  # Complete success with no critical errors
+    PARTIAL = "partial"  # Partial success, some directories/data failed
+    FAILED = "failed"  # Critical failure, no reliable snapshot obtained
+
+
+@dataclass
+class _FetchError:
+    """Internal error info for directory fetch failures."""
+
+    department_id: str
+    error_type: str  # "permission_denied", "api_error", "transport_error", "retries_exhausted"
+    message: str
+    is_critical: bool = False  # True if root department or complete failure
+
+
 @dataclass
 class DingTalkOrgSyncResult:
     """Summary returned to admin/API callers after a sync run."""
@@ -118,12 +137,16 @@ class DingTalkOrgSyncResult:
     memberships_removed: int = 0
     started_at: str | None = None
     finished_at: str | None = None
+    status: SyncStatus = SyncStatus.SUCCESS
     warnings: list[str] = field(default_factory=list)
+    snapshot_complete: bool = True
+    errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert result to a JSON-friendly dictionary."""
         return {
             "tenant_id": self.tenant_id,
+            "status": self.status.value,
             "departments_seen": self.departments_seen,
             "users_seen": self.users_seen,
             "teams_created": self.teams_created,
@@ -136,6 +159,8 @@ class DingTalkOrgSyncResult:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "warnings": list(self.warnings),
+            "snapshot_complete": self.snapshot_complete,
+            "errors": list(self.errors),
         }
 
 
@@ -221,11 +246,29 @@ class DingTalkOrgSyncService:
                 try:
                     self._ensure_supporting_tables()
                     token = self._get_access_token(app_key, app_secret)
-                    departments, users = self._fetch_directory_snapshot(
-                        token, root_department_id, warnings=result.warnings
+                    fetch_errors: list[_FetchError] = []
+                    departments, users, snapshot_complete = self._fetch_directory_snapshot(
+                        token, root_department_id, warnings=result.warnings, errors=fetch_errors
                     )
                     result.departments_seen = len(departments)
                     result.users_seen = len(users)
+                    result.snapshot_complete = snapshot_complete
+                    if not snapshot_complete:
+                        result.warnings.append(
+                            "Directory snapshot is incomplete due to one or more "
+                            "department user fetch failures; departed-user cleanup "
+                            "will be skipped to avoid accidentally deactivating "
+                            "valid users."
+                        )
+
+                    # Set status based on fetch errors
+                    if fetch_errors:
+                        critical_errors = [e for e in fetch_errors if e.is_critical]
+                        if critical_errors or not departments:
+                            result.status = SyncStatus.FAILED
+                        else:
+                            result.status = SyncStatus.PARTIAL
+                        result.errors = [e.message for e in fetch_errors]
 
                     # Cache the synced-team index once per run instead of re-scanning
                     # the whole teams table per department (WP-1). Newly created teams
@@ -274,10 +317,14 @@ class DingTalkOrgSyncService:
                     # Deactivate/unlink DingTalk users that were synced previously but are no
                     # longer in the directory. DingTalk recycles userids, so leaving a stale
                     # SSO identity row would let a recycled id re-resolve to the old account.
+                    # Issue #3020: Skip destructive cleanup when the directory snapshot is
+                    # incomplete (API failures) or empty (no users seen), to prevent mass
+                    # deactivation of valid synced users.
                     self._deactivate_departed_users(
                         tenant_id=effective_tenant_id,
                         seen_provider_user_ids=seen_provider_user_ids,
                         result=result,
+                        snapshot_complete=snapshot_complete,
                     )
 
                     result.finished_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
@@ -320,7 +367,9 @@ class DingTalkOrgSyncService:
             self._check_stale_sync(max_runtime_seconds, auto_recover)
 
             result = self.sync_org(tenant_id=config.get("org_sync_tenant_id"))
-            self.__class__._last_scheduled_sync_at = now
+            # Only update last_scheduled_sync_at on complete success
+            if result and result.status == SyncStatus.SUCCESS:
+                self.__class__._last_scheduled_sync_at = now
             return result
         finally:
             self._schedule_lock.release()
@@ -565,10 +614,18 @@ class DingTalkOrgSyncService:
         token: str,
         root_department_id: str,
         warnings: list[str] | None = None,
-    ) -> tuple[list[DingTalkDepartment], list[DingTalkUser]]:
-        """Recursively fetch departments and users starting from the configured root."""
+        errors: list[_FetchError] | None = None,
+    ) -> tuple[list[DingTalkDepartment], list[DingTalkUser], bool]:
+        """Recursively fetch departments and users starting from the configured root.
+
+        Returns a ``(departments, users, snapshot_complete)`` tuple.
+        ``snapshot_complete`` is False when any department's user page fetch
+        failed, meaning the user set may be incomplete. Callers must check this
+        flag before running destructive reconciliation (departed-user cleanup).
+        """
         departments: dict[str, DingTalkDepartment] = {}
         users: dict[str, DingTalkUser] = {}
+        snapshot_complete = True
 
         queue: deque[str] = deque([root_department_id])
         visited: set[str] = set()
@@ -579,15 +636,39 @@ class DingTalkOrgSyncService:
                 continue
             visited.add(current_department_id)
 
-            child_departments = self._fetch_child_departments(token, current_department_id)
+            is_root = current_department_id == root_department_id
+            try:
+                child_departments = self._fetch_child_departments(token, current_department_id)
+            except Exception as exc:
+                msg = f"Skipped DingTalk department {current_department_id} children: {exc}"
+                logger.warning(msg)
+                if warnings is not None:
+                    warnings.append(msg)
+                if errors is not None:
+                    errors.append(
+                        _FetchError(
+                            department_id=current_department_id,
+                            error_type="api_error",
+                            message=msg,
+                            is_critical=is_root,
+                        )
+                    )
+                snapshot_complete = False
+                continue
             for department in child_departments:
                 if department.department_id not in departments:
                     departments[department.department_id] = department
                     queue.append(department.department_id)
 
-            direct_users = self._fetch_department_users(
-                token, current_department_id, warnings=warnings
+            direct_users, dept_complete = self._fetch_department_users(
+                token,
+                current_department_id,
+                warnings=warnings,
+                errors=errors,
+                is_root_department=is_root,
             )
+            if not dept_complete:
+                snapshot_complete = False
             for user in direct_users:
                 existing = users.get(user.user_id)
                 if existing is None:
@@ -613,7 +694,7 @@ class DingTalkOrgSyncService:
             ),
         )
         sorted_users = sorted(users.values(), key=lambda u: (u.name.lower(), u.user_id))
-        return sorted_departments, sorted_users
+        return sorted_departments, sorted_users, snapshot_complete
 
     def _fetch_child_departments(self, token: str, department_id: str) -> list[DingTalkDepartment]:
         """Fetch immediate child departments for a DingTalk department."""
@@ -651,7 +732,9 @@ class DingTalkOrgSyncService:
         token: str,
         department_id: str,
         warnings: list[str] | None = None,
-    ) -> list[DingTalkUser]:
+        errors: list[_FetchError] | None = None,
+        is_root_department: bool = False,
+    ) -> tuple[list[DingTalkUser], bool]:
         """Fetch users directly under a DingTalk department.
 
         Uses the batched ``topapi/v2/user/list`` endpoint (one call per page of up
@@ -660,15 +743,27 @@ class DingTalkOrgSyncService:
         follow-up per-user call is needed. Page-level transient errors (rate-limit
         ``errcode -1``) are retried with bounded backoff; a non-transient error on
         a page warns and stops paging that department without aborting the run.
+
+        Returns a ``(users, complete)`` tuple. ``complete`` is False when any page
+        fetch failed (partial results may be present); callers can use this to
+        decide whether destructive reconciliation is safe.
         """
         users: list[DingTalkUser] = []
         cursor = 0
         while True:
-            data = self._fetch_user_page(token, department_id, cursor, warnings=warnings)
+            data = self._fetch_user_page(
+                token,
+                department_id,
+                cursor,
+                warnings=warnings,
+                errors=errors,
+                is_root_department=is_root_department,
+            )
             if data is None:
                 # Page failed (non-transient errcode or retries exhausted): keep
                 # whatever users were already collected and stop paging this dept.
-                return users
+                # Signal incompleteness so the caller can skip destructive cleanup.
+                return users, False
             result = data.get("result") if isinstance(data.get("result"), dict) else data
             if not isinstance(result, dict):
                 result = {}
@@ -686,7 +781,7 @@ class DingTalkOrgSyncService:
             if next_cursor is None:
                 break
             cursor = int(next_cursor)
-        return users
+        return users, True
 
     def _fetch_user_page(
         self,
@@ -694,6 +789,8 @@ class DingTalkOrgSyncService:
         department_id: str,
         cursor: int,
         warnings: list[str] | None = None,
+        errors: list[_FetchError] | None = None,
+        is_root_department: bool = False,
     ) -> dict[str, Any] | None:
         """Fetch one page of department users.
 
@@ -721,11 +818,20 @@ class DingTalkOrgSyncService:
                     _TRANSIENT_SLEEP(_TRANSIENT_BACKOFF_BASE * (2**attempt))
                     continue
                 break
-            except Exception as exc:  # network / JSON parse / transport error
+            except Exception as exc:
                 msg = f"Skipped DingTalk department {department_id} users: {exc}"
                 logger.warning(msg)
                 if warnings is not None:
                     warnings.append(msg)
+                if errors is not None:
+                    errors.append(
+                        _FetchError(
+                            department_id=department_id,
+                            error_type="transport_error",
+                            message=msg,
+                            is_critical=is_root_department,
+                        )
+                    )
                 return None
         # Non-transient errcode or transient retries exhausted.
         msg = (
@@ -736,6 +842,20 @@ class DingTalkOrgSyncService:
         logger.warning(msg)
         if warnings is not None:
             warnings.append(msg)
+        if errors is not None:
+            error_type = "api_error"
+            if last_err and last_err.errcode in {60021, 50006}:
+                error_type = "permission_denied"
+            elif attempt >= _TRANSIENT_MAX_RETRIES:
+                error_type = "retries_exhausted"
+            errors.append(
+                _FetchError(
+                    department_id=department_id,
+                    error_type=error_type,
+                    message=msg,
+                    is_critical=is_root_department,
+                )
+            )
         return None
 
     def _user_from_detail(
@@ -1211,6 +1331,7 @@ class DingTalkOrgSyncService:
         tenant_id: int,
         seen_provider_user_ids: set[str],
         result: DingTalkOrgSyncResult,
+        snapshot_complete: bool = True,
     ) -> None:
         """Deactivate and unlink DingTalk-synced users absent from the current snapshot.
 
@@ -1224,7 +1345,21 @@ class DingTalkOrgSyncService:
         whose linked local user belongs to this tenant) are eligible. Without this
         filter a multi-tenant deployment would let tenant A's sync deactivate tenant
         B's DingTalk identities.
+
+        Issue #3020: If the snapshot is incomplete (API failures during directory
+        fetch) or empty (no users seen at all), the cleanup is skipped entirely to
+        prevent mass deactivation of valid synced users. This matches the Feishu
+        implementation's ``if not seen_provider_user_ids: return`` guard.
         """
+        if not snapshot_complete:
+            # Incomplete snapshot: some department user fetches failed. We cannot
+            # trust the seen set, so skip destructive cleanup to avoid false
+            # deactivations.
+            return
+        if not seen_provider_user_ids:
+            # Nothing was seen this run; do not mass-deactivate on an empty
+            # snapshot (likely an API outage) to avoid a destructive blunder.
+            return
         rows = self.db.fetch_all(
             """
             SELECT user_id, provider_user_id, provider_data

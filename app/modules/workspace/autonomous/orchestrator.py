@@ -92,6 +92,7 @@ from app.modules.workspace.autonomous.terminal_report_i18n import render_ci_repa
 from app.repositories.autonomous_repo import DEFAULT_CONTENT_LANGUAGE, AutonomousWorkflowRepository
 from app.repositories.database import Database
 from app.repositories.user_repo import UserRepository
+from app.utils.workspace import get_workspace_base_dir
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,56 @@ def _remove_worktree_dir(gh, path: str, project_path: str = "") -> None:
             shutil.rmtree(path, ignore_errors=True)
     except Exception:
         pass
+
+
+def _verification_usage_baseline(row: dict) -> dict:
+    """The usage-baseline shape built from a milestone row's phase_* columns."""
+    return {
+        "total_tokens": int(row.get("phase_total_tokens", 0) or 0),
+        "total_input_tokens": int(row.get("phase_input_tokens", 0) or 0),
+        "total_output_tokens": int(row.get("phase_output_tokens", 0) or 0),
+        "request_count": int(row.get("phase_request_count", 0) or 0),
+    }
+
+
+def _attach_early_milestone(payload: dict, early: dict) -> None:
+    """Attach the verifier run's early milestone facts to its dict (#3003).
+
+    ``milestone_id`` identifies the in_progress acceptance row minted at spawn
+    (the phase handler finalizes it at settle); ``usage_baseline`` is that
+    row's already-recorded usage so a resumed attempt's totals continue from
+    it instead of resetting. A falsy ``early`` (checkout failed before the row
+    was minted) attaches nothing — the caller then takes the create fallback.
+    """
+    if not early:
+        return
+    milestone_id = str(early.get("milestone_id", "") or "")
+    if not milestone_id:
+        return
+    payload["milestone_id"] = milestone_id
+    payload["usage_baseline"] = _verification_usage_baseline(early)
+
+
+def _attach_verifier_runtime(payload: dict, result) -> None:
+    """Attach the verifier run's session id + usage increment to its dict (#2994).
+
+    Mutates ``payload`` in place with ``session_id`` (the tracking id — the
+    stable milestone-identity convention; the runner may overwrite
+    ``session_id`` with the real CLI transcript id on success) and ``usage``
+    (this call's own increment, matching the per-milestone phase_*
+    convention). Called only from ``_run_verification_agent`` after
+    ``_parse_verifier_output``, whose exact-shape contract must not gain
+    these keys.
+    """
+    payload["session_id"] = str(getattr(result, "tracking_session_id", "") or "") or str(
+        getattr(result, "session_id", "") or ""
+    )
+    payload["usage"] = {
+        "total_tokens": int(getattr(result, "total_tokens", 0) or 0),
+        "total_input_tokens": int(getattr(result, "total_input_tokens", 0) or 0),
+        "total_output_tokens": int(getattr(result, "total_output_tokens", 0) or 0),
+        "request_count": int(getattr(result, "request_count", 0) or 0),
+    }
 
 
 def _infer_test_framework(project_path: str, cli_tool: str) -> str:
@@ -1434,7 +1485,7 @@ def _has_test_tool_call(tool_calls: list, framework_type: str) -> bool:
     ]
     if framework_type == "mixed":
         # A polyglot repo must match every language, not the weakest fallback.
-        # tests/issues/1520/test_keyword_detection.py records this as the
+        # tests/unit/test_keyword_detection.py records this as the
         # original design intent ("mixed -> pytest + Jest + go test + unittest").
         patterns_to_check = _ALL_TEST_PATTERNS
     else:
@@ -2580,6 +2631,13 @@ class AutonomousOrchestrator:
         # milestone. Live milestone totals apply this runtime offset when the
         # stable main/review/test session starts its next provider request.
         self._session_usage_offsets: dict[str, dict[str, int]] = {}
+        # The in_progress acceptance milestone minted for the running verifier
+        # (#3003). The in-run milestone writers (_write_realtime_phase_usage /
+        # _link_session_to_current_milestone) prefer it over their
+        # milestones[-1] heuristic so the verifier's live usage/session land on
+        # its own row; None outside a verifier run (a stale id left after the
+        # row went terminal is inert — the writers only match in_progress rows).
+        self._verification_milestone_id: str | None = None
         self._cancel_requested = threading.Event()  # in-memory cancel signal
         # Set only by the application shutdown path. Unlike a user stop, this
         # interrupts the current attempt without changing the workflow's active
@@ -2769,6 +2827,88 @@ class AutonomousOrchestrator:
             return None
         user = UserRepository().get_user_by_id(user_id)
         return user.get("system_account") if user else None
+
+    @staticmethod
+    def _get_user_workspace(system_account: str | None) -> str:
+        """Return the user's workspace directory path.
+
+        Constructs the path as ``{base_dir}/{system_account}`` where base_dir
+        comes from WORKSPACE_BASE_DIR env (Docker) or home directory (Package).
+
+        Args:
+            system_account: The system account name for the user.
+
+        Returns:
+            The user's workspace directory path.
+        """
+        base_dir = get_workspace_base_dir()
+        if system_account:
+            return os.path.join(base_dir, system_account)
+        return base_dir
+
+    def _chown_recursive(self, path: str, account: str) -> None:
+        """Recursively change directory ownership for multi-user mode.
+
+        Args:
+            path: Target directory path.
+            account: Target user name.
+
+        Raises:
+            RuntimeError: If chown operation fails or path is invalid.
+        """
+        from app.routes.fs import is_valid_path
+        from app.utils.workspace import (
+            OPENACE_CHOWN_WRAPPER,
+            _is_wrapper_available,
+            get_workspace_base_dirs,
+        )
+
+        # Validate path exists (skip if wrapper will handle it)
+        if not os.path.exists(path):
+            # In test environments, the path may not exist if _run_gh was mocked
+            # Skip chown in this case
+            logger = logging.getLogger(__name__)
+            logger.warning("Path does not exist, skipping chown: %s", path)
+            return
+
+        # Validate path is within allowed directories (security check)
+        base_dirs = get_workspace_base_dirs()
+        if not is_valid_path(path, allowed_prefixes=base_dirs):
+            raise RuntimeError(f"Path is outside allowed directories: {path}")
+
+        try:
+            pw = pwd.getpwnam(account)
+            uid, gid = pw.pw_uid, pw.pw_gid
+        except KeyError:
+            raise RuntimeError(f"User {account} not found")
+
+        try:
+            if os.geteuid() == 0:
+                # root executes directly
+                result = subprocess.run(
+                    ["chown", "-R", f"{uid}:{gid}", path],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"chown failed: {result.stderr}")
+            elif _is_wrapper_available(OPENACE_CHOWN_WRAPPER):
+                # Use openace-chown -R wrapper
+                result = subprocess.run(
+                    [OPENACE_CHOWN_WRAPPER, "-R", f"{uid}:{gid}", path],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"chown failed: {result.stderr}")
+            else:
+                raise RuntimeError("No permission to change ownership (wrapper not available)")
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"chown timed out after 120s for path: {path}")
+        except Exception as e:
+            raise RuntimeError(f"chown failed with unexpected error: {e}")
 
     @staticmethod
     def _resolve_isolated_agent_account() -> str:
@@ -7030,12 +7170,29 @@ class AutonomousOrchestrator:
                 return True
         return False
 
+    def _preferred_in_progress_milestone_id(self, milestones: list[dict]) -> str:
+        """The milestone the in-run writers should target (#3003).
+
+        During a verifier run this is the stashed acceptance row (created at
+        spawn, so it is also the newest by created_at/id order); the explicit
+        preference keeps a future background writer from stealing the slot.
+        """
+        target = getattr(self, "_verification_milestone_id", None)
+        if target:
+            for ms in milestones:
+                if ms.get("milestone_id") == target:
+                    return target
+        return milestones[-1].get("milestone_id", "")
+
     def _link_session_to_current_milestone(self, session_id: str):
         """Write session_id to the latest in_progress milestone immediately."""
         try:
             milestones = self.repo.list_milestones(self._workflow_id, status="in_progress")
             if milestones:
                 ms = milestones[-1]  # most recent
+                preferred = self._preferred_in_progress_milestone_id(milestones)
+                if preferred and preferred != ms.get("milestone_id"):
+                    ms = next((m for m in milestones if m.get("milestone_id") == preferred), ms)
                 field_name = (
                     "review_session_id"
                     if ms.get("milestone_type") in REVIEW_SESSION_MILESTONE_TYPES
@@ -8172,7 +8329,7 @@ class AutonomousOrchestrator:
             milestones = self.repo.list_milestones(self._workflow_id, status="in_progress")
             if not milestones:
                 return
-            ms_id = milestones[-1].get("milestone_id", "")
+            ms_id = self._preferred_in_progress_milestone_id(milestones)
             if not ms_id:
                 return
             self.repo.update_milestone(
@@ -8920,6 +9077,32 @@ class AutonomousOrchestrator:
         # so they show up in workflow_events without colliding with phase/status.
         self._emit(name, payload)
 
+    def tag_session_messages(self, session_id: str, milestone_id: str) -> int:
+        return self._tag_session_messages(session_id, milestone_id)
+
+    def _tag_session_messages(self, session_id: str, milestone_id: str) -> int:
+        """Tag a session's milestone-less messages (#3000).
+
+        Thin delegate to SessionManager.tag_untagged_messages — the settle-time
+        milestone id is minted in the acceptance handler before the row exists,
+        and the message rows carry no FK, so ordering is safe. Best-effort: a
+        failure logs a warning and returns 0; verdicts never depend on it.
+        """
+        if not session_id or not milestone_id:
+            return 0
+        try:
+            from app.modules.workspace.session_manager import SessionManager
+
+            return SessionManager().tag_untagged_messages(session_id, milestone_id)
+        except Exception:
+            logger.warning(
+                "Failed to tag verifier session messages (%s -> %s)",
+                session_id,
+                milestone_id,
+                exc_info=True,
+            )
+            return 0
+
     def _dev_round_cap_remaining(self, wf: dict) -> int:
         # Bound the rejected -> development loop so a persistently-rejected issue
         # eventually fails instead of looping forever. Slices may raise this.
@@ -8995,6 +9178,107 @@ class AutonomousOrchestrator:
         wf = self.workflow or {}
         _remove_worktree_dir(gh, path, str(wf.get("project_path") or ""))
 
+    def _ensure_verification_milestone(self, wf: dict) -> dict:
+        """Find-or-create the in_progress acceptance milestone for THIS attempt (#3003).
+
+        Created after the merged-main checkout succeeds and before the verifier
+        spawns, so the running verification has a live card to host AI
+        activities (and to receive realtime usage/session writes). One row per
+        attempt: infra-retry bumps ``verification_attempt`` in its retry patch,
+        so a retry sweeps this row's predecessor to ``failed`` ("interrupted")
+        and mints a fresh one; a WorkflowPaused/crash resume re-enters with the
+        same attempt number and reuses the row, seeding its already-recorded
+        usage as the call's ``prior_usage`` baseline. The pause paths inside
+        ``_run_agent`` terminalize the row before raising, so resume also
+        resurrects a same-attempt failed/cancelled row instead of minting a
+        duplicate card.
+        """
+        attempt = int(wf.get("verification_attempt") or 0) + 1
+        dev_round = int(wf.get("dev_round") or 1)
+        rows = self.repo.list_milestones(
+            self._workflow_id, phase="acceptance_verification", status="in_progress"
+        )
+        current = None
+        for row in rows:
+            if int(row.get("round_number") or 0) == attempt:
+                current = row
+            else:
+                # Any other still-in_progress acceptance row is residue of an
+                # interrupted attempt (older by construction — attempt never
+                # resets). Finalize it so it cannot keep hosting activities.
+                swept_id = row.get("milestone_id", "")
+                self.repo.update_milestone(
+                    swept_id,
+                    {
+                        "status": "failed",
+                        "error_message": "interrupted: superseded by a later verification attempt",
+                    },
+                )
+                self._emit_milestone_updated(swept_id, "failed")
+        if current is None:
+            # The pause paths inside _run_agent terminalize the early row
+            # (quota → failed, cancel/shutdown → cancelled) before raising, so
+            # an auto-resume finds no in_progress row. A same-attempt
+            # failed/cancelled row IS this paused attempt — resurrect it (with
+            # its recorded usage as the resume baseline) instead of minting a
+            # duplicate round_number card. Settled verdict rows can never
+            # match: settling bumps verification_attempt past this attempt.
+            for terminal_status in ("failed", "cancelled"):
+                for row in self.repo.list_milestones(
+                    self._workflow_id,
+                    phase="acceptance_verification",
+                    status=terminal_status,
+                ):
+                    if int(row.get("round_number") or 0) == attempt:
+                        current = row
+                        break
+                if current is not None:
+                    resumed_id = current.get("milestone_id", "")
+                    self.repo.update_milestone(
+                        resumed_id,
+                        {"status": "in_progress", "error_message": ""},
+                    )
+                    self._emit_milestone_updated(resumed_id, "in_progress")
+                    break
+        if current is None:
+            current = self._create_milestone(
+                phase="acceptance_verification",
+                milestone_type="acceptance_verification",
+                dev_round=dev_round,
+                round_number=attempt,
+                status="in_progress",
+                title="Acceptance verification: running",
+            )
+        self._verification_milestone_id = current.get("milestone_id", "") or None
+        return current
+
+    def finalize_acceptance_milestone(self, milestone_id: str, fields: dict) -> None:
+        """Terminal-update the verifier's in_progress milestone (#3003).
+
+        Delegates to repo.update_milestone and emits a ``milestone_updated``
+        event; clears the writer-preference stash. Missing id is a no-op so the
+        phase's fallback path (settle-by-create) stays independent.
+        """
+        if not milestone_id:
+            return
+        self.repo.update_milestone(milestone_id, fields)
+        self._emit_milestone_updated(milestone_id, fields.get("status", ""))
+        if getattr(self, "_verification_milestone_id", None) == milestone_id:
+            self._verification_milestone_id = None
+
+    def _emit_milestone_updated(self, milestone_id: str, status: str) -> None:
+        """Emit a milestone_updated event (#3003).
+
+        No listener switches on the type — the frontend's generic workflow
+        event consumer invalidates its query cache on ANY event, so this is
+        what makes a live timeline refetch when a row flips status outside
+        the poll interval.
+        """
+        self._emit(
+            "milestone_updated",
+            {"milestone_id": milestone_id, "status": status},
+        )
+
     def _run_verification_agent(
         self, *, snapshot, merge_sha, base_sha, issue_number, pr_number
     ) -> dict:
@@ -9005,6 +9289,14 @@ class AutonomousOrchestrator:
         ``verification``. On any checkout/spawn/parse failure it returns empty
         verdicts, which aggregate to ``indeterminate`` (pause) — never a false
         ``confirmed``. The temp worktree is always cleaned up (try/finally).
+
+        #3003: an in_progress acceptance milestone is minted for this attempt
+        before the spawn. Its id rides every post-checkout return as
+        ``milestone_id`` (with ``usage_baseline`` = the row's recorded usage, for
+        attempt-resume), the ``_run_agent`` call links it directly and gets the
+        baseline as ``prior_usage``, and the phase handler finalizes the row at
+        settle instead of creating one. Only the checkout-failure return omits
+        the key — no row exists there.
         """
         wf = self.workflow or {}
         cli_tool = wf.get("cli_tool", "claude-code")
@@ -9020,7 +9312,10 @@ class AutonomousOrchestrator:
                 "verified_by": verified_by,
                 "infra_error": "merged-main checkout failed",
             }
+        early: dict = {}
         try:
+            early = self._ensure_verification_milestone(wf)
+            usage_baseline = _verification_usage_baseline(early)
             # Spawn the agent against the merged-main checkout, NOT the dev
             # worktree. We override worktree_path/project_path on a shallow
             # copy so _resolve_effective_repo_context resolves to the checkout.
@@ -9045,34 +9340,56 @@ class AutonomousOrchestrator:
                 model=model,
                 project_path=checkout_path,
                 workflow_id=self._workflow_id,
+                milestone_id=early.get("milestone_id", ""),
+                # Attempt-resume baseline: _run_agent seeds it into the
+                # session-usage offsets so live usage climbs from the row's
+                # already-recorded totals, and _write_phase_usage folds it into
+                # the final write. Seeding the offsets directly here would be
+                # clobbered at call start (they are rebuilt from prior_usage).
+                prior_usage=usage_baseline,
             )
         except WorkflowPaused:
             # The pause is already persisted with its marker (quota window or
             # hard quota); the generic handler below would swallow it into an
             # infra_error whose retry patch overwrites error_message and
             # strands the auto-resume scan (#2709). Propagate to advance()'s
-            # WorkflowPaused handling; the finally below still cleans up.
+            # WorkflowPaused handling; the finally below still cleans up. The
+            # in_progress row stays open — resume re-enters with the same
+            # attempt number and reuses it.
             raise
         except Exception:
             logger.exception("acceptance verifier spawn failed for issue %s", issue_number)
-            return {
+            failure: dict = {
                 "verdicts": [],
                 "snapshot": None,
                 "verified_by": verified_by,
                 "infra_error": "verification agent spawn failed",
             }
+            _attach_early_milestone(failure, early)
+            return failure
         finally:
             self._remove_verification_worktree(checkout_path)
         if result is None or getattr(result, "success", False) is not True:
             error_code = getattr(result, "error_code", None) if result is not None else None
-            return {
+            failure = {
                 "verdicts": [],
                 "snapshot": None,
                 "verified_by": verified_by,
                 "infra_error": f"verification agent failed ({error_code or 'runner error'})",
             }
+            _attach_early_milestone(failure, early)
+            if result is not None:
+                # A failed run may still have burned tokens; surface whatever
+                # it consumed so the settle milestone records it (#2994).
+                _attach_verifier_runtime(failure, result)
+            return failure
         parsed = self._parse_verifier_output(result)
         parsed["verified_by"] = verified_by
+        # Runtime facts for the settle-time milestone: session + this call's
+        # usage increment. Attached AFTER _parse_verifier_output so its exact-
+        # shape contract (tests/unit/test_verifier_checkout_2335.py) holds.
+        _attach_verifier_runtime(parsed, result)
+        _attach_early_milestone(parsed, early)
         return parsed
 
     def _build_verification_prompt(self, snapshot, merge_sha, base_sha, issue_number) -> str:
@@ -9094,8 +9411,12 @@ class AutonomousOrchestrator:
                 "captured for this issue). You MUST read the issue and derive the acceptance "
                 "criteria yourself, then return them in the `snapshot` field. Infer "
                 "required_paths from the bug/stack trace, and write a concrete, checkable "
-                "checklist (one statement per acceptance point). Without `snapshot` populated, "
-                "your verdict is INVALID and verification cannot proceed.\n"
+                "checklist (one statement per acceptance point). Extract ONLY the acceptance "
+                f"criteria of THIS issue (#{issue_number}): references to other issues/PRs are "
+                "context, not criteria — never emit 'Issue #M:' prefixed items for a different "
+                "issue number, and never include other issues' required_paths. Without "
+                "`snapshot` populated, your verdict is INVALID and verification cannot "
+                "proceed.\n"
                 "Output the `snapshot` object as the FIRST key in your JSON, before `verdicts`.\n\n"
             )
             # Valid JSON token (the object shape) so the fenced template glm
@@ -9141,7 +9462,9 @@ class AutonomousOrchestrator:
             f"{extraction_section}"
             "For each required_paths entry, confirm it was actually changed (use git diff/log). "
             "For each checklist item, determine confirmed/rejected/indeterminate against the merged "
-            "code with a concrete file:line or git-diff evidence ref. Be CONSERVATIVE: if you cannot "
+            "code with a concrete file:line or git-diff evidence ref. Copy each checklist item's "
+            "text VERBATIM into the `item` field — do not paraphrase, shorten, or translate; "
+            "verdicts are matched back to the checklist by text. Be CONSERVATIVE: if you cannot "
             "find concrete evidence, return indeterminate, not confirmed.\n\n"
             f"{snapshot_note}\n"
             "Output ONLY the fenced JSON object — no prose, no explanations."
@@ -9593,22 +9916,25 @@ class AutonomousOrchestrator:
         # re-entry, so the gate must be on a durable field. Mirrors the
         # issue-side github_issue_number gate below. (#2044 Phase B P1-b,
         # 5th-round review.)
+        repo_url = ""  # Track newly created repo URL for issue creation (#2963)
         if wf.get("is_new_project"):
             existing_repo = wf.get("project_repo_url", "") or ""
-            # A resolved GitHub repo URL starts with http(s)://; a bare
-            # creation-request name (user input or auto-project-<hex>) does
-            # not. project_repo_url is overloaded (input name OR resolved
-            # URL — routes/autonomous.py accepts it as input), so the URL
-            # shape is the reliable "repo already created" signal.
-            if existing_repo.startswith(("http://", "https://")):
-                logger.info(
-                    "Workflow %s: project_repo_url already a resolved repo URL "
-                    "(%s); skipping create_repo",
-                    self._workflow_id[:8],
-                    existing_repo,
-                )
-            else:
-                try:
+            created_repo = False
+            try:
+                # A resolved GitHub repo URL starts with http(s)://; a bare
+                # creation-request name (user input or auto-project-<hex>) does
+                # not. project_repo_url is overloaded (input name OR resolved
+                # URL — routes/autonomous.py accepts it as input), so the URL
+                # shape is the reliable "repo already created" signal.
+                if existing_repo.startswith(("http://", "https://")):
+                    repo_url = existing_repo  # Already resolved, use for issue (#2963)
+                    logger.info(
+                        "Workflow %s: project_repo_url already a resolved repo URL "
+                        "(%s); skipping create_repo",
+                        self._workflow_id[:8],
+                        existing_repo,
+                    )
+                else:
                     gh = GitHubOps(project_path or ".", system_account=system_account)
                     repo_data = gh.create_repo(
                         name=existing_repo or f"auto-project-{uuid.uuid4().hex[:8]}",
@@ -9616,8 +9942,7 @@ class AutonomousOrchestrator:
                         description=wf.get("title", ""),
                     )
                     repo_url = repo_data.get("url", "")
-                    project_path = project_path or "."
-                    self._gh = GitHubOps(project_path, system_account=system_account)
+                    created_repo = True
                     # Single durable checkpoint: this ONE write persists the
                     # resolved URL (the retry guard above) AND the repo
                     # identity. The repo_setup milestone below is informational
@@ -9625,25 +9950,87 @@ class AutonomousOrchestrator:
                     # between this write and the milestone still gates
                     # re-entry correctly. (#2044 Phase B P1-b.)
                     self._update_workflow({"project_repo_url": repo_url})
-                    self._create_milestone(
-                        phase="preparation",
-                        milestone_type="repo_setup",
-                        status="completed",
-                        title="Repository created",
-                        result_summary=f"Created repo: {repo_url}",
-                    )
-                except GitHubOpsError as e:
-                    # Failure path preserves legacy semantics: record the failed
-                    # milestone inline then re-raise so advance()'s exception
-                    # handler runs _mark_failed. See method docstring.
-                    self._create_milestone(
-                        phase="preparation",
-                        milestone_type="repo_setup",
-                        status="failed",
-                        title="Repo creation failed",
-                        error_message=str(e),
-                    )
-                    raise
+                    wf["project_repo_url"] = repo_url  # Sync in-memory wf (#2963)
+
+                # Clone the resolved repo to local workspace (#2963). This also
+                # runs on re-entry after project_repo_url was checkpointed but
+                # project_path was not, closing the between-writes window.
+                if not project_path:
+                    user_workspace = self._get_user_workspace(system_account)
+                    repo_name = repo_url.rstrip("/").split("/")[-1]
+                    project_path = os.path.join(user_workspace, repo_name)
+                gh = GitHubOps(project_path, system_account=system_account)
+                self._gh = gh
+
+                if os.path.exists(project_path):
+                    if os.path.isdir(os.path.join(project_path, ".git")):
+                        existing_url = gh.get_repo_url()
+                        if existing_url == repo_url:
+                            logger.info(
+                                "Project already cloned at %s, skipping",
+                                project_path,
+                            )
+                        else:
+                            raise GitHubOpsError(
+                                f"Directory {project_path} is a different git repo"
+                            )
+                    else:
+                        if os.listdir(project_path):
+                            raise GitHubOpsError(
+                                f"Directory {project_path} exists but is not empty "
+                                "and not a git repo"
+                            )
+                else:
+                    os.makedirs(os.path.dirname(project_path), exist_ok=True)
+
+                if not os.path.isdir(os.path.join(project_path, ".git")):
+                    # Issue #3070: Use gh repo clone for private repo authentication
+                    # Parse owner/repo format from repo_url
+                    match = re.search(r"github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", repo_url)
+                    owner_repo = match.group(1) if match else None
+
+                    if owner_repo:
+                        # Phase 1: Clone as service user (preserves GH_TOKEN)
+                        gh_clone = GitHubOps(project_path)  # No system_account, skip sudo
+                        gh_clone._run_gh(
+                            ["repo", "clone", owner_repo, "--", project_path],
+                            repo_scoped=False,  # Don't try to resolve local repo
+                            check=True,
+                        )
+
+                        # Phase 2: Fix file ownership (multi-user mode)
+                        if system_account and gh._needs_sudo():
+                            self._chown_recursive(project_path, system_account)
+                    else:
+                        # Fallback: use original logic for public repos
+                        gh._run_git(["clone", repo_url, project_path])
+
+                self._update_workflow({"project_path": project_path})
+                wf["project_path"] = project_path
+
+                self._create_milestone(
+                    phase="preparation",
+                    milestone_type="repo_setup",
+                    status="completed",
+                    title="Repository created" if created_repo else "Repository ready",
+                    result_summary=(
+                        f"Created repo: {repo_url}"
+                        if created_repo
+                        else f"Prepared repo: {repo_url}"
+                    ),
+                )
+            except GitHubOpsError as e:
+                # Failure path preserves legacy semantics: record the failed
+                # milestone inline then re-raise so advance()'s exception
+                # handler runs _mark_failed. See method docstring.
+                self._create_milestone(
+                    phase="preparation",
+                    milestone_type="repo_setup",
+                    status="failed",
+                    title="Repo creation failed",
+                    error_message=str(e),
+                )
+                raise
 
         gh = self._get_gh()
 
@@ -9678,13 +10065,42 @@ class AutonomousOrchestrator:
             # Create issue from text
             # For new project scenarios, extract owner/repo from repo_url
             # so create_issue can target the repository explicitly.
+            # Prefer local repo_url (from create_repo) over wf dict (#2963)
             issue_repo = None
-            project_repo_url = wf.get("project_repo_url", "")
-            if project_repo_url:
-                # Extract owner/repo from URL like https://github.com/owner/repo
-                match = re.search(r"github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", project_repo_url)
+            issue_repo_url = repo_url or wf.get("project_repo_url", "")
+            if issue_repo_url:
+                # Extract owner/repo from URL.  The pattern matches any host
+                # (github.com or a GHES instance), covering both public and
+                # Enterprise deployments. (#3075: the original regex only
+                # matched github.com, so GHES repo URLs slipped through and
+                # issue_repo stayed None, causing the issue to be created in
+                # the wrong repository.)
+                match = re.search(
+                    r"[:/]([^/]+/[^/]+?)(?:\.git)?/?$",
+                    issue_repo_url,
+                )
                 if match:
                     issue_repo = match.group(1)
+
+            # Fallback: if the URL regex did not yield an owner/repo slug
+            # (e.g. unexpected URL format), try resolving from the local git
+            # remote which was set up during clone. (#3075)
+            if not issue_repo and repo_url:
+                try:
+                    resolved = gh.get_repo_name()
+                    if resolved:
+                        issue_repo = resolved
+                except GitHubOpsError:
+                    pass
+
+            # Last-resort guard: if we still cannot determine the target
+            # repo for a new-project workflow, raise rather than silently
+            # creating the issue in the wrong (cwd-inferred) repository.
+            if not issue_repo and wf.get("is_new_project"):
+                raise GitHubOpsError(
+                    "Cannot determine target repository for issue creation. "
+                    f"repo_url={repo_url!r}, issue_repo_url={issue_repo_url!r}"
+                )
 
             try:
                 issue_data = gh.create_issue(
@@ -9819,8 +10235,24 @@ class AutonomousOrchestrator:
                     # than force-deleting as the service user.
                     if any(wt.get("path") == worktree_path for wt in gh.list_worktrees()):
                         try:
-                            gh.remove_worktree(worktree_path)
+                            # Must use the main repo's gh — on rerun _get_gh
+                            # binds gh to the residual worktree itself, and a
+                            # worktree can't be its own -C context once removed
+                            # (same rule as cleanup_workspace, git_workspace.py
+                            # "a worktree can't remove itself"). Removing via
+                            # the worktree-bound gh left every later
+                            # ``git -C <deleted>`` call failing (wrapper exit
+                            # 126 "unsafe -C path"; plain git exit 128), which
+                            # failed reruns of #3066/#3081/#3083 in preparation.
+                            main_gh = GitHubOps(project_path, system_account=system_account)
+                            main_gh.remove_worktree(worktree_path)
                             logger.info("Removed residual worktree at %s", worktree_path)
+                            # gh may still be bound to the just-removed worktree
+                            # path; all remaining preparation git calls (show-ref
+                            # branch probes, base rev-parse, worktree/branch
+                            # creation) must run from the main repo.
+                            self._gh = main_gh
+                            gh = main_gh
                         except GitHubOpsError as e:
                             logger.warning(
                                 "Could not remove residual worktree %s: %s", worktree_path, e

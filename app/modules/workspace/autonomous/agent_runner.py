@@ -898,7 +898,7 @@ class AutonomousAgentRunner:
             models_used = [result.model] if hasattr(result, "model") and result.model else None
 
             # Call increment_usage (atomic UPSERT)
-            repo.increment_usage(
+            increment_ok = repo.increment_usage(
                 tool_name=tool_name,
                 host_name=host_name,
                 tenant_id=tenant_id,
@@ -909,6 +909,15 @@ class AutonomousAgentRunner:
                 request_count=result.request_count or 0,
                 models_used=models_used,
             )
+
+            if not increment_ok:
+                # Keep daily_usage_synced unset so subsequent activity can
+                # still be recorded; this round's usage is not retried.
+                logger.warning(
+                    "increment_usage failed for session=%s; leaving daily_usage_synced unset",
+                    session_id[:8],
+                )
+                return
 
             # Set sync flag to mark as synced (idempotency)
             if self.session_manager:

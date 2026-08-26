@@ -114,3 +114,28 @@ def test_extraction_prompt_puts_snapshot_first_in_template():
         '"verdicts"'
     ), "extraction-case template must list `snapshot` before `verdicts`"
     assert "FIRST" in prompt or "first" in prompt
+
+
+# --- #2982: verbatim echo + issue-scoped extraction ---------------------------
+# glm-5 returned shortened/paraphrased checklist text ("定义机器状态常量" for
+# "定义机器状态常量（_STATUS_ONLINE, …）"); text-based coverage matching then
+# failed and fully-confirmed deliveries went indeterminate. And for issue
+# #2841 the extractor bundled SIBLING issues' paths ("Issue #2953:"/"Issue
+# #2883:" items). The prompt must demand verbatim echo and this-issue-only
+# extraction.
+
+
+def test_prompt_demands_verbatim_checklist_echo():
+    prompt = _prompt(
+        AcceptanceSnapshot(required_paths=["app/x.py"], checklist=["done"], source="convention")
+    )
+    assert "VERBATIM" in prompt
+    assert "do not paraphrase, shorten, or translate" in prompt
+
+
+def test_extraction_prompt_scopes_to_this_issue():
+    snap = AcceptanceSnapshot()  # empty → extraction required
+    prompt = _prompt(snap)  # _prompt uses issue 2394
+    assert "ONLY the acceptance" in prompt
+    assert "#2394" in prompt
+    assert "never emit 'Issue #M:'" in prompt

@@ -759,6 +759,32 @@ CONF_EOF
     return 0
 }
 
+install_git_gh_wrappers() {
+    local script_dir
+    script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    local source_dir
+    source_dir=$(cd "$script_dir/../../.." && pwd)
+    local config_src_dir="$source_dir/config/openace"
+
+    if [ ! -f "$source_dir/scripts/openace-git.py" ] || [ ! -f "$source_dir/scripts/openace-gh.py" ]; then
+        print_warning "未找到 openace git/gh wrappers（搜索 $source_dir/scripts），跳过安装"
+        return 1
+    fi
+    if [ ! -f "$config_src_dir/git-wrapper.json" ] || [ ! -f "$config_src_dir/gh-wrapper.json" ]; then
+        print_warning "未找到 openace git/gh wrapper 配置（搜索 $config_src_dir），跳过安装"
+        return 1
+    fi
+
+    install -o root -g root -m 0755 "$source_dir/scripts/openace-git.py" /usr/local/bin/openace-git || return 1
+    install -o root -g root -m 0755 "$source_dir/scripts/openace-gh.py" /usr/local/bin/openace-gh || return 1
+    install -d -o root -g root -m 0755 /etc/openace || return 1
+    install -o root -g root -m 0644 "$config_src_dir/git-wrapper.json" /etc/openace/git-wrapper.json || return 1
+    install -o root -g root -m 0644 "$config_src_dir/gh-wrapper.json" /etc/openace/gh-wrapper.json || return 1
+
+    print_success "已安装 openace git/gh wrappers 和配置"
+    return 0
+}
+
 # Configure sudoers for multi-user workspace mode
 configure_sudoers() {
     print_header "配置 Sudo 权限"
@@ -852,16 +878,26 @@ $RUN_USER ALL=(root) NOPASSWD: $wrapper_bin *"
 # Allows the service account to run qwen-code-webui as other users
 # 【安全加固 Issue #2181】删除高风险通配规则
 
+# git/gh cross-user operations are validated by root-owned wrappers (#2650).
+Cmnd_Alias GIT_SAFE = /usr/local/bin/openace-git *
+Cmnd_Alias GH_SAFE = /usr/local/bin/openace-gh *
+
+# 低风险工具（Issue #2181：移除 cat/chown/rm，改用 wrapper）
+Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/id *, /usr/bin/find *
+
+# 跨用户 mkdir：github_ops 创建 verifier worktree 时执行 sudo -u <account> mkdir ...
+Cmnd_Alias MKDIR_SAFE = /usr/bin/mkdir *, /bin/mkdir *
+
 # WebUI 启动规则：通过 openace-webui-launch wrapper 以任意用户运行
 # Issue #2298: wrapper 内联传递 LLM 配置环境变量，绕过 sudo env_keep 过滤。
 # Issue #2313: 允许环境变量参数（KEY=VAL）出现在 webui_path 之前。
 $RUN_USER ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path" *
 
-# 低风险工具（Issue #2181：移除 cat/chown/rm，改用 wrapper）
-$RUN_USER ALL=(root) NOPASSWD: /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/mkdir *, /usr/bin/id *, /usr/bin/find *
-
-# Git/gh commands for autonomous development (Issue #1395)
-$RUN_USER ALL=(root) NOPASSWD: /usr/bin/git *, /usr/bin/gh *, /usr/local/bin/git *, /usr/local/bin/gh *
+# 低风险工具和 autonomous git/gh wrappers
+$RUN_USER ALL=(ALL) NOPASSWD: OPENACE_UTILS
+$RUN_USER ALL=(ALL) NOPASSWD: GIT_SAFE
+$RUN_USER ALL=(ALL) NOPASSWD: GH_SAFE
+$RUN_USER ALL=(ALL) NOPASSWD: MKDIR_SAFE
 
 # 【Issue #2181】安全 wrapper 规则（替代原 cat/chown/useradd/rm 通配）
 ${security_wrapper_rules}
@@ -876,29 +912,38 @@ ${wrapper_rule}
 # env_keep 主要用于 WebUI 启动，移除敏感凭据
 # 【Issue #2298】OPENAI_API_KEY/OPENAI_BASE_URL 不通过 env_keep，
 # 改由 webui_manager 通过 sudo -u user /usr/bin/env KEY=val ... 内联传递
-Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR PATH\"
+# PATH 移除（Issue #2650）：secure_path 已覆盖命令查找，env_keep PATH 是死配置兼隐患
+Defaults env_keep += \"OPENACE_PROXY_TOKEN OPENACE_PROXY_URL OPENACE_MODEL OPENACE_LOG_DIR\"
 Defaults env_keep += \"GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL\"
 Defaults env_keep += \"SESSION_TIMEOUT_MS KEEPALIVE_INTERVAL_MS\"
+Defaults secure_path = /usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 "
 
     # Check if sudoers file already exists
     if [ -f "$sudoers_file" ]; then
         # 【修复 PR #1467 评论】旧逻辑只看 webui_path 命中就 return，导致已有部署
-        # 升级时不会补齐本 PR 新增的 git/gh / CLI / run-as wrapper 规则。改为校验
-        # 关键标记是否齐备：git 规则（Issue #1395 起所有版本都有），以及 wrapper
-        # 规则（仅在 wrapper 已安装时才要求）。任一缺失即重写。
+        # 升级时不会补齐本 PR 新增的 CLI / run-as wrapper 规则。改为校验关键
+        # 标记是否齐备。任一缺失即重写。
         local needs_update=false
-        if ! grep -qF '/usr/bin/git *' "$sudoers_file" 2>/dev/null; then
+        if ! grep -E '^Cmnd_Alias[[:space:]]+GIT_SAFE[[:space:]]*=[[:space:]]*/usr/local/bin/openace-git[[:space:]]+\*[[:space:]]*$' "$sudoers_file" 2>/dev/null || \
+           ! grep -E "^${RUN_USER} ALL=\(ALL\) NOPASSWD: GIT_SAFE([[:space:]]|$)" "$sudoers_file" 2>/dev/null; then
+            needs_update=true
+        fi
+        if ! grep -E '^Cmnd_Alias[[:space:]]+GH_SAFE[[:space:]]*=[[:space:]]*/usr/local/bin/openace-gh[[:space:]]+\*[[:space:]]*$' "$sudoers_file" 2>/dev/null || \
+           ! grep -E "^${RUN_USER} ALL=\(ALL\) NOPASSWD: GH_SAFE([[:space:]]|$)" "$sudoers_file" 2>/dev/null; then
             needs_update=true
         fi
         if [ -n "$wrapper_rule" ] && ! grep -qF 'openace-run-as --isolated *' "$sudoers_file" 2>/dev/null; then
+            needs_update=true
+        fi
+        if ! grep -q "secure_path.*usr/local/bin" "$sudoers_file" 2>/dev/null; then
             needs_update=true
         fi
         if [ "$needs_update" = false ]; then
             print_success "Sudoers 规则已是最新"
             return 0
         fi
-        print_info "更新现有 sudoers 文件（补齐 git/gh/CLI/wrapper 规则）..."
+        print_info "更新现有 sudoers 文件（补齐 git/gh wrappers/CLI/wrapper 规则）..."
     fi
 
     # Back up the existing sudoers file before overwriting so a visudo
@@ -2217,10 +2262,26 @@ build_docker_image() {
             # Build frontend
             print_info "构建前端..."
             cd "$source_dir/frontend"
-            if [ ! -d "node_modules" ]; then
-                print_info "安装前端依赖..."
-                npm install
-                if [ $? -ne 0 ]; then
+
+            # Install/sync frontend dependencies based on lockfile (Issue #3096)
+            # Use npm ci to ensure dependencies match package-lock.json exactly.
+            # Fallback: if npm ci fails (e.g. offline) and node_modules already
+            # exists, warn and continue; if node_modules is missing, abort.
+            if [ -f "package-lock.json" ]; then
+                print_info "同步前端依赖 (npm ci)..."
+                if npm ci; then
+                    :
+                else
+                    if [ -d "node_modules" ]; then
+                        print_warning "npm ci 失败，将使用现有 node_modules 继续构建"
+                    else
+                        print_error "前端依赖安装失败且 node_modules 不存在"
+                        return 1
+                    fi
+                fi
+            else
+                print_info "安装前端依赖 (npm install)..."
+                if ! npm install; then
                     print_error "前端依赖安装失败"
                     return 1
                 fi
@@ -2503,20 +2564,134 @@ show_upgrade_summary() {
 upgrade_deployment() {
     print_header "执行升级"
 
-    # Stop and remove old containers before upgrade
-    # This handles both current (open-ace) and legacy (open-ace-web) container names
-    # to avoid port conflicts during upgrade
-    print_info "清理旧容器..."
+    # ---------------------------------------------------------------
+    # Phase 1: Pre-check (no container changes, old service stays running)
+    # ---------------------------------------------------------------
+
+    # Get source directory from script location
+    # Script is at scripts/install-central/docker-method/install.sh
+    # Source dir is at root (3 levels up)
+    local script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    local SOURCE_DIR=$(cd "$script_dir/../../.." && pwd)
+
+    # Verify source directory
+    if [ ! -f "$SOURCE_DIR/Dockerfile" ] || [ ! -d "$SOURCE_DIR/frontend" ]; then
+        print_error "无法找到源码目录: $SOURCE_DIR"
+        print_info "请确保脚本位于源码目录的 scripts/install-central/docker-method/ 下"
+        return 1
+    fi
+
+    print_info "源码目录: $SOURCE_DIR"
+
+    # ---------------------------------------------------------------
+    # Phase 2: Build candidate (no container changes, old service stays running)
+    # ---------------------------------------------------------------
+
+    # Use a unique candidate tag so the running "latest" image is not
+    # overwritten until the candidate has been verified healthy.
+    local candidate_tag="open-ace:upgrade-candidate-$(date +%s)"
+    print_info "候选镜像标签: $candidate_tag"
+
+    # 2a. Build frontend in source directory
+    print_info "构建前端..."
+    cd "$SOURCE_DIR/frontend"
+    if [ -f "package.json" ]; then
+        # Check if npm is available
+        if ! command -v npm &>/dev/null; then
+            print_error "npm 未安装，无法构建前端"
+            print_info "旧服务未受影响，继续运行"
+            return 1
+        fi
+
+        # Install/sync dependencies based on lockfile (Issue #3096)
+        # Use npm ci to ensure dependencies match package-lock.json exactly.
+        # Fallback: if npm ci fails (e.g. offline) and node_modules already
+        # exists, warn and continue; if node_modules is missing, abort.
+        if [ -f "package-lock.json" ]; then
+            print_info "同步前端依赖 (npm ci)..."
+            if npm ci; then
+                :
+            else
+                if [ -d "node_modules" ]; then
+                    print_warning "npm ci 失败，将使用现有 node_modules 继续构建"
+                else
+                    print_error "前端依赖安装失败且 node_modules 不存在"
+                    print_info "旧服务未受影响，继续运行"
+                    return 1
+                fi
+            fi
+        else
+            print_info "安装前端依赖 (npm install)..."
+            if ! npm install; then
+                print_error "前端依赖安装失败"
+                print_info "旧服务未受影响，继续运行"
+                return 1
+            fi
+        fi
+
+        # Build frontend
+        print_info "执行 npm run build..."
+        if ! npm run build; then
+            print_error "前端构建失败"
+            print_info "旧服务未受影响，继续运行"
+            return 1
+        fi
+        print_success "前端构建完成"
+    else
+        print_warning "未找到 package.json，跳过前端构建"
+    fi
+
+    # 2b. Build Docker image with candidate tag
+    cd "$SOURCE_DIR"
+    print_info "构建候选 Docker 镜像..."
+    if ! docker build -t "$candidate_tag" --target production .; then
+        print_error "Docker 镜像构建失败"
+        print_info "旧服务未受影响，继续运行"
+        return 1
+    fi
+    print_success "候选 Docker 镜像构建完成: $candidate_tag"
+
+    # ---------------------------------------------------------------
+    # Phase 3: Save rollback info (old image ID, compose/env backup)
+    # ---------------------------------------------------------------
+
+    # Save old image ID for potential rollback
+    local old_image_id=""
+    old_image_id=$(docker images --format '{{.ID}}' "$IMAGE_NAME" 2>/dev/null | head -1)
+    if [ -n "$old_image_id" ]; then
+        print_info "已记录旧镜像 ID: $old_image_id"
+    else
+        print_warning "未找到旧镜像 $IMAGE_NAME，回滚将无法恢复旧镜像"
+    fi
+
+    # Backup docker-compose.yml and .env for potential rollback
+    local backup_suffix=".upgrade-backup-$(date +%s)"
+    local compose_backup="$DEPLOY_DIR/docker-compose.yml${backup_suffix}"
+    local env_backup="$DEPLOY_DIR/.env${backup_suffix}"
+    if [ -f "$DEPLOY_DIR/docker-compose.yml" ]; then
+        cp "$DEPLOY_DIR/docker-compose.yml" "$compose_backup"
+        print_info "已备份 docker-compose.yml"
+    fi
+    if [ -f "$DEPLOY_DIR/.env" ]; then
+        cp "$DEPLOY_DIR/.env" "$env_backup"
+        print_info "已备份 .env"
+    fi
+
+    # ---------------------------------------------------------------
+    # Phase 4: Data migration + container switch
+    # ---------------------------------------------------------------
+
+    # Data migration for multi-user mode (Issue #1205)
+    # Export container /home data to host ./data/home BEFORE container removal.
+    # docker exec requires a running container, so migration is done before
+    # docker stop. docker cp also works on stopped containers, but docker exec
+    # is used for listing which requires the container to be running.
+    print_info "检查旧容器数据迁移..."
     for old_container in "open-ace" "open-ace-web"; do
         if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${old_container}$"; then
-            print_info "停止容器: $old_container"
-            docker stop "$old_container" 2>/dev/null || true
-
-            # Data migration for multi-user mode (Issue #1205)
-            # Export container /home data to host ./data/home before container removal
-            # This is a one-time migration when upgrading from version without volume mapping
             if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-                print_info "检查容器内 home 目录数据..."
+                print_info "检查容器 $old_container 内 home 目录数据..."
+                # Use docker exec while container is still running
                 local home_exists=$(docker exec "$old_container" test -d /home 2>/dev/null && echo "yes" || echo "no")
 
                 if [ "$home_exists" = "yes" ]; then
@@ -2547,78 +2722,36 @@ upgrade_deployment() {
                     fi
                 fi
             fi
+        fi
+    done
 
+    # Now stop and remove old containers
+    print_info "停止并删除旧容器..."
+    for old_container in "open-ace" "open-ace-web"; do
+        if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${old_container}$"; then
+            print_info "停止容器: $old_container"
+            docker stop "$old_container" 2>/dev/null || true
             print_info "删除容器: $old_container"
             docker rm "$old_container" 2>/dev/null || true
         fi
     done
     print_success "旧容器清理完成"
 
-    # Get source directory from script location
-    # Script is at scripts/install-central/docker-method/install.sh
-    # Source dir is at root (3 levels up)
-    local script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    local SOURCE_DIR=$(cd "$script_dir/../../.." && pwd)
+    # Re-tag candidate as the production image name (latest)
+    print_info "标记候选镜像为 $IMAGE_NAME..."
+    docker tag "$candidate_tag" "$IMAGE_NAME"
+    print_success "镜像标记完成: $IMAGE_NAME"
 
-    # Verify source directory
-    if [ ! -f "$SOURCE_DIR/Dockerfile" ] || [ ! -d "$SOURCE_DIR/frontend" ]; then
-        print_error "无法找到源码目录: $SOURCE_DIR"
-        print_info "请确保脚本位于源码目录的 scripts/install-central/docker-method/ 下"
-        return 1
-    fi
-
-    print_info "源码目录: $SOURCE_DIR"
-
-    # 1. Build frontend in source directory
-    print_info "构建前端..."
-    cd "$SOURCE_DIR/frontend"
-    if [ -f "package.json" ]; then
-        # Check if npm is available
-        if ! command -v npm &>/dev/null; then
-            print_error "npm 未安装，无法构建前端"
-            return 1
-        fi
-
-        # Install dependencies if needed
-        if [ ! -d "node_modules" ]; then
-            print_info "安装前端依赖..."
-            npm install
-        fi
-
-        # Build frontend
-        print_info "执行 npm run build..."
-        npm run build
-        if [ $? -ne 0 ]; then
-            print_error "前端构建失败"
-            return 1
-        fi
-        print_success "前端构建完成"
-    else
-        print_warning "未找到 package.json，跳过前端构建"
-    fi
-
-    # 2. Build Docker image in source directory
-    cd "$SOURCE_DIR"
-    print_info "重建 Docker 镜像..."
-    docker build -t "$IMAGE_NAME" --target production .
-    if [ $? -ne 0 ]; then
-        print_error "Docker 镜像构建失败"
-        return 1
-    fi
-    print_success "Docker 镜像重建完成: $IMAGE_NAME"
-
-    # 3. Update docker-compose.yml and .env
+    # Update docker-compose.yml and .env
     cd "$DEPLOY_DIR"
     print_info "更新 docker-compose.yml 和 .env..."
-    # Call create_docker_compose and create_env_file but they will overwrite, which is fine
-    # We need to temporarily set a flag to avoid prompting
     local old_non_interactive="$NON_INTERACTIVE"
     NON_INTERACTIVE=true
     create_docker_compose
     create_env_file
     NON_INTERACTIVE="$old_non_interactive"
 
-    # 3.5. Ensure new directories exist for volume mounts (Issue #1205)
+    # Ensure new directories exist for volume mounts (Issue #1205)
     print_info "创建持久化目录..."
     mkdir -p "$DEPLOY_DIR"/logs
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
@@ -2628,23 +2761,24 @@ upgrade_deployment() {
     fi
     print_success "持久化目录创建完成"
 
-    # 4. Update sudoers if multi-user mode is enabled
+    # Update sudoers if multi-user mode is enabled
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
         print_info "更新 sudoers 配置..."
         stop_webui_systemd_service
         install_run_as_wrapper || print_warning "run-as wrapper 安装失败，跨用户 agent 启动可能受限"
-        configure_sudoers
-        if [ $? -ne 0 ]; then
-            print_warning "Sudoers 配置失败，但继续升级"
+        if ! install_git_gh_wrappers; then
+            print_error "git/gh wrappers 安装失败，拒绝写入 wrapper-only sudoers"
+        else
+            configure_sudoers
+            if [ $? -ne 0 ]; then
+                print_warning "Sudoers 配置失败，但继续升级"
+            fi
         fi
     fi
 
-    # 5. config.json is preserved (not overwritten)
-
-    # 5.5. Grant sequence permissions to DB_USER if needed
+    # Grant sequence permissions to DB_USER if needed
     # PostgreSQL sequences have independent owners (pg_class.relowner).
     # When DB_USER is not a superuser, permissions must be granted by a superuser.
-    # We query for actual superuser rather than assuming 'postgres' exists.
     print_info "检查数据库序列权限..."
 
     # Check if DB_USER is a superuser
@@ -2679,9 +2813,7 @@ upgrade_deployment() {
         fi
     fi
 
-    # 5.6. Check alembic_version table before recreating container (Issue #1192)
-    # Diagnostic: confirms migration metadata is present so the entrypoint's
-    # minimum-revision guard and alembic upgrade can run cleanly.
+    # Check alembic_version table before recreating container (Issue #1192)
     print_info "检查数据库 migration 状态..."
     local alembic_exists=""
     alembic_exists=$(docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -t -c \
@@ -2696,11 +2828,30 @@ upgrade_deployment() {
         export ALEMBIC_VERSION_EXISTS="no"
     fi
 
-    # 6. Recreate only open-ace container (PostgreSQL not restarted)
+    # ---------------------------------------------------------------
+    # Phase 5: Start new container and health gate
+    # ---------------------------------------------------------------
+
+    # Recreate only open-ace container (PostgreSQL not restarted)
+    # Use "if ! cmd" pattern so set -e does not exit before rollback runs
     print_info "重建 open-ace 容器..."
-    docker compose up -d --force-recreate open-ace
-    if [ $? -ne 0 ]; then
+    if ! docker compose up -d --force-recreate open-ace; then
         print_error "容器重建失败"
+        # Attempt rollback
+        if [ -n "$old_image_id" ]; then
+            print_warning "尝试回滚到旧版本..."
+            docker tag "$old_image_id" "$IMAGE_NAME" || true
+            if [ -f "$compose_backup" ]; then
+                cp "$compose_backup" "$DEPLOY_DIR/docker-compose.yml" || true
+            fi
+            if [ -f "$env_backup" ]; then
+                cp "$env_backup" "$DEPLOY_DIR/.env" || true
+            fi
+            docker compose up -d open-ace 2>/dev/null || true
+            print_error "回滚完成，旧版本已恢复（可能需要等待启动）"
+        fi
+        # Clean up backup files on failure
+        rm -f "$compose_backup" "$env_backup" 2>/dev/null || true
         return 1
     fi
 
@@ -2710,9 +2861,11 @@ upgrade_deployment() {
 
     local max_attempts=30
     local attempt=1
+    local health_passed=false
     while [ $attempt -le $max_attempts ]; do
         if curl -s "http://localhost:$WEB_PORT/health" | grep -q "healthy"; then
             print_success "应用已就绪"
+            health_passed=true
             break
         fi
         echo -n "."
@@ -2721,15 +2874,64 @@ upgrade_deployment() {
     done
     echo ""
 
-    if [ $attempt -gt $max_attempts ]; then
-        print_warning "应用启动中，请稍后检查状态"
+    if [ "$health_passed" = "false" ]; then
+        # Health check failed — rollback
+        print_error "新版本健康检查未通过，开始自动回滚..."
+
+        # Stop and remove the failed new container
+        docker stop open-ace 2>/dev/null || true
+        docker rm open-ace 2>/dev/null || true
+
+        # Re-tag old image back to latest
+        if [ -n "$old_image_id" ]; then
+            print_info "恢复旧镜像标签..."
+            docker tag "$old_image_id" "$IMAGE_NAME" || true
+        fi
+
+        # Restore old compose and env files
+        if [ -f "$compose_backup" ]; then
+            cp "$compose_backup" "$DEPLOY_DIR/docker-compose.yml" || true
+            print_info "已恢复 docker-compose.yml"
+        fi
+        if [ -f "$env_backup" ]; then
+            cp "$env_backup" "$DEPLOY_DIR/.env" || true
+            print_info "已恢复 .env"
+        fi
+
+        # Restart old container
+        print_info "启动旧版本容器..."
+        docker compose up -d open-ace 2>/dev/null || true
+
+        # Wait for old container to be healthy
+        sleep 3
+        local rollback_attempt=1
+        local rollback_max=30
+        while [ $rollback_attempt -le $rollback_max ]; do
+            if curl -s "http://localhost:$WEB_PORT/health" | grep -q "healthy"; then
+                print_success "旧版本已恢复并就绪"
+                break
+            fi
+            echo -n "."
+            sleep 1
+            rollback_attempt=$((rollback_attempt + 1))
+        done
+        echo ""
+
+        if [ $rollback_attempt -gt $rollback_max ]; then
+            print_error "回滚后旧版本未通过健康检查，请手动检查服务状态"
+        fi
+
+        print_error "升级失败，已回滚到旧版本。新版本健康检查未通过。"
+        # Clean up backup files on failure
+        rm -f "$compose_backup" "$env_backup" 2>/dev/null || true
+        return 1
     fi
 
-    # 7. Fix alembic_version if missing (Issue #1192)
-    # docker-entrypoint.sh runs a minimum-revision check before Alembic
-    # upgrade. We verify that the migration metadata exists after container
-    # restart and offer a manual recovery path if the entrypoint did not
-    # create it (e.g. a pre-baseline database that the guard rejected).
+    # ---------------------------------------------------------------
+    # Phase 6: Commit — health passed, finalize upgrade
+    # ---------------------------------------------------------------
+
+    # Fix alembic_version if missing (Issue #1192)
     if [ "$ALEMBIC_VERSION_EXISTS" = "no" ]; then
         print_info "验证最低 revision 检查与 Alembic upgrade 是否已由 entrypoint 自动处理..."
         local alembic_fixed=""
@@ -2749,6 +2951,11 @@ upgrade_deployment() {
         fi
     fi
 
+    # Clean up backup files and candidate tag
+    rm -f "$compose_backup" "$env_backup" 2>/dev/null || true
+    docker rmi "$candidate_tag" 2>/dev/null || true
+
+    print_success "升级成功完成"
     return 0
 }
 
@@ -3092,6 +3299,14 @@ create_docker_compose() {
         print_info "  - 映射 SSH 密钥目录: $SSH_MOUNT_SOURCE"
     fi
 
+    # Multi-user mode configuration (Issue #2235)
+    multi_user_section=""
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        multi_user_section="    user: \"0\"
+"
+        print_info "  - 多用户模式：容器以 root 运行"
+    fi
+
     # Note: We don't specify 'platform' in docker-compose.yml to allow using locally loaded images
     # The platform detection is just for information purposes
     cat > "$compose_file" << EOF
@@ -3103,7 +3318,7 @@ services:
   open-ace:
     image: $IMAGE_NAME
     container_name: open-ace
-    restart: unless-stopped
+$multi_user_section    restart: unless-stopped
     ports:
 $ports_section
     environment:
@@ -3115,6 +3330,19 @@ $ports_section
       - OPENACE_SYSTEM_ACCOUNT=$RUN_USER
       # Data fetch: container runs as root, use venv Python (Issue #1121)
       - FETCH_USE_SUDO=false
+EOF
+
+    # Add multi-user mode environment variables (Issue #2235)
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        cat >> "$compose_file" << EOF
+      # Multi-user mode requires explicit root authorization
+      - OPENACE_ALLOW_ROOT_MULTI_USER=1
+      # Ensure config persists to mounted volume when running as root
+      - OPENACE_CONFIG_DIR=/home/open-ace/.open-ace
+EOF
+    fi
+
+    cat >> "$compose_file" << EOF
     volumes:
 $volumes_section
     depends_on:
@@ -3168,6 +3396,14 @@ volumes:
   postgres-data:
     driver: local
 EOF
+
+    # Add home-data volume for multi-user mode (Issue #2235)
+    if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
+        cat >> "$compose_file" << EOF
+  home-data:
+    driver: local
+EOF
+    fi
 
     # Set permissions for docker-compose.yml (Issue #1253)
     # This file contains sensitive information: database password, secret key, etc.
@@ -3946,6 +4182,10 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
     # Stop existing qwen-code-webui systemd service first
     stop_webui_systemd_service
     install_run_as_wrapper || print_warning "run-as wrapper 安装失败，跨用户 agent 启动可能受限"
+    if ! install_git_gh_wrappers; then
+        print_error "git/gh wrappers 安装失败，拒绝写入 wrapper-only sudoers"
+        exit 1
+    fi
     configure_sudoers
     if [ $? -ne 0 ]; then
         print_warning "Sudoers 配置失败，多用户模式可能无法正常工作"

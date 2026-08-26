@@ -28,16 +28,14 @@ import {
   useAppStore,
   useWorkspaceFullscreen,
   useEnableTabNotifications,
-  useWorkspaceTabs,
-  useWorkspaceActiveTabId,
   useSetWorkspaceActiveTabId,
   useAddWorkspaceTab,
   useUpdateWorkspaceTab,
   useRemoveWorkspaceTab,
-  useWorkspaceTabsOrder,
   useSetWorkspaceTabsOrder,
   type WorkspaceTab as StoreWorkspaceTab,
 } from '@/store';
+import { useSafeWorkspaceState } from '@/hooks/useSafeWorkspaceState';
 import { t } from '@/i18n';
 import { Error, Button, Card, useToast, Modal } from '@/components/common';
 import { NewSessionModal } from '@/components/work/NewSessionModal';
@@ -120,6 +118,7 @@ export const Workspace: React.FC = () => {
   const [tabsOrder, setTabsOrder] = useState<string[]>([]); // Visual order for drag sort (Issue #1470)
   const [activeTabId, setActiveTabId] = useState<string>('');
   const [loadingTabs, setLoadingTabs] = useState<Set<string>>(new Set());
+  const [failedTabs, setFailedTabs] = useState<Set<string>>(new Set()); // Issue #2242: Track failed iframe loads
   const [renameTabId, setRenameTabId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [showRenameModal, setShowRenameModal] = useState(false);
@@ -154,11 +153,8 @@ export const Workspace: React.FC = () => {
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
   // Refresh lock to prevent concurrent token refresh
   const refreshingRef = useRef(false);
-
-  // Workspace tabs state from store (Issue #65)
-  const storedTabs = useWorkspaceTabs();
-  const storedActiveTabId = useWorkspaceActiveTabId();
-  const storedTabsOrder = useWorkspaceTabsOrder(); // Issue #1470
+  // Issue #2242: Timeout refs for iframe error detection (cross-origin fallback)
+  const iframeTimeoutRefs = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   // Use stable action selectors (fixes infinite loop)
   const setStoredActiveTabId = useSetWorkspaceActiveTabId();
@@ -167,13 +163,23 @@ export const Workspace: React.FC = () => {
   const removeStoredTab = useRemoveWorkspaceTab();
   const setStoredTabsOrder = useSetWorkspaceTabsOrder(); // Issue #1470
 
+  // Issue #2953: Use centralized validation hook for safe workspace state
+  const {
+    tabs: safeStoredTabs,
+    tabsOrder: safeStoredTabsOrder,
+    activeTabId: safeStoredActiveTabId,
+  } = useSafeWorkspaceState();
+
   // Issue #1470: Compute ordered tabs for visual display (Tab Bar only)
+  // Issue #2953: Use Map and Set for performance optimization and defensive handling
   // Tab Content uses original tabs order to prevent iframe re-creation
   const orderedTabs = useMemo(() => {
-    if (tabsOrder.length === 0) return tabs;
-    // Sort tabs by tabsOrder, then append any tabs not in order (new tabs)
+    if (!Array.isArray(tabsOrder) || tabsOrder.length === 0) return tabs;
+    // Use Map for O(1) tab lookup
+    const tabMap = new Map(tabs.map((t) => [t.id, t]));
+    // Sort tabs by tabsOrder
     const ordered = tabsOrder
-      .map((id) => tabs.find((t) => t.id === id))
+      .map((id) => tabMap.get(id))
       .filter((tab): tab is WorkspaceTab => tab !== undefined);
     // Add any new tabs that aren't in tabsOrder yet
     const orderedIds = new Set(tabsOrder);
@@ -531,7 +537,7 @@ export const Workspace: React.FC = () => {
       // Issue #121: Only auto-fullscreen if setting is enabled
       if (event.data?.type === 'openace-enter-chat') {
         if (useAppStore.getState().autoFullscreenOnEnterChat) {
-          useAppStore.getState().enterWorkspaceFullscreen(false, false);
+          useAppStore.getState().enterWorkspaceFullscreen(false);
         }
       }
 
@@ -677,8 +683,18 @@ export const Workspace: React.FC = () => {
       }
 
       // Listen for ESC key forwarded from qwen-code-webui iframe (Issue #103)
-      if (event.data?.type === 'qwen-code-esc-pressed' && workspaceFullscreen) {
-        exitWorkspaceFullscreen();
+      // Layered ESC handling (shared rule with WorkLayout): an open modal handles
+      // ESC itself; otherwise close the prompts drawer first; otherwise exit
+      // fullscreen. Values read via getState() to avoid stale closures.
+      if (event.data?.type === 'qwen-code-esc-pressed') {
+        const state = useAppStore.getState();
+        if (!document.querySelector('.modal.show')) {
+          if (state.promptsDrawerOpen) {
+            state.setPromptsDrawerOpen(false);
+          } else if (state.workspaceFullscreen) {
+            exitWorkspaceFullscreen();
+          }
+        }
       }
 
       // Listen for switch project request from qwen-code-webui iframe (Issue #229)
@@ -730,13 +746,7 @@ export const Workspace: React.FC = () => {
 
     window.addEventListener('message', handleIframeMessage);
     return () => window.removeEventListener('message', handleIframeMessage);
-  }, [
-    enableTabNotifications,
-    language,
-    workspaceFullscreen,
-    exitWorkspaceFullscreen,
-    clearTabNotification,
-  ]);
+  }, [enableTabNotifications, language, exitWorkspaceFullscreen, clearTabNotification]);
 
   // Check quota
   const checkQuota = useCallback(async () => {
@@ -1068,87 +1078,286 @@ export const Workspace: React.FC = () => {
     let initialTabs: WorkspaceTab[] = [];
     let initialActiveTabId = '';
 
-    if (restoreSessionId) {
-      // Case 1: URL restore params - create a single tab with the restore session
-      // Build settings from URL params
-      const urlSettings:
-        { model?: string; useWebUI?: boolean; permissionMode?: string } | undefined =
-        urlModel || urlUseWebUI !== null || urlPermissionMode
-          ? {
-              model: urlModel ?? undefined,
-              useWebUI: urlUseWebUI === 'true' ? true : urlUseWebUI === 'false' ? false : undefined,
-              permissionMode: urlPermissionMode ?? undefined,
-            }
-          : undefined;
+    // Issue #2953: Wrap restoration logic in try-catch for safety
+    try {
+      if (restoreSessionId) {
+        // Case 1: URL restore params - create a single tab with the restore session
+        // Issue #2953: Smart URL restore - check if session already exists in store
+        const existingTab = safeStoredTabs.find((t) => t.sessionId === restoreSessionId);
+        if (existingTab) {
+          // Session already exists in store, restore ALL tabs and activate this one
+          console.log(
+            '[Workspace] Found existing tab for session, restoring all tabs and activating:',
+            restoreSessionId
+          );
+          initialActiveTabId = existingTab.id;
 
-      // Build remote params from URL (only for local/remote, not terminal)
-      const remoteParams:
-        | { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string }
-        | undefined =
-        urlWorkspaceType && urlWorkspaceType !== 'terminal'
-          ? {
-              workspaceType: urlWorkspaceType,
-              machineId: urlMachineId ?? undefined,
+          // Issue #3071: Restore ALL tabs from localStorage, not just the matched one
+          initialTabs = safeStoredTabs.map((storedTab) => {
+            // Terminal tabs don't need URL regeneration
+            if (storedTab.tabType === 'terminal') {
+              return {
+                ...storedTab,
+                url: '',
+                token: '',
+                terminalWsUrl: '',
+                terminalToken: '',
+              };
+            }
+
+            // Regenerate URL for each tab
+            const remoteParams = storedTab.workspaceType
+              ? {
+                  workspaceType: storedTab.workspaceType,
+                  machineId: storedTab.machineId,
+                  machineName: storedTab.machineName,
+                }
+              : undefined;
+            const effectiveUrl = storedTab.sessionId
+              ? getEffectiveUrl(
+                  storedTab.sessionId,
+                  storedTab.encodedProjectName,
+                  storedTab.toolName,
+                  storedTab.settings,
+                  remoteParams
+                )
+              : getEffectiveUrl(undefined, undefined, undefined, undefined, remoteParams);
+
+            return {
+              ...storedTab,
+              url: effectiveUrl ?? '',
+              token: userWebUI?.token ?? '',
+            };
+          });
+        } else {
+          // No existing tab, create new one
+          // Build settings from URL params
+          const urlSettings:
+            { model?: string; useWebUI?: boolean; permissionMode?: string } | undefined =
+            urlModel || urlUseWebUI !== null || urlPermissionMode
+              ? {
+                  model: urlModel ?? undefined,
+                  useWebUI:
+                    urlUseWebUI === 'true' ? true : urlUseWebUI === 'false' ? false : undefined,
+                  permissionMode: urlPermissionMode ?? undefined,
+                }
+              : undefined;
+
+          // Build remote params from URL (only for local/remote, not terminal)
+          const remoteParams:
+            | { workspaceType?: 'local' | 'remote'; machineId?: string; machineName?: string }
+            | undefined =
+            urlWorkspaceType && urlWorkspaceType !== 'terminal'
+              ? {
+                  workspaceType: urlWorkspaceType,
+                  machineId: urlMachineId ?? undefined,
+                  machineName: urlMachineName ?? undefined,
+                }
+              : undefined;
+
+          // Handle terminal session restoration separately
+          if (urlWorkspaceType === 'terminal' && urlTerminalId && urlMachineId) {
+            // Create terminal tab
+            const tab: WorkspaceTab = {
+              id: generateTabId(),
+              title: t('restoredSession', language),
+              url: '', // Terminal tabs don't use iframe URL
+              token: '',
+              sessionId: restoreSessionId,
+              tabType: 'terminal',
+              terminalId: urlTerminalId,
+              machineId: urlMachineId,
               machineName: urlMachineName ?? undefined,
+              createdAt: Date.now(),
+              waitingForUser: false,
+              waitingType: null,
+            };
+            initialTabs = [tab];
+            initialActiveTabId = tab.id;
+
+            // Save to store
+            addStoredTab({
+              id: tab.id,
+              title: tab.title,
+              tabType: 'terminal',
+              terminalId: urlTerminalId,
+              machineId: urlMachineId,
+              machineName: urlMachineName ?? undefined,
+              createdAt: tab.createdAt,
+              waitingForUser: false,
+              waitingType: null,
+            });
+          } else {
+            // Regular session (local or remote)
+            const effectiveUrl = getEffectiveUrl(
+              restoreSessionId,
+              urlEncodedProjectName ?? undefined,
+              urlToolName ?? undefined,
+              urlSettings,
+              remoteParams,
+              urlResumeHint
+            );
+            if (effectiveUrl) {
+              const newTab: WorkspaceTab = {
+                id: generateTabId(),
+                title: t('restoredSession', language),
+                url: effectiveUrl,
+                token: userWebUI?.token ?? '',
+                sessionId: restoreSessionId,
+                encodedProjectName: urlEncodedProjectName ?? undefined,
+                toolName: urlToolName ?? undefined,
+                settings: urlSettings,
+                workspaceType:
+                  urlWorkspaceType && urlWorkspaceType !== 'terminal'
+                    ? urlWorkspaceType
+                    : undefined,
+                machineId: urlMachineId ?? undefined,
+                machineName: urlMachineName ?? undefined,
+                createdAt: Date.now(),
+                waitingForUser: false,
+                waitingType: null,
+              };
+
+              // Issue #3071: Restore ALL tabs from localStorage and APPEND the new tab
+              initialTabs = [
+                ...safeStoredTabs.map((storedTab) => {
+                  // Terminal tabs don't need URL regeneration
+                  if (storedTab.tabType === 'terminal') {
+                    return {
+                      ...storedTab,
+                      url: '',
+                      token: '',
+                      terminalWsUrl: '',
+                      terminalToken: '',
+                    };
+                  }
+
+                  // Regenerate URL for each tab
+                  const remoteParams = storedTab.workspaceType
+                    ? {
+                        workspaceType: storedTab.workspaceType,
+                        machineId: storedTab.machineId,
+                        machineName: storedTab.machineName,
+                      }
+                    : undefined;
+                  const effectiveUrl = storedTab.sessionId
+                    ? getEffectiveUrl(
+                        storedTab.sessionId,
+                        storedTab.encodedProjectName,
+                        storedTab.toolName,
+                        storedTab.settings,
+                        remoteParams
+                      )
+                    : getEffectiveUrl(undefined, undefined, undefined, undefined, remoteParams);
+
+                  return {
+                    ...storedTab,
+                    url: effectiveUrl ?? '',
+                    token: userWebUI?.token ?? '',
+                  };
+                }),
+                newTab, // Append new tab
+              ];
+              initialActiveTabId = newTab.id;
+
+              // Save to store (append, don't clear existing tabs)
+              // Issue #2953: Smart append instead of replacing all tabs
+              addStoredTab({
+                id: newTab.id,
+                title: newTab.title,
+                sessionId: newTab.sessionId,
+                encodedProjectName: newTab.encodedProjectName,
+                toolName: newTab.toolName,
+                settings: newTab.settings,
+                workspaceType: newTab.workspaceType,
+                machineId: newTab.machineId,
+                machineName: newTab.machineName,
+                createdAt: newTab.createdAt,
+                waitingForUser: newTab.waitingForUser,
+                waitingType: newTab.waitingType,
+              });
             }
-          : undefined;
+          }
+        }
 
-      // Handle terminal session restoration separately
-      if (urlWorkspaceType === 'terminal' && urlTerminalId && urlMachineId) {
-        // Create terminal tab
-        const tab: WorkspaceTab = {
-          id: generateTabId(),
-          title: t('restoredSession', language),
-          url: '', // Terminal tabs don't use iframe URL
-          token: '',
-          sessionId: restoreSessionId,
-          tabType: 'terminal',
-          terminalId: urlTerminalId,
-          machineId: urlMachineId,
-          machineName: urlMachineName ?? undefined,
-          createdAt: Date.now(),
-          waitingForUser: false,
-          waitingType: null,
-        };
-        initialTabs = [tab];
-        initialActiveTabId = tab.id;
+        // Clear the restore parameters after using it
+        // Issue #2899: Keep sessionId in URL for browser back/forward and refresh
+        // Only clear one-time parameters (restoreSession, resumeHint)
+        // Issue #2953: Wrap setSearchParams in try-catch
+        try {
+          searchParams.delete('restoreSession');
+          searchParams.delete('resumeHint');
+          // Clear other params that should not persist after navigation
+          searchParams.delete('workspaceType');
+          searchParams.delete('machineId');
+          searchParams.delete('machineName');
+          searchParams.delete('terminalId');
+          setSearchParams(searchParams, { replace: true });
+        } catch (err) {
+          console.warn('[Workspace] Failed to clear URL parameters:', err);
+        }
+      } else if (safeStoredTabs.length > 0) {
+        // Case 2: Restore from store - regenerate URLs for each tab
+        // Issue #2953: Use safe values from validation hook
+        initialTabs = safeStoredTabs.map((storedTab) => {
+          // Terminal tabs don't need URL regeneration
+          if (storedTab.tabType === 'terminal') {
+            return {
+              ...storedTab,
+              url: '',
+              token: '',
+              terminalWsUrl: '',
+              terminalToken: '',
+            };
+          }
 
-        // Save to store
-        addStoredTab({
-          id: tab.id,
-          title: tab.title,
-          tabType: 'terminal',
-          terminalId: urlTerminalId,
-          machineId: urlMachineId,
-          machineName: urlMachineName ?? undefined,
-          createdAt: tab.createdAt,
-          waitingForUser: false,
-          waitingType: null,
+          // Regenerate URL based on sessionId if available
+          // Include settings and remote params in URL for restoration
+          const remoteParams = storedTab.workspaceType
+            ? {
+                workspaceType: storedTab.workspaceType,
+                machineId: storedTab.machineId,
+                machineName: storedTab.machineName,
+              }
+            : undefined;
+          const effectiveUrl = storedTab.sessionId
+            ? getEffectiveUrl(
+                storedTab.sessionId,
+                storedTab.encodedProjectName,
+                storedTab.toolName,
+                storedTab.settings,
+                remoteParams
+              )
+            : getEffectiveUrl(undefined, undefined, undefined, undefined, remoteParams);
+
+          return {
+            ...storedTab,
+            url: effectiveUrl ?? '',
+            token: userWebUI?.token ?? '',
+          };
+        });
+
+        // Use stored active tab ID if it exists in the restored tabs
+        // Issue #2953: Use safe value
+        initialActiveTabId = safeStoredTabs.find((t) => t.id === safeStoredActiveTabId)
+          ? safeStoredActiveTabId
+          : initialTabs.length > 0
+            ? initialTabs[0].id
+            : '';
+
+        console.log('[Issue #65] Restored workspace tabs from store:', {
+          tabsCount: initialTabs.length,
+          activeTabId: initialActiveTabId,
         });
       } else {
-        // Regular session (local or remote)
-        const effectiveUrl = getEffectiveUrl(
-          restoreSessionId,
-          urlEncodedProjectName ?? undefined,
-          urlToolName ?? undefined,
-          urlSettings,
-          remoteParams,
-          urlResumeHint
-        );
+        // Case 3: No stored state and no URL params - create a new session tab
+        const effectiveUrl = getEffectiveUrl();
         if (effectiveUrl) {
           const tab: WorkspaceTab = {
             id: generateTabId(),
-            title: t('restoredSession', language),
+            title: t('newSession', language),
             url: effectiveUrl,
             token: userWebUI?.token ?? '',
-            sessionId: restoreSessionId,
-            encodedProjectName: urlEncodedProjectName ?? undefined,
-            toolName: urlToolName ?? undefined,
-            settings: urlSettings,
-            workspaceType:
-              urlWorkspaceType && urlWorkspaceType !== 'terminal' ? urlWorkspaceType : undefined,
-            machineId: urlMachineId ?? undefined,
-            machineName: urlMachineName ?? undefined,
             createdAt: Date.now(),
             waitingForUser: false,
             waitingType: null,
@@ -1156,88 +1365,23 @@ export const Workspace: React.FC = () => {
           initialTabs = [tab];
           initialActiveTabId = tab.id;
 
-          // Save to store (this replaces any previous stored tabs)
+          // Save new tab to store
           addStoredTab({
             id: tab.id,
             title: tab.title,
             sessionId: tab.sessionId,
             encodedProjectName: tab.encodedProjectName,
             toolName: tab.toolName,
-            settings: tab.settings,
-            workspaceType: tab.workspaceType,
-            machineId: tab.machineId,
-            machineName: tab.machineName,
             createdAt: tab.createdAt,
             waitingForUser: tab.waitingForUser,
             waitingType: tab.waitingType,
           });
         }
       }
-
-      // Clear the restore parameters after using it
-      // Issue #2899: Keep sessionId in URL for browser back/forward and refresh
-      // Only clear one-time parameters (restoreSession, resumeHint)
-      searchParams.delete('restoreSession');
-      searchParams.delete('resumeHint');
-      // Clear other params that should not persist after navigation
-      searchParams.delete('workspaceType');
-      searchParams.delete('machineId');
-      searchParams.delete('machineName');
-      searchParams.delete('terminalId');
-      setSearchParams(searchParams, { replace: true });
-    } else if (storedTabs.length > 0) {
-      // Case 2: Restore from store - regenerate URLs for each tab
-      initialTabs = storedTabs.map((storedTab) => {
-        // Terminal tabs don't need URL regeneration
-        if (storedTab.tabType === 'terminal') {
-          return {
-            ...storedTab,
-            url: '',
-            token: '',
-            terminalWsUrl: '',
-            terminalToken: '',
-          };
-        }
-
-        // Regenerate URL based on sessionId if available
-        // Include settings and remote params in URL for restoration
-        const remoteParams = storedTab.workspaceType
-          ? {
-              workspaceType: storedTab.workspaceType,
-              machineId: storedTab.machineId,
-              machineName: storedTab.machineName,
-            }
-          : undefined;
-        const effectiveUrl = storedTab.sessionId
-          ? getEffectiveUrl(
-              storedTab.sessionId,
-              storedTab.encodedProjectName,
-              storedTab.toolName,
-              storedTab.settings,
-              remoteParams
-            )
-          : getEffectiveUrl(undefined, undefined, undefined, undefined, remoteParams);
-
-        return {
-          ...storedTab,
-          url: effectiveUrl ?? '',
-          token: userWebUI?.token ?? '',
-        };
-      });
-
-      // Use stored active tab ID if it exists in the restored tabs
-      initialActiveTabId = storedTabs.find((t) => t.id === storedActiveTabId)
-        ? storedActiveTabId
-        : initialTabs.length > 0
-          ? initialTabs[0].id
-          : '';
-
-      console.log('[Issue #65] Restored workspace tabs from store:', {
-        tabsCount: initialTabs.length,
-        activeTabId: initialActiveTabId,
-      });
-    } else {
-      // Case 3: No stored state and no URL params - create a new session tab
+    } catch (err) {
+      // Issue #2953: Catch and log any errors during restoration
+      console.error('[Workspace] Error during tab initialization:', err);
+      // Fallback: Create a new session tab
       const effectiveUrl = getEffectiveUrl();
       if (effectiveUrl) {
         const tab: WorkspaceTab = {
@@ -1251,18 +1395,6 @@ export const Workspace: React.FC = () => {
         };
         initialTabs = [tab];
         initialActiveTabId = tab.id;
-
-        // Save new tab to store
-        addStoredTab({
-          id: tab.id,
-          title: tab.title,
-          sessionId: tab.sessionId,
-          encodedProjectName: tab.encodedProjectName,
-          toolName: tab.toolName,
-          createdAt: tab.createdAt,
-          waitingForUser: tab.waitingForUser,
-          waitingType: tab.waitingType,
-        });
       }
     }
 
@@ -1274,9 +1406,10 @@ export const Workspace: React.FC = () => {
       setLoadingTabs(new Set(initialTabs.map((t) => t.id)));
 
       // Issue #1470: Initialize tabsOrder from store or use default order
-      if (storedTabsOrder.length > 0) {
+      // Issue #2953: Use safe value and validate order
+      if (safeStoredTabsOrder.length > 0) {
         // Filter storedTabsOrder to only include existing tabs
-        const validOrder = storedTabsOrder.filter((id) => initialTabs.some((t) => t.id === id));
+        const validOrder = safeStoredTabsOrder.filter((id) => initialTabs.some((t) => t.id === id));
         // Add any new tabs that aren't in the order
         const orderedIds = new Set(validOrder);
         const newTabIds = initialTabs.filter((t) => !orderedIds.has(t.id)).map((t) => t.id);
@@ -1293,9 +1426,9 @@ export const Workspace: React.FC = () => {
 
     userWebUI,
     tabsInitialized,
-    storedTabs,
-    storedActiveTabId,
-    storedTabsOrder, // Issue #1470
+    safeStoredTabs, // Issue #2953: Use safe values
+    safeStoredActiveTabId, // Issue #2953: Use safe values
+    safeStoredTabsOrder, // Issue #2953: Use safe values
     language,
     getEffectiveUrl,
     searchParams,
@@ -1797,7 +1930,7 @@ export const Workspace: React.FC = () => {
 
   // Close a tab
   const closeTab = useCallback(
-    (tabId: string, e: React.MouseEvent) => {
+    async (tabId: string, e: React.MouseEvent) => {
       e.stopPropagation();
 
       const tab = tabs.find((t) => t.id === tabId);
@@ -1807,12 +1940,20 @@ export const Workspace: React.FC = () => {
         // Cancel any pending terminal status polling
         terminalPollCancelRefs.current.set(tabId, true);
         if (tab.terminalId && tab.machineId) {
-          remoteApi
-            .stopTerminal({
+          try {
+            const result = await remoteApi.stopTerminal({
               terminal_id: tab.terminalId,
               machine_id: tab.machineId,
-            })
-            .catch((err) => console.error('Failed to stop terminal:', err));
+            });
+            if (result.success) {
+              toast.success(t('terminalStopRequestSent', language));
+            } else {
+              toast.error(t('terminalStopFailed', language));
+            }
+          } catch (err) {
+            console.error('Failed to stop terminal:', err);
+            toast.error(t('terminalStopFailed', language));
+          }
         }
         doCloseTab(tabId);
         return;
@@ -1826,7 +1967,7 @@ export const Workspace: React.FC = () => {
 
       doCloseTab(tabId);
     },
-    [tabs, doCloseTab]
+    [tabs, doCloseTab, toast, language]
   );
 
   // Handle remote tab close with session stop
@@ -2096,13 +2237,76 @@ export const Workspace: React.FC = () => {
     return undefined;
   }, [resizingTabId, handleResizeMove, handleResizeEnd]);
 
-  // Handle iframe load complete
+  // Handle iframe load complete (Issue #2242: enhanced with error detection)
   const handleIframeLoad = useCallback((tabId: string) => {
     setLoadingTabs((prev) => {
       const newSet = new Set(prev);
       newSet.delete(tabId);
       return newSet;
     });
+    // Clear from failed tabs on successful load
+    setFailedTabs((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(tabId);
+      return newSet;
+    });
+  }, []);
+
+  // Issue #2242: Handle iframe load error (timeout-based detection)
+  const handleIframeError = useCallback((tabId: string) => {
+    setLoadingTabs((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(tabId);
+      return newSet;
+    });
+    setFailedTabs((prev) => {
+      const newSet = new Set(prev);
+      newSet.add(tabId);
+      return newSet;
+    });
+  }, []);
+
+  // Issue #2242: Timeout-based iframe error detection
+  // Cross-origin iframes don't trigger onError, so we use timeout as fallback
+  useEffect(() => {
+    // Check each loading tab and set up timeout detection
+    loadingTabs.forEach((tabId) => {
+      if (!iframeTimeoutRefs.current.has(tabId)) {
+        const timeout = setTimeout(() => {
+          // If still loading after timeout, mark as failed
+          setLoadingTabs((prev) => {
+            if (prev.has(tabId)) {
+              setFailedTabs((failed) => {
+                const newSet = new Set(failed);
+                newSet.add(tabId);
+                return newSet;
+              });
+              const newSet = new Set(prev);
+              newSet.delete(tabId);
+              return newSet;
+            }
+            return prev;
+          });
+        }, 30000); // 30 seconds timeout
+        iframeTimeoutRefs.current.set(tabId, timeout);
+      }
+    });
+
+    // Clean up timeouts for tabs that are no longer loading
+    iframeTimeoutRefs.current.forEach((timeout, tabId) => {
+      if (!loadingTabs.has(tabId)) {
+        clearTimeout(timeout);
+        iframeTimeoutRefs.current.delete(tabId);
+      }
+    });
+  }, [loadingTabs]);
+
+  // Clean up all timeouts on unmount
+  useEffect(() => {
+    return () => {
+      iframeTimeoutRefs.current.forEach((timeout) => clearTimeout(timeout));
+      iframeTimeoutRefs.current.clear();
+    };
   }, []);
 
   // Navigate to usage page
@@ -2348,7 +2552,7 @@ export const Workspace: React.FC = () => {
           {/* Fullscreen toggle button */}
           <button
             className="btn btn-sm btn-outline-secondary fullscreen-toggle-btn"
-            onClick={() => toggleWorkspaceFullscreen(false, false)}
+            onClick={() => toggleWorkspaceFullscreen(false)}
             title={
               workspaceFullscreen ? t('exitFullscreen', language) : t('enterFullscreen', language)
             }
@@ -2503,7 +2707,7 @@ export const Workspace: React.FC = () => {
           {workspaceFullscreen && (
             <button
               className="btn btn-sm btn-outline-secondary px-3 py-1 mx-2"
-              onClick={() => toggleWorkspaceFullscreen(false, false)}
+              onClick={() => toggleWorkspaceFullscreen(false)}
               title={t('exitFullscreen', language)}
             >
               <i className="bi bi-fullscreen-exit me-1" />
@@ -2696,23 +2900,72 @@ export const Workspace: React.FC = () => {
                   }
                 }}
               />
+            ) : failedTabs.has(tab.id) ? (
+              /* Issue #2242: Workspace Error Page */
+              <div className="d-flex flex-column align-items-center justify-content-center h-100 p-4">
+                <i className="bi bi-exclamation-triangle fs-1 text-warning mb-3" />
+                <h4 className="text-center mb-2">{t('workspaceLoadFailed', language)}</h4>
+                <p className="text-muted text-center mb-3">
+                  {t('workspaceLoadFailedHelp', language)}
+                </p>
+                <div className="text-start mb-3">
+                  <p className="fw-medium mb-1">{t('workspaceLoadFailedTroubleshoot', language)}</p>
+                  <ul className="text-muted small mb-0">
+                    <li>{t('workspaceLoadFailedStep1', language)}</li>
+                    <li>{t('workspaceLoadFailedStep2', language)}</li>
+                    <li>{t('workspaceLoadFailedStep3', language)}</li>
+                    <li>{t('workspaceLoadFailedStep4', language)}</li>
+                  </ul>
+                </div>
+                <div className="d-flex gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setFailedTabs((prev) => {
+                        const newSet = new Set(prev);
+                        newSet.delete(tab.id);
+                        return newSet;
+                      });
+                      setLoadingTabs((prev) => new Set(prev).add(tab.id));
+                    }}
+                  >
+                    <i className="bi bi-arrow-clockwise me-2" />
+                    {t('retry', language)}
+                  </Button>
+                  <Button
+                    variant="outline-primary"
+                    onClick={() =>
+                      window.open(
+                        'https://github.com/open-ace/open-ace/blob/main/docs/cn/DEPLOYMENT.md',
+                        '_blank'
+                      )
+                    }
+                  >
+                    <i className="bi bi-book me-2" />
+                    {t('workspaceLoadFailedDocs', language)}
+                  </Button>
+                </div>
+              </div>
             ) : (
               /* Workspace Tab (iframe) */
-              <iframe
-                ref={(el) => {
-                  if (el) {
-                    iframeRefs.current.set(tab.id, el);
-                  } else {
-                    iframeRefs.current.delete(tab.id);
-                  }
-                }}
-                src={tab.url}
-                title={`Workspace - ${tab.title}`}
-                className="w-100 h-100"
-                style={{ border: 'none' }}
-                allow="clipboard-read; clipboard-write"
-                onLoad={() => handleIframeLoad(tab.id)}
-              />
+              <>
+                <iframe
+                  ref={(el) => {
+                    if (el) {
+                      iframeRefs.current.set(tab.id, el);
+                    } else {
+                      iframeRefs.current.delete(tab.id);
+                    }
+                  }}
+                  src={tab.url}
+                  title={`Workspace - ${tab.title}`}
+                  className="w-100 h-100"
+                  style={{ border: 'none' }}
+                  allow="clipboard-read; clipboard-write"
+                  onLoad={() => handleIframeLoad(tab.id)}
+                  onError={() => handleIframeError(tab.id)}
+                />
+              </>
             )}
           </div>
         ))}

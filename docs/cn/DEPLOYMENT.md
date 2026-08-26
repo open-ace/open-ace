@@ -56,16 +56,113 @@ uid 1000 执行入口脚本，而不再仅依赖清单中的 `securityContext`�
 多用户工作区模式（`WORKSPACE_MULTI_USER_MODE=true` 或配置中的
 `workspace.multi_user_mode: true`）确实需要 root——它会创建系统用户
 （`useradd`）、修复属主（`chown`）并在 `/home` 下切换身份
-（`sudo -u <user>`）。多用户部署必须显式回退到 root：
+（`sudo -u <user>`）。
+
+---
+
+### 多用户工作区部署
+
+#### 方式一：一键启动脚本（推荐）
+
+```bash
+# 使用一键脚本启动多用户模式
+./scripts/start-multi-user.sh
+```
+
+脚本会自动：
+- 检测 Docker Compose 版本（v1/v2）
+- 验证配置文件存在
+- 启动多用户模式容器
+- 输出访问地址和状态
+
+#### 方式二：Docker Compose Overlay
+
+```bash
+# 一键启用多用户模式
+./scripts/bootstrap-compose-env.sh
+docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d --wait
+```
+
+docker-compose.multi-user.yml 会自动配置：
+- 容器以 root 运行（`user: "0"`）
+- 显式授权（`OPENACE_ALLOW_ROOT_MULTI_USER=1`）
+- 配置持久化（`OPENACE_CONFIG_DIR=/home/open-ace/.open-ace`）
+
+#### 方式三：手动配置
 
 ```bash
 docker run --user 0 -e WORKSPACE_MULTI_USER_MODE=true \
-  -e OPENACE_ALLOW_ROOT_MULTI_USER=1 ...
+  -e OPENACE_ALLOW_ROOT_MULTI_USER=1 \
+  -e OPENACE_CONFIG_DIR=/home/open-ace/.open-ace ...
 ```
 
-必须同时设置 `--user 0`（或清单中的 `runAsUser: 0`）与
-`OPENACE_ALLOW_ROOT_MULTI_USER=1`，否则入口脚本会以清晰的错误信息退出，
-而不是默默吞掉非 root 多用户部署会遇到的 `useradd`/`chown` 权限失败。
+必须同时设置 `--user 0`（或清单中的 `runAsUser: 0`）、
+`OPENACE_ALLOW_ROOT_MULTI_USER=1` 和 `OPENACE_CONFIG_DIR`，否则入口脚本会
+以清晰的错误信息退出，而不是默默吞掉非 root 多用户部署会遇到的
+`useradd`/`chown` 权限失败。
+
+---
+
+### 多用户模式常见问题
+
+#### 常见错误和解决方案
+
+| 错误信息 | 原因 | 解决方案 |
+|----------|------|----------|
+| `multi-user workspace mode requires root` | 以非 root 运行但启用了多用户模式 | 使用 `./scripts/start-multi-user.sh` 或 overlay 文件 |
+| `OPENACE_ALLOW_ROOT_MULTI_USER=1 is not set` | 以 root 运行但未显式授权 | 使用 `./scripts/start-multi-user.sh` 或设置环境变量 |
+| `工作区加载失败` | iframe 加载失败或超时 | 检查容器日志、验证配置、重启容器 |
+| `docker-compose.multi-user.yml not found` | overlay 文件不存在 | 确保正确克隆了仓库，或从 GitHub 下载文件 |
+
+#### 从单用户迁移到多用户
+
+如果您已有单用户模式部署，可按以下步骤迁移：
+
+1. **停止现有容器**
+   ```bash
+   docker compose down
+   ```
+   > 注意：数据不会丢失，Docker 卷会保留
+
+2. **检查数据卷**
+   ```bash
+   docker volume ls | grep open-ace
+   # 应看到：config-data, postgres-data, workspace-data
+   ```
+
+3. **使用多用户模式启动**
+   ```bash
+   ./scripts/start-multi-user.sh
+   ```
+   或
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+   ```
+
+4. **验证数据完整性**
+   - 登录系统，检查用户和会话数据是否存在
+   - 检查配置是否正确加载
+   - 测试工作区功能
+
+#### 迁移验证清单
+
+- [ ] 数据库数据保留（用户、会话、配置）
+- [ ] Docker 卷数据保留（config-data, workspace-data）
+- [ ] 用户可以正常登录
+- [ ] 工作区可以正常创建和使用
+- [ ] 已有的 AI 会话可以恢复
+
+#### 从 config.json 迁移
+
+如果您之前在 config.json 中设置了 `"multi_user_mode": true`：
+
+1. 推荐使用 docker-compose.multi-user.yml（见上方）
+2. 或在 config.json 中将 `"multi_user_mode"` 设置为 `false`，改用环境变量控制
+
+**注意**：多用户模式需要容器以 root 运行，仅适用于受控环境。生产环境请确保
+设置强密码和安全密钥。
+
+---
 
 ### 初始部署
 
@@ -587,6 +684,39 @@ ps aux | grep python
 # 修复权限
 chmod -R 755 ~/.open-ace/
 ```
+
+### code-server 安装验证
+
+**用途**：code-server 用于本地工作区会话模式下的"打开 VS Code"功能。当用户在本地工作区点击"打开 VS Code"按钮时，系统会启动 code-server 提供 Web 版 VS Code 编辑器。
+
+**验证安装**：
+
+```bash
+# 在 Docker 容器中验证
+docker run --rm <image> which code-server
+docker run --rm <image> code-server --version
+```
+
+**常见问题**：
+
+| 错误信息 | 原因 | 解决方案 |
+|---------|------|----------|
+| `code-server is not installed` | 镜像版本过旧或未正确构建 | 重新构建 Docker 镜像 |
+| `code-server: command not found` | PATH 问题 | 检查 `/usr/bin/code-server` 是否存在 |
+| 安装失败 | 网络问题 | 检查网络连接，考虑使用代理 |
+
+**历史修复记录**：
+
+| Issue/PR | 日期 | 修复内容 |
+|----------|------|----------|
+| #2245 / #2250 | 2026-08-05 | 首次添加 code-server 安装 |
+| #2358 | 2026-08-06 | 修正验证路径（/usr/local/bin → /usr/bin） |
+| #2498 | 2026-08-11 | 移除无效的 `--prefix` 参数 |
+
+**安装方式**：
+- 使用官方安装脚本：`https://code-server.dev/install.sh`
+- Debian 环境下使用 deb 包安装到 `/usr/bin/code-server`
+- 超时设置：连接 15 秒，执行 300 秒
 
 ## 安全注意事项
 

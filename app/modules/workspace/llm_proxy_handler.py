@@ -19,7 +19,15 @@ from app.modules.workspace.model_gateway import get_gateway_planner
 # Issue #1894: SSRF protection
 from app.utils.outbound_url_guard import safe_request
 
+# Issue #3080: Response time tracking
+from app.utils.request_performance import generate_request_id, get_recorder
+
 logger = logging.getLogger(__name__)
+
+# Issue #1995: HTTP status codes that trigger HA failover
+# 502/503/504 are transient gateway errors suitable for failover to another key.
+# 500/501 are server-side bugs that failover cannot fix, so they are excluded.
+RETRY_STATUS_CODES = (401, 403, 429, 502, 503, 504)
 
 # Issue #2547: Stopped sessions cache for request circuit breaking
 # When a session is stopped, we add its ID here to reject subsequent
@@ -713,6 +721,7 @@ def _finalize_upstream_response(
 
     Issue #2184: Added request_path, requested_model, and request_id extraction
     for multi-provider usage recording with proper protocol detection.
+    Issue #3080: Added response time tracking.
     """
     if content_type is None:
         content_type = resp.headers.get("Content-Type", "")
@@ -720,10 +729,38 @@ def _finalize_upstream_response(
     # Extract request_id from response headers
     request_id = resp.headers.get("x-request-id") or resp.headers.get("openai-request-id")
 
+    # Issue #3080: Initialize performance recorder
+    # Generate a unique performance request ID
+    perf_request_id = generate_request_id(session_id)
+
+    # Try to get recorder (may fail if not initialized)
+    recorder = None
+    try:
+        recorder = get_recorder()
+        # Record request start
+        recorder.record_request_start(
+            request_id=perf_request_id,
+            session_id=session_id,
+            tenant_id=None,  # Will be resolved from session
+            tool_name=provider,
+            sample_type="streaming" if "text/event-stream" in content_type else "batch",
+            model=requested_model,
+        )
+    except Exception as e:
+        logger.debug(f"Failed to initialize performance recorder: {e}")
+
     def generate(_resp=resp, _content_type=content_type, _body=body):
         total_content = b""
+        first_chunk = True
         for chunk in _resp.iter_content(chunk_size=4096):
             total_content += chunk
+            # Issue #3080: Record first response on first chunk
+            if first_chunk and recorder:
+                try:
+                    recorder.record_first_response(perf_request_id)
+                except Exception as e:
+                    logger.debug(f"Failed to record first response: {e}")
+                first_chunk = False
             yield chunk
         try:
             _record_llm_usage(
@@ -737,8 +774,20 @@ def _finalize_upstream_response(
                 request_id=request_id,
                 model=requested_model,
             )
+            # Issue #3080: Record request complete
+            if recorder:
+                try:
+                    recorder.record_request_complete(perf_request_id, status="success")
+                except Exception as e:
+                    logger.debug(f"Failed to record request complete: {e}")
         except Exception as exc:
             logger.error("Failed to record LLM usage: %s", exc)
+            # Issue #3080: Record request failure
+            if recorder:
+                try:
+                    recorder.record_request_complete(perf_request_id, status="failed")
+                except Exception as e:
+                    logger.debug(f"Failed to record request failure: {e}")
 
     response_headers = {}
     for key, value in resp.headers.items():
@@ -766,8 +815,21 @@ def _finalize_upstream_response(
             request_id=request_id,
             model=requested_model,
         )
+        # Issue #3080: Record request complete for non-streaming
+        if recorder:
+            try:
+                recorder.record_first_response(perf_request_id)
+                recorder.record_request_complete(perf_request_id, status="success")
+            except Exception as e:
+                logger.debug(f"Failed to record performance: {e}")
     except Exception as exc:
         logger.error("Failed to record LLM usage: %s", exc)
+        # Issue #3080: Record request failure
+        if recorder:
+            try:
+                recorder.record_request_complete(perf_request_id, status="failed")
+            except Exception as e:
+                logger.debug(f"Failed to record request failure: {e}")
     return Response(
         content,
         status=resp.status_code,
@@ -1243,36 +1305,26 @@ def handle_llm_proxy_request(
     else:
         session_id = token_session_id
 
-        # Issue #2464: If using webui aggregate session, check for user's active session
-        # When user creates a session via /work, route WebUI messages to that session
+        # Issue #3025: Remove active-session fallback for webui:* tokens.
+        # Previously, when a webui:* aggregate token lacked X-Session-Id, the code
+        # queried the user's active sessions and picked the most recently updated
+        # non-webui session. This caused cross-session data contamination: requests
+        # from one workspace were written into an unrelated session, inflating its
+        # message/request/token counts while the intended session remained empty.
+        #
+        # Now, the session_id stays as the webui:* aggregate session. The existing
+        # auto-create logic in _record_llm_usage (lines ~464-479) handles creating
+        # the aggregate session if needed. When upstream sends X-Session-Id, the
+        # header-based routing above (lines ~1128-1247) takes precedence.
         if session_id.startswith("webui:"):
-            # Issue #2727: Log WARNING for webui:* fallback behavior
             logger.warning(
-                "Using webui aggregate session without X-Session-Id header, "
-                "fallback to user's active session (user_id=%s, tenant_id=%s)",
+                "Using webui aggregate session without X-Session-Id header; "
+                "requests will be recorded to the aggregate session "
+                "(user_id=%s, tenant_id=%s). "
+                "Upstream should send X-Session-Id to route to a specific session.",
                 user_id,
                 tenant_id,
             )
-            try:
-                from app.modules.workspace.session_manager import get_session_manager
-
-                sm = get_session_manager()
-                active_sessions = sm.get_active_sessions(user_id=user_id, tenant_id=tenant_id)
-                # Filter out webui aggregate sessions, get the most recent non-webui session
-                # get_active_sessions already returns sessions sorted by updated_at DESC
-                non_webui_sessions = [
-                    s for s in active_sessions if not s.session_id.startswith("webui:")
-                ]
-                if non_webui_sessions:
-                    # First result is the most recently updated (SQL ORDER BY updated_at DESC)
-                    session_id = non_webui_sessions[0].session_id
-                    logger.debug(
-                        "Using user's active session %s instead of webui aggregate",
-                        session_id[:8],
-                    )
-            except Exception as e:
-                # On any error, fall back to webui aggregate session
-                logger.warning("Failed to get active sessions, using webui aggregate: %s", e)
 
     # Issue #2547: Circuit breaking for stopped sessions
     # Reject requests from orphan processes that may still be retrying
@@ -1472,7 +1524,18 @@ def handle_llm_proxy_request(
                 exclude_key_ids=exclude_key_ids,
             )
 
-        if not key_result:
+        # Issue #2466: a resolver that hands back a key we already failed over
+        # away from means the unexcluded pool is empty — retrying it would spin
+        # this loop forever. Treat it exactly like "no key left".
+        if not key_result or key_result[2] in exclude_key_ids:
+            if key_result:
+                logger.error(
+                    "LLM proxy: resolver returned excluded key_id=%s "
+                    "(attempt=%d, excluded=%d); treating failover pool as exhausted",
+                    key_result[2],
+                    attempt,
+                    len(exclude_key_ids),
+                )
             if allocated_rate_limited_key_ids:
                 return (
                     jsonify(
@@ -1764,7 +1827,9 @@ def handle_llm_proxy_request(
                     exclude_key_ids.add(key_id)
                     continue
 
-                if resp.status_code in (401, 403, 429):
+                # Issue #1995: Retry on auth errors (401/403/429) and gateway errors (502/503/504)
+                # Gateway errors are transient issues where another key may succeed.
+                if resp.status_code in RETRY_STATUS_CODES:
                     exclude_key_ids.add(key_id)
                     continue
 

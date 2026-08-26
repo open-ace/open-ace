@@ -135,8 +135,45 @@ describe('RuntimeIsolationPanel', () => {
     rerender(<RuntimeIsolationPanel workflow={workflow(spaceSnap)} />);
     expect(screen.getByText('2 CPU')).toBeInTheDocument();
     rerender(<RuntimeIsolationPanel workflow={workflow(maxSnap)} />);
-    // "max" means no limit → should show '—'
-    expect(screen.queryByText('CPU')).toBeInTheDocument();
+    // "max" + every other limit unset → no limit pill to show; the collapsed
+    // header now states that explicitly instead of rendering dash pills.
+    expect(screen.queryByText('CPU')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('No resource limits set (policy file loaded, but all limits are unset)')
+    ).toBeInTheDocument();
+  });
+
+  it('states explicitly when a loaded policy has no limits configured (#2985)', () => {
+    // Single-user dev deployments load agent-launcher.conf without any
+    // agent_task_* limits: the snapshot exists with zeros. Six dash pills
+    // read as broken data — the header must explain what happened.
+    const noLimitsSnap = JSON.stringify({
+      provider: 'legacy_posix',
+      policy_configured: true,
+      capabilities: ['cpu_mem_pids_time_quota', 'filesystem_acl'],
+      limits: {
+        memory_max_bytes: 0,
+        pids_max: 0,
+        cpu_max: '',
+        wall_clock_limit: 0,
+        ephemeral_storage_limit: 0,
+        inode_limit: 0,
+      },
+      enforced: { cpu: true, memory: true },
+    });
+    render(<RuntimeIsolationPanel workflow={workflow(noLimitsSnap)} />);
+    expect(
+      screen.getByText('No resource limits set (policy file loaded, but all limits are unset)')
+    ).toBeInTheDocument();
+    // The distinct "policy not configured" notice must NOT appear — the file
+    // WAS loaded, only the limits are unset.
+    expect(screen.queryByText('Policy not configured')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
+    // Collapsed summary pill + expanded body notice both state it.
+    expect(
+      screen.getAllByText('No resource limits set (policy file loaded, but all limits are unset)')
+        .length
+    ).toBe(2);
   });
 
   it('reveals capabilities and detailed limit cards when expanded', () => {

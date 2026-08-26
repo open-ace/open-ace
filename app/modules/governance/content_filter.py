@@ -532,14 +532,58 @@ class ContentFilter:
     _DATE_LIKE = re.compile(r"\+?\d{4}([-\s/.]\d{1,2}){0,2}\Z")
 
     @classmethod
-    def _looks_like_date(cls, value: str) -> bool:
-        """True if *value* is a date (YYYY-MM-DD / YYYY-MM), not a phone number.
+    def _is_compact_date(cls, value: str) -> bool:
+        """Check if 8-digit string is a valid YYYYMMDD compact date.
 
-        International-phone false positives on dates like 2026-08-12 (#2499) are
-        dropped; real phones (which don't follow a 4-digit-year + short-groups
-        shape) are unaffected.
+        Used to exclude compact dates from international phone number detection.
+        Only returns True for valid dates; invalid dates (wrong month/day/year)
+        return False so they remain as phone number candidates.
+
+        Args:
+            value: String to check (should be stripped before calling).
+
+        Returns:
+            True if value is a valid compact date, False otherwise.
         """
-        return bool(cls._DATE_LIKE.match(value.strip()))
+        # Fast path: must be exactly 8 digits
+        if len(value) != 8 or not value.isdigit():
+            return False
+
+        # Parse year, month, day
+        year = int(value[:4])
+        month = int(value[4:6])
+        day = int(value[6:8])
+
+        # Year range validation (1900-2100 covers reasonable business dates)
+        if not (1900 <= year <= 2100):
+            return False
+
+        # Month validation
+        if not (1 <= month <= 12):
+            return False
+
+        # Day validation with month and leap year awareness
+        days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        # Leap year: divisible by 4 but not 100, or divisible by 400
+        is_leap = (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0)
+        if is_leap and month == 2:
+            max_day = 29
+        else:
+            max_day = days_in_month[month - 1]
+
+        return 1 <= day <= max_day
+
+    @classmethod
+    def _looks_like_date(cls, value: str) -> bool:
+        """True if *value* is a date (YYYY-MM-DD / YYYY-MM / YYYYMMDD), not a phone number.
+
+        International-phone false positives on dates like 2026-08-12 (#2499) and
+        compact dates like 20260818 (#2828) are dropped; real phones (which don't
+        follow a 4-digit-year + short-groups shape or valid date ranges) are
+        unaffected.
+        """
+        stripped = value.strip()
+        return bool(cls._DATE_LIKE.match(stripped)) or cls._is_compact_date(stripped)
 
     def check_content(
         self,

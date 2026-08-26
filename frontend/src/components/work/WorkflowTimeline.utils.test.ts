@@ -41,6 +41,7 @@ describe('WorkflowTimeline.utils', () => {
       main_session_id: 'main-session',
       review_session_id: 'review-session',
       test_session_id: 'test-session',
+      verification_session_id: 'verification-session',
     };
 
     expect(getWorkflowSessionIdForMilestone('pr_updated', workflow)).toBe('main-session');
@@ -48,6 +49,9 @@ describe('WorkflowTimeline.utils', () => {
     expect(getWorkflowSessionIdForMilestone('pr_reviewed', workflow)).toBe('review-session');
     expect(getWorkflowSessionIdForMilestone('plan_reviewed', workflow)).toBe('review-session');
     expect(getWorkflowSessionIdForMilestone('tests_run', workflow)).toBe('test-session');
+    expect(getWorkflowSessionIdForMilestone('acceptance_verification', workflow)).toBe(
+      'verification-session'
+    );
   });
 
   it('classifies AI-backed and system-only milestone cards', () => {
@@ -63,6 +67,7 @@ describe('WorkflowTimeline.utils', () => {
       'pr_updated',
       'ci_repair_applied',
       'conflicts_resolved',
+      'acceptance_verification',
     ]) {
       expect(isAiMilestoneType(type), type).toBe(true);
     }
@@ -103,6 +108,28 @@ describe('WorkflowTimeline.utils', () => {
     }));
     expect(getActivityHostMilestoneId(betweenMilestones, 2, 'developing')).toBe('current');
     expect(getActivityHostMilestoneId(betweenMilestones, 2, 'completed')).toBeNull();
+  });
+
+  it('hosts the in_progress acceptance milestone during verification (#3003)', () => {
+    const milestones = [
+      {
+        milestone_id: 'merged',
+        milestone_type: 'merged',
+        status: 'completed',
+        dev_round: 1,
+      },
+      {
+        milestone_id: 'verifying',
+        milestone_type: 'acceptance_verification',
+        status: 'in_progress',
+        dev_round: 1,
+      },
+    ];
+    expect(getActivityHostMilestoneId(milestones, 1, 'verification_pending')).toBe('verifying');
+    // Without a live row (e.g. the merge-SHA retry loop), verification must
+    // NOT fall back to the previous phase's card — no host at all.
+    const noLiveRow = milestones.map((m) => ({ ...m, status: 'completed' }));
+    expect(getActivityHostMilestoneId(noLiveRow, 1, 'verification_pending')).toBeNull();
   });
 
   it('never mounts AI activity on system-only cards or idle workflow phases', () => {

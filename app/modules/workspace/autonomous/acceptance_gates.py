@@ -285,9 +285,13 @@ def _is_repo_or_service_module(path: str) -> bool:
     """Whether a path is a repository/service production module.
 
     The call-chain gate can't see the full pre-change tree, so it treats every
-    repo/service module in the diff as a candidate "new module" and requires a
-    production caller to also be in the diff — a genuinely new module normally
-    lands together with at least one caller in the same PR.
+    ADDED repo/service module in the diff as a candidate "new module" and
+    requires a production caller to also be in the diff — a genuinely new
+    module normally lands together with at least one caller in the same PR.
+    A MODIFIED module is exempt: its callers already exist outside the diff,
+    and flagging internal edits to established modules as "dead code" is a
+    false positive (batch PRs routinely modify service modules without
+    touching their callers).
     """
     return bool(_REPO_OR_SERVICE_RE.match(path))
 
@@ -302,12 +306,23 @@ def call_chain_gate(
 ) -> list[ItemVerdict]:
     """New repository/service modules must have a production caller in the diff.
 
-    REJECTED if a new repo/service module appears with only test references in
-    the changed tree; CONFIRMED if a non-test changed file imports it;
-    INDETERMINATE if no repo/service module changed.
+    "New" means added (or renamed into) ``app/repositories|services/`` in the
+    base..merge diff; modified modules are exempt (see
+    ``_is_repo_or_service_module``). REJECTED if a new repo/service module
+    appears with only test references in the changed tree; CONFIRMED if a
+    non-test changed file imports it; silent (no verdicts) if no repo/service
+    module was added.
     """
-    changed = gh.get_changed_files(base=base_sha, head=merge_sha) or []
-    new_modules = [p for p in changed if _is_repo_or_service_module(p)]
+    entries = gh.get_changed_files_with_status(base=base_sha, head=merge_sha) or []
+    status_by_path: dict[str, str] = {}
+    for status, path in entries:
+        status_by_path[path] = status
+    changed = list(status_by_path)
+    new_modules = [
+        path
+        for path, status in status_by_path.items()
+        if status in ("A", "R") and _is_repo_or_service_module(path)
+    ]
     if not new_modules:
         # No repo/service modules in the diff: gate is not applicable (silent).
         return []

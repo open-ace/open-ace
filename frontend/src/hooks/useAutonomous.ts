@@ -11,6 +11,10 @@ import type { CreateWorkflowRequest, WorkflowListParams } from '@/api/autonomous
 export interface SessionMessage {
   role: string;
   content: string;
+  /** ISO timestamp (null when unknown) — #3000 viewer display */
+  timestamp?: string | null;
+  /** Milestone attribution ('' when untagged) — #3000 */
+  milestone_id?: string;
 }
 
 /** Session detail returned by milestone session API */

@@ -35,6 +35,7 @@ export {
   useUpdateQuota,
   useAuditLogs,
   useFilterRules,
+  useFilterStats,
   useCreateFilterRule,
   useUpdateFilterRule,
   useDeleteFilterRule,
@@ -51,6 +52,10 @@ export {
   useUpdatePolicyRule,
   useTogglePolicyRule,
   usePolicyDecisions,
+  useSensitiveKeywords,
+  useCreateSensitiveKeyword,
+  useUpdateSensitiveKeyword,
+  useDeleteSensitiveKeyword,
 } from './useAdmin';
 export { useMyUsage } from './useReport';
 export {
@@ -67,6 +72,8 @@ export {
   useAnomalyTrend,
   useDataRange,
   useUsageForecast,
+  useEnterpriseReport,
+  useEfficiencyMetrics,
 } from './useAnalysis';
 export {
   useSessions,
@@ -139,3 +146,13 @@ export {
   AUDIT_CATEGORIES_FALLBACK,
 } from './useAuditActions';
 export type { AuditActionItem, AuditCategory, AuditActionsResponse } from '@/types';
+
+// Safe workspace state hook (Issue #2953)
+export {
+  useSafeWorkspaceState,
+  validateActiveTabId,
+  validateTabsOrder,
+} from './useSafeWorkspaceState';
+
+// Admin tenant selection hook (Issue #2841)
+export { useAdminTenant } from './useAdminTenant';

@@ -1,6 +1,6 @@
 # AI 自主开发
 
-本文面向使用、部署和维护 Open ACE AI 自主开发功能的用户与开发者，说明当前实现的功能边界、工作流生命周期、三会话设计、CI 自愈、隔离执行、用量统计和前端可观测性。
+本文面向使用、部署和维护 Open ACE AI 自主开发功能的用户与开发者，说明当前实现的功能边界、工作流生命周期、会话线设计、CI 自愈、合并后验收核对、隔离执行、用量统计和前端可观测性。
 
 > 本文描述的是仓库当前实现。修改自主开发代码时，应同时更新本文、英文版文档和相应回归测试。
 
@@ -16,7 +16,8 @@ AI 自主开发把一条需求或一个 GitHub Issue 转换为可审计的软件
 6. 独立审查代码，按意见修复并复审；
 7. 生成最终报告；
 8. 等待并检查 GitHub CI，必要时自动修复；
-9. 处理主分支同步或合并冲突，合并 PR，并清理分支和工作树。
+9. 处理主分支同步或合并冲突，合并 PR，并清理分支和工作树；
+10. 合并后由无凭据、只读的独立验收 Agent 在合并后的 main SHA 上核对验收清单；confirmed 才自动关闭 Issue，rejected/indeterminate 暂停等待人工复核。
 
 工作流的目标不是让一个 Agent 连续执行一段不可见的脚本，而是把关键决策、AI 会话、代码变更、测试、审查、重试和失败原因记录为可恢复的里程碑。
 
@@ -58,7 +59,7 @@ AI 自主开发把一条需求或一个 GitHub Issue 转换为可审计的软件
 
 - **查看定义/方案/审查/报告**：打开持久化内容；
 - **查看代码变更**：按里程碑或整个 PR 查看 diff 和增删统计；
-- **查看会话**：打开该里程碑所属的稳定会话线；
+- **查看会话**：打开该里程碑所属的稳定会话线（完整 transcript，含时间戳与 Markdown 渲染）；
 - **取消轮次**：取消目标里程碑之后的步骤，进入 `wait`，等待用户反馈；
 - **从此处分叉**：复制分叉点之前的历史，创建独立工作流和工作树；
 - **反馈后继续**：把用户反馈记录为新里程碑，再回到对应流程。
@@ -71,9 +72,10 @@ AI 自主开发把一条需求或一个 GitHub Issue 转换为可审计的软件
 
 - 当前阶段、状态、开发轮次和错误；
 - 项目、分支、worktree、PR 和批次信息；
-- `main_session_id`、`review_session_id`、`test_session_id`；
+- `main_session_id`、`review_session_id`、`test_session_id`、`verification_session_id`；
 - Token、输入/输出 Token 和请求数汇总；
 - CI 修复次数、失败指纹和诊断状态；
+- 验收核对状态（`verification_status`）、尝试次数、Issue 验收快照哈希和人工改判上下文；
 - 暂停、超时、用户反馈和恢复上下文。
 
 ### 3.2 Milestone
@@ -81,6 +83,8 @@ AI 自主开发把一条需求或一个 GitHub Issue 转换为可审计的软件
 `workflow_milestones` 是时间线中的审计单元。一个里程碑只描述一次明确事件，例如方案生成、方案审查、实现、测试、PR 审查、CI 诊断或冲突修复。
 
 里程碑保存自己的增量用量 `phase_*`，以及会话、内容、提交、diff 统计和错误。它不是工作流累计用量的副本。
+
+验收核对里程碑有自己的行生命周期：verifier 启动时先创建 in_progress 的 “Acceptance verification: running” 行并承载实时活动，结算时在同一行上写入终态结论，而不是另起新行。
 
 ### 3.3 Agent session
 
@@ -91,10 +95,12 @@ AI 自主开发把一条需求或一个 GitHub Issue 转换为可审计的软件
 正常阶段顺序为：
 
 ```text
-preparation → planning → development → pr_review → report → merge
+preparation → planning → development → pr_review → report → merge → acceptance_verification
 ```
 
 `wait` 是用户反馈等待阶段，不属于线性 `PHASE_ORDER`；它可以从取消轮次或反馈流程进入，再返回合适的业务阶段。
+
+`acceptance_verification` 是合并后的独立验收核对阶段（#2335，默认启用，可通过配置 `autonomous.acceptance_verification_enabled` 关闭）。verdict 为 confirmed、或人工把 rejected/indeterminate 改判为 confirmed 后，工作流才进入 `completed`；关闭该功能时合并后直接完成。
 
 主要状态：
 
@@ -109,25 +115,27 @@ preparation → planning → development → pr_review → report → merge
 | `reporting` | 生成最终报告 |
 | `waiting` | 等待用户反馈 |
 | `merging` | CI 检查、修复、同步和合并 |
-| `paused` | 人工暂停、应用配额暂停或上游硬配额暂停 |
+| `verification_pending` | 合并后的独立验收核对进行中 |
+| `paused` | 人工暂停、应用配额暂停、上游硬配额暂停或验收暂停（rejected/indeterminate/重试耗尽） |
 | `planning_timeout` | 方案阶段超时，等待延时或重试 |
-| `completed` | PR 已合并且收尾完成 |
+| `completed` | PR 已合并、收尾完成，且（启用验收时）验收 confirmed 后 Issue 已关闭 |
 | `failed` | 自动恢复边界已耗尽，需要人工处理 |
 | `cancelled` | 用户停止或批次级取消 |
 
 持久化状态是恢复依据。进程重启后不得仅依赖内存中的 Agent、锁或 SSE 连接来判断下一步。
 
-## 5. 严格的三会话设计
+## 5. 稳定的会话线设计
 
-每个工作流只维护三条稳定会话线：
+每个工作流只维护四条稳定会话线：
 
 | 会话线 | 持久化字段 | 覆盖里程碑 |
 |--------|------------|------------|
 | `main` | `main_session_id` | 方案生成、方案收敛、开发、PR 修复、最终总结和 CI 修复 |
 | `review` | `review_session_id` | 方案审查和 PR 代码审查 |
 | `test` | `test_session_id` | 各开发轮次的测试与验证 |
+| `verification` | `verification_session_id` | 合并后的独立验收核对 |
 
-三条线在多个里程碑间通过 resume 复用，目的是：
+这些会话线在多个里程碑间通过 resume 复用，目的是：
 
 - 让实现 Agent 保留需求、方案和已做改动的连续上下文；
 - 让审查 Agent 独立于实现者，避免同一上下文自我确认；
@@ -144,11 +152,14 @@ preparation → planning → development → pr_review → report → merge
 4. 把新 provider 会话重新绑定到同一个 Open ACE 会话行；
 5. 保留失败尝试已经产生的用量。
 
-因此上下文恢复不会创建“第四条会话线”。任何修改都必须保持 `main / review / test` 三字段是工作流的唯一稳定拓扑。
+因此上下文恢复不会创建新的会话线。任何修改都必须保持 `main / review / test / verification` 四字段是工作流的唯一稳定拓扑。
 
 ## 6. 调度、并发和批处理
 
-`AutonomousScheduler` 周期性扫描活动工作流，最多并行推进 3 个工作流。这是模块级硬上限（`MAX_CONCURRENT_WORKFLOWS = 3`，见 `app/services/autonomous_scheduler.py`），并非运维可调项，修改需改动代码。
+`AutonomousScheduler` 周期性扫描活动工作流，并发上限分两层：
+
+- **全局上限**：所有用户合计同时推进的工作流数，默认 10（`MAX_CONCURRENT_WORKFLOWS`，见 `app/services/autonomous_scheduler.py`），可用 `/etc/openace/agent-launcher.conf` 的 `agent_max_concurrent_workflows` 覆盖；调度器每个周期重新读取配置，修改后无需重启服务。
+- **每用户上限**：单个用户同时推进的工作流数 = 其所属租户的 `max_sessions_per_user`（默认 5），在调度选择时强制，与创建工作流时的并发检查口径一致。
 
 调度同时执行三层互斥：
 
@@ -256,6 +267,7 @@ CI 修复提示要求 Agent 先查看 `.github/workflows/`、`package.json`、`M
 | 上下文溢出 | maximum context/input length | 在同一稳定会话线上换新 provider transcript 重试 |
 | CI 证据不足 | Actions 日志尚未生成或无权限 | 等待诊断；达到上限后失败并提示检查权限 |
 | 仓库完整性异常 | `.git` 内容、inode、所有者或 ACL 被篡改 | fail-closed，退出码 68，要求人工检查 |
+| 验收 verifier 基础设施失败 | 运行器失败、验收输出不可解析 | 同阶段自动重试，最多尝试 3 次（确定性解析失败最多 2 次）；耗尽后暂停等待人工 |
 
 人工暂停、应用配额暂停和上游硬配额暂停虽然都使用 `paused`，但通过错误原因区分。只有应用配额暂停允许自动恢复；人工暂停和上游硬配额暂停必须由用户决定何时继续。
 
@@ -306,6 +318,8 @@ CI 修复提示要求 Agent 先查看 `.github/workflows/`、`package.json`、`M
 
 runner 对 provider 的累计计数维护基线，只保存本次增量。上下文恢复和 API 重试产生的真实用量也必须合并到当前里程碑。
 
+验收核对用量记在验收里程碑自己的 `phase_*` 上：跨尝试复用 `verification` 会话线时以已记录用量为基线（`prior_usage`）折算，只保存本次增量；运行中的验收里程碑行同时接收实时用量写入。
+
 ### 12.2 AI Activity
 
 AI Activity 通过 SSE 实时传递 tool use、assistant 文本、usage、重试和系统事件。它是运行可观测性，不是持久化审计日志：
@@ -318,7 +332,7 @@ AI Activity 通过 SSE 实时传递 tool use、assistant 文本、usage、重试
 - 长时间无活动才进入 stale 提示，不能把正常的大模型首包等待过早标为故障；
 - 每个里程碑最多显示最近活动，完整会话从“查看会话”进入。
 
-AI Activity 只挂在真正运行 Agent 的 planning、development、pr_review，以及明确的 merge 修复/冲突里程碑上。排队、准备、报告和用户等待阶段不能伪装成 AI 正在运行。
+AI Activity 只挂在真正运行 Agent 的里程碑上：planning、development、pr_review 的 AI 里程碑、明确的 merge 修复/冲突里程碑，以及验收核对里程碑（工作流处于 `verification_pending` 时，运行中的验收里程碑就是活动宿主，实时用量增长记在该行上）。排队、准备、报告和用户等待阶段不能伪装成 AI 正在运行。里程碑状态在调度轮询间隔之外变化（例如运行中验收行定稿）时，后端发送 `milestone_updated` 事件让时间线立即刷新。
 
 ## 13. 时间线用户体验约束
 
@@ -330,6 +344,8 @@ AI Activity 只挂在真正运行 Agent 的 planning、development、pr_review�
 - 里程碑操作按钮可以换行；
 - 方案定稿及其他 AI 里程碑显示自己的 Token、请求数和会话；没有新调用时明确标记“无新增 AI 用量”；
 - 系统里程碑没有 AI 会话时不展示误导性的 0 Token；
+- 验收里程碑与其它 AI 里程碑一样显示 Token、请求数和会话按钮；“验收报告”查看按钮使用 warning 样式变体（#2995）；
+- 会话查看器展示该里程碑所属稳定会话线的完整 transcript：消息带时间戳，assistant/user 内容以 Markdown 渲染，超长消息默认折叠可展开，超过截断上限时明确标注；
 - 全屏内容和 diff modal 内部可滚动，标题栏不因全屏按钮产生额外空行；
 - 自动展开跟随最新活动里程碑，但用户手动折叠或查看旧里程碑后不抢夺焦点；
 - 自动滚动仅在用户仍位于底部附近时启用。
@@ -353,12 +369,14 @@ AI Activity 只挂在真正运行 Agent 的 planning、development、pr_review�
 | `OPENACE_AUTONOMOUS_AGENT_ACCOUNT` | `openace-agent` | 隔离 Agent 账户 |
 | `OPENACE_RUN_AS` | `/usr/local/bin/openace-run-as` | 隔离启动器 |
 | `OPENACE_AGENT_GUARD_BIN` | `/usr/local/libexec/openace-agent-bin` | 隔离环境的受控命令目录 |
+| `agent_max_concurrent_workflows` | `10` | agent-launcher.conf：调度器全局并发上限，每个调度周期重读（重跑 cgroup 脚本会覆盖该值） |
+| `autonomous.acceptance_verification_enabled` | `true` | config.json `autonomous` 节：合并后独立验收核对开关 |
 
 本文档其他位置引用的内部限值同样是模块级常量，并非运维可调项：
 
 | 常量 | 默认值 | 来源 | 用途 |
 |------|--------|------|------|
-| `MAX_CONCURRENT_WORKFLOWS` | `3` | `app/services/autonomous_scheduler.py` | 调度器同时推进的工作流数（另见 §6） |
+| `MAX_CONCURRENT_WORKFLOWS` | `10` | `app/services/autonomous_scheduler.py` | 调度器全局并发默认值，可被 agent-launcher.conf 的 `agent_max_concurrent_workflows` 覆盖（另见 §6） |
 | `MAX_CI_REPAIR_ATTEMPTS` | `5` | `app/modules/workspace/autonomous/orchestrator.py` | 合并阶段自动 CI 修复次数（§9.2） |
 | `MAX_CI_DIAGNOSTICS_ATTEMPTS` | `6` | `app/modules/workspace/autonomous/orchestrator.py` | 失败日志暂不可用时的调度轮询上限（§9.2） |
 | `MAX_PRE_COMMIT_CONVERGENCE_PASSES` | `3` | `app/modules/workspace/autonomous/orchestrator.py` | 隔离 `pre-commit` 收敛轮数（§9.2） |
@@ -395,7 +413,7 @@ sudo bash scripts/setup-cgroup-v2.sh --memory 4G --pids 1024 --cpu 4
 | `--pids` | `512` | 每个 agent 任务最大进程数 |
 | `--cpu` | `2` | 每个 agent 任务可用 CPU 核数 |
 | `--cgroup-enabled` | `on` | 强制启用；`auto` 仅在 cgroup 可写时启用；`off` 禁用 |
-| `--concurrency` | `3` | 调度器同时推进的工作流数 |
+| `--concurrency` | `10` | 写入 conf 的调度器全局并发上限（`agent_max_concurrent_workflows`） |
 | `--wall-clock` | `3600` | 单次任务墙钟超时（秒） |
 | `--conf` | `/etc/openace/agent-launcher.conf` | 配置文件路径 |
 | `--cgroup-root` | `/sys/fs/cgroup/openace-agent` | 父 cgroup 路径 |
@@ -438,9 +456,20 @@ sudo rm /etc/systemd/system/openace-cgroup-setup.service
 | `GET /api/autonomous/workflows/:id/timeline` | 查询里程碑 |
 | `POST /api/autonomous/workflows/:id/milestones/:mid/cancel` | 取消轮次并等待反馈 |
 | `POST /api/autonomous/workflows/:id/milestones/:mid/fork` | 从里程碑分叉 |
+| `GET /api/autonomous/workflows/:id/forks` | 查询分叉工作流 |
+| `GET /api/autonomous/workflows/:id/milestones/:mid/session` | 里程碑会话详情（完整稳定会话线 transcript） |
+| `GET /api/autonomous/workflows/:id/milestones/:mid/diff` | 里程碑代码变更 diff |
+| `POST /api/autonomous/workflows/:id/resume-with-feedback` | 反馈后继续 |
+| `POST /api/autonomous/workflows/:id/verification_override` | 验收暂停人工改判为 confirmed |
+| `POST /api/autonomous/workflows/:id/extend-planning-timeout` | 延长方案阶段超时 |
+| `POST /api/autonomous/workflows/:id/done` | 标记需求完成并收尾 |
 | `GET /api/autonomous/workflows/:id/events/stream` | SSE 活动流 |
 | `GET /api/autonomous/workflows/:id/pr-diff` | PR diff |
 | `GET /api/autonomous/workflows/:id/pr-stats` | PR 变更统计 |
+| `DELETE /api/autonomous/workflows/:id` | 删除工作流 |
+| `DELETE /api/autonomous/batches/:id` | 删除批次 |
+
+`GET /tools` 与 `GET /models` 为基础设施端点，不在本概览内。
 
 完整字段和返回结构以 [API 文档](API.md) 与 `app/routes/autonomous.py` 为准。
 
@@ -448,9 +477,12 @@ sudo rm /etc/systemd/system/openace-cgroup-setup.service
 
 | 文件 | 职责 |
 |------|------|
-| `app/routes/autonomous.py` | API、权限、暂停/恢复/停止、SSE、里程碑操作 |
+| `app/routes/autonomous.py` | API、权限、暂停/恢复/停止、SSE、里程碑操作、验收人工改判 |
 | `app/services/autonomous_scheduler.py` | 调度、配额门、并发、批次和分布式锁 |
-| `app/modules/workspace/autonomous/orchestrator.py` | 状态机、提示词、三会话、CI 修复、冲突和合并 |
+| `app/modules/workspace/autonomous/orchestrator.py` | 状态机、提示词、会话线、CI 修复、冲突和合并 |
+| `app/modules/workspace/autonomous/phases/` | 已迁移阶段处理器（development、pr_review、merge、acceptance_verification）与注册表 |
+| `app/modules/workspace/autonomous/phase_host.py` | 阶段处理器依赖的宿主能力协议 |
+| `app/modules/workspace/autonomous/acceptance_snapshot.py` / `acceptance_gates.py` / `acceptance_verdicts.py` | 验收清单快照、确定性机械门与逐项判定聚合 |
 | `app/modules/workspace/autonomous/agent_runner.py` | CLI 适配、会话恢复、活动与用量采集 |
 | `app/modules/workspace/autonomous/github_ops.py` | 受控 Git/GitHub 操作 |
 | `app/repositories/autonomous_repo.py` | Workflow、Milestone、锁和用量持久化 |
@@ -465,10 +497,11 @@ sudo rm /etc/systemd/system/openace-cgroup-setup.service
 
 ### 17.1 会话和用量
 
-- 三条稳定会话线跨多个里程碑 resume；
+- 四条稳定会话线跨多个里程碑 resume；
 - 上下文溢出后仍是同一稳定行；
 - API 重试和上下文恢复用量不丢失、不重复；
 - 方案定稿、测试、审查、CI 修复的会话和用量展示；
+- 验收里程碑记录自己的会话与用量（运行中行 → 同行定稿）；
 - `thinking_tokens` 和空 activity 不进入 UI。
 
 ### 17.2 CI 修复
@@ -511,7 +544,16 @@ sudo rm /etc/systemd/system/openace-cgroup-setup.service
 - 里程碑顺序相同时间戳时稳定；
 - 操作按钮换行；
 - 内容/diff modal 全屏滚动；
+- 会话查看器时间戳、Markdown 渲染与超长消息折叠/截断；
 - 用户手动折叠、旧里程碑查看和自动滚动互不争抢。
+
+### 17.6 验收核对
+
+- 运行中验收里程碑生命周期：启动创建/同尝试复活/旧尝试清扫为 interrupted、结算同行定稿；
+- 上游配额在验收中途暂停：已消耗用量先写入运行中验收行，再终止该行；
+- rejected/indeterminate 暂停与人工 override 改判 confirmed（`verified_by` 记录人工身份）；
+- 基础设施重试与确定性解析失败重试上限；
+- settle 时把 verifier 会话未打标消息归入验收里程碑。
 
 建议优先运行：
 
@@ -519,6 +561,8 @@ sudo rm /etc/systemd/system/openace-cgroup-setup.service
 pytest -q tests/issues/716 tests/unit/test_autonomous_ci_guardrails.py
 pytest -q tests/unit/test_autonomous_timeline_session_identity.py
 pytest -q tests/unit/test_upstream_quota_pause.py
+pytest -q tests/unit/test_verification_usage_wiring_2994.py
+pytest -q tests/unit/test_milestone_session_route_3000.py
 pytest -q tests/issues/1395
 cd frontend && npm test -- --run WorkflowTimeline
 ```
@@ -540,6 +584,9 @@ cd frontend && npm test -- --run WorkflowTimeline
 | `.git` 完整性失败 | 核对注册表、ACL、worktree 指针、inode 和中断前后日志，不要直接删注册表 |
 | 暂停后自动恢复 | 检查错误原因是否错误使用应用配额前缀 |
 | modal 全屏无法滚动 | 检查 modal body、内容容器的 `min-height: 0` 和内部 `overflow: auto` |
+| 验收里程碑没有 Token/会话 | 查 `verification_session_id` 与该里程碑 `phase_*` 是否已写入 |
+| 运行中验收卡没有 AI 活动 | 状态须为 `verification_pending` 且存在 in_progress 验收里程碑；再查 SSE/keepalive |
+| 会话详情消息不全 | 查 settle 时未打标消息回扫与稳定会话 tracking id |
 
 ## 19. 已知边界
 
@@ -549,3 +596,4 @@ cd frontend && npm test -- --run WorkflowTimeline
 - pending 的仓库检查等待不消耗 CI 修复次数；无 pending 的明确策略阻塞会暂停，等待用户审批、解除 draft 或调整仓库规则后人工恢复。
 - 上游 provider 的错误文案可能变化；新增适配时必须用零 Token 错误信封和结构化 runner 结果约束匹配范围。
 - 隔离执行依赖 Linux ACL 和受控 sudoers；不满足这些条件时不应降级为以项目所有者身份执行。
+- 验收结论由确定性机械门与逐项判定聚合产生，不是一次主观总体判断；人工 override 会把人工身份记入 `verified_by`。

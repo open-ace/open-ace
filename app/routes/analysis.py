@@ -304,6 +304,35 @@ def api_user_segmentation():
     return jsonify(result)
 
 
+@analysis_bp.route("/analysis/user-role-distribution")
+def api_user_role_distribution():
+    """Get user role distribution data.
+
+    Issue #3079: Support role-based user grouping in trend analysis.
+
+    Returns user counts by role group (admin, manager, user, unknown).
+    """
+    is_admin, tenant_id = _get_tenant_filter()
+    start_date = request.args.get("start")
+    end_date = request.args.get("end")
+    host = request.args.get("host")
+
+    # Issue #2738: Validate date range
+    validated = _validate_date_range_or_error(start_date, end_date)
+    # Check if validation failed: validated[1] is status code (int) instead of date string
+    if validated[1] is not None and isinstance(validated[1], int):
+        return validated[0], validated[1]
+    start_date, end_date = validated
+
+    result = analysis_service.get_user_role_distribution(
+        start_date=start_date,
+        end_date=end_date,
+        host_name=host,
+        tenant_id=tenant_id,
+    )
+    return jsonify(result)
+
+
 @analysis_bp.route("/analysis/tool-comparison")
 def api_tool_comparison():
     """Get tool comparison data."""

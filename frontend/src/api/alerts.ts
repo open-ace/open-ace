@@ -106,6 +106,30 @@ export const alertsApi = {
     const unread_count = response.filter((a) => !a.read).length;
     return { alerts: response, unread_count };
   },
+
+  // Issue #3082: Manager 获取租户范围告警
+  async getTenantAlerts(params?: {
+    type?: string;
+    severity?: string;
+    unread_only?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<AlertListResponse> {
+    const queryParams: Record<string, string> = {};
+    if (params?.type) queryParams.type = params.type;
+    if (params?.severity) queryParams.severity = params.severity;
+    if (params?.unread_only) queryParams.unread_only = 'true';
+    if (params?.limit) queryParams.limit = String(params.limit);
+    if (params?.offset) queryParams.offset = String(params.offset);
+
+    // Issue #3082: 返回格式统一为 {success: true, data: {alerts: [...], unread_count: n}}
+    const response = await apiClient.get<{ success: boolean; data: AlertListResponse }>(
+      '/api/alerts/tenant',
+      queryParams
+    );
+    return response.data;
+  },
+
   async createTestAlert(data: {
     type?: string;
     severity?: string;

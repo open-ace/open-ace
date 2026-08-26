@@ -1,4 +1,6 @@
 import React from 'react';
+import { reportFrontendError, logFallback } from '@utils/errorReporter';
+import { isChunkLoadError } from './isChunkLoadError';
 
 interface ChunkLoadErrorBoundaryProps {
   children: React.ReactNode;
@@ -7,22 +9,6 @@ interface ChunkLoadErrorBoundaryProps {
 
 interface ChunkLoadErrorBoundaryState {
   error: Error | null;
-}
-
-/**
- * Return true only for browser errors that specifically identify a failed
- * JavaScript chunk or dynamic import. Generic network errors must not turn
- * ordinary API failures into full-page reload prompts.
- */
-export function isChunkLoadError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  if (error.name === 'ChunkLoadError') return true;
-  return [
-    /Loading (?:CSS )?chunk [^ ]+ failed/i,
-    /Failed to fetch dynamically imported module/i,
-    /Importing a module script failed/i,
-    /error loading dynamically imported module/i,
-  ].some((pattern) => pattern.test(error.message));
 }
 
 /**
@@ -36,8 +22,67 @@ export class ChunkLoadErrorBoundary extends React.Component<
 > {
   public override state: ChunkLoadErrorBoundaryState = { error: null };
 
+  // Instance property to store errorId (avoiding re-render)
+  private errorId: string | null = null;
+
   public static getDerivedStateFromError(error: Error): ChunkLoadErrorBoundaryState {
     return { error };
+  }
+
+  public override componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
+    try {
+      // Issue #2953: Build context object with additional information
+      const context: Record<string, unknown> = {
+        url: window.location.href,
+        path: window.location.pathname,
+        search: window.location.search,
+      };
+
+      // Extract URL parameters relevant to session restoration
+      const urlParams = new URLSearchParams(window.location.search);
+      const sessionId = urlParams.get('sessionId');
+      const encodedProjectName = urlParams.get('encodedProjectName');
+      const restoreSession = urlParams.get('restoreSession');
+
+      if (sessionId) context.sessionId = sessionId;
+      if (encodedProjectName) context.encodedProjectName = encodedProjectName;
+      if (restoreSession) context.restoreSession = restoreSession;
+
+      // Add store state summary if available
+      try {
+        const storedState = localStorage.getItem('open-ace-store');
+        if (storedState) {
+          const parsed = JSON.parse(storedState);
+          if (parsed?.state) {
+            context.storeState = {
+              hasTabs: Array.isArray(parsed.state.workspaceTabs),
+              tabsCount: Array.isArray(parsed.state.workspaceTabs)
+                ? parsed.state.workspaceTabs.length
+                : 0,
+              hasActiveTabId: typeof parsed.state.workspaceActiveTabId === 'string',
+              hasTabsOrder: Array.isArray(parsed.state.workspaceTabsOrder),
+              tabsOrderCount: Array.isArray(parsed.state.workspaceTabsOrder)
+                ? parsed.state.workspaceTabsOrder.length
+                : 0,
+            };
+          }
+        }
+      } catch {
+        // Ignore errors when reading localStorage
+      }
+
+      // Report error with context
+      this.errorId = reportFrontendError({
+        error,
+        errorInfo: { componentStack: errorInfo.componentStack ?? undefined },
+        category: isChunkLoadError(error) ? 'chunk-load' : 'render-runtime',
+        context,
+      });
+    } catch (e) {
+      // Swallow all exceptions to prevent infinite loop
+      logFallback('[ErrorReporter] Failed to report', e);
+      this.errorId = 'fallback';
+    }
   }
 
   private readonly reloadPage = (): void => {
@@ -53,6 +98,8 @@ export class ChunkLoadErrorBoundary extends React.Component<
     if (!error) return this.props.children;
 
     const chunkFailure = isChunkLoadError(error);
+    const displayErrorId = this.errorId ?? 'pending';
+
     return (
       <main
         className="min-vh-100 d-flex align-items-center justify-content-center bg-light p-4"
@@ -63,10 +110,13 @@ export class ChunkLoadErrorBoundary extends React.Component<
           <h1 className="h4">
             {chunkFailure ? 'A new version of Open ACE is available' : 'Open ACE could not render'}
           </h1>
-          <p className="text-muted mb-4">
+          <p className="text-muted mb-2">
             {chunkFailure
               ? 'This page is still using files from an older version. Reload to continue safely.'
               : 'An unexpected display error occurred. Reload the page to try again.'}
+          </p>
+          <p className="text-muted small mb-4">
+            Error ID: <code className="user-select-all">{displayErrorId}</code>
           </p>
           <button className="btn btn-primary" type="button" onClick={this.reloadPage}>
             Reload page

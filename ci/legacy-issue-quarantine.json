@@ -1,15 +1,5 @@
 {
   "version": 1,
   "schema": "openace-legacy-issue-quarantine",
-  "entries": [
-    {
-      "nodeid": "tests/issues/604/test_llm_proxy_handler_1060.py::TestUpstreamQuotaExceededAlert::test_upstream_429_other_error_no_alert",
-      "reason": "Deadlocks the remote LLM-proxy failover loop in a background-thread wait that pytest-timeout cannot terminate; shard cannot complete while this runs.",
-      "owner": "richardhuang",
-      "tracking_issue": "https://github.com/open-ace/open-ace/issues/2466",
-      "exit_condition": "The remote LLM-proxy handler returns a non-deadlocking result (500/502) after exhausting failover keys; verified when the weekly subprocess probe for this nodeid passes.",
-      "expires_on": "2026-09-09",
-      "expected_probe_outcome": "timeout"
-    }
-  ]
+  "entries": []
 }

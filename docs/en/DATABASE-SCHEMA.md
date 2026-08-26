@@ -19,10 +19,10 @@ Core user table with role-based access control.
 | is_admin | boolean | DEFAULT false |
 | is_active | boolean | DEFAULT true |
 | role | varchar | CHECK IN ('admin','manager','user') |
-| daily_token_quota | integer | |
-| monthly_token_quota | integer | |
-| daily_request_quota | integer | |
-| monthly_request_quota | integer | |
+| daily_token_quota | bigint | Stored in M units (Issue #3018) |
+| monthly_token_quota | bigint | Stored in M units (Issue #3018) |
+| daily_request_quota | bigint | Stored as actual count (Issue #3018) |
+| monthly_request_quota | bigint | Stored as actual count (Issue #3018) |
 | tenant_id | integer | FK → tenants(id) ON DELETE SET NULL |
 | must_change_password | boolean | DEFAULT false |
 | system_account | text | OS username for multi-user mode |
@@ -286,8 +286,10 @@ Aggregated from daily_messages where agent_session_id IS NOT NULL. Provides sess
 | Column | Type | Notes |
 |--------|------|-------|
 | tenant_id | integer | UNIQUE FK → tenants(id) ON DELETE CASCADE |
-| daily_token_limit | integer | DEFAULT 1,000,000 |
-| monthly_token_limit | integer | DEFAULT 30,000,000 |
+| daily_token_limit | bigint | DEFAULT 1,000,000 (actual token count, Issue #1259) |
+| monthly_token_limit | bigint | DEFAULT 30,000,000 (actual token count, Issue #1259) |
+| daily_request_limit | bigint | DEFAULT 10,000 (Issue #3018) |
+| monthly_request_limit | bigint | DEFAULT 300,000 (Issue #3018) |
 | max_users | integer | DEFAULT 100 |
 | max_sessions_per_user | integer | DEFAULT 5 |
 

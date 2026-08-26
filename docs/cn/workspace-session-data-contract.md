@@ -68,6 +68,16 @@
 - 不参与 Workspace session summary 正常读取链路
 - 不作为 Workspace transcript 的常态兜底源
 
+写入规范：
+
+- 通过 `DailyMessagesSink` 写入（Issue #3027）
+- 数据来源：
+  - `llm_proxy`：Workspace 页面 AI 对话（`DailyMessagesSink`）
+  - `remote_sync`：CLI 会话同步（`remote.py`）
+- 幂等策略：按 `(date, tool_name, message_id, host_name)` 唯一约束
+- 消息 ID 生成：`{session_id}-{timestamp_ms}-{sequence}`
+- 字段对齐：与 `remote.py` 的 `session_sync` 保持一致
+
 ## 运行时 contract
 
 - transcript writer 默认只写 `session_messages`

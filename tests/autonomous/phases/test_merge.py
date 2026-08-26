@@ -97,6 +97,14 @@ def _workflow(pr_number: int | None = 123, dev_round: int = 1) -> dict:
     }
 
 
+def _policy_exhausted_workflow() -> dict:
+    """A workflow whose merge-policy settle budget is already exhausted, so the
+    residual-settle guard must NOT defer — it falls straight to the pause."""
+    wf = _workflow()
+    wf["merge_policy_settle_retries"] = merge_phase._MERGE_POLICY_SETTLE_RETRY_MAX
+    return wf
+
+
 # ── registration ─────────────────────────────────────────────────────────
 
 
@@ -333,7 +341,7 @@ def test_merge_policy_block_with_settled_ci_still_pauses():
     deps.gh.get_branch_protection.return_value = {
         "required_status_checks": {"contexts": ["PR Gate"]}
     }
-    result = merge_phase.handle(_ctx(_workflow()), deps)
+    result = merge_phase.handle(_ctx(_policy_exhausted_workflow()), deps)
 
     assert result.outcome == "pause"
     host.emit_status_change.assert_called_once()
@@ -383,7 +391,7 @@ def test_merge_policy_block_with_missing_required_on_stale_head_pauses():
         checks=[{"name": "Select suites", "bucket": "pass"}],
         committed_at=datetime.now(timezone.utc) - timedelta(hours=2),
     )
-    result = merge_phase.handle(_ctx(_workflow()), deps)
+    result = merge_phase.handle(_ctx(_policy_exhausted_workflow()), deps)
 
     assert result.outcome == "pause"
     host.emit_status_change.assert_called_once()
@@ -397,14 +405,14 @@ def test_merge_policy_block_with_unresolvable_commit_time_pauses():
         checks=[{"name": "Select suites", "bucket": "pass"}],
         committed_at=None,
     )
-    assert merge_phase.handle(_ctx(_workflow()), deps).outcome == "pause"
+    assert merge_phase.handle(_ctx(_policy_exhausted_workflow()), deps).outcome == "pause"
 
     deps_raise, _ = _policy_unsettled_deps(
         checks=[{"name": "Select suites", "bucket": "pass"}],
         committed_at=None,
     )
     deps_raise.gh.get_commit_committed_at.side_effect = GitHubOpsError("api down")
-    assert merge_phase.handle(_ctx(_workflow()), deps_raise).outcome == "pause"
+    assert merge_phase.handle(_ctx(_policy_exhausted_workflow()), deps_raise).outcome == "pause"
 
 
 def test_merge_policy_block_with_unobservable_required_still_pauses():
@@ -416,7 +424,7 @@ def test_merge_policy_block_with_unobservable_required_still_pauses():
         committed_at=datetime.now(timezone.utc),
     )
     deps.gh.get_branch_protection.side_effect = GitHubOpsError("no access")
-    result = merge_phase.handle(_ctx(_workflow()), deps)
+    result = merge_phase.handle(_ctx(_policy_exhausted_workflow()), deps)
 
     assert result.outcome == "pause"
     host.emit_status_change.assert_called_once()
@@ -429,10 +437,71 @@ def test_merge_policy_block_with_required_present_skips_commit_time_lookup():
         checks=[{"name": "PR Gate", "bucket": "pass"}],
         committed_at=datetime.now(timezone.utc),
     )
-    result = merge_phase.handle(_ctx(_workflow()), deps)
+    result = merge_phase.handle(_ctx(_policy_exhausted_workflow()), deps)
 
     assert result.outcome == "pause"
     deps.gh.get_commit_committed_at.assert_not_called()
+    host.emit_status_change.assert_called_once()
+
+
+# ── bounded merge-policy settle budget (residual-race guard) ──────────────
+
+
+def test_settle_retry_before_pause():
+    """A 'clean rollup but GitHub still blocked' shape with budget remaining
+    defers (retry) and increments the settle counter — not a pause."""
+    deps, host = _policy_unsettled_deps(
+        checks=[{"name": "PR Gate", "bucket": "pass"}],  # required context present
+        committed_at=datetime.now(timezone.utc),
+    )
+    wf = _workflow()
+    wf["merge_policy_settle_retries"] = 0
+    result = merge_phase.handle(_ctx(wf), deps)
+
+    assert result.outcome == "retry"
+    assert result.workflow_patch["merge_policy_settle_retries"] == 1
+    host.emit_status_change.assert_not_called()
+
+
+def test_settle_retry_accumulates_then_pauses():
+    """The settle counter accumulates across scheduler cycles; when it reaches
+    the cap the workflow pauses, and the pause resets the counter so a resume
+    gets a fresh budget."""
+    deps, host = _policy_unsettled_deps(
+        checks=[{"name": "PR Gate", "bucket": "pass"}],
+        committed_at=datetime.now(timezone.utc),
+    )
+    cap = merge_phase._MERGE_POLICY_SETTLE_RETRY_MAX
+    for counter in range(cap):  # 0,1,2 → retry and increment
+        wf = _workflow()
+        wf["merge_policy_settle_retries"] = counter
+        result = merge_phase.handle(_ctx(wf), deps)
+        assert result.outcome == "retry"
+        assert result.workflow_patch["merge_policy_settle_retries"] == counter + 1
+        host.emit_status_change.assert_not_called()
+
+    # counter == cap → pause, and the pause resets the counter to 0.
+    wf = _workflow()
+    wf["merge_policy_settle_retries"] = cap
+    result = merge_phase.handle(_ctx(wf), deps)
+    assert result.outcome == "pause"
+    assert result.workflow_patch["merge_policy_settle_retries"] == 0
+    host.emit_status_change.assert_called_once()
+
+
+def test_genuine_block_still_pauses_within_budget():
+    """With the budget exhausted, a still-blocked settled rollup is a genuine
+    external block: it must still pause (never retry forever), and the pause
+    keeps the human-facing message/resume semantics."""
+    deps, host = _policy_unsettled_deps(
+        checks=[{"name": "PR Gate", "bucket": "pass"}],
+        committed_at=datetime.now(timezone.utc),
+    )
+    result = merge_phase.handle(_ctx(_policy_exhausted_workflow()), deps)
+
+    assert result.outcome == "pause"
+    assert result.workflow_patch["merge_policy_settle_retries"] == 0
+    assert "not merge-ready" in result.structured_error["message"]
     host.emit_status_change.assert_called_once()
 
 

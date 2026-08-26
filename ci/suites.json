@@ -3,7 +3,11 @@
   "baseline_runbook": "docs/TEST_LAYERS.md#baseline",
   "toolchain": {
     "production_python": "3.11",
-    "compatibility_python": ["3.10", "3.14"],
+    "min_python": "3.10",
+    "compatibility_python": [
+      "3.12",
+      "3.14"
+    ],
     "node": "20",
     "runner": "ubuntu-24.04"
   },
@@ -13,12 +17,13 @@
     "default-collection",
     "dependency-audit",
     "e2e-governance",
+    "false-positive-scan",
     "frontend",
     "issue-collection",
-    "legacy-pr",
     "package",
     "postgres",
-    "python-core"
+    "python-core",
+    "python-min"
   ],
   "suites": {
     "default-collection": {
@@ -31,15 +36,37 @@
       "description": "Audit declared Python and locked frontend production dependencies",
       "timeout_seconds": 300,
       "commands": [
-        ["{python}", "-m", "pip_audit", "-r", "requirements-ci.lock", "--skip-editable"],
-        ["{python}", "-m", "pip_audit", "-r", "requirements.lock", "--skip-editable"],
+        [
+          "{python}",
+          "-m",
+          "pip_audit",
+          "-r",
+          "requirements-ci.lock",
+          "--skip-editable"
+        ],
+        [
+          "{python}",
+          "-m",
+          "pip_audit",
+          "-r",
+          "requirements.lock",
+          "--skip-editable"
+        ],
         {
           "working_directory": "frontend",
-          "command": ["npm", "ci", "--no-audit", "--no-fund"]
+          "command": [
+            "npm",
+            "ci",
+            "--no-audit",
+            "--no-fund"
+          ]
         },
         {
           "working_directory": "frontend",
-          "command": ["bash", "../scripts/ci/npm_audit_with_whitelist.sh"]
+          "command": [
+            "bash",
+            "../scripts/ci/npm_audit_with_whitelist.sh"
+          ]
         }
       ]
     },
@@ -47,27 +74,125 @@
       "description": "Validate E2E governance artifacts, ledgers, and lane closures",
       "timeout_seconds": 180,
       "commands": [
-        ["{python}", "scripts/e2e/inventory.py", "validate"],
-        ["{python}", "scripts/e2e/manifest.py", "validate"],
-        ["{python}", "scripts/e2e/governance.py", "validate"],
-        ["{python}", "scripts/e2e/selector.py", "--event", "pr"],
-        ["{python}", "scripts/e2e/selector.py", "--event", "nightly"],
-        ["{python}", "scripts/e2e/selector.py", "--event", "weekly"]
+        [
+          "{python}",
+          "scripts/e2e/inventory.py",
+          "validate"
+        ],
+        [
+          "{python}",
+          "scripts/e2e/manifest.py",
+          "validate"
+        ],
+        [
+          "{python}",
+          "scripts/e2e/governance.py",
+          "validate"
+        ],
+        [
+          "{python}",
+          "scripts/e2e/selector.py",
+          "--event",
+          "pr"
+        ],
+        [
+          "{python}",
+          "scripts/e2e/selector.py",
+          "--event",
+          "nightly"
+        ],
+        [
+          "{python}",
+          "scripts/e2e/selector.py",
+          "--event",
+          "weekly"
+        ]
       ]
     },
     "python-core": {
       "description": "Required deterministic Python suite on the production runtime",
       "timeout_seconds": 600,
       "commands": [
-        ["{python}", "-m", "pytest", "tests/", "-q", "--maxfail=1", "--cov=scripts/shared", "--cov=app/auth", "--cov=app/remote_ws_handler", "--cov=app/modules/sso", "--cov=app/routes", "--cov=app/services", "--cov-fail-under=47", "--cov-report=term", "--cov-report=xml", "-m", "not postgres and not performance"],
-        ["{python}", "scripts/scan_test_false_positives.py", "tests", "--exclude-dirs", "tests/issues", "--baseline", ".false-positive-baseline.json"]
+        [
+          "{python}",
+          "-m",
+          "pytest",
+          "tests/",
+          "-q",
+          "-n",
+          "auto",
+          "--maxfail=1",
+          "--cov=scripts/shared",
+          "--cov=app/auth",
+          "--cov=app/remote_ws_handler",
+          "--cov=app/modules/sso",
+          "--cov=app/routes",
+          "--cov=app/services",
+          "--cov-fail-under=47",
+          "--cov-report=term",
+          "--cov-report=xml",
+          "-m",
+          "not postgres and not performance"
+        ]
+      ]
+    },
+    "false-positive-scan": {
+      "description": "Scan test code for false-positive patterns (Issue #2189, Scope #6)",
+      "timeout_seconds": 120,
+      "commands": [
+        [
+          "{python}",
+          "scripts/scan_test_false_positives.py",
+          "tests",
+          "--exclude-dirs",
+          "tests/issues",
+          "--baseline",
+          ".false-positive-baseline.json"
+        ]
+      ]
+    },
+    "python-min": {
+      "description": "compileall + full unit suite on the minimum supported Python (catches version-specific regressions on the oldest interpreter; #2868)",
+      "timeout_seconds": 600,
+      "commands": [
+        [
+          "{python}",
+          "-m",
+          "compileall",
+          "-q",
+          "app",
+          "scripts",
+          "cli.py",
+          "server.py"
+        ],
+        [
+          "{python}",
+          "-m",
+          "pytest",
+          "tests/unit/",
+          "-q",
+          "-n",
+          "auto",
+          "--maxfail=1",
+          "-m",
+          "not postgres and not performance"
+        ]
       ]
     },
     "compatibility-smoke": {
       "description": "Fast minimum/maximum Python compatibility coverage",
       "timeout_seconds": 420,
       "commands": [
-        ["{python}", "-m", "compileall", "-q", "app", "scripts", "cli.py", "server.py"],
+        [
+          "{python}",
+          "-m",
+          "compileall",
+          "-q",
+          "app",
+          "scripts",
+          "cli.py",
+          "server.py"
+        ],
         [
           "{python}",
           "-m",
@@ -92,31 +217,57 @@
       "collection_target": "tests/issues",
       "baseline_layer": "issues"
     },
-    "legacy-pr": {
-      "description": "Required legacy regressions promoted before Issue #2429",
-      "timeout_seconds": 300,
-      "commands": [
-        ["{python}", "-m", "pytest", "tests/issues", "-q", "--maxfail=1", "-m", "priority_p0 and not postgres and not performance"]
-      ]
-    },
     "frontend": {
       "description": "Frontend lint, typecheck, unit tests, and production build",
       "timeout_seconds": 480,
       "working_directory": "frontend",
       "commands": [
-        ["npm", "ci", "--no-audit", "--no-fund"],
-        ["npm", "run", "lint"],
-        ["npm", "run", "format:check"],
-        ["npm", "run", "typecheck"],
-        ["npm", "run", "test:coverage"],
-        ["npm", "run", "build"]
+        [
+          "npm",
+          "ci",
+          "--no-audit",
+          "--no-fund"
+        ],
+        [
+          "npm",
+          "run",
+          "lint"
+        ],
+        [
+          "npm",
+          "run",
+          "format:check"
+        ],
+        [
+          "npm",
+          "run",
+          "typecheck"
+        ],
+        [
+          "npm",
+          "run",
+          "test:coverage"
+        ],
+        [
+          "npm",
+          "run",
+          "build"
+        ]
       ]
     },
     "package": {
       "description": "Build Python source and wheel artifacts",
       "timeout_seconds": 240,
       "commands": [
-        ["{python}", "-m", "build", "--sdist", "--wheel", "--outdir", "dist/"]
+        [
+          "{python}",
+          "-m",
+          "build",
+          "--sdist",
+          "--wheel",
+          "--outdir",
+          "dist/"
+        ]
       ]
     },
     "postgres": {
@@ -124,21 +275,51 @@
       "timeout_seconds": 480,
       "preserve_database_environment": true,
       "commands": [
-        ["{python}", "-m", "pytest", "tests/integration", "-q", "--maxfail=1", "-m", "postgres"]
+        [
+          "{python}",
+          "-m",
+          "pytest",
+          "tests/integration",
+          "-q",
+          "--maxfail=1",
+          "-m",
+          "postgres"
+        ]
       ]
     },
     "performance": {
       "description": "Wall-clock benchmarks; advisory because shared runners are noisy",
       "timeout_seconds": 900,
       "commands": [
-        ["{python}", "-m", "pytest", "tests", "-q", "--maxfail=1", "-m", "performance and not postgres"]
+        [
+          "{python}",
+          "-m",
+          "pytest",
+          "tests",
+          "-q",
+          "--maxfail=1",
+          "-m",
+          "performance and not postgres"
+        ]
       ]
     },
     "critical-e2e": {
       "description": "Change-sensitive critical browser path; not required until stabilized",
       "timeout_seconds": 480,
       "commands": [
-        ["{python}", "scripts/run_extended_tests.py", "--category", "critical", "--isolated-home", "--reruns", "1", "--timeout", "180", "--maxfail", "5"]
+        [
+          "{python}",
+          "scripts/run_extended_tests.py",
+          "--category",
+          "critical",
+          "--isolated-home",
+          "--reruns",
+          "1",
+          "--timeout",
+          "180",
+          "--maxfail",
+          "5"
+        ]
       ]
     }
   }

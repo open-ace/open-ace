@@ -9,7 +9,7 @@
  * - Deregister machine (system admin only)
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   useMachines,
   useMachineUsers,
@@ -21,6 +21,7 @@ import {
   useAssignUser,
   useRevokeUser,
   useUsers,
+  useAdminTenant,
 } from '@/hooks';
 import { useLanguage } from '@/store';
 import type { Language } from '@/i18n';
@@ -36,54 +37,24 @@ import {
   useToast,
 } from '@/components/common';
 import type { RemoteMachine } from '@/api';
-import { tenantApi, type Tenant } from '@/api';
 import { copyToClipboard } from '@/utils';
-import { isAdminRole, canManageAllTenants } from '@/utils/permissions';
-import { useAuth } from '@/hooks';
+import { isAdminRole } from '@/utils/permissions';
 
 export const RemoteMachineManagement: React.FC = () => {
   const language = useLanguage();
   const toast = useToast();
 
-  // Admin tenant selection
-  const { user } = useAuth();
-  const isAdmin = canManageAllTenants(user);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null);
-  const selectedTenantIdRef = useRef<number | null>(null);
-  const [isLoadingTenants, setIsLoadingTenants] = useState(false);
-
-  // Compute effective tenant ID
-  const effectiveTenantId = isAdmin ? selectedTenantId : user?.tenant_id;
-
-  // Fetch tenants list for admin users
-  useEffect(() => {
-    if (!isAdmin) return;
-
-    setIsLoadingTenants(true);
-    tenantApi
-      .listTenants({ status: 'active', limit: 100 })
-      .then((result) => {
-        setTenants(result.tenants);
-        // Use ref to check, avoid triggering useEffect again
-        if (result.tenants.length > 0 && !selectedTenantIdRef.current) {
-          selectedTenantIdRef.current = result.tenants[0].id;
-          setSelectedTenantId(result.tenants[0].id);
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to fetch tenants:', err);
-        toast.error(t('failedToLoadTenants', language) || 'Failed to load tenants');
-      })
-      .finally(() => {
-        setIsLoadingTenants(false);
-      });
-  }, [isAdmin, language, toast]);
-
-  // Sync ref with state
-  useEffect(() => {
-    selectedTenantIdRef.current = selectedTenantId;
-  }, [selectedTenantId]);
+  // Admin tenant selection (Issue #2841)
+  const {
+    tenants,
+    selectedTenantId,
+    selectTenant,
+    clearSelection,
+    effectiveTenantId,
+    isLoading: isLoadingTenants,
+    error: tenantLoadError,
+    retry: retryTenantLoad,
+  } = useAdminTenant();
 
   const {
     data: machinesData,
@@ -339,8 +310,8 @@ export const RemoteMachineManagement: React.FC = () => {
   ).length;
   const offlineCount = totalMachines - onlineCount;
 
-  // Handle empty tenant list for admin
-  if (isAdmin && tenants.length === 0 && !isLoadingTenants) {
+  // Handle empty tenant list
+  if (tenants.length === 0 && !isLoadingTenants && !tenantLoadError) {
     return (
       <div className="remote-machine-management">
         <EmptyState
@@ -355,24 +326,17 @@ export const RemoteMachineManagement: React.FC = () => {
     );
   }
 
-  // Handle no tenant for non-admin
-  if (!isAdmin && !user?.tenant_id) {
+  // Handle tenant load error
+  if (tenantLoadError && !isLoadingTenants) {
     return (
       <div className="remote-machine-management">
-        <EmptyState
-          icon="bi-building"
-          title={t('noTenantConfigured', language) || 'No Tenant Configured'}
-          description={
-            t('noTenantDescription', language) ||
-            'Please contact system administrator to configure your tenant.'
-          }
-        />
+        <Error message={tenantLoadError} onRetry={retryTenantLoad} />
       </div>
     );
   }
 
   // Show loading while tenants are loading
-  if (isLoadingTenants || (isAdmin && !effectiveTenantId)) {
+  if (isLoadingTenants) {
     return (
       <Loading size="lg" text={t('loadingTenants', language) || 'Loading tenant information...'} />
     );
@@ -396,8 +360,8 @@ export const RemoteMachineManagement: React.FC = () => {
 
   return (
     <div className="remote-machine-management">
-      {/* Tenant Selector - Only for admins */}
-      {isAdmin && (
+      {/* Tenant Selector - Show when there are tenants to choose from */}
+      {tenants.length > 0 && (
         <div className="card mb-3">
           <div className="card-body">
             <div className="row align-items-center">
@@ -407,16 +371,28 @@ export const RemoteMachineManagement: React.FC = () => {
                   {t('selectTenant', language) || 'Select Tenant'}
                 </label>
               </div>
-              <div className="col-md-8">
+              <div className="col-md-6">
                 <Select
                   value={selectedTenantId?.toString() ?? ''}
-                  onChange={(value) => setSelectedTenantId(Number(value))}
+                  onChange={(value) => selectTenant(Number(value))}
                   options={tenants.map((tenant) => ({
                     value: tenant.id.toString(),
                     label: tenant.name,
                   }))}
                   placeholder={t('selectTenantPlaceholder', language) || 'Choose a tenant'}
                 />
+              </div>
+              <div className="col-md-2">
+                {selectedTenantId && (
+                  <Button
+                    variant="outline-secondary"
+                    size="sm"
+                    onClick={clearSelection}
+                    title={t('clearSelection', language) || 'Clear Selection'}
+                  >
+                    <i className="bi bi-x-lg" />
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -432,6 +408,12 @@ export const RemoteMachineManagement: React.FC = () => {
             size="sm"
             onClick={handleGenerateToken}
             loading={generateToken.isPending}
+            disabled={!effectiveTenantId}
+            title={
+              !effectiveTenantId
+                ? t('selectTenantFirst', language) || 'Please select a tenant first'
+                : undefined
+            }
           >
             <i className="bi bi-plus-lg me-1" />
             {t('generateToken', language)}
@@ -1032,11 +1014,81 @@ const MachineDetailsDialog: React.FC<MachineDetailsDialogProps> = ({
         </div>
       </div>
 
+      {/* Hardware Resources - Issue #3066 */}
+      {machine.capabilities &&
+        Object.keys(machine.capabilities).length > 0 &&
+        (() => {
+          const caps = machine.capabilities as Record<string, unknown>;
+          const cpuCores = typeof caps.cpu_cores === 'number' ? caps.cpu_cores : undefined;
+          const memoryMb = typeof caps.memory_mb === 'number' ? caps.memory_mb : undefined;
+          const diskFreeGb = typeof caps.disk_free_gb === 'number' ? caps.disk_free_gb : undefined;
+
+          // Show hardware cards only if at least one hardware field is present
+          if (cpuCores !== undefined || memoryMb !== undefined || diskFreeGb !== undefined) {
+            return (
+              <div className="mb-4">
+                <label className="text-muted small d-block mb-2">
+                  <i className="bi bi-hdd-network me-1" />
+                  {t('hardwareInfo', language)}
+                </label>
+                <div className="row g-2">
+                  {cpuCores !== undefined && cpuCores > 0 && (
+                    <div className="col-md-4">
+                      <div className="card border-0 bg-light">
+                        <div className="card-body text-center py-2 px-3">
+                          <i
+                            className="bi bi-cpu text-primary mb-1"
+                            style={{ fontSize: '1.5rem' }}
+                          />
+                          <div className="text-muted small">{t('cpuCores', language)}</div>
+                          <div className="fw-bold">
+                            {cpuCores} {t('cores', language)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {memoryMb !== undefined && memoryMb > 0 && (
+                    <div className="col-md-4">
+                      <div className="card border-0 bg-light">
+                        <div className="card-body text-center py-2 px-3">
+                          <i
+                            className="bi bi-memory text-success mb-1"
+                            style={{ fontSize: '1.5rem' }}
+                          />
+                          <div className="text-muted small">{t('memorySize', language)}</div>
+                          <div className="fw-bold">
+                            {(memoryMb / 1024).toFixed(1)} {t('gb', language)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {diskFreeGb !== undefined && diskFreeGb > 0 && (
+                    <div className="col-md-4">
+                      <div className="card border-0 bg-light">
+                        <div className="card-body text-center py-2 px-3">
+                          <i className="bi bi-hdd text-info mb-1" style={{ fontSize: '1.5rem' }} />
+                          <div className="text-muted small">{t('diskFreeSpace', language)}</div>
+                          <div className="fw-bold">
+                            {diskFreeGb.toFixed(1)} {t('gb', language)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          }
+          return null;
+        })()}
+
       {/* Capabilities - Collapsible */}
       {machine.capabilities && Object.keys(machine.capabilities).length > 0 && (
         <div className="mb-4">
           <div
-            className="d-flex align-items-center cursor-pointer"
+            className="d-flex align-items-center"
             onClick={() => setCapabilitiesExpanded(!capabilitiesExpanded)}
             style={{ cursor: 'pointer' }}
           >

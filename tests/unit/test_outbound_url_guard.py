@@ -1,11 +1,15 @@
 """Unit tests for outbound URL SSRF protection."""
 
+import ipaddress
+import os
 import socket
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.utils.outbound_url_guard import (
     OutboundUrlBlockedError,
+    _get_proxies,
     assert_public_http_url,
     validate_public_http_url,
 )
@@ -197,3 +201,430 @@ def test_rejects_double_encoded_hostname():
 
     assert not result.allowed
     assert "percent" in result.error.lower()
+
+
+# ── Proxy configuration tests (Issue #2237) ─────────────────────────────────────
+
+
+def test_get_proxies_returns_none_when_no_env_vars():
+    """Test that _get_proxies returns None when no proxy env vars are set."""
+    with patch.dict(os.environ, {}, clear=True):
+        # Remove all proxy-related env vars
+        for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
+            os.environ.pop(key, None)
+        result = _get_proxies()
+        assert result is None
+
+
+def test_get_proxies_returns_proxies_from_uppercase_env():
+    """Test that _get_proxies reads HTTP_PROXY and HTTPS_PROXY env vars."""
+    with patch.dict(
+        os.environ,
+        {
+            "HTTP_PROXY": "http://proxy.example.com:8080",
+            "HTTPS_PROXY": "http://proxy.example.com:8080",
+        },
+        clear=True,
+    ):
+        result = _get_proxies()
+        assert result == {
+            "http": "http://proxy.example.com:8080",
+            "https": "http://proxy.example.com:8080",
+        }
+
+
+def test_get_proxies_returns_proxies_from_lowercase_env():
+    """Test that _get_proxies reads http_proxy and https_proxy env vars."""
+    with patch.dict(
+        os.environ,
+        {
+            "http_proxy": "http://proxy.example.com:8080",
+            "https_proxy": "http://proxy.example.com:8080",
+        },
+        clear=True,
+    ):
+        result = _get_proxies()
+        assert result == {
+            "http": "http://proxy.example.com:8080",
+            "https": "http://proxy.example.com:8080",
+        }
+
+
+def test_get_proxies_prioritizes_uppercase_env():
+    """Test that uppercase env vars take precedence over lowercase."""
+    with patch.dict(
+        os.environ,
+        {
+            "HTTP_PROXY": "http://upper.example.com:8080",
+            "http_proxy": "http://lower.example.com:8080",
+        },
+        clear=True,
+    ):
+        result = _get_proxies()
+        assert result == {"http": "http://upper.example.com:8080"}
+
+
+def test_get_proxies_returns_partial_proxies():
+    """Test that _get_proxies works when only one proxy is configured."""
+    with patch.dict(os.environ, {"HTTPS_PROXY": "http://proxy.example.com:8080"}, clear=True):
+        result = _get_proxies()
+        assert result == {"https": "http://proxy.example.com:8080"}
+
+
+def test_safe_request_uses_env_proxies(monkeypatch):
+    """Test that safe_request uses proxy from environment variables."""
+    import requests
+
+    from app.utils.outbound_url_guard import safe_request
+
+    # Mock the session.request to capture proxies argument
+    mock_session = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_session.request.return_value = mock_response
+
+    # Set proxy env vars
+    monkeypatch.setenv("HTTP_PROXY", "http://test-proxy.example.com:8080")
+    monkeypatch.setenv("HTTPS_PROXY", "http://test-proxy.example.com:8080")
+
+    # Mock resolver to return a public IP
+    def mock_resolver(host, port, type=socket.SOCK_STREAM):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", port))]
+
+    with patch("app.utils.outbound_url_guard.requests.Session") as mock_session_class:
+        mock_session_class.return_value = mock_session
+        # Call safe_request
+        safe_request("GET", "https://example.com/test", resolver=mock_resolver)
+
+        # Verify that proxies from env were used
+        call_args = mock_session.request.call_args
+        assert "proxies" in call_args[1]
+        assert call_args[1]["proxies"] == {
+            "http": "http://test-proxy.example.com:8080",
+            "https": "http://test-proxy.example.com:8080",
+        }
+
+
+def test_safe_request_disables_proxy_when_no_env_vars(monkeypatch):
+    """Test that safe_request disables proxy when no env vars are set."""
+    import requests
+
+    from app.utils.outbound_url_guard import safe_request
+
+    # Mock the session.request to capture proxies argument
+    mock_session = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_session.request.return_value = mock_response
+
+    # Clear all proxy env vars
+    for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
+        monkeypatch.delenv(key, raising=False)
+
+    # Mock resolver to return a public IP
+    def mock_resolver(host, port, type=socket.SOCK_STREAM):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", port))]
+
+    with patch("app.utils.outbound_url_guard.requests.Session") as mock_session_class:
+        mock_session_class.return_value = mock_session
+        # Call safe_request
+        safe_request("GET", "https://example.com/test", resolver=mock_resolver)
+
+        # Verify that proxies were disabled
+        call_args = mock_session.request.call_args
+        assert "proxies" in call_args[1]
+        assert call_args[1]["proxies"] == {"http": None, "https": None}
+
+
+# ── Issue #2236: TLS SNI and Certificate Verification Tests ───────────────────────
+
+
+@pytest.mark.security
+def test_safe_request_retains_hostname_for_tls_sni():
+    """Test that safe_request retains original URL hostname for TLS SNI (Issue #2236).
+
+    This is critical for SSL certificate verification, as certificates are issued
+    to domain names, not IP literals.
+    """
+    from app.utils.outbound_url_guard import safe_request
+
+    # Mock the session.request to capture the URL
+    mock_session = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_session.request.return_value = mock_response
+
+    # Mock resolver to return a public IP
+    def mock_resolver(host, port, type=socket.SOCK_STREAM):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", port))]
+
+    with patch("app.utils.outbound_url_guard.requests.Session") as mock_session_class:
+        mock_session_class.return_value = mock_session
+
+        # Call safe_request with a domain URL
+        original_url = "https://api.deepseek.com/v1/chat/completions"
+        safe_request("POST", original_url, resolver=mock_resolver)
+
+        # Verify that the original URL was passed to session.request (not an IP literal)
+        call_args = mock_session.request.call_args
+        assert call_args[0][1] == original_url  # The URL argument
+        assert "api.deepseek.com" in call_args[0][1]
+        assert "8.8.8.8" not in call_args[0][1]
+
+
+@pytest.mark.security
+def test_ip_literal_url_skips_dns_resolution():
+    """Test that IP literal URLs skip DNS resolution in _PinnedIPAdapter (Issue #2236).
+
+    This is a performance optimization and security measure for IP literal URLs.
+    """
+    from app.utils.outbound_url_guard import _PinnedIPAdapter
+
+    # Create an adapter
+    adapter = _PinnedIPAdapter(allowed_ips=[], resolver=_resolver("8.8.8.8"))
+
+    # Test with a public IP literal URL
+    adapter._check_resolved_ip("https://8.8.8.8/test")  # Should not raise
+
+    # Test with a private IP literal URL (should raise)
+    with pytest.raises(OutboundUrlBlockedError, match="non-public IP"):
+        adapter._check_resolved_ip("https://10.0.0.1/test")
+
+
+@pytest.mark.security
+def test_dns_rebinding_detection_at_connect_time():
+    """Test that DNS rebinding is detected at connect time (Issue #2236).
+
+    The adapter should detect if the hostname resolves to a different IP
+    than the pre-verified IP.
+    """
+    from app.utils.outbound_url_guard import _PinnedIPAdapter
+
+    # Create an adapter with pre-verified IPs
+    adapter = _PinnedIPAdapter(
+        allowed_ips=[ipaddress.ip_address("93.184.216.34")],
+        resolver=_resolver("8.8.8.8"),  # Different IP
+    )
+
+    # The adapter should allow different public IPs (CDN scenario) but log a warning
+    # This test verifies it doesn't raise an error for different public IPs
+    try:
+        adapter._check_resolved_ip("https://example.com/test")
+    except Exception as e:
+        pytest.fail(f"Should not raise exception for different public IPs: {e}")
+
+
+@pytest.mark.security
+def test_dns_rebinding_to_private_ip_blocked():
+    """Test that DNS rebinding to private IP is blocked (Issue #2236)."""
+    from app.utils.outbound_url_guard import _PinnedIPAdapter
+
+    # Create an adapter
+    adapter = _PinnedIPAdapter(
+        allowed_ips=[ipaddress.ip_address("93.184.216.34")],
+        resolver=_resolver("10.0.0.1"),  # Private IP
+    )
+
+    # The adapter should raise an error for private IP resolution
+    with pytest.raises(OutboundUrlBlockedError, match="DNS rebinding detected"):
+        adapter._check_resolved_ip("https://example.com/test")
+
+
+# ── Issue #2236: DeepSeek API Integration Tests ───────────────────────────────────
+
+
+@pytest.mark.security
+def test_deepseek_api_url_validation():
+    """Test that DeepSeek API URL is validated correctly (Issue #2236)."""
+    # Mock DNS to return a public IP for api.deepseek.com
+    result = validate_public_http_url(
+        "https://api.deepseek.com/v1/chat/completions",
+        resolver=_resolver("104.18.25.175"),  # Example public IP
+    )
+
+    assert result.allowed
+    assert result.resolved_addresses
+    assert len(result.resolved_addresses) > 0
+    # Verify the resolved IP is public
+    for addr in result.resolved_addresses:
+        assert _is_public_address_test(addr)
+
+
+def _is_public_address_test(address):
+    """Helper function to test if an address is public."""
+    from app.utils.outbound_url_guard import _is_public_address
+
+    return _is_public_address(address)
+
+
+@pytest.mark.security
+def test_deepseek_api_tls_sni_with_hostname():
+    """Test that DeepSeek API requests use correct TLS SNI with hostname (Issue #2236).
+
+    This is critical for certificate verification.
+    """
+    import ipaddress
+
+    from app.utils.outbound_url_guard import safe_request
+
+    # Mock the session.request to verify URL
+    mock_session = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_session.request.return_value = mock_response
+
+    # Mock resolver to return DeepSeek's IP
+    def mock_resolver(host, port, type=socket.SOCK_STREAM):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("104.18.25.175", port))]
+
+    with patch("app.utils.outbound_url_guard.requests.Session") as mock_session_class:
+        mock_session_class.return_value = mock_session
+
+        url = "https://api.deepseek.com/v1/chat/completions"
+        safe_request("POST", url, resolver=mock_resolver)
+
+        # Verify that the URL contains the hostname, not the IP
+        call_args = mock_session.request.call_args
+        requested_url = call_args[0][1]
+        assert "api.deepseek.com" in requested_url
+        assert "104.18.25.175" not in requested_url
+
+
+# ── Issue #2236: CDN and Edge Case Tests ─────────────────────────────────────────
+
+
+@pytest.mark.security
+def test_cdn_ip_rotation_allows_different_public_ips():
+    """Test that CDN IP rotation allows different public IPs (Issue #2236).
+
+    CDN-fronted endpoints may return different public IPs between DNS resolutions.
+    The adapter should allow this (with a warning) since HTTPS certificate
+    verification mitigates rebinding to a different public host.
+    """
+    import ipaddress
+
+    from app.utils.outbound_url_guard import _PinnedIPAdapter
+
+    # Create an adapter with pre-verified IP
+    adapter = _PinnedIPAdapter(
+        allowed_ips=[ipaddress.ip_address("104.18.25.175")],
+        resolver=_resolver("104.18.26.175"),  # Different public IP
+    )
+
+    # Should not raise an error (CDN scenario)
+    try:
+        adapter._check_resolved_ip("https://api.deepseek.com/v1/chat")
+    except Exception as e:
+        pytest.fail(f"Should not raise exception for CDN IP rotation: {e}")
+
+
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "error_msg",
+    [
+        "DNS resolution failed",
+        "DNS resolution timeout",
+    ],
+)
+def test_dns_resolution_error_handling(error_msg):
+    """Test that DNS resolution errors are handled gracefully (Issue #2236).
+
+    This parameterized test covers both failure and timeout scenarios.
+    """
+    from app.utils.outbound_url_guard import _PinnedIPAdapter
+
+    # Create a resolver that raises an error
+    def error_resolver(host, port, type=socket.SOCK_STREAM):
+        raise OSError(error_msg)
+
+    adapter = _PinnedIPAdapter(allowed_ips=[], resolver=error_resolver)
+
+    # Should raise OutboundUrlBlockedError with clear message
+    with pytest.raises(OutboundUrlBlockedError, match="DNS resolution failed"):
+        adapter._check_resolved_ip("https://example.com/test")
+
+
+@pytest.mark.security
+def test_adapter_unmount_from_shared_session():
+    """Test that adapter is unmounted from shared sessions (Issue #2236).
+
+    This prevents adapter leakage into subsequent requests on shared sessions.
+    """
+    import requests
+
+    from app.utils.outbound_url_guard import safe_request
+
+    # Create a shared session with a custom adapter
+    shared_session = requests.Session()
+    custom_adapter = MagicMock()
+    shared_session.mount("https://", custom_adapter)
+
+    # Mock resolver
+    def mock_resolver(host, port, type=socket.SOCK_STREAM):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", port))]
+
+    # Mock session.request
+    with patch.object(shared_session, "request") as mock_request:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_request.return_value = mock_response
+
+        # Call safe_request with the shared session
+        safe_request(
+            "GET", "https://example.com/test", session=shared_session, resolver=mock_resolver
+        )
+
+        # Verify that the custom adapter is restored
+        assert shared_session.adapters.get("https://") == custom_adapter
+
+
+@pytest.mark.security
+@pytest.mark.parametrize(
+    "ip_addr,description",
+    [
+        ("10.0.0.1", "private network"),
+        ("127.0.0.1", "loopback"),
+        ("169.254.169.254", "metadata endpoint"),
+    ],
+)
+def test_safe_request_blocks_non_public_ips(ip_addr, description):
+    """Test that safe_request blocks requests to non-public IPs (Issue #2236).
+
+    This parameterized test covers private networks, loopback addresses, and metadata endpoints.
+    """
+    from app.utils.outbound_url_guard import safe_request
+
+    # Mock resolver to return a non-public IP
+    def non_public_resolver(host, port, type=socket.SOCK_STREAM):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip_addr, port))]
+
+    # Should raise OutboundUrlBlockedError
+    with pytest.raises(OutboundUrlBlockedError, match="non-public"):
+        safe_request("GET", "https://example.com/test", resolver=non_public_resolver)
+
+
+# ── Issue #2236: Performance Tests ───────────────────────────────────────────────
+
+
+def test_ip_literal_url_validation():
+    """Test that IP literal URLs are validated directly without DNS resolution (Issue #2236).
+
+    This is a performance optimization. IP literal URLs should be validated
+    directly without calling the DNS resolver.
+    """
+    from app.utils.outbound_url_guard import _PinnedIPAdapter
+
+    # Create a resolver that should never be called
+    def tracking_resolver(host, port, type=socket.SOCK_STREAM):
+        raise AssertionError("Resolver should not be called for IP literal URLs")
+
+    # Create an adapter with the tracking resolver
+    adapter = _PinnedIPAdapter(allowed_ips=[], resolver=tracking_resolver)
+
+    # Test with a public IP literal URL
+    # Should succeed without calling the resolver
+    adapter._check_resolved_ip("https://8.8.8.8/test")  # Should not raise
+
+    # Test with a private IP literal URL (should raise, but still not call resolver)
+    with pytest.raises(OutboundUrlBlockedError, match="non-public IP"):
+        adapter._check_resolved_ip("https://10.0.0.1/test")

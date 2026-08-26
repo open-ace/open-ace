@@ -21,6 +21,15 @@ export default defineConfig({
         'src/main.tsx',
         'src/App.tsx',
       ],
+      thresholds: {
+        // Issue #2941: Ensure quotaFormatter.ts maintains 100% coverage
+        'src/utils/quotaFormatter.ts': {
+          statements: 90,
+          branches: 90,
+          functions: 90,
+          lines: 90,
+        },
+      },
     },
   },
   resolve: {

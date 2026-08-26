@@ -90,7 +90,6 @@ async def test_auto_fullscreen_on_chat(
             # Step 3: Check initial panel state (should be expanded)
             print("\n[Step 3] Checking initial panel state...")
             left_panel = page.locator(".work-left-panel")
-            right_panel = page.locator(".work-right-panel")
             work_layout = page.locator(".work-layout")
 
             # Check if fullscreen mode is NOT active initially
@@ -105,10 +104,9 @@ async def test_auto_fullscreen_on_chat(
                 test_results.append(("Initial Fullscreen Off", "WARN", "Already fullscreen"))
 
             # Get initial panel widths
+            # (the right panel was retired; prompts are now a floating drawer)
             left_width_initial = await left_panel.evaluate("el => el.offsetWidth")
-            right_width_initial = await right_panel.evaluate("el => el.offsetWidth")
             print(f"   Left panel width: {left_width_initial}px")
-            print(f"   Right panel width: {right_width_initial}px")
 
             # Step 4: Wait for iframe to load
             print("\n[Step 4] Waiting for workspace iframe...")
@@ -256,27 +254,19 @@ async def test_auto_fullscreen_on_chat(
 
             # Check panel widths in fullscreen mode
             left_width_fs = await left_panel.evaluate("el => el.offsetWidth")
-            right_width_fs = await right_panel.evaluate("el => el.offsetWidth")
             print(f"   Left panel width (after): {left_width_fs}px")
-            print(f"   Right panel width (after): {right_width_fs}px")
 
-            if left_width_fs == 0 and right_width_fs == 0:
-                print("   ✓ Both panels collapsed")
-                test_results.append(("Panels Collapsed", "PASS", ""))
-            elif left_width_fs < left_width_initial and right_width_fs < right_width_initial:
-                print("   ✓ Panels at least partially collapsed")
+            if left_width_fs == 0:
+                print("   ✓ Left panel collapsed")
+                test_results.append(("Panel Collapsed", "PASS", ""))
+            elif left_width_fs < left_width_initial:
+                print("   ✓ Panel at least partially collapsed")
                 test_results.append(
-                    (
-                        "Panels Collapsed",
-                        "PASS",
-                        f"Reduced from {left_width_initial}/{right_width_initial}",
-                    )
+                    ("Panel Collapsed", "PASS", f"Reduced from {left_width_initial}")
                 )
             else:
-                print("   ✗ Panels not collapsed")
-                test_results.append(
-                    ("Panels Collapsed", "FAIL", f"L:{left_width_fs}, R:{right_width_fs}")
-                )
+                print("   ✗ Panel not collapsed")
+                test_results.append(("Panel Collapsed", "FAIL", f"L:{left_width_fs}"))
 
             await page.screenshot(path=f"{SCREENSHOT_DIR}/03_fullscreen_state_{timestamp}.png")
             print("   ✓ Final screenshot saved")

@@ -31,6 +31,7 @@ import { useAppStore } from '@/store';
 import { t } from '@/i18n';
 import { initializeQueryKeyRegistry } from '@/utils';
 import { canAccessManageMode } from '@/utils/permissions';
+import { isWorkspaceRoute } from '@/utils/urlUtils';
 import { featureFlagsApi } from '@/api';
 
 // Initialize query key registry on app load
@@ -73,6 +74,11 @@ const ROIAnalysis = lazy(() =>
 const UsageForecast = lazy(() =>
   import('@/components/features/analysis/UsageForecast').then((m) => ({
     default: m.UsageForecast,
+  }))
+);
+const EnterpriseReport = lazy(() =>
+  import('@/components/features/analysis/EnterpriseReport').then((m) => ({
+    default: m.EnterpriseReport,
   }))
 );
 const ConversationHistory = lazy(() =>
@@ -350,10 +356,7 @@ const WorkRoutes: React.FC = () => {
   const location = useLocation();
   const autonomousEnabled = useAppStore((state) => state.autonomousEnabled);
   const configLoaded = useAppStore((state) => state.configLoaded);
-  const isWorkspaceRoute =
-    location.pathname === '/work' ||
-    location.pathname === '/work/' ||
-    location.pathname === '/work/workspace';
+  const isWorkspace = isWorkspaceRoute(location.pathname);
 
   return (
     <Suspense fallback={<PageLoader />}>
@@ -365,10 +368,10 @@ const WorkRoutes: React.FC = () => {
               {/* Workspace always mounted - hidden when other routes are active.
                 display:contents makes children direct flex children of .work-main,
                 preserving layout. display:none hides but keeps iframe in DOM. */}
-              <div style={{ display: isWorkspaceRoute ? 'contents' : 'none' }}>
+              <div style={{ display: isWorkspace ? 'contents' : 'none' }}>
                 <Workspace />
               </div>
-              <div style={{ display: isWorkspaceRoute ? 'none' : 'contents' }}>
+              <div style={{ display: isWorkspace ? 'none' : 'contents' }}>
                 <Outlet />
               </div>
             </WorkLayout>
@@ -438,6 +441,7 @@ const ManageRoutes: React.FC = () => {
           <Route path="analysis/anomaly" element={<AnomalyDetection />} />
           <Route path="analysis/roi" element={<ROIAnalysis />} />
           <Route path="analysis/forecast" element={<UsageForecast />} />
+          <Route path="analysis/enterprise-report" element={<EnterpriseReport />} />
           <Route path="analysis/conversation-history" element={<ConversationHistory />} />
           <Route path="messages" element={<Messages />} />
 

@@ -78,6 +78,15 @@ export interface UserSegmentation {
   dormant: number; // No activity
 }
 
+// Issue #3079: User role distribution for role-based grouping
+// Simple format: just counts, frontend handles i18n labels
+export interface UserRoleDistribution {
+  admin: number;
+  manager: number;
+  user: number;
+  unknown: number;
+}
+
 export interface Anomaly {
   date: string;
   tokens: number;
@@ -125,6 +134,20 @@ export interface DataRange {
   max_date: string;
 }
 
+// Issue #3080: Response time metrics for trend analysis
+export interface ResponseTimeMetrics {
+  avg_response_time_ms: number | null;
+  p50_response_time_ms: number | null;
+  p95_response_time_ms: number | null;
+  tool_call_avg_ms: number | null;
+  tool_call_ratio: number | null; // 0-1
+  sample_count: number;
+  success_count: number;
+  failed_count: number;
+  coverage_ratio: number; // 0-1
+  data_available: boolean;
+}
+
 // Batch response type
 export interface BatchAnalysisResponse {
   key_metrics: KeyMetrics;
@@ -134,6 +157,8 @@ export interface BatchAnalysisResponse {
   conversation_stats: ConversationStats;
   tool_comparison: ToolComparison;
   user_segmentation: UserSegmentation;
+  user_role_distribution?: UserRoleDistribution; // Issue #3079
+  response_time_metrics?: ResponseTimeMetrics; // Issue #3080
   data_range?: DataRange;
 }
 
@@ -154,6 +179,85 @@ export interface ForecastAvailableFalse {
 }
 
 export type ForecastResponse = ForecastAvailableTrue | ForecastAvailableFalse;
+
+// Enterprise Report Types
+export interface EnterpriseReportResponse {
+  period: {
+    start: string;
+    end: string;
+  };
+  summary: {
+    total_tokens: number;
+    total_input_tokens: number;
+    total_output_tokens: number;
+    total_requests: number;
+    unique_tools: number;
+    unique_hosts: number;
+    daily_average_tokens: number;
+    daily_average_requests: number;
+    peak_day: string | null;
+    peak_tokens: number;
+  };
+  trends: TrendItem[];
+  anomalies: AnomalyItem[];
+  breakdown_by_tool: Record<string, ToolBreakdown>;
+  breakdown_by_host: Record<string, HostBreakdown>;
+}
+
+export interface TrendItem {
+  metric: string;
+  direction: 'up' | 'down' | 'stable';
+  change_percentage: number;
+  current_value: number;
+  previous_value: number;
+  period_days: number;
+  confidence: number;
+}
+
+export interface AnomalyItem {
+  type: 'spike' | 'drop' | 'unusual_pattern';
+  metric: string;
+  date: string;
+  expected_value: number;
+  actual_value: number;
+  deviation_percentage: number;
+  severity: 'low' | 'medium' | 'high';
+  description: string;
+}
+
+export interface ToolBreakdown {
+  tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  requests: number;
+  days_active: number;
+}
+
+export interface HostBreakdown {
+  tokens: number;
+  requests: number;
+  days_active: number;
+}
+
+export interface EfficiencyMetricsResponse {
+  efficiency_available: boolean;
+  output_ratio?: number;
+  tokens_per_request?: number;
+  output_per_request?: number;
+  input_output_ratio?: number;
+  summary?: {
+    total_tokens: number;
+    total_input: number;
+    total_output: number;
+    total_requests: number;
+  };
+}
+
+export interface ExportResponse {
+  report: EnterpriseReportResponse;
+  exported_at: string;
+  format: 'json';
+}
 
 // API
 export const analysisApi = {
@@ -276,6 +380,20 @@ export const analysisApi = {
     return apiClient.get<UserSegmentation>('/api/analysis/user-segmentation', params);
   },
 
+  // Issue #3079: Get user role distribution for role-based grouping
+  async getUserRoleDistribution(
+    startDate?: string,
+    endDate?: string,
+    host?: string
+  ): Promise<UserRoleDistribution> {
+    const params: Record<string, string> = {};
+    if (startDate) params.start = startDate;
+    if (endDate) params.end = endDate;
+    if (host) params.host = host;
+
+    return apiClient.get<UserRoleDistribution>('/api/analysis/user-role-distribution', params);
+  },
+
   async getRecommendations(host?: string): Promise<Recommendation[]> {
     const params: Record<string, string> = {};
     if (host) params.host = host;
@@ -339,5 +457,80 @@ export const analysisApi = {
     return apiClient.get<ForecastResponse>('/api/analytics/forecast', {
       days: String(validatedDays),
     });
+  },
+
+  /**
+   * Get enterprise analytics report.
+   * @param params Report parameters
+   */
+  async getEnterpriseReport(params: {
+    startDate?: string;
+    endDate?: string;
+    days?: number;
+    trends?: boolean;
+    anomalies?: boolean;
+  }): Promise<EnterpriseReportResponse> {
+    const queryParams: Record<string, string> = {};
+    if (params.startDate) queryParams.start_date = params.startDate;
+    if (params.endDate) queryParams.end_date = params.endDate;
+    if (params.days !== undefined) queryParams.days = String(params.days);
+    if (params.trends !== undefined) queryParams.trends = String(params.trends);
+    if (params.anomalies !== undefined) queryParams.anomalies = String(params.anomalies);
+
+    return apiClient.get<EnterpriseReportResponse>('/api/analytics/report', queryParams);
+  },
+
+  /**
+   * Get efficiency metrics.
+   * @param params Efficiency metrics parameters
+   */
+  async getEfficiencyMetrics(params: {
+    startDate?: string;
+    endDate?: string;
+    days?: number;
+  }): Promise<EfficiencyMetricsResponse> {
+    const queryParams: Record<string, string> = {};
+    if (params.startDate) queryParams.start_date = params.startDate;
+    if (params.endDate) queryParams.end_date = params.endDate;
+    if (params.days !== undefined) queryParams.days = String(params.days);
+
+    return apiClient.get<EfficiencyMetricsResponse>('/api/analytics/efficiency', queryParams);
+  },
+
+  /**
+   * Export analytics report.
+   * @param params Export parameters
+   */
+  async exportReport(params: {
+    startDate?: string;
+    endDate?: string;
+    days?: number;
+    format: 'csv' | 'json';
+  }): Promise<Blob | ExportResponse> {
+    const queryParams: Record<string, string> = {
+      format: params.format,
+    };
+    if (params.startDate) queryParams.start_date = params.startDate;
+    if (params.endDate) queryParams.end_date = params.endDate;
+    if (params.days !== undefined) queryParams.days = String(params.days);
+
+    if (params.format === 'csv') {
+      // CSV returns a blob for download
+      const response = await fetch(
+        `/api/analytics/export?${new URLSearchParams(queryParams).toString()}`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token') ?? ''}`,
+          },
+        }
+      );
+      if (!response.ok) {
+        throw new Error(`Export failed: ${response.statusText}`);
+      }
+      return response.blob();
+    }
+
+    // JSON returns data for preview
+    return apiClient.get<ExportResponse>('/api/analytics/export', queryParams);
   },
 };

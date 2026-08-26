@@ -27,7 +27,9 @@ import dataclasses
 import fnmatch
 import json
 import logging
+import re
 import time
+import uuid
 from typing import cast
 
 from app.modules.workspace.autonomous.acceptance_gates import run_mechanical_gates
@@ -62,12 +64,23 @@ def _snapshot_to_json(snapshot: AcceptanceSnapshot) -> str:
     return json.dumps(dataclasses.asdict(snapshot), ensure_ascii=False)
 
 
-def _validate_extracted_snapshot(payload: object) -> AcceptanceSnapshot:
+# Checklist items prefixed "Issue #M:" describe ANOTHER issue's deliverables
+# (observed when the extractor absorbed sibling-issue context); they are not
+# acceptance criteria of the issue being verified. Trailing references
+# ("…修复（Issue #2883）") are unaffected — only leading ownership prefixes.
+_CROSS_ISSUE_PREFIX_RE = re.compile(r"^Issue\s*#(\d+)\s*[:：]", re.IGNORECASE)
+
+
+def _validate_extracted_snapshot(
+    payload: object, issue_number: int | None = None
+) -> AcceptanceSnapshot:
     """Build a conservative LLM-extracted snapshot or raise ``ValueError``.
 
     When the issue has no convention snapshot, this object becomes the source
     of truth for checklist coverage and scope gates. Accepting unknown/missing
     fields or wrong types would let a fabricated verdict bypass those gates.
+    Checklist items owned by a DIFFERENT issue ("Issue #M:" prefix, M != the
+    issue being verified) are dropped before validation.
     """
     expected_fields = {
         "required_paths",
@@ -88,6 +101,14 @@ def _validate_extracted_snapshot(payload: object) -> AcceptanceSnapshot:
         list_fields[field_name] = [item.strip() for item in value]
     if not isinstance(payload["closure_constraints"], bool):
         raise ValueError("extracted snapshot closure_constraints was not boolean")
+    if issue_number:
+        kept = []
+        for item in list_fields["checklist"]:
+            match = _CROSS_ISSUE_PREFIX_RE.match(item)
+            if match and match.group(1) != str(issue_number):
+                continue
+            kept.append(item)
+        list_fields["checklist"] = kept
     if not list_fields["required_paths"] and not list_fields["checklist"]:
         raise ValueError("extracted snapshot contained no verifiable criteria")
 
@@ -109,27 +130,49 @@ def _glob_matches(pattern: str, paths: list[str]) -> str | None:
     return None
 
 
+# required_paths entries may be globs (issue acceptance snapshots allow them);
+# git pathspec and fnmatch glob semantics differ, so the history probe only
+# runs for literal paths.
+_GLOB_META_CHARS = frozenset("*?[]{}")
+
+
 def run_scope_gate(
-    gh, required_paths: list[str], base_sha: str, merge_sha: str
-) -> list[ItemVerdict]:
+    gh,
+    required_paths: list[str],
+    base_sha: str,
+    merge_sha: str,
+    snapshot_source: str = "convention",
+) -> tuple[list[ItemVerdict], list[dict]]:
     """Deterministic scope gate: each required path must appear in base..merge diff.
 
-    Returns one ``ItemVerdict`` per required path: CONFIRMED if a changed path
-    matches (glob), REJECTED with the missing path as evidence otherwise.
+    Returns ``(verdicts, advisory)``. ``verdicts`` feed the issue-level
+    aggregation: CONFIRMED if a changed path matches (glob), REJECTED
+    otherwise — with one refinement. A path missing from the cumulative diff
+    but touched by some commit in the range was changed-then-lost (typically
+    dropped in conflict resolution) and is REJECTED with that evidence;
+    a path never touched in the range is only REJECTED for authoritative
+    convention snapshots. For LLM-extracted snapshots (confidence=low, prone
+    to over-specifying paths whose work already landed before base) such
+    paths become ``advisory`` report entries that are excluded from the
+    aggregation and surfaced for manual review instead.
     """
     try:
         changed = gh.get_changed_files(base=base_sha, head=merge_sha) or []
     except Exception as exc:  # noqa: BLE001 - git/API failures are inconclusive, not rejection
-        return [
-            ItemVerdict(
-                item="scope:changed-files",
-                verdict=Verdict.INDETERMINATE,
-                evidence=[{"ref": "git-diff:error", "note": f"scope diff failed: {exc!r}"}],
-                rationale="Required-path scope could not be read; verification must pause.",
-                retryable=True,
-            )
-        ]
+        return (
+            [
+                ItemVerdict(
+                    item="scope:changed-files",
+                    verdict=Verdict.INDETERMINATE,
+                    evidence=[{"ref": "git-diff:error", "note": f"scope diff failed: {exc!r}"}],
+                    rationale="Required-path scope could not be read; verification must pause.",
+                    retryable=True,
+                )
+            ],
+            [],
+        )
     verdicts: list[ItemVerdict] = []
+    advisory: list[dict] = []
     for path in required_paths:
         hit = _glob_matches(path, changed)
         if hit is not None:
@@ -140,7 +183,51 @@ def run_scope_gate(
                     evidence=[{"ref": f"git-diff:{hit}", "note": "required path present in merge"}],
                 )
             )
-        else:
+            continue
+        touched: bool | None = None
+        if not (_GLOB_META_CHARS & set(path)):
+            try:
+                touched = bool(gh.path_touched_in_range(base_sha, merge_sha, path))
+            except Exception as exc:  # noqa: BLE001 - history probe failure is inconclusive
+                return (
+                    [
+                        ItemVerdict(
+                            item=path,
+                            verdict=Verdict.INDETERMINATE,
+                            evidence=[
+                                {
+                                    "ref": "git-log:error",
+                                    "note": f"scope history probe failed: {exc!r}",
+                                }
+                            ],
+                            rationale="Required-path history could not be read; verification must pause.",
+                            retryable=True,
+                        )
+                    ],
+                    [],
+                )
+        if touched:
+            verdicts.append(
+                ItemVerdict(
+                    item=path,
+                    verdict=Verdict.REJECTED,
+                    evidence=[
+                        {
+                            "ref": f"lost:{path}",
+                            "note": (
+                                "path modified within the merge range but absent from the "
+                                "final cumulative diff"
+                            ),
+                        }
+                    ],
+                    rationale=(
+                        "The merge range contains commits touching this required path, yet "
+                        "the cumulative diff does not — the change was likely lost during "
+                        "conflict resolution."
+                    ),
+                )
+            )
+        elif snapshot_source == "convention":
             verdicts.append(
                 ItemVerdict(
                     item=path,
@@ -154,7 +241,28 @@ def run_scope_gate(
                     rationale="Issue scope requires this path; it was not changed on the merged branch.",
                 )
             )
-    return verdicts
+        else:
+            # LLM-extracted snapshot + never touched in range: the extractor
+            # over-specified (work often already landed before base, or
+            # belongs to a sibling issue). Advisory only — semantic verifier
+            # items remain the real gate.
+            advisory.append(
+                {
+                    "item": path,
+                    "verdict": "advisory",
+                    "evidence": [
+                        {
+                            "ref": f"untouched:{path}",
+                            "note": "path absent from base..merge diff and never touched in range",
+                        }
+                    ],
+                    "rationale": (
+                        "LLM-extracted scope listed this path, but no commit in the merge "
+                        "range touched it; not counted against the verdict."
+                    ),
+                }
+            )
+    return verdicts, advisory
 
 
 def _verdict_from_str(s: str) -> Verdict:
@@ -178,6 +286,13 @@ _FUZZY_ITEM_MATCH_THRESHOLD = 0.8
 
 # Tokens that flip the meaning of a requirement when added or removed.
 _NEGATION_MARKER_TOKENS = frozenset({"not", "no", "never", "without"})
+# CJK negation heads: a CJK token (bigram or single-char run) starting with one
+# of these carries negation (不删/未覆盖/无变化/非空/没变…). Head chars like 未
+# also open neutral words (未来); a one-sided marker only makes the pair NOT
+# match (conservative loss of coverage), never a false confirmation.
+_CJK_NEGATION_HEADS = frozenset("不未无非莫勿没")
+# CJK Unified Ideographs + Extension A — the ranges tokenized as bigrams.
+_CJK_RUN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]+")
 
 
 def _negation_markers(tokens: list[str]) -> set[str]:
@@ -186,7 +301,8 @@ def _negation_markers(tokens: list[str]) -> set[str]:
     Contractions ending in ``n't`` and ``cannot`` are canonicalized to
     ``not`` so a paraphrase that only swaps the contraction form ("must
     not" vs "mustn't") keeps matching, while an actual negation flip always
-    yields a different set.
+    yields a different set. CJK tokens contribute their head character when
+    it is a negation head (see ``_CJK_NEGATION_HEADS``).
     """
     markers: set[str] = set()
     for token in tokens:
@@ -197,6 +313,8 @@ def _negation_markers(tokens: list[str]) -> set[str]:
             markers.add("not")
         elif word in _NEGATION_MARKER_TOKENS:
             markers.add(word)
+        elif word and word[0] in _CJK_NEGATION_HEADS:
+            markers.add(word[0])
     return markers
 
 
@@ -209,19 +327,72 @@ def _contains_token_subsequence(haystack: list[str], needle: list[str]) -> bool:
     )
 
 
+def _fuzzy_tokens(normalized: str) -> list[str]:
+    """Tokenize for fuzzy matching; CJK runs become character bigrams.
+
+    Whitespace tokenization turns a whole Chinese phrase into a single token,
+    so a verbatim-but-shortened verifier item ("定义机器状态常量") shares zero
+    tokens with its checklist form ("定义机器状态常量（_STATUS_ONLINE, …）")
+    and every similarity path degenerates to 0. Each CJK run instead yields
+    its in-run character bigrams (a 1-char run yields that char); non-CJK
+    segments keep plain whitespace splitting, so English token sequences are
+    unchanged token-for-token.
+    """
+    tokens: list[str] = []
+    pos = 0
+    for match in _CJK_RUN_RE.finditer(normalized):
+        tokens.extend(normalized[pos : match.start()].split())
+        run = match.group(0)
+        if len(run) == 1:
+            tokens.append(run)
+        else:
+            tokens.extend(run[i : i + 2] for i in range(len(run) - 1))
+        pos = match.end()
+    tokens.extend(normalized[pos:].split())
+    return tokens
+
+
+def _weighted_jaccard(tokens_a: list[str], tokens_b: list[str]) -> float:
+    """Token-set Jaccard with CJK tokens weighted 1x and all others 2x.
+
+    A CJK bigram carries one character-pair of information; any other token
+    (an alphanumeric identifier like CSV/XLSX, or a punctuation token)
+    carries the whole distinction between two otherwise-identical
+    requirements. With uniform weights, swapping one identifier among ten
+    CJK bigrams scores 9/11 = 0.82 — above the 0.8 bar — so non-CJK tokens
+    are weighted 2x to sink such pairs (9/13 = 0.69) while near-verbatim
+    pairs stay above it. ``_fuzzy_tokens`` emits tokens that are either
+    pure CJK or CJK-free, so every token in an all-English comparison has
+    the same weight and the ratio — and therefore every existing English
+    score — is bit-for-bit unchanged.
+    """
+
+    def _weight(token: str) -> int:
+        return 1 if _CJK_RUN_RE.search(token) else 2
+
+    intersection = set(tokens_a) & set(tokens_b)
+    union = set(tokens_a) | set(tokens_b)
+    if not union:
+        return 0.0
+    return sum(_weight(t) for t in intersection) / sum(_weight(t) for t in union)
+
+
 def _items_match_fuzzy(a: str, b: str) -> float:
     """Conservative similarity in [0, 1] between two checklist item strings.
 
     1.0 for identical normalized strings, or for an elaboration of the same
     requirement — the short side's full token sequence appears as a
-    contiguous token run of the long side AND the short side carries at
-    least 3 tokens and at least half the long side's token count. Bare
+    contiguous token run of the long side AND the short side carries
+    at least 3 tokens and at least half the long side's token count. Bare
     character-level substrings ("Auth" inside "OAuth2 token refresh")
     therefore never score 1.0; they fall through to Jaccard. A negation
     flip (one side negates, the other does not) scores 0.0 outright: those
     are semantic opposites, never paraphrases. Everything else is the
-    token-set Jaccard similarity of the normalized strings, which
-    deliberately ignores word order.
+    weighted token-set Jaccard similarity of the normalized strings, which
+    deliberately ignores word order (see ``_weighted_jaccard``). Tokens are
+    CJK-aware: Chinese runs become character bigrams (see ``_fuzzy_tokens``)
+    so shortened-but-verbatim CJK items still match their checklist
+    elaborations.
     """
     normalized_a = _normalized_item(a)
     normalized_b = _normalized_item(b)
@@ -229,8 +400,8 @@ def _items_match_fuzzy(a: str, b: str) -> float:
         return 0.0
     if normalized_a == normalized_b:
         return 1.0
-    tokens_a = normalized_a.split()
-    tokens_b = normalized_b.split()
+    tokens_a = _fuzzy_tokens(normalized_a)
+    tokens_b = _fuzzy_tokens(normalized_b)
     if not tokens_a or not tokens_b:
         return 0.0
     if _negation_markers(tokens_a) != _negation_markers(tokens_b):
@@ -246,7 +417,7 @@ def _items_match_fuzzy(a: str, b: str) -> float:
         and _contains_token_subsequence(long_tokens, short_tokens)
     ):
         return 1.0
-    return len(set(tokens_a) & set(tokens_b)) / len(set(tokens_a) | set(tokens_b))
+    return _weighted_jaccard(tokens_a, tokens_b)
 
 
 def _cover_missing_checklist_items(
@@ -350,13 +521,28 @@ def _parse_issue_body(gh, issue_number) -> str:
 
 
 def _failed_items(report: dict) -> list[tuple[str, dict]]:
-    """Actionable items: scope/gates/verifier entries not confirmed."""
+    """Actionable items: scope/gates/verifier entries not confirmed.
+
+    Advisory scope entries (LLM-snapshot paths never touched in range) are
+    informational and never actionable failures.
+    """
     out: list[tuple[str, dict]] = []
     for kind in ("scope", "gates", "verifier"):
         for entry in report.get(kind, []):
-            if entry.get("verdict") != "confirmed":
-                out.append((kind, entry))
+            if entry.get("verdict") in ("confirmed", "advisory"):
+                continue
+            out.append((kind, entry))
     return out
+
+
+def _advisory_items(report: dict) -> list[dict]:
+    """Advisory scope entries: excluded from the verdict, surfaced for humans."""
+    return [
+        entry
+        for kind in ("scope", "gates", "verifier")
+        for entry in report.get(kind, [])
+        if entry.get("verdict") == "advisory"
+    ]
 
 
 def feedback_prefill_from_report(report: dict) -> str:
@@ -426,6 +612,15 @@ def _acceptance_summary(status: str, report: dict) -> str:
         listed = ", ".join(failed_names[:6])
         extra = f" (+{len(failed_names) - 6} more)" if len(failed_names) > 6 else ""
         return f"status={status}; not-verified: {listed}{extra}"
+    advisory_names = [
+        str(entry.get("item", "")).strip()
+        for entry in _advisory_items(report)
+        if str(entry.get("item", "")).strip()
+    ]
+    if advisory_names:
+        listed = ", ".join(advisory_names[:6])
+        extra = f" (+{len(advisory_names) - 6} more)" if len(advisory_names) > 6 else ""
+        return f"status={status}; advisory: {listed}{extra}"
     return (
         f"status={status}; "
         f"scope={len(report.get('scope', []))} "
@@ -468,6 +663,14 @@ def _format_report_comment(report: dict) -> str:
                     detail = ev[0].get("note", "")
             tail = f" — {detail}" if detail else ""
             lines.append(f"- [{kind}] `{entry.get('item')}` ({entry.get('verdict')}){tail}")
+    advisory = _advisory_items(report)
+    if advisory:
+        lines += ["", "**Advisory (not counted in verdict):**"]
+        for entry in advisory:
+            lines.append(
+                f"- `{entry.get('item')}` — not changed in this merge; "
+                f"verify manually only if it belongs to this issue"
+            )
     lines += [
         "",
         "**Next step:** address the items above, then resume the workflow to re-verify.",
@@ -573,7 +776,17 @@ def _prior_infra_error_kind(wf: dict, merge_sha: str, snap_hash: str) -> str | N
     return kind if isinstance(kind, str) and kind else None
 
 
-def _acceptance_milestone(*, workflow_id, dev_round, attempt, status, report) -> dict:
+def _acceptance_milestone(
+    *,
+    workflow_id,
+    dev_round,
+    attempt,
+    status,
+    report,
+    session_id: str = "",
+    usage: dict | None = None,
+    milestone_id: str = "",
+) -> dict:
     """Build the acceptance-verification milestone row.
 
     ``result_summary`` / ``metadata`` are DB columns inserted verbatim by
@@ -581,10 +794,23 @@ def _acceptance_milestone(*, workflow_id, dev_round, attempt, status, report) ->
     — passing the raw ``report`` dict crashed with ``can't adapt type 'dict'``
     the moment a verdict was committed (#2394). ``metadata`` keeps the full
     structured report as JSON; ``result_summary`` is a short readable line.
+
+    ``session_id`` is the verifier run's tracking session id and ``usage`` its
+    own increment for THIS attempt (#2994) — both from
+    ``_run_verification_agent``'s runtime attachment. They land in the same
+    ``phase_*`` columns every other AI milestone uses, so workflow totals
+    (summed from those columns) finally include verification consumption and
+    the UI card gets its session button + token/request chips.
+
+    ``milestone_id`` is minted by the caller (#3000) so the session's messages
+    can be tagged before the row is inserted; empty falls back to
+    create_milestone's own uuid.
     """
     summary = _acceptance_summary(status, report)
+    usage = usage or {}
     return {
         "workflow_id": workflow_id,
+        "milestone_id": milestone_id or "",
         "phase": "acceptance_verification",
         "dev_round": dev_round,
         "round_number": attempt,
@@ -593,6 +819,11 @@ def _acceptance_milestone(*, workflow_id, dev_round, attempt, status, report) ->
         "title": f"Acceptance verification: {status}",
         "result_summary": summary,
         "metadata": json.dumps(report, ensure_ascii=False),
+        "session_id": session_id or "",
+        "phase_total_tokens": int(usage.get("total_tokens", 0) or 0),
+        "phase_input_tokens": int(usage.get("total_input_tokens", 0) or 0),
+        "phase_output_tokens": int(usage.get("total_output_tokens", 0) or 0),
+        "phase_request_count": int(usage.get("request_count", 0) or 0),
     }
 
 
@@ -708,6 +939,16 @@ def handle(ctx, deps) -> PhaseResult:
         )
         or {}
     )
+    # Verifier runtime facts (#2994): tracking session id + this attempt's own
+    # usage increment — recorded on the settle-time milestone (and reflected
+    # into workflow totals via usage_delta on the settled PhaseResult).
+    verifier_session_id = str(agent_out.get("session_id") or "")
+    verifier_usage = agent_out.get("usage") or {}
+    # #3003: the in_progress acceptance row minted at spawn (absent when the
+    # merged-main checkout failed before minting) and its already-recorded
+    # usage — a resumed attempt's totals continue from the baseline.
+    early_milestone_id = str(agent_out.get("milestone_id") or "")
+    usage_baseline = agent_out.get("usage_baseline") or {}
     verifier_verdicts: list[ItemVerdict] = []
     for index, raw_verdict in enumerate(agent_out.get("verdicts") or []):
         if not isinstance(raw_verdict, dict):
@@ -764,7 +1005,9 @@ def handle(ctx, deps) -> PhaseResult:
             )
         else:
             try:
-                snapshot = _validate_extracted_snapshot(extracted_payload)
+                snapshot = _validate_extracted_snapshot(
+                    extracted_payload, issue_number=issue_number
+                )
                 snap_hash = hash_snapshot(snapshot)
             except ValueError as exc:
                 agent_out["infra_error"] = f"verification agent returned invalid snapshot: {exc}"
@@ -781,8 +1024,13 @@ def handle(ctx, deps) -> PhaseResult:
     # explicitly indeterminate for human follow-up.
     verifier_verdicts = _cover_missing_checklist_items(verifier_verdicts, snapshot.checklist)
 
-    # Mechanical scope gate (deterministic): required paths must be in the diff.
-    scope_verdicts = run_scope_gate(gh, snapshot.required_paths, base_sha, merge_sha)
+    # Mechanical scope gate (deterministic): required paths must be in the
+    # diff. LLM-snapshot paths never touched in the range come back as
+    # advisory entries: reported for manual review, excluded from the
+    # aggregation below.
+    scope_verdicts, scope_advisory = run_scope_gate(
+        gh, snapshot.required_paths, base_sha, merge_sha, snapshot_source=snapshot.source
+    )
 
     # The other 4 mechanical gates (#2335 S4): conservative static-analysis
     # checks whose verdicts fold into the issue-level aggregation alongside the
@@ -838,7 +1086,8 @@ def handle(ctx, deps) -> PhaseResult:
         "scope": [
             {"item": v.item, "verdict": v.verdict.value, "evidence": v.evidence}
             for v in scope_verdicts
-        ],
+        ]
+        + scope_advisory,
         "gates": [
             {
                 "item": v.item,
@@ -877,13 +1126,56 @@ def handle(ctx, deps) -> PhaseResult:
         "verified_by": verified_by,
         "verification_attempt": (wf.get("verification_attempt") or 0) + 1,
     }
-    milestone = _acceptance_milestone(
-        workflow_id=wf.get("workflow_id"),
-        dev_round=int(wf.get("dev_round") or 1),
-        attempt=common_patch["verification_attempt"],
-        status=status,
-        report=report,
-    )
+
+    # #3003: with an early milestone (minted at verifier spawn), settle
+    # FINALIZES that row; only the create fallback (checkout failed before the
+    # row existed) builds a milestone_events payload. The two shapes share the
+    # tag target and the usage arithmetic (early rows fold the resume
+    # baseline into their totals).
+    def _merged_usage() -> dict:
+        return {
+            key: int(usage_baseline.get(key, 0) or 0) + int(verifier_usage.get(key, 0) or 0)
+            for key in (
+                "total_tokens",
+                "total_input_tokens",
+                "total_output_tokens",
+                "request_count",
+            )
+        }
+
+    if early_milestone_id:
+        # NO phase_* overwrite here: the row already holds the authoritative
+        # usage — _run_agent's _write_phase_usage writes baseline + the SUM of
+        # every in-run invocation delta, which can exceed baseline + the final
+        # result's own delta when the call retried in-run. Overwriting would
+        # silently drop those burned tokens from the card and the totals.
+        finalize_fields = {
+            "status": status,
+            "title": f"Acceptance verification: {status}",
+            "result_summary": _acceptance_summary(status, report),
+            "metadata": json.dumps(report, ensure_ascii=False),
+            "session_id": verifier_session_id,
+        }
+        milestone = None  # finalize path carries no milestone_events
+        tag_milestone_id = early_milestone_id
+    else:
+        # Create fallback (#3000 semantics): pre-mint the id so the session's
+        # messages can be tagged before the row is inserted (create_milestone
+        # honors a caller-supplied id; session_messages has no FK).
+        settle_milestone_id = str(uuid.uuid4())
+        milestone = _acceptance_milestone(
+            workflow_id=wf.get("workflow_id"),
+            dev_round=int(wf.get("dev_round") or 1),
+            attempt=common_patch["verification_attempt"],
+            status=status,
+            report=report,
+            session_id=verifier_session_id,
+            usage=verifier_usage,
+            milestone_id=settle_milestone_id,
+        )
+        finalize_fields = {}  # unused on the fallback path
+        tag_milestone_id = settle_milestone_id
+
     # A deterministic parse failure that repeats identically across consecutive
     # attempts is certain to keep failing, so cap it below the transient budget
     # (#2867). The first occurrence still gets one retry (a genuine one-off is
@@ -899,13 +1191,48 @@ def handle(ctx, deps) -> PhaseResult:
         # Infrastructure failures are not acceptance evidence and must not
         # create a terminal milestone. Keep the workflow in its current phase
         # so the scheduler can retry automatically; the attempt report remains
-        # persisted for diagnostics.
+        # persisted for diagnostics. The early row is finalized as a failed
+        # diagnostic card KEEPING its realtime-recorded usage (a partial fix
+        # for #2999: infra-retry attempts finally have somewhere to land), and
+        # this attempt's messages are tagged onto it (#3003 per-attempt
+        # attribution).
+        if early_milestone_id:
+            deps.host.finalize_acceptance_milestone(
+                early_milestone_id,
+                {
+                    "status": "failed",
+                    "title": "Acceptance verification: failed",
+                    "error_message": "Acceptance verifier infrastructure failure; retrying",
+                },
+            )
+            if verifier_session_id:
+                deps.host.tag_session_messages(verifier_session_id, early_milestone_id)
         return PhaseResult.retry(
             workflow_patch={
                 **common_patch,
                 "error_message": "Acceptance verifier infrastructure failure; retrying",
             }
         )
+
+    def _tag_settle_messages() -> None:
+        # Sweep the verifier session's still-untagged messages onto the settle
+        # milestone. Idempotent — per-attempt rows tag their own messages at
+        # infra-retry finalize; this catches anything left untagged.
+        if verifier_session_id:
+            deps.host.tag_session_messages(verifier_session_id, tag_milestone_id)
+
+    def _settle_milestone_events() -> list[dict]:
+        return [milestone] if milestone is not None else []
+
+    def _usage_delta() -> dict | None:
+        # Early path: the row's phase_* already hold the authoritative totals
+        # (written by _run_agent); this value only triggers the idempotent
+        # refresh, so an all-zero delta collapses to None like the fallback.
+        if early_milestone_id:
+            merged = _merged_usage()
+            return merged if any(merged.values()) else None
+        return verifier_usage or None
+
     if agent_out.get("infra_error"):
         exhausted_msg = (
             "Acceptance verifier produced unparseable output "
@@ -913,13 +1240,20 @@ def handle(ctx, deps) -> PhaseResult:
             if deterministic_repeat
             else "Acceptance verifier infrastructure retries exhausted; awaiting review"
         )
+        if early_milestone_id:
+            deps.host.finalize_acceptance_milestone(
+                early_milestone_id,
+                {**finalize_fields, "error_message": exhausted_msg},
+            )
+        _tag_settle_messages()
         return PhaseResult.pause(
             workflow_patch={
                 **common_patch,
                 "error_message": exhausted_msg,
             },
-            milestone_events=[milestone],
+            milestone_events=_settle_milestone_events(),
             structured_error={"message": "verifier-infrastructure-exhausted", "report": report},
+            usage_delta=_usage_delta(),
         )
 
     if status == "confirmed":
@@ -930,6 +1264,9 @@ def handle(ctx, deps) -> PhaseResult:
             return PhaseResult.retry()
         gh.close_issue(issue_number)
         common_patch["issue_closed_by_workflow_at"] = _now_iso()
+        if early_milestone_id:
+            deps.host.finalize_acceptance_milestone(early_milestone_id, finalize_fields)
+        _tag_settle_messages()
         return PhaseResult.completed(
             next_phase="completed",
             workflow_patch={
@@ -937,10 +1274,14 @@ def handle(ctx, deps) -> PhaseResult:
                 "completed_at": _now_iso(),
                 "error_message": None,
             },
-            milestone_events=[milestone],
+            milestone_events=_settle_milestone_events(),
+            usage_delta=_usage_delta(),
         )
     if status == "rejected":
         _post_verdict_comment(deps, issue_number, report)
+        if early_milestone_id:
+            deps.host.finalize_acceptance_milestone(early_milestone_id, finalize_fields)
+        _tag_settle_messages()
         return PhaseResult.pause(
             structured_error={
                 "message": "Acceptance verification rejected",
@@ -950,15 +1291,20 @@ def handle(ctx, deps) -> PhaseResult:
                 **common_patch,
                 "error_message": "Acceptance verification rejected; awaiting review",
             },
-            milestone_events=[milestone],
+            milestone_events=_settle_milestone_events(),
+            usage_delta=_usage_delta(),
         )
     # indeterminate
     _post_verdict_comment(deps, issue_number, report)
+    if early_milestone_id:
+        deps.host.finalize_acceptance_milestone(early_milestone_id, finalize_fields)
+    _tag_settle_messages()
     return PhaseResult.pause(
         workflow_patch={
             **common_patch,
             "error_message": "Acceptance indeterminate: awaiting evidence",
         },
-        milestone_events=[milestone],
+        milestone_events=_settle_milestone_events(),
         structured_error={"message": "indeterminate", "report": report},
+        usage_delta=_usage_delta(),
     )

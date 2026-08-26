@@ -18,6 +18,29 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def _verify_gevent_patch() -> None:
+    """Verify gevent monkey-patch was applied correctly.
+
+    Issue #2237: Check that gunicorn_entry.py successfully applied gevent
+    monkey-patch before any urllib3 imports. If not, log a warning that
+    RecursionError may occur in urllib3 during LLM proxy requests.
+    """
+    import ssl
+
+    if not hasattr(ssl, "_gevent_patched"):
+        logger.warning(
+            "gevent monkey-patch verification failed: ssl._gevent_patched not set. "
+            "This could cause RecursionError in urllib3 during LLM proxy requests. "
+            "Ensure gunicorn_entry.py is used as the entry point."
+        )
+    else:
+        logger.info("gevent monkey-patch verification passed: ssl._gevent_patched is set")
+
+
+# Issue #2237: Verify gevent patch at worker initialization
+_verify_gevent_patch()
+
 # Issue #2187: Apply psycogreen patch for gevent compatibility.
 # This MUST be done before any psycopg2 connections are created.
 # The import order is:

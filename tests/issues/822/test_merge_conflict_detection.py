@@ -21,6 +21,7 @@ import pytest
 from app.modules.workspace.autonomous.evidence import Evidence, Verdict
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator, WorkflowPaused
+from app.modules.workspace.autonomous.phases import merge as merge_phase
 
 
 def _make_workflow(**overrides):
@@ -684,8 +685,14 @@ class TestDoMergeDeferredRetry:
         mock_gh.merge_pr.side_effect = GitHubOpsError("GraphQL: review required")
         o._resolve_merge_conflicts = MagicMock()
 
+        # Exhaust the settle budget (#2964) so the policy block pauses instead
+        # of deferring with a retry.
         with pytest.raises(WorkflowPaused, match="Merge blocked by repository policy"):
-            o._do_merge(_make_workflow())
+            o._do_merge(
+                _make_workflow(
+                    merge_policy_settle_retries=merge_phase._MERGE_POLICY_SETTLE_RETRY_MAX
+                )
+            )
 
         o._resolve_merge_conflicts.assert_not_called()
         pause_update = o._update_workflow.call_args.args[0]
@@ -698,7 +705,12 @@ class TestDoMergeDeferredRetry:
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_policy_pause_survives_advance_success_cleanup(self, mock_gh_cls):
         """An older transient retry counter must not clear the pause reason."""
-        wf = _make_workflow(transient_retry_count=2)
+        # Exhaust the settle budget (#2964) so this still-pause scenario does
+        # not defer with a retry instead.
+        wf = _make_workflow(
+            transient_retry_count=2,
+            merge_policy_settle_retries=merge_phase._MERGE_POLICY_SETTLE_RETRY_MAX,
+        )
         o, _ = _make_orchestrator(wf)
         o._ensure_worktree = MagicMock()
         mock_gh = MagicMock()
@@ -2073,8 +2085,14 @@ class TestAddWorktreeExistingBranch:
         o._branch_contains_main = MagicMock(return_value=True)
         o._resolve_merge_conflicts = MagicMock()
 
+        # Exhaust the settle budget (#2964): the stale-dirty policy rejection
+        # must still reach the pause, not defer with a retry.
         with pytest.raises(WorkflowPaused, match="Merge blocked by repository policy"):
-            o._do_merge(_make_workflow())
+            o._do_merge(
+                _make_workflow(
+                    merge_policy_settle_retries=merge_phase._MERGE_POLICY_SETTLE_RETRY_MAX
+                )
+            )
 
         o._resolve_merge_conflicts.assert_not_called()
         o._branch_contains_main.assert_called_once()

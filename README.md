@@ -123,7 +123,19 @@
 
 ## 🚀 5 分钟快速开始
 
-### 方式一：一键部署（推荐）
+### 🎯 部署模式选择
+
+| 场景 | 推荐模式 | 说明 |
+|------|----------|------|
+| 个人使用、单机体验 | **单用户模式** | 默认模式，无需额外配置，容器以非 root 运行 |
+| 团队协作、多用户隔离 | **多用户模式** | 每个用户独立工作区，容器需以 root 运行 |
+| 生产环境、企业部署 | **多用户模式** | 配合 OIDC/SSO、权限管理、审计追踪 |
+
+---
+
+### 🚀 单用户模式（默认）
+
+**适合**：个人使用、快速体验、单机测试
 
 ```bash
 # 克隆项目
@@ -141,6 +153,58 @@ docker compose up -d --build
 > ⚠️ 生产环境请通过 `.env` 显式设置强密钥（参考 `.env.example`）、修改默认密码，并参阅 [部署指南](docs/cn/DEPLOYMENT.md)。自动生成的密钥仅存在于运行环境，容器/卷销毁后不保留。
 
 > 🇨🇳 **国内网络**：若构建时拉取基础镜像卡住或超时，见 [国内网络加速](#-国内网络加速)。
+
+---
+
+### 👥 多用户模式
+
+**适合**：团队协作、生产环境、需要用户隔离的场景
+
+**⚠️ 重要提示**：
+- 多用户模式需要容器以 root 运行（用于创建系统用户）
+- 不要直接修改 `docker-compose.yml`，使用专用的 overlay 配置文件
+
+#### 方式一：一键启动脚本（推荐）
+
+```bash
+# 克隆项目
+git clone https://github.com/open-ace/open-ace.git
+cd open-ace
+
+# 使用一键脚本启动多用户模式
+./scripts/start-multi-user.sh
+
+# 访问 http://localhost:19888
+```
+
+#### 方式二：Docker Compose Overlay
+
+```bash
+# 克隆项目
+git clone https://github.com/open-ace/open-ace.git
+cd open-ace
+
+# 使用 overlay 文件启动
+./scripts/bootstrap-compose-env.sh
+docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d --wait
+
+# 访问 http://localhost:19888
+```
+
+#### 多用户模式配置说明
+
+`docker-compose.multi-user.yml` 自动配置以下内容：
+
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| `user: "0"` | 以 root 运行 | 创建系统用户所需 |
+| `WORKSPACE_MULTI_USER_MODE` | `true` | 启用多用户模式 |
+| `OPENACE_ALLOW_ROOT_MULTI_USER` | `1` | 显式授权 root 运行 |
+| `OPENACE_CONFIG_DIR` | `/home/open-ace/.open-ace` | 配置持久化路径 |
+
+> 📖 **详细文档**：[多用户工作区部署](docs/cn/DEPLOYMENT.md#多用户工作区部署)
+
+---
 
 #### 🇨🇳 国内网络加速
 
@@ -162,7 +226,27 @@ docker compose up -d --build
 
 > 也可在 Docker daemon 配置 `registry-mirrors`（Docker Desktop / OrbStack 的镜像加速设置），效果相同但作用于全局。
 
-### 方式二：源码安装
+---
+
+#### 🌐 代理配置
+
+如果你的环境需要通过代理访问外部 API（如 OpenAI、GitHub 等），请设置以下环境变量：
+
+```bash
+export HTTP_PROXY=http://proxy.example.com:8080
+export HTTPS_PROXY=http://proxy.example.com:8080
+```
+
+Open ACE 会自动使用这些代理配置进行出站请求。
+
+**注意事项**：
+- 支持标准环境变量：`HTTP_PROXY`、`HTTPS_PROXY`（大小写均可）
+- 配置后会应用于所有出站 HTTP/HTTPS 请求
+- 不配置代理时，系统默认禁用代理查找（避免 gevent RecursionError）
+
+---
+
+### 源码安装
 
 ```bash
 # 1. 克隆项目
@@ -188,7 +272,9 @@ python3 server.py
 
 > 💡 直接 `python3 server.py` 启动时，若未显式设置 `OPENACE_ENCRYPTION_KEY`，开发/试用模式下会在首次启动自动生成并持久化到 `~/.open-ace/generated-secrets.env`（重启复用、不轮转；生产模式仍要求显式设置），与 Docker 路径的零配置行为一致（Issue #2667）。
 
-### 默认账号
+---
+
+### 🔑 默认账号
 
 | 角色 | 用户名 | 密码 |
 |------|--------|------|

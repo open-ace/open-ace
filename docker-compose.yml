@@ -1,25 +1,60 @@
 # Open ACE - AI Computing Explorer - Docker Compose Configuration
 # For production deployment with PostgreSQL database
 #
-# One-click deploy (Issue #1260):
-#   git clone https://github.com/open-ace/open-ace.git
-#   cd open-ace
-#   docker compose up -d --build
-#   # Access http://localhost:19888
+# ============================================================================
+# DEPLOYMENT MODES
+# ============================================================================
 #
-# Pull pre-built image from Docker Hub:
+# 🚀 Single-User Mode (DEFAULT):
+#   This is the default mode. Container runs as non-root (uid 1000).
+#   No additional configuration needed.
+#
+#   Quick start:
+#     docker compose up -d
+#     # Access http://localhost:19888
+#
+# 👥 Multi-User Workspace Mode:
+#   Enables per-user workspace isolation. Container MUST run as root to create
+#   system users (useradd, chown, sudo -u operations).
+#
+#   ⚠️ IMPORTANT: Do NOT modify this file to enable multi-user mode!
+#   Use the dedicated overlay file instead:
+#
+#   Option 1 - One-click script (RECOMMENDED):
+#     ./scripts/start-multi-user.sh
+#
+#   Option 2 - Docker Compose overlay:
+#     docker compose -f docker-compose.yml -f docker-compose.multi-user.yml up -d
+#
+#   Why not modify this file?
+#   - Security: Default config follows least-privilege principle (non-root)
+#   - Safety: Entrypoint validates config consistency and fails fast on errors
+#   - Best practice: Overlay pattern is the official Docker Compose recommendation
+#
+# 📦 Pull pre-built image from Docker Hub:
 #   docker compose up -d
 #
-# HTTPS reverse proxy:
+# 🔒 HTTPS reverse proxy:
 #   Follow docs/en/NGINX.md or docs/cn/NGINX.md
 #
-# Multi-user workspace:
-#   WORKSPACE_MULTI_USER_MODE=true docker compose up -d
-#   Then create users via admin API — system users are auto-created in container
-#
-# Developer build (for local testing):
+# 🔧 Developer build (for local testing):
 #   docker build -t open-ace:dev --target production .
 #   IMAGE_NAME=open-ace:dev docker compose up -d
+#
+# ============================================================================
+# MULTI-USER MODE DETAILS
+# ============================================================================
+#
+# The docker-compose.multi-user.yml overlay adds:
+#   - user: "0"                        # Run container as root
+#   - WORKSPACE_MULTI_USER_MODE=true   # Enable multi-user mode
+#   - OPENACE_ALLOW_ROOT_MULTI_USER=1  # Explicit root authorization
+#   - OPENACE_CONFIG_DIR=/home/open-ace/.open-ace  # Config persistence
+#
+# For multi-user deployment guide, see:
+#   docs/cn/DEPLOYMENT.md#多用户工作区部署
+#
+# ============================================================================
 
 services:
   # ===========================================================================
@@ -59,6 +94,9 @@ services:
       # Database (Issue #1893): Development mode uses dev-password-change-in-production.
       # Production mode requires explicit strong password via DB_PASSWORD env var.
       - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-dev-password-change-in-production}@postgres:5432/${DB_NAME:-ace}
+      # Issue #3095: Pass DB_PASSWORD as standalone env var for security baseline check.
+      # The entrypoint check_security_baseline() reads DB_PASSWORD directly, not from DATABASE_URL.
+      - DB_PASSWORD=${DB_PASSWORD:-}
       # Multi-user Workspace
       - WORKSPACE_MULTI_USER_MODE=${WORKSPACE_MULTI_USER_MODE:-false}
       # Workspace base directory (users' projects stored under /workspace/<username>/)
@@ -125,6 +163,8 @@ services:
       - SECRET_KEY=${SECRET_KEY:-}
       - OPENACE_ENCRYPTION_KEY=${OPENACE_ENCRYPTION_KEY:-}
       - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-dev-password-change-in-production}@postgres:5432/${DB_NAME:-ace}
+      # Issue #3095: Pass DB_PASSWORD as standalone env var for security baseline check.
+      - DB_PASSWORD=${DB_PASSWORD:-}
       - SCHEDULER_HEARTBEAT_INTERVAL=${SCHEDULER_HEARTBEAT_INTERVAL:-10}
       - SCHEDULER_HEARTBEAT_TIMEOUT=${SCHEDULER_HEARTBEAT_TIMEOUT:-60}
       - SCHEDULER_LOCK_TIMEOUT=${SCHEDULER_LOCK_TIMEOUT:-1800}
