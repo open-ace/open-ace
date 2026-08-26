@@ -9986,10 +9986,38 @@ class AutonomousOrchestrator:
             issue_repo = None
             issue_repo_url = repo_url or wf.get("project_repo_url", "")
             if issue_repo_url:
-                # Extract owner/repo from URL like https://github.com/owner/repo
-                match = re.search(r"github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", issue_repo_url)
+                # Extract owner/repo from URL.  The pattern matches any host
+                # (github.com or a GHES instance), covering both public and
+                # Enterprise deployments. (#3075: the original regex only
+                # matched github.com, so GHES repo URLs slipped through and
+                # issue_repo stayed None, causing the issue to be created in
+                # the wrong repository.)
+                match = re.search(
+                    r"[:/]([^/]+/[^/]+?)(?:\.git)?/?$",
+                    issue_repo_url,
+                )
                 if match:
                     issue_repo = match.group(1)
+
+            # Fallback: if the URL regex did not yield an owner/repo slug
+            # (e.g. unexpected URL format), try resolving from the local git
+            # remote which was set up during clone. (#3075)
+            if not issue_repo and repo_url:
+                try:
+                    resolved = gh.get_repo_name()
+                    if resolved:
+                        issue_repo = resolved
+                except GitHubOpsError:
+                    pass
+
+            # Last-resort guard: if we still cannot determine the target
+            # repo for a new-project workflow, raise rather than silently
+            # creating the issue in the wrong (cwd-inferred) repository.
+            if not issue_repo and wf.get("is_new_project"):
+                raise GitHubOpsError(
+                    "Cannot determine target repository for issue creation. "
+                    f"repo_url={repo_url!r}, issue_repo_url={issue_repo_url!r}"
+                )
 
             try:
                 issue_data = gh.create_issue(
