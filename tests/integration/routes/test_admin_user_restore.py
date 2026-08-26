@@ -9,11 +9,60 @@ Tests cover:
 """
 
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 import pytest
 
 from app.modules.governance.audit_logger import AuditAction
 from app.repositories.user_repo import UserRepository
+from app.routes.admin import admin_bp
+
+# ---------------------------------------------------------------------------
+# Flask app fixtures for admin API tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def app_for_admin(tmp_db):
+    """Create Flask app with admin routes for testing."""
+    from flask import Flask
+
+    app = Flask(__name__)
+    app.register_blueprint(admin_bp, url_prefix="/api")
+    app.config["TESTING"] = True
+    app.config["SECRET_KEY"] = "test-secret-key"
+
+    # Patch database to use tmp_db
+    with patch("app.repositories.database.Database", return_value=tmp_db):
+        yield app
+
+
+@pytest.fixture
+def admin_client_for_api(app_for_admin, tmp_db):
+    """Create authenticated admin test client for admin API tests."""
+    # Ensure necessary tenant and user records exist
+    tmp_db.execute(
+        "INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (1, 'Default Tenant', 'default')"
+    )
+
+    # Mock authenticated admin user
+    admin_user = {
+        "id": 1,
+        "username": "admin",
+        "email": "admin@test.com",
+        "role": "platform_admin",
+        "tenant_id": None,
+    }
+
+    with patch("app.auth.decorators._load_user_from_token", return_value=admin_user):
+        client = app_for_admin.test_client()
+        client.set_cookie("session_token", "test-admin-token")
+        yield client
+
+
+# ---------------------------------------------------------------------------
+# Test helper functions
+# ---------------------------------------------------------------------------
 
 
 def _insert_user(tmp_db, username="testuser", email=None, tenant_id=None, deleted_at=None):
@@ -698,3 +747,159 @@ class TestUsernameEmailConflictScenarios:
         deleted_user = repo.get_soft_deleted_user_by_username("deleted_partial")
         assert deleted_user is not None
         assert deleted_user["id"] == deleted_user_id
+
+
+class TestAPILayerSoftDeleteConflict:
+    """Tests for API layer soft-delete conflict detection (Issue #2755).
+
+    These tests verify the API endpoint returns the correct response format
+    that the frontend expects.
+    """
+
+    def test_create_user_api_returns_soft_deleted_conflict(self, admin_client_for_api, tmp_db):
+        """Verify create user API returns proper conflict response for soft-deleted user."""
+        from datetime import datetime, timezone
+
+        deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        deleted_user = {
+            "id": 100,
+            "username": "api_deleted_user",
+            "email": "api_deleted@test.com",
+            "deleted_at": deleted_at,
+            "tenant_id": 1,
+        }
+
+        # Mock user_repo to simulate soft-deleted user
+        with patch("app.routes.admin.user_repo") as mock_repo:
+            mock_repo.get_user_by_username.return_value = None  # No active user
+            mock_repo.get_user_by_email.return_value = None  # No active user
+            mock_repo.get_soft_deleted_user_by_username.return_value = deleted_user
+            mock_repo.get_soft_deleted_user_by_email.return_value = None
+
+            # Try to create a user with the same username
+            response = admin_client_for_api.post(
+                "/api/admin/users",
+                json={
+                    "username": "api_deleted_user",
+                    "email": "new_email@test.com",
+                    "password": "Password123!",
+                    "role": "user",
+                    "tenant_id": 1,
+                },
+            )
+
+        assert response.status_code == 409
+        data = response.get_json()
+        assert data["error"] == "USER_SOFT_DELETED"
+        assert "soft_deleted_user" in data
+
+        # Verify the response contains all fields the frontend expects
+        soft_deleted = data["soft_deleted_user"]
+        assert soft_deleted["user_id"] == 100
+        assert soft_deleted["username"] == "api_deleted_user"
+        assert soft_deleted["email"] == "api_deleted@test.com"
+        assert soft_deleted["deleted_at"] is not None
+        assert "username" in soft_deleted["conflicts"]
+
+    def test_create_user_api_soft_deleted_email_conflict(self, admin_client_for_api, tmp_db):
+        """Verify create user API returns proper conflict for soft-deleted email."""
+        from datetime import datetime, timezone
+
+        deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        deleted_user = {
+            "id": 101,
+            "username": "unique_username_for_email",
+            "email": "api_deleted_email@test.com",
+            "deleted_at": deleted_at,
+            "tenant_id": 1,
+        }
+
+        with patch("app.routes.admin.user_repo") as mock_repo:
+            mock_repo.get_user_by_username.return_value = None  # No active user
+            mock_repo.get_user_by_email.return_value = None  # No active user
+            mock_repo.get_soft_deleted_user_by_username.return_value = None
+            mock_repo.get_soft_deleted_user_by_email.return_value = deleted_user
+
+            response = admin_client_for_api.post(
+                "/api/admin/users",
+                json={
+                    "username": "new_username",
+                    "email": "api_deleted_email@test.com",
+                    "password": "Password123!",
+                    "role": "user",
+                    "tenant_id": 1,
+                },
+            )
+
+        assert response.status_code == 409
+        data = response.get_json()
+        assert data["error"] == "USER_SOFT_DELETED"
+
+        soft_deleted = data["soft_deleted_user"]
+        assert soft_deleted["user_id"] == 101
+        assert "email" in soft_deleted["conflicts"]
+
+    def test_create_user_api_both_fields_match(self, admin_client_for_api, tmp_db):
+        """Verify create user API returns both fields in conflicts when both match."""
+        from datetime import datetime, timezone
+
+        deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        deleted_user = {
+            "id": 102,
+            "username": "both_match_api_user",
+            "email": "both_match_api@test.com",
+            "deleted_at": deleted_at,
+            "tenant_id": 1,
+        }
+
+        with patch("app.routes.admin.user_repo") as mock_repo:
+            mock_repo.get_user_by_username.return_value = None
+            mock_repo.get_user_by_email.return_value = None
+            mock_repo.get_soft_deleted_user_by_username.return_value = deleted_user
+            mock_repo.get_soft_deleted_user_by_email.return_value = deleted_user
+
+            response = admin_client_for_api.post(
+                "/api/admin/users",
+                json={
+                    "username": "both_match_api_user",
+                    "email": "both_match_api@test.com",
+                    "password": "Password123!",
+                    "role": "user",
+                    "tenant_id": 1,
+                },
+            )
+
+        assert response.status_code == 409
+        data = response.get_json()
+
+        soft_deleted = data["soft_deleted_user"]
+        assert soft_deleted["user_id"] == 102
+        assert "username" in soft_deleted["conflicts"]
+        assert "email" in soft_deleted["conflicts"]
+
+    def test_create_user_api_active_user_conflict_returns_400(self, admin_client_for_api, tmp_db):
+        """Verify creating user with existing active username returns 400, not 409."""
+        active_user = {
+            "id": 103,
+            "username": "active_api_user",
+            "email": "active_api@test.com",
+        }
+
+        with patch("app.routes.admin.user_repo") as mock_repo:
+            mock_repo.get_user_by_username.return_value = active_user
+
+            response = admin_client_for_api.post(
+                "/api/admin/users",
+                json={
+                    "username": "active_api_user",
+                    "email": "different@test.com",
+                    "password": "Password123!",
+                    "role": "user",
+                    "tenant_id": 1,
+                },
+            )
+
+        # Should return 400 for active user conflict, not 409 for soft-deleted
+        assert response.status_code == 400
+        data = response.get_json()
+        assert "soft_deleted_user" not in data
