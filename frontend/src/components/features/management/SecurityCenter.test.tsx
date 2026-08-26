@@ -1566,7 +1566,9 @@ describe('SecurityCenter', () => {
 
       // Find the delete button by its variant (outline-danger)
       const buttons = screen.getAllByRole('button');
-      const deleteBtn = buttons.find((btn) => btn.getAttribute('data-variant') === 'outline-danger');
+      const deleteBtn = buttons.find(
+        (btn) => btn.getAttribute('data-variant') === 'outline-danger'
+      );
       expect(deleteBtn).toBeDefined();
       fireEvent.click(deleteBtn!);
 
@@ -1585,7 +1587,9 @@ describe('SecurityCenter', () => {
       fireEvent.click(screen.getByText('Sensitive Keywords'));
 
       const buttons = screen.getAllByRole('button');
-      const deleteBtn = buttons.find((btn) => btn.getAttribute('data-variant') === 'outline-danger');
+      const deleteBtn = buttons.find(
+        (btn) => btn.getAttribute('data-variant') === 'outline-danger'
+      );
       expect(deleteBtn).toBeDefined();
       fireEvent.click(deleteBtn!);
 
@@ -1602,7 +1606,9 @@ describe('SecurityCenter', () => {
       fireEvent.click(screen.getByText('Sensitive Keywords'));
 
       const buttons = screen.getAllByRole('button');
-      const deleteBtn = buttons.find((btn) => btn.getAttribute('data-variant') === 'outline-danger');
+      const deleteBtn = buttons.find(
+        (btn) => btn.getAttribute('data-variant') === 'outline-danger'
+      );
       expect(deleteBtn).toBeDefined();
       fireEvent.click(deleteBtn!);
 
