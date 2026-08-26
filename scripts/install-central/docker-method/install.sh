@@ -2262,10 +2262,26 @@ build_docker_image() {
             # Build frontend
             print_info "构建前端..."
             cd "$source_dir/frontend"
-            if [ ! -d "node_modules" ]; then
-                print_info "安装前端依赖..."
-                npm install
-                if [ $? -ne 0 ]; then
+
+            # Install/sync frontend dependencies based on lockfile (Issue #3096)
+            # Use npm ci to ensure dependencies match package-lock.json exactly.
+            # Fallback: if npm ci fails (e.g. offline) and node_modules already
+            # exists, warn and continue; if node_modules is missing, abort.
+            if [ -f "package-lock.json" ]; then
+                print_info "同步前端依赖 (npm ci)..."
+                if npm ci; then
+                    :
+                else
+                    if [ -d "node_modules" ]; then
+                        print_warning "npm ci 失败，将使用现有 node_modules 继续构建"
+                    else
+                        print_error "前端依赖安装失败且 node_modules 不存在"
+                        return 1
+                    fi
+                fi
+            else
+                print_info "安装前端依赖 (npm install)..."
+                if ! npm install; then
                     print_error "前端依赖安装失败"
                     return 1
                 fi
@@ -2587,10 +2603,30 @@ upgrade_deployment() {
             return 1
         fi
 
-        # Install dependencies if needed
-        if [ ! -d "node_modules" ]; then
-            print_info "安装前端依赖..."
-            npm install
+        # Install/sync dependencies based on lockfile (Issue #3096)
+        # Use npm ci to ensure dependencies match package-lock.json exactly.
+        # Fallback: if npm ci fails (e.g. offline) and node_modules already
+        # exists, warn and continue; if node_modules is missing, abort.
+        if [ -f "package-lock.json" ]; then
+            print_info "同步前端依赖 (npm ci)..."
+            if npm ci; then
+                :
+            else
+                if [ -d "node_modules" ]; then
+                    print_warning "npm ci 失败，将使用现有 node_modules 继续构建"
+                else
+                    print_error "前端依赖安装失败且 node_modules 不存在"
+                    print_info "旧服务未受影响，继续运行"
+                    return 1
+                fi
+            fi
+        else
+            print_info "安装前端依赖 (npm install)..."
+            if ! npm install; then
+                print_error "前端依赖安装失败"
+                print_info "旧服务未受影响，继续运行"
+                return 1
+            fi
         fi
 
         # Build frontend
