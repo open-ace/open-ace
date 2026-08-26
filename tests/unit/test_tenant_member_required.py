@@ -4,9 +4,10 @@ Tests for tenant_member_required decorator.
 Issue #3082: Manager 角色告警管理入口
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from flask import Flask, g, jsonify
-from unittest.mock import patch, MagicMock
 
 from app.auth.decorators import tenant_member_required
 
