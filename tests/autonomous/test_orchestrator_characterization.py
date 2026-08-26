@@ -40,6 +40,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Module handle for monkeypatching class-level collaborators (GitHubOps,
+# UserRepository) inside orchestrator's namespace.
+from app.modules.workspace.autonomous import orchestrator as _orch_module
 from app.modules.workspace.autonomous.orchestrator import (
     PHASE_ORDER,
     PHASE_STATUS_MAP,
@@ -1418,6 +1421,221 @@ def test_preparation_phase_returns_phase_result_not_inline_commit(monkeypatch):
     # does NOT) — assert the planning payload actually fires.
     assert captured_phase_changes, "_do_preparation did not emit phase_change"
     assert {"phase": "planning"} in captured_phase_changes
+
+
+class TestPreparationResidualWorktreeCleanup:
+    """Residual-worktree cleanup must not delete gh's own ``-C`` context.
+
+    Bug 8 (#3066/#3081/#3083): on rerun, ``_get_gh`` binds gh to the residual
+    worktree itself. Removing that worktree via the worktree-bound gh left
+    every later ``git -C <deleted-dir>`` call failing (openace-git wrapper
+    exit 126 "denied: unsafe -C path"; plain git exit 128), so preparation
+    failed on every retry. The cleanup must use a main-repo GitHubOps and
+    rebind gh to it after a successful removal (same rule as
+    git_workspace.py "a worktree can't remove itself").
+    """
+
+    PROJECT = "/srv/open-ace"
+    WT = "/srv/open-ace/.worktrees/wf-test"
+    BRANCH = "auto-dev/wf-test"
+
+    def _workflow(self, **overrides) -> dict:
+        # _active_workflow's defaults already satisfy the #1573 pre-generated
+        # worktree shape (worktree_path under project_path). issue_number +
+        # requirements_text both present: skips create_issue (requires no
+        # issue_number) AND get_issue (requires no requirements_text), so the
+        # run goes straight to the branch/worktree-creation segment.
+        wf = _active_workflow(
+            phase="preparation",
+            status="preparing",
+            branch_strategy="worktree",
+            github_issue_number=3066,
+            requirements_text="Build the widget",
+            requirements_issue_url="",
+            is_new_project=False,
+        )
+        wf.update(overrides)
+        return wf
+
+    @staticmethod
+    def _run_git(args, **kwargs):
+        # rev-parse → resolved base; everything else (show-ref probes) →
+        # returncode 1 = "branch does not exist" → fresh-creation path.
+        if args[0] == "rev-parse":
+            return MagicMock(stdout="deadbeef\n", returncode=0)
+        return MagicMock(stdout="", returncode=1)
+
+    def _wt_gh(self, registered: bool) -> MagicMock:
+        gh = MagicMock(name="wt_gh")
+        gh.list_worktrees.return_value = (
+            [{"path": self.WT}] if registered else [{"path": f"{self.PROJECT}/.worktrees/other"}]
+        )
+        gh.path_exists_as_user.return_value = False
+        gh._run_git.side_effect = self._run_git
+        gh.create_worktree.return_value = {"worktree_path": self.WT}
+        return gh
+
+    def _main_gh(self, remove_error=None) -> MagicMock:
+        gh = MagicMock(name="main_gh")
+        gh._run_git.side_effect = self._run_git
+        gh.create_worktree.return_value = {"worktree_path": self.WT}
+        gh.get_current_branch.return_value = self.BRANCH
+        if remove_error is not None:
+            gh.remove_worktree.side_effect = remove_error
+        return gh
+
+    def _gh_factory(self, main_gh, ctor_calls: list):
+        """Replace orchestrator.GitHubOps: main-repo constructions get
+        ``main_gh``; every other construction (the #1573 verification block's
+        ``GitHubOps(actual_worktree_path, ...)``) gets a fresh mock whose
+        ``get_current_branch`` matches, so verification passes."""
+
+        def factory(path, system_account=None):
+            ctor_calls.append({"path": path, "system_account": system_account})
+            if main_gh is not None and path == self.PROJECT:
+                return main_gh
+            verify_gh = MagicMock(name=f"verify_gh({path})")
+            verify_gh.get_current_branch.return_value = self.BRANCH
+            return verify_gh
+
+        return factory
+
+    def _run_preparation(self, orch):
+        """Run _do_preparation with a recording host (no real event emission)."""
+        import dataclasses
+
+        captured_phase_changes: list[dict] = []
+        real_host = orch
+
+        class _RecordingHost:
+            workflow_id = orch.workflow_id
+
+            def emit_phase_change(self, payload):
+                captured_phase_changes.append(payload)
+
+            def session_offsets(self):
+                return real_host.session_offsets()
+
+            def cancellation(self):
+                return real_host.cancellation()
+
+            def create_milestone_idempotent(self, **kw):
+                return real_host.create_milestone_idempotent(**kw)
+
+        deps = dataclasses.replace(orch._build_phase_deps(), host=_RecordingHost())
+        ctx = orch._build_workflow_context(orch.workflow)
+        result = orch._do_preparation(ctx, deps)
+        return result, captured_phase_changes
+
+    _EXPECTED_PROBE_COMMANDS = [
+        ["fetch", "origin", "main"],
+        ["worktree", "prune"],
+        ["show-ref", "--verify", "--quiet", f"refs/heads/{BRANCH}"],
+        ["show-ref", "--verify", "--quiet", f"refs/remotes/origin/{BRANCH}"],
+        ["rev-parse", "origin/main"],
+    ]
+
+    def test_preparation_rerun_residual_worktree_rebinds_to_main_repo(self, monkeypatch):
+        orch = _make_orchestrator(self._workflow(user_id="user-1"))
+
+        wt_gh = self._wt_gh(registered=True)
+        main_gh = self._main_gh()
+        # Capture the cached gh at create_worktree time — mid-run proof that
+        # gh was rebound to the main repo right after the residual removal.
+        gh_at_create: list = []
+
+        def _capture_create(**kwargs):
+            gh_at_create.append(orch._gh)
+            return {"worktree_path": self.WT}
+
+        main_gh.create_worktree.side_effect = _capture_create
+
+        ctor_calls: list[dict] = []
+        # Multi-user semantics: user_id → system_account must reach the
+        # main-repo GitHubOps constructor.
+        user_repo_cls = MagicMock()
+        user_repo_cls.return_value.get_user_by_id.return_value = {"system_account": "qlfan"}
+        monkeypatch.setattr(_orch_module, "UserRepository", user_repo_cls)
+        monkeypatch.setattr(_orch_module, "GitHubOps", self._gh_factory(main_gh, ctor_calls))
+        monkeypatch.setattr(orch, "_get_gh", lambda: wt_gh)
+
+        result, phase_changes = self._run_preparation(orch)
+
+        # The removal ran on a gh constructed for the main repo, carrying the
+        # workflow's system_account.
+        assert {"path": self.PROJECT, "system_account": "qlfan"} in ctor_calls
+        main_gh.remove_worktree.assert_called_once_with(self.WT)
+        # The worktree-bound gh only saw the pre-cleanup fetch/prune — every
+        # post-removal git call ran against the main repo, not the deleted dir.
+        wt_cmds = [c.args[0] for c in wt_gh._run_git.call_args_list]
+        assert wt_cmds == [["fetch", "origin", "main"], ["worktree", "prune"]]
+        wt_gh.create_worktree.assert_not_called()
+        main_gh._run_git.assert_any_call(["rev-parse", "origin/main"])
+        # Mid-run: by create_worktree time the cached gh IS the main-repo
+        # instance (rebind happened immediately after removal).
+        assert gh_at_create and gh_at_create[0] is main_gh
+        # Preparation completed and advanced to planning.
+        assert result.outcome == "completed"
+        assert result.next_phase == "planning"
+        assert {"phase": "planning"} in phase_changes
+
+    def test_preparation_rerun_no_residual_keeps_binding(self, monkeypatch):
+        orch = _make_orchestrator(self._workflow())
+
+        wt_gh = self._wt_gh(registered=False)
+        ctor_calls: list[dict] = []
+        monkeypatch.setattr(_orch_module, "GitHubOps", self._gh_factory(None, ctor_calls))
+        monkeypatch.setattr(orch, "_get_gh", lambda: wt_gh)
+
+        result, _ = self._run_preparation(orch)
+
+        # No residual → no main-repo gh constructed and no removal; the only
+        # GitHubOps construction is the #1573 verification instance. gh keeps
+        # the original binding and the full command sequence runs through it
+        # (pre-fix behaviour on this branch, unchanged).
+        assert [c["path"] for c in ctor_calls] == [self.WT]
+        wt_gh.remove_worktree.assert_not_called()
+        wt_cmds = [c.args[0] for c in wt_gh._run_git.call_args_list]
+        assert wt_cmds == self._EXPECTED_PROBE_COMMANDS
+        wt_gh.create_worktree.assert_called_once()
+        assert result.outcome == "completed"
+        assert result.next_phase == "planning"
+
+    def test_preparation_residual_remove_failure_keeps_worktree_binding(self, monkeypatch):
+        from app.modules.workspace.autonomous.github_ops import GitHubOpsError
+
+        orch = _make_orchestrator(self._workflow())
+
+        wt_gh = self._wt_gh(registered=True)
+        main_gh = self._main_gh(remove_error=GitHubOpsError("worktree remove failed"))
+        # Capture the cached gh at create_worktree time — mid-run proof that a
+        # failed removal must NOT rebind gh away from the original binding.
+        gh_at_create: list = []
+
+        def _capture_create(**kwargs):
+            gh_at_create.append(orch._gh)
+            return {"worktree_path": self.WT}
+
+        wt_gh.create_worktree.side_effect = _capture_create
+
+        ctor_calls: list[dict] = []
+        monkeypatch.setattr(_orch_module, "GitHubOps", self._gh_factory(main_gh, ctor_calls))
+        monkeypatch.setattr(orch, "_get_gh", lambda: wt_gh)
+
+        result, _ = self._run_preparation(orch)
+
+        # Removal was attempted on the main-repo gh and failed.
+        main_gh.remove_worktree.assert_called_once_with(self.WT)
+        # Removal failed with the directory still present → gh keeps the
+        # original worktree binding; probes/rev-parse/create_worktree keep
+        # running against it (warning, then continue — pre-fix behaviour).
+        assert gh_at_create and gh_at_create[0] is wt_gh
+        main_gh._run_git.assert_not_called()
+        main_gh.create_worktree.assert_not_called()
+        wt_cmds = [c.args[0] for c in wt_gh._run_git.call_args_list]
+        assert wt_cmds == self._EXPECTED_PROBE_COMMANDS
+        assert result.outcome == "completed"
+        assert result.next_phase == "planning"
 
 
 def test_planning_phase_returns_phase_result_not_inline_commit(monkeypatch):
