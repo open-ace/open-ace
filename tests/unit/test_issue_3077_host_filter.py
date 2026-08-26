@@ -6,8 +6,9 @@ Tests that the /api/hosts endpoint merges hosts from:
 2. remote_machines table (registered machines)
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 from flask import Flask, g
 
 
@@ -155,7 +156,7 @@ class TestHostFilterIncludesRemoteMachines:
 
                     with patch(
                         "app.modules.workspace.remote_agent_manager.get_remote_agent_manager",
-                            return_value=mock_agent_mgr,
+                        return_value=mock_agent_mgr,
                     ):
                         client = app.test_client()
                         response = client.get(
