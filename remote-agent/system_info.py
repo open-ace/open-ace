@@ -15,6 +15,62 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
+def _get_hostname() -> str:
+    """
+    Get the system hostname with proper Unicode handling.
+
+    Issue #3081: On Windows with Chinese hostnames, platform.node() may
+    return incorrectly encoded strings. Use Windows API GetComputerNameW
+    to ensure correct Unicode hostname retrieval.
+
+    Returns:
+        The hostname as a Unicode string.
+    """
+    if os.name != "nt":
+        return platform.node()
+
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+
+        # GetComputerNameW returns the NetBIOS name as Unicode
+        # https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getcomputernameW
+        size = ctypes.c_ulong(256)
+        buffer = ctypes.create_unicode_buffer(size.value)
+        if kernel32.GetComputerNameW(buffer, ctypes.byref(size)):
+            return buffer.value
+    except Exception as e:
+        logger.debug("Windows API GetComputerNameW failed: %s, falling back to platform.node()", e)
+
+    # Fallback to platform.node() if Windows API fails
+    hostname = platform.node()
+
+    # Try to fix encoding if it looks like corrupted bytes
+    # This handles the case where the hostname was decoded incorrectly
+    try:
+        # If the hostname contains replacement characters or looks wrong,
+        # try to re-encode it correctly
+        if "?" in hostname or any(ord(c) > 65535 for c in hostname):
+            # Try encoding as the Windows system code page and re-decoding as UTF-8
+            import ctypes
+
+            cp = ctypes.windll.kernel32.GetACP()
+            encoding = f"cp{cp}"
+            # This is a best-effort fix for already-corrupted strings
+            try:
+                fixed = hostname.encode(encoding, errors="replace").decode("utf-8", errors="replace")
+                if fixed and fixed != hostname:
+                    logger.info("Fixed hostname encoding: %s -> %s", repr(hostname), repr(fixed))
+                    return fixed
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return hostname
+
 # CLI tools the agent can manage
 KNOWN_CLI_TOOLS = [
     "qwen-code-cli",
@@ -38,7 +94,7 @@ def get_system_info() -> dict[str, Any]:
         "os_type": platform.system(),
         "os_version": platform.release(),
         "os_platform": platform.platform(),
-        "hostname": platform.node(),
+        "hostname": _get_hostname(),
         "architecture": platform.machine(),
         "python_version": platform.python_version(),
     }
