@@ -116,10 +116,7 @@ export async function updateProject(
   projectId: number,
   data: Partial<{ name: string; description: string; is_shared: boolean }>
 ): Promise<{ success: boolean; project: Project }> {
-  return apiClient.put<{ success: boolean; project: Project }>(
-    `/api/projects/${projectId}`,
-    data
-  );
+  return apiClient.put<{ success: boolean; project: Project }>(`/api/projects/${projectId}`, data);
 }
 
 /**

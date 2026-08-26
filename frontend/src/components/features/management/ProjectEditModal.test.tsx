@@ -47,7 +47,15 @@ vi.mock('@/i18n', () => ({
 
 // Mock common components
 vi.mock('@/components/common', () => ({
-  Modal: ({ children, isOpen, title }: { children: React.ReactNode; isOpen: boolean; title: string }) =>
+  Modal: ({
+    children,
+    isOpen,
+    title,
+  }: {
+    children: React.ReactNode;
+    isOpen: boolean;
+    title: string;
+  }) =>
     isOpen ? (
       <div data-testid="modal" aria-label={title}>
         {children}
@@ -167,12 +175,7 @@ describe('ProjectEditModal', () => {
 
   it('does not render when project is null', () => {
     const { container } = render(
-      <ProjectEditModal
-        isOpen={true}
-        onClose={vi.fn()}
-        onSuccess={vi.fn()}
-        project={null}
-      />
+      <ProjectEditModal isOpen={true} onClose={vi.fn()} onSuccess={vi.fn()} project={null} />
     );
     expect(container.querySelector('[data-testid="modal"]')).not.toBeInTheDocument();
   });

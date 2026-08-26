@@ -15,7 +15,7 @@ import { updateProject, getProject, type ProjectStats } from '@/api/projects';
 
 // Matches backend validate_project_name in app/utils/validators.py
 // Allowed: letters, digits, underscore, hyphen, space, Chinese characters
-const PROJECT_NAME_FORBIDDEN_PATTERN = /[\t\n\r\f\v<>\/\\]/;
+const PROJECT_NAME_FORBIDDEN_PATTERN = /[\t\n\r\f\v<>/\\]/;
 
 interface ProjectEditModalProps {
   isOpen: boolean;
@@ -152,7 +152,7 @@ export const ProjectEditModal: React.FC<ProjectEditModalProps> = ({
     } catch (err: unknown) {
       const error = err as { message?: string; status?: number };
       const status = error?.status;
-      let errorMessage = error?.message || 'Failed to update project';
+      let errorMessage = error?.message ?? 'Failed to update project';
 
       // Handle specific error codes
       if (status === 403) {
@@ -226,9 +226,7 @@ export const ProjectEditModal: React.FC<ProjectEditModalProps> = ({
             checked={formData.is_shared}
             onChange={(checked) => setFormData((prev) => ({ ...prev, is_shared: checked }))}
           />
-          <small className="text-muted d-block mt-1">
-            {t('projectSharedHint', language)}
-          </small>
+          <small className="text-muted d-block mt-1">{t('projectSharedHint', language)}</small>
         </div>
 
         {/* Footer */}
@@ -236,7 +234,12 @@ export const ProjectEditModal: React.FC<ProjectEditModalProps> = ({
           <Button variant="secondary" onClick={onClose} disabled={isSubmitting || isLoadingProject}>
             {t('cancel', language)}
           </Button>
-          <Button type="submit" variant="primary" loading={isSubmitting} disabled={isLoadingProject}>
+          <Button
+            type="submit"
+            variant="primary"
+            loading={isSubmitting}
+            disabled={isLoadingProject}
+          >
             {t('save', language)}
           </Button>
         </div>

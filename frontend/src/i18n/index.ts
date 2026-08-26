@@ -1054,7 +1054,8 @@ export const translations: Record<Language, Translations> = {
     projectNameInvalidChars:
       'Project name contains invalid characters. Only letters, numbers, spaces, underscores, hyphens, and Chinese characters are allowed.',
     projectNamePlaceholder: 'Enter project name',
-    projectNameHint: 'Max 255 characters. Allowed: letters, numbers, spaces, _ , - and Chinese characters.',
+    projectNameHint:
+      'Max 255 characters. Allowed: letters, numbers, spaces, _ , - and Chinese characters.',
     projectDescription: 'Description',
     projectDescriptionPlaceholder: 'Enter project description',
     projectDescriptionMaxLength: 'Description must be less than 1000 characters',
@@ -4680,7 +4681,8 @@ export const translations: Record<Language, Translations> = {
     projectDescriptionPlaceholder: 'プロジェクトの説明を入力',
     projectDescriptionMaxLength: '説明は1000文字以内で入力してください',
     projectShared: '共有',
-    projectSharedHint: '有効にすると、他のユーザーがこのプロジェクトにアクセスできます。大きなプロジェクトは処理に時間がかかる場合があります。',
+    projectSharedHint:
+      '有効にすると、他のユーザーがこのプロジェクトにアクセスできます。大きなプロジェクトは処理に時間がかかる場合があります。',
     projectUpdated: 'プロジェクトが正常に更新されました',
     projectEditNoPermission: 'このプロジェクトを編集する権限がありません',
     projectEditNotFound: 'プロジェクトが見つかりません。削除された可能性があります。',
@@ -6698,7 +6700,8 @@ export const translations: Record<Language, Translations> = {
     projectDescriptionPlaceholder: '프로젝트 설명 입력',
     projectDescriptionMaxLength: '설명은 1000자 이하여야 합니다',
     projectShared: '공유',
-    projectSharedHint: '활성화하면 다른 사용자가 이 프로젝트에 액세스할 수 있습니다. 대용량 프로젝트는 처리에 시간이 걸릴 수 있습니다.',
+    projectSharedHint:
+      '활성화하면 다른 사용자가 이 프로젝트에 액세스할 수 있습니다. 대용량 프로젝트는 처리에 시간이 걸릴 수 있습니다.',
     projectUpdated: '프로젝트가 성공적으로 업데이트되었습니다',
     projectEditNoPermission: '이 프로젝트를 편집할 권한이 없습니다',
     projectEditNotFound: '프로젝트를 찾을 수 없습니다. 삭제되었을 수 있습니다.',
