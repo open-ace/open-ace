@@ -40,6 +40,12 @@ trap {
     exit 1
 }
 
+# Fix Chinese hostname encoding (Issue #3081)
+# PowerShell 5.1 defaults to system encoding (GBK on Chinese Windows),
+# which causes ConvertTo-Json to produce garbled output for non-ASCII characters.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 Write-Host "Open ACE Remote Agent Installer" -ForegroundColor Blue
 Write-Host "================================" -ForegroundColor Blue
 Write-Host "Server: $ServerUrl"
