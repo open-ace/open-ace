@@ -2578,7 +2578,6 @@ upgrade_deployment() {
 
     # 2a. Build frontend in source directory
     print_info "构建前端..."
-    local frontend_built=false
     cd "$SOURCE_DIR/frontend"
     if [ -f "package.json" ]; then
         # Check if npm is available
@@ -2596,14 +2595,12 @@ upgrade_deployment() {
 
         # Build frontend
         print_info "执行 npm run build..."
-        npm run build
-        if [ $? -ne 0 ]; then
+        if ! npm run build; then
             print_error "前端构建失败"
             print_info "旧服务未受影响，继续运行"
             return 1
         fi
         print_success "前端构建完成"
-        frontend_built=true
     else
         print_warning "未找到 package.json，跳过前端构建"
     fi
@@ -2611,8 +2608,7 @@ upgrade_deployment() {
     # 2b. Build Docker image with candidate tag
     cd "$SOURCE_DIR"
     print_info "构建候选 Docker 镜像..."
-    docker build -t "$candidate_tag" --target production .
-    if [ $? -ne 0 ]; then
+    if ! docker build -t "$candidate_tag" --target production .; then
         print_error "Docker 镜像构建失败"
         print_info "旧服务未受影响，继续运行"
         return 1
@@ -2801,23 +2797,25 @@ upgrade_deployment() {
     # ---------------------------------------------------------------
 
     # Recreate only open-ace container (PostgreSQL not restarted)
+    # Use "if ! cmd" pattern so set -e does not exit before rollback runs
     print_info "重建 open-ace 容器..."
-    docker compose up -d --force-recreate open-ace
-    if [ $? -ne 0 ]; then
+    if ! docker compose up -d --force-recreate open-ace; then
         print_error "容器重建失败"
         # Attempt rollback
         if [ -n "$old_image_id" ]; then
             print_warning "尝试回滚到旧版本..."
-            docker tag "$old_image_id" "$IMAGE_NAME"
+            docker tag "$old_image_id" "$IMAGE_NAME" || true
             if [ -f "$compose_backup" ]; then
-                cp "$compose_backup" "$DEPLOY_DIR/docker-compose.yml"
+                cp "$compose_backup" "$DEPLOY_DIR/docker-compose.yml" || true
             fi
             if [ -f "$env_backup" ]; then
-                cp "$env_backup" "$DEPLOY_DIR/.env"
+                cp "$env_backup" "$DEPLOY_DIR/.env" || true
             fi
             docker compose up -d open-ace 2>/dev/null || true
             print_error "回滚完成，旧版本已恢复（可能需要等待启动）"
         fi
+        # Clean up backup files on failure
+        rm -f "$compose_backup" "$env_backup" 2>/dev/null || true
         return 1
     fi
 
@@ -2851,16 +2849,16 @@ upgrade_deployment() {
         # Re-tag old image back to latest
         if [ -n "$old_image_id" ]; then
             print_info "恢复旧镜像标签..."
-            docker tag "$old_image_id" "$IMAGE_NAME"
+            docker tag "$old_image_id" "$IMAGE_NAME" || true
         fi
 
         # Restore old compose and env files
         if [ -f "$compose_backup" ]; then
-            cp "$compose_backup" "$DEPLOY_DIR/docker-compose.yml"
+            cp "$compose_backup" "$DEPLOY_DIR/docker-compose.yml" || true
             print_info "已恢复 docker-compose.yml"
         fi
         if [ -f "$env_backup" ]; then
-            cp "$env_backup" "$DEPLOY_DIR/.env"
+            cp "$env_backup" "$DEPLOY_DIR/.env" || true
             print_info "已恢复 .env"
         fi
 
@@ -2888,6 +2886,8 @@ upgrade_deployment() {
         fi
 
         print_error "升级失败，已回滚到旧版本。新版本健康检查未通过。"
+        # Clean up backup files on failure
+        rm -f "$compose_backup" "$env_backup" 2>/dev/null || true
         return 1
     fi
 
