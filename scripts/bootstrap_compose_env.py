@@ -17,8 +17,13 @@ from pathlib import Path
 REQUIRED = ("DB_PASSWORD", "SECRET_KEY", "OPENACE_ENCRYPTION_KEY")
 ALL_KEYS = ("OPENACE_SECURITY_MODE", *REQUIRED, "UPLOAD_AUTH_KEY")
 FORBIDDEN_PASSWORDS = {
-    "ace-secret", "dev-password-change-in-production", "change-me", "password",
-    "admin", "postgres", "123456",
+    "ace-secret",
+    "dev-password-change-in-production",
+    "change-me",
+    "password",
+    "admin",
+    "postgres",
+    "123456",
 }
 
 
@@ -66,9 +71,20 @@ def find_postgres_volumes(project_root: Path, env_values: dict[str, str]) -> lis
         raise RuntimeError("Docker CLI is unavailable; existing volume state is unknown")
     project = compose_project_name(project_root, env_values)
     result = subprocess.run(
-        [docker, "volume", "ls", "-q", "--filter", f"label=com.docker.compose.project={project}",
-         "--filter", "label=com.docker.compose.volume=postgres-data"],
-        capture_output=True, text=True, timeout=15, check=False,
+        [
+            docker,
+            "volume",
+            "ls",
+            "-q",
+            "--filter",
+            f"label=com.docker.compose.project={project}",
+            "--filter",
+            "label=com.docker.compose.volume=postgres-data",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
     )
     if result.returncode != 0:
         raise RuntimeError("cannot inspect Docker volumes; existing volume state is unknown")
@@ -80,7 +96,9 @@ def safe_external_value(name: str) -> str | None:
     if value is None or value == "":
         return None
     if "\n" in value or "\r" in value or not re.fullmatch(r"[A-Za-z0-9_.~:/+@%-]+", value):
-        raise RuntimeError(f"{name} from the shell cannot be safely persisted; put it in .env explicitly")
+        raise RuntimeError(
+            f"{name} from the shell cannot be safely persisted; put it in .env explicitly"
+        )
     return value
 
 
@@ -139,7 +157,11 @@ def bootstrap(project_root: Path, check_only: bool = False) -> None:
     try:
         with os.fdopen(lock_fd, "r+") as lock:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True) if env_path.exists() else []
+            lines = (
+                env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+                if env_path.exists()
+                else []
+            )
             current = parse_env(lines)
             for key in ALL_KEYS:
                 external = os.environ.get(key)
@@ -148,9 +170,13 @@ def bootstrap(project_root: Path, check_only: bool = False) -> None:
                         f"{key} differs between the shell and .env; refusing an ambiguous deployment"
                     )
             if check_only:
-                errors = validate({**current, **{key: os.environ[key] for key in ALL_KEYS if os.environ.get(key)}})
+                errors = validate(
+                    {**current, **{key: os.environ[key] for key in ALL_KEYS if os.environ.get(key)}}
+                )
                 if errors:
-                    raise RuntimeError("invalid production configuration:\n- " + "\n- ".join(errors))
+                    raise RuntimeError(
+                        "invalid production configuration:\n- " + "\n- ".join(errors)
+                    )
                 return
             missing_persisted_db = not current.get("DB_PASSWORD")
             if missing_persisted_db:
@@ -188,7 +214,11 @@ def main() -> int:
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         print(f"ERROR: {exc}", file=os.sys.stderr)
         return 1
-    print("Production Compose environment is valid." if args.check else "Production Compose environment is ready (.env mode 0600).")
+    print(
+        "Production Compose environment is valid."
+        if args.check
+        else "Production Compose environment is ready (.env mode 0600)."
+    )
     return 0
 
 

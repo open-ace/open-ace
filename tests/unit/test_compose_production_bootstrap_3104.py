@@ -20,17 +20,30 @@ def fake_docker(tmp_path: Path, volumes: str = "", exit_code: int = 0) -> Path:
 def run_bootstrap(project: Path, bin_dir: Path, extra_env=None):
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
-    for key in ("DB_PASSWORD", "SECRET_KEY", "OPENACE_ENCRYPTION_KEY", "UPLOAD_AUTH_KEY", "OPENACE_SECURITY_MODE"):
+    for key in (
+        "DB_PASSWORD",
+        "SECRET_KEY",
+        "OPENACE_ENCRYPTION_KEY",
+        "UPLOAD_AUTH_KEY",
+        "OPENACE_SECURITY_MODE",
+    ):
         env.pop(key, None)
     env.update(extra_env or {})
     return subprocess.run(
         ["python3", str(SCRIPT), "--project-root", str(project)],
-        capture_output=True, text=True, env=env, timeout=20,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=20,
     )
 
 
 def values(path: Path):
-    return dict(line.split("=", 1) for line in path.read_text().splitlines() if "=" in line and not line.startswith("#"))
+    return dict(
+        line.split("=", 1)
+        for line in path.read_text().splitlines()
+        if "=" in line and not line.startswith("#")
+    )
 
 
 def test_fresh_bootstrap_is_secure_and_idempotent(tmp_path):
@@ -41,7 +54,10 @@ def test_fresh_bootstrap_is_secure_and_idempotent(tmp_path):
     first = env_path.read_bytes()
     configured = values(env_path)
     assert configured["OPENACE_SECURITY_MODE"] == "production"
-    assert all(configured[key] for key in ("DB_PASSWORD", "SECRET_KEY", "OPENACE_ENCRYPTION_KEY", "UPLOAD_AUTH_KEY"))
+    assert all(
+        configured[key]
+        for key in ("DB_PASSWORD", "SECRET_KEY", "OPENACE_ENCRYPTION_KEY", "UPLOAD_AUTH_KEY")
+    )
     assert stat.S_IMODE(env_path.stat().st_mode) == 0o600
     assert run_bootstrap(tmp_path, tmp_path).returncode == 0
     assert env_path.read_bytes() == first
@@ -58,7 +74,9 @@ def test_preserves_comments_unknown_keys_and_existing_secrets(tmp_path):
     assert values(tmp_path / ".env")["DB_PASSWORD"] == original_password
 
 
-@pytest.mark.parametrize("last_line", ["# final comment", "UNKNOWN=value", "DB_PASSWORD=existing-strong-password"])
+@pytest.mark.parametrize(
+    "last_line", ["# final comment", "UNKNOWN=value", "DB_PASSWORD=existing-strong-password"]
+)
 def test_existing_env_without_final_newline_remains_valid(tmp_path, last_line):
     fake_docker(tmp_path)
     (tmp_path / ".env").write_text(last_line)
