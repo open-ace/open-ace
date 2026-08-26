@@ -20,7 +20,7 @@ from app.modules.workspace.model_gateway import get_gateway_planner
 from app.utils.outbound_url_guard import safe_request
 
 # Issue #3080: Response time tracking
-from app.utils.request_performance import get_recorder, generate_request_id
+from app.utils.request_performance import generate_request_id, get_recorder
 
 logger = logging.getLogger(__name__)
 
@@ -733,15 +733,27 @@ def _finalize_upstream_response(
     # Generate a unique performance request ID
     perf_request_id = generate_request_id(session_id)
 
+    # Issue #3080: Resolve tenant_id from session for proper tenant isolation
+    tenant_id = None
+    try:
+        from app.modules.workspace.session_manager import get_session_manager
+
+        sm = get_session_manager()
+        session = sm.get_session(session_id)
+        if session:
+            tenant_id = getattr(session, "tenant_id", None)
+    except Exception as e:
+        logger.debug(f"Failed to get tenant_id from session: {e}")
+
     # Try to get recorder (may fail if not initialized)
     recorder = None
     try:
         recorder = get_recorder()
-        # Record request start
+        # Record request start with actual tenant_id
         recorder.record_request_start(
             request_id=perf_request_id,
             session_id=session_id,
-            tenant_id=None,  # Will be resolved from session
+            tenant_id=tenant_id,  # Use actual tenant_id for proper isolation
             tool_name=provider,
             sample_type="streaming" if "text/event-stream" in content_type else "batch",
             model=requested_model,

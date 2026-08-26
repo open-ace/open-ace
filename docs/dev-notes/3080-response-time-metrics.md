@@ -6,6 +6,42 @@
 ## 概述
 在管理 → 分析 → 趋势分析页面中增加响应时间关键指标，帮助管理员了解用户实际等待体验和系统性能。
 
+## 代码审查修复
+
+### 修复 1: 租户隔离实现缺陷（已修复）
+**问题**: `llm_proxy_handler.py` 中性能记录时 `tenant_id` 设置为 `None`，导致所有请求被归类到默认租户。
+
+**修复**:
+- 从 session 中正确获取 `tenant_id`
+- 确保不同租户的数据正确隔离
+
+**修复位置**: `app/modules/workspace/llm_proxy_handler.py:732-751`
+
+**修复代码**:
+```python
+# Issue #3080: Resolve tenant_id from session for proper tenant isolation
+tenant_id = None
+try:
+    from app.modules.workspace.session_manager import get_session_manager
+    sm = get_session_manager()
+    session = sm.get_session(session_id)
+    if session:
+        tenant_id = getattr(session, "tenant_id", None)
+except Exception as e:
+    logger.debug(f"Failed to get tenant_id from session: {e}")
+```
+
+### 待修复: Schema-sync 失败（需要 PostgreSQL 环境）
+**问题**: 数据库迁移文件已创建，但 schema 快照文件未重新生成。
+
+**原因**: `scripts/rebuild_schema_snapshots.py` 需要 PostgreSQL 数据库 URL，当前环境无可用 PostgreSQL。
+
+**状态**: 需要在 CI 环境中运行以下命令：
+```bash
+python scripts/rebuild_schema_snapshots.py --postgres-url <url>
+git add schema/schema-postgres.sql schema/schema-sqlite.sql
+```
+
 ## 已完成功能
 
 ### 1. 数据库层（已完成）
@@ -13,6 +49,7 @@
 - ✅ 新增 `request_performance` 表（原始性能事件）
 - ✅ 新增 `response_time_stats` 表（预聚合统计数据）
 - ✅ 添加索引优化查询性能
+- ⚠️ Schema 快照文件待更新（需要 PostgreSQL 环境）
 
 ### 2. 后端核心模块（已完成）
 

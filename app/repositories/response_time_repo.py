@@ -103,7 +103,9 @@ class ResponseTimeRepository:
             "sample_count": int(result.get("sample_count") or 0),
             "success_count": int(result.get("success_count") or 0),
             "failed_count": int(result.get("failed_count") or 0),
-            "tool_call_avg_ms": int(result.get("tool_call_avg_ms") or 0) if result.get("tool_call_avg_ms") else None,
+            "tool_call_avg_ms": (
+                int(result.get("tool_call_avg_ms") or 0) if result.get("tool_call_avg_ms") else None
+            ),
             "tool_call_ratio": result.get("tool_call_ratio"),
             "data_available": True,
         }
@@ -186,15 +188,15 @@ class ResponseTimeRepository:
                 "data_available": False,
             }
 
-        weighted_p50 = sum(
-            (d.get("p50_ms") or 0) * (d.get("sample_count", 0) or 0)
-            for d in daily_data
-        ) / total_samples
+        weighted_p50 = (
+            sum((d.get("p50_ms") or 0) * (d.get("sample_count", 0) or 0) for d in daily_data)
+            / total_samples
+        )
 
-        weighted_p95 = sum(
-            (d.get("p95_ms") or 0) * (d.get("sample_count", 0) or 0)
-            for d in daily_data
-        ) / total_samples
+        weighted_p95 = (
+            sum((d.get("p95_ms") or 0) * (d.get("sample_count", 0) or 0) for d in daily_data)
+            / total_samples
+        )
 
         return {
             "p50_response_time_ms": int(weighted_p50),
@@ -264,17 +266,23 @@ class ResponseTimeRepository:
 
         trend = []
         for row in results:
-            trend.append({
-                "date": row.get("date"),
-                "avg_response_time_ms": int(row.get("avg_ms") or 0),
-                "p50_response_time_ms": int(row.get("p50_ms") or 0),
-                "p95_response_time_ms": int(row.get("p95_ms") or 0),
-                "sample_count": int(row.get("sample_count") or 0),
-                "success_count": int(row.get("success_count") or 0),
-                "failed_count": int(row.get("failed_count") or 0),
-                "tool_call_avg_ms": int(row.get("tool_call_avg_ms") or 0) if row.get("tool_call_avg_ms") else None,
-                "tool_call_ratio": row.get("tool_call_ratio"),
-            })
+            trend.append(
+                {
+                    "date": row.get("date"),
+                    "avg_response_time_ms": int(row.get("avg_ms") or 0),
+                    "p50_response_time_ms": int(row.get("p50_ms") or 0),
+                    "p95_response_time_ms": int(row.get("p95_ms") or 0),
+                    "sample_count": int(row.get("sample_count") or 0),
+                    "success_count": int(row.get("success_count") or 0),
+                    "failed_count": int(row.get("failed_count") or 0),
+                    "tool_call_avg_ms": (
+                        int(row.get("tool_call_avg_ms") or 0)
+                        if row.get("tool_call_avg_ms")
+                        else None
+                    ),
+                    "tool_call_ratio": row.get("tool_call_ratio"),
+                }
+            )
 
         return trend
 

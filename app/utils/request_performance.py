@@ -323,7 +323,9 @@ class RequestPerformanceRecorder:
             elif attempt < MAX_RETRIES - 1:
                 time.sleep(0.1 * (attempt + 1))  # Exponential backoff
             else:
-                logger.warning(f"Failed to write {len(records)} records after {MAX_RETRIES} retries")
+                logger.warning(
+                    f"Failed to write {len(records)} records after {MAX_RETRIES} retries"
+                )
 
     def _process_events(self, events: list[PerformanceEvent]) -> list[RequestRecord]:
         """Process events into database records."""
@@ -378,8 +380,7 @@ class RequestPerformanceRecorder:
                     # Calculate TTFT
                     if record.started_at_monotonic and record.first_response_monotonic:
                         record.ttft_ms = int(
-                            (record.first_response_monotonic - record.started_at_monotonic)
-                            * 1000
+                            (record.first_response_monotonic - record.started_at_monotonic) * 1000
                         )
                         # TTFT should be non-negative
                         if record.ttft_ms < 0:
@@ -408,7 +409,9 @@ class RequestPerformanceRecorder:
 
                     # Adjust TTFT to exclude tool call time if not already set
                     if record.ttft_ms is None and record.total_duration_ms is not None:
-                        record.ttft_ms = max(0, record.total_duration_ms - record.tool_call_duration_ms)
+                        record.ttft_ms = max(
+                            0, record.total_duration_ms - record.tool_call_duration_ms
+                        )
 
                     # Mark for write
                     records_to_write.append(record)
@@ -433,9 +436,7 @@ class RequestPerformanceRecorder:
         # Check queue size
         if len(self.event_queue) >= self.queue_max_size:
             self.metrics.increment("queue_overflow_count")
-            logger.warning(
-                f"Performance queue overflow, dropping event for {event.request_id}"
-            )
+            logger.warning(f"Performance queue overflow, dropping event for {event.request_id}")
             return False
 
         # Set timestamp if not provided
