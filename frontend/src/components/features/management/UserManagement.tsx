@@ -193,6 +193,7 @@ export const UserManagement: React.FC = () => {
   };
 
   // Cache password validation result to avoid recomputing on every render
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const passwordValidationError = useMemo(
     () => validatePasswordPolicy(editingPassword),
     [editingPassword, securitySettings, language]
@@ -319,8 +320,8 @@ export const UserManagement: React.FC = () => {
       console.error('Failed to save user:', err);
 
       // Check for soft-deleted user conflict (Issue #2755)
-      const errorObj = err as Record<string, unknown>;
-      const errorData = errorObj?.response?.data as Record<string, unknown> | undefined;
+      const errorObj = err as { response?: { data?: { error?: string; soft_deleted_user?: Record<string, unknown> } } };
+      const errorData = errorObj?.response?.data;
 
       if (errorData?.error === 'USER_SOFT_DELETED' && errorData.soft_deleted_user) {
         // Soft-deleted user conflict - show restore modal
@@ -980,9 +981,7 @@ export const UserManagement: React.FC = () => {
 
                 // Validate password
                 if (restorePassword !== restorePasswordConfirm) {
-                  toast.error(
-                    language === 'zh' ? '密码不匹配' : 'Passwords do not match'
-                  );
+                  toast.error(language === 'zh' ? '密码不匹配' : 'Passwords do not match');
                   return;
                 }
 
@@ -1004,9 +1003,7 @@ export const UserManagement: React.FC = () => {
                     data: restoreData,
                   });
 
-                  toast.success(
-                    language === 'zh' ? '用户已恢复' : 'User restored successfully'
-                  );
+                  toast.success(language === 'zh' ? '用户已恢复' : 'User restored successfully');
                   setShowRestoreModal(false);
                   setSoftDeletedConflict(null);
                   setPendingCreateData(null);
