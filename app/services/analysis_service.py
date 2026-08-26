@@ -142,7 +142,17 @@ class AnalysisService:
                 results[key] = future.result()
             except Exception as e:
                 logger.error(f"Query {key} failed: {e}")
-                results[key] = {} if key in ["aggregates", "session_summary"] else []
+                results[key] = (
+                    {}
+                    if key
+                    in [
+                        "aggregates",
+                        "session_summary",
+                        "response_time_stats",
+                        "response_time_percentiles",
+                    ]
+                    else []
+                )
 
         # Extract results
         aggregates = results.get("aggregates", {})
@@ -1482,9 +1492,10 @@ class AnalysisService:
         if not end_date:
             end_date = get_today()
 
-        return self.response_time_repo.get_response_time_trend(
+        result = self.response_time_repo.get_response_time_trend(
             start_date=start_date,
             end_date=end_date,
             host_name=host_name,
             tenant_id=tenant_id,
         )
+        return list(result)  # Ensure correct type for mypy

@@ -124,6 +124,7 @@ class RequestPerformanceRecorder:
 
     _instance: Optional["RequestPerformanceRecorder"] = None
     _lock = threading.Lock()
+    _initialized: bool
 
     def __new__(cls, *args, **kwargs):
         """Singleton pattern for global recorder instance."""
@@ -302,7 +303,7 @@ class RequestPerformanceRecorder:
             return
 
         # Collect up to batch_size events
-        events_to_process = []
+        events_to_process: list[PerformanceEvent] = []
         while self.event_queue and len(events_to_process) < self.batch_size:
             try:
                 events_to_process.append(self.event_queue.popleft())
@@ -349,6 +350,8 @@ class RequestPerformanceRecorder:
                 if event.request_id not in self.inflight_requests:
                     # Only create new record for start events with tenant_id
                     if event.event_type == "start":
+                        # tenant_id is guaranteed non-None for start events (checked above)
+                        assert event.tenant_id is not None
                         self.inflight_requests[event.request_id] = RequestRecord(
                             request_id=event.request_id,
                             session_id=event.session_id,
