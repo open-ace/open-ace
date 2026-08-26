@@ -521,40 +521,42 @@ export const QuotaAlerts: React.FC = () => {
           <EmptyState icon="bi-sliders" title={t('noQuotaData', language)} />
         ) : (
           <div className="row g-3">
-            {quotaData.map((user) => {
+            {quotaData.map((quotaUser) => {
               const dailyTokenPercentage = getUsagePercentage(
-                user.tokens_used_today,
-                user.daily_token_quota ? user.daily_token_quota * TOKEN_QUOTA_MULTIPLIER : undefined
+                quotaUser.tokens_used_today,
+                quotaUser.daily_token_quota
+                  ? quotaUser.daily_token_quota * TOKEN_QUOTA_MULTIPLIER
+                  : undefined
               );
               const monthlyTokenPercentage = getUsagePercentage(
-                user.tokens_used_month,
-                user.monthly_token_quota
-                  ? user.monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
+                quotaUser.tokens_used_month,
+                quotaUser.monthly_token_quota
+                  ? quotaUser.monthly_token_quota * TOKEN_QUOTA_MULTIPLIER
                   : undefined
               );
               const dailyRequestPercentage = getUsagePercentage(
-                user.requests_today,
-                user.daily_request_quota
+                quotaUser.requests_today,
+                quotaUser.daily_request_quota
               );
               const monthlyRequestPercentage = getUsagePercentage(
-                user.requests_month,
-                user.monthly_request_quota
+                quotaUser.requests_month,
+                quotaUser.monthly_request_quota
               );
 
               return (
-                <div key={user.id} className="col-md-6 col-lg-4">
+                <div key={quotaUser.id} className="col-md-6 col-lg-4">
                   <Card className="h-100">
                     <div className="d-flex justify-content-between align-items-start mb-3">
                       <div>
-                        <h6 className="mb-1">{user.username}</h6>
-                        <small className="text-muted">{user.email}</small>
+                        <h6 className="mb-1">{quotaUser.username}</h6>
+                        <small className="text-muted">{quotaUser.email}</small>
                       </div>
                       {/* Issue #3082: 仅 Admin 可编辑配额 */}
                       {isAdmin(user) && (
                         <Button
                           variant="outline-primary"
                           size="sm"
-                          onClick={() => handleOpenEdit(user)}
+                          onClick={() => handleOpenEdit(quotaUser)}
                           title={t('editQuota', language) ?? 'Edit Quota'}
                         >
                           <i className="bi bi-pencil" />
@@ -567,8 +569,8 @@ export const QuotaAlerts: React.FC = () => {
                       <div className="d-flex justify-content-between mb-1">
                         <small>{t('dailyTokenQuota', language)}</small>
                         <small>
-                          {formatTokens(user.tokens_used_today ?? 0)} /{' '}
-                          {formatQuotaForDisplay(user.daily_token_quota, true)}
+                          {formatTokens(quotaUser.tokens_used_today ?? 0)} /{' '}
+                          {formatQuotaForDisplay(quotaUser.daily_token_quota, true)}
                         </small>
                       </div>
                       <Progress
@@ -583,8 +585,8 @@ export const QuotaAlerts: React.FC = () => {
                       <div className="d-flex justify-content-between mb-1">
                         <small>{t('monthlyTokenQuota', language)}</small>
                         <small>
-                          {formatTokens(user.tokens_used_month ?? 0)} /{' '}
-                          {formatQuotaForDisplay(user.monthly_token_quota, true)}
+                          {formatTokens(quotaUser.tokens_used_month ?? 0)} /{' '}
+                          {formatQuotaForDisplay(quotaUser.monthly_token_quota, true)}
                         </small>
                       </div>
                       <Progress
@@ -599,8 +601,10 @@ export const QuotaAlerts: React.FC = () => {
                       <div className="d-flex justify-content-between mb-1">
                         <small>{t('dailyRequestQuota', language)}</small>
                         <small>
-                          {formatNumber(user.requests_today ?? 0)} /{' '}
-                          {user.daily_request_quota ? formatNumber(user.daily_request_quota) : '∞'}
+                          {formatNumber(quotaUser.requests_today ?? 0)} /{' '}
+                          {quotaUser.daily_request_quota
+                            ? formatNumber(quotaUser.daily_request_quota)
+                            : '∞'}
                         </small>
                       </div>
                       <Progress
@@ -615,9 +619,9 @@ export const QuotaAlerts: React.FC = () => {
                       <div className="d-flex justify-content-between mb-1">
                         <small>{t('monthlyRequestQuota', language)}</small>
                         <small>
-                          {formatNumber(user.requests_month ?? 0)} /{' '}
-                          {user.monthly_request_quota
-                            ? formatNumber(user.monthly_request_quota)
+                          {formatNumber(quotaUser.requests_month ?? 0)} /{' '}
+                          {quotaUser.monthly_request_quota
+                            ? formatNumber(quotaUser.monthly_request_quota)
                             : '∞'}
                         </small>
                       </div>
