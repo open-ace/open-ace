@@ -2846,6 +2846,66 @@ class AutonomousOrchestrator:
             return os.path.join(base_dir, system_account)
         return base_dir
 
+    def _chown_recursive(self, path: str, account: str) -> None:
+        """Recursively change directory ownership for multi-user mode.
+
+        Args:
+            path: Target directory path.
+            account: Target user name.
+
+        Raises:
+            RuntimeError: If chown operation fails or path is invalid.
+        """
+        from app.utils.workspace import (
+            OPENACE_CHOWN_WRAPPER,
+            _is_wrapper_available,
+            get_workspace_base_dirs,
+        )
+        from app.routes.fs import is_valid_path
+
+        # Validate path exists
+        if not os.path.exists(path):
+            raise RuntimeError(f"Path does not exist: {path}")
+
+        # Validate path is within allowed directories (security check)
+        base_dirs = get_workspace_base_dirs()
+        if not is_valid_path(path, allowed_prefixes=base_dirs):
+            raise RuntimeError(f"Path is outside allowed directories: {path}")
+
+        try:
+            pw = pwd.getpwnam(account)
+            uid, gid = pw.pw_uid, pw.pw_gid
+        except KeyError:
+            raise RuntimeError(f"User {account} not found")
+
+        try:
+            if os.geteuid() == 0:
+                # root executes directly
+                result = subprocess.run(
+                    ["chown", "-R", f"{uid}:{gid}", path],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"chown failed: {result.stderr}")
+            elif _is_wrapper_available(OPENACE_CHOWN_WRAPPER):
+                # Use openace-chown -R wrapper
+                result = subprocess.run(
+                    [OPENACE_CHOWN_WRAPPER, "-R", f"{uid}:{gid}", path],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"chown failed: {result.stderr}")
+            else:
+                raise RuntimeError("No permission to change ownership (wrapper not available)")
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"chown timed out after 120s for path: {path}")
+        except Exception as e:
+            raise RuntimeError(f"chown failed with unexpected error: {e}")
+
     @staticmethod
     def _resolve_isolated_agent_account() -> str:
         """Return the credentialless OS principal used for local AI agents.
@@ -9920,7 +9980,26 @@ class AutonomousOrchestrator:
                     os.makedirs(os.path.dirname(project_path), exist_ok=True)
 
                 if not os.path.isdir(os.path.join(project_path, ".git")):
-                    gh._run_git(["clone", repo_url, project_path])
+                    # Issue #3070: Use gh repo clone for private repo authentication
+                    # Parse owner/repo format from repo_url
+                    match = re.search(r"github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", repo_url)
+                    owner_repo = match.group(1) if match else None
+                    
+                    if owner_repo:
+                        # Phase 1: Clone as service user (preserves GH_TOKEN)
+                        gh_clone = GitHubOps(project_path)  # No system_account, skip sudo
+                        gh_clone._run_gh(
+                            ["repo", "clone", owner_repo, "--", project_path],
+                            repo_scoped=False,  # Don't try to resolve local repo
+                            check=True,
+                        )
+                        
+                        # Phase 2: Fix file ownership (multi-user mode)
+                        if system_account and gh._needs_sudo():
+                            self._chown_recursive(project_path, system_account)
+                    else:
+                        # Fallback: use original logic for public repos
+                        gh._run_git(["clone", repo_url, project_path])
 
                 self._update_workflow({"project_path": project_path})
                 wf["project_path"] = project_path

@@ -7,7 +7,7 @@
 #   - Uses flock to prevent race conditions
 #   - Audit logging with fallback to stderr
 #
-# Usage: openace-chown <uid>:<gid> <path>
+# Usage: openace-chown [-R] <uid>:<gid> <path>
 #
 # Exit codes:
 #   0 - Success
@@ -41,11 +41,26 @@ log_audit() {
 }
 
 usage() {
-    echo "Usage: $0 <uid>:<gid> <path>" >&2
+    echo "Usage: $0 [-R] <uid>:<gid> <path>" >&2
+    echo "  -R: Recursive chown" >&2
     echo "  UID/GID must be >= $MIN_UID" >&2
     echo "  Path must be under /workspace/* or /home/*" >&2
     exit 1
 }
+
+# Parse arguments (support -R option)
+RECURSIVE="false"
+while [[ "$1" == -* ]]; do
+    case "$1" in
+        -R)
+            RECURSIVE="true"
+            shift
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
 
 # Validate arguments
 if [ "$#" -ne 2 ]; then
@@ -67,13 +82,13 @@ GID_NUM="${BASH_REMATCH[2]}"
 # Validate UID/GID range
 if [ "$UID_NUM" -lt "$MIN_UID" ]; then
     echo "ERROR: UID $UID_NUM is below minimum $MIN_UID (system users not allowed)" >&2
-    log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} result=reject_uid_low"
+    log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} recursive=${RECURSIVE} result=reject_uid_low"
     exit 3
 fi
 
 if [ "$GID_NUM" -lt "$MIN_UID" ]; then
     echo "ERROR: GID $GID_NUM is below minimum $MIN_UID (system groups not allowed)" >&2
-    log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} result=reject_gid_low"
+    log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} recursive=${RECURSIVE} result=reject_gid_low"
     exit 3
 fi
 
@@ -104,7 +119,7 @@ done
 
 if [ "$PATH_VALID" = false ]; then
     echo "ERROR: Path '$RESOLVED_PATH' is outside allowed directories (/workspace/*, /home/*)" >&2
-    log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} resolved=${RESOLVED_PATH} result=reject_path"
+    log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} resolved=${RESOLVED_PATH} recursive=${RECURSIVE} result=reject_path"
     exit 2
 fi
 
@@ -112,15 +127,21 @@ fi
 exec 200>"$LOCK_FILE"
 if ! flock -w "$LOCK_TIMEOUT" 200; then
     echo "ERROR: Failed to acquire lock within ${LOCK_TIMEOUT}s" >&2
-    log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} result=lock_timeout"
+    log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} recursive=${RECURSIVE} result=lock_timeout"
     exit 4
 fi
 
 # Execute chown
-if chown "$OWNERSHIP" "$TARGET_PATH"; then
-    log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} result=success"
+if [ "$RECURSIVE" = "true" ]; then
+    CHOWN_ARGS=("-R" "$OWNERSHIP" "$TARGET_PATH")
+else
+    CHOWN_ARGS=("$OWNERSHIP" "$TARGET_PATH")
+fi
+
+if chown "${CHOWN_ARGS[@]}"; then
+    log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} recursive=${RECURSIVE} result=success"
     exit 0
 else
-    log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} result=fail"
+    log_audit "caller=$(whoami) target=${OWNERSHIP} path=${TARGET_PATH} recursive=${RECURSIVE} result=fail"
     exit 5
 fi
