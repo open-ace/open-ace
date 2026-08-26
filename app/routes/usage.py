@@ -212,13 +212,20 @@ def api_tools():
 
 @usage_bp.route("/hosts")
 def api_hosts():
-    """Get list of all hosts from pre-aggregated summary table.
+    """Get list of all hosts from pre-aggregated summary table and remote machines.
+
+    Issue #3077: 合并两个数据来源
+    - 从 usage_summary 表获取有使用数据的主机
+    - 从 remote_machines 表获取已注册机器的 machine_name
+    - 合并后去重返回，确保管理员能看到所有相关主机
 
     Issue #2821: 主机列表路径选择
     - 平台管理员始终可访问全局主机列表
     - 全局范围用户也访问全局主机列表
     - 租户范围用户使用租户过滤
     """
+    from app.modules.workspace.remote_agent_manager import get_remote_agent_manager
+
     tenant_id = get_current_tenant_id()
     # Ensure summary is up to date
     if summary_service.needs_refresh():
@@ -231,7 +238,42 @@ def api_hosts():
     else:
         # 租户范围 → 租户过滤
         hosts = usage_service.get_all_hosts(tenant_id=tenant_id)
-    return jsonify(hosts)
+
+    # Issue #3077: 从 remote_machines 表获取已注册机器的 machine_name
+    agent_mgr = get_remote_agent_manager()
+    user_role = g.user.get("role")
+    user_tenant_id = g.user.get("tenant_id")
+
+    # 根据用户角色获取可见的远程机器列表
+    if is_platform_admin_role(user_role):
+        # 平台管理员可以看到所有机器（需要指定 tenant_id）
+        # 由于 /api/hosts 不接受 tenant_id 参数，平台管理员看到所有机器
+        machines = agent_mgr.list_machines()
+    elif user_role == "tenant_admin":
+        # 租户管理员只能看到自己租户的机器
+        if user_tenant_id is not None:
+            machines = agent_mgr.list_machines(tenant_id=user_tenant_id)
+        else:
+            machines = []
+    elif user_tenant_id is not None:
+        # 有租户的用户，看到自己租户的机器
+        machines = agent_mgr.list_machines(tenant_id=user_tenant_id)
+    else:
+        # 无租户的普通用户，看到分配给自己的机器
+        machines = agent_mgr.list_machines(user_id=g.user["id"])
+
+    # 提取 machine_name 并合并到主机列表
+    # Type: ensure machine_name is str, not str | None
+    machine_names: set[str] = set()
+    for m in machines:
+        name = m.get("machine_name")
+        if name:  # Only add non-empty strings
+            machine_names.add(name)
+
+    # 合并两个列表并去重
+    all_hosts = sorted(set(hosts) | machine_names)
+
+    return jsonify(all_hosts)
 
 
 @usage_bp.route("/trend")
