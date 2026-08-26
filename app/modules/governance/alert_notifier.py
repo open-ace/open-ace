@@ -2712,6 +2712,99 @@ class AlertNotifier:
 
         return count or 0
 
+    def get_alerts_by_tenant(
+        self,
+        tenant_id: int,
+        alert_type: str | None = None,
+        severity: str | None = None,
+        unread_only: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Alert]:
+        """
+        Get alerts for all users in a tenant.
+
+        Issue #3082: Manager 角色需要查看租户范围内的告警。
+
+        Args:
+            tenant_id: Filter by tenant ID (via user_id -> users.tenant_id join).
+            alert_type: Filter by alert type.
+            severity: Filter by severity.
+            unread_only: Only return unread alerts.
+            limit: Maximum number of alerts to return.
+            offset: Offset for pagination.
+
+        Returns:
+            List of Alert objects for users in the specified tenant.
+        """
+        from app.repositories.database import adapt_sql
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        conditions = ["u.tenant_id = ?"]
+        params: list[Any] = [tenant_id]
+
+        if alert_type:
+            conditions.append("a.alert_type = ?")
+            params.append(alert_type)
+
+        if severity:
+            conditions.append("a.severity = ?")
+            params.append(severity)
+
+        if unread_only:
+            conditions.append(adapt_boolean_condition("a.read", False))
+
+        where_clause = " AND ".join(conditions)
+
+        cursor.execute(
+            adapt_sql(f"""
+            SELECT a.* FROM alerts a
+            JOIN users u ON a.user_id = u.id
+            WHERE {where_clause}
+            ORDER BY a.created_at DESC
+            LIMIT ? OFFSET ?
+        """),
+            params + [limit, offset],
+        )
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [self._row_to_alert(row) for row in rows]
+
+    def get_unread_count_by_tenant(self, tenant_id: int) -> int:
+        """
+        Get count of unread alerts for all users in a tenant.
+
+        Issue #3082: Manager 角色需要统计租户未读告警数量。
+
+        Args:
+            tenant_id: Filter by tenant ID.
+
+        Returns:
+            Number of unread alerts.
+        """
+        from app.repositories.database import adapt_sql
+
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            adapt_sql(f"""
+                SELECT COUNT(*) as count FROM alerts a
+                JOIN users u ON a.user_id = u.id
+                WHERE u.tenant_id = ? AND {adapt_boolean_condition('a.read', False)}
+            """),
+            (tenant_id,),
+        )
+
+        count = cursor.fetchone()["count"]
+        conn.close()
+
+        return count or 0
+
     def has_recent_quota_alert(
         self,
         user_id: int,

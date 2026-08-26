@@ -20,6 +20,7 @@ from app.auth.decorators import (
     _extract_session_token,
     _load_user_from_token,
     enforce_password_change_requirement,
+    tenant_member_required,
 )
 from app.modules.governance.alert_notifier import (
     NotificationPreference,
@@ -274,6 +275,92 @@ def create_test_alert():
         return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Error creating test alert: {e}")
+        return jsonify({"success": False, "error": "Internal server error"}), 500
+
+
+# ==================== Tenant Alerts (Issue #3082) ====================
+
+
+@alerts_bp.route("/alerts/tenant", methods=["GET"])
+@tenant_member_required
+def list_tenant_alerts():
+    """
+    Get tenant-scoped alerts.
+
+    Issue #3082: Manager 角色查看租户范围内的所有类型告警。
+
+    Data source: alert_notifier.get_alerts_by_tenant()
+    Return format: {"success": true, "data": {alerts: [...], unread_count: n}}
+
+    Permission rules:
+    - platform_admin: global alerts
+    - tenant_admin: tenant-scoped alerts
+    - manager: tenant-scoped alerts (read-only)
+
+    Supported filters:
+    - type: alert type (quota/system/security)
+    - severity: severity level (info/warning/critical)
+    - unread_only: only return unread alerts
+
+    Tenant isolation:
+    - tenant_id from g.user.tenant_id (not from request parameters)
+    - platform_admin with tenant_id=None returns all alerts
+    """
+    try:
+        # Get alert_notifier instance
+        notifier = get_alert_notifier()
+
+        # Tenant ID from authenticated user (safe: not from request parameters)
+        tenant_id = g.user.get("tenant_id")
+
+        # Parameter validation with range checks
+        limit = min(int(request.args.get("limit", 100)), 200)
+        offset = max(0, int(request.args.get("offset", 0)))  # Issue #3082: 防止负数
+
+        # Filter parameters
+        alert_type = request.args.get("type")
+        severity = request.args.get("severity")
+        unread_only = request.args.get("unread_only", "false").lower() == "true"
+
+        if tenant_id is None:
+            # platform_admin: return all alerts (no tenant filter)
+            alerts = notifier.get_alerts(
+                alert_type=alert_type,
+                severity=severity,
+                unread_only=unread_only,
+                limit=limit,
+                offset=offset,
+            )
+            unread_count = notifier.get_unread_count()
+        else:
+            # tenant_admin / manager: tenant-scoped alerts
+            alerts = notifier.get_alerts_by_tenant(
+                tenant_id=tenant_id,
+                alert_type=alert_type,
+                severity=severity,
+                unread_only=unread_only,
+                limit=limit,
+                offset=offset,
+            )
+            unread_count = notifier.get_unread_count_by_tenant(tenant_id)
+
+        # Return format: unified with success flag
+        return jsonify(
+            {
+                "success": True,
+                "data": {
+                    "alerts": [a.to_dict() for a in alerts],
+                    "unread_count": unread_count,
+                },
+            }
+        )
+
+    except ValueError as e:
+        # Specific exception for parameter parsing errors
+        logger.error(f"Invalid parameter in tenant alerts: {e}")
+        return jsonify({"success": False, "error": f"Invalid parameter: {e}"}), 400
+    except Exception as e:
+        logger.error(f"Error listing tenant alerts: {e}")
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
 

@@ -120,7 +120,6 @@ const navSections: NavSection[] = [
         label: 'quotaAndAlerts',
         icon: 'bi-sliders',
         path: '/manage/quota',
-        adminOnly: true,
       },
       {
         id: 'compliance',
