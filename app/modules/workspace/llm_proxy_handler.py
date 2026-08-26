@@ -19,6 +19,9 @@ from app.modules.workspace.model_gateway import get_gateway_planner
 # Issue #1894: SSRF protection
 from app.utils.outbound_url_guard import safe_request
 
+# Issue #3080: Response time tracking
+from app.utils.request_performance import generate_request_id, get_recorder
+
 logger = logging.getLogger(__name__)
 
 # Issue #1995: HTTP status codes that trigger HA failover
@@ -718,6 +721,7 @@ def _finalize_upstream_response(
 
     Issue #2184: Added request_path, requested_model, and request_id extraction
     for multi-provider usage recording with proper protocol detection.
+    Issue #3080: Added response time tracking.
     """
     if content_type is None:
         content_type = resp.headers.get("Content-Type", "")
@@ -725,10 +729,38 @@ def _finalize_upstream_response(
     # Extract request_id from response headers
     request_id = resp.headers.get("x-request-id") or resp.headers.get("openai-request-id")
 
+    # Issue #3080: Initialize performance recorder
+    # Generate a unique performance request ID
+    perf_request_id = generate_request_id(session_id)
+
+    # Try to get recorder (may fail if not initialized)
+    recorder = None
+    try:
+        recorder = get_recorder()
+        # Record request start
+        recorder.record_request_start(
+            request_id=perf_request_id,
+            session_id=session_id,
+            tenant_id=None,  # Will be resolved from session
+            tool_name=provider,
+            sample_type="streaming" if "text/event-stream" in content_type else "batch",
+            model=requested_model,
+        )
+    except Exception as e:
+        logger.debug(f"Failed to initialize performance recorder: {e}")
+
     def generate(_resp=resp, _content_type=content_type, _body=body):
         total_content = b""
+        first_chunk = True
         for chunk in _resp.iter_content(chunk_size=4096):
             total_content += chunk
+            # Issue #3080: Record first response on first chunk
+            if first_chunk and recorder:
+                try:
+                    recorder.record_first_response(perf_request_id)
+                except Exception as e:
+                    logger.debug(f"Failed to record first response: {e}")
+                first_chunk = False
             yield chunk
         try:
             _record_llm_usage(
@@ -742,8 +774,20 @@ def _finalize_upstream_response(
                 request_id=request_id,
                 model=requested_model,
             )
+            # Issue #3080: Record request complete
+            if recorder:
+                try:
+                    recorder.record_request_complete(perf_request_id, status="success")
+                except Exception as e:
+                    logger.debug(f"Failed to record request complete: {e}")
         except Exception as exc:
             logger.error("Failed to record LLM usage: %s", exc)
+            # Issue #3080: Record request failure
+            if recorder:
+                try:
+                    recorder.record_request_complete(perf_request_id, status="failed")
+                except Exception as e:
+                    logger.debug(f"Failed to record request failure: {e}")
 
     response_headers = {}
     for key, value in resp.headers.items():
@@ -771,8 +815,21 @@ def _finalize_upstream_response(
             request_id=request_id,
             model=requested_model,
         )
+        # Issue #3080: Record request complete for non-streaming
+        if recorder:
+            try:
+                recorder.record_first_response(perf_request_id)
+                recorder.record_request_complete(perf_request_id, status="success")
+            except Exception as e:
+                logger.debug(f"Failed to record performance: {e}")
     except Exception as exc:
         logger.error("Failed to record LLM usage: %s", exc)
+        # Issue #3080: Record request failure
+        if recorder:
+            try:
+                recorder.record_request_complete(perf_request_id, status="failed")
+            except Exception as e:
+                logger.debug(f"Failed to record request failure: {e}")
     return Response(
         content,
         status=resp.status_code,
