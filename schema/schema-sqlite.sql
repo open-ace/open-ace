@@ -1655,6 +1655,48 @@ CREATE TABLE workflow_milestones (
  FOREIGN KEY (workflow_id) REFERENCES autonomous_workflows(workflow_id) ON DELETE CASCADE
 );
 
+-- Issue #3080: Response time tracking tables
+CREATE TABLE request_performance (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ request_id TEXT NOT NULL UNIQUE,
+ session_id TEXT,
+ conversation_id TEXT,
+ tenant_id INTEGER NOT NULL,
+ tool_name TEXT NOT NULL,
+ host_name TEXT DEFAULT 'localhost',
+ user_id INTEGER,
+ started_at TIMESTAMP NOT NULL,
+ first_response_at TIMESTAMP,
+ completed_at TIMESTAMP,
+ ttft_ms INTEGER,
+ tool_call_duration_ms INTEGER DEFAULT 0,
+ total_duration_ms INTEGER,
+ status TEXT NOT NULL DEFAULT 'success',
+ sample_type TEXT DEFAULT 'streaming',
+ model TEXT,
+ tool_call_count INTEGER DEFAULT 0,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE response_time_stats (
+ date TEXT NOT NULL,
+ tool_name TEXT NOT NULL,
+ host_name TEXT DEFAULT 'localhost',
+ tenant_id INTEGER NOT NULL,
+ avg_ms REAL,
+ p50_ms INTEGER,
+ p95_ms INTEGER,
+ min_ms INTEGER,
+ max_ms INTEGER,
+ tool_call_avg_ms REAL,
+ tool_call_ratio REAL,
+ sample_count INTEGER NOT NULL DEFAULT 0,
+ success_count INTEGER NOT NULL DEFAULT 0,
+ failed_count INTEGER NOT NULL DEFAULT 0,
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ PRIMARY KEY (date, tool_name, host_name, tenant_id)
+);
+
 CREATE UNIQUE INDEX agent_approvals_request_id_key ON agent_approvals (request_id);
 
 CREATE UNIQUE INDEX agent_runs_run_id_key ON agent_runs (run_id);
@@ -2260,6 +2302,17 @@ CREATE INDEX idx_workflows_parent ON autonomous_workflows (parent_workflow_id);
 CREATE INDEX idx_workflows_status_created ON autonomous_workflows (status, created_at);
 
 CREATE INDEX idx_workflows_user_status ON autonomous_workflows (user_id, status);
+
+-- Issue #3080: Response time tracking indexes
+CREATE INDEX idx_request_performance_date ON request_performance (started_at);
+
+CREATE INDEX idx_request_performance_tenant ON request_performance (tenant_id);
+
+CREATE INDEX idx_request_performance_tool ON request_performance (tool_name, started_at);
+
+CREATE INDEX idx_response_time_stats_date ON response_time_stats (date);
+
+CREATE INDEX idx_response_time_stats_tenant ON response_time_stats (tenant_id, date);
 
 CREATE UNIQUE INDEX ix_anomaly_status_anomaly_id ON anomaly_status (anomaly_id) WHERE ((anomaly_id) <> '');
 
