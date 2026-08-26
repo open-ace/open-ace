@@ -94,6 +94,9 @@ services:
       # Database (Issue #1893): Development mode uses dev-password-change-in-production.
       # Production mode requires explicit strong password via DB_PASSWORD env var.
       - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-dev-password-change-in-production}@postgres:5432/${DB_NAME:-ace}
+      # Issue #3095: Pass DB_PASSWORD as standalone env var for security baseline check.
+      # The entrypoint check_security_baseline() reads DB_PASSWORD directly, not from DATABASE_URL.
+      - DB_PASSWORD=${DB_PASSWORD:-}
       # Multi-user Workspace
       - WORKSPACE_MULTI_USER_MODE=${WORKSPACE_MULTI_USER_MODE:-false}
       # Workspace base directory (users' projects stored under /workspace/<username>/)
@@ -160,6 +163,8 @@ services:
       - SECRET_KEY=${SECRET_KEY:-}
       - OPENACE_ENCRYPTION_KEY=${OPENACE_ENCRYPTION_KEY:-}
       - DATABASE_URL=postgresql://${DB_USER:-ace}:${DB_PASSWORD:-dev-password-change-in-production}@postgres:5432/${DB_NAME:-ace}
+      # Issue #3095: Pass DB_PASSWORD as standalone env var for security baseline check.
+      - DB_PASSWORD=${DB_PASSWORD:-}
       - SCHEDULER_HEARTBEAT_INTERVAL=${SCHEDULER_HEARTBEAT_INTERVAL:-10}
       - SCHEDULER_HEARTBEAT_TIMEOUT=${SCHEDULER_HEARTBEAT_TIMEOUT:-60}
       - SCHEDULER_LOCK_TIMEOUT=${SCHEDULER_LOCK_TIMEOUT:-1800}
