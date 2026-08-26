@@ -64,13 +64,11 @@ def main():
         cursor = conn.cursor()
 
         # Get all machines
-        query = adapt_sql(
-            """
+        query = adapt_sql("""
             SELECT machine_id, machine_name, hostname, status, created_at
             FROM remote_machines
             ORDER BY created_at DESC
-            """
-        )
+            """)
         cursor.execute(query)
 
         machines = cursor.fetchall()
@@ -158,7 +156,7 @@ def main():
     print()
     print("=" * 70)
     print()
-    print(f"Affected machine IDs (for reference):")
+    print("Affected machine IDs (for reference):")
     for machine in corrupted_machines:
         print(f"  - {machine['machine_id']}")
 
