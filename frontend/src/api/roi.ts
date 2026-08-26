@@ -208,13 +208,13 @@ export const roiApi = {
 
   async getROIByUser(
     params?: Omit<ROIRequestParams, 'user_id' | 'tool_name'>
-  ): Promise<Record<string, ROIBreakdown>> {
+  ): Promise<Record<string, ROIMetrics>> {
     const queryParams: Record<string, string> = {};
     if (params?.start_date) queryParams.start_date = params.start_date;
     if (params?.end_date) queryParams.end_date = params.end_date;
     appendAssumptions(queryParams, params?.assumptions);
 
-    const response = await apiClient.get<{ success: boolean; data: Record<string, ROIBreakdown> }>(
+    const response = await apiClient.get<{ success: boolean; data: Record<string, ROIMetrics> }>(
       '/api/roi/by-user',
       queryParams
     );
