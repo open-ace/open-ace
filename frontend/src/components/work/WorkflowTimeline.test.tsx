@@ -688,7 +688,8 @@ describe('milestone time format (#2985)', () => {
         ]
       );
       const timeEl = container.querySelector('.timeline-milestone-time span');
-      expect(timeEl?.textContent).toMatch(/\d{2}\/\d{2}[,.]? ?\d{2}:\d{2}:\d{2}/);
+      // Intl.DateTimeFormat uses locale-dependent separators (/ or - or .)
+      expect(timeEl?.textContent).toMatch(/\d{2}[/.-]\d{2}[/.-]?\d*,?.?\d{2}:\d{2}:\d{2}/);
       expect(timeEl?.textContent).not.toMatch(/2026/);
 
       const second = renderWithMilestones(
