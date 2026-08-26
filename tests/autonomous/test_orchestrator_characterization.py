@@ -1565,6 +1565,9 @@ class TestPreparationResidualWorktreeCleanup:
         # workflow's system_account.
         assert {"path": self.PROJECT, "system_account": "qlfan"} in ctor_calls
         main_gh.remove_worktree.assert_called_once_with(self.WT)
+        # Core invariant: the removal never runs through the worktree-bound
+        # gh (a worktree can't remove its own -C context).
+        wt_gh.remove_worktree.assert_not_called()
         # The worktree-bound gh only saw the pre-cleanup fetch/prune — every
         # post-removal git call ran against the main repo, not the deleted dir.
         wt_cmds = [c.args[0] for c in wt_gh._run_git.call_args_list]
