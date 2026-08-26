@@ -1693,10 +1693,9 @@ CREATE TABLE response_time_stats (
  sample_count INTEGER NOT NULL DEFAULT 0,
  success_count INTEGER NOT NULL DEFAULT 0,
  failed_count INTEGER NOT NULL DEFAULT 0,
- updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ PRIMARY KEY (date, tool_name, host_name, tenant_id)
 );
-
-CREATE UNIQUE INDEX sqlite_autoindex_response_time_stats_1 ON response_time_stats (date, tool_name, host_name, tenant_id);
 
 CREATE UNIQUE INDEX agent_approvals_request_id_key ON agent_approvals (request_id);
 
