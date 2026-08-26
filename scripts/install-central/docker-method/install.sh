@@ -2548,20 +2548,118 @@ show_upgrade_summary() {
 upgrade_deployment() {
     print_header "执行升级"
 
-    # Stop and remove old containers before upgrade
-    # This handles both current (open-ace) and legacy (open-ace-web) container names
-    # to avoid port conflicts during upgrade
-    print_info "清理旧容器..."
+    # ---------------------------------------------------------------
+    # Phase 1: Pre-check (no container changes, old service stays running)
+    # ---------------------------------------------------------------
+
+    # Get source directory from script location
+    # Script is at scripts/install-central/docker-method/install.sh
+    # Source dir is at root (3 levels up)
+    local script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    local SOURCE_DIR=$(cd "$script_dir/../../.." && pwd)
+
+    # Verify source directory
+    if [ ! -f "$SOURCE_DIR/Dockerfile" ] || [ ! -d "$SOURCE_DIR/frontend" ]; then
+        print_error "无法找到源码目录: $SOURCE_DIR"
+        print_info "请确保脚本位于源码目录的 scripts/install-central/docker-method/ 下"
+        return 1
+    fi
+
+    print_info "源码目录: $SOURCE_DIR"
+
+    # ---------------------------------------------------------------
+    # Phase 2: Build candidate (no container changes, old service stays running)
+    # ---------------------------------------------------------------
+
+    # Use a unique candidate tag so the running "latest" image is not
+    # overwritten until the candidate has been verified healthy.
+    local candidate_tag="open-ace:upgrade-candidate-$(date +%s)"
+    print_info "候选镜像标签: $candidate_tag"
+
+    # 2a. Build frontend in source directory
+    print_info "构建前端..."
+    local frontend_built=false
+    cd "$SOURCE_DIR/frontend"
+    if [ -f "package.json" ]; then
+        # Check if npm is available
+        if ! command -v npm &>/dev/null; then
+            print_error "npm 未安装，无法构建前端"
+            print_info "旧服务未受影响，继续运行"
+            return 1
+        fi
+
+        # Install dependencies if needed
+        if [ ! -d "node_modules" ]; then
+            print_info "安装前端依赖..."
+            npm install
+        fi
+
+        # Build frontend
+        print_info "执行 npm run build..."
+        npm run build
+        if [ $? -ne 0 ]; then
+            print_error "前端构建失败"
+            print_info "旧服务未受影响，继续运行"
+            return 1
+        fi
+        print_success "前端构建完成"
+        frontend_built=true
+    else
+        print_warning "未找到 package.json，跳过前端构建"
+    fi
+
+    # 2b. Build Docker image with candidate tag
+    cd "$SOURCE_DIR"
+    print_info "构建候选 Docker 镜像..."
+    docker build -t "$candidate_tag" --target production .
+    if [ $? -ne 0 ]; then
+        print_error "Docker 镜像构建失败"
+        print_info "旧服务未受影响，继续运行"
+        return 1
+    fi
+    print_success "候选 Docker 镜像构建完成: $candidate_tag"
+
+    # ---------------------------------------------------------------
+    # Phase 3: Save rollback info (old image ID, compose/env backup)
+    # ---------------------------------------------------------------
+
+    # Save old image ID for potential rollback
+    local old_image_id=""
+    old_image_id=$(docker images --format '{{.ID}}' "$IMAGE_NAME" 2>/dev/null | head -1)
+    if [ -n "$old_image_id" ]; then
+        print_info "已记录旧镜像 ID: $old_image_id"
+    else
+        print_warning "未找到旧镜像 $IMAGE_NAME，回滚将无法恢复旧镜像"
+    fi
+
+    # Backup docker-compose.yml and .env for potential rollback
+    local backup_suffix=".upgrade-backup-$(date +%s)"
+    local compose_backup="$DEPLOY_DIR/docker-compose.yml${backup_suffix}"
+    local env_backup="$DEPLOY_DIR/.env${backup_suffix}"
+    if [ -f "$DEPLOY_DIR/docker-compose.yml" ]; then
+        cp "$DEPLOY_DIR/docker-compose.yml" "$compose_backup"
+        print_info "已备份 docker-compose.yml"
+    fi
+    if [ -f "$DEPLOY_DIR/.env" ]; then
+        cp "$DEPLOY_DIR/.env" "$env_backup"
+        print_info "已备份 .env"
+    fi
+
+    # ---------------------------------------------------------------
+    # Phase 4: Data migration + container switch
+    # ---------------------------------------------------------------
+
+    # Data migration for multi-user mode (Issue #1205)
+    # Export container /home data to host ./data/home BEFORE container removal.
+    # docker exec requires a running container, so migration is done before
+    # docker stop. docker cp also works on stopped containers, but docker exec
+    # is used for listing which requires the container to be running.
+    print_info "检查旧容器数据迁移..."
     for old_container in "open-ace" "open-ace-web"; do
         if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${old_container}$"; then
-            print_info "停止容器: $old_container"
-            docker stop "$old_container" 2>/dev/null || true
-
-            # Data migration for multi-user mode (Issue #1205)
-            # Export container /home data to host ./data/home before container removal
-            # This is a one-time migration when upgrading from version without volume mapping
             if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
-                print_info "检查容器内 home 目录数据..."
+                print_info "检查容器 $old_container 内 home 目录数据..."
+                # Use docker exec while container is still running
                 local home_exists=$(docker exec "$old_container" test -d /home 2>/dev/null && echo "yes" || echo "no")
 
                 if [ "$home_exists" = "yes" ]; then
@@ -2592,78 +2690,36 @@ upgrade_deployment() {
                     fi
                 fi
             fi
+        fi
+    done
 
+    # Now stop and remove old containers
+    print_info "停止并删除旧容器..."
+    for old_container in "open-ace" "open-ace-web"; do
+        if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${old_container}$"; then
+            print_info "停止容器: $old_container"
+            docker stop "$old_container" 2>/dev/null || true
             print_info "删除容器: $old_container"
             docker rm "$old_container" 2>/dev/null || true
         fi
     done
     print_success "旧容器清理完成"
 
-    # Get source directory from script location
-    # Script is at scripts/install-central/docker-method/install.sh
-    # Source dir is at root (3 levels up)
-    local script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    local SOURCE_DIR=$(cd "$script_dir/../../.." && pwd)
+    # Re-tag candidate as the production image name (latest)
+    print_info "标记候选镜像为 $IMAGE_NAME..."
+    docker tag "$candidate_tag" "$IMAGE_NAME"
+    print_success "镜像标记完成: $IMAGE_NAME"
 
-    # Verify source directory
-    if [ ! -f "$SOURCE_DIR/Dockerfile" ] || [ ! -d "$SOURCE_DIR/frontend" ]; then
-        print_error "无法找到源码目录: $SOURCE_DIR"
-        print_info "请确保脚本位于源码目录的 scripts/install-central/docker-method/ 下"
-        return 1
-    fi
-
-    print_info "源码目录: $SOURCE_DIR"
-
-    # 1. Build frontend in source directory
-    print_info "构建前端..."
-    cd "$SOURCE_DIR/frontend"
-    if [ -f "package.json" ]; then
-        # Check if npm is available
-        if ! command -v npm &>/dev/null; then
-            print_error "npm 未安装，无法构建前端"
-            return 1
-        fi
-
-        # Install dependencies if needed
-        if [ ! -d "node_modules" ]; then
-            print_info "安装前端依赖..."
-            npm install
-        fi
-
-        # Build frontend
-        print_info "执行 npm run build..."
-        npm run build
-        if [ $? -ne 0 ]; then
-            print_error "前端构建失败"
-            return 1
-        fi
-        print_success "前端构建完成"
-    else
-        print_warning "未找到 package.json，跳过前端构建"
-    fi
-
-    # 2. Build Docker image in source directory
-    cd "$SOURCE_DIR"
-    print_info "重建 Docker 镜像..."
-    docker build -t "$IMAGE_NAME" --target production .
-    if [ $? -ne 0 ]; then
-        print_error "Docker 镜像构建失败"
-        return 1
-    fi
-    print_success "Docker 镜像重建完成: $IMAGE_NAME"
-
-    # 3. Update docker-compose.yml and .env
+    # Update docker-compose.yml and .env
     cd "$DEPLOY_DIR"
     print_info "更新 docker-compose.yml 和 .env..."
-    # Call create_docker_compose and create_env_file but they will overwrite, which is fine
-    # We need to temporarily set a flag to avoid prompting
     local old_non_interactive="$NON_INTERACTIVE"
     NON_INTERACTIVE=true
     create_docker_compose
     create_env_file
     NON_INTERACTIVE="$old_non_interactive"
 
-    # 3.5. Ensure new directories exist for volume mounts (Issue #1205)
+    # Ensure new directories exist for volume mounts (Issue #1205)
     print_info "创建持久化目录..."
     mkdir -p "$DEPLOY_DIR"/logs
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
@@ -2673,27 +2729,24 @@ upgrade_deployment() {
     fi
     print_success "持久化目录创建完成"
 
-    # 4. Update sudoers if multi-user mode is enabled
+    # Update sudoers if multi-user mode is enabled
     if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
         print_info "更新 sudoers 配置..."
         stop_webui_systemd_service
         install_run_as_wrapper || print_warning "run-as wrapper 安装失败，跨用户 agent 启动可能受限"
         if ! install_git_gh_wrappers; then
             print_error "git/gh wrappers 安装失败，拒绝写入 wrapper-only sudoers"
-            return 1
-        fi
-        configure_sudoers
-        if [ $? -ne 0 ]; then
-            print_warning "Sudoers 配置失败，但继续升级"
+        else
+            configure_sudoers
+            if [ $? -ne 0 ]; then
+                print_warning "Sudoers 配置失败，但继续升级"
+            fi
         fi
     fi
 
-    # 5. config.json is preserved (not overwritten)
-
-    # 5.5. Grant sequence permissions to DB_USER if needed
+    # Grant sequence permissions to DB_USER if needed
     # PostgreSQL sequences have independent owners (pg_class.relowner).
     # When DB_USER is not a superuser, permissions must be granted by a superuser.
-    # We query for actual superuser rather than assuming 'postgres' exists.
     print_info "检查数据库序列权限..."
 
     # Check if DB_USER is a superuser
@@ -2728,9 +2781,7 @@ upgrade_deployment() {
         fi
     fi
 
-    # 5.6. Check alembic_version table before recreating container (Issue #1192)
-    # Diagnostic: confirms migration metadata is present so the entrypoint's
-    # minimum-revision guard and alembic upgrade can run cleanly.
+    # Check alembic_version table before recreating container (Issue #1192)
     print_info "检查数据库 migration 状态..."
     local alembic_exists=""
     alembic_exists=$(docker compose exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -t -c \
@@ -2745,11 +2796,28 @@ upgrade_deployment() {
         export ALEMBIC_VERSION_EXISTS="no"
     fi
 
-    # 6. Recreate only open-ace container (PostgreSQL not restarted)
+    # ---------------------------------------------------------------
+    # Phase 5: Start new container and health gate
+    # ---------------------------------------------------------------
+
+    # Recreate only open-ace container (PostgreSQL not restarted)
     print_info "重建 open-ace 容器..."
     docker compose up -d --force-recreate open-ace
     if [ $? -ne 0 ]; then
         print_error "容器重建失败"
+        # Attempt rollback
+        if [ -n "$old_image_id" ]; then
+            print_warning "尝试回滚到旧版本..."
+            docker tag "$old_image_id" "$IMAGE_NAME"
+            if [ -f "$compose_backup" ]; then
+                cp "$compose_backup" "$DEPLOY_DIR/docker-compose.yml"
+            fi
+            if [ -f "$env_backup" ]; then
+                cp "$env_backup" "$DEPLOY_DIR/.env"
+            fi
+            docker compose up -d open-ace 2>/dev/null || true
+            print_error "回滚完成，旧版本已恢复（可能需要等待启动）"
+        fi
         return 1
     fi
 
@@ -2759,9 +2827,11 @@ upgrade_deployment() {
 
     local max_attempts=30
     local attempt=1
+    local health_passed=false
     while [ $attempt -le $max_attempts ]; do
         if curl -s "http://localhost:$WEB_PORT/health" | grep -q "healthy"; then
             print_success "应用已就绪"
+            health_passed=true
             break
         fi
         echo -n "."
@@ -2770,15 +2840,62 @@ upgrade_deployment() {
     done
     echo ""
 
-    if [ $attempt -gt $max_attempts ]; then
-        print_warning "应用启动中，请稍后检查状态"
+    if [ "$health_passed" = "false" ]; then
+        # Health check failed — rollback
+        print_error "新版本健康检查未通过，开始自动回滚..."
+
+        # Stop and remove the failed new container
+        docker stop open-ace 2>/dev/null || true
+        docker rm open-ace 2>/dev/null || true
+
+        # Re-tag old image back to latest
+        if [ -n "$old_image_id" ]; then
+            print_info "恢复旧镜像标签..."
+            docker tag "$old_image_id" "$IMAGE_NAME"
+        fi
+
+        # Restore old compose and env files
+        if [ -f "$compose_backup" ]; then
+            cp "$compose_backup" "$DEPLOY_DIR/docker-compose.yml"
+            print_info "已恢复 docker-compose.yml"
+        fi
+        if [ -f "$env_backup" ]; then
+            cp "$env_backup" "$DEPLOY_DIR/.env"
+            print_info "已恢复 .env"
+        fi
+
+        # Restart old container
+        print_info "启动旧版本容器..."
+        docker compose up -d open-ace 2>/dev/null || true
+
+        # Wait for old container to be healthy
+        sleep 3
+        local rollback_attempt=1
+        local rollback_max=30
+        while [ $rollback_attempt -le $rollback_max ]; do
+            if curl -s "http://localhost:$WEB_PORT/health" | grep -q "healthy"; then
+                print_success "旧版本已恢复并就绪"
+                break
+            fi
+            echo -n "."
+            sleep 1
+            rollback_attempt=$((rollback_attempt + 1))
+        done
+        echo ""
+
+        if [ $rollback_attempt -gt $rollback_max ]; then
+            print_error "回滚后旧版本未通过健康检查，请手动检查服务状态"
+        fi
+
+        print_error "升级失败，已回滚到旧版本。新版本健康检查未通过。"
+        return 1
     fi
 
-    # 7. Fix alembic_version if missing (Issue #1192)
-    # docker-entrypoint.sh runs a minimum-revision check before Alembic
-    # upgrade. We verify that the migration metadata exists after container
-    # restart and offer a manual recovery path if the entrypoint did not
-    # create it (e.g. a pre-baseline database that the guard rejected).
+    # ---------------------------------------------------------------
+    # Phase 6: Commit — health passed, finalize upgrade
+    # ---------------------------------------------------------------
+
+    # Fix alembic_version if missing (Issue #1192)
     if [ "$ALEMBIC_VERSION_EXISTS" = "no" ]; then
         print_info "验证最低 revision 检查与 Alembic upgrade 是否已由 entrypoint 自动处理..."
         local alembic_fixed=""
@@ -2798,6 +2915,11 @@ upgrade_deployment() {
         fi
     fi
 
+    # Clean up backup files and candidate tag
+    rm -f "$compose_backup" "$env_backup" 2>/dev/null || true
+    docker rmi "$candidate_tag" 2>/dev/null || true
+
+    print_success "升级成功完成"
     return 0
 }
 
