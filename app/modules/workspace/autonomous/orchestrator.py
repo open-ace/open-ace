@@ -2856,21 +2856,19 @@ class AutonomousOrchestrator:
         Raises:
             RuntimeError: If chown operation fails or path is invalid.
         """
+        from app.routes.fs import is_valid_path
         from app.utils.workspace import (
             OPENACE_CHOWN_WRAPPER,
             _is_wrapper_available,
             get_workspace_base_dirs,
         )
-        from app.routes.fs import is_valid_path
 
         # Validate path exists (skip if wrapper will handle it)
         if not os.path.exists(path):
             # In test environments, the path may not exist if _run_gh was mocked
             # Skip chown in this case
             logger = logging.getLogger(__name__)
-            logger.warning(
-                "Path does not exist, skipping chown: %s", path
-            )
+            logger.warning("Path does not exist, skipping chown: %s", path)
             return
 
         # Validate path is within allowed directories (security check)
@@ -9990,7 +9988,7 @@ class AutonomousOrchestrator:
                     # Parse owner/repo format from repo_url
                     match = re.search(r"github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", repo_url)
                     owner_repo = match.group(1) if match else None
-                    
+
                     if owner_repo:
                         # Phase 1: Clone as service user (preserves GH_TOKEN)
                         gh_clone = GitHubOps(project_path)  # No system_account, skip sudo
@@ -9999,7 +9997,7 @@ class AutonomousOrchestrator:
                             repo_scoped=False,  # Don't try to resolve local repo
                             check=True,
                         )
-                        
+
                         # Phase 2: Fix file ownership (multi-user mode)
                         if system_account and gh._needs_sudo():
                             self._chown_recursive(project_path, system_account)

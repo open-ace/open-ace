@@ -194,6 +194,8 @@ class TestPreparationIssueCreation:
             "url": f"{repo_url}/issues/42",
         }
         mock_gh._run_git.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_gh._run_gh.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_gh._needs_sudo.return_value = False  # Single-user mode, no chown needed
         mock_gh.get_repo_url.return_value = repo_url
         mock_gh.get_current_branch.return_value = "main"
 
@@ -269,6 +271,8 @@ class TestPreparationIssueCreation:
             "url": f"{repo_url}/issues/7",
         }
         mock_gh._run_git.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_gh._run_gh.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_gh._needs_sudo.return_value = False  # Single-user mode, no chown needed
         mock_gh.get_repo_url.return_value = repo_url
         mock_gh.get_current_branch.return_value = "main"
 
@@ -339,6 +343,8 @@ class TestPreparationIssueCreation:
         # create_repo returns empty URL
         mock_gh.create_repo.return_value = {"name": "some-name", "url": ""}
         mock_gh._run_git.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_gh._run_gh.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_gh._needs_sudo.return_value = False  # Single-user mode, no chown needed
         mock_gh.get_repo_url.return_value = ""
         mock_gh.get_repo_name.return_value = ""
         mock_gh.get_current_branch.return_value = "main"
