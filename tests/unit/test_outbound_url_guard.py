@@ -628,3 +628,56 @@ def test_ip_literal_url_validation():
     # Test with a private IP literal URL (should raise, but still not call resolver)
     with pytest.raises(OutboundUrlBlockedError, match="non-public IP"):
         adapter._check_resolved_ip("https://10.0.0.1/test")
+
+
+# --- Issue #3116: transient DNS-resolution failures ---
+
+
+def _raising_resolver(host, port, type=socket.SOCK_STREAM):
+    raise OSError("temporary failure in name resolution")
+
+
+def _empty_resolver(host, port, type=socket.SOCK_STREAM):
+    return []
+
+
+def test_dns_resolution_timeout_is_transient():
+    result = validate_public_http_url(
+        "https://coding.example.com/v1/messages",
+        resolver=_raising_resolver,
+    )
+    assert not result.allowed
+    assert result.transient is True
+
+
+def test_empty_resolution_is_transient():
+    result = validate_public_http_url(
+        "https://coding.example.com/v1/messages",
+        resolver=_empty_resolver,
+    )
+    assert not result.allowed
+    assert result.transient is True
+
+
+def test_private_address_block_is_not_transient():
+    result = validate_public_http_url(
+        "https://sso.example.com/token",
+        resolver=_resolver("10.1.2.3"),
+    )
+    assert not result.allowed
+    assert result.transient is False
+
+
+def test_bad_scheme_block_is_not_transient():
+    result = validate_public_http_url("ftp://example.com/file")
+    assert not result.allowed
+    assert result.transient is False
+
+
+def test_allowed_url_is_not_transient():
+    result = validate_public_http_url(
+        "https://login.example.com/oauth/token",
+        resolver=_resolver("93.184.216.34"),
+    )
+    assert result.allowed
+    assert result.transient is False
