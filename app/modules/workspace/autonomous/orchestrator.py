@@ -10152,8 +10152,24 @@ class AutonomousOrchestrator:
                     # than force-deleting as the service user.
                     if any(wt.get("path") == worktree_path for wt in gh.list_worktrees()):
                         try:
-                            gh.remove_worktree(worktree_path)
+                            # Must use the main repo's gh — on rerun _get_gh
+                            # binds gh to the residual worktree itself, and a
+                            # worktree can't be its own -C context once removed
+                            # (same rule as cleanup_workspace, git_workspace.py
+                            # "a worktree can't remove itself"). Removing via
+                            # the worktree-bound gh left every later
+                            # ``git -C <deleted>`` call failing (wrapper exit
+                            # 126 "unsafe -C path"; plain git exit 128), which
+                            # failed reruns of #3066/#3081/#3083 in preparation.
+                            main_gh = GitHubOps(project_path, system_account=system_account)
+                            main_gh.remove_worktree(worktree_path)
                             logger.info("Removed residual worktree at %s", worktree_path)
+                            # gh may still be bound to the just-removed worktree
+                            # path; all remaining preparation git calls (show-ref
+                            # branch probes, base rev-parse, worktree/branch
+                            # creation) must run from the main repo.
+                            self._gh = main_gh
+                            gh = main_gh
                         except GitHubOpsError as e:
                             logger.warning(
                                 "Could not remove residual worktree %s: %s", worktree_path, e
