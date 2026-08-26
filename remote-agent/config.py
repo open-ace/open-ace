@@ -46,7 +46,9 @@ def _get_hostname() -> str:
         if kernel32.GetComputerNameW(buffer, ctypes.byref(size)):
             return buffer.value
     except Exception as e:
-        logger.debug("Windows API GetComputerNameW failed: %s, falling back to socket.gethostname()", e)
+        logger.debug(
+            "Windows API GetComputerNameW failed: %s, falling back to socket.gethostname()", e
+        )
 
     # Fallback to socket.gethostname() if Windows API fails
     hostname = socket.gethostname()
@@ -59,7 +61,9 @@ def _get_hostname() -> str:
             cp = ctypes.windll.kernel32.GetACP()
             encoding = f"cp{cp}"
             try:
-                fixed = hostname.encode(encoding, errors="replace").decode("utf-8", errors="replace")
+                fixed = hostname.encode(encoding, errors="replace").decode(
+                    "utf-8", errors="replace"
+                )
                 if fixed and fixed != hostname:
                     logger.info("Fixed hostname encoding: %s -> %s", repr(hostname), repr(fixed))
                     return fixed
@@ -69,6 +73,7 @@ def _get_hostname() -> str:
         pass
 
     return hostname
+
 
 # Default configuration values
 DEFAULTS = {

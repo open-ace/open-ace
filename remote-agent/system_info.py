@@ -60,7 +60,9 @@ def _get_hostname() -> str:
             encoding = f"cp{cp}"
             # This is a best-effort fix for already-corrupted strings
             try:
-                fixed = hostname.encode(encoding, errors="replace").decode("utf-8", errors="replace")
+                fixed = hostname.encode(encoding, errors="replace").decode(
+                    "utf-8", errors="replace"
+                )
                 if fixed and fixed != hostname:
                     logger.info("Fixed hostname encoding: %s -> %s", repr(hostname), repr(fixed))
                     return fixed
@@ -70,6 +72,7 @@ def _get_hostname() -> str:
         pass
 
     return hostname
+
 
 # CLI tools the agent can manage
 KNOWN_CLI_TOOLS = [
