@@ -1697,6 +1697,8 @@ CREATE TABLE response_time_stats (
  PRIMARY KEY (date, tool_name, host_name, tenant_id)
 );
 
+CREATE UNIQUE INDEX sqlite_autoindex_response_time_stats_1 ON response_time_stats (date, tool_name, host_name, tenant_id);
+
 CREATE UNIQUE INDEX agent_approvals_request_id_key ON agent_approvals (request_id);
 
 CREATE UNIQUE INDEX agent_runs_run_id_key ON agent_runs (run_id);
