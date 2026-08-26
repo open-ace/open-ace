@@ -136,7 +136,11 @@ export const QuotaAlerts: React.FC = () => {
         setUnreadCount(result.unread_count);
       } else if (user?.role === 'manager') {
         // Manager: 查看租户用户告警（Issue #3082 阶段二）
+        // 传递过滤器参数，与其他角色保持一致
         const result = await alertsApi.getTenantAlerts({
+          type: typeFilter || undefined,
+          severity: severityFilter || undefined,
+          unread_only: readFilter === 'unread',
           limit: 100,
         });
         setAlerts(result.alerts);
