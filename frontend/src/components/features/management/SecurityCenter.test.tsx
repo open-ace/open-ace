@@ -1323,5 +1323,134 @@ describe('SecurityCenter', () => {
       fireEvent.click(screen.getByText('Refresh'));
       expect(mockRefetch).toHaveBeenCalled();
     });
+
+    it('shows empty state when patterns array is empty', async () => {
+      vi.mocked(useFilterStats).mockReturnValue({
+        data: {
+          enabled: true,
+          redact_pii: true,
+          block_high_risk: true,
+          pattern_count: 0,
+          keyword_count: 0,
+          patterns: [],
+          compiled_cache_size: 0,
+          compiled_cache_hits: 0,
+          compiled_cache_misses: 0,
+          compiled_cache_hit_rate: 0,
+          compiled_cache_max_size: 1000,
+        },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+        isFetching: false,
+      } as ReturnType<typeof useFilterStats>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      await waitFor(() => {
+        expect(screen.getByText('Loaded Patterns')).toBeInTheDocument();
+      });
+      expect(screen.getByText('No patterns loaded')).toBeInTheDocument();
+    });
+
+    it('shows view all button when patterns exceed 20 items', async () => {
+      const manyPatterns = Array.from({ length: 25 }, (_, i) => `pattern_${i}`);
+      vi.mocked(useFilterStats).mockReturnValue({
+        data: {
+          enabled: true,
+          redact_pii: true,
+          block_high_risk: true,
+          pattern_count: 25,
+          keyword_count: 0,
+          patterns: manyPatterns,
+          compiled_cache_size: 25,
+          compiled_cache_hits: 100,
+          compiled_cache_misses: 10,
+          compiled_cache_hit_rate: 90.91,
+          compiled_cache_max_size: 1000,
+        },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+        isFetching: false,
+      } as ReturnType<typeof useFilterStats>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      await waitFor(() => {
+        expect(screen.getByText('Loaded Patterns')).toBeInTheDocument();
+      });
+      // Should show "View all (25)" button
+      expect(screen.getByText('View all (25)')).toBeInTheDocument();
+      // Should only show first 20 patterns
+      expect(screen.getByText('pattern_0')).toBeInTheDocument();
+      expect(screen.queryByText('pattern_20')).not.toBeInTheDocument();
+
+      // Click to expand
+      fireEvent.click(screen.getByText('View all (25)'));
+      await waitFor(() => {
+        expect(screen.getByText('pattern_20')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Show less')).toBeInTheDocument();
+    });
+
+    it('shows correct progress bar variant for different hit rates', async () => {
+      // Test high hit rate (>= 90%) -> success
+      vi.mocked(useFilterStats).mockReturnValue({
+        data: {
+          enabled: true,
+          redact_pii: true,
+          block_high_risk: true,
+          pattern_count: 5,
+          keyword_count: 10,
+          patterns: ['password'],
+          compiled_cache_size: 100,
+          compiled_cache_hits: 900,
+          compiled_cache_misses: 100,
+          compiled_cache_hit_rate: 90,
+          compiled_cache_max_size: 1000,
+        },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+        isFetching: false,
+      } as ReturnType<typeof useFilterStats>);
+      const { unmount } = render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      await waitFor(() => {
+        expect(screen.getByTestId('progress')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('progress')).toHaveAttribute('data-variant', 'success');
+      unmount();
+
+      // Test medium hit rate (70-90%) -> warning
+      vi.mocked(useFilterStats).mockReturnValue({
+        data: {
+          enabled: true,
+          redact_pii: true,
+          block_high_risk: true,
+          pattern_count: 5,
+          keyword_count: 10,
+          patterns: ['password'],
+          compiled_cache_size: 100,
+          compiled_cache_hits: 800,
+          compiled_cache_misses: 200,
+          compiled_cache_hit_rate: 80,
+          compiled_cache_max_size: 1000,
+        },
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+        isFetching: false,
+      } as ReturnType<typeof useFilterStats>);
+      render(<SecurityCenter />);
+      fireEvent.click(screen.getByText('Filter Statistics'));
+      await waitFor(() => {
+        expect(screen.getByTestId('progress')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('progress')).toHaveAttribute('data-variant', 'warning');
+    });
   });
 });
