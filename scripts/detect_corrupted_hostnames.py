@@ -42,7 +42,7 @@ def detect_mojibake(value: str | None) -> bool:
     # Common mojibake patterns
     patterns = [
         r"\?{2,}",  # Two or more consecutive question marks
-        r"",  # Replacement character
+        r"�",  # Unicode replacement character (U+FFFD)
         r"[\x00-\x08\x0B\x0C\x0E-\x1F]",  # Control characters
     ]
 
