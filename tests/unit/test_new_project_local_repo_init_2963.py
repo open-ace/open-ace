@@ -196,6 +196,8 @@ class TestCloneAfterCreateRepo:
         mock_gh = MagicMock()
         mock_gh.create_repo.return_value = {"name": "new-repo", "url": repo_url}
         mock_gh._run_git.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_gh._run_gh.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_gh._needs_sudo.return_value = False  # Single-user mode, no chown needed
         mock_gh.get_current_branch.return_value = "main"
 
         repo = MagicMock()
@@ -255,7 +257,12 @@ class TestCloneAfterCreateRepo:
 
             result = orch._do_preparation(ctx, deps)
 
-        mock_gh._run_git.assert_any_call(["clone", repo_url, fallback_path])
+        # Issue #3070: Now uses gh repo clone for private repo authentication
+        mock_gh._run_gh.assert_any_call(
+            ["repo", "clone", "owner/new-repo", "--", fallback_path],
+            repo_scoped=False,
+            check=True,
+        )
         makedirs.assert_any_call("/workspace/alice", exist_ok=True)
         orch._update_workflow.assert_any_call({"project_path": fallback_path})
         assert result.next_phase == "planning"
@@ -281,6 +288,8 @@ class TestCloneAfterCreateRepo:
 
         local_gh = MagicMock(name="local_gh")
         local_gh._run_git.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        local_gh._run_gh.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        local_gh._needs_sudo.return_value = False  # Single-user mode, no chown needed
         local_gh.get_current_branch.return_value = "main"
 
         repo = MagicMock()
@@ -339,7 +348,12 @@ class TestCloneAfterCreateRepo:
 
         local_gh.create_repo.assert_not_called()
         git_hub_ops.assert_any_call(fallback_path, system_account="alice")
-        local_gh._run_git.assert_any_call(["clone", repo_url, fallback_path])
+        # Issue #3070: Now uses gh repo clone for private repo authentication
+        local_gh._run_gh.assert_any_call(
+            ["repo", "clone", "owner/new-repo", "--", fallback_path],
+            repo_scoped=False,
+            check=True,
+        )
         makedirs.assert_any_call("/workspace/alice", exist_ok=True)
         orch._update_workflow.assert_any_call({"project_path": fallback_path})
         assert result.next_phase == "planning"
