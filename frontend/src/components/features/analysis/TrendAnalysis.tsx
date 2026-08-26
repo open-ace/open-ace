@@ -203,6 +203,7 @@ export const TrendAnalysis: React.FC = () => {
   const toolComparison = batchData?.tool_comparison;
   const userSegmentation = batchData?.user_segmentation;
   const userRoleDistribution = batchData?.user_role_distribution; // Issue #3079
+  const responseTimeMetrics = batchData?.response_time_metrics; // Issue #3080
   // Note: dataRange is already extracted above (before useMemo for dateRange)
 
   // Prepare chart data
@@ -213,6 +214,35 @@ export const TrendAnalysis: React.FC = () => {
   // Calculate additional metrics
   const activeUsers = userRanking?.users?.length ?? 0;
   const healthScoreResult = calculateHealthScore(keyMetrics, conversationStats);
+
+  // Issue #3080: Format response time display
+  const formatResponseTime = (ms: number | null | undefined): string => {
+    if (ms === null || ms === undefined) return t('notAvailable', language);
+    if (ms < 1000) return `${ms} ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
+    return `${(ms / 60000).toFixed(1)} min`;
+  };
+
+  // Issue #3080: Build response time tooltip
+  const getResponseTimeTooltip = (): string => {
+    if (!responseTimeMetrics?.data_available) {
+      return t('avgResponseTimeTooltip', language).replace('{count}', '0').replace('{coverage}', '0');
+    }
+    const count = responseTimeMetrics.sample_count ?? 0;
+    const coverage = Math.round((responseTimeMetrics.coverage_ratio ?? 0) * 100);
+    let tooltip = t('avgResponseTimeTooltip', language)
+      .replace('{count}', count.toString())
+      .replace('{coverage}', coverage.toString());
+
+    // Add tool call info if available
+    if (responseTimeMetrics.tool_call_avg_ms && responseTimeMetrics.tool_call_ratio) {
+      const toolTime = formatResponseTime(responseTimeMetrics.tool_call_avg_ms);
+      const toolRatio = Math.round(responseTimeMetrics.tool_call_ratio * 100);
+      tooltip += `\n${t('toolCallAvg', language).replace('{time}', toolTime)}`;
+      tooltip += `\n${t('toolCallRatio', language).replace('{ratio}', toolRatio.toString())}`;
+    }
+    return tooltip;
+  };
 
   // Show skeleton on initial load
   if (isLoading && isInitialLoad.current) {
@@ -392,6 +422,19 @@ export const TrendAnalysis: React.FC = () => {
                   : 'warning'
             }
             helpTooltip={t(`healthScoreTooltip_${healthScoreResult.status}`, language)}
+          />
+        </div>
+      </div>
+
+      {/* Issue #3080: Response Time Card */}
+      <div className="row g-3 mb-4">
+        <div className="col-12">
+          <StatCard
+            label={t('avgResponseTime', language)}
+            value={formatResponseTime(responseTimeMetrics?.avg_response_time_ms)}
+            icon={<i className="bi bi-speedometer fs-4" />}
+            variant={responseTimeMetrics?.data_available ? 'info' : 'secondary'}
+            helpTooltip={getResponseTimeTooltip()}
           />
         </div>
       </div>
