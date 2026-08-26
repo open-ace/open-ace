@@ -194,9 +194,11 @@ def api_create_user():
                         "user_id": deleted_user["id"],
                         "username": deleted_user["username"],
                         "email": deleted_user["email"],
-                        "deleted_at": deleted_user["deleted_at"].isoformat()
-                        if deleted_user.get("deleted_at")
-                        else None,
+                        "deleted_at": (
+                            deleted_user["deleted_at"].isoformat()
+                            if deleted_user.get("deleted_at")
+                            else None
+                        ),
                         "tenant_id": deleted_user.get("tenant_id"),
                         "conflicts": conflicts,
                     },

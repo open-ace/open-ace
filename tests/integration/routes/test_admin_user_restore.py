@@ -17,7 +17,6 @@ from app.modules.governance.audit_logger import AuditAction
 from app.repositories.user_repo import UserRepository
 from app.routes.admin import admin_bp
 
-
 # ---------------------------------------------------------------------------
 # Flask app fixtures for admin API tests
 # ---------------------------------------------------------------------------
