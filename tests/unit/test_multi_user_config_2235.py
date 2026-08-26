@@ -154,6 +154,14 @@ class TestDockerComposeMultiUserSyntax:
 
         # Use docker compose config to validate syntax
         # Set timeout to avoid hanging the test suite if Docker daemon is slow
+        compose_env = os.environ.copy()
+        compose_env.update(
+            {
+                "DB_PASSWORD": "test-only-strong-password",
+                "SECRET_KEY": "s" * 64,
+                "OPENACE_ENCRYPTION_KEY": "e" * 64,
+            }
+        )
         try:
             result = subprocess.run(
                 ["docker", "compose", "-f", str(compose_file), "config", "--quiet"],
@@ -161,6 +169,7 @@ class TestDockerComposeMultiUserSyntax:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                env=compose_env,
             )
         except subprocess.TimeoutExpired:
             pytest.skip("Docker compose command timed out")
@@ -173,6 +182,7 @@ class TestDockerComposeMultiUserSyntax:
             if (
                 "docker-compose.yml" in result.stderr
                 or "has neither an image nor a build context" in result.stderr
+                or "looking up compose provider failed" in result.stderr
             ):
                 pytest.skip("Base docker-compose.yml validation required")
             else:
