@@ -344,8 +344,8 @@ describe('RemoteMachineManagement - Token Rotate Offline Scenario (Issue #1503)'
 
       expect(machine.capabilities).toBeNull();
       // The component should not render hardware cards when capabilities is null
-      const shouldRender = machine.capabilities !== null &&
-        Object.keys(machine.capabilities ?? {}).length > 0;
+      const shouldRender =
+        machine.capabilities !== null && Object.keys(machine.capabilities ?? {}).length > 0;
       expect(shouldRender).toBe(false);
     });
 
@@ -362,8 +362,8 @@ describe('RemoteMachineManagement - Token Rotate Offline Scenario (Issue #1503)'
         capabilities: {},
       } as RemoteMachine;
 
-      const shouldRender = machine.capabilities !== null &&
-        Object.keys(machine.capabilities ?? {}).length > 0;
+      const shouldRender =
+        machine.capabilities !== null && Object.keys(machine.capabilities ?? {}).length > 0;
       expect(shouldRender).toBe(false);
     });
 
