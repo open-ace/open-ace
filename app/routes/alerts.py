@@ -20,7 +20,7 @@ from app.auth.decorators import (
     _extract_session_token,
     _load_user_from_token,
     enforce_password_change_requirement,
-    tenant_member_required,  # Issue #3082: 新增装饰器支持 Manager 角色
+    tenant_member_required,
 )
 from app.modules.governance.alert_notifier import (
     NotificationPreference,
