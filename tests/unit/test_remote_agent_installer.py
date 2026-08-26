@@ -9,7 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def runtime_agent_files():
     agent_dir = REPO_ROOT / "remote-agent"
-    excluded = {"install.ps1", "install.sh", "uninstall.ps1", "uninstall.sh"}
+    excluded = {"install.ps1", "install.sh", "uninstall.ps1", "uninstall.sh", "test-encoding.ps1"}
     return sorted(
         path.name for path in agent_dir.iterdir() if path.is_file() and path.name not in excluded
     )

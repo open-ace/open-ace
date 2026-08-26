@@ -45,6 +45,61 @@ MAX_RAW_CONTENT_LENGTH = 100000
 MAX_MESSAGE_LENGTH = 50000
 
 # ════════════════════════════════════════════
+# Issue #3081: Hostname encoding validation
+# ════════════════════════════════════════════
+
+
+def validate_string_encoding(value: str | None, field_name: str) -> tuple[bool, str | None]:
+    """
+    Validate that a string is valid UTF-8 encoded and does not contain mojibake.
+
+    Args:
+        value: String value to validate (can be None)
+        field_name: Field name for error messages
+
+    Returns:
+        Tuple of (is_valid, error_message)
+        - (True, None) if valid
+        - (False, error_message) if invalid
+    """
+    if value is None:
+        return True, None
+
+    try:
+        # Attempt to encode and decode as UTF-8
+        value.encode("utf-8").decode("utf-8")
+
+        # Check for mojibake patterns
+        # Pattern 1: Double question mark followed by space
+        if "?? " in value:
+            return (
+                False,
+                f"{field_name} contains mojibake (encoding corruption). "
+                f"Please ensure your machine {field_name.lower()} uses valid UTF-8 characters.",
+            )
+
+        # Pattern 2: Unicode replacement character (U+FFFD)
+        if "�" in value:
+            return (
+                False,
+                f"{field_name} contains mojibake (encoding corruption). "
+                f"Please ensure your machine {field_name.lower()} uses valid UTF-8 characters.",
+            )
+
+        # Pattern 3: Three or more consecutive question marks
+        if "???" in value:
+            return (
+                False,
+                f"{field_name} contains mojibake (encoding corruption). "
+                f"Please ensure your machine {field_name.lower()} uses valid UTF-8 characters.",
+            )
+
+        return True, None
+    except (UnicodeDecodeError, UnicodeEncodeError) as e:
+        return False, f"{field_name} has invalid UTF-8 encoding: {e}"
+
+
+# ════════════════════════════════════════════
 # Issue #2532: Sensitive response field constants
 # ════════════════════════════════════════════
 
@@ -2153,6 +2208,25 @@ def agent_register():
         return jsonify({"error": "registration_token is required"}), 400
     if not machine_name:
         return jsonify({"error": "machine_name is required"}), 400
+
+    # Issue #3081: Validate hostname and machine_name encoding
+    is_valid, error = validate_string_encoding(hostname, "hostname")
+    if not is_valid:
+        logger.warning("Invalid hostname encoding rejected: %s", hostname)
+        return jsonify({"error": error, "hint": "Please check your system hostname encoding"}), 400
+
+    is_valid, error = validate_string_encoding(machine_name, "machine_name")
+    if not is_valid:
+        logger.warning("Invalid machine_name encoding rejected: %s", machine_name)
+        return (
+            jsonify(
+                {
+                    "error": error,
+                    "hint": "Please use ASCII characters for machine_name or ensure valid UTF-8",
+                }
+            ),
+            400,
+        )
 
     agent_mgr = get_remote_agent_manager()
 

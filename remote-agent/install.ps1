@@ -33,6 +33,138 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# ============================================================
+# Fix Chinese hostname encoding (Issue #3081)
+# ============================================================
+
+function Set-JsonEncoding {
+    <#
+    .SYNOPSIS
+    设置 JSON 序列化所需的 UTF-8 编码环境
+
+.DESCRIPTION
+    临时修改控制台编码，确保 ConvertTo-Json 正确处理中文和其它非 ASCII 字符。
+    返回原始编码状态，供后续恢复使用。
+
+.OUTPUTS
+    Hashtable 包含原始编码设置
+
+.EXAMPLE
+    $encodingState = Set-JsonEncoding
+    try {
+        # 执行 JSON 序列化
+    } finally {
+        $encodingState | Restore-JsonEncoding
+    }
+    #>
+    $original = @{
+        OutputEncoding = [Console]::OutputEncoding
+        PSOutputEncoding = $OutputEncoding
+    }
+
+Write-Host "[DEBUG] Setting UTF-8 encoding for JSON serialization (Issue #3081)" -ForegroundColor Cyan
+    Write-Host "[DEBUG] Original console encoding: $([Console]::OutputEncoding.EncodingName)" -ForegroundColor Cyan
+    Write-Host "[DEBUG] PowerShell version: $($PSVersionTable.PSVersion)" -ForegroundColor Cyan
+
+try {
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $OutputEncoding = [System.Text.Encoding]::UTF8
+        Write-Host "[DEBUG] UTF-8 encoding set successfully" -ForegroundColor Cyan
+    } catch {
+        Write-Host "[WARN] Failed to set UTF-8 encoding: $_" -ForegroundColor Yellow
+    }
+
+return $original
+}
+
+function Restore-JsonEncoding {
+    <#
+    .SYNOPSIS
+    恢复原始编码设置
+
+.DESCRIPTION
+    恢复 Set-JsonEncoding 修改的编码设置。
+
+.PARAMETER State
+    Set-JsonEncoding 返回的原始编码状态
+
+.EXAMPLE
+    $encodingState = Set-JsonEncoding
+    try {
+        # 执行 JSON 序列化
+    } finally {
+        $encodingState | Restore-JsonEncoding
+    }
+    #>
+    param(
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
+        [hashtable]$State
+    )
+
+try {
+        [Console]::OutputEncoding = $State.OutputEncoding
+        $OutputEncoding = $State.PSOutputEncoding
+        Write-Host "[DEBUG] Restored original encoding: $([Console]::OutputEncoding.EncodingName)" -ForegroundColor Cyan
+    } catch {
+        Write-Host "[WARN] Failed to restore encoding: $_" -ForegroundColor Yellow
+    }
+}
+
+function Write-JsonFile {
+    <#
+    .SYNOPSIS
+    使用 UTF-8 无 BOM 写入 JSON 文件
+
+.DESCRIPTION
+    确保文件以无 BOM 的 UTF-8 编码写入，避免 curl 发送带 BOM 的 JSON。
+    自动检测 PowerShell 版本，针对不同版本使用最优方案。
+
+.PARAMETER Content
+    JSON 字符串内容
+
+.PARAMETER FilePath
+    目标文件路径
+
+.EXAMPLE
+    $json = @{ name = "测试" } | ConvertTo-Json
+    Write-JsonFile -Content $json -FilePath "output.json"
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Content,
+
+        [Parameter(Mandatory=$true)]
+        [string]$FilePath
+    )
+
+Write-Host "[DEBUG] Writing JSON file (UTF-8 no BOM): $FilePath" -ForegroundColor Cyan
+    Write-Host "[DEBUG] File content length: $($Content.Length) characters" -ForegroundColor Cyan
+
+# PowerShell 7+ 支持原生 utf8NoBOM
+    if ($PSVersionTable.PSVersion.Major -ge 7) {
+        Write-Host "[DEBUG] Using PowerShell 7+ native utf8NoBOM encoding" -ForegroundColor Cyan
+        $Content | Out-File -FilePath $FilePath -Encoding utf8NoBOM -NoNewline
+    } else {
+        # PowerShell 5.1: 使用 System.IO.File
+        Write-Host "[DEBUG] Using System.IO.File for UTF-8 no BOM (PowerShell 5.1)" -ForegroundColor Cyan
+        $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
+        [System.IO.File]::WriteAllText($FilePath, $Content, $utf8NoBomEncoding)
+    }
+
+# 验证文件无 BOM
+    $fileBytes = [System.IO.File]::ReadAllBytes($FilePath)
+    if ($fileBytes.Length -ge 3 -and $fileBytes[0] -eq 0xEF -and $fileBytes[1] -eq 0xBB -and $fileBytes[2] -eq 0xBF) {
+        Write-Host "[WARN] JSON file has UTF-8 BOM, removing..." -ForegroundColor Yellow
+        # 移除 BOM（前 3 字节）
+        $newBytes = New-Object byte[] ($fileBytes.Length - 3)
+        [Array]::Copy($fileBytes, 3, $newBytes, 0, $fileBytes.Length - 3)
+        [System.IO.File]::WriteAllBytes($FilePath, $newBytes)
+        Write-Host "[DEBUG] BOM removed from file" -ForegroundColor Cyan
+    } else {
+        Write-Host "[DEBUG] File verified: no BOM detected" -ForegroundColor Cyan
+    }
+}
+
 # Trap unhandled errors to prevent silent exits
 trap {
     Write-Host "[ERROR] Script failed: $_" -ForegroundColor Red
@@ -789,7 +921,9 @@ $config = @{
 }
 if ($CaBundlePath) { $config.ca_bundle_path = $CaBundlePath }
 
-$config | ConvertTo-Json | Set-Content -Path "$InstallDir\config.json"
+# Save configuration using UTF-8 no BOM (Issue #3081)
+$configJson = $config | ConvertTo-Json
+Write-JsonFile -Content $configJson -FilePath "$InstallDir\config.json"
 Write-Host "[OK] Configuration saved" -ForegroundColor Green
 
 # Step 7: Register with server
@@ -837,31 +971,34 @@ $body = @{
     ip_address = $localIp
 } | ConvertTo-Json
 
+# Set UTF-8 encoding for JSON serialization (Issue #3081)
+$encodingState = Set-JsonEncoding
 try {
     $bodyFile = "$env:TEMP\agent_register_$([System.Guid]::NewGuid()).json"
-    $body | Out-File -FilePath $bodyFile -Encoding utf8 -NoNewline
+    Write-JsonFile -Content $body -FilePath $bodyFile
 
-    $responseFile = "$env:TEMP\agent_response_$([System.Guid]::NewGuid()).json"
-    & $curlPath -s @serverCurlTlsArgs -X POST -H "Content-Type: application/json" -d "@$bodyFile" -o $responseFile "$ServerUrl/api/remote/agent/register"
+$responseFile = "$env:TEMP\agent_response_$([System.Guid]::NewGuid()).json"
+    & $curlPath -s @serverCurlTlsArgs -X POST -H "Content-Type: application/json; charset=utf-8" -d "@$bodyFile" -o $responseFile "$ServerUrl/api/remote/agent/register"
 
-    if (-not (Test-Path $responseFile)) {
+if (-not (Test-Path $responseFile)) {
         Write-Host "[ERROR] Registration failed: no response from server" -ForegroundColor Red
         exit 1
     }
 
-    $responseRaw = Get-Content $responseFile -Raw
+$responseRaw = Get-Content $responseFile -Raw
     $response = $responseRaw | ConvertFrom-Json
     Remove-Item $bodyFile -ErrorAction SilentlyContinue
     Remove-Item $responseFile -ErrorAction SilentlyContinue
 
-    if ($response.success) {
+if ($response.success) {
         Write-Host "[OK] Machine registered successfully!" -ForegroundColor Green
 
-        # Extract agent_token from registration response and save to config
+# Extract agent_token from registration response and save to config
         if ($response.machine -and $response.machine.agent_token) {
             try {
                 $config.agent_token = $response.machine.agent_token
-                $config | ConvertTo-Json | Set-Content -Path "$InstallDir\config.json"
+                $configJson = $config | ConvertTo-Json
+                Write-JsonFile -Content $configJson -FilePath "$InstallDir\config.json"
                 Write-Host "[OK] Agent token saved to configuration" -ForegroundColor Green
             } catch {
                 Write-Host "[WARNING] Failed to save agent_token: $_" -ForegroundColor Yellow
@@ -877,9 +1014,9 @@ try {
         Write-Host "[ERROR] Registration failed. Response: $responseRaw" -ForegroundColor Red
         exit 1
     }
-} catch {
-    Write-Host "[ERROR] Registration failed: $_" -ForegroundColor Red
-    exit 1
+} finally {
+    # Restore original encoding
+    $encodingState | Restore-JsonEncoding
 }
 
 # Step 8: Set up auto-start via Windows Task Scheduler
