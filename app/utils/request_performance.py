@@ -564,5 +564,7 @@ def get_recorder() -> RequestPerformanceRecorder:
 def generate_request_id(session_id: str) -> str:
     """Generate a unique request ID."""
     timestamp_ms = int(time.time() * 1000)
-    random_suffix = random.randint(1000, 9999)
+    # Use a larger random range to reduce collision probability
+    # 6-digit random number gives 1M possibilities
+    random_suffix = random.randint(100000, 999999)
     return f"{session_id}-{timestamp_ms}-{random_suffix}"
