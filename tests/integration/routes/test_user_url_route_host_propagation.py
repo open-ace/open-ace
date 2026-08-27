@@ -90,14 +90,23 @@ def test_user_url_route_uses_request_host_not_config_ip(
     Regression: the route previously dropped the host_url argument, so the
     iframe URL fell back to config.url's container IP.
     """
-    mock_get_manager.return_value = _stub_manager()
+    from app.services.webui_manager import WebUIManager
+
+    manager = _stub_manager()
+    mock_get_manager.return_value = manager
     mock_get_user.return_value = MOCK_USER
 
-    resp = _authed_get(
-        workspace_app.test_client(),
-        "/api/workspace/user-url",
-        host="my-host.example:19888",
-    )
+    # Mock _launch_webui_process and _wait_for_service_ready to avoid starting
+    # a real WebUI process in test environment (Issue #3129)
+    with (
+        patch.object(WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})),
+        patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
+    ):
+        resp = _authed_get(
+            workspace_app.test_client(),
+            "/api/workspace/user-url",
+            host="my-host.example:19888",
+        )
 
     assert resp.status_code == 200
     data = resp.get_json()
@@ -118,14 +127,23 @@ def test_user_url_route_uses_localhost_in_default_case(
     mock_get_user, mock_get_manager, workspace_app
 ):
     """The common local-dev case: Host=localhost:19888 -> url=localhost:3100."""
-    mock_get_manager.return_value = _stub_manager()
+    from app.services.webui_manager import WebUIManager
+
+    manager = _stub_manager()
+    mock_get_manager.return_value = manager
     mock_get_user.return_value = MOCK_USER
 
-    resp = _authed_get(
-        workspace_app.test_client(),
-        "/api/workspace/user-url",
-        host="localhost:19888",
-    )
+    # Mock _launch_webui_process and _wait_for_service_ready to avoid starting
+    # a real WebUI process in test environment (Issue #3129)
+    with (
+        patch.object(WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})),
+        patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
+    ):
+        resp = _authed_get(
+            workspace_app.test_client(),
+            "/api/workspace/user-url",
+            host="localhost:19888",
+        )
 
     assert resp.status_code == 200
     data = resp.get_json()
