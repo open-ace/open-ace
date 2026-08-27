@@ -10007,7 +10007,7 @@ class AutonomousOrchestrator:
                                 "and not a git repo"
                             )
                 else:
-                    os.makedirs(os.path.dirname(project_path), exist_ok=True)
+                    os.makedirs(project_path, exist_ok=True)
 
                 if not os.path.isdir(os.path.join(project_path, ".git")):
                     # Issue #3070: Use gh repo clone for private repo authentication
