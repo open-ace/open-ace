@@ -318,3 +318,229 @@ class TestConvenienceFunctions:
         with patch.object(SchedulerStatusReader, "clear_cache") as mock_clear:
             clear_cache("test_job")
             mock_clear.assert_called_once_with("test_job")
+
+
+class TestSchedulerStatusReaderRunsFallback:
+    """Test scheduler_runs fallback when no leader row exists.
+
+    Issue #3146: After release_leadership() deletes the scheduler_leaders
+    row, the status reader should fall back to scheduler_runs for
+    durable run history instead of reporting "stopped".
+    """
+
+    def setup_method(self):
+        SchedulerStatusReader._instance = None
+
+    def test_fallback_to_runs_returns_idle(self):
+        """When leader row absent but recent run exists, return idle."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        recent_run = now - timedelta(seconds=30)
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            None,  # scheduler_leaders query returns no row
+            {  # scheduler_runs fallback query
+                "leader_id": "worker-abc-123",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "status": "completed",
+            },
+        ]
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        assert result["health_status"] == "idle"
+        assert result["running"] is True
+        assert result["worker_id"] == "worker-abc-123"
+        assert result["last_run"] is not None
+        assert result["next_run"] is not None
+        assert result["heartbeat"] is None
+        assert result["error"] is None
+
+    def test_fallback_to_runs_returns_stale(self):
+        """When last run is old but not too old, return stale."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        # threshold_healthy for interval=300 is 360, threshold_stopped is 720
+        old_run = now - timedelta(seconds=500)
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            None,  # scheduler_leaders query returns no row
+            {  # scheduler_runs fallback query
+                "leader_id": "worker-abc-123",
+                "started_at": old_run,
+                "ended_at": old_run,
+                "status": "completed",
+            },
+        ]
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        assert result["health_status"] == "stale"
+        assert result["running"] is True
+        assert result["worker_id"] == "worker-abc-123"
+
+    def test_fallback_to_runs_returns_stopped_when_old(self):
+        """When last run is very old, return stopped."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        # threshold_stopped for interval=300 is 720
+        very_old_run = now - timedelta(seconds=800)
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            None,  # scheduler_leaders query returns no row
+            {  # scheduler_runs fallback query
+                "leader_id": "worker-abc-123",
+                "started_at": very_old_run,
+                "ended_at": very_old_run,
+                "status": "completed",
+            },
+        ]
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        assert result["health_status"] == "stopped"
+        assert result["running"] is False
+        assert result["worker_id"] == "worker-abc-123"
+
+    def test_fallback_no_runs_returns_stopped(self):
+        """When no leader row and no run history, return stopped."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            None,  # scheduler_leaders query returns no row
+            None,  # scheduler_runs fallback query also returns nothing
+        ]
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        assert result["health_status"] == "stopped"
+        assert result["running"] is False
+        assert result["worker_id"] is None
+        assert result["last_run"] is None
+        assert result["next_run"] is None
+
+    def test_fallback_next_run_calculated_from_last_run(self):
+        """next_run should be last_run + interval."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        recent_run = now - timedelta(seconds=60)
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            None,  # scheduler_leaders query returns no row
+            {  # scheduler_runs fallback query
+                "leader_id": "worker-abc-123",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "status": "completed",
+            },
+        ]
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        assert result["next_run"] is not None
+        next_run_dt = datetime.fromisoformat(result["next_run"])
+        expected = recent_run + timedelta(seconds=300)
+        assert abs((next_run_dt - expected).total_seconds()) < 1
+
+    def test_fallback_uses_ended_at_when_available(self):
+        """Fallback should prefer ended_at over started_at for last_run."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        started = now - timedelta(seconds=120)
+        ended = now - timedelta(seconds=30)
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            None,  # scheduler_leaders query returns no row
+            {  # scheduler_runs fallback query
+                "leader_id": "worker-abc-123",
+                "started_at": started,
+                "ended_at": ended,
+                "status": "completed",
+            },
+        ]
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        # last_run should be ended_at, not started_at
+        last_run_dt = datetime.fromisoformat(result["last_run"])
+        assert abs((last_run_dt - ended).total_seconds()) < 1
+
+    def test_leader_row_takes_precedence_over_runs(self):
+        """When leader row exists, scheduler_runs is NOT queried."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.return_value = {
+            "job_name": "data_fetch",
+            "leader_id": "active-worker",
+            "owner_info": "host:123",
+            "acquired_at": now,
+            "expires_at": now + timedelta(seconds=1800),
+            "heartbeat_at": now,
+            "last_run_at": now,
+            "run_count": 5,
+            "skip_count": 0,
+            "fail_count": 0,
+        }
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        # Should return from leader row, not runs fallback
+        assert result["health_status"] == "healthy"
+        assert result["worker_id"] == "active-worker"
+        # fetch_one should be called only once (for scheduler_leaders)
+        assert mock_db.fetch_one.call_count == 1
+
+    def test_fallback_heartbeat_age_is_last_run_age(self):
+        """heartbeat_age_seconds should reflect last run age in fallback."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        recent_run = now - timedelta(seconds=45)
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            None,
+            {
+                "leader_id": "worker-abc-123",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "status": "completed",
+            },
+        ]
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        assert result["heartbeat_age_seconds"] is not None
+        # Should be approximately 45 seconds
+        assert 40 < result["heartbeat_age_seconds"] < 55

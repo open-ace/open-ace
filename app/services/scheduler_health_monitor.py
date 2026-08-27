@@ -277,6 +277,7 @@ class SchedulerHealthMonitor:
         """Check individual scheduler health and create alert if needed.
 
         Issue #2820: Uses health status classification (healthy/stale/stopped/unknown).
+        Issue #3146: "idle" status treated like "healthy" — worker alive between runs.
 
         Args:
             name: Scheduler name.
@@ -299,8 +300,8 @@ class SchedulerHealthMonitor:
             # Clear the stopped alert flag if it exists
             self._alert_created_for.discard(name)
 
-        elif health_status == "healthy":
-            # Clear alert flags when scheduler is healthy again
+        elif health_status in ("healthy", "idle"):
+            # Clear alert flags when scheduler is healthy or idle
             self._alert_created_for.discard(name)
             self._alert_created_for.discard(f"{name}:stale")
 

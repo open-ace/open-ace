@@ -295,3 +295,30 @@ class TestHealthMonitorIntegration:
         # Test with unknown running
         status = {"running": "unknown"}
         assert monitor._get_scheduler_health_status(status) == "unknown"
+
+    def test_health_monitor_idle_does_not_create_alert(self):
+        """Test that idle status does not create alerts.
+
+        Issue #3146: idle status means worker is alive between runs.
+        """
+        from app.services.scheduler_health_monitor import SchedulerHealthMonitor
+
+        SchedulerHealthMonitor._instance = None
+        monitor = SchedulerHealthMonitor()
+
+        # Pre-set alert flags to simulate a previous stopped/stale alert
+        monitor._alert_created_for.add("data_fetch")
+        monitor._alert_created_for.add("data_fetch:stale")
+
+        # Simulate idle status
+        status = {"health_status": "idle", "running": True}
+
+        with patch.object(monitor, "_create_scheduler_alert") as mock_alert:
+            monitor._check_scheduler_health("data_fetch", status)
+
+            # Should NOT create any alert
+            mock_alert.assert_not_called()
+
+        # Should clear previous alert flags
+        assert "data_fetch" not in monitor._alert_created_for
+        assert "data_fetch:stale" not in monitor._alert_created_for

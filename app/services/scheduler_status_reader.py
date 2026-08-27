@@ -150,7 +150,12 @@ class SchedulerStatusReader:
         threshold_healthy: int,
         threshold_stopped: int,
     ) -> dict[str, Any]:
-        """Query scheduler_leaders table for status."""
+        """Query scheduler_leaders table for status.
+
+        When the leader row is absent (idle interval between runs),
+        falls back to scheduler_runs for last-run and worker info.
+        Issue #3146.
+        """
         from app.repositories.database import Database
 
         db = Database()
@@ -167,16 +172,13 @@ class SchedulerStatusReader:
         )
 
         if not result:
-            return {
-                "running": False,
-                "worker_id": None,
-                "heartbeat": None,
-                "heartbeat_age_seconds": None,
-                "last_run": None,
-                "next_run": None,
-                "health_status": "stopped",
-                "error": None,
-            }
+            # No active leader row — the scheduler is idle between runs
+            # (release_leadership deletes the row after each execution).
+            # Fall back to scheduler_runs for durable run history.
+            # Issue #3146.
+            return self._query_runs_fallback(
+                db, job_name, interval_seconds, threshold_healthy, threshold_stopped
+            )
 
         # Check if expired
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -219,6 +221,98 @@ class SchedulerStatusReader:
             "worker_id": leader_id,
             "heartbeat": heartbeat_str,
             "heartbeat_age_seconds": heartbeat_age_seconds,
+            "last_run": last_run_str,
+            "next_run": next_run_str,
+            "health_status": health_status,
+            "error": None,
+        }
+
+    def _query_runs_fallback(
+        self,
+        db: Any,
+        job_name: str,
+        interval_seconds: int,
+        threshold_healthy: int,
+        threshold_stopped: int,
+    ) -> dict[str, Any]:
+        """Query scheduler_runs for last-run info when no leader row exists.
+
+        Issue #3146: After release_leadership() deletes the scheduler_leaders
+        row, the scheduler is idle between runs.  We read the most recent
+        scheduler_runs record to determine last_run, worker_id, next_run,
+        and compute health based on the age of that record.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        run = db.fetch_one(
+            """
+            SELECT leader_id, started_at, ended_at, status
+            FROM scheduler_runs
+            WHERE job_name = ?
+            ORDER BY started_at DESC
+            LIMIT 1
+            """,
+            (job_name,),
+        )
+
+        if not run:
+            # No run history at all — scheduler has never executed
+            return {
+                "running": False,
+                "worker_id": None,
+                "heartbeat": None,
+                "heartbeat_age_seconds": None,
+                "last_run": None,
+                "next_run": None,
+                "health_status": "stopped",
+                "error": None,
+            }
+
+        # Use ended_at if available, otherwise started_at
+        last_run_at = run.get("ended_at") or run.get("started_at")
+        worker_id = run.get("leader_id")
+
+        # Calculate age of last run
+        last_run_age_seconds: float | None = None
+        if last_run_at:
+            if last_run_at.tzinfo is not None:
+                last_run_age_seconds = (now - last_run_at.replace(tzinfo=None)).total_seconds()
+            else:
+                last_run_age_seconds = (now - last_run_at).total_seconds()
+
+        # Determine health status based on last run age
+        if last_run_age_seconds is None or last_run_age_seconds >= threshold_stopped:
+            health_status = "stopped"
+        elif last_run_age_seconds >= threshold_healthy:
+            health_status = "stale"
+        else:
+            # Last run was recent — worker is alive but idle between runs
+            health_status = "idle"
+
+        # running is True for idle and stale (worker may still be alive);
+        # False only for stopped
+        running = health_status in ("idle", "stale")
+
+        # Calculate next_run from last_run + interval
+        next_run = None
+        if last_run_at:
+            from datetime import timedelta
+
+            if last_run_at.tzinfo:
+                last_run_naive = last_run_at.replace(tzinfo=None)
+            else:
+                last_run_naive = last_run_at
+            next_run = last_run_naive + timedelta(seconds=interval_seconds)
+
+        # Format timestamps
+        last_run_str = last_run_at.isoformat() if last_run_at else None
+        next_run_str = next_run.isoformat() if next_run else None
+
+        return {
+            "running": running,
+            "worker_id": worker_id,
+            "heartbeat": None,  # No active heartbeat when idle
+            "heartbeat_age_seconds": last_run_age_seconds,
             "last_run": last_run_str,
             "next_run": next_run_str,
             "health_status": health_status,
