@@ -216,15 +216,22 @@ export const FeishuConfig: React.FC<{ compact?: boolean }> = ({ compact = false 
     }
   };
 
-  // Get status badge
+  // Get status badge based on verification status
   const getStatusBadge = () => {
     if (!config) {
       return <Badge variant="secondary">{t('feishuNotConfigured', language)}</Badge>;
     }
-    if (config.app_secret_masked) {
-      return <Badge variant="success">{t('feishuConnected', language)}</Badge>;
+    switch (config.verification_status) {
+      case 'connected':
+        return <Badge variant="success">{t('feishuConnected', language)}</Badge>;
+      case 'connection_failed':
+        return <Badge variant="danger">{t('feishuConnectionFailed', language)}</Badge>;
+      case 'configuration_error':
+        return <Badge variant="warning">{t('feishuConfigurationError', language)}</Badge>;
+      case 'configured_unverified':
+      default:
+        return <Badge variant="secondary">{t('feishuConfiguredUnverified', language)}</Badge>;
     }
-    return <Badge variant="warning">{t('feishuInvalid', language)}</Badge>;
   };
 
   if (loading) {

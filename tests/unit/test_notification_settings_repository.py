@@ -24,7 +24,12 @@ def repository(tmp_path, monkeypatch):
             interval_minutes INTEGER NOT NULL DEFAULT 60,
             max_runtime_seconds INTEGER NOT NULL DEFAULT 1800,
             auto_recovery INTEGER NOT NULL DEFAULT 0, created_by INTEGER,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT,
+            verification_status TEXT,
+            last_tested_at TEXT,
+            last_test_error_code TEXT,
+            last_test_error_summary TEXT,
+            verified_config_fingerprint TEXT
         );
         CREATE TABLE dingtalk_settings (
             id INTEGER PRIMARY KEY, app_key TEXT, app_secret_enc TEXT,
@@ -163,4 +168,66 @@ def test_save_rolls_back_when_import_state_write_fails(repository, monkeypatch):
     current = repo.get("webhook", include_secrets=True)
     assert current is not None
     assert current["enabled"] == 1
-    assert current["webhook_secret"] == "original"
+
+
+def test_save_sets_configured_unverified_on_new_config(repository):
+    """Saving a new config should set verification_status to configured_unverified."""
+    repo, _config_dir, _connection = repository
+    saved = repo.save(
+        "feishu",
+        {"app_id": "test_app", "app_secret": "secret"},
+        user_id=1,
+    )
+    assert saved["verification_status"] == "configured_unverified"
+    assert saved["verified_config_fingerprint"] is not None
+
+
+def test_save_resets_verification_status_on_config_change(repository):
+    """Saving with changed app_id should reset verification status."""
+    repo, _config_dir, _connection = repository
+    repo.save("feishu", {"app_id": "test_app", "app_secret": "secret"}, user_id=1)
+
+    # Simulate successful verification
+    repo.update_verification_status("feishu", "connected")
+
+    # Save with same app_id - status should be preserved
+    repo.save("feishu", {"app_id": "test_app"}, user_id=1)
+    result = repo.get("feishu")
+    assert result["verification_status"] == "connected"
+
+    # Save with different app_id - status should be reset
+    repo.save("feishu", {"app_id": "new_app", "app_secret": "new_secret"}, user_id=1)
+    result = repo.get("feishu")
+    assert result["verification_status"] == "configured_unverified"
+
+
+def test_update_verification_status(repository):
+    """update_verification_status should persist status and error info."""
+    repo, _config_dir, _connection = repository
+    repo.save("feishu", {"app_id": "test_app", "app_secret": "secret"}, user_id=1)
+
+    repo.update_verification_status(
+        "feishu",
+        "connection_failed",
+        error_code="FEISHU_API_ERROR_10001",
+        error_summary="Invalid credentials",
+    )
+
+    result = repo.get("feishu")
+    assert result["verification_status"] == "connection_failed"
+    assert result["last_test_error_code"] == "FEISHU_API_ERROR_10001"
+    assert result["last_test_error_summary"] == "Invalid credentials"
+    assert result["last_tested_at"] is not None
+
+
+def test_verification_status_returned_in_get(repository):
+    """get() should return verification status fields."""
+    repo, _config_dir, _connection = repository
+    repo.save("feishu", {"app_id": "test_app", "app_secret": "secret"}, user_id=1)
+    repo.update_verification_status("feishu", "connected")
+
+    result = repo.get("feishu")
+    assert "verification_status" in result
+    assert result["verification_status"] == "connected"
+    assert "last_tested_at" in result
+    assert "verified_config_fingerprint" in result

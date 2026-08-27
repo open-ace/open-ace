@@ -157,27 +157,65 @@ def update_feishu_config():
 
 @feishu_config_bp.route("/management/feishu-config/test", methods=["POST"])
 def test_feishu_connection():
-    """Test Feishu connection."""
+    """Test Feishu connection and persist verification status."""
     try:
         data = request.get_json() or {}
 
         # Test with provided parameters or saved config
-        saved = get_notification_settings_repository().get("feishu", include_secrets=True) or {}
+        repo = get_notification_settings_repository()
+        saved = repo.get("feishu", include_secrets=True) or {}
         service = get_feishu_config_service()
         result = service.test_connection(
             app_id=data.get("app_id") or saved.get("app_id"),
             app_secret=data.get("app_secret") or saved.get("app_secret"),
         )
 
-        if result["success"]:
-            logger.info("Feishu connection test successful")
+        # Persist verification status if config exists in database
+        if saved and saved.get("app_id"):
+            if result["success"]:
+                repo.update_verification_status("feishu", "connected")
+                logger.info("Feishu connection test successful, status persisted")
+            else:
+                # Determine error code
+                error_code = _classify_feishu_error(result.get("message", ""))
+                repo.update_verification_status(
+                    "feishu",
+                    "connection_failed",
+                    error_code=error_code,
+                    error_summary=result.get("message", "")[:200],  # Truncate for safety
+                )
+                logger.error(f"Feishu connection test failed: {result['message']}")
         else:
-            logger.error(f"Feishu connection test failed: {result['message']}")
+            if result["success"]:
+                logger.info("Feishu connection test successful (no saved config)")
+            else:
+                logger.error(f"Feishu connection test failed: {result['message']}")
 
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error testing Feishu connection: {e}")
         return jsonify({"success": False, "error": "Internal server error", "message": str(e)}), 500
+
+
+def _classify_feishu_error(message: str) -> str:
+    """Classify Feishu error message into a stable error code."""
+    message_lower = message.lower()
+    if "blocked by security policy" in message_lower:
+        return "FEISHU_REQUEST_BLOCKED"
+    if "app_id" in message_lower or "app_secret" in message_lower:
+        return "FEISHU_INVALID_CREDENTIALS"
+    if "placeholder" in message_lower:
+        return "FEISHU_PLACEHOLDER_VALUE"
+    if "timeout" in message_lower or "network" in message_lower:
+        return "FEISHU_NETWORK_ERROR"
+    if "code=" in message_lower:
+        # Extract API error code
+        import re
+
+        match = re.search(r"code=(\d+)", message)
+        if match:
+            return f"FEISHU_API_ERROR_{match.group(1)}"
+    return "FEISHU_UNKNOWN_ERROR"
 
 
 @feishu_config_bp.route("/management/feishu-config", methods=["DELETE"])

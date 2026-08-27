@@ -5,6 +5,9 @@
 import { apiClient } from './client';
 
 // Types
+export type FeishuVerificationStatus =
+  'configured_unverified' | 'connected' | 'connection_failed' | 'configuration_error';
+
 export interface FeishuConfigResponse {
   app_id: string;
   app_secret_masked?: string;
@@ -13,6 +16,11 @@ export interface FeishuConfigResponse {
   org_sync_tenant_id?: number;
   org_sync_max_runtime_seconds?: number;
   org_sync_auto_recover?: boolean;
+  // Verification status fields
+  verification_status?: FeishuVerificationStatus;
+  last_tested_at?: string;
+  last_test_error_code?: string;
+  last_test_error_summary?: string;
 }
 
 export interface FeishuTestResult {

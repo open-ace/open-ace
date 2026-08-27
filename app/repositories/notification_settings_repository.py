@@ -1,5 +1,7 @@
 """Centralized, encrypted system settings for notification integrations."""
 
+import hashlib
+import hmac
 import json
 import os
 from datetime import datetime, timezone
@@ -156,6 +158,34 @@ class NotificationSettingsRepository:
                 )
             elif "fallback_webhook_secret_enc" in current:
                 columns["fallback_webhook_secret_enc"] = current["fallback_webhook_secret_enc"]
+
+        # Handle verification status fields
+        # Compute new fingerprint and reset verification status when config changes
+        # Merge current first, then override with new columns so new values take precedence
+        merged = {**current, **columns}
+        new_fingerprint = self._compute_config_fingerprint(kind, merged)
+        old_fingerprint = current.get("verified_config_fingerprint")
+
+        # If fingerprint changed (config changed), reset verification status
+        if kind == "feishu":
+            if new_fingerprint != old_fingerprint:
+                columns["verification_status"] = "configured_unverified"
+                columns["verified_config_fingerprint"] = new_fingerprint
+                columns["last_tested_at"] = None
+                columns["last_test_error_code"] = None
+                columns["last_test_error_summary"] = None
+            else:
+                # Preserve existing verification status
+                for field in [
+                    "verification_status",
+                    "last_tested_at",
+                    "last_test_error_code",
+                    "last_test_error_summary",
+                    "verified_config_fingerprint",
+                ]:
+                    if field in current and field not in columns:
+                        columns[field] = current[field]
+
         columns.update(
             id=1,
             created_by=user_id if user_id is not None else current.get("created_by"),
@@ -225,6 +255,67 @@ class NotificationSettingsRepository:
             raise
         finally:
             conn.close()
+
+    def update_verification_status(
+        self,
+        kind: str,
+        status: str,
+        error_code: str | None = None,
+        error_summary: str | None = None,
+    ) -> None:
+        """Update verification status for an integration after testing connection.
+
+        Args:
+            kind: Integration type (feishu, dingtalk, webhook)
+            status: Verification status (connected, connection_failed, configuration_error)
+            error_code: Error code if status is connection_failed or configuration_error
+            error_summary: Human-readable error summary (should be sanitized, no secrets)
+        """
+        table = self._table(kind)
+        conn = self._connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                adapt_sql(
+                    f"UPDATE {table} SET verification_status = ?, last_tested_at = ?, "
+                    f"last_test_error_code = ?, last_test_error_summary = ? WHERE id = 1"
+                ),  # nosec B608: allowlisted table
+                (
+                    status,
+                    datetime.now(timezone.utc).replace(tzinfo=None),
+                    error_code,
+                    error_summary,
+                ),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def _compute_config_fingerprint(self, kind: str, values: dict[str, Any]) -> str:
+        """Compute a fingerprint for configuration change detection.
+
+        Uses HMAC with the encryption key to create a stable fingerprint that
+        can detect when key configuration parameters have changed.
+        """
+        if kind == "feishu":
+            # Fingerprint based on app_id (app_secret is encrypted, use its presence)
+            app_id = values.get("app_id", "")
+            secret_present = bool(values.get("app_secret") or values.get("app_secret_enc"))
+            payload = f"{app_id}:{secret_present}"
+        elif kind == "dingtalk":
+            app_key = values.get("app_key", "")
+            secret_present = bool(values.get("app_secret") or values.get("app_secret_enc"))
+            payload = f"{app_key}:{secret_present}"
+        else:
+            # For webhook, just use secret presence
+            payload = str(bool(values.get("webhook_secret") or values.get("webhook_secret_enc")))
+
+        # Use encryption key as HMAC key for consistency
+        key = os.environ.get("OPENACE_ENCRYPTION_KEY", "default-fingerprint-key")
+        return hmac.new(key.encode(), payload.encode(), hashlib.sha256).hexdigest()[:32]
 
 
 _repository = NotificationSettingsRepository()
