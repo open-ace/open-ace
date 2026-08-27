@@ -263,7 +263,8 @@ class TestCloneAfterCreateRepo:
             repo_scoped=False,
             check=True,
         )
-        makedirs.assert_any_call("/workspace/alice", exist_ok=True)
+        # Issue #3155: Create project_path directory before gh repo clone
+        makedirs.assert_any_call(fallback_path, exist_ok=True)
         orch._update_workflow.assert_any_call({"project_path": fallback_path})
         assert result.next_phase == "planning"
 
@@ -354,7 +355,8 @@ class TestCloneAfterCreateRepo:
             repo_scoped=False,
             check=True,
         )
-        makedirs.assert_any_call("/workspace/alice", exist_ok=True)
+        # Issue #3155: Create project_path directory before gh repo clone
+        makedirs.assert_any_call(fallback_path, exist_ok=True)
         orch._update_workflow.assert_any_call({"project_path": fallback_path})
         assert result.next_phase == "planning"
 
