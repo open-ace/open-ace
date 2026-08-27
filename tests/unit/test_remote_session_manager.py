@@ -2,11 +2,218 @@
 Unit tests for RemoteSessionManager.
 
 Issue #2597: Prevent zombie sessions during heartbeat tolerance window.
+Issue #3139: Auto-resume for loop detection aborts in autonomous modes.
 """
 
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+class TestProcessRequestStateLoopAbortAutoResume:
+    """Tests for auto-resume after loop detection abort (Issue #3139)."""
+
+    @pytest.fixture
+    def mock_agent_manager(self):
+        """Create a mock agent manager."""
+        mock = MagicMock()
+        mock.buffer_output = MagicMock()
+        return mock
+
+    @pytest.fixture
+    def mock_session_manager(self):
+        """Create a mock session manager."""
+        mock = MagicMock()
+        return mock
+
+    @pytest.fixture
+    def manager(self, mock_agent_manager, mock_session_manager):
+        """Create a RemoteSessionManager with mocked dependencies."""
+        with patch(
+            "app.modules.workspace.remote_session_manager.get_remote_agent_manager",
+            return_value=mock_agent_manager,
+        ):
+            with patch(
+                "app.modules.workspace.remote_session_manager.SessionManager",
+                return_value=mock_session_manager,
+            ):
+                with patch(
+                    "app.modules.workspace.remote_session_manager.APIKeyProxyService",
+                ):
+                    from app.modules.workspace.remote_session_manager import RemoteSessionManager
+
+                    mgr = RemoteSessionManager()
+                    mgr._agent_manager = mock_agent_manager
+                    mgr._session_manager = mock_session_manager
+                    yield mgr
+
+    def test_auto_resumes_yolo_mode_on_loop_abort(self, manager, mock_session_manager):
+        """
+        Issue #3139: Should auto-resume when loop detection abort occurs
+        in yolo mode session.
+        """
+        session_id = "test-session-id"
+
+        # Set permission mode to yolo
+        manager._session_permission_modes[session_id] = "yolo"
+
+        # Mock session as active
+        mock_session = MagicMock()
+        mock_session.status = "active"
+        mock_session_manager.get_session.return_value = mock_session
+
+        # Mock send_message to capture the resume call
+        with patch.object(manager, "send_message") as mock_send:
+            mock_send.return_value = True
+
+            # Process loop detection abort
+            manager.process_request_state(
+                session_id=session_id,
+                state="aborted",
+                reason="loop",
+            )
+
+            # Wait for timer to execute
+            import time
+            time.sleep(0.6)
+
+            # Verify send_message was called with "继续"
+            mock_send.assert_called_once_with(session_id, "继续")
+
+    def test_auto_resumes_auto_edit_mode_on_loop_abort(self, manager, mock_session_manager):
+        """
+        Issue #3139: Should auto-resume when loop detection abort occurs
+        in auto-edit mode session.
+        """
+        session_id = "test-session-id"
+
+        # Set permission mode to auto-edit
+        manager._session_permission_modes[session_id] = "auto-edit"
+
+        # Mock session as active
+        mock_session = MagicMock()
+        mock_session.status = "active"
+        mock_session_manager.get_session.return_value = mock_session
+
+        # Mock send_message
+        with patch.object(manager, "send_message") as mock_send:
+            mock_send.return_value = True
+
+            manager.process_request_state(
+                session_id=session_id,
+                state="aborted",
+                reason="system",
+            )
+
+            import time
+            time.sleep(0.6)
+
+            mock_send.assert_called_once_with(session_id, "继续")
+
+    def test_no_auto_resume_for_user_abort(self, manager, mock_session_manager):
+        """
+        Issue #3139: Should NOT auto-resume for user-initiated abort
+        even in yolo mode.
+        """
+        session_id = "test-session-id"
+
+        manager._session_permission_modes[session_id] = "yolo"
+
+        mock_session = MagicMock()
+        mock_session.status = "active"
+        mock_session_manager.get_session.return_value = mock_session
+
+        with patch.object(manager, "send_message") as mock_send:
+            manager.process_request_state(
+                session_id=session_id,
+                state="aborted",
+                reason="user",
+            )
+
+            import time
+            time.sleep(0.6)
+
+            # Should NOT auto-resume for user abort
+            mock_send.assert_not_called()
+
+    def test_no_auto_resume_for_default_mode(self, manager, mock_session_manager):
+        """
+        Issue #3139: Should NOT auto-resume for default permission mode
+        even on loop detection abort.
+        """
+        session_id = "test-session-id"
+
+        # Default mode (no entry means default)
+        manager._session_permission_modes[session_id] = "default"
+
+        mock_session = MagicMock()
+        mock_session.status = "active"
+        mock_session_manager.get_session.return_value = mock_session
+
+        with patch.object(manager, "send_message") as mock_send:
+            manager.process_request_state(
+                session_id=session_id,
+                state="aborted",
+                reason="loop",
+            )
+
+            import time
+            time.sleep(0.6)
+
+            # Should NOT auto-resume for default mode
+            mock_send.assert_not_called()
+
+    def test_no_auto_resume_for_stopped_session(self, manager, mock_session_manager):
+        """
+        Issue #3139: Should NOT auto-resume if session is already stopped.
+        """
+        session_id = "test-session-id"
+
+        manager._session_permission_modes[session_id] = "yolo"
+
+        # Session is stopped
+        mock_session = MagicMock()
+        mock_session.status = "stopped"
+        mock_session_manager.get_session.return_value = mock_session
+
+        with patch.object(manager, "send_message") as mock_send:
+            manager.process_request_state(
+                session_id=session_id,
+                state="aborted",
+                reason="loop",
+            )
+
+            import time
+            time.sleep(0.6)
+
+            # Should NOT auto-resume stopped session
+            mock_send.assert_not_called()
+
+    def test_auto_resume_handles_internal_abort_reason(self, manager, mock_session_manager):
+        """
+        Issue #3139: Should auto-resume for 'internal_abort' reason.
+        """
+        session_id = "test-session-id"
+
+        manager._session_permission_modes[session_id] = "yolo"
+
+        mock_session = MagicMock()
+        mock_session.status = "active"
+        mock_session_manager.get_session.return_value = mock_session
+
+        with patch.object(manager, "send_message") as mock_send:
+            mock_send.return_value = True
+
+            manager.process_request_state(
+                session_id=session_id,
+                state="aborted",
+                reason="internal_abort",
+            )
+
+            import time
+            time.sleep(0.6)
+
+            mock_send.assert_called_once_with(session_id, "继续")
 
 
 class TestCreateRemoteSessionDBStatusCheck:

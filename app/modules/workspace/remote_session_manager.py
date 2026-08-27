@@ -1714,7 +1714,14 @@ class RemoteSessionManager:
         reason: str = "user",
         message: str | None = None,
     ) -> None:
-        """Buffer a request lifecycle event for SSE delivery to the frontend."""
+        """Buffer a request lifecycle event for SSE delivery to the frontend.
+
+        Issue #3139: Auto-resume for loop detection aborts in autonomous modes.
+        When qwen-code-webui's loop detection triggers an abort (reason contains
+        "loop", "system", or "internal_abort"), and the session is in yolo or
+        auto-edit mode, automatically send a resume message to continue the
+        autonomous workflow without user intervention.
+        """
         if state not in self._allowed_request_states:
             logger.warning(
                 "Ignoring unsupported request_state for session %s: %s",
@@ -1722,6 +1729,36 @@ class RemoteSessionManager:
                 state,
             )
             return
+
+        # Issue #3139: Check for loop detection abort in autonomous mode
+        # Loop detection aborts have reason="loop", "system", or "internal_abort"
+        # and should auto-resume for yolo/auto-edit sessions.
+        permission_mode = self._session_permission_modes.get(session_id, "default")
+        is_autonomous = permission_mode in ("yolo", "auto-edit")
+        reason_lower = reason.lower() if reason else ""
+        is_loop_abort = (
+            state == "aborted"
+            and reason_lower in ("loop", "system", "internal_abort")
+        )
+
+        if is_loop_abort and is_autonomous:
+            logger.info(
+                "Auto-resuming session %s after loop detection abort "
+                "(permission_mode=%s, reason=%s)",
+                session_id[:8],
+                permission_mode,
+                reason,
+            )
+            # Use a timer to delay the resume slightly, giving the abort
+            # time to complete before resuming. This also avoids potential
+            # issues with nested call stacks.
+            timer = threading.Timer(
+                0.5,
+                self._auto_resume_after_loop_abort,
+                args=(session_id,),
+            )
+            timer.daemon = True
+            timer.start()
 
         payload: dict[str, Any] = {
             "type": state,
@@ -1745,6 +1782,61 @@ class RemoteSessionManager:
             state,
             reason,
         )
+
+    def _auto_resume_after_loop_abort(self, session_id: str) -> None:
+        """Auto-resume a session after a loop detection abort.
+
+        Called from a background thread after a short delay to allow the abort
+        to complete. Sends a "继续" message to the remote session to resume
+        the autonomous workflow.
+
+        Issue #3139: This enables autonomous workflows (fix_issue, etc.) to
+        continue without user intervention when qwen-code-webui's loop detection
+        triggers a false abort.
+        """
+        try:
+            # Check if session is still active before resuming
+            session = self._session_manager.get_session(session_id)
+            if not session:
+                logger.warning(
+                    "Session %s not found, skipping auto-resume",
+                    session_id[:8],
+                )
+                return
+
+            if session.status in ("stopped", "error"):
+                logger.info(
+                    "Session %s is %s, skipping auto-resume",
+                    session_id[:8],
+                    session.status,
+                )
+                return
+
+            # Send the resume message
+            success = self.send_message(session_id, "继续")
+            if success:
+                logger.info(
+                    "Auto-resumed session %s after loop detection abort",
+                    session_id[:8],
+                )
+                # Record the auto-resume event for audit
+                self._timeline(
+                    "record_event",
+                    session_id,
+                    "auto_resume",
+                    metadata={"reason": "loop_detection_abort"},
+                )
+            else:
+                logger.warning(
+                    "Failed to auto-resume session %s after loop detection abort",
+                    session_id[:8],
+                )
+        except Exception as e:
+            logger.exception(
+                "Error auto-resuming session %s after loop detection abort: %s",
+                session_id[:8],
+                e,
+            )
 
     def process_session_status_update(
         self,
