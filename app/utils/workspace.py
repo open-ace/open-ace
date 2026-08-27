@@ -120,6 +120,10 @@ def _is_docker_multi_user_mode() -> bool:
 def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
     """确保系统用户存在，创建工作目录。
 
+    Behavior differs by deployment mode:
+    - Docker multi-user mode: Creates system user + workspace + .qwen dirs
+    - Package single-user mode: Skips system user creation (returns True)
+
     此函数用于 Package 版 multi-user mode，当服务以非 root 用户运行时，
     通过 sudo 执行 useradd 和 chown 命令。
 
@@ -130,6 +134,11 @@ def ensure_system_user(system_account: str, uid: int | None = None) -> bool:
     Returns:
         True 如果用户存在或创建成功。
     """
+    # Issue #3130: 非 Docker 多用户模式跳过系统用户创建
+    if not _is_docker_multi_user_mode():
+        logger.debug(f"Skipping system user creation in non-Docker mode: {system_account}")
+        return True
+
     # 用户名格式验证（Linux useradd 要求）
     # - Must start with a lowercase letter or underscore
     # - Can contain lowercase letters, digits, underscores, and dashes
