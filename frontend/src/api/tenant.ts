@@ -81,11 +81,15 @@ export interface TenantStats {
   total_requests: number;
 }
 
+// PlanQuota - matches backend QuotaConfig.to_dict() from app/models/tenant.py
+// Issue #3138: Fix type mismatch between frontend and backend
 export interface PlanQuota {
-  plan: string;
-  monthly_tokens: number;
-  monthly_requests: number;
-  features: string[];
+  daily_token_limit: number;
+  monthly_token_limit: number;
+  daily_request_limit: number;
+  monthly_request_limit: number;
+  max_users: number;
+  max_sessions_per_user: number;
 }
 
 // API
