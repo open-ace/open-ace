@@ -33,8 +33,31 @@ _fetch_status: dict[str, Any] = {
     "last_run": None,
     "last_result": None,
     "error": None,
+    "degraded": False,
+    "degraded_reason": None,
 }
 _fetch_lock = threading.Lock()
+
+
+def set_fetch_degraded(reason: str | None) -> None:
+    """Set or clear the fetch degraded state.
+
+    Issue #3145: When FETCH_USE_SUDO=true but the wrapper is missing or invalid,
+    the scheduler should not attempt to run fetch jobs that will fail.
+
+    Args:
+        reason: Description of why fetch is degraded, or None to clear.
+    """
+    global _fetch_status
+    with _fetch_lock:
+        if reason:
+            _fetch_status["degraded"] = True
+            _fetch_status["degraded_reason"] = reason
+            logger.error(f"Fetch set to degraded mode: {reason}")
+        else:
+            _fetch_status["degraded"] = False
+            _fetch_status["degraded_reason"] = None
+            logger.info("Fetch degraded mode cleared")
 
 
 def _parse_fetch_result(output: str) -> dict[str, Any]:
@@ -128,11 +151,19 @@ def run_fetch_scripts():
     Returns:
         dict or None: Per-tool results on success (e.g. {"qwen": {"success": True, ...}, ...}).
                       {"_skipped": True} if a concurrent fetch is already running.
+                      {"_degraded": True, "reason": str} if in degraded mode.
                       None if an unexpected error occurred in the outer handler.
     """
     global _fetch_status
 
     with _fetch_lock:
+        # Issue #3145: Check degraded state first
+        if _fetch_status.get("degraded"):
+            logger.error(
+                f"Fetch skipped due to degraded state: {_fetch_status.get('degraded_reason')}"
+            )
+            return {"_degraded": True, "reason": _fetch_status.get("degraded_reason")}
+
         if _fetch_status["is_running"]:
             return {"_skipped": True}
         _fetch_status["is_running"] = True
@@ -386,7 +417,14 @@ def api_fetch_status():
     # Add scheduler status
     scheduler_status = scheduler.get_status()
 
-    return jsonify({"success": True, "status": fetch_status, "scheduler": scheduler_status})
+    # Issue #3145: Include degraded state in response
+    return jsonify(
+        {
+            "success": True,
+            "status": fetch_status,
+            "scheduler": scheduler_status,
+        }
+    )
 
 
 @fetch_bp.route("/fetch")
