@@ -6,7 +6,7 @@ The DB / git-worktree registry / disk are not updated atomically, so failures
 at any step could leave the workflow pointing at the main checkout (HEAD=main).
 
 These lock in the #2041 in-process guarantees (the SIGKILL-recovery acceptance
-criterion is tracked separately). Helpers mirror tests/issues/822/.
+criterion is tracked separately). Helpers mirror tests/unit/test_merge_conflict_detection.py (#822).
 """
 
 from unittest.mock import MagicMock, patch

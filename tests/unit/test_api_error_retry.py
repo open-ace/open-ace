@@ -19,6 +19,8 @@ from app.modules.workspace.autonomous import orchestrator as orch_module
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1001)]
+
 
 def _make_workflow(**overrides):
     base = {

@@ -6,16 +6,23 @@ Covers:
 - Agent command handler: _cmd_create_directory
 """
 
-import importlib
+import importlib.util
 import json
 import os
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(584)]
+
 # Add project root to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+project_root = str(Path(__file__).resolve().parents[2])
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 # Sentinel distinguishing "never captured" from a legitimately-None original
 # in the tearDown restore guards.
@@ -311,49 +318,60 @@ class TestAgentCreateDirectory(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Import RemoteAgent with mocked dependencies."""
-        agent_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "remote-agent")
-        agent_dir = os.path.abspath(agent_dir)
+        """Load remote-agent/agent.py with mocked dependencies.
 
-        # Mock all remote-agent dependencies before importing
-        mock_modules = [
-            "config",
-            "executor",
-            "session_sync",
-            "system_info",
-            "cli_settings",
-        ]
-        for mod_name in mock_modules:
-            if mod_name not in sys.modules:
-                sys.modules[mod_name] = MagicMock()
-
+        The mock sys.modules entries (and the loaded module itself) live only
+        inside a patch.dict window restored via addClassCleanup, so no bare
+        ``config`` / ``executor`` / ... MagicMock leaks into the pytest
+        process after this class finishes.
+        """
         # Provide AgentConfig
-        mock_config = sys.modules["config"]
+        mock_config = MagicMock()
         mock_config.AgentConfig = type("AgentConfig", (), {"__init__": lambda self: None})
 
         # Provide ProcessExecutor
-        mock_executor = sys.modules["executor"]
+        mock_executor = MagicMock()
         mock_executor.ProcessExecutor = MagicMock
 
         # Provide SessionSyncService
-        mock_session_sync = sys.modules["session_sync"]
+        mock_session_sync = MagicMock()
         mock_session_sync.SessionSyncService = MagicMock
 
         # Provide get_capabilities
-        mock_system_info = sys.modules["system_info"]
+        mock_system_info = MagicMock()
         mock_system_info.get_capabilities = MagicMock(return_value={})
 
         # Provide apply_cli_settings
-        mock_cli = sys.modules["cli_settings"]
+        mock_cli = MagicMock()
         mock_cli.apply_cli_settings = MagicMock()
 
-        if agent_dir not in sys.path:
-            sys.path.insert(0, agent_dir)
+        # agent.py also imports tls_config; mocked for the same reason (the
+        # real module would require remote-agent on sys.path).
+        mock_tls_config = MagicMock()
 
-        if "agent" in sys.modules:
-            del sys.modules["agent"]
+        patcher = patch.dict(
+            sys.modules,
+            {
+                "config": mock_config,
+                "executor": mock_executor,
+                "session_sync": mock_session_sync,
+                "system_info": mock_system_info,
+                "cli_settings": mock_cli,
+                "tls_config": mock_tls_config,
+            },
+        )
+        patcher.start()
+        cls.addClassCleanup(patcher.stop)
 
-        import agent as agent_mod
+        # Load agent.py by path under a unique name instead of importing
+        # ``agent`` with remote-agent on sys.path: a leaked remote-agent
+        # entry shadows bare ``import config`` for every later test in the
+        # same worker.
+        agent_path = Path(project_root) / "remote-agent" / "agent.py"
+        spec = importlib.util.spec_from_file_location("agent_584", agent_path)
+        agent_mod = importlib.util.module_from_spec(spec)
+        sys.modules["agent_584"] = agent_mod
+        spec.loader.exec_module(agent_mod)
 
         cls.AgentClass = agent_mod.RemoteAgent
 

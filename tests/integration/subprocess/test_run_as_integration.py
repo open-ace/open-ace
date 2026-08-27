@@ -20,7 +20,7 @@ unchanged pre-existing code.
 
 These SKIP unless the host is a provisioned Linux-root lane. Run with::
 
-    sudo pytest tests/issues/2018/test_run_as_integration.py
+    sudo pytest tests/integration/subprocess/test_run_as_integration.py
 """
 
 import os
@@ -57,17 +57,22 @@ def _conf_allows_home() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not (
-        _linux_root()
-        and _has_setfacl()
-        and _has_agent()
-        and _INSTALLED_VALIDATOR.exists()
-        and _INSTALLED_CONF.exists()
-        and _conf_allows_home()
+pytestmark = [
+    pytest.mark.regression,
+    pytest.mark.issue(2018),
+    pytest.mark.security,
+    pytest.mark.skipif(
+        not (
+            _linux_root()
+            and _has_setfacl()
+            and _has_agent()
+            and _INSTALLED_VALIDATOR.exists()
+            and _INSTALLED_CONF.exists()
+            and _conf_allows_home()
+        ),
+        reason="requires Linux + root + setfacl + openace-agent + installed validator/conf (conf allows /home)",
     ),
-    reason="requires Linux + root + setfacl + openace-agent + installed validator/conf (conf allows /home)",
-)
+]
 
 
 @pytest.fixture

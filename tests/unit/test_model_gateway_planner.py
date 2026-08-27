@@ -20,6 +20,8 @@ from app.modules.workspace.model_gateway.planner import (
 )
 from app.utils.llm_proxy_url_validator import LlmProxyValidationResult
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(720)]
+
 
 def _mock_validate_llm_proxy_url(url, tenant_id, provider, *, resolver=None):
     """Mock validator that allows all URLs for testing."""

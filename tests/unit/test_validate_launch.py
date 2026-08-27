@@ -18,7 +18,9 @@ from pathlib import Path
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[3]
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2018)]
+
+_ROOT = Path(__file__).resolve().parents[2]
 _HELPER = _ROOT / "scripts" / "openace-validate-launch"
 
 
