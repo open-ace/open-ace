@@ -67,17 +67,6 @@ def _test_relative_path(item):
         return None
 
 
-def _legacy_issue_number(item):
-    """Return the issue number encoded by a legacy tests/issues/<number> path."""
-    relative = _test_relative_path(item)
-    if relative is None:
-        return None
-    parts = relative.parts
-    if len(parts) >= 3 and parts[0] == "tests" and parts[1] == "issues" and parts[2].isdigit():
-        return parts[2]
-    return None
-
-
 def _marked_issue_numbers(item):
     numbers = set()
     for marker in item.iter_markers(name="issue"):
@@ -89,7 +78,7 @@ def _marked_issue_numbers(item):
 
 
 def pytest_collection_modifyitems(config, items):
-    """Backfill legacy provenance and support ``pytest --issue=N`` everywhere."""
+    """Support ``pytest --issue=N`` selection on explicit issue markers."""
     selected_issues = set(config.getoption("--issue"))
     invalid = sorted(number for number in selected_issues if not number.isdigit())
     if invalid:
@@ -101,11 +90,6 @@ def pytest_collection_modifyitems(config, items):
         relative = _test_relative_path(item)
         if relative is not None and relative.parts[:2] == ("tests", "performance"):
             item.add_marker(pytest.mark.performance)
-
-        legacy_number = _legacy_issue_number(item)
-        if legacy_number:
-            item.add_marker(pytest.mark.issue(int(legacy_number)))
-            item.add_marker(pytest.mark.regression)
 
         if selected_issues and not (selected_issues & _marked_issue_numbers(item)):
             deselected.append(item)

@@ -21,8 +21,8 @@ Tests the complete quota enforcement system after fixing:
 - Fix 6: Monthly quota checking
 
 Run (against the deployed environment):
-  HEADLESS=true  python tests/issues/172/manual_e2e_quota_enforcement.py
-  HEADLESS=false python tests/issues/172/manual_e2e_quota_enforcement.py
+  HEADLESS=true  python scripts/manual_e2e_quota_enforcement.py
+  HEADLESS=false python scripts/manual_e2e_quota_enforcement.py
 """
 
 import os

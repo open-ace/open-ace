@@ -2674,6 +2674,1707 @@
       "cadence": "nightly",
       "collects": true,
       "notes": "initial disposition (issue #2491 P1 draft)"
+    },
+    {
+      "path": "tests/e2e/browser/test_codex_frontend.py",
+      "mode": "pytest-automated",
+      "owner": "issue-517",
+      "issue": 517,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "migrated from tests/issues/517 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/browser/test_manage_analysis_conversation_pagination.py",
+      "mode": "pytest-automated",
+      "owner": "issue-824",
+      "issue": 824,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "migrated from tests/issues/824 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/browser/test_page_size_loading.py",
+      "mode": "pytest-automated",
+      "owner": "issue-42",
+      "issue": 42,
+      "home_lane": "pr-critical",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 120,
+      "cadence": "pr",
+      "collects": true,
+      "notes": "migrated from tests/issues/42 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/e2e_api_key_toggle.py",
+      "mode": "pytest-automated",
+      "owner": "issue-435",
+      "issue": 435,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/435 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/e2e_audit_analysis_playwright.py",
+      "mode": "pytest-automated",
+      "owner": "issue-198",
+      "issue": 198,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/198 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/e2e_conversation_history.py",
+      "mode": "pytest-automated",
+      "owner": "issue-191",
+      "issue": 191,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/191 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/e2e_conversation_history_default_dates.py",
+      "mode": "pytest-automated",
+      "owner": "issue-1006",
+      "issue": 1006,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/1006 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/e2e_ip_whitelist_input.py",
+      "mode": "pytest-automated",
+      "owner": "issue-863",
+      "issue": 863,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/863 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/e2e_project_sort.py",
+      "mode": "pytest-automated",
+      "owner": "issue-211",
+      "issue": 211,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/211 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/e2e_project_stats_accuracy.py",
+      "mode": "pytest-automated",
+      "owner": "issue-210",
+      "issue": 210,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/210 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/session_detail_test.py",
+      "mode": "manual-demo",
+      "owner": "issue-54",
+      "issue": 54,
+      "home_lane": "nightly",
+      "executor": "none",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "manual demo script: not automated coverage; migrated from tests/issues/54 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/test_add_user_button.py",
+      "mode": "pytest-automated",
+      "owner": "issue-53",
+      "issue": 53,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/53 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/test_add_user_modal_fields.py",
+      "mode": "pytest-automated",
+      "owner": "issue-54",
+      "issue": 54,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/54 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/test_admin_menu.py",
+      "mode": "pytest-automated",
+      "owner": "issue-76",
+      "issue": 76,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/76 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/test_conversation_detail_modal.py",
+      "mode": "pytest-automated",
+      "owner": "issue-79",
+      "issue": 79,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/79 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/test_issue52_management_users.py",
+      "mode": "pytest-automated",
+      "owner": "issue-52",
+      "issue": 52,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/52 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/test_issue79_conversation_detail.py",
+      "mode": "pytest-automated",
+      "owner": "issue-79",
+      "issue": 79,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/79 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/test_menu.py",
+      "mode": "pytest-automated",
+      "owner": "issue-76",
+      "issue": 76,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/76 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/test_normal_user_landing.py",
+      "mode": "pytest-automated",
+      "owner": "issue-51",
+      "issue": 51,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/51 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/test_quota_enforcement.py",
+      "mode": "pytest-automated",
+      "owner": "issue-42",
+      "issue": 42,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/42 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/test_role_filter.py",
+      "mode": "pytest-automated",
+      "owner": "issue-79",
+      "issue": 79,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/79 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/test_session_detail_modal.py",
+      "mode": "pytest-automated",
+      "owner": "issue-54",
+      "issue": 54,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/54 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/manage/test_usage_trend_stats.py",
+      "mode": "pytest-automated",
+      "owner": "issue-51",
+      "issue": 51,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/51 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_codex_real_session.py",
+      "mode": "pytest-automated",
+      "owner": "issue-517",
+      "issue": 517,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "migrated from tests/issues/517 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_codex_remote.py",
+      "mode": "pytest-automated",
+      "owner": "issue-517",
+      "issue": 517,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "migrated from tests/issues/517 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_file_changes_comprehensive.py",
+      "mode": "manual-demo",
+      "owner": "issue-144",
+      "issue": 144,
+      "home_lane": "weekly",
+      "executor": "none",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": false,
+      "notes": "manual demo script: not automated coverage; migrated from tests/issues/144 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/remote/e2e_file_changes_panel.py",
+      "mode": "pytest-automated",
+      "owner": "issue-144",
+      "issue": 144,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "migrated from tests/issues/144 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/remote/test_remote_session_ux.py",
+      "mode": "pytest-automated",
+      "owner": "issue-165",
+      "issue": 165,
+      "home_lane": "weekly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "remote",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "weekly",
+      "collects": true,
+      "notes": "migrated from tests/issues/165 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/terminal/demo_real_chat.py",
+      "mode": "manual-demo",
+      "owner": "issue-394",
+      "issue": 394,
+      "home_lane": "nightly",
+      "executor": "none",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "manual demo script: not automated coverage; migrated from tests/issues/394 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/terminal/demo_terminal.py",
+      "mode": "manual-demo",
+      "owner": "issue-394",
+      "issue": 394,
+      "home_lane": "nightly",
+      "executor": "none",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "manual demo script: not automated coverage; migrated from tests/issues/394 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/terminal/demo_web_terminal.py",
+      "mode": "manual-demo",
+      "owner": "issue-394",
+      "issue": 394,
+      "home_lane": "nightly",
+      "executor": "none",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "manual demo script: not automated coverage; migrated from tests/issues/394 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/terminal/e2e_real_chat.py",
+      "mode": "manual-demo",
+      "owner": "issue-394",
+      "issue": 394,
+      "home_lane": "nightly",
+      "executor": "none",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "manual demo script: not automated coverage; migrated from tests/issues/394 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/terminal/e2e_terminal_tab.py",
+      "mode": "pytest-automated",
+      "owner": "issue-394",
+      "issue": 394,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/394 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/terminal/test_terminal_demo.py",
+      "mode": "pytest-automated",
+      "owner": "issue-394",
+      "issue": 394,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/394 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/check_custom_dropdown.py",
+      "mode": "manual-demo",
+      "owner": "issue-36",
+      "issue": 36,
+      "home_lane": "nightly",
+      "executor": "none",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "manual demo script: not automated coverage; migrated from tests/issues/36 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/check_sender.py",
+      "mode": "manual-demo",
+      "owner": "issue-36",
+      "issue": 36,
+      "home_lane": "nightly",
+      "executor": "none",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "manual demo script: not automated coverage; migrated from tests/issues/36 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_add_prompt.py",
+      "mode": "pytest-automated",
+      "owner": "issue-99",
+      "issue": 99,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/99 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_auto_refresh.py",
+      "mode": "pytest-automated",
+      "owner": "issue-47",
+      "issue": 47,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/47 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_background_permission.py",
+      "mode": "pytest-automated",
+      "owner": "issue-71",
+      "issue": 71,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/71 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_bell_fullscreen.py",
+      "mode": "pytest-automated",
+      "owner": "issue-73",
+      "issue": 73,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/73 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_chat_restore.py",
+      "mode": "pytest-automated",
+      "owner": "issue-70",
+      "issue": 70,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/70 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_conversation_detail.py",
+      "mode": "pytest-automated",
+      "owner": "issue-98",
+      "issue": 98,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/98 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_conversation_history_fullscreen.py",
+      "mode": "pytest-automated",
+      "owner": "issue-25",
+      "issue": 25,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/25 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_conversation_history_fullscreen_exit.py",
+      "mode": "pytest-automated",
+      "owner": "issue-72",
+      "issue": 72,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/72 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_conversation_history_icon.py",
+      "mode": "pytest-automated",
+      "owner": "issue-4",
+      "issue": 4,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/4 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_conversation_history_no_id_column.py",
+      "mode": "pytest-automated",
+      "owner": "issue-29",
+      "issue": 29,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/29 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_conversation_history_page_size.py",
+      "mode": "pytest-automated",
+      "owner": "issue-38",
+      "issue": 38,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/38 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_conversation_history_sort.py",
+      "mode": "pytest-automated",
+      "owner": "issue-34",
+      "issue": 34,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/34 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_conversation_history_ui.py",
+      "mode": "pytest-automated",
+      "owner": "issue-94",
+      "issue": 94,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/94 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_conversation_timeline_display.py",
+      "mode": "pytest-automated",
+      "owner": "issue-32",
+      "issue": 32,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/32 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_cross_tab_message.py",
+      "mode": "pytest-automated",
+      "owner": "issue-71",
+      "issue": 71,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/71 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_data_status.py",
+      "mode": "pytest-automated",
+      "owner": "issue-68",
+      "issue": 68,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/68 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_data_status_local.py",
+      "mode": "pytest-automated",
+      "owner": "issue-73",
+      "issue": 73,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/73 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_data_status_simplified.py",
+      "mode": "pytest-automated",
+      "owner": "issue-74",
+      "issue": 74,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/74 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_data_update.py",
+      "mode": "pytest-automated",
+      "owner": "issue-98",
+      "issue": 98,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/98 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_debug_save_detailed.py",
+      "mode": "pytest-automated",
+      "owner": "issue-55",
+      "issue": 55,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/55 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_debug_save_issue.py",
+      "mode": "pytest-automated",
+      "owner": "issue-55",
+      "issue": 55,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/55 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_global_refresh.py",
+      "mode": "pytest-automated",
+      "owner": "issue-98",
+      "issue": 98,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/98 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_i18n_translations.py",
+      "mode": "pytest-automated",
+      "owner": "issue-90",
+      "issue": 90,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/90 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_keyboard_in_input.py",
+      "mode": "pytest-automated",
+      "owner": "issue-68",
+      "issue": 68,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/68 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_keyboard_shortcut_chat.py",
+      "mode": "pytest-automated",
+      "owner": "issue-68",
+      "issue": 68,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/68 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_language_selector.py",
+      "mode": "pytest-automated",
+      "owner": "issue-75",
+      "issue": 75,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/75 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_language_sync.py",
+      "mode": "pytest-automated",
+      "owner": "issue-60",
+      "issue": 60,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/60 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_login_button.py",
+      "mode": "pytest-automated",
+      "owner": "issue-78",
+      "issue": 78,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/78 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_logout_position.py",
+      "mode": "pytest-automated",
+      "owner": "issue-92",
+      "issue": 92,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/92 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_manage_language_dropdown.py",
+      "mode": "pytest-automated",
+      "owner": "issue-80",
+      "issue": 80,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/80 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_management_button.py",
+      "mode": "pytest-automated",
+      "owner": "issue-91",
+      "issue": 91,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/91 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_messages_fetch_interval.py",
+      "mode": "pytest-automated",
+      "owner": "issue-20",
+      "issue": 20,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/20 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_messages_pagination.py",
+      "mode": "pytest-automated",
+      "owner": "issue-55",
+      "issue": 55,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/55 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_messages_ui.py",
+      "mode": "pytest-automated",
+      "owner": "issue-95",
+      "issue": 95,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/95 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_notification_all_scenarios.py",
+      "mode": "pytest-automated",
+      "owner": "issue-71",
+      "issue": 71,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/71 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_notification_console_log.py",
+      "mode": "pytest-automated",
+      "owner": "issue-71",
+      "issue": 71,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/71 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_notification_timing.py",
+      "mode": "pytest-automated",
+      "owner": "issue-71",
+      "issue": 71,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/71 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_profile_hover.py",
+      "mode": "pytest-automated",
+      "owner": "issue-86",
+      "issue": 86,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/86 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_quota_alerts_dialog_v2.py",
+      "mode": "pytest-automated",
+      "owner": "issue-55",
+      "issue": 55,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/55 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_realtime_cross_tab.py",
+      "mode": "pytest-automated",
+      "owner": "issue-71",
+      "issue": 71,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/71 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_recommendations_ui.py",
+      "mode": "pytest-automated",
+      "owner": "issue-69",
+      "issue": 69,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/69 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_refresh.py",
+      "mode": "pytest-automated",
+      "owner": "issue-98",
+      "issue": 98,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/98 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_refresh_detailed.py",
+      "mode": "pytest-automated",
+      "owner": "issue-98",
+      "issue": 98,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/98 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_report_charts.py",
+      "mode": "pytest-automated",
+      "owner": "issue-91",
+      "issue": 91,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/91 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_restore_button.py",
+      "mode": "pytest-automated",
+      "owner": "issue-74",
+      "issue": 74,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/74 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_sender_simplified_display.py",
+      "mode": "pytest-automated",
+      "owner": "issue-36",
+      "issue": 36,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/36 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_session_detail_ui.py",
+      "mode": "pytest-automated",
+      "owner": "issue-69",
+      "issue": 69,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/69 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_session_list_display.py",
+      "mode": "pytest-automated",
+      "owner": "issue-59",
+      "issue": 59,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/59 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_session_restore.py",
+      "mode": "pytest-automated",
+      "owner": "issue-16",
+      "issue": 16,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/16 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_settings_restore.py",
+      "mode": "manual-demo",
+      "owner": "issue-70",
+      "issue": 70,
+      "home_lane": "nightly",
+      "executor": "none",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "manual demo script: not automated coverage; migrated from tests/issues/70 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_sidebar_collapse.py",
+      "mode": "pytest-automated",
+      "owner": "issue-82",
+      "issue": 82,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/82 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_sidebar_collapse_normal_user.py",
+      "mode": "pytest-automated",
+      "owner": "issue-82",
+      "issue": 82,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/82 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_sidebar_scrollbar.py",
+      "mode": "pytest-automated",
+      "owner": "issue-77",
+      "issue": 77,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/77 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_status_bar_issue67.py",
+      "mode": "pytest-automated",
+      "owner": "issue-67",
+      "issue": 67,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/67 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_status_bar_usage.py",
+      "mode": "pytest-automated",
+      "owner": "issue-48",
+      "issue": 48,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/48 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_status_bar_usage_v2.py",
+      "mode": "pytest-automated",
+      "owner": "issue-48",
+      "issue": 48,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/48 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_tenant_form_validation.py",
+      "mode": "pytest-automated",
+      "owner": "issue-221",
+      "issue": 221,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/221 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_tenant_quota_dialog_v3.py",
+      "mode": "pytest-automated",
+      "owner": "issue-55",
+      "issue": 55,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/55 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_timeline_no_toolresult.py",
+      "mode": "pytest-automated",
+      "owner": "issue-35",
+      "issue": 35,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/35 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_title_restore.py",
+      "mode": "manual-demo",
+      "owner": "issue-70",
+      "issue": 70,
+      "home_lane": "nightly",
+      "executor": "none",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "manual demo script: not automated coverage; migrated from tests/issues/70 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_tool_label_display.py",
+      "mode": "pytest-automated",
+      "owner": "issue-30",
+      "issue": 30,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/30 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_user_scenario.py",
+      "mode": "pytest-automated",
+      "owner": "issue-55",
+      "issue": 55,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/55 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_workspace_keyboard_focus.py",
+      "mode": "pytest-automated",
+      "owner": "issue-83",
+      "issue": 83,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/83 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_workspace_restore_error.py",
+      "mode": "pytest-automated",
+      "owner": "issue-70",
+      "issue": 70,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/70 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_workspace_restore_full.py",
+      "mode": "pytest-automated",
+      "owner": "issue-70",
+      "issue": 70,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/70 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/ui/test_workspace_state_restore.py",
+      "mode": "pytest-automated",
+      "owner": "issue-65",
+      "issue": 65,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/65 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/work/e2e_codex_comprehensive.py",
+      "mode": "pytest-automated",
+      "owner": "issue-517",
+      "issue": 517,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/517 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/work/e2e_codex_integration.py",
+      "mode": "pytest-automated",
+      "owner": "issue-517",
+      "issue": 517,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/517 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/work/helpers.py",
+      "mode": "pytest-automated",
+      "owner": "issue-517",
+      "issue": 517,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "shared Codex E2E helpers: never collects nodeids itself; migrated from tests/issues/517 (#2429 batch 17)"
+    },
+    {
+      "path": "tests/e2e/work/test_project_keyboard_nav.py",
+      "mode": "pytest-automated",
+      "owner": "issue-52",
+      "issue": 52,
+      "home_lane": "nightly",
+      "executor": "pytest",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": true,
+      "notes": "migrated from tests/issues/52 (#2429 batch 17)"
     }
   ],
   "schema_name": "openace-e2e-inventory",

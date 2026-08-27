@@ -11,10 +11,10 @@
 
 - 不创建顶层 `tests/regression/` 或 `tests/security/`。回归与安全都是
   测试属性，不是运行环境。
-- 不把同一个测试复制到 `unit/`、`integration/`、`issues/` 等多个目录。
+- 不把同一个测试复制到 `unit/`、`integration/` 等多个目录。
   副本会产生漂移、重复执行和不同修复状态。
-- `tests/issues/` 是 legacy quarantine，不再接收新目录。现有测试按价值
-  逐步迁移，迁移完成后删除旧文件。
+- `tests/issues/` legacy quarantine 已随 #2429 最终批次整体退役并删除，
+  不得重建；回归测试直接进入规范目录并打 `regression`/`issue` marker。
 - GitHub issue 追踪使用 `@pytest.mark.issue(number)`；缺陷回归同时使用
   `@pytest.mark.regression`。
 
@@ -26,7 +26,6 @@
 | `tests/integration/` | 跨数据库、文件系统、子进程或组件边界；逐步细分 `sqlite/`、`postgres/`、`filesystem/`、`subprocess/` | 每个 PR；PostgreSQL 独立 lane |
 | `tests/e2e/` | 需要运行中的 Open ACE、浏览器或远端服务 | critical 子集按路径/标签；全量定时 |
 | `tests/performance/` | 有时间或资源阈值，可能受 runner 噪声影响 | 独立非阻塞 lane |
-| `tests/issues/` | 尚未分类的历史测试 | PR 只做全量收集；执行为定时/手动 |
 
 路由边界测试和并发测试已分别归入 `tests/integration/routes/` 与
 `tests/integration/concurrency/`。`tests/autonomous/` 和 tests 根目录中的
@@ -57,20 +56,13 @@ pytestmark = [pytest.mark.security, pytest.mark.regression, pytest.mark.issue(24
 
 ```bash
 # 默认 required suite（与 GitHub Actions 共用定义，并隔离 HOME/数据库环境）
-python scripts/ci.py run default-collection issue-collection python-core
+python scripts/ci.py run default-collection python-core
 
 # 按 issue 运行已经迁移到任意规范目录的测试
 pytest --issue=2429
 
-# 按 issue 运行 legacy quarantine 中的测试
-pytest tests/issues --issue=517
-
-# 验证整个 legacy tree 仍可被 pytest 收集
-pytest tests/issues --collect-only -q
-
 # 扩展测试
 python scripts/run_extended_tests.py --category e2e --isolated-home
-python scripts/run_extended_tests.py --category issues --split-total 4 --split-group 1 --isolated-home
 ```
 
 ## CI 保证
@@ -79,15 +71,15 @@ python scripts/run_extended_tests.py --category issues --split-total 4 --split-g
 
 1. 默认 suite 在生产 Python 3.11 上执行 unit、integration 等可确定测试；
    `security` marker 包含在同一 required suite 中。
-2. Python 3.11 的 required job 对 `tests/issues/` 做全量 pytest collection，
-   收集错误或 item 数低于 `.test-baseline.json` 立即失败。
-   历史上已进入 PR 门禁的 10 个 issue 目录已全部迁入 canonical 层
-   （#2429 批次 1：2390/2401/2403/2428/2438/2439/2442/2443；批次 2：
-   2335/2431），`legacy-pr` required suite 与
-   `tests/issues/pr-gate-directories.txt` 已随之退役，这些回归由
-   `python-core`/`python-min` required lane 按目录自动执行。
+2. Python 3.11 的 required job 对 `tests/` 做 pytest collection，收集错误或
+   item 数低于 `.test-baseline.json` 立即失败。历史上已进入 PR 门禁的
+   issue 目录早已全部迁入 canonical 层（#2429 批次 1/2），随后的
+   `legacy-pr` required suite、`tests/issues/pr-gate-directories.txt`、
+   issue-collection 收集门禁与 `tests/issues/` quarantine 树已随 #2429
+   最终批次整体退役；这些回归由 `python-core`/`python-min` required lane
+   按目录自动执行。
 3. critical E2E 按变更路径或标签执行，稳定前不作为 required check；完整 E2E
-   和 legacy issue shards 每夜执行。
+   每夜执行。
 4. PostgreSQL 和 performance 使用独立 lane，避免把环境需求隐藏成 skip。
 5. `tests/unit/test_test_layout_policy.py` 禁止新增编号目录、顶层功能域目录、
    tests 根目录测试文件，以及 `tests/regression/`、`tests/security/`。
@@ -110,7 +102,7 @@ GitHub Actions 都通过 `python scripts/ci.py` 执行。PR 矩阵按版本分�
 
 `python-min` 与 `python-core` 都对每个代码改动生效，故 `app/**` 改动必在最低支持
 版本真跑全量单元。Python 3.13 仍是声明支持版本但不在 PR 矩阵中。定时工作流在
-3.10、3.11、3.14 上执行完整 Python suite，并承担 E2E、legacy shards 和易受 runner
+3.10、3.11、3.14 上执行完整 Python suite，并承担 E2E 和易受 runner
 噪声影响的检查。`tests/unit/test_ci_runner.py::test_min_supported_python_runs_the_full_unit_suite`
 把「最低支持版本必须跑全量 tests/unit」锁进门禁。合并后对 main 的验证由既有
 `push: [main]`（`ci.yml` 与 `schema-sync.yml`）承担，本改动使其对最低版本真正
@@ -129,90 +121,44 @@ CI 所需的测试、检查、构建及审计工具统一保留在
 `dev` extra 必须与该输入保持一致，策略测试会自动检查两者及生产依赖边界。
 修改任一输入后必须按 `CONTRIBUTING.md` 的命令重新生成并提交 lock。
 
-收集成功只证明测试“存在且能导入”，不证明断言是绿的。Legacy suite 的定时
-结果用于迁移盘点；只有迁移到 required lane 的测试才能作为合并门禁。
+收集成功只证明测试“存在且能导入”，不证明断言是绿的。只有 required lane
+中的测试才能作为合并门禁。
 
-## Legacy issue 测试迁移
+## Legacy issue 测试迁移（已完成并退役）
 
-按以下顺序迁移，而不是一次性移动 441 个文件：
-
-1. 先迁移当前在 `.github/workflows/ci.yml` 中手工 opt-in 的 issue suites；
-   它们已经被认为值得阻止合并。
-2. 再迁移无网络、无真实数据库、无 sleep 的 unit-like 测试。
-3. 将数据库/文件系统/子进程测试迁入 integration，并补齐隔离 fixture。
-4. 将 Playwright、HTTP、WebSocket、远端主机测试迁入 E2E 的对应子目录。
-5. 性能测试进入 performance；只打印结果、没有有效断言、依赖个人数据或已经
-   被更强测试覆盖的脚本应修复、改为手动工具或删除。
-
-每个被提升的测试都必须满足：
+#2429 分批把 `tests/issues/` 迁入规范目录（unit-like → integration →
+e2e/performance），最终批次（17）迁出剩余 e2e 并删除整棵 quarantine 树、
+`legacy-directories.txt` 盘点、issue-collection 收集门禁、issue-tests
+nightly shards、`ci/legacy-issue-{quarantine,failures}.json` 与
+`scripts/legacy_issue_baseline.py` comparator。每个被提升的测试都满足：
 
 - 能在干净 checkout 中独立执行；
 - 修复前失败、修复后通过，断言验证行为而不是源码字符串；
 - 不写开发者 HOME、生产数据库或固定远端资源；
-- 在所属 CI lane 中被自动发现，不需要为每个 issue 修改 workflow YAML；
-- 移走后删除 legacy 原件，并从 inventory 中移除对应空目录。
+- 在所属 CI lane 中被自动发现，不需要为每个 issue 修改 workflow YAML。
 
 ## Baseline
 
 `.test-baseline.json` 分别记录 item 和文件数量。默认 CI 用真实 pytest
-collection 检查 legacy item 数；extended runner 的分片只能按文件分配，因此
-按 `split_total` 等比例检查文件 baseline。针对单个 issue 的本地运行不与
-全量 baseline 比较。
+collection 检查 item 数；extended runner 的分片只能按文件分配，因此
+按 `split_total` 等比例检查文件 baseline。
 
 Baseline 是防止测试静默消失的下限，不是覆盖率指标。降低 baseline 必须在 PR
 中说明迁移、删除或合并测试的原因；新增测试后应定期向上收紧。
 
-更新流程：先分别运行 `python scripts/ci.py run default-collection` 和
-`python scripts/ci.py run issue-collection` 记录实际 item/file 数；然后更新
-`.test-baseline.json` 的 `actual_*`。只有有意删除、合并或迁移测试时才降低
-`min_*`，并在 PR 中解释原因；新增测试只更新 `actual_*`，定期将 `min_*`
-向实际值收紧。最后重跑两个 collection suite。`ci/suites.json` 的
-`baseline_runbook` 字段固定指向本节，确保从 suite 清单可以发现本流程。
-
-### Legacy 失败基线（`ci/legacy-issue-failures.json`）
-
-这是与上面**完全不同**的另一类 baseline：它记录 `tests/issues/` 当前已审查的
-历史失败（assertion/error），不是 item/file 数量下限。两者必须同时生效，互不
-替代。详见 `docs/issue-2457-agent-handoff.md`。
-
-- 身份键 = `(nodeid, outcome, category)`。`nodeid` 由 `tests/issues/conftest.py`
-  的 `record_property("openace_nodeid", ...)` 注入（xunit2 不带 `file` 属性，故
-  必须由 conftest 提供权威 nodeid）。因此**生成 baseline 的 reference run 必须
-  在包含该 conftest 的提交上触发**。
-- `compare`（只读）是权威 gate：仅有 `known` 且完整 → exit 0（summary 仍列债务）；
-  出现 `new`/`changed`/`resolved`/任何 `collection_error`/`invalid` → 非零退出。
-  `collection_error` 永不进 baseline（collection gate 必须保持为零）；`resolved`
-  强制从 baseline 删除该 entry（包括 rerun 后转绿的失败），保证 baseline 持续收缩。
-- `snapshot`（显式 `--output`）生成候选 baseline 供人工 review，**拒绝**包含
-  `collection_error`。
-
-更新流程（只能由 PR 显式更新，CI 不得自动写回）：
-
-1. 在包含 `tests/issues/conftest.py` 的分支上触发
-   `workflow_dispatch category=issues`，等全部 4 shard 完成。
-2. 下载 `issue-tests-*` artifact，运行：
-
-   ```bash
-   python scripts/legacy_issue_baseline.py snapshot \
-     --junit '<下载的 test-results/issues-*.xml>' \
-     --source-run <run-id> --reference-commit <sha> \
-     --run-contract 'extended-tests issue-tests, --isolated-home --reruns 1 --timeout 240, 4 shards' \
-     --output ci/legacy-issue-failures.json
-   ```
-
-3. 在 PR 中说明全部新增 entries 来自哪次 reference run、按 outcome/category/issue
-   的分布，以及异常大户。降低/删除 entry 时同样在 PR 中逐条说明。
-4. 重跑一次 `category=issues`：仅已知失败时 `compare` exit 0。
-
-`run_extended_tests.py` 的 `require_review_threshold`（10%）同时是 comparator 的
-文件数地板来源，避免两套门禁口径不一致。Targeted（`--issue-numbers`）运行只在
-summary 标为 targeted，不冒充完整 nightly gate。
+更新流程：先运行 `python scripts/ci.py run default-collection` 记录实际
+item/file 数；然后更新 `.test-baseline.json` 的 `actual_*`。只有有意删除、
+合并或迁移测试时才降低 `min_*`，并在 PR 中解释原因；新增测试只更新
+`actual_*`，定期将 `min_*` 向实际值收紧。最后重跑 collection suite。
+`ci/suites.json` 的 `baseline_runbook` 字段固定指向本节，确保从 suite 清单
+可以发现本流程。
 
 ## E2E 治理基线（Issue #2491）
 
 `tests/e2e/` 的文件级 disposition、nodeid 级 debt/promotion 状态与互斥 lane
-selection 由 `scripts/e2e/` 的纯 stdlib 工具族治理（与 #2457 的
-`legacy_issue_baseline` 同一“本地与 CI 同一实现”模式），治理数据在 `ci/e2e-*.json`：
+selection 由 `scripts/e2e/` 的纯 stdlib 工具族治理（沿用 #2457 failure
+baseline 已退役的 `legacy_issue_baseline` 同款“本地与 CI 同一实现”模式），
+治理数据在 `ci/e2e-*.json`：
 
 - **inventory**（`ci/e2e-inventory.json`）：受管 root 下每个 `.py`（磁盘枚举为准，
   含 helper/演示脚本）必须有唯一 disposition（`pytest-automated |

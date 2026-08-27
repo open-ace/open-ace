@@ -56,10 +56,9 @@ pushes the fixes back and re-triggers CI — but going through
 - Choose one canonical location by runtime contract: `tests/unit/`,
   `tests/integration/`, `tests/e2e/`, or
   `tests/performance/`.
-- Do not create new `tests/issues/<number>/` directories. That tree is a legacy
-  quarantine excluded from default execution while Issue #2429 migration is in
-  progress. CI requires it to remain fully collectable, but collection is not
-  equivalent to execution.
+- The `tests/issues/<number>/` legacy quarantine was retired (deleted) by the
+  #2429 final exodus; do not recreate it. Put regressions in their canonical
+  layer with `pytest.mark.regression` and `pytest.mark.issue(<number>)`.
 - Do not create a top-level `tests/regression/` or copy a test across multiple
   directories. Mark bug tests once with `pytest.mark.regression` and
   `pytest.mark.issue(<number>)` in their canonical layer.

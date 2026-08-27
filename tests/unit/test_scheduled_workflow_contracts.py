@@ -25,15 +25,6 @@ def test_weekly_runs_on_saturday_at_0318_singapore_time():
     ]
 
 
-def test_quarantine_probe_runs_weekly_on_saturday_at_0318_singapore_time():
-    # The weekly subprocess probe of ci/legacy-issue-quarantine.json nodeids must
-    # match the agreed cadence (Sat 03:18 SGT) so a recovered/behavior-changed
-    # quarantine entry is caught and cannot drift silently.
-    assert _schedules("quarantine-probe.yml") == [
-        {"cron": "18 3 * * 6", "timezone": "Asia/Singapore"}
-    ]
-
-
 def test_ci_health_metrics_runs_daily_at_0618_singapore_time():
     assert _schedules("ci-health-metrics.yml") == [
         {"cron": "18 6 * * *", "timezone": "Asia/Singapore"}

@@ -9,7 +9,8 @@ Open ACE 测试按运行环境存放，每个测试只有一个 canonical locati
 - `integration/`：数据库、文件系统、子进程或跨组件测试。
 - `e2e/`：运行中服务器、浏览器、WebSocket 或远端服务。
 - `performance/`：时间或资源阈值测试。
-- `issues/`：Issue #2429 之前遗留的 quarantine，只迁出、不新增。
+
+`tests/issues/` legacy quarantine 已随 #2429 最终批次整体退役并删除。
 
 `security`、`regression` 和 GitHub issue 编号是测试元数据，不是目录：
 
@@ -26,7 +27,7 @@ CI 会自动消费；issue marker 保留追踪关系。
 
 ```bash
 # 与 GitHub Actions 相同的默认 PR suite
-python scripts/ci.py run default-collection issue-collection python-core
+python scripts/ci.py run default-collection python-core
 
 # 检查本地是否使用 CI 的 Python 3.11 / Node 20
 python scripts/ci.py doctor --strict
@@ -42,14 +43,9 @@ pytest tests/integration -m postgres
 # 根据 issue provenance 选择已迁移测试
 pytest --issue=2429
 
-# Legacy issue tests
-pytest tests/issues --issue=517
-pytest tests/issues --collect-only -q
-
 # Extended suites
 python scripts/run_extended_tests.py --category critical --isolated-home
 python scripts/run_extended_tests.py --category e2e --isolated-home
-python scripts/run_extended_tests.py --category issues --split-total 4 --split-group 1 --isolated-home
 ```
 
 ## 新测试的完成标准

@@ -1,0 +1,102 @@
+"""
+Test script for issue #74: Data Status panel simplified display.
+
+Issue: Data Status panel shows unnecessary header row.
+
+Fix: Remove header row with 'Data Status' text and refresh button.
+"""
+
+import os
+import sys
+import time
+from datetime import datetime
+
+import pytest
+
+# Get project root directory
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
+sys.path.insert(0, PROJECT_ROOT)
+
+import requests
+from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import async_playwright, expect
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(74)]
+
+
+# Configuration
+BASE_URL = "http://localhost:19888"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "74")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
+
+async def take_screenshot(page, name):
+    """Take a screenshot and return the path."""
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+    path = os.path.join(SCREENSHOT_DIR, name)
+    await page.screenshot(path=path)
+    return path
+
+
+def _skip_if_no_server():
+    try:
+        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+    except (requests.exceptions.RequestException, ConnectionError, OSError):
+        pytest.skip(f"test server not reachable at {BASE_URL}")
+
+
+@pytest.mark.asyncio
+async def test_data_status_simplified():
+    """Test #74: Data Status panel is simplified (no header)."""
+    _skip_if_no_server()
+    print("\n" + "=" * 50)
+    print("Test #74: Data Status panel simplified display")
+    print("=" * 50)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=HEADLESS)
+        context = await browser.new_context()
+        page = await context.new_page()
+
+        try:
+            # Login first
+            await page.goto(f"{BASE_URL}/login")
+            await page.wait_for_load_state("networkidle")
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
+            await page.click("#login-btn")
+            await page.wait_for_url(f"{BASE_URL}/", timeout=10000)
+            await page.wait_for_load_state("networkidle")
+
+            # Wait for data status to load
+            await page.wait_for_selector("#data-status-container", timeout=10000)
+            time.sleep(1)
+
+            # Take screenshot
+            screenshot_path = await take_screenshot(page, "01_data_status.png")
+            print(f"  Screenshot: {screenshot_path}")
+
+            # Check data status header is NOT present (simplified)
+            header = await page.locator("#data-status-container .data-status-header")
+            header_count = header.count()
+            assert header_count == 0, f"Data status header should not exist, found {header_count}"
+            print("  ✓ Data status header removed (simplified)")
+
+            # Check data status list exists
+            status_list = await page.locator("#data-status-container .data-status-list")
+            expect(status_list).to_be_visible()
+            print("  ✓ Data status list is visible")
+
+            print("  ✓ Test #74 PASSED")
+            return True
+
+        except PlaywrightError as e:
+            print(f"  ✗ Test #74 FAILED: {e}")
+            await take_screenshot(page, "error_74.png")
+            return False
+        finally:
+            await browser.close()

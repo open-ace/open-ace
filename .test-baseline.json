@@ -7,9 +7,9 @@
       "min_tests": 8112,
       "min_files": 250,
       "last_updated": "2026-08-27",
-      "update_reason": "Issue #2429 batch 16: in-process closure migrated 137 items (98 unit, 34 routes, 5 integration); min raised by exactly +137 (7975+137); actuals re-measured on branch (base drifted +29 via parallel PRs since batch 15's record)",
-      "actual_collected": 11779,
-      "actual_files": 784,
+      "update_reason": "Issue #2429 FINAL batch 17: e2e exodus + machinery retirement. 165 items migrated from tests/issues to tests/e2e/* (nightly e2e lane, governance-inventoried, manifest 292->457 nodeids) + 1 TS spec to frontend/e2e; 4 audited deletions; tests/issues tree deleted; issue-collection suite/layer/gate/conftest-backfill/quarantine-probe/baseline-comparator retired. default actuals 11718/783 = 11779 - 61 (test_legacy_issue_baseline.py's classify params, retired with its subject script); min unchanged (8112)",
+      "actual_collected": 11718,
+      "actual_files": 783,
       "threshold_percent": 96
     },
     "critical": {
@@ -28,15 +28,6 @@
       "last_updated": "2026-08-04",
       "update_reason": "E2E pytest compatible tests baseline",
       "note": "Currently excluded by norecursedirs"
-    },
-    "issues": {
-      "min_tests": 169,
-      "min_files": 93,
-      "last_updated": "2026-08-27",
-      "update_reason": "Issue #2429 batch 16: in-process closure \u2014 143 items drained (137 migrated + 6 audited 517 cross-file dedupe subsumptions with per-def ledger), 12 glob files: dirs 740 (88; 24 ambient-PG route bootstraps repaired to canonical tmp-sqlite fixtures) and 993 (10 + script) fully drained; 517 in-process half (27 incl. dedupe), 42 webui_manager (9; stale port assertions realigned to post-#3129 3100 pin), 52 (4 bool-returns -> asserts), 94 (5 zero-assert data-audit scripts -> seeded sqlite + real coverage asserts) partially drained; 6 no-assert __main__ scripts deleted (32x2, 69x1, 51x3); 3 playwright scripts rehomed to tests/e2e + governance rows; min_tests delta would be 99-143 < 0 -> CLAMPED to mirror remaining clean count 169 (protective for the final pre-retirement window); min_files 110-17=93 exact (12 migrated globs + 5 deleted no-assert script globs)",
-      "actual_collected": 169,
-      "actual_files": 108,
-      "threshold_percent": 97
     }
   },
   "tolerance": {
@@ -46,8 +37,7 @@
   "notes": [
     "Baseline created before pytest.ini modification to enable e2e_*.py collection",
     "tests/e2e currently excluded by norecursedirs in pytest.ini",
-    "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard",
-    "Default count from: python scripts/ci.py run default-collection (11779 items after #2429 batch 16)",
-    "Issue count from: clean-checkout issue-collection (169 items, 108 files after #2429 batch 16)"
+    "Default count from: python scripts/ci.py run default-collection (11718 items after #2429 batch 17 \u2014 final; tests/issues retired)",
+    "Issue #2429 complete: the tests/issues quarantine (430 dirs at peak) is fully drained and its machinery retired; e2e coverage lives in tests/e2e under governance"
   ]
 }

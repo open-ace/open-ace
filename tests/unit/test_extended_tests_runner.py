@@ -1,13 +1,11 @@
 """Tests for scripts/run_extended_tests.py (Issue #1469).
 
-Migrated from tests/issues/1469/test_extended_tests_runner.py. R-A repair
-(batch 14): the legacy version hardcoded issue numbers that the #2429 drain
-removes batch-by-batch — it had been silently red since batch 11 drained
-559 (select_targets skip-warns missing dirs, so the equality assert failed),
-and its self-referential ``--issue 1469`` would break the moment this very
-directory was drained. Issue selections are now derived at runtime from
-tests/issues/legacy-directories.txt filtered by directory existence, and
-the skip-warning for a drained number is asserted explicitly.
+Migrated from tests/issues/1469/test_extended_tests_runner.py. Batch 14 made
+the issue selections drain-proof by deriving them from
+tests/issues/legacy-directories.txt; the #2429 FINAL batch (17) retires the
+whole lane instead: the ``issues`` category, the ``--issue``/``--issue-numbers``
+selection, and the ci/legacy-issue-quarantine.json deselect machinery are
+gone, and these tests now pin that retired contract.
 """
 
 import subprocess
@@ -18,35 +16,6 @@ import pytest
 from scripts import run_extended_tests
 
 pytestmark = [pytest.mark.regression, pytest.mark.issue(1469)]
-
-
-def _listed_issue_numbers() -> list[str]:
-    """Issue numbers still listed in tests/issues/legacy-directories.txt."""
-    manifest = (
-        run_extended_tests.PROJECT_ROOT / "tests" / "issues" / "legacy-directories.txt"
-    ).read_text(encoding="utf-8")
-    return sorted(
-        (line.strip() for line in manifest.splitlines() if line.strip().isdigit()),
-        key=int,
-    )
-
-
-def _present_legacy_numbers() -> list[str]:
-    """Listed legacy numbers whose tests/issues/<number> directory still exists.
-
-    The #2429 roadmap drains these directories batch-by-batch, so any
-    hardcoded number goes stale the moment its batch lands; deriving the
-    selection from the filesystem keeps these assertions pinned to the
-    runner's behavior instead of the drain's progress.
-    """
-    issues_root = run_extended_tests.PROJECT_ROOT / "tests" / "issues"
-    return [number for number in _listed_issue_numbers() if (issues_root / number).is_dir()]
-
-
-# Drained by batch 11 (#2429) — permanently absent from both the filesystem
-# and legacy-directories.txt, which is exactly what makes it a stable probe
-# for the skip-missing-targets path.
-DRAINED_ISSUE_NUMBER = "559"
 
 
 def test_critical_category_selects_pr_gate_targets():
@@ -60,52 +29,40 @@ def test_critical_category_selects_pr_gate_targets():
     assert "tests/e2e/browser/test_navigation.py" in cmd
     assert "-m" in cmd
     assert "not postgres" in cmd
+    # The legacy quarantine deselect machinery is retired with the lane.
+    assert "--deselect" not in cmd
 
 
-def test_issue_numbers_select_specific_issue_directories(capsys):
-    present = _present_legacy_numbers()
-    assert len(present) >= 2, "expected at least two still-present legacy issue directories"
-    first, second = present[0], present[1]
+def test_issues_category_is_retired():
+    """#2429 final exodus: no category or flag may select tests/issues anymore."""
+    with pytest.raises(SystemExit):
+        run_extended_tests.parse_args(["--category", "issues", "--dry-run"])
+    with pytest.raises(SystemExit):
+        run_extended_tests.parse_args(["--category", "critical", "--issue", "517"])
+    with pytest.raises(SystemExit):
+        run_extended_tests.parse_args(["--category", "critical", "--issue-numbers", "517"])
 
-    drained_root = run_extended_tests.PROJECT_ROOT / "tests" / "issues" / DRAINED_ISSUE_NUMBER
-    assert not drained_root.exists(), f"{DRAINED_ISSUE_NUMBER} was expected to stay drained"
 
+def test_all_category_selects_only_the_e2e_tree():
+    args = run_extended_tests.parse_args(["--category", "all", "--dry-run"])
+
+    cmd = run_extended_tests.build_pytest_command(args)
+
+    targets = [part for part in cmd if part.startswith("tests/")]
+    assert targets, "the all category must still select a real test tree"
+    assert all(target.startswith("tests/e2e/") for target in targets)
+    assert not any(target.startswith("tests/issues") for target in targets)
+
+
+def test_select_targets_skip_warns_missing_targets(capsys):
     args = run_extended_tests.parse_args(
-        [
-            "--category",
-            "issues",
-            "--issue",
-            first,
-            "--issue-numbers",
-            f"{second},{DRAINED_ISSUE_NUMBER}",
-            "--dry-run",
-        ]
+        ["--category", "specific", "--target", "tests/e2e/no_such_dir", "--dry-run"]
     )
 
-    # The drained number is filtered out, not silently kept, and the
-    # selection order follows the --issue / --issue-numbers input order.
-    assert run_extended_tests.select_targets(args) == [
-        f"tests/issues/{first}",
-        f"tests/issues/{second}",
-    ]
-    # R-A strengthening: a drained number is skip-warned on stdout.
-    assert (
-        f"Skipping missing targets: tests/issues/{DRAINED_ISSUE_NUMBER}" in capsys.readouterr().out
-    )
+    with pytest.raises(FileNotFoundError, match="No selected test targets exist"):
+        run_extended_tests.select_targets(args)
 
-
-def test_targeted_issue_run_does_not_use_full_suite_baseline(monkeypatch):
-    issue = _present_legacy_numbers()[0]
-    args = run_extended_tests.parse_args(["--category", "issues", "--issue", issue, "--dry-run"])
-    monkeypatch.setattr(
-        run_extended_tests,
-        "check_baseline",
-        lambda *args, **kwargs: pytest.fail("full-suite baseline must not be checked"),
-    )
-
-    command = run_extended_tests.build_pytest_command(args)
-
-    assert any(path.startswith(f"tests/issues/{issue}/") for path in command)
+    assert "Skipping missing targets: tests/e2e/no_such_dir" in capsys.readouterr().out
 
 
 def test_sharded_baseline_is_scaled(monkeypatch):
@@ -113,13 +70,13 @@ def test_sharded_baseline_is_scaled(monkeypatch):
         run_extended_tests,
         "load_baseline",
         lambda: {
-            "layers": {"issues": {"min_files": 400}},
+            "layers": {"e2e_pytest": {"min_files": 400}},
             "tolerance": {"require_review_threshold": 10},
         },
     )
 
-    assert run_extended_tests.check_baseline("issues", file_count=100, split_total=4)
-    assert not run_extended_tests.check_baseline("issues", file_count=89, split_total=4)
+    assert run_extended_tests.check_baseline("e2e", file_count=100, split_total=4)
+    assert not run_extended_tests.check_baseline("e2e", file_count=89, split_total=4)
 
 
 def test_specific_category_requires_target():
@@ -135,13 +92,6 @@ def test_split_uses_deterministic_file_shards():
     assert files
     assert files == sorted(files)
     assert all(file.startswith("tests/e2e/browser/") for file in files)
-
-
-def test_invalid_issue_number_is_rejected():
-    args = run_extended_tests.parse_args(["--category", "issues", "--issue", "../716"])
-
-    with pytest.raises(ValueError, match="Invalid issue number"):
-        run_extended_tests.select_targets(args)
 
 
 def test_ensure_sqlite_schema_creates_isolated_test_database(tmp_path):
@@ -207,26 +157,6 @@ def test_frontend_build_check_fails_fast_when_dist_is_missing(tmp_path, monkeypa
 
     with pytest.raises(RuntimeError, match="Frontend build is missing"):
         run_extended_tests.ensure_frontend_built(True)
-
-
-def _write_q(tmp_path, obj):
-    p = tmp_path / "q.json"
-    import json
-
-    p.write_text(json.dumps(obj))
-    return p
-
-
-def test_quarantine_loader_missing_file_fails_closed(tmp_path):
-    with pytest.raises(SystemExit):
-        run_extended_tests._quarantine_nodeids(path=tmp_path / "missing.json")
-
-
-def test_quarantine_loader_corrupt_fails_closed(tmp_path):
-    p = tmp_path / "q.json"
-    p.write_text("{not json")
-    with pytest.raises(SystemExit):
-        run_extended_tests._quarantine_nodeids(path=p)
 
 
 def test_e2e_attempts_enable_attempt_plugin():
@@ -697,31 +627,3 @@ def test_dry_run_envelope_reports_success(tmp_path):
     payload = __import__("json").loads(envelope.read_text(encoding="utf-8"))
     assert payload["return_code"] == 0
     assert payload["job_conclusion"] == "success"
-
-
-def test_quarantine_loader_bad_schema_fails_closed(tmp_path):
-    p = _write_q(tmp_path, {"version": 1, "schema": "wrong", "entries": []})
-    with pytest.raises(SystemExit):
-        run_extended_tests._quarantine_nodeids(path=p)
-
-
-def test_quarantine_loader_expired_entry_fails_closed(tmp_path):
-    p = _write_q(
-        tmp_path,
-        {
-            "version": 1,
-            "schema": "openace-legacy-issue-quarantine",
-            "entries": [
-                {
-                    "nodeid": "tests/issues/604/t.py::a",
-                    "reason": "r",
-                    "owner": "o",
-                    "tracking_issue": "t",
-                    "exit_condition": "e",
-                    "expires_on": "2020-01-01",
-                }
-            ],
-        },
-    )
-    with pytest.raises(SystemExit):
-        run_extended_tests._quarantine_nodeids(path=p)

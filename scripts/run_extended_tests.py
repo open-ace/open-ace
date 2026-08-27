@@ -2,9 +2,9 @@
 """
 Run the server-dependent Open ACE test suites from CI or a local checkout.
 
-The default CI suite intentionally excludes tests/e2e and tests/issues because
-they need a live web server and can be slow. This runner is the shared entry
-point for scheduled, release, PR critical, and manual extended-test runs.
+The default CI suite intentionally excludes tests/e2e because those tests need
+a live web server and can be slow. This runner is the shared entry point for
+scheduled, release, PR critical, and manual extended-test runs.
 """
 
 from __future__ import annotations
@@ -36,7 +36,6 @@ SERVER_CATEGORIES = {
     "all",
     "critical",
     "e2e",
-    "issues",
     "regression",
     "ui",
     "remote",
@@ -60,8 +59,7 @@ CATEGORY_TARGETS = {
     "work": ["tests/e2e/work"],
     "performance": ["tests/e2e/performance"],
     "e2e": ["tests/e2e"],
-    "issues": ["tests/issues"],
-    "all": ["tests/e2e", "tests/issues"],
+    "all": ["tests/e2e"],
 }
 
 
@@ -86,18 +84,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="append",
         default=[],
         help="Specific pytest target. Required for --category specific.",
-    )
-    parser.add_argument(
-        "--issue",
-        dest="issues",
-        action="append",
-        default=[],
-        help="Issue number under tests/issues to run. Can be repeated.",
-    )
-    parser.add_argument(
-        "--issue-numbers",
-        default="",
-        help="Comma-separated issue numbers under tests/issues.",
     )
     parser.add_argument("--split-total", type=int, default=1, help="Total number of shards.")
     parser.add_argument("--split-group", type=int, default=1, help="1-based shard index to run.")
@@ -185,21 +171,6 @@ def execution_needs_server(args: argparse.Namespace, targets: list[str]) -> bool
     return any(bool(value) for value in resolved)
 
 
-def parse_issue_numbers(args: argparse.Namespace) -> list[str]:
-    numbers: list[str] = []
-    numbers.extend(args.issues)
-    if args.issue_numbers:
-        numbers.extend(part.strip() for part in args.issue_numbers.split(","))
-    clean = []
-    for number in numbers:
-        if not number:
-            continue
-        if not number.isdigit():
-            raise ValueError(f"Invalid issue number: {number!r}")
-        clean.append(number)
-    return clean
-
-
 def target_path(target: str) -> str:
     return target.split("::", 1)[0]
 
@@ -213,11 +184,6 @@ def select_targets(args: argparse.Namespace) -> list[str]:
         if not args.target:
             raise ValueError("--category specific requires at least one --target")
         targets = args.target
-    elif args.category == "issues":
-        issue_numbers = parse_issue_numbers(args)
-        targets = [f"tests/issues/{number}" for number in issue_numbers] or CATEGORY_TARGETS[
-            "issues"
-        ]
     else:
         targets = CATEGORY_TARGETS[args.category]
 
@@ -335,7 +301,6 @@ def check_baseline(category: str, file_count: int, split_total: int = 1) -> bool
         "default": "default",
         "critical": "critical",
         "e2e": "e2e_pytest",
-        "issues": "issues",
     }
 
     layer_name = layer_map.get(category)
@@ -376,78 +341,24 @@ def print_collection_manifest(files: list[str]) -> None:
     print("=" * 40 + "\n")
 
 
-def _quarantine_nodeids(path=None) -> list[str]:
-    """Read quarantined nodeids from ci/legacy-issue-quarantine.json.
-
-    Fail-closed: a missing, corrupt, wrong-schema/version, or expired entry must
-    NOT silently fall back to "no quarantine" — that would re-run a known-
-    deadlocking nodeid and hang the shard for the full job timeout. Any error
-    raises SystemExit and aborts the run. Expiry is checked so a stale quarantine
-    cannot silently keep deselecting; full nodeid-collectability is enforced by
-    the comparator (same shared loader).
-    """
-    import datetime
-    import importlib.util
-
-    if path is None:
-        path = PROJECT_ROOT / "ci" / "legacy-issue-quarantine.json"
-    path = Path(path)
-    if not path.exists():
-        raise SystemExit(
-            "ci/legacy-issue-quarantine.json is missing; refusing to run the "
-            "issue shard without the tracked exclusions (would deadlock)."
-        )
-    try:
-        # Reuse the comparator's strict loader (schema + version + entry types).
-        spec = importlib.util.spec_from_file_location(
-            "_lib_baseline", str(PROJECT_ROOT / "scripts" / "legacy_issue_baseline.py")
-        )
-        assert spec and spec.loader
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules["_lib_baseline"] = mod  # register before exec (dataclasses PEP 563)
-        spec.loader.exec_module(mod)
-        entries = mod.load_quarantine(path)
-        today = datetime.date.today().isoformat()
-        invalid = mod.validate_quarantine(entries, (), today)
-        if invalid:
-            raise SystemExit("invalid ci/legacy-issue-quarantine.json:\n  " + "\n  ".join(invalid))
-    except SystemExit:
-        raise
-    except Exception as exc:  # corrupt JSON, wrong schema, parse error, ...
-        raise SystemExit(f"cannot load ci/legacy-issue-quarantine.json: {exc}") from exc
-    return [e.nodeid for e in entries]
-
-
 def build_pytest_command(args: argparse.Namespace) -> list[str]:
     targets = resolved_targets(args)
     pytest_only = pytest_targets(targets)
 
     # Issue #2189: Print the file manifest. Item collection is separately gated
-    # by pytest itself; a targeted issue run must not be compared with the full
-    # legacy-suite baseline.
+    # by pytest itself.
     print_collection_manifest(targets)
     if not pytest_only:
         return []
-    targeted_issue_run = args.category == "issues" and bool(parse_issue_numbers(args))
     file_count = len(discover_test_files(pytest_only)) if args.selection_json else len(pytest_only)
-    if not targeted_issue_run and not check_baseline(
-        args.category, file_count, split_total=args.split_total
-    ):
+    if not check_baseline(args.category, file_count, split_total=args.split_total):
         raise ValueError(f"Test file count below baseline threshold for category: {args.category}")
 
     cmd = [sys.executable, "-m", "pytest", *pytest_only, "-m", "not postgres"]
     # Continue past per-file collection errors so every collectable nodeid gets a
     # terminal result; otherwise one bad file aborts the shard and leaves the
-    # rest result-less, which the #2457 failure-baseline completeness gate would
-    # (correctly) reject. Collection errors are still surfaced in the JUnit and
-    # hard-failed by the comparator (never baselined).
+    # rest result-less. Collection errors are still surfaced in the JUnit.
     cmd.append("--continue-on-collection-errors")
-    # Deselect nodeids tracked in ci/legacy-issue-quarantine.json (e.g. a test
-    # that deadlocks the shard). The same list is read by the comparator, which
-    # excludes them from the expected-executed set and reports them as debt, so
-    # the deselect + the manifest stay consistent (local == CI).
-    for nodeid in _quarantine_nodeids():
-        cmd.extend(["--deselect", nodeid])
     if args.parallel > 0:
         cmd.extend(["-n", str(args.parallel)])
     if args.reruns > 0:

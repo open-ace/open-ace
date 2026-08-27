@@ -11,14 +11,6 @@ LEGACY_TOP_LEVEL_FILES = TESTS_ROOT / "legacy-top-level-files.txt"
 CANONICAL_DIRECTORIES = {"e2e", "integration", "issues", "performance", "support", "unit"}
 
 
-def _legacy_inventory():
-    return {
-        line.strip()
-        for line in LEGACY_INVENTORY.read_text().splitlines()
-        if line.strip() and not line.startswith("#")
-    }
-
-
 def _text_inventory(path):
     return {
         line.strip()
@@ -27,24 +19,24 @@ def _text_inventory(path):
     }
 
 
-def test_no_new_issue_number_directory_is_added_to_legacy_quarantine():
-    """New regressions belong to a canonical execution-layer directory."""
-    inventory = _legacy_inventory()
-    current = {
-        path.name for path in LEGACY_ISSUES_ROOT.iterdir() if path.is_dir() and path.name.isdigit()
-    }
-
-    unexpected = current - inventory
-    assert not unexpected, (
-        "New tests/issues/<number> directories are prohibited. Put the test in "
-        "tests/unit, tests/integration, tests/e2e, or "
-        f"tests/performance and add issue/regression markers. Unexpected: {sorted(unexpected)}"
+def test_legacy_issue_quarantine_tree_stays_retired():
+    """#2429 final exodus deleted the tests/issues quarantine with its final
+    e2e wave. New regressions belong to a canonical execution-layer directory
+    with issue/regression markers; the tree must not come back."""
+    assert not LEGACY_ISSUES_ROOT.exists(), (
+        "tests/issues/ was retired by the #2429 final exodus. Put the test in "
+        "tests/unit, tests/integration, tests/e2e, or tests/performance and add "
+        "issue/regression markers instead of recreating the quarantine."
     )
 
 
-def test_legacy_issue_inventory_contains_only_issue_numbers():
-    invalid = sorted(entry for entry in _legacy_inventory() if not entry.isdigit())
-    assert not invalid, f"Invalid entries in legacy issue inventory: {invalid}"
+def test_legacy_issue_inventory_stays_retired():
+    """The legacy-directories inventory died with the tree; a stray inventory
+    file would imply an untracked tests/issues revival."""
+    assert not LEGACY_INVENTORY.exists(), (
+        "tests/issues/legacy-directories.txt was retired together with the "
+        "tests/issues tree; do not recreate it."
+    )
 
 
 def test_legacy_pr_gate_promotion_list_stays_retired():
@@ -108,9 +100,7 @@ def test_purpose_markers_are_not_runtime_directories():
     prohibited = sorted(
         str(path.relative_to(TESTS_ROOT))
         for path in TESTS_ROOT.rglob("*")
-        if path.is_dir()
-        and path.name in {"regression", "security"}
-        and LEGACY_ISSUES_ROOT not in path.parents
+        if path.is_dir() and path.name in {"regression", "security"}
     )
     assert not prohibited, (
         "regression/security must be markers in a runtime directory, not directories: "
