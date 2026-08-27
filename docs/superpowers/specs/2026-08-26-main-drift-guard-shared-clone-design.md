@@ -63,7 +63,7 @@ becomes: keep the benign-pull allow; then, before the fail-closed `return`, add 
 - **Harden the benign-pull probe** (retry fetch, tolerate lock-contention git errors). More complex, does not fix the stale-`origin/main` sub-case, and still *guesses* attribution instead of using the definitive cross-user signal.
 - **Skip the main-drift check entirely.** Removes real protection on same-user dev hosts where an escape is possible; the cross-user gate is strictly better (keeps that protection).
 
-## Test strategy (TDD, `tests/unit/`, marked `issue(3124)` + `regression`)
+## Test strategy (TDD, extend `tests/autonomous/test_repo_drift_validation.py` — reusing its `_make_orchestrator`/`_before_state`/`_install_fake_gh` harness; marked `issue(3124)` + `regression`)
 
 Drive `_validate_repo_context_after_run` with a crafted `before_state` (worktree "effective" head unchanged; "main" head moved, same branch) and patch `_capture_repo_state` for the after-snapshots and `AutonomousAgentRunner._is_cross_user` for the mode.
 
