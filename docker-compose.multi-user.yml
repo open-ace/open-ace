@@ -66,6 +66,8 @@ services:
     environment:
       # Multi-user workspace mode (required)
       - WORKSPACE_MULTI_USER_MODE=true
+      # Workspace base directory - required for _is_docker_multi_user_mode() check (Issue #3134)
+      - WORKSPACE_BASE_DIR=/workspace
       # Explicit root opt-in (Issue #1893)
       - OPENACE_ALLOW_ROOT_MULTI_USER=1
       # IMPORTANT: OPENACE_CONFIG_DIR must match the volume mount path in
