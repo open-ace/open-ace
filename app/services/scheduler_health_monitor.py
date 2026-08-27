@@ -7,6 +7,7 @@ Features:
 - Periodic health checks (every minute)
 - Automatic alert creation when scheduler stops
 - Status reporting for all schedulers
+- Execution health monitoring (Issue #3144)
 
 Supports multiple implementation backends:
 - threading: Default Python threading (may not work with gevent)
@@ -30,6 +31,12 @@ SCHEDULER_STOP_THRESHOLD_SEC = int(
 )  # 5 minutes
 HEALTH_MONITOR_ENABLED = (
     os.environ.get("SCHEDULER_HEALTH_MONITOR_ENABLED", "true").lower() == "true"
+)
+
+# Execution health thresholds (Issue #3144)
+SCHEDULER_FAILURE_THRESHOLD = int(os.environ.get("SCHEDULER_FAILURE_THRESHOLD", "3"))
+SCHEDULER_NO_SUCCESS_THRESHOLD_SEC = int(
+    os.environ.get("SCHEDULER_NO_SUCCESS_THRESHOLD_SEC", "3600")  # 1 hour
 )
 
 # Scheduler implementation backend (Issue #1481)
@@ -278,11 +285,13 @@ class SchedulerHealthMonitor:
 
         Issue #2820: Uses health status classification (healthy/stale/stopped/unknown).
         Issue #3146: "idle" status treated like "healthy" — worker alive between runs.
+        Issue #3144: Also checks execution health (failed runs, no success).
 
         Args:
             name: Scheduler name.
             status: Scheduler status dict.
         """
+        # Check liveness health (heartbeat/running status)
         health_status = self._get_scheduler_health_status(status)
 
         if health_status == "stopped":
@@ -306,6 +315,11 @@ class SchedulerHealthMonitor:
             self._alert_created_for.discard(f"{name}:stale")
 
         # Unknown status: don't generate alerts (can't determine health)
+
+        # Check execution health (Issue #3144)
+        # Only check execution health if the worker is alive (not stopped)
+        if health_status in ("healthy", "idle", "stale"):
+            self._check_execution_health(name, status)
 
     def _get_scheduler_health_status(self, status: dict) -> str:
         """Determine scheduler health status.
@@ -348,6 +362,134 @@ class SchedulerHealthMonitor:
         """
         health_status = self._get_scheduler_health_status(status)
         return health_status in ("healthy", "stale")  # stale is still "healthy" in basic check
+
+    def _check_execution_health(self, name: str, status: dict):
+        """Check execution health and create alert if needed.
+
+        Issue #3144: Checks for consecutive failures and no-success condition.
+
+        Args:
+            name: Scheduler name.
+            status: Scheduler status dict with execution_health fields.
+        """
+        execution_health = status.get("execution_health", "unknown")
+        consecutive_failures = status.get("consecutive_failures", 0)
+        last_success_at = status.get("last_success_at")
+
+        # Alert keys for execution health
+        failing_key = f"{name}:failing"
+        no_success_key = f"{name}:no_success"
+
+        # Check for failing state (consecutive failures >= threshold)
+        if execution_health == "failing":
+            if failing_key not in self._alert_created_for:
+                self._create_execution_alert(
+                    name, status, alert_type="failing", consecutive_failures=consecutive_failures
+                )
+                self._alert_created_for.add(failing_key)
+        else:
+            # Clear failing alert flag when recovered
+            self._alert_created_for.discard(failing_key)
+
+        # Check for no-success condition (no successful run for too long)
+        if last_success_at:
+            try:
+                from datetime import datetime as dt
+
+                last_success_dt = dt.fromisoformat(last_success_at.replace("Z", "+00:00"))
+                now = datetime.now(timezone.utc)
+                time_since_success = (now - last_success_dt).total_seconds()
+
+                if time_since_success > SCHEDULER_NO_SUCCESS_THRESHOLD_SEC:
+                    if no_success_key not in self._alert_created_for:
+                        self._create_execution_alert(
+                            name,
+                            status,
+                            alert_type="no_success",
+                            time_since_success=int(time_since_success),
+                        )
+                        self._alert_created_for.add(no_success_key)
+                else:
+                    # Clear no-success alert flag when there's a recent success
+                    self._alert_created_for.discard(no_success_key)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid last_success_at format for {name}: {last_success_at}")
+        elif consecutive_failures > 0 and execution_health in ("degraded", "failing"):
+            # No success timestamp but there are failures - this means no successful run ever
+            # Only alert if there are actual failures
+            if no_success_key not in self._alert_created_for:
+                self._create_execution_alert(
+                    name, status, alert_type="no_success", time_since_success=None
+                )
+                self._alert_created_for.add(no_success_key)
+
+        # Clear no-success alert when execution is healthy with a success timestamp
+        if execution_health == "healthy" and last_success_at:
+            self._alert_created_for.discard(no_success_key)
+
+    def _create_execution_alert(
+        self,
+        name: str,
+        status: dict,
+        alert_type: str = "failing",
+        consecutive_failures: int | None = None,
+        time_since_success: int | None = None,
+    ):
+        """Create a system alert for execution health issues.
+
+        Issue #3144: Creates alerts for consecutive failures or no-success condition.
+
+        Args:
+            name: Scheduler name.
+            status: Scheduler status dict.
+            alert_type: "failing" for consecutive failures, "no_success" for no success.
+            consecutive_failures: Number of consecutive failures.
+            time_since_success: Seconds since last successful run.
+        """
+        try:
+            from app.modules.governance.alert_notifier import create_system_alert
+
+            error_summary = status.get("error_summary")
+
+            if alert_type == "failing":
+                title = f"Scheduler Execution Failing: {name}"
+                message = (
+                    f"The {name} scheduler has failed {consecutive_failures} consecutive times. "
+                    f"Last error: {error_summary or 'unknown'}. "
+                    f"Please check the scheduler logs."
+                )
+                severity = "warning"
+            else:  # no_success
+                title = f"Scheduler No Success: {name}"
+                if time_since_success:
+                    hours = time_since_success // 3600
+                    minutes = (time_since_success % 3600) // 60
+                    message = (
+                        f"The {name} scheduler has not had a successful run "
+                        f"for {hours}h {minutes}m. "
+                        f"Last error: {error_summary or 'unknown'}. "
+                        f"Please check the scheduler logs."
+                    )
+                else:
+                    message = (
+                        f"The {name} scheduler has never had a successful run. "
+                        f"Last error: {error_summary or 'unknown'}. "
+                        f"Please check the scheduler logs."
+                    )
+                severity = "warning"
+
+            create_system_alert(
+                title=title,
+                message=message,
+                severity=severity,
+            )
+            logger.warning(
+                f"Created {severity} execution alert for scheduler {name} "
+                f"(type={alert_type}, failures={consecutive_failures})"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to create execution alert: {e}")
 
     def _create_scheduler_alert(
         self, name: str, status: dict, severity: str = "critical", is_stale: bool = False
