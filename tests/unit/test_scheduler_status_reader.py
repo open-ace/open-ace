@@ -490,7 +490,7 @@ class TestSchedulerStatusReaderRunsFallback:
         assert abs((last_run_dt - ended).total_seconds()) < 1
 
     def test_leader_row_takes_precedence_over_runs(self):
-        """When leader row exists, scheduler_runs is NOT queried."""
+        """When leader row exists, scheduler_runs is NOT queried for liveness."""
         reader = SchedulerStatusReader()
         reader._cache = {}
 
@@ -509,6 +509,10 @@ class TestSchedulerStatusReaderRunsFallback:
             "skip_count": 0,
             "fail_count": 0,
         }
+        # Execution health from runs (Issue #3144)
+        mock_db.fetch_all.return_value = [
+            {"status": "completed", "started_at": now, "ended_at": now, "error_message": None}
+        ]
 
         with patch("app.repositories.database.Database", return_value=mock_db):
             result = reader.get_status("data_fetch", 300)
@@ -544,3 +548,327 @@ class TestSchedulerStatusReaderRunsFallback:
         assert result["heartbeat_age_seconds"] is not None
         # Should be approximately 45 seconds
         assert 40 < result["heartbeat_age_seconds"] < 55
+
+
+class TestSchedulerStatusReaderExecutionHealth:
+    """Test execution health determination.
+
+    Issue #3144: Tests for execution health based on scheduler_runs history.
+    """
+
+    def setup_method(self):
+        SchedulerStatusReader._instance = None
+
+    def test_execution_health_healthy_on_success(self):
+        """When latest run completed, execution_health should be healthy."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        recent_run = now - timedelta(seconds=30)
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            None,  # scheduler_leaders query returns no row
+            {  # scheduler_runs fallback query
+                "leader_id": "worker-abc-123",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "status": "completed",
+                "error_message": None,
+            },
+        ]
+        mock_db.fetch_all.return_value = [
+            {
+                "status": "completed",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "error_message": None,
+            }
+        ]
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        assert result["execution_health"] == "healthy"
+        assert result["latest_run_status"] == "completed"
+        assert result["consecutive_failures"] == 0
+        assert result["error_summary"] is None
+
+    def test_execution_health_degraded_on_single_failure(self):
+        """When single failure, execution_health should be degraded."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        recent_run = now - timedelta(seconds=30)
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            None,  # scheduler_leaders query returns no row
+            {  # scheduler_runs fallback query
+                "leader_id": "worker-abc-123",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "status": "failed",
+                "error_message": "All fetch scripts failed",
+            },
+        ]
+        mock_db.fetch_all.return_value = [
+            {
+                "status": "failed",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "error_message": "All fetch scripts failed",
+            }
+        ]
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        assert result["execution_health"] == "degraded"
+        assert result["latest_run_status"] == "failed"
+        assert result["consecutive_failures"] == 1
+
+    def test_execution_health_failing_on_threshold_failures(self):
+        """When consecutive failures >= threshold, execution_health should be failing."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        recent_run = now - timedelta(seconds=30)
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            None,  # scheduler_leaders query returns no row
+            {  # scheduler_runs fallback query
+                "leader_id": "worker-abc-123",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "status": "failed",
+                "error_message": "All fetch scripts failed",
+            },
+        ]
+        # 3 consecutive failures (threshold)
+        mock_db.fetch_all.return_value = [
+            {
+                "status": "failed",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "error_message": "Error 1",
+            },
+            {
+                "status": "failed",
+                "started_at": recent_run - timedelta(minutes=5),
+                "ended_at": recent_run - timedelta(minutes=5),
+                "error_message": "Error 2",
+            },
+            {
+                "status": "failed",
+                "started_at": recent_run - timedelta(minutes=10),
+                "ended_at": recent_run - timedelta(minutes=10),
+                "error_message": "Error 3",
+            },
+        ]
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        assert result["execution_health"] == "failing"
+        assert result["consecutive_failures"] == 3
+
+    def test_execution_health_recovered_after_success(self):
+        """When success after failures, execution_health should be healthy."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        recent_run = now - timedelta(seconds=30)
+        earlier_run = now - timedelta(minutes=5)
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            None,  # scheduler_leaders query returns no row
+            {  # scheduler_runs fallback query - latest is success
+                "leader_id": "worker-abc-123",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "status": "completed",
+                "error_message": None,
+            },
+        ]
+        # Latest is success, earlier is failure
+        mock_db.fetch_all.return_value = [
+            {
+                "status": "completed",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "error_message": None,
+            },
+            {
+                "status": "failed",
+                "started_at": earlier_run,
+                "ended_at": earlier_run,
+                "error_message": "Error",
+            },
+        ]
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        assert result["execution_health"] == "healthy"
+        assert result["consecutive_failures"] == 0
+
+    def test_last_success_at_tracked_correctly(self):
+        """last_success_at should track the most recent successful run."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        success_time = now - timedelta(minutes=5)
+        failure_time = now - timedelta(seconds=30)
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            None,  # scheduler_leaders query returns no row
+            {  # scheduler_runs fallback query - latest is failure
+                "leader_id": "worker-abc-123",
+                "started_at": failure_time,
+                "ended_at": failure_time,
+                "status": "failed",
+                "error_message": "Error",
+            },
+        ]
+        # Latest is failure, earlier is success
+        mock_db.fetch_all.return_value = [
+            {
+                "status": "failed",
+                "started_at": failure_time,
+                "ended_at": failure_time,
+                "error_message": "Error",
+            },
+            {
+                "status": "completed",
+                "started_at": success_time,
+                "ended_at": success_time,
+                "error_message": None,
+            },
+        ]
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        assert result["execution_health"] == "degraded"
+        assert result["consecutive_failures"] == 1
+        assert result["last_success_at"] is not None
+        last_success_dt = datetime.fromisoformat(result["last_success_at"])
+        assert abs((last_success_dt - success_time).total_seconds()) < 1
+
+    def test_error_summary_sanitized(self):
+        """Error summary should have sensitive information removed."""
+        reader = SchedulerStatusReader()
+
+        # Test path sanitization
+        error = "Failed to access /home/username/secrets/config.yaml"
+        sanitized = reader._sanitize_error_message(error)
+        assert "username" not in sanitized
+        assert "<user>" in sanitized or "<path>" in sanitized
+
+        # Test IP sanitization
+        error = "Connection failed to 192.168.1.100:8080"
+        sanitized = reader._sanitize_error_message(error)
+        assert "192.168.1.100" not in sanitized
+        assert "<ip>" in sanitized
+
+        # Test token sanitization
+        error = "Authentication failed with token=abc123secret"
+        sanitized = reader._sanitize_error_message(error)
+        assert "abc123secret" not in sanitized
+        assert "token=<redacted>" in sanitized
+
+    def test_execution_health_unknown_no_runs(self):
+        """When no run history, execution_health should be unknown."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            None,  # scheduler_leaders query returns no row
+            None,  # scheduler_runs fallback query also returns nothing
+        ]
+        mock_db.fetch_all.return_value = []
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        assert result["execution_health"] == "unknown"
+        assert result["latest_run_status"] is None
+        assert result["consecutive_failures"] == 0
+
+    def test_partial_status_treated_as_success(self):
+        """Partial status should be treated as success for execution health."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        recent_run = now - timedelta(seconds=30)
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.side_effect = [
+            None,  # scheduler_leaders query returns no row
+            {  # scheduler_runs fallback query
+                "leader_id": "worker-abc-123",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "status": "partial",
+                "error_message": '{"type":"partial_failure","tools_failed":2}',
+            },
+        ]
+        mock_db.fetch_all.return_value = [
+            {
+                "status": "partial",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "error_message": '{"type":"partial_failure","tools_failed":2}',
+            }
+        ]
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        assert result["execution_health"] == "healthy"
+        assert result["latest_run_status"] == "partial"
+
+    def test_leader_row_includes_execution_health(self):
+        """When leader row exists, execution health is still queried from runs."""
+        reader = SchedulerStatusReader()
+        reader._cache = {}
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        mock_db = MagicMock()
+        mock_db.fetch_one.return_value = {
+            "job_name": "data_fetch",
+            "leader_id": "active-worker",
+            "owner_info": "host:123",
+            "acquired_at": now,
+            "expires_at": now + timedelta(seconds=1800),
+            "heartbeat_at": now,
+            "last_run_at": now,
+            "run_count": 5,
+            "skip_count": 0,
+            "fail_count": 0,
+        }
+        # Execution health from runs
+        mock_db.fetch_all.return_value = [
+            {"status": "completed", "started_at": now, "ended_at": now, "error_message": None}
+        ]
+
+        with patch("app.repositories.database.Database", return_value=mock_db):
+            result = reader.get_status("data_fetch", 300)
+
+        assert result["health_status"] == "healthy"
+        assert result["execution_health"] == "healthy"
+        assert result["latest_run_status"] == "completed"
+        # fetch_all should be called for execution health
+        assert mock_db.fetch_all.call_count >= 1
