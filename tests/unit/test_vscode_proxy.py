@@ -7,7 +7,11 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-project_root = str(Path(__file__).resolve().parent.parent.parent.parent)
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(610)]
+
+project_root = str(Path(__file__).resolve().parent.parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 

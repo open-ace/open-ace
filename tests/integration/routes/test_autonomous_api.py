@@ -11,6 +11,8 @@ import app.repositories.database as db_mod
 from app.modules.workspace.api_key_proxy import APIKeyProxyService
 from app.repositories.database import Database
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(716)]
+
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
 
@@ -79,6 +81,18 @@ def client(auto_db, monkeypatch):
     # import. Point both at auto_db's seeded SQLite DB so the app and the route
     # share the fixture's database. monkeypatch auto-restores both.
     monkeypatch.setenv("DATABASE_URL", auto_db.db_url)
+    # The create endpoint's module-level rate limiter (10/user/hour) is
+    # process-global state: hits accumulated by earlier test files in the same
+    # pytest process would 429 this file's own create requests (they run as
+    # user_id=1 too). Clear the per-user hit log so each test starts with a
+    # full budget; the limiter itself stays fully in effect within the test.
+    monkeypatch.setattr("app.routes.autonomous._workflow_rate_limiter._hits", {})
+    # These endpoint tests were written for single-tenant semantics: pin the
+    # deployment mode so the default branch_strategy ("new-branch") is not
+    # rejected by the multi-user _shared_checkout_rejection gate (#2021;
+    # that rejection logic is separately unit-covered by
+    # tests/unit/test_git_path_hardening.py).
+    monkeypatch.setenv("OPENACE_ALLOW_SHARED_CHECKOUT", "1")
     app = create_app({"TESTING": True})
     monkeypatch.setattr("app.routes.autonomous.user_repo", UserRepository(db=auto_db))
     with app.app_context():

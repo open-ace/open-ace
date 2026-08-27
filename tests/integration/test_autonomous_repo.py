@@ -10,6 +10,8 @@ import app.repositories.database as db_mod
 from app.repositories.autonomous_repo import AutonomousWorkflowRepository
 from app.repositories.database import Database
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(716)]
+
 
 @pytest.fixture
 def auto_db(tmp_path):

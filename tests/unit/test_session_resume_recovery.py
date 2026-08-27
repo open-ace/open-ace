@@ -157,7 +157,7 @@ class TestRunAgentSessionResumeRecovery:
         # Bypass trusted-git-context snapshot — tests use synthetic /tmp paths
         # that don't have a real .git directory. The snapshot fails closed in
         # production, so provide a trusted boundary here (same pattern as
-        # tests/issues/716/test_orchestrator.py).
+        # tests/unit/test_orchestrator.py).
         orch._snapshot_repo_context = MagicMock(
             return_value={
                 "context": {"repo_path": "/tmp/test-project"},

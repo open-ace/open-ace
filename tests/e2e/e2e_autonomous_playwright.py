@@ -13,8 +13,8 @@ Tests the full autonomous development frontend flow:
 8. Test milestone display
 
 Run:
-  HEADLESS=true  python tests/issues/716/e2e_autonomous_playwright.py   # CI
-  HEADLESS=false python tests/issues/716/e2e_autonomous_playwright.py   # Demo
+  HEADLESS=true  python tests/e2e/e2e_autonomous_playwright.py   # CI
+  HEADLESS=false python tests/e2e/e2e_autonomous_playwright.py   # Demo
 """
 
 import json

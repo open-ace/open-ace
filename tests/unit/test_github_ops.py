@@ -8,6 +8,8 @@ import pytest
 
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(716)]
+
 
 class TestGitHubOpsInit:
     """Tests for GitHubOps initialization."""

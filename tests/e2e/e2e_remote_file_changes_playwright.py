@@ -12,8 +12,8 @@ Open ACE - Remote File Changes Panel & VSCode E2E Playwright Test
 7. 验证降级：无 git 的机器不显示文件变更
 
 Run:
-  HEADLESS=true  python tests/issues/610/e2e_remote_file_changes_playwright.py
-  HEADLESS=false python tests/issues/610/e2e_remote_file_changes_playwright.py
+  HEADLESS=true  python tests/e2e/e2e_remote_file_changes_playwright.py
+  HEADLESS=false python tests/e2e/e2e_remote_file_changes_playwright.py
 """
 
 import json
@@ -23,9 +23,7 @@ import time
 import uuid
 
 # Add project root
-PROJECT_ROOT = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 

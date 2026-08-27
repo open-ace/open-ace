@@ -21,6 +21,8 @@ from app.services.autonomous_scheduler import (
     _is_quota_paused,
 )
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(716)]
+
 # ── helpers ──────────────────────────────────────────────────────────────
 
 _QUOTA_PATH = "app.modules.governance.quota_manager.QuotaManager"
@@ -310,6 +312,12 @@ def client(auto_db, monkeypatch):
     # (get_database_url() defaults to dev Postgres locally). The quota gate
     # short-circuits (429) before user_repo, so no user_repo rebind needed here.
     monkeypatch.setenv("DATABASE_URL", auto_db.db_url)
+    # The create endpoint's module-level rate limiter (10/user/hour) is
+    # process-global state: hits accumulated by earlier test files in the same
+    # pytest process would also 429 these requests, masking the quota-gate 429
+    # under test. Clear the per-user hit log so every 429 here is the quota
+    # gate's own; the limiter itself stays fully in effect within the test.
+    monkeypatch.setattr("app.routes.autonomous._workflow_rate_limiter._hits", {})
     app = create_app({"TESTING": True})
     with app.app_context():
         c = app.test_client()

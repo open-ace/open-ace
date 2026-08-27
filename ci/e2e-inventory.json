@@ -433,6 +433,22 @@
       "notes": "standalone playwright script (issue #2667): run via HEADLESS=true python tests/e2e/e2e_autonomous_models_error_playwright.py against a live server; collects no pytest nodeids"
     },
     {
+      "path": "tests/e2e/e2e_autonomous_playwright.py",
+      "mode": "standalone-automated",
+      "owner": "issue-716",
+      "issue": 716,
+      "home_lane": "nightly",
+      "executor": "standalone",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "rehomed from tests/issues/716 by batch 15 (#2429); standalone playwright script with run_tests/main, collects no pytest nodeids"
+    },
+    {
       "path": "tests/e2e/e2e_audit_log_default_dates_playwright.py",
       "mode": "pytest-automated",
       "owner": "e2e-governance",
@@ -591,6 +607,22 @@
       "cadence": "nightly",
       "collects": false,
       "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
+    },
+    {
+      "path": "tests/e2e/e2e_remote_file_changes_playwright.py",
+      "mode": "standalone-automated",
+      "owner": "issue-610",
+      "issue": 610,
+      "home_lane": "nightly",
+      "executor": "standalone",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "rehomed from tests/issues/610 by batch 15 (#2429); standalone playwright script with run_tests/main, collects no pytest nodeids"
     },
     {
       "path": "tests/e2e/e2e_roi_daily_costs_axis_playwright.py",

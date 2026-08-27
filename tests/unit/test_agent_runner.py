@@ -16,6 +16,8 @@ from app.modules.workspace.autonomous.agent_runner import (
 )
 from app.modules.workspace.session_manager import AgentSession
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(716)]
+
 
 class TestAgentRunnerInit:
     """Tests for agent runner initialization."""
@@ -60,6 +62,23 @@ class TestAgentRunnerRunTask:
     def setup_method(self):
         self.sm = MagicMock()
         self.runner = AutonomousAgentRunner(session_manager=self.sm)
+
+    @pytest.fixture(autouse=True)
+    def _stub_llm_proxy(self):
+        """Satisfy the #2019 fail-closed proxy seam for every run.
+
+        ``_build_agent_env`` resolves an LLM proxy token through
+        ``get_api_key_proxy_service()`` (imported at call time) and converts
+        ANY failure in that block into a fail-closed "LLM proxy setup failed"
+        error, masking the spawn/parsing failures these tests actually
+        assert on. Stub the getter so the seam succeeds with a token — the
+        canonical pattern from tests/unit/test_insights_service.py.
+        """
+        with patch(
+            "app.modules.workspace.api_key_proxy.get_api_key_proxy_service",
+            return_value=MagicMock(**{"generate_proxy_token.return_value": "tok"}),
+        ):
+            yield
 
     def test_run_local_missing_executable(self):
         """Should fail gracefully when CLI tool not found."""
@@ -918,8 +937,8 @@ class TestStopSession:
 
     def test_stop_nonexistent_session(self):
         runner = AutonomousAgentRunner()
-        # Should not raise
-        runner.stop_session("nonexistent")
+        # Should not raise — unknown session stop is a silent None return.
+        assert runner.stop_session("nonexistent") is None
 
     def test_stop_remote_session_marks_tracker_and_notifies_manager(self):
         remote_manager = MagicMock()
