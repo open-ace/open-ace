@@ -750,12 +750,10 @@ class WebUIManager:
 
             # Generate token for the request
             token = self.generate_token(user_id, 3100)
-            if host_url:
-                # Docker compose: URL from request.host_url with fixed port 3100
-                url = f"{base_url}:3100"
-            else:
-                # Fallback: use config.url (for edge cases where host_url not provided)
-                url = base_url
+            # Always add port 3100 in single-user mode
+            # Remove any existing port from base_url first, then add 3100
+            base_url_no_port = self._remove_port_from_url(base_url)
+            url = f"{base_url_no_port}:3100"
             return url, token
 
         with self._lock:

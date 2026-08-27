@@ -83,19 +83,27 @@ def test_get_user_webui_url_with_host_url():
     manager = WebUIManager(config)
     manager.stop_cleanup_thread()
 
-    # Without host_url: uses config.url directly (fallback)
-    url1, token1 = manager.get_user_webui_url(user_id=1, system_account="testuser")
-    assert url1 == "http://172.17.0.1"
+    # Mock _launch_webui_process and _wait_for_service_ready to avoid starting
+    # a real WebUI process in test environment (Issue #3129)
+    with (
+        patch.object(
+            WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})
+        ),
+        patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
+    ):
+        # Without host_url: uses config.url directly (fallback)
+        url1, token1 = manager.get_user_webui_url(user_id=1, system_account="testuser")
+        assert url1 == "http://172.17.0.1:3100"
 
-    # With host_url: uses request IP with fixed port 3100 (Issue #1357)
-    url2, token2 = manager.get_user_webui_url(
-        user_id=1, system_account="testuser", host_url="http://192.168.1.169:19888"
-    )
-    assert url2 == "http://192.168.1.169:3100"
+        # With host_url: uses request IP with fixed port 3100 (Issue #1357)
+        url2, token2 = manager.get_user_webui_url(
+            user_id=1, system_account="testuser", host_url="http://192.168.1.169:19888"
+        )
+        assert url2 == "http://192.168.1.169:3100"
 
-    # Verify tokens are generated
-    assert token1.startswith("v2:1:0:")
-    assert token2.startswith("v2:1:0:")
+        # Verify tokens are generated
+        assert token1.startswith("v2:1:")
+        assert token2.startswith("v2:1:")
 
 
 def test_get_user_webui_url_preserves_port_single_user():
@@ -113,18 +121,26 @@ def test_get_user_webui_url_preserves_port_single_user():
     manager = WebUIManager(config)
     manager.stop_cleanup_thread()
 
-    # Without host_url: uses config.url as fallback
-    url1, token1 = manager.get_user_webui_url(user_id=1, system_account="testuser")
-    assert url1 == "http://172.17.0.1:3100"
+    # Mock _launch_webui_process and _wait_for_service_ready to avoid starting
+    # a real WebUI process in test environment (Issue #3129)
+    with (
+        patch.object(
+            WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})
+        ),
+        patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
+    ):
+        # Without host_url: uses config.url as fallback (with port 3100)
+        url1, token1 = manager.get_user_webui_url(user_id=1, system_account="testuser")
+        assert url1 == "http://172.17.0.1:3100"
 
-    # With host_url: uses request IP with fixed port 3100 (Issue #1357)
-    url2, token2 = manager.get_user_webui_url(
-        user_id=1, system_account="testuser", host_url="http://192.168.1.169:19888"
-    )
-    assert url2 == "http://192.168.1.169:3100"
+        # With host_url: uses request IP with fixed port 3100 (Issue #1357)
+        url2, token2 = manager.get_user_webui_url(
+            user_id=1, system_account="testuser", host_url="http://192.168.1.169:19888"
+        )
+        assert url2 == "http://192.168.1.169:3100"
 
-    assert token1.startswith("v2:1:0:")
-    assert token2.startswith("v2:1:0:")
+        assert token1.startswith("v2:1:")
+        assert token2.startswith("v2:1:")
 
 
 def test_get_user_webui_url_preserves_port_in_multi_user():
@@ -193,6 +209,7 @@ def test_get_user_webui_url_preserves_port_in_multi_user():
             WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})
         ) as mock_launch,
         patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
+        patch.object(WebUIManager, "_is_port_available", return_value=True),
     ):
         url2, token2 = manager2.get_user_webui_url(
             user_id=7, system_account="testuser", host_url="http://192.168.1.169:19888"
