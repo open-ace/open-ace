@@ -4,12 +4,12 @@
   "created_before_modification": true,
   "layers": {
     "default": {
-      "min_tests": 6903,
+      "min_tests": 7475,
       "min_files": 250,
       "last_updated": "2026-08-27",
-      "update_reason": "Issue #2429 batch 13: I-group closure (29 dirs) migrated 334 items (307 unit incl. 4 red-on-main dirs repaired, 18 integration/routes, 9 integration flat); min raised by exactly +334 (6569+334); actuals measured locally on branch, CI clean re-confirmed",
-      "actual_collected": 10537,
-      "actual_files": 728,
+      "update_reason": "Issue #2429 batch 14: B-group in-process wave 1 (6 dirs) migrated 572 items (558 unit incl. 2376's 370-item parametrize corpora, 8 routes, 6 subprocess); min raised by exactly +572 (6903+572); actuals measured locally, CI clean re-confirmed",
+      "actual_collected": 11109,
+      "actual_files": 755,
       "threshold_percent": 96
     },
     "critical": {
@@ -30,12 +30,12 @@
       "note": "Currently excluded by norecursedirs"
     },
     "issues": {
-      "min_tests": 1171,
-      "min_files": 155,
+      "min_tests": 599,
+      "min_files": 126,
       "last_updated": "2026-08-27",
-      "update_reason": "Issue #2429 batch 13: I-group closure \u2014 29 dirs / 349 items / 37 glob files: 334 migrated (repairs: 1140+1138 env_security gate stubbed per canonical pattern, 1771 #2063 cooldown claim stubbed, 1329 create_app ambient-PG split away; rewrites: 679 ok()/fail() harness -> 14 real asserts incl. #2540 UUID-gate realignment, 1306 zero-assert placeholder given real assertions; realignment: 2280 sudoers to post-#2334 GIT_SAFE/GH_SAFE truth; tautology deletions with per-def audit: 761 x5, 776 x6 (inline re-implementations, zero production refs); dir 166 deleted wholesale: 2 no-assert real-CLI drivers + 2 sentinels + 2 non-collected manual scripts); min lowered by exact deltas (1520-349, 192-37)",
-      "actual_collected": 1384,
-      "actual_files": 170,
+      "update_reason": "Issue #2429 batch 14: B-group in-process wave 1 \u2014 6 dirs / 572 items / 29 glob files: all 572 migrated (repairs: 1469 stale 559 expectation + self-referential --issue 1469 made drain-proof via legacy-inventory-derived numbers, 2020 scheduler HOME-leak pinned at the task_isolation resolver seam); 2 standalone playwright scripts relocated to tests/e2e/ + governance inventory rows (+2, sanctioned minimal hand-edit \u2014 no add-row write command exists; validate=0 errors, governance tests 45/45); 172 manual diagnostic script relocated to scripts/ with a retargeted unit guard",
+      "actual_collected": 812,
+      "actual_files": 141,
       "threshold_percent": 97
     }
   },
@@ -47,7 +47,7 @@
     "Baseline created before pytest.ini modification to enable e2e_*.py collection",
     "tests/e2e currently excluded by norecursedirs in pytest.ini",
     "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard",
-    "Default count from: python scripts/ci.py run default-collection (10537 items after #2429 batch 13)",
-    "Issue count from: clean-checkout issue-collection (1384 items, 170 files after #2429 batch 13)"
+    "Default count from: python scripts/ci.py run default-collection (11109 items after #2429 batch 14)",
+    "Issue count from: clean-checkout issue-collection (812 items, 141 files after #2429 batch 14)"
   ]
 }
