@@ -62,6 +62,9 @@ services:
     extends:
       file: docker-compose.yml
       service: scheduler
+    # Issue #3128: Override inherited profiles: [scheduler] from docker-compose.yml
+    # Empty profiles list ensures scheduler starts by default in multi-user mode
+    profiles: []
     user: "0"
     environment:
       # Multi-user workspace mode (required)
