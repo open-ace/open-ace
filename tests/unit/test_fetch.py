@@ -26,6 +26,8 @@ class TestRunFetchScriptsReturns:
             "last_run": None,
             "last_result": None,
             "error": None,
+            "degraded": False,
+            "degraded_reason": None,
         }
 
     @patch("os.path.exists", return_value=False)
@@ -112,6 +114,25 @@ class TestRunFetchScriptsReturns:
 
         assert result is None
 
+    @patch("app.routes.fetch._run_subprocess")
+    def test_returns_degraded_when_wrapper_missing(self, mock_run):
+        """Issue #3145: When degraded is True, skip fetch and return degraded status."""
+        from app.routes import fetch as fetch_mod
+
+        # Set degraded state
+        fetch_mod._fetch_status["degraded"] = True
+        fetch_mod._fetch_status["degraded_reason"] = (
+            "Wrapper not found: /usr/local/bin/openace-fetch-wrapper"
+        )
+
+        result = run_fetch_scripts()
+
+        assert result == {
+            "_degraded": True,
+            "reason": "Wrapper not found: /usr/local/bin/openace-fetch-wrapper",
+        }
+        mock_run.assert_not_called()  # Should not attempt to run scripts
+
 
 class TestConfigPathScope:
     """Test Bug 3 fix: config_path must be defined outside per-script blocks."""
@@ -124,6 +145,8 @@ class TestConfigPathScope:
             "last_run": None,
             "last_result": None,
             "error": None,
+            "degraded": False,
+            "degraded_reason": None,
         }
 
     def test_config_path_available_when_qwen_missing(self):
@@ -171,3 +194,88 @@ class TestConfigPathScope:
         # Verify the default is "false" in getenv call
         assert '"FETCH_USE_SUDO", "false")' in source
         assert '"FETCH_USE_SUDO", "true")' not in source
+
+
+class TestFetchDegradedState:
+    """Issue #3145: Test degraded state management."""
+
+    def setup_method(self):
+        """Reset global fetch status before each test."""
+        from app.routes import fetch as fetch_mod
+
+        fetch_mod._fetch_status = {
+            "is_running": False,
+            "last_run": None,
+            "last_result": None,
+            "error": None,
+            "degraded": False,
+            "degraded_reason": None,
+        }
+
+    def test_set_fetch_degraded_sets_flag(self):
+        """set_fetch_degraded() should set degraded flag and reason."""
+        from app.routes import fetch as fetch_mod
+
+        fetch_mod.set_fetch_degraded("Wrapper not found")
+
+        assert fetch_mod._fetch_status["degraded"] is True
+        assert fetch_mod._fetch_status["degraded_reason"] == "Wrapper not found"
+
+    def test_set_fetch_degraded_clears_flag(self):
+        """set_fetch_degraded(None) should clear degraded state."""
+        from app.routes import fetch as fetch_mod
+
+        # First set degraded
+        fetch_mod.set_fetch_degraded("Wrapper not found")
+        assert fetch_mod._fetch_status["degraded"] is True
+
+        # Then clear it
+        fetch_mod.set_fetch_degraded(None)
+        assert fetch_mod._fetch_status["degraded"] is False
+        assert fetch_mod._fetch_status["degraded_reason"] is None
+
+    @patch("os.path.exists", return_value=True)
+    @patch("app.routes.fetch._run_subprocess")
+    def test_degraded_prevents_fetch_execution(self, mock_run, mock_exists):
+        """When degraded is True, run_fetch_scripts should skip execution."""
+        from app.routes import fetch as fetch_mod
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "OK"
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        # Set degraded state
+        fetch_mod.set_fetch_degraded("Test degraded")
+
+        result = run_fetch_scripts()
+
+        # Should return degraded status
+        assert result == {"_degraded": True, "reason": "Test degraded"}
+        # Should NOT call subprocess
+        mock_run.assert_not_called()
+
+    @patch("os.path.exists", return_value=True)
+    @patch("app.routes.fetch._run_subprocess")
+    def test_degraded_cleared_allows_fetch_execution(self, mock_run, mock_exists):
+        """After clearing degraded, run_fetch_scripts should work normally."""
+        from app.routes import fetch as fetch_mod
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "OK"
+        mock_result.stderr = ""
+        mock_run.return_value = mock_result
+
+        # Set and then clear degraded
+        fetch_mod.set_fetch_degraded("Wrapper missing")
+        fetch_mod.set_fetch_degraded(None)
+
+        with patch.dict(os.environ, {"FETCH_USE_SUDO": "false"}):
+            result = run_fetch_scripts()
+
+        # Should run normally
+        assert isinstance(result, dict)
+        assert "_degraded" not in result
+        mock_run.assert_called()

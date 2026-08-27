@@ -759,6 +759,40 @@ CONF_EOF
     return 0
 }
 
+# Install the privileged data fetch wrapper (Issue #3145).
+# This wrapper is required when FETCH_USE_SUDO=true in multi-user systemd deployments.
+# It allows the scheduler to run fetch scripts with root privileges to read
+# user home directories, then drops privileges to write to the database.
+install_fetch_wrapper() {
+    local src="${SCRIPT_DIR:-$(dirname "$(readlink -f "$0")")}/scripts/openace-fetch-wrapper"
+    local dst="/usr/local/bin/openace-fetch-wrapper"
+
+    # Resolve repo-relative source (install.sh lives in scripts/install-central/docker-method/)
+    if [ ! -f "$src" ]; then
+        local alt_src="$(dirname "$(dirname "$(readlink -f "$0")")")/../../scripts/openace-fetch-wrapper"
+        alt_src="$(readlink -f "$alt_src" 2>/dev/null || echo "$alt_src")"
+        if [ -f "$alt_src" ]; then
+            src="$alt_src"
+        fi
+    fi
+    if [ ! -f "$src" ]; then
+        print_warning "未找到 openace-fetch-wrapper（搜索 $src），跳过 wrapper 安装"
+        return 1
+    fi
+    if ! cp "$src" "$dst" 2>/dev/null; then
+        print_warning "拷贝 openace-fetch-wrapper 到 $dst 失败（需要 root？）"
+        return 1
+    fi
+    chown root:root "$dst" 2>/dev/null || true
+    chmod 755 "$dst"
+
+    # Create audit log directory
+    install -d -o root -g root -m 755 /var/log/openace 2>/dev/null || true
+
+    print_success "已安装 fetch wrapper 到 $dst"
+    return 0
+}
+
 install_git_gh_wrappers() {
     local script_dir
     script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -882,6 +916,10 @@ $RUN_USER ALL=(root) NOPASSWD: $wrapper_bin *"
 Cmnd_Alias GIT_SAFE = /usr/local/bin/openace-git *
 Cmnd_Alias GH_SAFE = /usr/local/bin/openace-gh *
 
+# Fetch wrapper for privileged data collection (Issue #3145).
+# Required for multi-user systemd deployments with FETCH_USE_SUDO=true.
+Cmnd_Alias FETCH_WRAPPER = /usr/local/bin/openace-fetch-wrapper *
+
 # 低风险工具（Issue #2181：移除 cat/chown/rm，改用 wrapper）
 Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr/bin/id *, /usr/bin/find *
 
@@ -897,6 +935,7 @@ $RUN_USER ALL=(ALL) NOPASSWD: /usr/local/bin/openace-webui-launch * "$webui_path
 $RUN_USER ALL=(ALL) NOPASSWD: OPENACE_UTILS
 $RUN_USER ALL=(ALL) NOPASSWD: GIT_SAFE
 $RUN_USER ALL=(ALL) NOPASSWD: GH_SAFE
+$RUN_USER ALL=(ALL) NOPASSWD: FETCH_WRAPPER
 $RUN_USER ALL=(ALL) NOPASSWD: MKDIR_SAFE
 
 # 【Issue #2181】安全 wrapper 规则（替代原 cat/chown/useradd/rm 通配）
@@ -2766,6 +2805,7 @@ upgrade_deployment() {
         print_info "更新 sudoers 配置..."
         stop_webui_systemd_service
         install_run_as_wrapper || print_warning "run-as wrapper 安装失败，跨用户 agent 启动可能受限"
+        install_fetch_wrapper || print_warning "fetch wrapper 安装失败，特权数据采集可能受限"
         if ! install_git_gh_wrappers; then
             print_error "git/gh wrappers 安装失败，拒绝写入 wrapper-only sudoers"
         else
@@ -4182,6 +4222,7 @@ if [ "$WORKSPACE_MULTI_USER_MODE" = "true" ]; then
     # Stop existing qwen-code-webui systemd service first
     stop_webui_systemd_service
     install_run_as_wrapper || print_warning "run-as wrapper 安装失败，跨用户 agent 启动可能受限"
+    install_fetch_wrapper || print_warning "fetch wrapper 安装失败，特权数据采集可能受限"
     if ! install_git_gh_wrappers; then
         print_error "git/gh wrappers 安装失败，拒绝写入 wrapper-only sudoers"
         exit 1

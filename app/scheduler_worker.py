@@ -225,6 +225,9 @@ class SchedulerWorker:
         【Issue #2543】确保 scheduler 和 web 服务的 FETCH_USE_SUDO 配置一致，
         检查 wrapper 是否存在，sudoers 规则是否正确。
 
+        【Issue #3145】当 FETCH_USE_SUDO=true 且 wrapper 缺失时，设置 degraded 状态，
+        阻止 scheduler 执行注定失败的采集任务。
+
         漂移级别：
         - 警告级：记录日志，标记 degraded，继续运行
         - 错误级：记录日志，标记 failed，可能影响功能
@@ -315,6 +318,21 @@ class SchedulerWorker:
             for warning in warnings:
                 logger.warning(f"  WARNING: {warning}")
             logger.warning("=" * 60)
+
+        # Issue #3145: 设置 degraded 状态
+        # 当 FETCH_USE_SUDO=true 但有 critical issues 时，阻止采集任务运行
+        if scheduler_fetch_sudo and issues:
+            from app.routes.fetch import set_fetch_degraded
+
+            degraded_reason = "; ".join(issues)
+            set_fetch_degraded(degraded_reason)
+            logger.error(
+                "Fetch set to degraded mode due to critical issues. "
+                "Scheduler will not run data collection jobs until fixed."
+            )
+        elif scheduler_fetch_sudo and warnings:
+            # 警告级别不影响运行，但记录状态
+            logger.warning("Fetch has warnings but will continue to run")
 
         # 总结
         if not issues and not warnings:

@@ -2228,6 +2228,35 @@ _install_wrapper() {
     return 0
 }
 
+# Install the privileged data fetch wrapper (Issue #3145).
+# This wrapper is required when FETCH_USE_SUDO=true in multi-user systemd deployments.
+# It allows the scheduler to run fetch scripts with root privileges to read
+# user home directories, then drops privileges to write to the database.
+# Must run BEFORE configure_sudoers so the sudoers rule (which keys off -x $wrapper_path)
+# sees it.
+install_fetch_wrapper() {
+    local install_dir="$1"
+    local src="$install_dir/scripts/openace-fetch-wrapper"
+    local dst="/usr/local/bin/openace-fetch-wrapper"
+
+    if [ ! -f "$src" ]; then
+        print_warning "openace-fetch-wrapper not found at $src; skipping wrapper install"
+        return 1
+    fi
+    if ! cp "$src" "$dst" 2>/dev/null; then
+        print_warning "Failed to copy openace-fetch-wrapper to $dst (need root?)"
+        return 1
+    fi
+    chown root:root "$dst" 2>/dev/null || true
+    chmod 755 "$dst"
+
+    # Create audit log directory
+    install -d -o root -g root -m 755 /var/log/openace 2>/dev/null || true
+
+    print_success "Installed fetch wrapper to $dst"
+    return 0
+}
+
 install_git_gh_wrappers() {
     local install_dir="$1"
     local config_src_dir="$install_dir/config/openace"
@@ -2484,26 +2513,16 @@ configure_sudoers() {
     # Create sudoers file
     local sudoers_file="/etc/sudoers.d/open-ace-webui"
 
-    # Build fetch script rules (check all 5 scripts)
-    # 【修复 Issue #1977】支持 Python 3.10+ 类型注解语法
-    # 使用安装的 Python 版本，而非系统 /usr/bin/python3（可能是 3.9）
-    local python_bin="${install_dir}/agent_bin/python3"
-    if [ ! -x "$python_bin" ]; then
-        python_bin="/usr/local/bin/python3.12"
+    # Build fetch script rules (Issue #3145: use wrapper instead of direct Python paths)
+    # The wrapper /usr/local/bin/openace-fetch-wrapper is installed by install_fetch_wrapper().
+    # It validates parameters, logs audit trails, and drops privileges for database writes.
+    local fetch_wrapper_rule=""
+    local fetch_wrapper_path="/usr/local/bin/openace-fetch-wrapper"
+    if [ -x "$fetch_wrapper_path" ]; then
+        fetch_wrapper_rule="$run_user ALL=(root) NOPASSWD: FETCH_WRAPPER"
+    else
+        print_warning "openace-fetch-wrapper not found; privileged data collection will be disabled"
     fi
-    if [ ! -x "$python_bin" ]; then
-        python_bin="/usr/bin/python3"
-    fi
-    local fetch_scripts=("fetch_qwen.py" "fetch_claude.py" "fetch_openclaw.py" "fetch_codex.py" "fetch_zcode.py")
-    local fetch_rules=""
-    for script in "${fetch_scripts[@]}"; do
-        local script_path="$install_dir/scripts/$script"
-        if [ -f "$script_path" ]; then
-            fetch_rules="${fetch_rules}
-# Allow $run_user to run $script as root for multi-user data collection
-$run_user ALL=(root) NOPASSWD: $python_bin $script_path *"
-        fi
-    done
 
     # Add /usr/local/bin/qwen-code-webui rule if it exists (Node.js v20+ may be installed there)
     local webui_local_path="/usr/local/bin/qwen-code-webui"
@@ -2591,10 +2610,10 @@ ${security_wrapper_rules}"
 ${wrapper_rule}"
     fi
 
-    # Only add fetch_rules if not empty
-    if [ -n "$fetch_rules" ]; then
+    # Add fetch wrapper rule if the wrapper is installed (Issue #3145)
+    if [ -n "$fetch_wrapper_rule" ]; then
         current_user_rules="${current_user_rules}
-${fetch_rules}"
+${fetch_wrapper_rule}"
     fi
 
     # Build header and defaults section
@@ -2654,6 +2673,10 @@ Cmnd_Alias OPENACE_UTILS = /usr/bin/test *, /usr/bin/ls *, /usr/bin/stat *, /usr
 # 而 verifier worktree 必须由执行 git 的身份持有）。sudo 按调用方 PATH 解析
 # 裸 mkdir，/usr/bin 与 /bin 两种解析路径都必须匹配。
 Cmnd_Alias MKDIR_SAFE = /usr/bin/mkdir *, /bin/mkdir *
+
+# Fetch wrapper for privileged data collection (Issue #3145).
+# Required for multi-user systemd deployments with FETCH_USE_SUDO=true.
+Cmnd_Alias FETCH_WRAPPER = /usr/local/bin/openace-fetch-wrapper *
 
 # 【安全加固 Issue #2181】安全 wrapper 规则
 # 以下 wrapper 替代原通配命令，内部验证参数安全性
@@ -4346,6 +4369,10 @@ install_local() {
         # Install the run-as wrapper BEFORE configure_sudoers (Issue #1395):
         # the sudoers rule keys off `[ -x /usr/local/bin/openace-run-as ]`.
         install_run_as_wrapper "$sudoers_install_dir"
+
+        # Install the fetch wrapper BEFORE configure_sudoers (Issue #3145):
+        # the sudoers rule keys off `[ -x /usr/local/bin/openace-fetch-wrapper ]`.
+        install_fetch_wrapper "$sudoers_install_dir"
 
         # Install the write-as wrapper BEFORE configure_sudoers (Issue #1916):
         # the sudoers rule keys off `[ -x /usr/local/bin/openace-write-as ]`.
