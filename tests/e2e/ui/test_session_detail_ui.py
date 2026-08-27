@@ -9,7 +9,7 @@ This test verifies:
 5. Data consistency between Session List and Session Detail
 
 Usage:
-    python3 tests/issues/69/test_session_detail_ui.py
+    python3 -m pytest tests/e2e/ui/test_session_detail_ui.py
 """
 
 import os

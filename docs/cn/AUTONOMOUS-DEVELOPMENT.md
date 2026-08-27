@@ -558,12 +558,12 @@ sudo rm /etc/systemd/system/openace-cgroup-setup.service
 建议优先运行：
 
 ```bash
-pytest -q tests/issues/716 tests/unit/test_autonomous_ci_guardrails.py
+pytest -q tests/unit/test_autonomous_ci_guardrails.py
 pytest -q tests/unit/test_autonomous_timeline_session_identity.py
 pytest -q tests/unit/test_upstream_quota_pause.py
 pytest -q tests/unit/test_verification_usage_wiring_2994.py
 pytest -q tests/unit/test_milestone_session_route_3000.py
-pytest -q tests/issues/1395
+pytest -q tests/integration/subprocess
 cd frontend && npm test -- --run WorkflowTimeline
 ```
 

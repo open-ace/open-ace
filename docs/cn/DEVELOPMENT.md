@@ -130,7 +130,7 @@ python scripts/run_extended_tests.py --category critical --isolated-home
 
 # 完整 E2E 或 issue 回归分片
 python scripts/run_extended_tests.py --category e2e --isolated-home
-python scripts/run_extended_tests.py --category issues --split-total 4 --split-group 1 --isolated-home
+python scripts/run_extended_tests.py --category e2e --split-total 4 --split-group 1 --isolated-home
 ```
 
 完整前端参考请参阅 [FRONTEND-GUIDE.md](FRONTEND-GUIDE.md)。

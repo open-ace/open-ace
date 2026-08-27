@@ -17,7 +17,7 @@ Open ACE - Issue #165: 远程会话管理与体验完善 E2E Test
   B6: 错误消息国际化 — 中英文错误展示
 
 Run (via the lane runner, which starts the isolated server):
-  python scripts/run_extended_tests.py --category issues --issue-numbers 165
+  python scripts/run_extended_tests.py --category e2e
   # direct script mode (requires a server at BASE_URL with admin/admin123):
   HEADLESS=true  python tests/e2e/remote/test_remote_session_ux.py
 """
