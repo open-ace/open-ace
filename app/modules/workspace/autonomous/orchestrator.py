@@ -3355,6 +3355,32 @@ class AutonomousOrchestrator:
                 and before_main.get("branch") == after_main.get("branch")
                 and before_effective.get("head") == after_effective.get("head")
             ):
+                # #3124: on multi-user hosts the agent runs under the cross-user
+                # isolated launcher — a credentialless principal with a scoped
+                # ACL to ONLY its worktree — and CANNOT touch the shared project
+                # clone. So a main-HEAD move it could not have caused is external
+                # (a sibling workflow's merge/prep or the developer); project
+                # clones are shared across concurrent workflows, so blaming the
+                # agent is a false positive. This mirrors the branch-switch skip
+                # below and relies on the same isolation assumption, keyed on the
+                # SAME predicate that gates the isolated launch (_is_cross_user).
+                # We reason via the repo-owner ``system_account`` here (the
+                # isolated launch uses a distinct credentialless account), but on
+                # a multi-user host both differ from the service process user, so
+                # the answer is identical. Short-circuit before the benign-pull
+                # probe, which itself runs git on the contended shared clone and
+                # can fail closed under concurrency. Same-user (dev/macOS) mode
+                # has no isolation and keeps the fail-closed probe below.
+                if AutonomousAgentRunner._is_cross_user(system_account):
+                    logger.warning(
+                        "Workflow %s: main repo HEAD moved %s..%s during agent run, "
+                        "but the agent ran cross-user (isolated launcher; cannot touch "
+                        "the shared project clone). Treating as external drift and allowing.",
+                        self._workflow_id,
+                        before_main.get("head", "")[:8],
+                        after_main.get("head", "")[:8],
+                    )
+                    return ""
                 # main HEAD moved but the worktree did not. This is either an
                 # agent operating on the main repo, or an external `git pull`
                 # moving HEAD to a remote commit during the agent run. Allow

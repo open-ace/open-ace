@@ -25,6 +25,9 @@ Covers:
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
 
 MAIN_REPO = "/srv/open-ace"
@@ -369,3 +372,83 @@ class TestRepoDriftValidation:
 
         err = o._validate_repo_context_after_run(before, system_account=None)
         assert err == ""
+
+
+class TestSharedCloneCrossUser:
+    """#3124: a cross-user isolated agent cannot touch the shared project
+    clone, so a main-HEAD move during its run is external (a sibling workflow
+    or the developer) and must not fail the workflow. Same-user mode, where an
+    escape is possible, stays fail-closed."""
+
+    pytestmark = [pytest.mark.issue(3124), pytest.mark.regression]
+
+    def test_cross_user_agent_allows_nonbenign_main_drift(self, monkeypatch):
+        # #2739: main moved forward but NOT onto origin/main (benign-pull probe
+        # would return False -> today this blocks). Under the cross-user isolated
+        # launcher the agent could not have done it -> allow.
+        _install_fake_gh(
+            monkeypatch,
+            after_main_head=MAIN_AFTER_LOCAL,
+            effective_head=WORKTREE_HEAD,
+            moved_forward=True,
+            after_on_remote=False,
+        )
+        o = _make_orchestrator()
+        before = _before_state(MAIN_BEFORE)
+        with patch.object(AutonomousAgentRunner, "_is_cross_user", return_value=True):
+            assert o._validate_repo_context_after_run(before, system_account="dwu") == ""
+
+    def test_cross_user_agent_allows_even_when_probe_indeterminate(self, monkeypatch):
+        # #2739 exact shape: the benign-pull probe hits a git error under shared-
+        # clone contention (indeterminate -> fail-closed today). Cross-user must
+        # still allow, and must not depend on the probe outcome.
+        _install_fake_gh(
+            monkeypatch,
+            after_main_head=MAIN_AFTER_LOCAL,
+            effective_head=WORKTREE_HEAD,
+            git_error=True,
+        )
+        o = _make_orchestrator()
+        before = _before_state(MAIN_BEFORE)
+        with patch.object(AutonomousAgentRunner, "_is_cross_user", return_value=True):
+            assert o._validate_repo_context_after_run(before, system_account="dwu") == ""
+
+    def test_same_user_nonbenign_main_drift_still_blocks(self, monkeypatch):
+        # Same-user host (no isolation): an escape is possible, so a non-benign
+        # main move stays fail-closed.
+        _install_fake_gh(
+            monkeypatch,
+            after_main_head=MAIN_AFTER_LOCAL,
+            effective_head=WORKTREE_HEAD,
+            moved_forward=True,
+            after_on_remote=False,
+        )
+        o = _make_orchestrator()
+        before = _before_state(MAIN_BEFORE)
+        with patch.object(AutonomousAgentRunner, "_is_cross_user", return_value=False):
+            err = o._validate_repo_context_after_run(before, system_account="alice")
+            assert "Detected commits on the main repository" in err
+
+    def test_cross_user_does_not_suppress_repo_root_escape(self, monkeypatch):
+        # The cross-user allow is scoped to the main-drift block only. A genuine
+        # worktree-integrity violation (repo root changed) still blocks.
+        def factory(repo_path, system_account=None):
+            gh = MagicMock()
+            gh.get_path_identity.return_value = "1:1"
+            gh.get_current_branch.return_value = "auto-dev/wf-drift"
+            gh.get_current_commit.return_value = WORKTREE_HEAD
+
+            def run_git(args, check=True):
+                if args == ["rev-parse", "--show-toplevel"]:
+                    return MagicMock(stdout="/srv/somewhere-else")
+                return MagicMock(stdout=repo_path, returncode=0)
+
+            gh._run_git.side_effect = run_git
+            return gh
+
+        monkeypatch.setattr("app.modules.workspace.autonomous.orchestrator.GitHubOps", factory)
+        o = _make_orchestrator()
+        before = _before_state(MAIN_BEFORE)
+        with patch.object(AutonomousAgentRunner, "_is_cross_user", return_value=True):
+            err = o._validate_repo_context_after_run(before, system_account="dwu")
+            assert "Agent escaped the workflow repository" in err
