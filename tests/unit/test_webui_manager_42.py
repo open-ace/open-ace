@@ -7,6 +7,11 @@ Tests for:
 2. Port allocation
 3. Token generation and validation
 4. Multi-user mode configuration
+
+Migrated from tests/issues/42/test_webui_manager.py (#2429 batch 16) with the
+R2 repair: ``test_manager_get_user_webui_url_single_user`` used to spawn a real
+WebUI process; its launch/readiness seams are now stubbed so the test is
+deterministic (see that test's comment for the full story).
 """
 
 import json
@@ -17,10 +22,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# Add app to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-
 from app.services.webui_manager import WebUIInstance, WebUIManager, WorkspaceConfig
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(42)]
 
 
 def test_workspace_config_defaults():
@@ -182,12 +186,29 @@ def test_manager_get_user_webui_url_single_user():
     # Stop cleanup thread to avoid issues
     manager.stop_cleanup_thread()
 
+    # R2 repair (#2429 batch 16): the original test spawned a REAL WebUI
+    # process here. Without a qwen-code-webui executable the launch returns
+    # None and _start_single_user_instance raises ValueError ("Failed to
+    # launch single-user WebUI process"), making the test env-dependent.
+    # Stub the launch/readiness seams (same pattern as
+    # test_manager_instance_limit) so the single-user start path runs
+    # deterministically without any real subprocess.
+    def fake_launch(user_id, system_account, port, base_url):
+        process = MagicMock()
+        process.pid = os.getpid()  # signalable pid for WebUIInstance.is_alive()
+        return process, MagicMock()
+
+    manager._launch_webui_process = MagicMock(side_effect=fake_launch)
+    manager._wait_for_service_ready = MagicMock(return_value=True)
+
     url, token = manager.get_user_webui_url(user_id=1, system_account="testuser")
 
-    # URL should preserve port from config (WebUI port is fixed in single-user mode)
-    assert url == "http://localhost:8080"
+    # Single-user mode pins the WebUI to the fixed port 3100 (Issue #3129):
+    # the config URL's host is kept but its port is replaced with 3100.
+    assert url == "http://localhost:3100"
     # Token is generated for iframe auth in cross-origin API calls
-    assert token.startswith("v2:1:0:")  # v2 format: v2:user_id:port:timestamp:random:signature
+    # v2 format: v2:user_id:port:timestamp:random:signature
+    assert token.startswith("v2:1:3100:")
     print(f"✓ Single-user mode: url={url}, token={token[:20]}...")
 
 
@@ -238,7 +259,7 @@ def test_config_json_sample():
     """Test that config.json.sample has new parameters."""
     print("\n=== Test: config.json.sample has new parameters ===")
 
-    config_path = Path(__file__).parent.parent.parent.parent / "config" / "config.json.sample"
+    config_path = Path(__file__).resolve().parents[2] / "config" / "config.json.sample"
     assert config_path.exists(), f"config.json.sample not found at {config_path}"
 
     with open(config_path) as f:
@@ -284,47 +305,3 @@ def test_extract_system_account():
     system_account = extract_system_account_from_sender_name("")
     assert system_account is None
     print("✓ Handled empty sender_name")
-
-
-def run_all_tests():
-    """Run all tests."""
-    print("=" * 60)
-    print("Issue 42: Multi-user WebUI Manager Tests")
-    print("=" * 60)
-
-    tests = [
-        test_workspace_config_defaults,
-        test_workspace_config_from_dict,
-        test_webui_instance,
-        test_manager_port_allocation,
-        test_manager_token_generation,
-        test_manager_get_user_webui_url_single_user,
-        test_manager_instance_limit,
-        test_config_json_sample,
-        test_extract_system_account,
-    ]
-
-    passed = 0
-    failed = 0
-
-    for test in tests:
-        try:
-            test()
-            passed += 1
-        except AssertionError as e:
-            print(f"✗ Test failed: {e}")
-            failed += 1
-        except Exception as e:
-            print(f"✗ Test error: {e}")
-            failed += 1
-
-    print("\n" + "=" * 60)
-    print(f"Results: {passed} passed, {failed} failed")
-    print("=" * 60)
-
-    return failed == 0
-
-
-if __name__ == "__main__":
-    success = run_all_tests()
-    sys.exit(0 if success else 1)

@@ -418,6 +418,38 @@
       "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
+      "path": "tests/e2e/e2e_autonomous_comprehensive_playwright.py",
+      "mode": "standalone-automated",
+      "owner": "issue-740",
+      "issue": 740,
+      "home_lane": "nightly",
+      "executor": "standalone",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "rehomed from tests/issues/740 by batch 16 (#2429); standalone playwright script with run_tests/main, collects no pytest nodeids"
+    },
+    {
+      "path": "tests/e2e/e2e_autonomous_gap_playwright.py",
+      "mode": "standalone-automated",
+      "owner": "issue-740",
+      "issue": 740,
+      "home_lane": "nightly",
+      "executor": "standalone",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "rehomed from tests/issues/740 by batch 16 (#2429); standalone playwright script with run_tests/main, collects no pytest nodeids"
+    },
+    {
       "path": "tests/e2e/e2e_autonomous_models_error_playwright.py",
       "mode": "standalone-automated",
       "owner": "e2e-governance",
@@ -463,6 +495,22 @@
       "cadence": "nightly",
       "collects": false,
       "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/e2e_card_summary_playwright.py",
+      "mode": "standalone-automated",
+      "owner": "issue-993",
+      "issue": 993,
+      "home_lane": "nightly",
+      "executor": "standalone",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "rehomed from tests/issues/993 by batch 16 (#2429); standalone playwright script with run_tests/main, collects no pytest nodeids"
     },
     {
       "path": "tests/e2e/e2e_compliance_report_playwright.py",
