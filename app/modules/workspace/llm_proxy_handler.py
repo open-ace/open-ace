@@ -226,6 +226,38 @@ def _determine_target_url(
         # Standard SSRF validation
         result = validate_llm_proxy_url(target_url, tenant_id, provider)
         if not result.allowed:
+            if result.transient:
+                # A transient DNS-resolution failure (timeout / empty answer) is
+                # NOT a policy violation — no request is sent either way, but it
+                # is safe to retry. Surface a retryable 5xx whose body the
+                # orchestrator's transient-error classifier recognizes, instead
+                # of a permanent 403 that hard-fails the workflow. #3116.
+                logger.warning(
+                    "LLM proxy upstream DNS resolution failed for tenant %s provider %s: %s",
+                    tenant_id,
+                    provider,
+                    result.error,
+                )
+                audit_blocked_url(
+                    tenant_id=tenant_id,
+                    provider=provider,
+                    url=target_url,
+                    reason="dns_resolution_failed",
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": {
+                                "message": (
+                                    "Upstream host DNS resolution failed (transient). "
+                                    "Service Unavailable — retry later."
+                                ),
+                                "type": "upstream_unavailable",
+                            }
+                        }
+                    ),
+                    503,
+                )
             sanitized_error = sanitize_error_message(result.error or "Invalid URL")
             logger.warning(
                 "LLM proxy URL blocked for tenant %s provider %s: %s",

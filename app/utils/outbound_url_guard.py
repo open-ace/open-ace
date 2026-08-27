@@ -177,6 +177,11 @@ class OutboundUrlValidationResult:
     # before the request and by :class:`_PinnedIPAdapter` to re-check at
     # connect time.
     resolved_addresses: tuple[IPAddress, ...] = ()
+    # True when the failure is a *resolution* failure (DNS timeout / empty
+    # answer) rather than a policy determination. A transient failure sends no
+    # request but is safe to retry; callers may surface it as a retryable 5xx
+    # instead of a permanent 4xx. #3116.
+    transient: bool = False
 
 
 class OutboundUrlBlockedError(ValueError):
@@ -243,12 +248,16 @@ def validate_public_http_url(
     try:
         addresses = _resolve_addresses(ascii_host, parsed.port, resolver)
     except OSError as exc:
-        return OutboundUrlValidationResult(False, f"Host could not be resolved: {exc}")
+        return OutboundUrlValidationResult(
+            False, f"Host could not be resolved: {exc}", transient=True
+        )
     except ValueError as exc:
         return OutboundUrlValidationResult(False, str(exc))
 
     if not addresses:
-        return OutboundUrlValidationResult(False, "Host did not resolve to an IP address")
+        return OutboundUrlValidationResult(
+            False, "Host did not resolve to an IP address", transient=True
+        )
 
     public_addresses = [addr for addr in addresses if _is_public_address(addr)]
     if len(public_addresses) != len(addresses):

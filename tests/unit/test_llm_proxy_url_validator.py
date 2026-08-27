@@ -400,3 +400,43 @@ class TestIsAllowedHost:
             tenant_id=1,
         )
         assert not is_allowed
+
+
+# --- Issue #3116: transient DNS-resolution failures ---
+
+
+def _raising_resolver(host, port, type=socket.SOCK_STREAM):
+    raise OSError("temporary failure in name resolution")
+
+
+def test_validate_llm_proxy_url_marks_dns_failure_transient():
+    result = validate_llm_proxy_url(
+        "https://coding.example.com/v1/messages",
+        tenant_id=1,
+        provider="anthropic",
+        resolver=_raising_resolver,
+    )
+    assert not result.allowed
+    assert result.transient is True
+
+
+def test_validate_llm_proxy_url_private_block_not_transient():
+    result = validate_llm_proxy_url(
+        "https://coding.example.com/v1/messages",
+        tenant_id=1,
+        provider="anthropic",
+        resolver=_resolver("10.1.2.3"),
+    )
+    assert not result.allowed
+    assert result.transient is False
+
+
+def test_validate_llm_proxy_url_allowed_not_transient():
+    result = validate_llm_proxy_url(
+        "https://coding.example.com/v1/messages",
+        tenant_id=1,
+        provider="anthropic",
+        resolver=_resolver("93.184.216.34"),
+    )
+    assert result.allowed
+    assert result.transient is False
