@@ -1736,10 +1736,7 @@ class RemoteSessionManager:
         permission_mode = self._session_permission_modes.get(session_id, "default")
         is_autonomous = permission_mode in ("yolo", "auto-edit")
         reason_lower = reason.lower() if reason else ""
-        is_loop_abort = (
-            state == "aborted"
-            and reason_lower in ("loop", "system", "internal_abort")
-        )
+        is_loop_abort = state == "aborted" and reason_lower in ("loop", "system", "internal_abort")
 
         if is_loop_abort and is_autonomous:
             logger.info(

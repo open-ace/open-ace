@@ -75,6 +75,7 @@ class TestProcessRequestStateLoopAbortAutoResume:
 
             # Wait for timer to execute
             import time
+
             time.sleep(0.6)
 
             # Verify send_message was called with "继续"
@@ -106,6 +107,7 @@ class TestProcessRequestStateLoopAbortAutoResume:
             )
 
             import time
+
             time.sleep(0.6)
 
             mock_send.assert_called_once_with(session_id, "继续")
@@ -131,6 +133,7 @@ class TestProcessRequestStateLoopAbortAutoResume:
             )
 
             import time
+
             time.sleep(0.6)
 
             # Should NOT auto-resume for user abort
@@ -158,6 +161,7 @@ class TestProcessRequestStateLoopAbortAutoResume:
             )
 
             import time
+
             time.sleep(0.6)
 
             # Should NOT auto-resume for default mode
@@ -184,6 +188,7 @@ class TestProcessRequestStateLoopAbortAutoResume:
             )
 
             import time
+
             time.sleep(0.6)
 
             # Should NOT auto-resume stopped session
@@ -211,6 +216,7 @@ class TestProcessRequestStateLoopAbortAutoResume:
             )
 
             import time
+
             time.sleep(0.6)
 
             mock_send.assert_called_once_with(session_id, "继续")
