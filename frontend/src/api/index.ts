@@ -120,6 +120,7 @@ export type {
 export { tenantApi } from './tenant';
 export type {
   Tenant,
+  TenantPlan,
   TenantQuota,
   CreateTenantRequest,
   UpdateTenantRequest,
