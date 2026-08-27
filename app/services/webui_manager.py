@@ -208,6 +208,12 @@ class WebUIManager:
         self._cleanup_greenlet: gevent.Greenlet | None = None
         self._running = False
 
+        # Single-user mode instance (Issue #3129)
+        # In single-user mode (Docker compose), this tracks the shared WebUI
+        # instance listening on port 3100.
+        self._single_user_instance: WebUIInstance | None = None
+        self._single_user_lock = gevent_lock.RLock()  # Lock for single-user instance startup
+
         # Generate token secret if not configured
         if not self.config.token_secret:
             self.config.token_secret = secrets.token_hex(32)
@@ -722,8 +728,28 @@ class WebUIManager:
 
         if not self.config.multi_user_mode:
             # Single-user mode (docker compose): use fixed WebUI port 3100
-            # base_url from _replace_host_from_request has no port
-            token = self.generate_token(user_id, 0)
+            # Issue #3129: Start the single-user WebUI instance if not running
+            with self._single_user_lock:
+                # Check if instance exists and is alive
+                if self._single_user_instance is not None and self._single_user_instance.is_alive():
+                    self._single_user_instance.update_activity()
+                    logger.debug(
+                        f"Single-user WebUI instance already running: "
+                        f"pid={self._single_user_instance.pid}, port={self._single_user_instance.port}"
+                    )
+                else:
+                    # Instance not running or dead, start a new one
+                    if self._single_user_instance is not None:
+                        logger.warning(
+                            "Single-user WebUI instance was dead, restarting: "
+                            f"pid={self._single_user_instance.pid}, "
+                            f"port={self._single_user_instance.port}"
+                        )
+                        self._stop_single_user_instance_internal()
+                    self._start_single_user_instance(user_id, system_account, base_url)
+
+            # Generate token for the request
+            token = self.generate_token(user_id, 3100)
             if host_url:
                 # Docker compose: URL from request.host_url with fixed port 3100
                 url = f"{base_url}:3100"
@@ -760,6 +786,112 @@ class WebUIManager:
             # Start new instance
             instance = self._start_instance_internal(user_id, system_account, base_url)
             return instance.url, instance.token
+
+    def _start_single_user_instance(
+        self, user_id: int, system_account: str, base_url: str
+    ) -> None:
+        """
+        Start the single-user WebUI instance on port 3100.
+
+        This method is called when the first user requests the WebUI URL
+        in single-user mode (Docker compose). It starts a single shared
+        instance that all users connect to.
+
+        Must be called with self._single_user_lock held.
+
+        Args:
+            user_id: User ID for logging and token generation.
+            system_account: System account name (current user in single-user mode).
+            base_url: Base URL from request (e.g., http://192.168.1.87).
+
+        Raises:
+            ValueError: If the WebUI process fails to start.
+        """
+        port = 3100  # Fixed port for single-user mode
+        logger.info(f"Starting single-user WebUI instance on port {port}")
+
+        # Generate token
+        token = self.generate_token(user_id, port)
+
+        # Build URL
+        url = f"{base_url}:{port}"
+
+        # Start process
+        pid = None
+        process = None
+
+        try:
+            process, model_pool = self._launch_webui_process(
+                user_id, system_account, port, base_url
+            )
+            pid = process.pid if process else None
+
+            if process is None:
+                raise ValueError("Failed to launch single-user WebUI process")
+
+            # Wait for service to be ready
+            if not self._wait_for_service_ready(port, timeout=15.0):
+                # Service not ready, clean up
+                try:
+                    process.terminate()
+                    process.wait(timeout=2)
+                except Exception:
+                    pass
+                raise ValueError(
+                    "Single-user WebUI service failed to start within timeout. "
+                    "Check if qwen-code-webui is installed correctly."
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to start single-user WebUI process: {e}")
+            raise
+
+        instance = WebUIInstance(
+            user_id=user_id,
+            system_account=system_account,
+            port=port,
+            pid=pid,
+            token=token,
+            process=process,
+            url=url,
+            session_model_pool=model_pool,
+        )
+
+        self._single_user_instance = instance
+        logger.info(
+            f"Started single-user WebUI instance: "
+            f"port={port}, pid={pid}, system_account={system_account}"
+        )
+
+    def _stop_single_user_instance_internal(self) -> None:
+        """
+        Stop the single-user WebUI instance (internal, must be called with lock).
+
+        This method is called when the instance is dead and needs to be restarted,
+        or during shutdown.
+        """
+        if self._single_user_instance is None:
+            return
+
+        instance = self._single_user_instance
+        logger.info(f"Stopping single-user WebUI instance: pid={instance.pid}, port={instance.port}")
+
+        if instance.process is not None:
+            try:
+                # Terminate the process
+                instance.process.terminate()
+                # Wait for process to exit
+                try:
+                    instance.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Force kill if it doesn't exit gracefully
+                    instance.process.kill()
+                    instance.process.wait(timeout=2)
+            except Exception as e:
+                logger.warning(f"Error stopping single-user WebUI process: {e}")
+
+        self._single_user_instance = None
+        logger.info("Single-user WebUI instance stopped")
 
     def _start_instance_internal(
         self, user_id: int, system_account: str, base_url: str | None = None
@@ -1359,6 +1491,11 @@ class WebUIManager:
 
     def stop_all_instances(self):
         """Stop all running webui instances."""
+        # Stop single-user instance first (Issue #3129)
+        with self._single_user_lock:
+            self._stop_single_user_instance_internal()
+
+        # Stop multi-user instances
         with self._lock:
             for user_id in list(self._instances.keys()):
                 self._stop_instance_internal(user_id)
@@ -1367,8 +1504,14 @@ class WebUIManager:
 
     def get_instance_count(self) -> int:
         """Get the number of active instances."""
+        count = 0
+        # Count single-user instance (Issue #3129)
+        if self._single_user_instance is not None and self._single_user_instance.is_alive():
+            count += 1
+        # Count multi-user instances
         with self._lock:
-            return sum(1 for i in self._instances.values() if i.is_alive())
+            count += sum(1 for i in self._instances.values() if i.is_alive())
+        return count
 
     def get_user_instance(self, user_id: int) -> WebUIInstance | None:
         """Get the instance for a specific user."""
@@ -1377,9 +1520,27 @@ class WebUIManager:
 
     def get_all_instances(self) -> list[dict[str, Any]]:
         """Get information about all instances."""
+        instances = []
+
+        # Include single-user instance (Issue #3129)
+        if self._single_user_instance is not None:
+            i = self._single_user_instance
+            instances.append({
+                "user_id": i.user_id,
+                "system_account": i.system_account,
+                "port": i.port,
+                "pid": i.pid,
+                "url": i.url,
+                "allocated_at": i.allocated_at.isoformat(),
+                "last_activity": i.last_activity.isoformat(),
+                "is_alive": i.is_alive(),
+                "mode": "single-user",
+            })
+
+        # Include multi-user instances
         with self._lock:
-            return [
-                {
+            for i in self._instances.values():
+                instances.append({
                     "user_id": i.user_id,
                     "system_account": i.system_account,
                     "port": i.port,
@@ -1388,12 +1549,18 @@ class WebUIManager:
                     "allocated_at": i.allocated_at.isoformat(),
                     "last_activity": i.last_activity.isoformat(),
                     "is_alive": i.is_alive(),
-                }
-                for i in self._instances.values()
-            ]
+                    "mode": "multi-user",
+                })
+
+        return instances
 
     def update_user_activity(self, user_id: int):
         """Update the activity timestamp for a user's instance."""
+        # Update single-user instance activity (Issue #3129)
+        if self._single_user_instance is not None:
+            self._single_user_instance.update_activity()
+
+        # Update multi-user instance activity
         with self._lock:
             if user_id in self._instances:
                 self._instances[user_id].update_activity()
