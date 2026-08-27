@@ -171,6 +171,12 @@ vi.mock('@/components/common', () => ({
   ),
   PageRefreshControl: () => <div data-testid="page-refresh-control" />,
   useConfirm: () => async () => true,
+  useToast: () => ({
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn(),
+  }),
 }));
 
 // Mock API
@@ -384,7 +390,6 @@ describe('TenantManagement - Issue #3137', () => {
 
       // Update name without changing plan
       const modal = screen.getByTestId('modal');
-      const nameInput = within(modal).getAllByTestId('select')[0]; // TextInput uses placeholder as testid
       // Note: In real implementation, we would update the name input
 
       // Click save

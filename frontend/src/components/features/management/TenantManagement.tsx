@@ -27,7 +27,13 @@ import {
   PageRefreshControl,
 } from '@/components/common';
 import { useConfirm } from '@/components/common';
-import { tenantApi, type Tenant, type TenantPlan, type CreateTenantRequest, type UpdateTenantRequest } from '@/api';
+import {
+  tenantApi,
+  type Tenant,
+  type TenantPlan,
+  type CreateTenantRequest,
+  type UpdateTenantRequest,
+} from '@/api';
 import { formatDateTime } from '@/utils';
 import { usePageRefresh } from '@/hooks';
 import { useTenantQuotaCheck } from '@/hooks/useTenantQuotaCheck';
@@ -734,9 +740,7 @@ export const TenantManagement: React.FC = () => {
               <Select
                 options={modalPlanOptions}
                 value={formData.plan ?? 'standard'}
-                onChange={(value) =>
-                  setFormData({ ...formData, plan: value as TenantPlan })
-                }
+                onChange={(value) => setFormData({ ...formData, plan: value as TenantPlan })}
               />
             </div>
             <div className="col-md-6">
