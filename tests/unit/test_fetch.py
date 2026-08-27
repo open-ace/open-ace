@@ -121,7 +121,9 @@ class TestRunFetchScriptsReturns:
 
         # Set degraded state
         fetch_mod._fetch_status["degraded"] = True
-        fetch_mod._fetch_status["degraded_reason"] = "Wrapper not found: /usr/local/bin/openace-fetch-wrapper"
+        fetch_mod._fetch_status["degraded_reason"] = (
+            "Wrapper not found: /usr/local/bin/openace-fetch-wrapper"
+        )
 
         result = run_fetch_scripts()
 
