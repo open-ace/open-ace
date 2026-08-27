@@ -16,7 +16,7 @@ def test_backend_plan_quotas_match_expected_plans():
     前端 TenantPlan 类型定义：
     'free' | 'standard' | 'premium' | 'enterprise'
     """
-    expected_plans = {'free', 'standard', 'premium', 'enterprise'}
+    expected_plans = {"free", "standard", "premium", "enterprise"}
     backend_plans = set(TenantService.PLAN_QUOTAS.keys())
 
     assert backend_plans == expected_plans, (
@@ -37,12 +37,12 @@ def test_each_plan_has_quota_config():
     验证每个套餐都有完整的配额配置。
     """
     required_fields = [
-        'daily_token_limit',
-        'monthly_token_limit',
-        'daily_request_limit',
-        'monthly_request_limit',
-        'max_users',
-        'max_sessions_per_user',
+        "daily_token_limit",
+        "monthly_token_limit",
+        "daily_request_limit",
+        "monthly_request_limit",
+        "max_users",
+        "max_sessions_per_user",
     ]
 
     for plan_name, quota_config in TenantService.PLAN_QUOTAS.items():
@@ -61,19 +61,24 @@ def test_free_plan_exists():
     Issue #3137: free 套餐应该有合理的配额限制，
     作为基础套餐，其限制应该低于 standard 套餐。
     """
-    assert 'free' in TenantService.PLAN_QUOTAS, "free plan should exist in PLAN_QUOTAS"
+    assert "free" in TenantService.PLAN_QUOTAS, "free plan should exist in PLAN_QUOTAS"
 
-    free_quota = TenantService.PLAN_QUOTAS['free'].to_dict()
-    standard_quota = TenantService.PLAN_QUOTAS['standard'].to_dict()
+    free_quota = TenantService.PLAN_QUOTAS["free"].to_dict()
+    standard_quota = TenantService.PLAN_QUOTAS["standard"].to_dict()
 
     # free 套餐的各项限制应该低于或等于 standard 套餐
-    assert free_quota['daily_token_limit'] <= standard_quota['daily_token_limit'], \
-        "free plan daily_token_limit should be <= standard"
-    assert free_quota['monthly_token_limit'] <= standard_quota['monthly_token_limit'], \
-        "free plan monthly_token_limit should be <= standard"
-    assert free_quota['daily_request_limit'] <= standard_quota['daily_request_limit'], \
-        "free plan daily_request_limit should be <= standard"
-    assert free_quota['monthly_request_limit'] <= standard_quota['monthly_request_limit'], \
-        "free plan monthly_request_limit should be <= standard"
-    assert free_quota['max_users'] <= standard_quota['max_users'], \
-        "free plan max_users should be <= standard"
+    assert (
+        free_quota["daily_token_limit"] <= standard_quota["daily_token_limit"]
+    ), "free plan daily_token_limit should be <= standard"
+    assert (
+        free_quota["monthly_token_limit"] <= standard_quota["monthly_token_limit"]
+    ), "free plan monthly_token_limit should be <= standard"
+    assert (
+        free_quota["daily_request_limit"] <= standard_quota["daily_request_limit"]
+    ), "free plan daily_request_limit should be <= standard"
+    assert (
+        free_quota["monthly_request_limit"] <= standard_quota["monthly_request_limit"]
+    ), "free plan monthly_request_limit should be <= standard"
+    assert (
+        free_quota["max_users"] <= standard_quota["max_users"]
+    ), "free plan max_users should be <= standard"
