@@ -10,7 +10,7 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = PROJECT_ROOT / ".github" / "workflows" / "extended-tests.yml"
-EXECUTION_JOBS = ("full-e2e", "issue-tests", "manual-extended")
+EXECUTION_JOBS = ("full-e2e", "manual-extended")
 CATEGORY_PATTERN = re.compile(r"inputs\.category\s*==\s*'([^']+)'")
 
 
@@ -52,14 +52,13 @@ def test_dispatch_categories_are_exhaustive_and_unambiguous():
         "critical": {"manual-extended"},
         "regression": {"manual-extended"},
         "e2e": {"full-e2e"},
-        "issues": {"issue-tests"},
-        "all": {"full-e2e", "issue-tests"},
+        "all": {"full-e2e"},
         "specific": {"manual-extended"},
     }
 
     assert set().union(*categories_by_job.values()) == options
     assert selected_jobs == expected
-    assert all(len(selected_jobs[category]) == 1 for category in options - {"all"})
+    assert all(len(selected_jobs[category]) == 1 for category in options)
     assert "!=" not in jobs["manual-extended"]["if"]
 
 
@@ -73,13 +72,6 @@ def test_dispatch_lane_predicates_have_exact_boolean_semantics():
             "(github.event_name == 'pull_request' && "
             "contains(github.event.pull_request.labels.*.name, 'run-full-e2e'))"
         ),
-        "issue-tests": (
-            "github.event_name == 'schedule' || "
-            "(github.event_name == 'workflow_dispatch' && "
-            "(inputs.category == 'issues' || inputs.category == 'all')) || "
-            "(github.event_name == 'pull_request' && "
-            "contains(github.event.pull_request.labels.*.name, 'run-issue-tests'))"
-        ),
         "manual-extended": (
             "github.event_name == 'workflow_dispatch' && "
             "(inputs.category == 'critical' || inputs.category == 'regression' || "
@@ -92,24 +84,26 @@ def test_dispatch_lane_predicates_have_exact_boolean_semantics():
     } == expected
 
 
-def test_issue_dispatch_keeps_fail_closed_baseline_comparator():
-    jobs = _workflow()["jobs"]
-    comparator = jobs["legacy-issue-baseline"]
-    condition = comparator["if"]
+def test_legacy_issue_lane_is_retired():
+    """#2429 final exodus: the issue-tests lane, its fail-closed baseline
+    comparator job, and the nightly LEGACY_RESULT plumbing are gone for good.
 
-    assert comparator["needs"] == ["issue-tests"]
-    assert _dispatch_categories(comparator) == {"issues", "all"}
-    assert "always()" in condition
-    assert "needs.issue-tests.result != 'skipped'" in condition
+    Regressions now live in canonical layers gated by python-core/python-min;
+    nothing may reintroduce a tests/issues execution lane here."""
+    jobs = _workflow()["jobs"]
+
+    assert "issue-tests" not in jobs
+    assert "legacy-issue-baseline" not in jobs
 
     nightly = jobs["nightly-summary"]
-    assert "legacy-issue-baseline" in nightly["needs"]
+    assert "issue-tests" not in nightly["needs"]
+    assert "legacy-issue-baseline" not in nightly["needs"]
     publish_step = next(
         step for step in nightly["steps"] if step["name"] == "Publish nightly result"
     )
-    assert publish_step["env"]["LEGACY_RESULT"] == "${{ needs.legacy-issue-baseline.result }}"
+    assert "LEGACY_RESULT" not in publish_step["env"]
+    assert "LEGACY_RESULT" not in publish_step["run"]
     assert 'if [ "$PYTHON_RESULT" != success ]' in publish_step["run"]
-    assert '[ "$LEGACY_RESULT" != success ]' in publish_step["run"]
 
 
 def test_full_e2e_governance_job_wraps_full_e2e_and_feeds_nightly_gate():
@@ -161,7 +155,7 @@ def test_full_e2e_governance_job_wraps_full_e2e_and_feeds_nightly_gate():
     assert publish_step["env"]["E2E_RESULT"] == "${{ needs.full-e2e-governance.result }}"
 
 
-@pytest.mark.parametrize("failed_lane", [None, "python", "e2e", "legacy"])
+@pytest.mark.parametrize("failed_lane", [None, "python", "e2e"])
 def test_nightly_gate_returns_nonzero_for_every_failed_lane(tmp_path, failed_lane):
     jobs = _workflow()["jobs"]
     publish_step = next(
@@ -169,7 +163,7 @@ def test_nightly_gate_returns_nonzero_for_every_failed_lane(tmp_path, failed_lan
         for step in jobs["nightly-summary"]["steps"]
         if step["name"] == "Publish nightly result"
     )
-    results = {"python": "success", "e2e": "success", "legacy": "success"}
+    results = {"python": "success", "e2e": "success"}
     if failed_lane:
         results[failed_lane] = "failure"
     summary_path = tmp_path / "summary.md"
@@ -177,7 +171,6 @@ def test_nightly_gate_returns_nonzero_for_every_failed_lane(tmp_path, failed_lan
         **os.environ,
         "PYTHON_RESULT": results["python"],
         "E2E_RESULT": results["e2e"],
-        "LEGACY_RESULT": results["legacy"],
         "GITHUB_STEP_SUMMARY": str(summary_path),
     }
 
@@ -198,7 +191,6 @@ def test_execution_lane_names_and_artifacts_are_unique():
     jobs = _workflow()["jobs"]
     expected = {
         "full-e2e": ("Full E2E (${{ matrix.shard }}/2)", "full-e2e-${{ matrix.shard }}"),
-        "issue-tests": ("Issue Tests (${{ matrix.group }}/4)", "issue-tests-${{ matrix.group }}"),
         "manual-extended": ("Manual Extended Tests", "manual-extended-tests"),
     }
 

@@ -54,7 +54,6 @@ def test_docs_only_change_selects_no_runtime_suite():
 def test_backend_change_selects_production_python_suite():
     assert ci.select_pr_suites(["app/services/auth_service.py"]) == [
         "default-collection",
-        "issue-collection",
         "python-core",
         "python-min",
     ]
@@ -192,10 +191,13 @@ def test_extended_runner_change_selects_critical_and_governance_suites():
     assert "e2e-governance" in selected
 
 
-def test_test_change_selects_issue_collection():
+def test_test_change_keeps_default_collection_and_retires_issue_collection():
+    """#2429 final exodus: tests/** changes still gate on default collection,
+    and the legacy issue-collection suite is gone from the registry."""
     selected = ci.select_pr_suites(["tests/unit/test_example.py"])
     assert "default-collection" in selected
-    assert "issue-collection" in selected
+    assert "issue-collection" not in ci.load_config()["suites"]
+    assert "issue-collection" not in ci.load_config()["pr_suites"]
 
 
 def test_isolated_environment_drops_developer_database_settings(monkeypatch, tmp_path):
@@ -216,17 +218,19 @@ def test_collection_count_uses_final_pytest_summary():
     assert ci.collection_count(output) == 4417
 
 
-def test_collection_file_count_honors_default_quarantine():
+def test_collection_file_count_covers_default_tree():
     assert ci.candidate_test_file_count("tests") >= 250
-    # Floor mirrors .test-baseline.json issues.min_files (430 -> 413 -> 393 -> 383
-    # -> 371 -> 357 -> 338 -> 316 -> 277 -> 244 -> 221 -> 207 -> 192 -> 155
-    # -> 126 -> 110 -> 98 -> 93 as #2429 batches 1-8 migrated 17 + 20 + 12 + 19 + 22 + 39 files,
-    # batches 9/10/11/12/13/14 (I-group db, db+subprocess, subprocess-core,
-    # merge/gateway/org-sync/run-as, closure, B-group in-proc wave 1)
-    # 33 + 23 + 14 + 15 + 37 + 29 + 16 + 17 more into canonical layers / e2e
-    # and governed the stubs (batch 15 = B-group 716/610, batch 16 = in-proc
-    # closure). min_tests delta 99-143 < 0 -> clamped to remaining count 169.
-    assert ci.candidate_test_file_count("tests/issues") >= 93
+
+
+def test_legacy_issue_quarantine_tree_is_retired():
+    """#2429 final exodus: the tests/issues quarantine no longer exists, so its
+    per-issue collection floor (the long min_files chain this test used to
+    re-assert) is retired with it. Regressions live in canonical layers and
+    are collected by the default-collection gate."""
+    assert not (ROOT / "tests" / "issues").exists(), (
+        "tests/issues was retired with the #2429 final exodus; new tests belong "
+        "in tests/unit, tests/integration, tests/e2e, or tests/performance"
+    )
 
 
 def test_missing_push_base_fails_safe_to_policy_change():

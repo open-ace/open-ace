@@ -1,0 +1,157 @@
+"""
+Test script for Issue #69: /api/analysis/recommendations API
+
+This test verifies that:
+1. Analysis page loads correctly
+2. Recommendations section displays properly
+3. API returns valid JSON data (no TypeError)
+
+Usage:
+    # Run standalone test
+    python3 tests/ui/test_issue69_recommendations.py
+"""
+
+import os
+import time
+
+import pytest
+import requests
+from playwright.async_api import async_playwright
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(69)]
+
+
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
+# Test configuration
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+TIMEOUT = 10000  # 10 seconds timeout
+
+
+def _skip_if_no_server():
+    try:
+        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+    except (requests.exceptions.RequestException, ConnectionError, OSError):
+        pytest.skip(f"test server not reachable at {BASE_URL}")
+
+
+@pytest.mark.asyncio
+async def test_recommendations_api():
+    """Test that recommendations API works correctly after fix."""
+    _skip_if_no_server()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=HEADLESS)
+        context = await browser.new_context()
+        page = await context.new_page()
+
+        try:
+            print("=" * 60)
+            print("[UI] Testing: Issue #69 - Recommendations API")
+            print("=" * 60)
+
+            # Step 1: Login
+            print("\n[Step 1] Logging in...")
+            await page.goto(f"{BASE_URL}/login")
+            await page.wait_for_timeout(1000)
+            await page.evaluate(
+                """async (credentials) => {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(credentials)
+                });
+                return await response.json();
+            }""",
+                {"username": USERNAME, "password": PASSWORD},
+            )
+            print("✓ Login successful")
+
+            # Step 2: Navigate to Analysis page
+            print("\n[Step 2] Navigating to Analysis page...")
+            start_time = time.time()
+            await page.goto(f"{BASE_URL}/manage/analysis/roi")
+            await page.wait_for_timeout(3000)
+            navigation_time = time.time() - start_time
+            print(f"✓ Analysis page loaded in {navigation_time:.2f} seconds")
+
+            # Step 3: Check for recommendations content
+            print("\n[Step 3] Checking recommendations section...")
+
+            # Wait for recommendations to load
+            time.sleep(2)
+
+            # Check if recommendations container exists
+            recommendations_container = page.locator("#recommendations-content")
+            rec_count = await recommendations_container.count()
+            if rec_count > 0:
+                print("✓ Recommendations container found")
+            else:
+                print("⚠ Recommendations container not found (checking alternative selectors)")
+
+            # Step 4: Verify API response via network
+            print("\n[Step 4] Verifying API response...")
+
+            # Listen for API response
+            api_responses = []
+
+            def handle_response(response):
+                if "/api/analysis/recommendations" in response.url:
+                    api_responses.append(
+                        {"url": response.url, "status": response.status, "ok": response.ok}
+                    )
+                    print(f"  API Response: {response.status} - {response.url}")
+
+            page.on("response", handle_response)
+
+            # Reload to capture API call
+            await page.reload()
+            time.sleep(3)
+
+            # Check API responses
+            if api_responses:
+                for resp in api_responses:
+                    assert resp["status"] == 200, (
+                        f"Recommendations API returned {resp['status']} "
+                        f"(issue #69 regression): {resp['url']}"
+                    )
+                    print("✓ Recommendations API returned 200 OK")
+            else:
+                print("⚠ No API response captured (may need manual verification)")
+
+            # Step 5: Check for error messages in UI
+            print("\n[Step 5] Checking for error messages...")
+            error_elements = page.locator('.alert-danger, .error-message, [class*="error"]')
+            error_count = await error_elements.count()
+
+            if error_count > 0:
+                print(f"✗ Found {error_count} error messages in UI")
+                for i in range(error_count):
+                    error_text = await error_elements.nth(i).inner_text()
+                    print(f"  Error: {error_text}")
+            else:
+                print("✓ No error messages found in UI")
+            assert error_count == 0, f"{error_count} error message(s) shown in the analysis UI"
+
+            # Take screenshot
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            screenshot_path = f"screenshots/issues/69/test_recommendations_{timestamp}.png"
+            await page.screenshot(path=screenshot_path)
+            print(f"\n✓ Screenshot saved to {screenshot_path}")
+
+            print("\n" + "=" * 60)
+            print("Test completed successfully!")
+            print("Issue #69 fix verified: Recommendations API working correctly")
+            print("=" * 60)
+
+        except Exception as e:
+            print(f"\n✗ Test failed: {e}")
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            screenshot_path = f"screenshots/issues/69/test_recommendations_error_{timestamp}.png"
+            await page.screenshot(path=screenshot_path)
+            print(f"Error screenshot saved to {screenshot_path}")
+            raise
+
+        finally:
+            await browser.close()

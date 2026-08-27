@@ -1,0 +1,111 @@
+"""
+Test script for issue #75: Language selector as dropdown.
+
+Issue: Language selector should be a dropdown above Version.
+
+Fix: Change from button to select element, move above Version.
+"""
+
+import os
+import sys
+from datetime import datetime
+
+import pytest
+
+# Get project root directory
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
+sys.path.insert(0, PROJECT_ROOT)
+
+import requests
+from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import async_playwright, expect
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(75)]
+
+
+# Configuration
+BASE_URL = "http://localhost:19888"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "75")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
+
+async def take_screenshot(page, name):
+    """Take a screenshot and return the path."""
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+    path = os.path.join(SCREENSHOT_DIR, name)
+    await page.screenshot(path=path)
+    return path
+
+
+def _skip_if_no_server():
+    try:
+        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+    except (requests.exceptions.RequestException, ConnectionError, OSError):
+        pytest.skip(f"test server not reachable at {BASE_URL}")
+
+
+@pytest.mark.asyncio
+async def test_language_selector():
+    """Test #75: Language selector is a dropdown above Version."""
+    _skip_if_no_server()
+    print("\n" + "=" * 50)
+    print("Test #75: Language selector as dropdown")
+    print("=" * 50)
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=HEADLESS)
+        context = await browser.new_context()
+        page = await context.new_page()
+
+        try:
+            # Login first
+            await page.goto(f"{BASE_URL}/login")
+            await page.wait_for_load_state("networkidle")
+            await page.fill("#username", USERNAME)
+            await page.fill("#password", PASSWORD)
+            await page.click("#login-btn")
+            await page.wait_for_url(f"{BASE_URL}/", timeout=10000)
+            await page.wait_for_load_state("networkidle")
+
+            # Take screenshot
+            screenshot_path = await take_screenshot(page, "01_language_selector.png")
+            print(f"  Screenshot: {screenshot_path}")
+
+            # Check language selector is a select element (dropdown)
+            lang_select = await page.locator("#lang-select")
+            expect(lang_select).to_be_visible()
+            print("  ✓ Language selector is visible")
+
+            # Check it's a select element
+            tag_name = lang_select.evaluate("el => el.tagName")
+            assert (
+                tag_name == "SELECT"
+            ), f"Language selector should be a SELECT element, got: {tag_name}"
+            print("  ✓ Language selector is a dropdown (SELECT)")
+
+            # Check options exist
+            options = lang_select.locator("option")
+            option_count = options.count()
+            assert (
+                option_count >= 2
+            ), f"Should have at least 2 language options, found {option_count}"
+            print(f"  ✓ Found {option_count} language options")
+
+            # Check language selector is above Version
+            version_text = await page.locator(".sidebar-footer").locator("text=Version:")
+            expect(version_text).to_be_visible()
+            print("  ✓ Version text is visible below language selector")
+
+            print("  ✓ Test #75 PASSED")
+            return True
+
+        except PlaywrightError as e:
+            print(f"  ✗ Test #75 FAILED: {e}")
+            await take_screenshot(page, "error_75.png")
+            return False
+        finally:
+            await browser.close()

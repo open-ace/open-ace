@@ -1,0 +1,425 @@
+#!/usr/bin/env python3
+"""
+Open ACE - Codex Integration E2E Test
+
+Comprehensive end-to-end test for OpenAI Codex CLI integration:
+1. fetch_codex.py data fetching (sessions, messages, tokens)
+2. API endpoint verification (sessions, messages, usage)
+3. Codex-specific content_block types (reasoning, file_change, task_summary)
+4. Token usage in daily_usage and agent_sessions
+5. Remote session adapter (CLI adapter, terminal menu)
+6. Frontend rendering verification via Playwright
+
+Prerequisites:
+  - Codex sessions exist in ~/.codex/sessions/
+  - Backend server running on BASE_URL
+  - Frontend dev server running on WEBUI_URL (for Playwright tests)
+
+Run:
+  HEADLESS=true  python tests/e2e/work/e2e_codex_integration.py
+  HEADLESS=false python tests/e2e/work/e2e_codex_integration.py
+
+#2429 exodus note: the four Playwright frontend checks moved to
+tests/e2e/browser/test_codex_frontend.py (browser area); this file keeps the
+server-API tests.
+"""
+
+import json
+import os
+import sys
+import time
+
+import pytest
+import requests
+
+# Absolute package import of the shared codex helpers (prepend-mode
+# requirement): put the project root on sys.path so ``tests.e2e.work.helpers``
+# resolves under both pytest import modes.
+sys.path.insert(
+    0,
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+)
+
+from tests.e2e.work import helpers
+from tests.e2e.work.helpers import (
+    BASE_URL,
+    FETCH_HOSTNAME,
+    HEADLESS,
+    PROJECT_ROOT,
+    TestResults,
+    api_get,
+    api_login,
+    api_post,
+    cleanup_codex_seed,
+    ensure_lane_login,
+    poll_until,
+    print_results,
+    run_test,
+    seed_codex_data,
+)
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(517)]
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _lane_seed_and_auth():
+    """Login + seed codex data once for this module (lane-only concerns)."""
+    ensure_lane_login()
+    seed_codex_data()
+    yield
+    cleanup_codex_seed()
+
+
+# ── Test state ─────────────────────────────────────────
+auth_token = None
+results = TestResults()
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-codex")
+
+
+# ═══════════════════════════════════════════════════════
+# SECTION 1: fetch_codex.py Data Fetching
+# ═══════════════════════════════════════════════════════
+
+
+def test_fetch_codex_runs():
+    """fetch_codex.py runs successfully and processes sessions."""
+    import subprocess
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            os.path.join(PROJECT_ROOT, "scripts", "fetch_codex.py"),
+            "--days",
+            "999",
+            # Tag side-effect rows so cleanup can remove exactly them and
+            # never touch real-host data on a reuse server.
+            "--hostname",
+            FETCH_HOSTNAME,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=PROJECT_ROOT,
+    )
+    assert result.returncode == 0, f"fetch_codex.py failed: {result.stderr[-500:]}"
+    output = result.stdout
+    assert (
+        "session files" in output.lower() or "processed" in output.lower()
+    ), f"Unexpected output: {output[:300]}"
+    print(f"    Output: {output.splitlines()[-5:]}")
+
+
+def test_daily_usage_has_codex():
+    """daily_usage table has codex entries with non-zero tokens."""
+    from shared.db import get_connection
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT date, tokens_used, input_tokens, output_tokens, request_count "
+        "FROM daily_usage WHERE tool_name = 'codex' ORDER BY date DESC LIMIT 5"
+    )
+    rows = cur.fetchall()
+    assert rows, "No codex daily_usage rows found"
+    total_tokens = sum(r["tokens_used"] for r in rows)
+    print(f"    Found {len(rows)} daily_usage rows, total_tokens={total_tokens}")
+    # At least one day should have tokens
+    assert any(
+        r["tokens_used"] > 0 for r in rows
+    ), f"All codex daily_usage rows have 0 tokens: {rows}"
+
+
+def test_agent_sessions_have_codex():
+    """agent_sessions table has codex sessions with non-zero tokens."""
+    from shared.db import get_connection
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT COUNT(*) as cnt, SUM(total_tokens) as total, SUM(message_count) as msgs "
+        "FROM agent_sessions WHERE tool_name = 'codex'"
+    )
+    row = cur.fetchone()
+    assert row["cnt"] > 0, "No codex sessions in agent_sessions"
+    assert row["total"] > 0, f"All {row['cnt']} codex sessions have 0 total_tokens"
+    assert row["msgs"] > 0, f"All {row['cnt']} codex sessions have 0 messages"
+    print(f"    {row['cnt']} sessions, {row['total']} tokens, {row['msgs']} messages")
+
+
+def test_session_messages_have_codex():
+    """session_messages table has codex messages with content."""
+    from shared.db import get_connection
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT COUNT(*) as cnt FROM session_messages sm "
+        "JOIN agent_sessions s ON sm.session_id = s.session_id "
+        "WHERE s.tool_name = 'codex'"
+    )
+    row = cur.fetchone()
+    assert row["cnt"] > 0, "No codex session_messages found"
+    print(f"    {row['cnt']} codex session_messages")
+
+
+def test_codex_content_block_types():
+    """Verify Codex-specific content_block types exist in session_messages."""
+    from shared.db import get_connection
+
+    conn = get_connection()
+    cur = conn.cursor()
+    # Check for content_blocks in metadata JSON
+    cur.execute(
+        "SELECT sm.metadata FROM session_messages sm "
+        "JOIN agent_sessions s ON sm.session_id = s.session_id "
+        "WHERE s.tool_name = 'codex' AND sm.metadata IS NOT NULL "
+        "LIMIT 500"
+    )
+    rows = cur.fetchall()
+    assert rows, "No codex session_messages with metadata"
+
+    types_found = set()
+    for row in rows:
+        try:
+            meta = (
+                json.loads(row["metadata"]) if isinstance(row["metadata"], str) else row["metadata"]
+            )
+            blocks = meta.get("content_blocks", [])
+            for block in blocks:
+                if isinstance(block, dict) and "type" in block:
+                    types_found.add(block["type"])
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    print(f"    Content block types found: {sorted(types_found)}")
+    # Standard types that should always be present
+    assert "text" in types_found, "No 'text' content_blocks found"
+    # At least one of tool_use or tool_result should exist
+    assert (
+        "tool_use" in types_found or "tool_result" in types_found
+    ), "No tool_use or tool_result content_blocks found"
+
+
+def test_codex_daily_messages():
+    """daily_messages table has codex entries."""
+    from shared.db import get_connection
+
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT COUNT(*) as cnt, COUNT(DISTINCT agent_session_id) as sessions "
+        "FROM daily_messages WHERE tool_name = 'codex'"
+    )
+    row = cur.fetchone()
+    assert row["cnt"] > 0, "No codex daily_messages found"
+    print(f"    {row['cnt']} messages across {row['sessions']} sessions")
+
+
+# ═══════════════════════════════════════════════════════
+# SECTION 2: API Endpoint Verification
+# ═══════════════════════════════════════════════════════
+
+
+def test_api_sessions_list_codex():
+    """GET /api/workspace/sessions?tool_name=codex returns codex sessions."""
+    data = api_get("/workspace/sessions", params={"tool_name": "codex", "limit": 5})
+    sessions = data.get("data", {}).get("sessions", [])
+    total = data.get("data", {}).get("total", 0)
+    assert total > 0, "No codex sessions returned from API"
+    print(f"    {total} sessions, showing {len(sessions)}")
+
+    # Verify session structure
+    s = sessions[0]
+    assert s["tool_name"] in ("codex", "codex-cli"), f"Unexpected tool_name: {s['tool_name']}"
+    assert s.get("session_id"), "Missing session_id"
+
+
+def test_api_session_detail():
+    """GET /api/workspace/sessions/<id>?include_messages=true returns messages."""
+    # First get a session id
+    data = api_get("/workspace/sessions", params={"tool_name": "codex", "limit": 1})
+    sessions = data.get("data", {}).get("sessions", [])
+    assert sessions, "No codex sessions to query detail"
+
+    sid = sessions[0]["session_id"]
+    detail = api_get(f"/workspace/sessions/{sid}", params={"include_messages": "true"})
+    session = detail.get("data", {})
+    assert session.get("session_id") == sid, "Session ID mismatch"
+
+    messages = session.get("messages", [])
+    print(
+        f"    Session {sid[:16]}...: {session.get('message_count', 0)} messages, "
+        f"{session.get('total_tokens', 0)} tokens"
+    )
+    # Messages may come from session_messages or daily_messages fallback
+    if messages:
+        roles = {m.get("role") for m in messages}
+        print(f"    Roles: {sorted(roles)}")
+
+
+def test_api_session_with_tokens():
+    """At least one codex session has non-zero total_tokens."""
+    data = api_get("/workspace/sessions", params={"tool_name": "codex", "limit": 50})
+    sessions = data.get("data", {}).get("sessions", [])
+    sessions_with_tokens = [s for s in sessions if s.get("total_tokens", 0) > 0]
+    assert sessions_with_tokens, f"None of {len(sessions)} sessions have tokens"
+    top = max(sessions_with_tokens, key=lambda s: s["total_tokens"])
+    print(
+        f"    Top session: {top['total_tokens']:,} tokens, {top.get('message_count', 0)} messages"
+    )
+
+
+def test_api_usage_codex():
+    """GET /api/tool/codex/<days> returns usage data."""
+    r = requests.get(
+        f"{BASE_URL}/api/tool/codex/30",
+        cookies={"session_token": helpers._auth_token},
+    )
+    assert r.status_code == 200, f"GET /api/tool/codex/30 failed: {r.status_code} {r.text[:300]}"
+    data = r.json()
+    # The response may be a raw list or wrapped in {"data": [...]}
+    usage = data if isinstance(data, list) else data.get("data", [])
+    assert usage, "No codex usage data returned"
+    total_tokens = sum(u.get("tokens_used", 0) for u in usage if isinstance(u, dict))
+    print(f"    {len(usage)} days of codex usage, total={total_tokens:,} tokens")
+
+
+def test_api_messages_codex():
+    """GET /api/messages?tool=codex returns codex messages."""
+    data = api_get(
+        "/messages",
+        params={"tool": "codex", "limit": 5, "start_date": "2026-01-01", "end_date": "2026-12-31"},
+    )
+    messages = data.get("messages", data.get("data", []))
+    total = data.get("total", 0)
+    assert total > 0, "No codex messages returned"
+    print(f"    {total} messages total, showing {len(messages)}")
+    if messages:
+        m = messages[0]
+        assert m.get("tool_name") == "codex", f"Unexpected tool_name: {m.get('tool_name')}"
+
+
+def test_api_usage_tools_includes_codex():
+    """The usage tools query includes codex.
+
+    /api/tools is served from a ttl=300 in-process cache; a sibling browser
+    test can prime it with the empty pre-seed list, so assert the underlying
+    repository query (what the endpoint computes) instead of the cached HTTP
+    response — order-independent within the shard.
+    """
+    from app.repositories.usage_repo import UsageRepository
+
+    repo = UsageRepository()
+    tools = repo.get_all_tools(tenant_id=1)
+    assert "codex" in tools, f"codex not in tools list: {tools}"
+    print(f"    Tools: {tools}")
+
+
+def test_api_codex_alias_resolution():
+    """GET /api/workspace/sessions?tool_name=codex-cli also returns codex sessions."""
+    data = api_get("/workspace/sessions", params={"tool_name": "codex-cli", "limit": 5})
+    _sessions = data.get("data", {}).get("sessions", [])
+    total = data.get("data", {}).get("total", 0)
+    # Should return the same sessions as tool_name=codex
+    assert "data" in data, f"unexpected sessions response shape: {list(data)}"
+    print(f"    codex-cli alias: {total} sessions")
+
+
+# ═══════════════════════════════════════════════════════
+# SECTION 3+4: Remote Session Adapter / Tool Connector
+# (in-process defs extracted to tests/unit/test_codex_adapter_inprocess_517.py
+#  in #2429 batch 16)
+# ═══════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════
+# SECTION 6: Content Block Rendering Verification
+# ═══════════════════════════════════════════════════════
+
+
+def test_content_block_types_in_api():
+    """API returns session messages with all Codex content_block types."""
+    # Get a session with messages
+    data = api_get("/workspace/sessions", params={"tool_name": "codex", "limit": 20})
+    sessions = data.get("data", {}).get("sessions", [])
+
+    all_types = set()
+    checked = 0
+    for s in sessions:
+        sid = s["session_id"]
+        try:
+            detail = api_get(f"/workspace/sessions/{sid}", params={"include_messages": "true"})
+        except AssertionError:
+            continue
+        messages = detail.get("data", {}).get("messages", [])
+        for msg in messages:
+            meta = msg.get("metadata", {})
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except json.JSONDecodeError:
+                    continue
+            blocks = meta.get("content_blocks", [])
+            for b in blocks:
+                if isinstance(b, dict) and "type" in b:
+                    all_types.add(b["type"])
+            checked += 1
+
+    print(f"    Checked {checked} sessions, found types: {sorted(all_types)}")
+    assert "text" in all_types, "No 'text' content_blocks in API responses"
+
+
+# ═══════════════════════════════════════════════════════
+# MAIN: Run all tests
+# ═══════════════════════════════════════════════════════
+
+
+def main():
+    print("=" * 60)
+    print("Codex Integration E2E Test Suite")
+    print("=" * 60)
+
+    # ── Phase 1: Data layer tests (no server required) ──
+    print("\n── Phase 1: Data Layer ──")
+
+    run_test("fetch_codex.py runs successfully", test_fetch_codex_runs)
+    run_test("daily_usage has codex entries with tokens", test_daily_usage_has_codex)
+    run_test("agent_sessions have codex with tokens", test_agent_sessions_have_codex)
+    run_test("session_messages have codex content", test_session_messages_have_codex)
+    run_test("Codex content_block types exist", test_codex_content_block_types)
+    run_test("daily_messages has codex entries", test_codex_daily_messages)
+
+    # ── Phase 2+3: Adapter / backend module tests ──
+    # (in-process defs extracted to tests/unit/test_codex_adapter_inprocess_517.py
+    #  in #2429 batch 16)
+
+    # ── Phase 4: API tests (server required) ──
+    print("\n── Phase 4: API Endpoints ──")
+
+    try:
+        api_login()
+        print("  Logged in successfully")
+    except (AssertionError, requests.exceptions.RequestException) as e:
+        print(f"  SKIP: Login failed: {e}")
+        print("  Skipping API and frontend tests")
+        print_results(results)
+        return
+
+    run_test("API sessions list codex", test_api_sessions_list_codex)
+    run_test("API session detail with messages", test_api_session_detail)
+    run_test("API session with tokens", test_api_session_with_tokens)
+    run_test("API usage for codex", test_api_usage_codex)
+    run_test("API messages for codex", test_api_messages_codex)
+    run_test("API usage tools includes codex", test_api_usage_tools_includes_codex)
+    run_test("API codex alias resolution", test_api_codex_alias_resolution)
+    run_test("Content block types in API responses", test_content_block_types_in_api)
+
+    # ── Phase 5: Frontend tests (server + frontend required) ──
+    # (extracted to tests/e2e/browser/test_codex_frontend.py in #2429 batch 17)
+
+    if not print_results(results):
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -224,10 +224,6 @@ tests/
 │   ├── remote/         # Remote workspace tests
 │   └── terminal/       # Terminal tests
 ├── performance/        # Timing/resource tests (scheduled lane)
-├── issues/             # Legacy quarantine; do not add new tests
-│   ├── 164/
-│   ├── 517/
-│   └── ...
 └── conftest.py         # Shared fixtures
 ```
 

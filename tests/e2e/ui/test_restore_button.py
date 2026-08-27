@@ -1,0 +1,132 @@
+"""
+Test for issue 74: Restore session button not working
+"""
+
+import asyncio
+import os
+
+import pytest
+import requests
+from playwright.async_api import async_playwright
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(74)]
+
+
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
+
+
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "74")
+
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+
+
+def _skip_if_no_server():
+    try:
+        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+    except (requests.exceptions.RequestException, ConnectionError, OSError):
+        pytest.skip(f"test server not reachable at {BASE_URL}")
+
+
+@pytest.mark.asyncio
+async def test_restore_button():
+    """Test that the restore session button works correctly"""
+    _skip_if_no_server()
+    async with async_playwright() as p:
+
+        browser = await p.chromium.launch(headless=HEADLESS)
+        context = await browser.new_context()
+        page = await context.new_page()
+
+        # Enable console message capture
+        console_messages = []
+        page.on("console", lambda msg: console_messages.append(f"[{msg.type}] {msg.text}"))
+
+        print("1. Navigating to login page...")
+        await page.goto(f"{BASE_URL}/", wait_until="networkidle")
+        await page.wait_for_timeout(1000)
+
+        # Login
+        print("2. Logging in...")
+        await page.fill("#username", USERNAME)
+        await page.fill("#password", PASSWORD)
+        await page.click("button[type='submit']")
+
+        try:
+            await page.wait_for_url("**/dashboard**", timeout=5000)
+            print("   Login successful!")
+        except:
+            current_url = page.url
+            print(f"   Current URL: {current_url}")
+            assert not (
+                "login" in current_url or current_url == f"{BASE_URL}/"
+            ), f"login did not complete (still at {current_url})"
+
+        await page.wait_for_timeout(1000)
+
+        # Navigate to sessions page
+        print("\n3. Navigating to sessions page...")
+        await page.goto(f"{BASE_URL}/sessions", wait_until="networkidle")
+        await page.wait_for_timeout(3000)
+
+        # Take screenshot
+        await page.screenshot(
+            path=os.path.join(SCREENSHOT_DIR, "sessions_page.png"),
+            full_page=True,
+        )
+
+        # Get first session card HTML
+        print("\n4. Analyzing first session card structure...")
+        session_count = await page.locator(".session-item").count()
+        print(f"   Found {session_count} session card(s)")
+        assert session_count > 0, "sessions page shows no session cards"
+        first_card = page.locator(".session-item").first
+
+        # Get all buttons in the card
+        buttons = await first_card.locator("button").all()
+        print(f"   Found {len(buttons)} buttons in first card")
+
+        for i, btn in enumerate(buttons):
+            btn_html = await btn.evaluate("el => el.outerHTML")
+            print(f"   Button {i+1}: {btn_html[:200]}...")
+
+        # Check for specific icons
+        print("\n5. Looking for restore button icon...")
+
+        # Try different selectors
+        selectors = [
+            "button:has(.bi-box-arrow-in-right)",
+            "button .bi-box-arrow-in-right",
+            ".bi-box-arrow-in-right",
+            "button[title*='Restore']",
+            "button[title*='恢复']",
+        ]
+
+        restore_icon_matches = 0
+        for sel in selectors:
+            count = await first_card.locator(sel).count()
+            restore_icon_matches += count
+            print(f"   Selector '{sel}': {count} matches")
+
+        assert restore_icon_matches > 0, "no restore button/icon found on the session card"
+
+        # Get the card's action area HTML
+        action_area = await first_card.locator(".d-flex.flex-column.gap-2").evaluate(
+            "el => el.outerHTML"
+        )
+        print(f"\n6. Action area HTML:\n{action_area}")
+
+        # Try to find any button with box-arrow icon
+        all_buttons_in_card = await first_card.locator("button i").all()
+        print("\n7. All button icons in card:")
+        for i, icon in enumerate(all_buttons_in_card):
+            icon_class = await icon.evaluate("el => el.className")
+            print(f"   Icon {i+1}: {icon_class}")
+
+        print("\n8. Keeping browser open for 10 seconds...")
+        await page.wait_for_timeout(10000)
+
+        await browser.close()

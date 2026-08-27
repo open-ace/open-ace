@@ -99,8 +99,6 @@
       "contract_paths": [
         ".github/workflows/extended-tests.yml",
         ".test-baseline.json",
-        "ci/legacy-issue-failures.json",
-        "ci/legacy-issue-quarantine.json",
         "ci/suites.json",
         "frontend/package-lock.json",
         "frontend/package.json",
@@ -113,10 +111,8 @@
         "schema/schema-sqlite.sql",
         "scripts/ci.py",
         "scripts/init_db.py",
-        "scripts/legacy_issue_baseline.py",
         "scripts/run_extended_tests.py",
-        "tests/conftest.py",
-        "tests/issues/conftest.py"
+        "tests/conftest.py"
       ]
     },
     {

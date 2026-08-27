@@ -56,7 +56,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Run the following command to get a detailed list:" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo 'python scripts/scan_test_false_positives.py tests --exclude-dirs tests/issues' >> $GITHUB_STEP_SUMMARY
+          echo 'python scripts/scan_test_false_positives.py tests' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Create review issue (if needed)
@@ -96,7 +96,7 @@ jobs:
 
           Run the following command to get a detailed list:
           ```bash
-          python scripts/scan_test_false_positives.py tests --exclude-dirs tests/issues
+          python scripts/scan_test_false_positives.py tests
           ```
           EOF
 

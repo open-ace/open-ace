@@ -19,7 +19,6 @@
     "e2e-governance",
     "false-positive-scan",
     "frontend",
-    "issue-collection",
     "package",
     "postgres",
     "python-core",
@@ -144,8 +143,6 @@
           "{python}",
           "scripts/scan_test_false_positives.py",
           "tests",
-          "--exclude-dirs",
-          "tests/issues",
           "--baseline",
           ".false-positive-baseline.json"
         ]
@@ -210,12 +207,6 @@
           "not performance"
         ]
       ]
-    },
-    "issue-collection": {
-      "description": "Required collection and baseline gate for the legacy issue quarantine",
-      "timeout_seconds": 120,
-      "collection_target": "tests/issues",
-      "baseline_layer": "issues"
     },
     "frontend": {
       "description": "Frontend lint, typecheck, unit tests, and production build",

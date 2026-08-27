@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""
+Issue #211 - Project List Sort E2E Test
+
+Tests that the project management table supports column sorting:
+1. Login as admin
+2. Navigate to /manage/projects
+3. Click sortable column headers
+4. Verify sort direction toggles and data reorders correctly
+
+Run:
+  HEADLESS=true  python tests/e2e/manage/e2e_project_sort.py
+  HEADLESS=false python tests/e2e/manage/e2e_project_sort.py
+"""
+
+import os
+import sys
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, PROJECT_ROOT)
+
+import pytest
+import requests
+from playwright.sync_api import sync_playwright
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(211)]
+
+# Config
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "e2e-project-sort")
+
+SORTABLE_COLUMNS = ["project", "users", "tokens", "requests", "workTime", "lastActive"]
+
+
+def ensure_dir():
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+
+
+def shot(page, name):
+    ensure_dir()
+    path = os.path.join(SCREENSHOT_DIR, f"{name}.png")
+    page.screenshot(path=path, full_page=True)
+    print(f"  screenshot: {name}.png")
+
+
+def test_project_sort():
+    print("=" * 60)
+    print("Issue #211 - Project List Sort E2E Test")
+    print("=" * 60)
+
+    # Login via API to verify backend is up
+    print("\n[1] Login via API")
+    session = requests.Session()
+    r = session.post(
+        f"{BASE_URL}/api/auth/login", json={"username": USERNAME, "password": PASSWORD}
+    )
+    assert r.status_code == 200, f"Login failed: {r.status_code}"
+    print("  OK - logged in")
+
+    # Check project stats endpoint returns data
+    r = session.get(f"{BASE_URL}/api/projects/stats")
+    assert r.status_code == 200, f"Stats API failed: {r.status_code}"
+    stats = r.json().get("stats", [])
+    print(f"  OK - {len(stats)} projects found")
+
+    # Seed projects when the DB is fresh: the projects page renders an
+    # empty-state component (no <table>) when there are no projects, which
+    # dead-waits below. The old flow hit that wait before its own
+    # "need at least 2 projects" skip ever ran.
+    if len(stats) < 2:
+        print("\n[1a] Seed projects for sorting")
+        for i in (1, 2, 3):
+            r = session.post(
+                f"{BASE_URL}/api/projects",
+                json={
+                    "name": f"E2E 211 Sort {i}",
+                    "path": f"/tmp/e2e-211-sort-{i}",
+                    "description": "seeded by issue 211 e2e",
+                    "create_dir": False,
+                },
+            )
+            assert r.status_code in (
+                200,
+                201,
+            ), f"Seed project {i} failed: {r.status_code} {r.text[:200]}"
+        r = session.get(f"{BASE_URL}/api/projects/stats")
+        assert r.status_code == 200, f"Stats API failed: {r.status_code}"
+        stats = r.json().get("stats", [])
+        print(f"  OK - seeded, {len(stats)} projects now")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=HEADLESS)
+        context = browser.new_context(viewport={"width": 1400, "height": 900})
+        page = context.new_page()
+
+        # Login via browser
+        print("\n[2] Browser login")
+        page.goto(f"{BASE_URL}/login", wait_until="domcontentloaded")
+        page.wait_for_timeout(1000)
+        page.fill('input[type="text"], input[name="username"]', USERNAME)
+        page.fill('input[type="password"], input[name="password"]', PASSWORD)
+        page.click('button[type="submit"]')
+        page.wait_for_url(lambda url: "/login" not in url, timeout=15000)
+        print("  OK - browser logged in")
+
+        # Navigate to project management
+        print("\n[3] Navigate to /manage/projects")
+        page.goto(f"{BASE_URL}/manage/projects", wait_until="domcontentloaded")
+        page.wait_for_timeout(2000)
+        page.wait_for_selector("table", timeout=10000)
+        print("  OK - project table loaded")
+        shot(page, "01_project_list")
+
+        if len(stats) < 2:
+            print("  SKIP - need at least 2 projects to test sorting")
+            browser.close()
+            return
+
+        # Test sorting on each sortable column
+        print("\n[4] Test sorting on each column")
+        headers = page.locator("table thead th")
+        header_count = headers.count()
+
+        # The table now has a leading spacer column (empty header) and
+        # non-sortable data columns (requests, work time); only columns whose
+        # header renders a caret after a click are sortable.
+        sortable_columns = []
+        for i in range(header_count - 1):  # skip last column (Actions)
+            header_text = headers.nth(i).inner_text().strip()
+            print(f"\n  Testing column: {header_text!r}")
+
+            # First click - activates sort with desc direction on sortable
+            # columns; non-sortable ones stay icon-less and are skipped.
+            headers.nth(i).click()
+            page.wait_for_timeout(500)
+
+            icon = headers.nth(i).locator("i.bi-caret-down-fill, i.bi-caret-up-fill")
+            if icon.count() == 0:
+                print("    (not sortable - no sort icon after click)")
+                continue
+            assert icon.count() == 1, f"Expected exactly one sort icon for column '{header_text}'"
+            sortable_columns.append(header_text)
+            print("    Click 1: sort icon visible (desc)")
+            shot(page, f"02_sort_{header_text}_desc")
+
+            # Get current row order
+            first_row_name_desc = (
+                page.locator("table tbody tr").first.locator("td").first.inner_text()
+            )
+
+            # Second click - should toggle to asc
+            headers.nth(i).click()
+            page.wait_for_timeout(500)
+
+            icon = headers.nth(i).locator("i.bi-caret-down-fill, i.bi-caret-up-fill")
+            assert (
+                icon.count() == 1
+            ), f"Sort icon not found for column '{header_text}' after second click"
+            print("    Click 2: sort icon visible (asc)")
+            shot(page, f"03_sort_{header_text}_asc")
+
+            # Third click - back to desc
+            headers.nth(i).click()
+            page.wait_for_timeout(500)
+            first_row_name_desc2 = (
+                page.locator("table tbody tr").first.locator("td").first.inner_text()
+            )
+            assert (
+                first_row_name_desc == first_row_name_desc2
+            ), "Sort toggle failed: desc->asc->desc should return to original order"
+            print("    Click 3: back to desc, order matches first click")
+
+        # Test Actions column is NOT sortable (no sort icon, no cursor pointer)
+        print("\n  Testing Actions column is NOT sortable")
+        actions_header = headers.nth(header_count - 1)
+        actions_icon = actions_header.locator("i.bi-caret-down-fill, i.bi-caret-up-fill")
+        assert actions_icon.count() == 0, "Actions column should not have sort icon"
+        print("  OK - Actions column is not sortable")
+
+        assert sortable_columns, "No sortable column found - sort UI missing?"
+        print(f"\n  Sortable columns verified: {sortable_columns}")
+
+        print("\n" + "=" * 60)
+        print("ALL TESTS PASSED")
+        print("=" * 60)
+
+        browser.close()
+
+
+if __name__ == "__main__":
+    test_project_sort()
