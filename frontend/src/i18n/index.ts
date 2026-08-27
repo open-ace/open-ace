@@ -1603,6 +1603,21 @@ export const translations: Record<Language, Translations> = {
     maxSessionsPerUser: 'Max Sessions/User',
     quota: 'Quota',
 
+    // Issue #3132: Quota check
+    checkQuota: 'Check Quota',
+    checkingQuota: 'Checking...',
+    quotaCheckResult: 'Quota Check Result',
+    quotaAvailable: 'Quota Available',
+    // Note: quotaExceeded is already defined in Usage Overview section (line 840)
+    quotaCheckTime: 'Check Time',
+    quotaCheckSnapshotNote:
+      'This reflects quota status at check time and may differ from real-time usage',
+    editQuotaNow: 'Edit Quota Now',
+    failedToCheckQuota: 'Failed to check quota',
+    requestTimeout: 'Request timeout, please retry',
+    networkError: 'Network error, please retry',
+    noDetails: 'No details available',
+
     // Tenant i18n fixes (Issue #1500)
     tenantAllStatuses: 'All Statuses',
     tenantAllPlans: 'All Plans',
@@ -3801,6 +3816,20 @@ export const translations: Record<Language, Translations> = {
     maxSessionsPerUser: '每用户最大会话数',
     quota: '配额',
 
+    // Issue #3132: Quota check
+    checkQuota: '检查配额',
+    checkingQuota: '正在检查...',
+    quotaCheckResult: '配额检查结果',
+    quotaAvailable: '配额充足',
+    // Note: quotaExceeded (配额已超限) is already defined in Usage Overview section
+    quotaCheckTime: '检查时间',
+    quotaCheckSnapshotNote: '此为检查时刻的配额状态，可能与实时用量数据存在差异',
+    editQuotaNow: '立即编辑配额',
+    failedToCheckQuota: '检查配额失败',
+    requestTimeout: '请求超时，请重试',
+    networkError: '网络错误，请重试',
+    noDetails: '无详细信息',
+
     // Tenant i18n fixes (Issue #1500)
     tenantAllStatuses: '全部状态',
     tenantAllPlans: '全部套餐',
@@ -5883,6 +5912,21 @@ export const translations: Record<Language, Translations> = {
     maxUsers: '最大ユーザー数',
     maxSessionsPerUser: 'ユーザー最大セッション数',
 
+    // Issue #3132: Quota check
+    checkQuota: 'クォータ確認',
+    checkingQuota: '確認中...',
+    quotaCheckResult: 'クォータ確認結果',
+    quotaAvailable: 'クォータ十分',
+    quotaExceeded: 'クォータ超過',
+    quotaCheckTime: '確認時刻',
+    quotaCheckSnapshotNote:
+      'これは確認時点のクォータ状態であり、リアルタイム使用量と異なる場合があります',
+    editQuotaNow: '今すぐクォータ編集',
+    failedToCheckQuota: 'クォータ確認に失敗しました',
+    requestTimeout: 'リクエストがタイムアウトしました。再試行してください',
+    networkError: 'ネットワークエラー。再試行してください',
+    noDetails: '詳細なし',
+
     // Tenant i18n fixes (Issue #1500)
     tenantAllStatuses: 'すべての状態',
     tenantAllPlans: 'すべてのプラン',
@@ -7912,6 +7956,20 @@ export const translations: Record<Language, Translations> = {
     dailyRequestLimit: '일간 요청 제한',
     maxUsers: '최대 사용자',
     maxSessionsPerUser: '사용자 최대 세션',
+
+    // Issue #3132: Quota check
+    checkQuota: '할당량 확인',
+    checkingQuota: '확인 중...',
+    quotaCheckResult: '할당량 확인 결과',
+    quotaAvailable: '할당량 충분',
+    quotaExceeded: '할당량 초과',
+    quotaCheckTime: '확인 시간',
+    quotaCheckSnapshotNote: '이는 확인 시점의 할당량 상태이며 실시간 사용량과 다를 수 있습니다',
+    editQuotaNow: '지금 할당량 편집',
+    failedToCheckQuota: '할당량 확인 실패',
+    requestTimeout: '요청 시간 초과, 다시 시도하세요',
+    networkError: '네트워크 오류, 다시 시도하세요',
+    noDetails: '상세 정보 없음',
 
     // Tenant i18n fixes (Issue #1500)
     tenantAllStatuses: '모든 상태',
