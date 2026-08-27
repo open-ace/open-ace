@@ -68,7 +68,10 @@ class TestFeishuConfigTestConnection:
             assert data["success"] is False
             assert data["error"] == "FEISHU_SECRET_UNREADABLE"
             assert "re-enter" in data["message"].lower()
-            assert "secret" not in data.get("message", "").lower() or "app secret" in data["message"].lower()
+            assert (
+                "secret" not in data.get("message", "").lower()
+                or "app secret" in data["message"].lower()
+            )
 
     def test_error_response_no_sensitive_info(self, admin_client):
         """Error response should not expose cryptographic details or secret values."""

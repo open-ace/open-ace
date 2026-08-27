@@ -88,9 +88,7 @@ class NotificationSettingsRepository:
             try:
                 row[secret_name] = get_password_manager().decrypt(encrypted)
             except ValueError as e:
-                logger.error(
-                    f"Failed to decrypt {secret_name} for {kind}: decryption error"
-                )
+                logger.error(f"Failed to decrypt {secret_name} for {kind}: decryption error")
                 raise SecretDecryptionError(secret_name, kind) from e
         if kind == "dingtalk":
             encrypted_fallback = row.pop("fallback_webhook_secret_enc", None)
@@ -105,9 +103,7 @@ class NotificationSettingsRepository:
                         "Failed to decrypt fallback_webhook_secret for dingtalk: "
                         "decryption error"
                     )
-                    raise SecretDecryptionError(
-                        "fallback_webhook_secret", "dingtalk"
-                    ) from e
+                    raise SecretDecryptionError("fallback_webhook_secret", "dingtalk") from e
         return row
 
     def _legacy_values(self, kind: str, root: dict[str, Any]) -> dict[str, Any] | None:

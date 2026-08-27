@@ -208,13 +208,16 @@ def test_feishu_connection():
         return jsonify(result)
     except SecretDecryptionError as e:
         logger.error(f"Secret decryption error for {e.field_name}: saved secret unreadable")
-        return jsonify(
-            {
-                "success": False,
-                "error": "FEISHU_SECRET_UNREADABLE",
-                "message": "The saved App Secret cannot be decrypted. Please re-enter the App Secret and save the configuration.",
-            }
-        ), 409
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "FEISHU_SECRET_UNREADABLE",
+                    "message": "The saved App Secret cannot be decrypted. Please re-enter the App Secret and save the configuration.",
+                }
+            ),
+            409,
+        )
     except Exception as e:
         logger.error(f"Error testing Feishu connection: {e}")
         return jsonify({"success": False, "error": "Internal server error"}), 500
