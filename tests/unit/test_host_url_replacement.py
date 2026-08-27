@@ -86,9 +86,7 @@ def test_get_user_webui_url_with_host_url():
     # Mock _launch_webui_process and _wait_for_service_ready to avoid starting
     # a real WebUI process in test environment (Issue #3129)
     with (
-        patch.object(
-            WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})
-        ),
+        patch.object(WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})),
         patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
     ):
         # Without host_url: uses config.url directly (fallback)
@@ -124,9 +122,7 @@ def test_get_user_webui_url_preserves_port_single_user():
     # Mock _launch_webui_process and _wait_for_service_ready to avoid starting
     # a real WebUI process in test environment (Issue #3129)
     with (
-        patch.object(
-            WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})
-        ),
+        patch.object(WebUIManager, "_launch_webui_process", return_value=(MagicMock(), {})),
         patch.object(WebUIManager, "_wait_for_service_ready", return_value=True),
     ):
         # Without host_url: uses config.url as fallback (with port 3100)
