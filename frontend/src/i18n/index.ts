@@ -1621,6 +1621,7 @@ export const translations: Record<Language, Translations> = {
     // Tenant i18n fixes (Issue #1500)
     tenantAllStatuses: 'All Statuses',
     tenantAllPlans: 'All Plans',
+    tenantPlanFree: 'Free',
     tenantPlanStandard: 'Standard',
     tenantPlanPremium: 'Premium',
     tenantPlanEnterprise: 'Enterprise',
@@ -3832,6 +3833,7 @@ export const translations: Record<Language, Translations> = {
     // Tenant i18n fixes (Issue #1500)
     tenantAllStatuses: '全部状态',
     tenantAllPlans: '全部套餐',
+    tenantPlanFree: '免费版',
     tenantPlanStandard: '标准版',
     tenantPlanPremium: '高级版',
     tenantPlanEnterprise: '企业版',
@@ -5928,6 +5930,7 @@ export const translations: Record<Language, Translations> = {
     // Tenant i18n fixes (Issue #1500)
     tenantAllStatuses: 'すべての状態',
     tenantAllPlans: 'すべてのプラン',
+    tenantPlanFree: '無料',
     tenantPlanStandard: 'スタンダード',
     tenantPlanPremium: 'プレミアム',
     tenantPlanEnterprise: 'エンタープライズ',
@@ -7971,6 +7974,7 @@ export const translations: Record<Language, Translations> = {
     // Tenant i18n fixes (Issue #1500)
     tenantAllStatuses: '모든 상태',
     tenantAllPlans: '모든 플랜',
+    tenantPlanFree: '무료',
     tenantPlanStandard: '스탠다드',
     tenantPlanPremium: '프리미엄',
     tenantPlanEnterprise: '엔터프라이즈',

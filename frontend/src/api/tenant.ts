@@ -5,11 +5,14 @@
 import { apiClient } from './client';
 
 // Types
+// Issue #3137: Add 'free' plan to tenant plan type
+export type TenantPlan = 'free' | 'standard' | 'premium' | 'enterprise';
+
 export interface Tenant {
   id: number;
   name: string;
   slug: string;
-  plan: 'standard' | 'premium' | 'enterprise';
+  plan: TenantPlan;
   status: 'active' | 'suspended' | 'trial';
   contact_email?: string;
   contact_name?: string;
@@ -37,7 +40,7 @@ export interface TenantQuota {
 export interface CreateTenantRequest {
   name: string;
   slug?: string;
-  plan?: 'standard' | 'premium' | 'enterprise';
+  plan?: TenantPlan;
   contact_email?: string;
   contact_name?: string;
   trial_days?: number;
@@ -49,7 +52,7 @@ export interface CreateTenantRequest {
 export interface UpdateTenantRequest {
   name?: string;
   slug?: string;
-  plan?: 'standard' | 'premium' | 'enterprise';
+  plan?: TenantPlan;
   status?: 'active' | 'suspended' | 'trial';
   contact_email?: string;
   contact_phone?: string;

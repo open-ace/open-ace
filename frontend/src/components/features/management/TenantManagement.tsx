@@ -27,7 +27,13 @@ import {
   PageRefreshControl,
 } from '@/components/common';
 import { useConfirm } from '@/components/common';
-import { tenantApi, type Tenant, type CreateTenantRequest, type UpdateTenantRequest } from '@/api';
+import {
+  tenantApi,
+  type Tenant,
+  type TenantPlan,
+  type CreateTenantRequest,
+  type UpdateTenantRequest,
+} from '@/api';
 import { formatDateTime } from '@/utils';
 import { usePageRefresh } from '@/hooks';
 import { useTenantQuotaCheck } from '@/hooks/useTenantQuotaCheck';
@@ -37,7 +43,9 @@ import { QuotaCheckResultModal } from './QuotaCheckResultModal';
 
 // Tenant i18n fixes (Issue #1500)
 // Type-safe label mappings for plan and status
+// Issue #3137: Add 'free' plan support
 const PLAN_LABELS: Record<string, string> = {
+  free: 'tenantPlanFree',
   standard: 'tenantPlanStandard',
   premium: 'tenantPlanPremium',
   enterprise: 'tenantPlanEnterprise',
@@ -72,6 +80,7 @@ const getTenantPlanOptions = (language: Language, includeAll: boolean = true) =>
   const options = includeAll ? [{ value: '', label: t('tenantAllPlans', language) }] : [];
   return [
     ...options,
+    { value: 'free', label: t('tenantPlanFree', language) },
     { value: 'standard', label: t('tenantPlanStandard', language) },
     { value: 'premium', label: t('tenantPlanPremium', language) },
     { value: 'enterprise', label: t('tenantPlanEnterprise', language) },
@@ -436,6 +445,8 @@ export const TenantManagement: React.FC = () => {
 
   const getPlanVariant = (plan: string) => {
     switch (plan) {
+      case 'free':
+        return 'secondary';
       case 'enterprise':
         return 'primary';
       case 'premium':
@@ -729,9 +740,7 @@ export const TenantManagement: React.FC = () => {
               <Select
                 options={modalPlanOptions}
                 value={formData.plan ?? 'standard'}
-                onChange={(value) =>
-                  setFormData({ ...formData, plan: value as 'standard' | 'premium' | 'enterprise' })
-                }
+                onChange={(value) => setFormData({ ...formData, plan: value as TenantPlan })}
               />
             </div>
             <div className="col-md-6">
