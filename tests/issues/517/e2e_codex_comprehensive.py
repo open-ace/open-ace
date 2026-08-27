@@ -187,112 +187,6 @@ def _get_codex_adapter():
     return ADAPTERS["codex"]()
 
 
-def test_adapter_env_vars():
-    """Codex adapter sets OPENAI_API_KEY and OPENAI_BASE_URL."""
-    adapter = _get_codex_adapter()
-    env = adapter.get_env_vars(proxy_url="http://proxy:8080", proxy_token="tok-123")
-    assert env["OPENAI_API_KEY"] == "tok-123"
-    assert "v1" in env["OPENAI_BASE_URL"]
-    print(f"    OPENAI_BASE_URL={env['OPENAI_BASE_URL']}")
-
-
-def test_adapter_interactive_args():
-    """Codex adapter builds correct interactive mode args."""
-    adapter = _get_codex_adapter()
-    args = adapter.build_start_args(session_id="s1", project_path="/tmp", model="o3")
-    assert args[0] == "codex"
-    assert "--model" in args
-    assert "o3" in args
-    print(f"    Args: {args}")
-
-
-def test_adapter_resume_args():
-    """Codex adapter uses 'resume' subcommand for session restore."""
-    adapter = _get_codex_adapter()
-    args = adapter.build_start_args(
-        session_id="abc-123", project_path="/tmp/project", model="o3", resume=True
-    )
-    assert "resume" in args, f"Expected 'resume' in args: {args}"
-    assert "abc-123" in args, f"Expected session_id in resume args: {args}"
-    assert "--model" in args, "Expected --model flag in resume args"
-    assert "--cd" in args, "Expected --cd flag for project_path"
-    print(f"    Resume args: {args}")
-
-
-def test_adapter_permission_modes():
-    """Codex adapter maps permission modes correctly.
-
-    Issue #2645: Security fix for permission mode mapping.
-    - "ask"/"plan": Safe mode with approval prompts
-    - "auto": Safe automatic mode (NO dangerous bypass)
-    - "bypass": Dangerous mode with full bypass
-    """
-    adapter = _get_codex_adapter()
-
-    # Ask mode (safe)
-    args = adapter.build_start_args(session_id="s", project_path="/tmp", permission_mode="ask")
-    assert "--ask-for-approval" in args
-    assert "untrusted" in args
-    assert "--dangerously-bypass-approvals-and-sandbox" not in args
-    print(f"    Ask mode: {args}")
-
-    # Plan mode (alias for ask, safe)
-    args = adapter.build_start_args(session_id="s", project_path="/tmp", permission_mode="plan")
-    assert "--ask-for-approval" in args
-    assert "untrusted" in args
-    assert "--dangerously-bypass-approvals-and-sandbox" not in args
-    print(f"    Plan mode: {args}")
-
-    # Auto mode (safe, no dangerous flags)
-    args = adapter.build_start_args(session_id="s", project_path="/tmp", permission_mode="auto")
-    assert "--dangerously-bypass-approvals-and-sandbox" not in args
-    assert "--ask-for-approval" not in args  # Should not have any permission flags
-    print(f"    Auto mode (safe): {args}")
-
-    # Bypass mode (dangerous)
-    args = adapter.build_start_args(session_id="s", project_path="/tmp", permission_mode="bypass")
-    assert "--dangerously-bypass-approvals-and-sandbox" in args
-    print(f"    Bypass mode (dangerous): {args}")
-
-
-def test_adapter_single_shot():
-    """Codex adapter builds correct single-shot args."""
-    adapter = _get_codex_adapter()
-    args = adapter.build_single_shot_args("write a test", project_path="/tmp", model="o3")
-    assert "exec" in args
-    assert "--json" in args
-    assert "--sandbox" in args
-    assert "o3" in args
-    print(f"    Single-shot: {args}")
-
-
-def test_adapter_settings():
-    """Codex adapter strips sensitive keys and adds model_reasoning_summary."""
-    adapter = _get_codex_adapter()
-    settings = adapter.build_settings(
-        base_settings={
-            "env": {"OPENAI_API_KEY": "secret-key"},
-            "model": "o3",
-        }
-    )
-    assert settings["model_reasoning_summary"] == "auto"
-    assert "OPENAI_API_KEY" not in settings.get("env", {})
-    print(f"    Settings: {list(settings.keys())}")
-
-
-def test_terminal_menu_codex():
-    """Terminal menu includes Codex with correct config."""
-    sys.path.insert(0, os.path.join(PROJECT_ROOT, "remote-agent"))
-    import importlib
-
-    tm = importlib.import_module("terminal_menu")
-    codex = [t for t in tm.TOOLS if t["cli"] == "codex"]
-    assert codex, "No codex in terminal menu TOOLS"
-    assert codex[0]["env_key"] == "OPENAI_API_KEY"
-    assert "@openai/codex" in codex[0]["install_cmd"]
-    print("    Codex menu entry verified")
-
-
 # ═══════════════════════════════════════════════════════
 # SECTION 3: Session Sync
 # ═══════════════════════════════════════════════════════
@@ -373,21 +267,6 @@ def test_session_sync_scan_dirs():
 # ═══════════════════════════════════════════════════════
 # SECTION 4: Remote Session & Provider Mapping
 # ═══════════════════════════════════════════════════════
-
-
-def test_provider_mapping_codex():
-    """_cli_tool_to_provider maps codex/codex-cli to openai."""
-    from app.modules.workspace.remote_session_manager import RemoteSessionManager
-
-    # Access the static/class method
-    mgr = RemoteSessionManager.__new__(RemoteSessionManager)
-    mgr._cli_tool_to_provider = RemoteSessionManager._cli_tool_to_provider.__get__(mgr)
-
-    assert mgr._cli_tool_to_provider("codex") == "openai", "codex should map to openai provider"
-    assert (
-        mgr._cli_tool_to_provider("codex-cli") == "openai"
-    ), "codex-cli should map to openai provider"
-    print("    codex -> openai, codex-cli -> openai")
 
 
 def test_api_key_proxy_codex_lookup():
@@ -958,53 +837,6 @@ def test_api_codex_alias():
     print(f"    codex-cli alias: {data.get('data', {}).get('total', 0)} sessions")
 
 
-def test_tool_name_normalization():
-    """Tool name normalization handles all codex variants."""
-    from app.utils.tool_names import TOOL_NAME_ALIASES, normalize_tool_name
-
-    assert normalize_tool_name("codex") == "codex"
-    assert normalize_tool_name("codex-cli") == "codex"
-    assert "codex" in TOOL_NAME_ALIASES
-    print("    Normalization: codex -> codex, codex-cli -> codex")
-
-
-# ═══════════════════════════════════════════════════════
-# SECTION 8: Backend Modules
-# ═══════════════════════════════════════════════════════
-
-
-def test_tool_connector_codex():
-    """Tool connector registers codex with correct attributes."""
-    from app.modules.workspace.tool_connector import get_tool_connector
-
-    codex = get_tool_connector().get_tool("codex")
-    assert codex, "codex not in tool connector"
-    assert codex.tool_type == "agent"
-    assert codex.supports_streaming
-    assert codex.supports_tools
-    assert "coding" in codex.capabilities
-    print(f"    Connector: type={codex.tool_type}, models={codex.models}")
-
-
-def test_user_tool_account_codex():
-    """User tool account model supports codex type."""
-    from app.models.user_tool_account import TOOL_TYPES
-
-    assert "codex" in TOOL_TYPES
-    print(f"    TOOL_TYPES['codex'] = {TOOL_TYPES['codex']}")
-
-
-def test_fetch_route_codex():
-    """Fetch route includes codex script execution."""
-    import inspect
-
-    from app.routes.fetch import run_fetch_scripts
-
-    source = inspect.getsource(run_fetch_scripts)
-    assert "fetch_codex.py" in source, "fetch_codex.py not referenced in run_fetch_scripts"
-    print("    fetch_codex.py included in fetch route")
-
-
 # ═══════════════════════════════════════════════════════
 # MAIN: Run all tests
 # ═══════════════════════════════════════════════════════
@@ -1024,14 +856,7 @@ def main():
     run_test("Content block types exist", test_content_block_types)
 
     # ── Phase 2: CLI Adapter (no server required) ──
-    print("\n── Phase 2: CLI Adapter ──")
-    run_test("Adapter env vars (OPENAI_API_KEY/BASE_URL)", test_adapter_env_vars)
-    run_test("Adapter interactive args", test_adapter_interactive_args)
-    run_test("Adapter resume args (session restore)", test_adapter_resume_args)
-    run_test("Adapter permission modes", test_adapter_permission_modes)
-    run_test("Adapter single-shot args", test_adapter_single_shot)
-    run_test("Adapter settings (sensitive key stripping)", test_adapter_settings)
-    run_test("Terminal menu includes codex", test_terminal_menu_codex)
+    # (extracted to tests/unit/test_codex_adapter_inprocess_517.py in batch 16)
 
     # ── Phase 3: Session Sync (no server required) ──
     print("\n── Phase 3: Session Sync ──")
@@ -1056,7 +881,6 @@ def main():
     # Monkey-patch global auth_token for api_get/api_post
     globals()["auth_token"] = auth_token
 
-    run_test("Provider mapping (codex -> openai)", test_provider_mapping_codex)
     run_test("API key proxy codex lookup", test_api_key_proxy_codex_lookup)
     run_test("Remote machine codex capabilities", test_remote_codex_capabilities)
     run_test("Remote session create codex", test_remote_session_create_codex)
@@ -1081,13 +905,9 @@ def main():
     run_test("API usage data codex", test_api_usage_data)
     run_test("API tools list includes codex", test_api_tools_list)
     run_test("API codex alias resolution", test_api_codex_alias)
-    run_test("Tool name normalization", test_tool_name_normalization)
 
     # ── Phase 8: Backend Modules ──
-    print("\n── Phase 8: Backend Modules ──")
-    run_test("Tool connector registers codex", test_tool_connector_codex)
-    run_test("User tool account codex type", test_user_tool_account_codex)
-    run_test("Fetch route includes codex", test_fetch_route_codex)
+    # (extracted to tests/unit/test_codex_adapter_inprocess_517.py in batch 16)
 
     if not print_results(results):
         sys.exit(1)

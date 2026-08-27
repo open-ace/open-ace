@@ -1,21 +1,26 @@
 """Tests for Issue #740 Batch 1 — Session manager wiring, remote null safety, and process termination.
 
+Migrated from tests/issues/740/test_batch1_session_wiring.py (unit half). The two
+HTTP stop/pause route tests moved to
+tests/integration/routes/test_autonomous_stop_pause_740.py.
+
 Covers:
 - SessionManager is passed to AutonomousAgentRunner at orchestrator init
 - _run_agent wrapper tracks session_id for cancellation
 - cancel_current_task() stops the running agent session
 - Remote execution null guard for session_manager
 - Scheduler exposes running orchestrator instances
-- Stop/pause API routes cancel running agent tasks
+- _cancel_running_task helper (direct calls, no HTTP)
 """
 
-import threading
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.services.autonomous_scheduler import AutonomousScheduler as AutonomousSchedulerForTest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(740)]
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -675,109 +680,15 @@ class TestSchedulerOrchestratorRegistry:
             assert wf_id not in scheduler._in_progress_ids
 
 
-# ── Test: Stop/Pause API cancellation ────────────────────────────────
+# ── Test: _cancel_running_task helper (direct calls) ─────────────────
 
 
 class TestStopPauseCancelsTask:
-    """Verify stop/pause API routes cancel running agent tasks."""
+    """Verify _cancel_running_task cancels running agent tasks (direct calls).
 
-    def _make_client(self):
-        """Create Flask test client with test DB."""
-        import os as _os
-        import tempfile
-
-        import app.repositories.database as db_mod
-        from app import create_app
-
-        db_path = tempfile.mktemp(suffix=".db")
-        orig = db_mod.adapt_sql
-        db_mod.adapt_sql = lambda sql: sql
-
-        db = db_mod.Database(f"sqlite:///{db_path}")
-        try:
-            with db.get_connection() as conn:
-                cursor = conn.cursor()
-                from app.repositories.schema_init import load_schema_from_file
-
-                # Let the authoritative schema create users: the old hand-rolled
-                # CREATE TABLE drifted (no deleted_at/system_account columns —
-                # the schema's partial indexes on those columns then failed).
-                load_schema_from_file(db_url=f"sqlite:///{db_path}", dialect="sqlite")
-                cursor.execute(
-                    "INSERT OR IGNORE INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
-                    ("admin", "admin@test.com", "hash123", "admin"),
-                )
-                conn.commit()
-        finally:
-            pass
-
-        app = create_app({"TESTING": True})
-        c = app.test_client()
-        c.set_cookie("session_token", "test-token")
-        return c, db_path, orig, db_mod, _os
-
-    def _mock_auth(self, user_id=1, role="admin"):
-        return patch(
-            "app.auth.decorators._load_user_from_token",
-            return_value={
-                "id": user_id,
-                "username": "admin" if role == "admin" else "testuser",
-                "email": f"{role}@test.com",
-                "role": role,
-            },
-        )
-
-    def test_stop_calls_cancel_running_task(self):
-        """stop_workflow should call _cancel_running_task."""
-        c, db_path, orig, db_mod, _os = self._make_client()
-        repo = MagicMock()
-        repo.get_workflow.return_value = {
-            "workflow_id": "wf-stop-test",
-            "user_id": 1,
-            "status": "developing",
-        }
-        repo.update_workflow.return_value = None
-
-        with self._mock_auth():
-            with patch("app.routes.autonomous.auto_repo", repo):
-                with patch("app.routes.autonomous._stop_running_task") as mock_cancel:
-                    resp = c.post("/api/autonomous/workflows/wf-stop-test/stop")
-
-        assert resp.status_code == 200
-        mock_cancel.assert_called_once_with("wf-stop-test")
-
-        # Cleanup
-        try:
-            db_mod.adapt_sql = orig
-            _os.unlink(db_path)
-        except OSError:
-            pass
-
-    def test_pause_calls_cancel_running_task(self):
-        """pause_workflow should call _cancel_running_task."""
-        c, db_path, orig, db_mod, _os = self._make_client()
-        repo = MagicMock()
-        repo.get_workflow.return_value = {
-            "workflow_id": "wf-pause-test",
-            "user_id": 1,
-            "status": "developing",
-        }
-        repo.update_workflow.return_value = None
-
-        with self._mock_auth():
-            with patch("app.routes.autonomous.auto_repo", repo):
-                with patch("app.routes.autonomous._pause_running_task") as mock_cancel:
-                    resp = c.post("/api/autonomous/workflows/wf-pause-test/pause")
-
-        assert resp.status_code == 200
-        mock_cancel.assert_called_once_with("wf-pause-test")
-
-        # Cleanup
-        try:
-            db_mod.adapt_sql = orig
-            _os.unlink(db_path)
-        except OSError:
-            pass
+    The HTTP stop/pause route halves of the original class moved to
+    tests/integration/routes/test_autonomous_stop_pause_740.py.
+    """
 
     def test_cancel_running_task_calls_scheduler(self):
         """_cancel_running_task should find and cancel the orchestrator."""
@@ -803,8 +714,8 @@ class TestStopPauseCancelsTask:
 
             from app.routes.autonomous import _cancel_running_task
 
-            # Should not raise
-            _cancel_running_task("wf-no-orch")
+            # Should not raise — no-orchestrator is a silent None return.
+            assert _cancel_running_task("wf-no-orch") is None
 
     def test_cancel_running_task_handles_exception(self):
         """_cancel_running_task should handle scheduler errors gracefully."""
@@ -815,8 +726,8 @@ class TestStopPauseCancelsTask:
 
             from app.routes.autonomous import _cancel_running_task
 
-            # Should not raise
-            _cancel_running_task("wf-error")
+            # Should not raise — scheduler errors are logged, not propagated.
+            assert _cancel_running_task("wf-error") is None
 
 
 # ── Test: Integration — Full stop flow ───────────────────────────────

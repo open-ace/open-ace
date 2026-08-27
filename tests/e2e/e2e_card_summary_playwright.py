@@ -10,8 +10,8 @@ Verifies the per-round summary line on milestone cards:
 Data is seeded directly via AutonomousWorkflowRepository (no real agent / gh runs).
 
 Run:
-  HEADLESS=true  python tests/issues/993/e2e_card_summary_playwright.py   # CI
-  HEADLESS=false python tests/issues/993/e2e_card_summary_playwright.py   # Demo
+  HEADLESS=true  python tests/e2e/e2e_card_summary_playwright.py   # CI
+  HEADLESS=false python tests/e2e/e2e_card_summary_playwright.py   # Demo
 """
 
 import os
@@ -19,10 +19,8 @@ import sys
 import time
 import uuid
 
-# tests/issues/993/file.py → tests/issues/993 → tests/issues → tests → PROJECT_ROOT
-PROJECT_ROOT = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+# tests/e2e/file.py → tests/e2e → tests → PROJECT_ROOT
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 
 import requests

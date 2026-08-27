@@ -5,12 +5,19 @@ Verifies:
     match, capped at 200 chars, empty when absent / whitespace-stripped).
   - ``TLDR_INSTRUCTION`` is appended to every ``_run_agent`` prompt.
   - phase milestones persist the extracted ``tldr`` alongside ``result_summary``.
+
+Migrated from tests/issues/993/test_tldr.py by batch 16 (#2429); straight
+move, no body changes.
 """
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.modules.workspace.autonomous.models import AgentTaskResult
 from app.modules.workspace.autonomous.orchestrator import TLDR_INSTRUCTION, AutonomousOrchestrator
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(993)]
 
 # ── helpers (mirror tests/issues/987/) ───────────────────────────────────
 

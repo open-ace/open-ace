@@ -315,146 +315,10 @@ def test_api_codex_alias_resolution():
 
 
 # ═══════════════════════════════════════════════════════
-# SECTION 3: Remote Session Adapter
+# SECTION 3+4: Remote Session Adapter / Tool Connector
+# (in-process defs extracted to tests/unit/test_codex_adapter_inprocess_517.py
+#  in #2429 batch 16)
 # ═══════════════════════════════════════════════════════
-
-
-def test_codex_cli_adapter_imports_corrected():
-    """Codex CLI adapter can be imported and has required methods."""
-    sys.path.insert(0, os.path.join(PROJECT_ROOT, "remote-agent"))
-    from cli_adapters import ADAPTERS
-
-    # The adapter key is "codex" (not "codex-cli") in ADAPTERS registry
-    assert "codex" in ADAPTERS, f"codex not in ADAPTERS: {list(ADAPTERS.keys())}"
-    adapter_cls = ADAPTERS["codex"]
-    adapter = adapter_cls()
-
-    # Verify required attributes
-    assert adapter.EXECUTABLE == "codex", f"Unexpected executable: {adapter.EXECUTABLE}"
-    assert adapter.NPM_PACKAGE == "@openai/codex", f"Unexpected npm package: {adapter.NPM_PACKAGE}"
-
-    # Verify methods exist
-    assert hasattr(adapter, "get_env_vars"), "Missing get_env_vars"
-    assert hasattr(adapter, "build_start_args"), "Missing build_start_args"
-    assert hasattr(adapter, "build_single_shot_args"), "Missing build_single_shot_args"
-    assert hasattr(adapter, "get_settings_path"), "Missing get_settings_path"
-    assert hasattr(adapter, "configure_settings"), "Missing configure_settings"
-
-    print(f"    Adapter: {adapter_cls.__name__}, executable={adapter.EXECUTABLE}")
-
-
-def test_codex_adapter_env_vars():
-    """Codex adapter sets correct environment variables."""
-    sys.path.insert(0, os.path.join(PROJECT_ROOT, "remote-agent"))
-    from cli_adapters import ADAPTERS
-
-    adapter = ADAPTERS["codex"]()
-    env = adapter.get_env_vars(proxy_url="http://proxy:8080", proxy_token="test-token")
-
-    assert "OPENAI_API_KEY" in env, "Missing OPENAI_API_KEY"
-    assert env["OPENAI_API_KEY"] == "test-token", "OPENAI_API_KEY should be proxy_token"
-    assert "OPENAI_BASE_URL" in env, "Missing OPENAI_BASE_URL"
-    assert "v1" in env["OPENAI_BASE_URL"], "OPENAI_BASE_URL should contain /v1"
-    print(f"    Env vars: {list(env.keys())}")
-
-
-def test_codex_adapter_build_args():
-    """Codex adapter builds correct CLI arguments."""
-    sys.path.insert(0, os.path.join(PROJECT_ROOT, "remote-agent"))
-    from cli_adapters import ADAPTERS
-
-    adapter = ADAPTERS["codex"]()
-
-    # Interactive args
-    args = adapter.build_start_args(session_id="test-123", project_path="/tmp", model="o3")
-    assert "codex" in args, f"Expected 'codex' in args: {args}"
-    assert "--model" in args, "Missing --model flag"
-    assert "o3" in args, "Model not in args"
-    print(f"    Interactive args: {args}")
-
-    # Single shot args
-    args = adapter.build_single_shot_args("write a test", project_path="/tmp", model="o3")
-    assert "exec" in args, "Missing 'exec' subcommand"
-    assert "--json" in args, "Missing --json flag"
-    print(f"    Single-shot args: {args}")
-
-
-def test_codex_adapter_settings():
-    """Codex adapter configures settings correctly."""
-    sys.path.insert(0, os.path.join(PROJECT_ROOT, "remote-agent"))
-    from cli_adapters import ADAPTERS
-
-    adapter = ADAPTERS["codex"]()
-    settings = adapter.build_settings(
-        base_settings={
-            "model": "o3",
-            "env": {"OPENAI_API_KEY": "should-be-stripped"},
-        }
-    )
-
-    # Should have model_reasoning_summary
-    assert "model_reasoning_summary" in settings, "Missing model_reasoning_summary"
-    assert settings["model_reasoning_summary"] == "auto", "model_reasoning_summary should be 'auto'"
-    # Sensitive keys should be stripped from env
-    env = settings.get("env", {})
-    assert "OPENAI_API_KEY" not in env, "OPENAI_API_KEY should be stripped"
-    print(f"    Settings keys: {list(settings.keys())}")
-
-
-def test_terminal_menu_includes_codex():
-    """Terminal menu includes Codex entry."""
-    sys.path.insert(0, os.path.join(PROJECT_ROOT, "remote-agent"))
-    import importlib
-
-    tm = importlib.import_module("terminal_menu")
-
-    codex_entries = [t for t in tm.TOOLS if t["cli"] == "codex"]
-    assert codex_entries, "No codex entry in TOOLS"
-    codex = codex_entries[0]
-    assert codex["name"] == "Codex", f"Unexpected name: {codex['name']}"
-    assert codex["install_cmd"] == "npm install -g @openai/codex@latest"
-    assert codex["env_key"] == "OPENAI_API_KEY"
-    print(f"    Codex menu entry: {codex}")
-
-
-# ═══════════════════════════════════════════════════════
-# SECTION 4: Tool Connector Registration
-# ═══════════════════════════════════════════════════════
-
-
-def test_tool_connector_has_codex():
-    """Tool connector registers codex tool."""
-    from app.modules.workspace.tool_connector import get_tool_connector
-
-    connector = get_tool_connector()
-    codex = connector.get_tool("codex")
-    assert codex, "codex not registered in tool connector"
-    assert codex.name == "codex"
-    assert codex.tool_type == "agent", f"Expected 'agent', got '{codex.tool_type}'"
-    assert codex.supports_streaming, "codex should support streaming"
-    assert codex.supports_tools, "codex should support tools"
-    assert len(codex.models) > 0, "codex should have models"
-    print(f"    Codex: type={codex.tool_type}, models={codex.models}")
-
-
-def test_tool_name_normalization():
-    """Tool name normalization works for codex variants."""
-    from app.utils.tool_names import CANONICAL_TOOL_NAMES, TOOL_NAME_ALIASES, normalize_tool_name
-
-    assert normalize_tool_name("codex-cli") == "codex", "codex-cli should normalize to codex"
-    assert normalize_tool_name("codex") == "codex", "codex should stay codex"
-    assert "codex" in TOOL_NAME_ALIASES, "codex not in TOOL_NAME_ALIASES"
-    assert "codex-cli" in CANONICAL_TOOL_NAMES, "codex-cli not in CANONICAL_TOOL_NAMES"
-    print(f"    Aliases: {TOOL_NAME_ALIASES.get('codex', [])}")
-
-
-def test_user_tool_account_codex():
-    """User tool account model supports codex type."""
-    from app.models.user_tool_account import TOOL_TYPES
-
-    assert "codex" in TOOL_TYPES, "codex not in TOOL_TYPES"
-    assert TOOL_TYPES["codex"] == "Codex", f"Unexpected display: {TOOL_TYPES['codex']}"
-    print(f"    TOOL_TYPES['codex'] = {TOOL_TYPES['codex']}")
 
 
 # ═══════════════════════════════════════════════════════
@@ -644,21 +508,9 @@ def main():
     run_test("Codex content_block types exist", test_codex_content_block_types)
     run_test("daily_messages has codex entries", test_codex_daily_messages)
 
-    # ── Phase 2: Adapter tests (no server required) ──
-    print("\n── Phase 2: CLI Adapter ──")
-
-    run_test("Codex CLI adapter imports correctly", test_codex_cli_adapter_imports_corrected)
-    run_test("Codex adapter sets correct env vars", test_codex_adapter_env_vars)
-    run_test("Codex adapter builds CLI arguments", test_codex_adapter_build_args)
-    run_test("Codex adapter configures settings", test_codex_adapter_settings)
-    run_test("Terminal menu includes Codex", test_terminal_menu_includes_codex)
-
-    # ── Phase 3: Backend module tests (no server required) ──
-    print("\n── Phase 3: Backend Modules ──")
-
-    run_test("Tool connector registers codex", test_tool_connector_has_codex)
-    run_test("Tool name normalization works", test_tool_name_normalization)
-    run_test("User tool account supports codex", test_user_tool_account_codex)
+    # ── Phase 2+3: Adapter / backend module tests ──
+    # (in-process defs extracted to tests/unit/test_codex_adapter_inprocess_517.py
+    #  in #2429 batch 16)
 
     # ── Phase 4: API tests (server required) ──
     print("\n── Phase 4: API Endpoints ──")
