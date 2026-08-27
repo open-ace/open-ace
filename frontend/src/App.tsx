@@ -415,16 +415,6 @@ const PolicyRouteGuard: React.FC = () => {
   );
 };
 
-// Model Gateway Route Guard - waits for config and checks feature flag
-const ModelGatewayRouteGuard: React.FC = () => {
-  const modelGatewayEnabled = useAppStore((state) => state.modelGatewayEnabled);
-
-  return (
-    <FeatureRouteGuard enabled={modelGatewayEnabled} redirectPath="/manage/dashboard">
-      <ModelGatewayConfig />
-    </FeatureRouteGuard>
-  );
-};
 
 const ManageRoutes: React.FC = () => {
   return (
@@ -483,7 +473,7 @@ const ManageRoutes: React.FC = () => {
               />
             }
           />
-          <Route path="settings/model-gateway" element={<ModelGatewayRouteGuard />} />
+          <Route path="settings/model-gateway" element={<ModelGatewayConfig />} />
           <Route
             path="settings/feishu"
             element={
