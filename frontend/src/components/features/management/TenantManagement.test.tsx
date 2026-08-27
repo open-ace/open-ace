@@ -14,6 +14,19 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import '@testing-library/jest-dom';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
+// Import component and API before mocking (Vitest hoists mocks automatically)
+import { TenantManagement } from './TenantManagement';
+import { tenantApi } from '@/api';
+
+const mockTenantApi = tenantApi as unknown as {
+  listTenants: ReturnType<typeof vi.fn>;
+  createTenant: ReturnType<typeof vi.fn>;
+  updateTenant: ReturnType<typeof vi.fn>;
+  deleteTenant: ReturnType<typeof vi.fn>;
+  suspendTenant: ReturnType<typeof vi.fn>;
+  activateTenant: ReturnType<typeof vi.fn>;
+};
+
 // Mock language hook
 vi.mock('@/store', () => ({
   useLanguage: () => 'en',
@@ -192,18 +205,6 @@ vi.mock('@/hooks', () => ({
     refresh: {},
   }),
 }));
-
-import { TenantManagement } from './TenantManagement';
-import { tenantApi } from '@/api';
-
-const mockTenantApi = tenantApi as unknown as {
-  listTenants: ReturnType<typeof vi.fn>;
-  createTenant: ReturnType<typeof vi.fn>;
-  updateTenant: ReturnType<typeof vi.fn>;
-  deleteTenant: ReturnType<typeof vi.fn>;
-  suspendTenant: ReturnType<typeof vi.fn>;
-  activateTenant: ReturnType<typeof vi.fn>;
-};
 
 describe('TenantManagement - Issue #3137', () => {
   beforeEach(() => {
