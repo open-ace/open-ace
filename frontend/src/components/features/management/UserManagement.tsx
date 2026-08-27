@@ -193,7 +193,7 @@ export const UserManagement: React.FC = () => {
   };
 
   // Cache password validation result to avoid recomputing on every render
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   const passwordValidationError = useMemo(
     () => validatePasswordPolicy(editingPassword),
     [editingPassword, securitySettings, language]

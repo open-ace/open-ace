@@ -6,10 +6,7 @@ import { apiClient } from './client';
 
 // Types
 export type FeishuVerificationStatus =
-  | 'configured_unverified'
-  | 'connected'
-  | 'connection_failed'
-  | 'configuration_error';
+  'configured_unverified' | 'connected' | 'connection_failed' | 'configuration_error';
 
 export interface FeishuConfigResponse {
   app_id: string;
