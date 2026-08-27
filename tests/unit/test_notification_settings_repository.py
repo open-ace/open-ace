@@ -168,6 +168,7 @@ def test_save_rolls_back_when_import_state_write_fails(repository, monkeypatch):
     current = repo.get("webhook", include_secrets=True)
     assert current is not None
     assert current["enabled"] == 1
+    assert current["webhook_secret"] == "original"
 
 
 def test_save_sets_configured_unverified_on_new_config(repository):
@@ -231,3 +232,149 @@ def test_verification_status_returned_in_get(repository):
     assert result["verification_status"] == "connected"
     assert "last_tested_at" in result
     assert "verified_config_fingerprint" in result
+
+
+class TestSecretDecryptionError:
+    """Tests for Issue #3140: Secret decryption failure handling."""
+
+    def test_raises_secret_decryption_error_on_decrypt_failure(self, repository, monkeypatch):
+        """When decryption fails, should raise SecretDecryptionError instead of ValueError."""
+        from app.repositories.exceptions import SecretDecryptionError
+
+        repo, _config_dir, _connection = repository
+        repo.save(
+            "feishu",
+            {
+                "app_id": "cli_test",
+                "app_secret": "test-secret",
+                "sync_enabled": False,
+            },
+        )
+
+        def mock_decrypt(encrypted):
+            raise ValueError("Decryption failed: invalid key")
+
+        monkeypatch.setattr(module.get_password_manager(), "decrypt", mock_decrypt)
+
+        with pytest.raises(SecretDecryptionError) as exc_info:
+            repo.get("feishu", include_secrets=True)
+
+        assert exc_info.value.field_name == "app_secret"
+        assert exc_info.value.integration_kind == "feishu"
+        assert "incompatible" in str(exc_info.value).lower()
+
+    def test_error_message_does_not_expose_cryptographic_details(self, repository, monkeypatch):
+        """Error message should not contain original cryptographic error details."""
+        from app.repositories.exceptions import SecretDecryptionError
+
+        repo, _config_dir, _connection = repository
+        repo.save(
+            "feishu",
+            {
+                "app_id": "cli_test",
+                "app_secret": "test-secret",
+                "sync_enabled": False,
+            },
+        )
+
+        def mock_decrypt(encrypted):
+            raise ValueError("Decryption failed: invalid key or corrupted ciphertext")
+
+        monkeypatch.setattr(module.get_password_manager(), "decrypt", mock_decrypt)
+
+        with pytest.raises(SecretDecryptionError) as exc_info:
+            repo.get("feishu", include_secrets=True)
+
+        error_message = str(exc_info.value)
+        assert "invalid key" not in error_message
+        assert "corrupted ciphertext" not in error_message
+        assert "test-secret" not in error_message
+
+    def test_dingtalk_fallback_secret_decryption_error(self, repository, monkeypatch):
+        """DingTalk fallback webhook secret should also raise SecretDecryptionError."""
+        from app.repositories.exceptions import SecretDecryptionError
+
+        repo, _config_dir, _connection = repository
+        repo.save(
+            "dingtalk",
+            {
+                "app_key": "test_key",
+                "app_secret": "test-secret",
+                "fallback_webhook_secret": "fallback-secret",
+                "sync_enabled": False,
+            },
+        )
+
+        # Get the encrypted values
+        saved = repo.get("dingtalk", include_secrets=True)
+        assert saved is not None
+        assert saved["app_secret"] == "test-secret"
+        assert saved["fallback_webhook_secret"] == "fallback-secret"
+
+        # Now save again and mock to fail only on second call (fallback)
+        repo.save(
+            "dingtalk",
+            {
+                "app_key": "test_key",
+                "app_secret": "test-secret",
+                "fallback_webhook_secret": "fallback-secret",
+                "sync_enabled": False,
+            },
+        )
+
+        call_count = [0]
+
+        def mock_decrypt(encrypted):
+            call_count[0] += 1
+            # First call is for app_secret, second is for fallback_webhook_secret
+            if call_count[0] == 2:
+                raise ValueError("Decryption failed")
+            return "decrypted"
+
+        monkeypatch.setattr(module.get_password_manager(), "decrypt", mock_decrypt)
+
+        with pytest.raises(SecretDecryptionError) as exc_info:
+            repo.get("dingtalk", include_secrets=True)
+
+        assert exc_info.value.field_name == "fallback_webhook_secret"
+        assert exc_info.value.integration_kind == "dingtalk"
+
+    def test_normal_decrypt_succeeds(self, repository):
+        """Normal decryption should work without raising SecretDecryptionError."""
+        repo, _config_dir, _connection = repository
+        repo.save(
+            "feishu",
+            {
+                "app_id": "cli_test",
+                "app_secret": "test-secret-value",
+                "sync_enabled": False,
+            },
+        )
+
+        result = repo.get("feishu", include_secrets=True)
+
+        assert result is not None
+        assert result["app_secret"] == "test-secret-value"
+
+    def test_get_without_secrets_does_not_raise_decrypt_error(self, repository, monkeypatch):
+        """get(include_secrets=False) should not trigger decryption or errors."""
+        repo, _config_dir, _connection = repository
+        repo.save(
+            "feishu",
+            {
+                "app_id": "cli_test",
+                "app_secret": "test-secret",
+                "sync_enabled": False,
+            },
+        )
+
+        def mock_decrypt(encrypted):
+            raise ValueError("Should not be called")
+
+        monkeypatch.setattr(module.get_password_manager(), "decrypt", mock_decrypt)
+
+        result = repo.get("feishu", include_secrets=False)
+
+        assert result is not None
+        assert result["app_secret_configured"] is True
+        assert "app_secret" not in result

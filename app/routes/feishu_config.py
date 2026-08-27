@@ -14,6 +14,7 @@ from flask import Blueprint, g, jsonify, request
 
 from app.auth.decorators import admin_required
 from app.modules.governance.audit_logger import AuditAction, AuditLogger
+from app.repositories.exceptions import SecretDecryptionError
 from app.repositories.notification_settings_repository import get_notification_settings_repository
 from app.services.feishu_config_service import get_feishu_config_service
 
@@ -161,14 +162,27 @@ def test_feishu_connection():
     try:
         data = request.get_json() or {}
 
-        # Test with provided parameters or saved config
+        # If explicit credentials provided, use them directly without reading saved
+        explicit_app_id = data.get("app_id")
+        explicit_app_secret = data.get("app_secret")
+
         repo = get_notification_settings_repository()
-        saved = repo.get("feishu", include_secrets=True) or {}
-        service = get_feishu_config_service()
-        result = service.test_connection(
-            app_id=data.get("app_id") or saved.get("app_id"),
-            app_secret=data.get("app_secret") or saved.get("app_secret"),
-        )
+
+        if explicit_app_id and explicit_app_secret:
+            service = get_feishu_config_service()
+            result = service.test_connection(
+                app_id=explicit_app_id,
+                app_secret=explicit_app_secret,
+            )
+            saved = None  # No saved config needed for explicit credentials
+        else:
+            # Fall back to saved config only when no explicit credentials
+            saved = repo.get("feishu", include_secrets=True) or {}
+            service = get_feishu_config_service()
+            result = service.test_connection(
+                app_id=explicit_app_id or saved.get("app_id"),
+                app_secret=explicit_app_secret or saved.get("app_secret"),
+            )
 
         # Persist verification status if config exists in database
         if saved and saved.get("app_id"):
@@ -192,9 +206,21 @@ def test_feishu_connection():
                 logger.error(f"Feishu connection test failed: {result['message']}")
 
         return jsonify(result)
+    except SecretDecryptionError as e:
+        logger.error(f"Secret decryption error for {e.field_name}: saved secret unreadable")
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "FEISHU_SECRET_UNREADABLE",
+                    "message": "The saved App Secret cannot be decrypted. Please re-enter the App Secret and save the configuration.",
+                }
+            ),
+            409,
+        )
     except Exception as e:
         logger.error(f"Error testing Feishu connection: {e}")
-        return jsonify({"success": False, "error": "Internal server error", "message": str(e)}), 500
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 def _classify_feishu_error(message: str) -> str:
