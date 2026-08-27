@@ -40,8 +40,8 @@ PR #748 — Batch 6: Distributed lock & machine permission
   23. Remote machine admin permission validation
 
 Run:
-  HEADLESS=true  python tests/issues/740/e2e_autonomous_comprehensive_playwright.py   # CI
-  HEADLESS=false python tests/issues/740/e2e_autonomous_comprehensive_playwright.py   # Demo
+  HEADLESS=true  python tests/e2e/e2e_autonomous_comprehensive_playwright.py   # CI
+  HEADLESS=false python tests/e2e/e2e_autonomous_comprehensive_playwright.py   # Demo
 """
 
 import json
@@ -51,10 +51,8 @@ import time
 import uuid
 
 # Add project root to sys.path for app imports
-# tests/issues/740/file.py → tests/issues/740 → tests/issues → tests → PROJECT_ROOT
-PROJECT_ROOT = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+# tests/e2e/file.py → tests/e2e → tests → PROJECT_ROOT
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 
 import requests

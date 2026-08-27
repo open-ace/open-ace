@@ -147,12 +147,32 @@ class TestTenantService:
         assert svc.can_add_user(1) is False
 
     def test_get_plan_quotas(self):
+        """Issue #3138: Verify all quota fields match QuotaConfig.to_dict()."""
         svc, _, _ = self._make_service()
         quotas = svc.get_plan_quotas()
         assert "free" in quotas
         assert "standard" in quotas
         assert "premium" in quotas
         assert "enterprise" in quotas
+
+        # Issue #3138: Contract test - verify all expected fields exist
+        expected_fields = {
+            "daily_token_limit",
+            "monthly_token_limit",
+            "daily_request_limit",
+            "monthly_request_limit",
+            "max_users",
+            "max_sessions_per_user",
+        }
+        for plan_name, plan_quota in quotas.items():
+            assert set(plan_quota.keys()) == expected_fields, (
+                f"Plan {plan_name} has unexpected fields: "
+                f"expected {expected_fields}, got {set(plan_quota.keys())}"
+            )
+            # Verify all values are positive integers
+            for field_name, value in plan_quota.items():
+                assert isinstance(value, int), f"{plan_name}.{field_name} is not int"
+                assert value > 0, f"{plan_name}.{field_name} is not positive"
 
     def test_update_quota(self):
         svc, mock_repo, _ = self._make_service()

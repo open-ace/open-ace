@@ -20,8 +20,8 @@ features NOT tested in the original suite:
  13. Workflow definition snapshot modal UI
 
 Run:
-  HEADLESS=true  python tests/issues/740/e2e_autonomous_gap_playwright.py
-  HEADLESS=false python tests/issues/740/e2e_autonomous_gap_playwright.py
+  HEADLESS=true  python tests/e2e/e2e_autonomous_gap_playwright.py
+  HEADLESS=false python tests/e2e/e2e_autonomous_gap_playwright.py
 """
 
 import json
@@ -30,10 +30,8 @@ import sys
 import time
 import uuid
 
-# tests/issues/740/file.py → tests/issues/740 → tests/issues → tests → PROJECT_ROOT
-PROJECT_ROOT = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+# tests/e2e/file.py → tests/e2e → tests → PROJECT_ROOT
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 
 import requests
