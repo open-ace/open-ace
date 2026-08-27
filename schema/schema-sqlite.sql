@@ -577,6 +577,11 @@ CREATE TABLE feishu_settings (
  created_by integer,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+ verification_status TEXT,
+ last_tested_at TIMESTAMP,
+ last_test_error_code TEXT,
+ last_test_error_summary text,
+ verified_config_fingerprint TEXT,
     CONSTRAINT ck_feishu_settings_singleton CHECK ((id = 1))
 );
 

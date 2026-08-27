@@ -846,6 +846,11 @@ CREATE TABLE feishu_settings (
     created_by integer,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
     updated_at timestamp without time zone DEFAULT now() NOT NULL,
+    verification_status character varying(32),
+    last_tested_at timestamp without time zone,
+    last_test_error_code character varying(64),
+    last_test_error_summary text,
+    verified_config_fingerprint character varying(128),
     CONSTRAINT ck_feishu_settings_singleton CHECK ((id = 1))
 );
 
