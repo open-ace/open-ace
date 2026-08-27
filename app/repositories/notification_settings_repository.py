@@ -280,7 +280,12 @@ class NotificationSettingsRepository:
                     f"UPDATE {table} SET verification_status = ?, last_tested_at = ?, "
                     f"last_test_error_code = ?, last_test_error_summary = ? WHERE id = 1"
                 ),  # nosec B608: allowlisted table
-                (status, datetime.now(timezone.utc).replace(tzinfo=None), error_code, error_summary),
+                (
+                    status,
+                    datetime.now(timezone.utc).replace(tzinfo=None),
+                    error_code,
+                    error_summary,
+                ),
             )
             conn.commit()
         except Exception:
