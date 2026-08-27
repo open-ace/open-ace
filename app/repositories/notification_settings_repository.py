@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
@@ -11,7 +12,10 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from app.repositories.database import CONFIG_DIR, adapt_sql, get_database_url, is_postgresql
+from app.repositories.exceptions import SecretDecryptionError
 from app.utils.smtp_crypto import get_password_manager
+
+logger = logging.getLogger(__name__)
 
 
 class NotificationSettingsRepository:
@@ -58,7 +62,19 @@ class NotificationSettingsRepository:
             conn.close()
 
     def get(self, kind: str, include_secrets: bool = False) -> dict[str, Any] | None:
-        """Return masked settings, importing a legacy value at most once."""
+        """Return masked settings, importing a legacy value at most once.
+
+        Args:
+            kind: Integration type (e.g., "feishu", "dingtalk", "webhook").
+            include_secrets: If True, decrypt and include secret values.
+
+        Returns:
+            Configuration dict with masked secrets, or None if not configured.
+
+        Raises:
+            SecretDecryptionError: If include_secrets is True and the saved secret
+                cannot be decrypted with the current encryption key.
+        """
         row = self._get_raw(kind)
         if row is None and self._import_legacy(kind):
             row = self._get_raw(kind)
@@ -69,12 +85,29 @@ class NotificationSettingsRepository:
         encrypted = row.pop(column, None)
         row[f"{secret_name}_configured"] = bool(encrypted)
         if include_secrets and encrypted:
-            row[secret_name] = get_password_manager().decrypt(encrypted)
+            try:
+                row[secret_name] = get_password_manager().decrypt(encrypted)
+            except ValueError as e:
+                logger.error(
+                    f"Failed to decrypt {secret_name} for {kind}: decryption error"
+                )
+                raise SecretDecryptionError(secret_name, kind) from e
         if kind == "dingtalk":
             encrypted_fallback = row.pop("fallback_webhook_secret_enc", None)
             row["fallback_webhook_secret_configured"] = bool(encrypted_fallback)
             if include_secrets and encrypted_fallback:
-                row["fallback_webhook_secret"] = get_password_manager().decrypt(encrypted_fallback)
+                try:
+                    row["fallback_webhook_secret"] = get_password_manager().decrypt(
+                        encrypted_fallback
+                    )
+                except ValueError as e:
+                    logger.error(
+                        "Failed to decrypt fallback_webhook_secret for dingtalk: "
+                        "decryption error"
+                    )
+                    raise SecretDecryptionError(
+                        "fallback_webhook_secret", "dingtalk"
+                    ) from e
         return row
 
     def _legacy_values(self, kind: str, root: dict[str, Any]) -> dict[str, Any] | None:
