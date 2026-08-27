@@ -529,6 +529,22 @@
       "notes": "legacy playwright script with run_tests/main; execute as standalone automation in nightly governance"
     },
     {
+      "path": "tests/e2e/e2e_ha_model_pool.py",
+      "mode": "standalone-automated",
+      "owner": "issue-604",
+      "issue": 604,
+      "home_lane": "nightly",
+      "executor": "standalone",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "rehomed from tests/issues/604 by batch 14 (#2429); standalone playwright script with run_tests/main, collects no pytest nodeids"
+    },
+    {
       "path": "tests/e2e/e2e_model_gateway_playwright.py",
       "mode": "standalone-automated",
       "owner": "e2e-governance",
@@ -607,6 +623,22 @@
       "cadence": "nightly",
       "collects": false,
       "notes": "test-named but collects no nodeids today (async-marker/demo cluster, issue #2491 P5 triage)"
+    },
+    {
+      "path": "tests/e2e/e2e_runtime_isolation_panel.py",
+      "mode": "standalone-automated",
+      "owner": "issue-2020",
+      "issue": 2020,
+      "home_lane": "nightly",
+      "executor": "standalone",
+      "capabilities": [
+        "browser",
+        "server"
+      ],
+      "timeout_seconds": 240,
+      "cadence": "nightly",
+      "collects": false,
+      "notes": "rehomed from tests/issues/2020 by batch 14 (#2429); standalone playwright script with main, collects no pytest nodeids"
     },
     {
       "path": "tests/e2e/e2e_scope_exceeded_banner_playwright.py",

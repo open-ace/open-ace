@@ -219,12 +219,13 @@ def test_collection_count_uses_final_pytest_summary():
 def test_collection_file_count_honors_default_quarantine():
     assert ci.candidate_test_file_count("tests") >= 250
     # Floor mirrors .test-baseline.json issues.min_files (430 -> 413 -> 393 -> 383
-    # -> 371 -> 357 -> 338 -> 316 -> 277 -> 244 -> 221 -> 207 -> 192 -> 155 as
-    # #2429 batches 1-8 migrated 17 + 20 + 12 + 19 + 22 + 39 files, batches
-    # 9/10/11/12/13 (I-group db, db+subprocess, subprocess-core,
-    # merge/gateway/org-sync/run-as, closure) 33 + 23 + 14 + 15 + 37 more into
-    # canonical layers / e2e and governed the stubs.
-    assert ci.candidate_test_file_count("tests/issues") >= 155
+    # -> 371 -> 357 -> 338 -> 316 -> 277 -> 244 -> 221 -> 207 -> 192 -> 155
+    # -> 126 as #2429 batches 1-8 migrated 17 + 20 + 12 + 19 + 22 + 39 files,
+    # batches 9/10/11/12/13/14 (I-group db, db+subprocess, subprocess-core,
+    # merge/gateway/org-sync/run-as, closure, B-group in-proc wave 1)
+    # 33 + 23 + 14 + 15 + 37 + 29 more into canonical layers / e2e and
+    # governed the stubs.
+    assert ci.candidate_test_file_count("tests/issues") >= 126
 
 
 def test_missing_push_base_fails_safe_to_policy_change():
