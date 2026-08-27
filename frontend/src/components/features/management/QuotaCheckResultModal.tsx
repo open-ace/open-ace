@@ -35,6 +35,9 @@ export interface QuotaCheckResultModalProps {
 
 /**
  * Modal component for displaying quota check results
+ *
+ * Always renders the Modal component to ensure proper state management.
+ * Content is only displayed when result is available.
  */
 export const QuotaCheckResultModal: React.FC<QuotaCheckResultModalProps> = ({
   isOpen,
@@ -43,71 +46,73 @@ export const QuotaCheckResultModal: React.FC<QuotaCheckResultModalProps> = ({
   onEditQuota,
   language,
 }) => {
-  if (!result) {
-    return null;
-  }
-
-  const { tenant, allowed, reason, checkedAt } = result;
-
   // Get display reason (fallback if reason is null/undefined)
-  const displayReason = reason ?? t('noDetails', language);
+  // Use nullish coalescing to preserve empty strings if that's intentional
+  const displayReason = result?.reason ?? t('noDetails', language);
+
+  // Build title based on result availability
+  const title = result
+    ? `${result.tenant.name} ${t('quotaCheckResult', language)}`
+    : t('quotaCheckResult', language);
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={`${tenant.name} ${t('quotaCheckResult', language)}`}
+      title={title}
       size="md"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
             {t('close', language)}
           </Button>
-          {!allowed && (
-            <Button variant="primary" onClick={() => onEditQuota(tenant)}>
+          {result && !result.allowed && (
+            <Button variant="primary" onClick={() => onEditQuota(result.tenant)}>
               {t('editQuotaNow', language)}
             </Button>
           )}
         </>
       }
     >
-      <div className="quota-check-result">
-        {/* Status Badge */}
-        <div className="mb-3">
-          <div className="d-flex align-items-center gap-2">
-            <span className="fw-medium">{t('status', language)}:</span>
-            {allowed ? (
-              <Badge variant="success">{t('quotaAvailable', language)}</Badge>
-            ) : (
-              <Badge variant="danger">{t('quotaExceeded', language)}</Badge>
-            )}
-          </div>
-        </div>
-
-        {/* Reason (only shown when quota exceeded) */}
-        {!allowed && (
+      {result && (
+        <div className="quota-check-result">
+          {/* Status Badge */}
           <div className="mb-3">
-            <div className="fw-medium mb-1">{t('reason', language)}:</div>
-            <div className="text-muted p-2 bg-light rounded">{displayReason}</div>
+            <div className="d-flex align-items-center gap-2">
+              <span className="fw-medium">{t('status', language)}:</span>
+              {result.allowed ? (
+                <Badge variant="success">{t('quotaAvailable', language)}</Badge>
+              ) : (
+                <Badge variant="danger">{t('quotaExceeded', language)}</Badge>
+              )}
+            </div>
           </div>
-        )}
 
-        {/* Check Time */}
-        <div className="mb-3">
-          <div className="d-flex align-items-center gap-2">
-            <span className="fw-medium">{t('quotaCheckTime', language)}:</span>
-            <span className="text-muted">{formatDateTime(checkedAt.toISOString())}</span>
+          {/* Reason (only shown when quota exceeded) */}
+          {!result.allowed && (
+            <div className="mb-3">
+              <div className="fw-medium mb-1">{t('reason', language)}:</div>
+              <div className="text-muted p-2 bg-light rounded">{displayReason}</div>
+            </div>
+          )}
+
+          {/* Check Time */}
+          <div className="mb-3">
+            <div className="d-flex align-items-center gap-2">
+              <span className="fw-medium">{t('quotaCheckTime', language)}:</span>
+              <span className="text-muted">{formatDateTime(result.checkedAt.toISOString())}</span>
+            </div>
+          </div>
+
+          {/* Snapshot Note */}
+          <div className="mt-4 pt-3 border-top">
+            <small className="text-muted">
+              <i className="bi bi-info-circle me-1" />
+              {t('quotaCheckSnapshotNote', language)}
+            </small>
           </div>
         </div>
-
-        {/* Snapshot Note */}
-        <div className="mt-4 pt-3 border-top">
-          <small className="text-muted">
-            <i className="bi bi-info-circle me-1" />
-            {t('quotaCheckSnapshotNote', language)}
-          </small>
-        </div>
-      </div>
+      )}
     </Modal>
   );
 };

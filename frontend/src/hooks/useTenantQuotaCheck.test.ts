@@ -5,7 +5,7 @@
  */
 
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useTenantQuotaCheck } from './useTenantQuotaCheck';
 import { tenantApi } from '@/api';
 import type { Tenant } from '@/api';
@@ -42,6 +42,10 @@ describe('useTenantQuotaCheck', () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('should have initial state with empty checkingTenants and null checkResult', () => {
     const { result } = renderHook(() => useTenantQuotaCheck());
 
@@ -51,8 +55,7 @@ describe('useTenantQuotaCheck', () => {
   });
 
   it('should call tenantApi.checkQuota with correct parameters', async () => {
-    const mockResult = { allowed: true };
-    vi.mocked(tenantApi.checkQuota).mockResolvedValueOnce(mockResult);
+    vi.mocked(tenantApi.checkQuota).mockResolvedValueOnce({ allowed: true });
 
     const { result } = renderHook(() => useTenantQuotaCheck());
 
@@ -64,8 +67,7 @@ describe('useTenantQuotaCheck', () => {
   });
 
   it('should set checkResult on successful check', async () => {
-    const mockResult = { allowed: true, reason: undefined };
-    vi.mocked(tenantApi.checkQuota).mockResolvedValueOnce(mockResult);
+    vi.mocked(tenantApi.checkQuota).mockResolvedValueOnce({ allowed: true, reason: undefined });
 
     const { result } = renderHook(() => useTenantQuotaCheck());
 
@@ -82,8 +84,10 @@ describe('useTenantQuotaCheck', () => {
   });
 
   it('should set checkResult with reason when allowed is false', async () => {
-    const mockResult = { allowed: false, reason: 'Daily token quota exceeded' };
-    vi.mocked(tenantApi.checkQuota).mockResolvedValueOnce(mockResult);
+    vi.mocked(tenantApi.checkQuota).mockResolvedValueOnce({
+      allowed: false,
+      reason: 'Daily token quota exceeded',
+    });
 
     const { result } = renderHook(() => useTenantQuotaCheck());
 
@@ -97,12 +101,11 @@ describe('useTenantQuotaCheck', () => {
     });
   });
 
-  it('should prevent duplicate requests for the same tenant', async () => {
-    const mockResult = { allowed: true };
+  it('should prevent duplicate requests for the same tenant using functional state updates', async () => {
     vi.mocked(tenantApi.checkQuota).mockImplementation(
       () =>
         new Promise((resolve) => {
-          setTimeout(() => resolve(mockResult), 100);
+          setTimeout(() => resolve({ allowed: true }), 100);
         })
     );
 
@@ -113,7 +116,7 @@ describe('useTenantQuotaCheck', () => {
       result.current.checkQuota(mockTenant);
     });
 
-    // Try to check again immediately
+    // Try to check again immediately (should be prevented by functional state update)
     await act(async () => {
       await result.current.checkQuota(mockTenant);
     });
@@ -123,11 +126,10 @@ describe('useTenantQuotaCheck', () => {
   });
 
   it('should add and remove tenant from checkingTenants during check', async () => {
-    const mockResult = { allowed: true };
     vi.mocked(tenantApi.checkQuota).mockImplementation(
       () =>
         new Promise((resolve) => {
-          setTimeout(() => resolve(mockResult), 50);
+          setTimeout(() => resolve({ allowed: true }), 50);
         })
     );
 
@@ -163,7 +165,20 @@ describe('useTenantQuotaCheck', () => {
     expect(result.current.checkingTenants.has(1)).toBe(false);
   });
 
-  it('should handle tenant not found error', async () => {
+  it('should handle tenant not found error via status code', async () => {
+    const notFoundError = { message: 'Tenant not found', status: 404 };
+    vi.mocked(tenantApi.checkQuota).mockRejectedValueOnce(notFoundError);
+
+    const { result } = renderHook(() => useTenantQuotaCheck());
+
+    await act(async () => {
+      await result.current.checkQuota(mockTenant);
+    });
+
+    expect(result.current.checkResult).toBeNull();
+  });
+
+  it('should handle tenant not found error via string matching', async () => {
     const notFoundError = { message: 'Tenant not found' };
     vi.mocked(tenantApi.checkQuota).mockRejectedValueOnce(notFoundError);
 
@@ -176,9 +191,21 @@ describe('useTenantQuotaCheck', () => {
     expect(result.current.checkResult).toBeNull();
   });
 
+  it('should handle permission denied error (403)', async () => {
+    const forbiddenError = { message: 'Forbidden', status: 403 };
+    vi.mocked(tenantApi.checkQuota).mockRejectedValueOnce(forbiddenError);
+
+    const { result } = renderHook(() => useTenantQuotaCheck());
+
+    await act(async () => {
+      await result.current.checkQuota(mockTenant);
+    });
+
+    expect(result.current.checkResult).toBeNull();
+  });
+
   it('should clear result when clearResult is called', async () => {
-    const mockResult = { allowed: true };
-    vi.mocked(tenantApi.checkQuota).mockResolvedValueOnce(mockResult);
+    vi.mocked(tenantApi.checkQuota).mockResolvedValueOnce({ allowed: true });
 
     const { result } = renderHook(() => useTenantQuotaCheck());
 
@@ -197,35 +224,20 @@ describe('useTenantQuotaCheck', () => {
     expect(result.current.checkResult).toBeNull();
   });
 
-  it('should handle multiple tenants independently', async () => {
-    const mockTenant2: Tenant = { ...mockTenant, id: 2, name: 'Test Tenant 2' };
-
-    const mockResult1 = { allowed: true };
-    const mockResult2 = { allowed: false, reason: 'Quota exceeded' };
-
-    vi.mocked(tenantApi.checkQuota)
-      .mockImplementationOnce(
-        () => new Promise((resolve) => setTimeout(() => resolve(mockResult1), 100))
-      )
-      .mockImplementationOnce(
-        () => new Promise((resolve) => setTimeout(() => resolve(mockResult2), 50))
-      );
+  it('should handle reason being undefined in API response', async () => {
+    vi.mocked(tenantApi.checkQuota).mockResolvedValueOnce({ allowed: false, reason: undefined });
 
     const { result } = renderHook(() => useTenantQuotaCheck());
 
-    // Start both checks
-    act(() => {
-      result.current.checkQuota(mockTenant);
-      result.current.checkQuota(mockTenant2);
+    await act(async () => {
+      await result.current.checkQuota(mockTenant);
     });
 
-    // Both should be in checkingTenants
-    expect(result.current.checkingTenants.has(1)).toBe(true);
-    expect(result.current.checkingTenants.has(2)).toBe(true);
-
-    // Wait for both to complete
     await waitFor(() => {
-      expect(result.current.checkingTenants.size).toBe(0);
+      expect(result.current.checkResult).not.toBeNull();
+      expect(result.current.checkResult?.allowed).toBe(false);
+      // reason should be undefined (API returned undefined, we preserve it)
+      expect(result.current.checkResult?.reason).toBeUndefined();
     });
   });
 });

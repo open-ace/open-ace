@@ -5,9 +5,9 @@
  *
  * Features:
  * - Per-tenant independent checking state
- * - Duplicate request prevention
+ * - Duplicate request prevention using functional state updates
  * - Error handling with toast notifications
- * - 10-second timeout for API requests
+ * - Relies on apiClient's built-in timeout (30s) for timeout handling
  */
 
 import { useState, useCallback } from 'react';
@@ -40,11 +40,13 @@ export interface UseTenantQuotaCheckReturn {
   clearResult: () => void;
 }
 
-/** API request timeout in milliseconds */
-const REQUEST_TIMEOUT_MS = 10000;
-
 /**
  * Hook for checking tenant quota availability
+ *
+ * The API checks if the tenant's current usage exceeds their daily limits.
+ * Parameters:
+ * - tokens: 0 means "check if current usage exceeds limits" (not estimating additional usage)
+ * - requests: defaults to 0 in backend when not provided
  *
  * @returns Hook return value with checking state and functions
  */
@@ -61,27 +63,36 @@ export function useTenantQuotaCheck(): UseTenantQuotaCheckReturn {
   /**
    * Initiate quota check for a tenant
    *
+   * Uses functional state updates to prevent race conditions with stale closure values.
+   * The API client has built-in timeout handling (30 seconds), so we don't need
+   * an additional AbortController here.
+   *
    * @param tenant - Tenant to check
    */
   const checkQuota = useCallback(
     async (tenant: Tenant) => {
-      // Prevent duplicate requests for the same tenant
-      if (checkingTenants.has(tenant.id)) {
+      // Use functional update to avoid stale closure issues with checkingTenants
+      // This ensures we check against the latest state, not a snapshot from render time
+      let shouldProceed = false;
+      setCheckingTenants((prev) => {
+        if (prev.has(tenant.id)) {
+          // Already checking this tenant, don't proceed
+          return prev;
+        }
+        shouldProceed = true;
+        // Create new Set with the tenant added (immutable update)
+        return new Set(prev).add(tenant.id);
+      });
+
+      if (!shouldProceed) {
         return;
       }
 
-      // Add to checking set
-      setCheckingTenants((prev) => new Set(prev).add(tenant.id));
-
       try {
-        // Create abort controller for timeout
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
         // Call API with tokens: 0 to check if current usage exceeds limits
+        // This queries whether the tenant has any remaining quota capacity
+        // The apiClient has built-in 30s timeout and retry logic
         const result = await tenantApi.checkQuota(tenant.id, { tokens: 0 });
-
-        clearTimeout(timeoutId);
 
         // Store result with check timestamp
         setCheckResult({
@@ -91,27 +102,41 @@ export function useTenantQuotaCheck(): UseTenantQuotaCheckReturn {
           checkedAt: new Date(),
         });
       } catch (err: unknown) {
-        // Handle different error types
+        // Handle different error types with user-friendly messages
         let errorMessage: string;
+        let errorKey = 'failedToCheckQuota';
 
         if (err instanceof Error) {
+          // Check for timeout/abort error (from apiClient's built-in timeout)
           if (err.name === 'AbortError') {
             errorMessage = t('requestTimeout', language);
+            errorKey = 'requestTimeout';
           } else if (err.message.includes('fetch') || err.message.includes('network')) {
             errorMessage = t('networkError', language);
-          } else if (err.message.includes('404') || err.message.includes('not found')) {
-            errorMessage = t('tenantNotFound', language);
+            errorKey = 'networkError';
           } else {
             errorMessage = err.message;
           }
-        } else if (err && typeof err === 'object' && 'message' in err) {
-          // API error response
-          const apiError = err as { message?: string; error?: string };
-          const msg = apiError.message ?? apiError.error ?? 'Unknown error';
-          if (msg.toLowerCase().includes('not found')) {
+        } else if (err && typeof err === 'object') {
+          // API error response (has status code)
+          const apiError = err as { message?: string; error?: string; status?: number };
+
+          // Use status code for more reliable error type detection
+          if (apiError.status === 404) {
             errorMessage = t('tenantNotFound', language);
+            errorKey = 'tenantNotFound';
+          } else if (apiError.status === 403) {
+            errorMessage = t('noPermissionForTenantManagement', language);
+            errorKey = 'noPermission';
           } else {
-            errorMessage = msg;
+            const msg = apiError.message ?? apiError.error ?? 'Unknown error';
+            // Fallback to string matching for error type
+            if (msg.toLowerCase().includes('not found')) {
+              errorMessage = t('tenantNotFound', language);
+              errorKey = 'tenantNotFound';
+            } else {
+              errorMessage = msg;
+            }
           }
         } else {
           errorMessage = t('failedToCheckQuota', language);
@@ -120,14 +145,15 @@ export function useTenantQuotaCheck(): UseTenantQuotaCheckReturn {
         // Show error toast
         toast.error(t('failedToCheckQuota', language), errorMessage);
 
-        // Log error for debugging
+        // Log error for debugging with structured info
         console.error('Failed to check tenant quota:', {
           tenantId: tenant.id,
           tenantName: tenant.name,
+          errorKey,
           error: err,
         });
       } finally {
-        // Remove from checking set
+        // Remove from checking set using functional update
         setCheckingTenants((prev) => {
           const next = new Set(prev);
           next.delete(tenant.id);
@@ -135,7 +161,7 @@ export function useTenantQuotaCheck(): UseTenantQuotaCheckReturn {
         });
       }
     },
-    [checkingTenants, language, toast]
+    [language, toast]
   );
 
   /**
