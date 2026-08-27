@@ -281,9 +281,7 @@ class SchedulerStatusReader:
                 last_run_age_seconds = (now - last_run_at).total_seconds()
 
         # Determine health status based on last run age
-        if last_run_age_seconds is None:
-            health_status = "stopped"
-        elif last_run_age_seconds >= threshold_stopped:
+        if last_run_age_seconds is None or last_run_age_seconds >= threshold_stopped:
             health_status = "stopped"
         elif last_run_age_seconds >= threshold_healthy:
             health_status = "stale"
