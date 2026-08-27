@@ -651,9 +651,24 @@ class TestSchedulerStatusReaderExecutionHealth:
         ]
         # 3 consecutive failures (threshold)
         mock_db.fetch_all.return_value = [
-            {"status": "failed", "started_at": recent_run, "ended_at": recent_run, "error_message": "Error 1"},
-            {"status": "failed", "started_at": recent_run - timedelta(minutes=5), "ended_at": recent_run - timedelta(minutes=5), "error_message": "Error 2"},
-            {"status": "failed", "started_at": recent_run - timedelta(minutes=10), "ended_at": recent_run - timedelta(minutes=10), "error_message": "Error 3"},
+            {
+                "status": "failed",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "error_message": "Error 1",
+            },
+            {
+                "status": "failed",
+                "started_at": recent_run - timedelta(minutes=5),
+                "ended_at": recent_run - timedelta(minutes=5),
+                "error_message": "Error 2",
+            },
+            {
+                "status": "failed",
+                "started_at": recent_run - timedelta(minutes=10),
+                "ended_at": recent_run - timedelta(minutes=10),
+                "error_message": "Error 3",
+            },
         ]
 
         with patch("app.repositories.database.Database", return_value=mock_db):
@@ -684,8 +699,18 @@ class TestSchedulerStatusReaderExecutionHealth:
         ]
         # Latest is success, earlier is failure
         mock_db.fetch_all.return_value = [
-            {"status": "completed", "started_at": recent_run, "ended_at": recent_run, "error_message": None},
-            {"status": "failed", "started_at": earlier_run, "ended_at": earlier_run, "error_message": "Error"},
+            {
+                "status": "completed",
+                "started_at": recent_run,
+                "ended_at": recent_run,
+                "error_message": None,
+            },
+            {
+                "status": "failed",
+                "started_at": earlier_run,
+                "ended_at": earlier_run,
+                "error_message": "Error",
+            },
         ]
 
         with patch("app.repositories.database.Database", return_value=mock_db):
@@ -716,8 +741,18 @@ class TestSchedulerStatusReaderExecutionHealth:
         ]
         # Latest is failure, earlier is success
         mock_db.fetch_all.return_value = [
-            {"status": "failed", "started_at": failure_time, "ended_at": failure_time, "error_message": "Error"},
-            {"status": "completed", "started_at": success_time, "ended_at": success_time, "error_message": None},
+            {
+                "status": "failed",
+                "started_at": failure_time,
+                "ended_at": failure_time,
+                "error_message": "Error",
+            },
+            {
+                "status": "completed",
+                "started_at": success_time,
+                "ended_at": success_time,
+                "error_message": None,
+            },
         ]
 
         with patch("app.repositories.database.Database", return_value=mock_db):
