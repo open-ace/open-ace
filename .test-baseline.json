@@ -47,7 +47,7 @@
     "Baseline created before pytest.ini modification to enable e2e_*.py collection",
     "tests/e2e currently excluded by norecursedirs in pytest.ini",
     "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard",
-    "Default count from: python scripts/ci.py run default-collection (11775 items after #2429 batch 16)",
-    "Issue count from: clean-checkout issue-collection (169 items, 130 files after #2429 batch 16)"
+    "Default count from: python scripts/ci.py run default-collection (11779 items after #2429 batch 16)",
+    "Issue count from: clean-checkout issue-collection (169 items, 108 files after #2429 batch 16)"
   ]
 }
