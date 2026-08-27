@@ -4,12 +4,12 @@
   "created_before_modification": true,
   "layers": {
     "default": {
-      "min_tests": 6569,
+      "min_tests": 6903,
       "min_files": 250,
       "last_updated": "2026-08-27",
-      "update_reason": "Issue #2429 batch 12: merge/model-gateway/org-sync/run-as cluster migrated 336 items (unit: 822/1001/584/720 planner+handler+admin view-classes/1891 validation/1829 cache+fetch+tool-account-route/1827/2018 validator; integration: 720 repository, 1891 routes, 1829 signing+tool-account-repo, 2018 gate+integration); min raised by exactly +336 (6233+336); actuals 10203/690 measured locally on branch (= 9867 base 6bdeebea + 336; CI clean re-confirmed)",
-      "actual_collected": 10203,
-      "actual_files": 690,
+      "update_reason": "Issue #2429 batch 13: I-group closure (29 dirs) migrated 334 items (307 unit incl. 4 red-on-main dirs repaired, 18 integration/routes, 9 integration flat); min raised by exactly +334 (6569+334); actuals measured locally on branch, CI clean re-confirmed",
+      "actual_collected": 10537,
+      "actual_files": 728,
       "threshold_percent": 96
     },
     "critical": {
@@ -30,12 +30,12 @@
       "note": "Currently excluded by norecursedirs"
     },
     "issues": {
-      "min_tests": 1520,
-      "min_files": 192,
+      "min_tests": 1171,
+      "min_files": 155,
       "last_updated": "2026-08-27",
-      "update_reason": "Issue #2429 batch 12: I-group merge/model-gateway/org-sync/run-as cluster (8 dirs: 822/720/1891/1829/1827/2018/1001/584, 336 items / 15 glob files) — all 336 migrated to canonical layers (213 unit incl. repaired 1827, 123 integration: 720 repository + 1891 usage-report routes + 1829 signing/tool-account-repo + 2018 run-as gate [security] & root-integration [skipif kept]); 4 empty __init__.py deleted; 1827 was red on main since #3028/#3029 (fakes never realigned: snapshot 3-tuple + kwargs + (users, complete) return) — repaired with strengthened assertions plus the collaboration.is_postgresql sqlite pin; 1891 dead ambient-DB fixture dropped; 1829 fetch raw env/reload/sys.path replaced by scoped loader; 584 sys.modules/sys.path leaks scoped; 720 admin SSRF service tests fail-safed with safe_request mock; min lowered by exact deltas (1856-336, 207-15)",
-      "actual_collected": 1733,
-      "actual_files": 207,
+      "update_reason": "Issue #2429 batch 13: I-group closure \u2014 29 dirs / 349 items / 37 glob files: 334 migrated (repairs: 1140+1138 env_security gate stubbed per canonical pattern, 1771 #2063 cooldown claim stubbed, 1329 create_app ambient-PG split away; rewrites: 679 ok()/fail() harness -> 14 real asserts incl. #2540 UUID-gate realignment, 1306 zero-assert placeholder given real assertions; realignment: 2280 sudoers to post-#2334 GIT_SAFE/GH_SAFE truth; tautology deletions with per-def audit: 761 x5, 776 x6 (inline re-implementations, zero production refs); dir 166 deleted wholesale: 2 no-assert real-CLI drivers + 2 sentinels + 2 non-collected manual scripts); min lowered by exact deltas (1520-349, 192-37)",
+      "actual_collected": 1384,
+      "actual_files": 170,
       "threshold_percent": 97
     }
   },
@@ -47,7 +47,7 @@
     "Baseline created before pytest.ini modification to enable e2e_*.py collection",
     "tests/e2e currently excluded by norecursedirs in pytest.ini",
     "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard",
-    "Default count from: python scripts/ci.py run default-collection (10203 items after #2429 batch 12)",
-    "Issue count from: clean-checkout issue-collection (1733 items, 207 files after #2429 batch 12; base 6bdeebea was 2069/222 — main gained +1 issue item after batch 11 via 5fe363be; no tests/issues/89 in clean checkouts)"
+    "Default count from: python scripts/ci.py run default-collection (10537 items after #2429 batch 13)",
+    "Issue count from: clean-checkout issue-collection (1384 items, 170 files after #2429 batch 13)"
   ]
 }

@@ -1,0 +1,338 @@
+"""Tests for CI repair no-excerpt fingerprint handling (issue #1855).
+
+When `get_check_failure_excerpt` returns empty (old gh CLI / token /
+REST-API URL-format issues), the fingerprint degrades to a name-only
+`<no-excerpt>` sentinel. The "signature unchanged → give up" guard must
+NOT fire in that case — it would misfire and kill workflows whose real
+failure did change, because a name-only fingerprint can't tell whether the
+agent's fix changed the error set. The MAX_CI_REPAIR_ATTEMPTS cap still
+bounds retries.
+
+Also covers layer-1 fix: the REST-API check-run `link` (`/runs/<id>`)
+falls back to `gh run list --commit` + `gh run view --log-failed`.
+
+Migrated from tests/issues/1855/test_ci_repair_no_excerpt_no_misfire.py.
+(Dedupe against the canonical ci-repair coverage files is out of scope for
+this migration; this file moves as-is.)
+"""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1855)]
+
+
+def _make_workflow(**overrides):
+    base = {
+        "workflow_id": "wf-1855",
+        "user_id": 1,
+        "status": "merging",
+        "current_phase": "merge",
+        "ci_repair_attempts": 1,
+        "last_ci_failure_signature": "",
+        "last_ci_failure_head_sha": "",
+        "branch_name": "auto-dev/wf-1855",
+        "branch_strategy": "worktree",
+        "worktree_path": "/tmp/repo",
+        "preferred_worktree_path": "/tmp/repo",
+        "dev_round": 1,
+    }
+    base.update(overrides)
+    return base
+
+
+def _make_orchestrator(wf_data):
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    with (
+        patch("app.modules.workspace.autonomous.orchestrator.Database"),
+        patch(
+            "app.modules.workspace.autonomous.orchestrator.AutonomousWorkflowRepository"
+        ) as mock_repo_cls,
+    ):
+        mock_repo = MagicMock()
+        mock_repo.get_workflow.return_value = wf_data
+        mock_repo.list_milestones.return_value = []
+        mock_repo.create_milestone.return_value = {
+            "milestone_id": "ms-1",
+            "workflow_id": wf_data["workflow_id"],
+        }
+        mock_repo.create_event.return_value = {"id": 1}
+        mock_repo.update_workflow.return_value = wf_data
+        mock_repo_cls.return_value = mock_repo
+
+        orch = AutonomousOrchestrator(wf_data["workflow_id"])
+        orch.repo = mock_repo
+        orch.emitter = MagicMock()
+        orch._sync_failed_pr_with_main = MagicMock(return_value=False)
+    return orch, mock_repo
+
+
+_FAILED_CHECKS = [
+    {
+        "name": "lint",
+        "state": "failure",
+        "bucket": "fail",
+        "link": "https://github.com/open-ace/open-ace/runs/123",
+    }
+]
+
+
+# ── Layer 2: empty-excerpt fingerprint does not misfire give-up guard ──
+
+
+def test_no_excerpt_defers_without_consuming_attempt():
+    """Missing diagnostics must wait instead of sending a blind repair agent."""
+    wf = _make_workflow(
+        # Previous round also had no excerpt → both sigs are lint::<no-excerpt>
+        last_ci_failure_signature="lint::<no-excerpt>",
+        last_ci_failure_head_sha="sha-old",
+    )
+    orch, mock_repo = _make_orchestrator(wf)
+    gh = MagicMock()
+    gh.get_pr_head_sha.return_value = "sha-new"  # head changed (agent pushed)
+    gh.get_check_failure_excerpt.return_value = ""  # excerpt unavailable
+    gh.get_check_failure_excerpt  # explicit
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._run_merge_ci_repair = MagicMock()
+
+    orch._start_ci_repair_round(wf, 1873, _FAILED_CHECKS)
+
+    orch._run_merge_ci_repair.assert_not_called()
+    last_updates = [c.args[1] for c in mock_repo.update_workflow.call_args_list]
+    assert any(u.get("status") == "merging" for u in last_updates)
+    assert not any("ci_repair_attempts" in u for u in last_updates)
+
+
+def test_no_excerpt_stops_after_bounded_diagnostics_polls():
+    from app.modules.workspace.autonomous.orchestrator import MAX_CI_DIAGNOSTICS_ATTEMPTS
+
+    wf = _make_workflow(ci_diagnostics_attempts=MAX_CI_DIAGNOSTICS_ATTEMPTS - 1)
+    orch, mock_repo = _make_orchestrator(wf)
+    gh = MagicMock()
+    gh.get_pr_head_sha.return_value = "sha-new"
+    gh.get_check_failure_excerpt.return_value = ""
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._run_merge_ci_repair = MagicMock()
+
+    orch._start_ci_repair_round(wf, 1873, _FAILED_CHECKS)
+
+    orch._run_merge_ci_repair.assert_not_called()
+    updates = [call.args[1] for call in mock_repo.update_workflow.call_args_list]
+    assert any(update.get("status") == "failed" for update in updates)
+    assert any(
+        update.get("ci_diagnostics_attempts") == MAX_CI_DIAGNOSTICS_ATTEMPTS for update in updates
+    )
+
+
+def test_diagnostics_pending_milestone_closes_when_all_logs_arrive():
+    wf = _make_workflow(ci_diagnostics_attempts=2)
+    orch, mock_repo = _make_orchestrator(wf)
+    pending = {
+        "milestone_id": "ms-pending",
+        "milestone_type": "ci_diagnostics_pending",
+        "phase": "merge",
+        "dev_round": 1,
+        "round_number": 1,
+        "status": "in_progress",
+    }
+    mock_repo.list_milestones.side_effect = lambda *args, **kwargs: [pending]
+    gh = MagicMock()
+    gh.get_pr_head_sha.return_value = "sha-new"
+    gh.get_check_failure_excerpt.return_value = "pytest failed\n1 failed"
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._run_merge_ci_repair = MagicMock()
+
+    orch._start_ci_repair_round(wf, 1873, _FAILED_CHECKS)
+
+    assert any(
+        call.args[0] == "ms-pending" and call.args[1].get("status") == "completed"
+        for call in mock_repo.update_milestone.call_args_list
+    )
+    assert any(
+        call.args[1].get("ci_diagnostics_attempts") == 0
+        for call in mock_repo.update_workflow.call_args_list
+    )
+
+
+def test_meaningful_fingerprint_still_fires_guard_when_unchanged():
+    """Sanity: when excerpt IS available and signature truly unchanged, the
+    guard still FIRES (regression guard for the layer-2 #1855 change).
+
+    #2443 PR-C changed what "fires" means: a meaningful unchanged signature is a
+    Tier1 exhaustion, so under the dev-round cap it escalates to a fresh
+    development round (``developing``) instead of terminal-``failed``; only at
+    the cap does it fall through to failed. Either way the guard fired: no
+    repair attempt is launched and the workflow leaves the merge-repair loop."""
+    from app.modules.workspace.autonomous.orchestrator import (
+        MAX_MERGE_FAIL_DEV_ROUNDS,
+        AutonomousOrchestrator,
+    )
+
+    excerpt = "mypy....Failed\napp/baz.py:5 error: no-any-return\n"
+    import hashlib
+
+    expected_digest = hashlib.sha256(
+        AutonomousOrchestrator._normalize_failure_excerpt(excerpt).encode()
+    ).hexdigest()[:12]
+    expected_fingerprint = f"lint::{expected_digest}"
+
+    wf = _make_workflow(
+        last_ci_failure_signature=expected_fingerprint,
+        last_ci_failure_head_sha="sha-old",
+        merge_fail_dev_rounds=0,  # under cap → Tier1 escalation
+    )
+    orch, mock_repo = _make_orchestrator(wf)
+    gh = MagicMock()
+    gh.get_pr_head_sha.return_value = "sha-new"
+    gh.get_check_failure_excerpt.return_value = excerpt
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._run_merge_ci_repair = MagicMock()
+
+    orch._start_ci_repair_round(wf, 1873, _FAILED_CHECKS)
+
+    # Guard fired: no repair attempt, and the workflow escalated to development.
+    orch._run_merge_ci_repair.assert_not_called()
+    last_updates = [c.args[1] for c in mock_repo.update_workflow.call_args_list]
+    assert any(u.get("status") == "developing" for u in last_updates)
+    assert not any(u.get("status") == "merging" for u in last_updates)
+    # At the cap the same guard instead falls through to terminal failed.
+    wf_cap = _make_workflow(
+        last_ci_failure_signature=expected_fingerprint,
+        last_ci_failure_head_sha="sha-old",
+        merge_fail_dev_rounds=MAX_MERGE_FAIL_DEV_ROUNDS,
+    )
+    orch2, mock_repo2 = _make_orchestrator(wf_cap)
+    gh2 = MagicMock()
+    gh2.get_pr_head_sha.return_value = "sha-new"
+    gh2.get_check_failure_excerpt.return_value = excerpt
+    orch2._get_gh = MagicMock(return_value=gh2)
+    orch2._run_merge_ci_repair = MagicMock()
+    orch2._start_ci_repair_round(wf_cap, 1873, _FAILED_CHECKS)
+    cap_updates = [c.args[1] for c in mock_repo2.update_workflow.call_args_list]
+    assert any(u.get("status") == "failed" for u in cap_updates)
+
+
+# ── Layer 1: REST-API check-run link falls back to gh run list ─────────
+
+
+def test_get_check_failure_excerpt_falls_back_to_run_list_for_rest_api_link():
+    """When the check link is a REST-API check-run URL (/runs/<id>, not
+    /actions/runs/<run>/job/<job>), the excerpt fetch must fall back to
+    `gh run list --commit <sha>` + `gh run view --log-failed` instead of
+    returning empty."""
+    from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+    gh = GitHubOps.__new__(GitHubOps)
+    # d2aab16f version gate: _supports_escape_sequences_flag consults this
+    # probe attribute (set in __init__, which __new__ bypasses); modern gh
+    # supports --allow-escape-sequences, so the REST-link fallback path
+    # under test runs ungated.
+    gh._escape_flag_supported = True
+
+    # Simulate gh command outputs via _run_gh.
+    run_list_json = '[{"databaseId": 999, "name": "lint"}]'
+    log_failed_output = (
+        "end-of-file-fixer................................................Failed\n"
+        "- files were without new line at the end.\n"
+        "black....................................................Passed\n"
+    )
+
+    def fake_run(args, check=True, **_kw):
+        m = MagicMock()
+        if "run" in args and "list" in args:
+            m.returncode = 0
+            m.stdout = run_list_json
+            m.stderr = ""
+        elif "run" in args and "view" in args:
+            m.returncode = 0
+            m.stdout = log_failed_output
+            m.stderr = ""
+        else:
+            m.returncode = 1
+            m.stdout = ""
+            m.stderr = "unexpected"
+        return m
+
+    with patch.object(gh, "_run_gh", side_effect=fake_run):
+        excerpt = gh.get_check_failure_excerpt(
+            {
+                "name": "lint",
+                "link": "https://github.com/open-ace/open-ace/runs/12345678",
+                "head_sha": "abc123def456",
+                "bucket": "fail",
+            }
+        )
+
+    # The end-of-file-fixer failure line must be surfaced.
+    assert "end-of-file-fixer" in excerpt
+
+
+def test_get_check_failure_excerpt_run_list_fallback_returns_empty_without_head_sha():
+    """No head_sha in the check dict → can't query gh run list → return empty
+    (graceful degradation, same as pre-fix behavior for non-Actions checks)."""
+    from app.modules.workspace.autonomous.github_ops import GitHubOps
+
+    gh = GitHubOps.__new__(GitHubOps)
+    with patch.object(gh, "_run_gh") as mock_run:
+        excerpt = gh.get_check_failure_excerpt(
+            {"name": "lint", "link": "https://example.com/other-ci/42"}
+        )
+    assert excerpt == ""
+    mock_run.assert_not_called()
+
+
+# ── Mixed fingerprint: some checks have real excerpt, some don't ───────
+
+
+def test_mixed_fingerprint_skips_guard_when_any_check_has_no_excerpt():
+    """When a batch has multiple failing checks and at least one's excerpt is
+    unavailable, the combined signature contains <no-excerpt> and the give-up
+    guard must skip (treat the whole signature as non-discriminative). This
+    locks the current safe behavior so a future per-check 'optimization' does
+    not reintroduce the #1855 misfire.
+
+    Scenario: check 'lint' has a real excerpt (real hash), check 'test (3.9)'
+    has no excerpt (REST-API URL issue → <no-excerpt>). Previous round had the
+    same mixed signature + head changed. Guard must NOT fire."""
+    from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+    excerpt_lint = "black....Failed\nwould reformat app/foo.py\n"
+    import hashlib
+
+    lint_digest = hashlib.sha256(
+        AutonomousOrchestrator._normalize_failure_excerpt(excerpt_lint).encode()
+    ).hexdigest()[:12]
+    # Mixed signature: lint has real hash, test (3.9) has sentinel.
+    mixed_signature = sorted([f"lint::{lint_digest}", "test (3.9)::<no-excerpt>"])
+    mixed_signature_str = "\n".join(mixed_signature)
+
+    wf = _make_workflow(
+        last_ci_failure_signature=mixed_signature_str,
+        last_ci_failure_head_sha="sha-old",
+    )
+    orch, mock_repo = _make_orchestrator(wf)
+    gh = MagicMock()
+    gh.get_pr_head_sha.return_value = "sha-new"
+    # lint gets its excerpt back; test (3.9) still gets empty.
+    gh.get_check_failure_excerpt.side_effect = lambda check: (
+        excerpt_lint if check.get("name") == "lint" else ""
+    )
+    orch._get_gh = MagicMock(return_value=gh)
+    orch._run_merge_ci_repair = MagicMock()
+
+    failed_checks = [
+        {"name": "lint", "state": "failure", "bucket": "fail"},
+        {"name": "test (3.9)", "state": "failure", "bucket": "fail"},
+    ]
+    orch._start_ci_repair_round(wf, 1875, failed_checks)
+
+    # Partial diagnostics must defer rather than asking the agent to guess the
+    # missing test failure or consuming a repair attempt.
+    orch._run_merge_ci_repair.assert_not_called()
+    last_updates = [c.args[1] for c in mock_repo.update_workflow.call_args_list]
+    assert not any(
+        u.get("status") == "failed" for u in last_updates
+    ), "partial diagnostics should remain bounded-pending on the first poll"
+    assert any(u.get("ci_diagnostics_attempts") == 1 for u in last_updates)
