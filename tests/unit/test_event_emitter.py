@@ -5,11 +5,15 @@ import threading
 import time
 from unittest.mock import patch
 
+import pytest
+
 from app.modules.workspace.autonomous.event_emitter import (
     ACTIVITY_HISTORY_MAX_ITEMS,
     ACTIVITY_HISTORY_TTL_SECONDS,
     AutonomousEventEmitter,
 )
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(716)]
 
 
 class TestEventEmitter:
@@ -51,8 +55,8 @@ class TestEventEmitter:
 
     def test_emit_no_subscribers_no_error(self):
         emitter = AutonomousEventEmitter.instance()
-        # Should not raise
-        emitter.emit("wf-nonexistent", "orphan", {})
+        # Should not raise — fan-out to zero subscribers is a silent None return.
+        assert emitter.emit("wf-nonexistent", "orphan", {}) is None
 
     def test_late_subscriber_replays_recent_agent_activity(self):
         """A page opened mid-run receives recent activity immediately."""
@@ -113,8 +117,8 @@ class TestEventEmitter:
     def test_unsubscribe_nonexistent_queue(self):
         emitter = AutonomousEventEmitter.instance()
         q = queue.Queue()
-        # Should not raise
-        emitter.unsubscribe("wf-1", q)
+        # Should not raise — unknown queue removal is a silent None return.
+        assert emitter.unsubscribe("wf-1", q) is None
 
     def test_emit_isolated_per_workflow(self):
         emitter = AutonomousEventEmitter.instance()

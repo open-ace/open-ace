@@ -9,7 +9,11 @@ gh operation under a sudo wrapper and causing empty-requirements plans.
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsError
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(716)]
 
 
 def _completed(stdout: str = "", returncode: int = 0, stderr: str = "") -> MagicMock:

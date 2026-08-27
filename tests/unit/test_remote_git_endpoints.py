@@ -11,7 +11,6 @@ Covers:
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -19,7 +18,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-project_root = str(Path(__file__).resolve().parent.parent.parent.parent)
+pytestmark = [pytest.mark.regression, pytest.mark.issue(610)]
+
+project_root = str(Path(__file__).resolve().parent.parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
@@ -31,46 +32,22 @@ if project_root not in sys.path:
 
 @pytest.fixture(scope="module")
 def remote_module():
-    """Load remote.py with mocked dependencies."""
-    mock_modules = {
-        "app.modules": MagicMock(__path__=[]),
-        "app.modules.workspace": MagicMock(__path__=[]),
-        "app.modules.workspace.api_key_proxy": MagicMock(),
-        "app.modules.workspace.llm_proxy_handler": MagicMock(),
-        "app.modules.workspace.remote_agent_manager": MagicMock(),
-        "app.modules.workspace.remote_session_manager": MagicMock(),
-        "app.modules.workspace.terminal_store": MagicMock(),
-        "app.modules.workspace.session_manager": MagicMock(),
-        "app.modules.workspace.vscode_store": MagicMock(),
-        "app.modules.workspace.vscode_proxy": MagicMock(),
-        "app.auth.decorators": MagicMock(
-            _extract_token=MagicMock(return_value=""),
-            _load_user_from_token=MagicMock(return_value=None),
-            admin_required=MagicMock(),
-        ),
-        "app.repositories.database": MagicMock(),
-        "app.repositories.schema_init": MagicMock(),
-        "app.repositories.user_repo": MagicMock(),
-        "app.services.auth_service": MagicMock(),
-        "app.services.webui_manager": MagicMock(),
-        "app.services.remote_agent_manager": MagicMock(),
-        "app.modules.governance": MagicMock(__path__=[]),
-        "gevent": MagicMock(),
-        "gevent.lock": MagicMock(
-            RLock=lambda *a, **kw: MagicMock(__enter__=lambda s: s, __exit__=lambda s, *a: None),
-            Semaphore=lambda *a, **kw: MagicMock(
-                __enter__=lambda s: s, __exit__=lambda s, *a: None
-            ),
-        ),
-    }
+    """The real ``app.routes.remote`` module (Issue #610).
 
-    with patch.dict(sys.modules, mock_modules):
-        remote_path = Path(project_root) / "app" / "routes" / "remote.py"
-        spec = importlib.util.spec_from_file_location("remote_git_test", remote_path)
-        remote_module = importlib.util.module_from_spec(spec)
-        sys.modules["remote_git_test"] = remote_module
-        spec.loader.exec_module(remote_module)
-        yield remote_module
+    Repair D (#2429 batch 15): this fixture previously loaded remote.py via
+    ``importlib.util.spec_from_file_location`` under a broad
+    ``patch.dict(sys.modules, ...)`` of MagicMock modules. That fake-module
+    scaffold drifted from the real module's imports (e.g. governance
+    ``audit_logger``) and left the whole file order-dependent — all 38 tests
+    ERRORed standalone and only passed when a sibling module had already
+    imported the real package tree. Import the package for real instead,
+    exactly like the passing sibling test_remote_vscode_endpoints module;
+    each test patches the ``get_remote_agent_manager`` attribute (and sets
+    ``g.user`` / manager return values) at the seam.
+    """
+    from app.routes import remote as remote_mod
+
+    yield remote_mod
 
 
 def parse_response(result):

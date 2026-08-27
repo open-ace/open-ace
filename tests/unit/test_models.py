@@ -11,6 +11,8 @@ from app.modules.workspace.autonomous.models import (
     WorkflowMilestone,
 )
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(716)]
+
 
 class TestAutonomousWorkflow:
     """Tests for AutonomousWorkflow dataclass."""

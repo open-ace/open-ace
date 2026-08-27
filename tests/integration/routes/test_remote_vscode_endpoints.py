@@ -19,8 +19,12 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(610)]
 
 
 def _mock_load_user(token):
@@ -39,27 +43,36 @@ def _mock_load_user(token):
     return None
 
 
-def _make_app(mgr):
-    """Create a minimal Flask app with remote_bp for route testing."""
+def _make_app(testcase, mgr):
+    """Create a minimal Flask app with remote_bp for route testing.
+
+    Module-global seams (agent manager + token loaders) are swapped via
+    patch.object and restored with addCleanup so nothing leaks into later
+    tests in the same process.
+    """
+    from unittest.mock import patch
+
     from flask import Flask
 
     import app.modules.workspace.remote_agent_manager as ram_mod
+    from app.auth import decorators as auth_dec
+    from app.modules.workspace import session_access
     from app.routes import remote as remote_mod
 
-    ram_mod._agent_manager = mgr
+    for target, attr, value in (
+        (ram_mod, "_agent_manager", mgr),
+        (auth_dec, "_load_user_from_token", _mock_load_user),
+        (remote_mod, "_load_user_from_token", _mock_load_user),
+        (session_access, "_load_user_from_token", _mock_load_user),
+    ):
+        patcher = patch.object(target, attr, value, create=True)
+        patcher.start()
+        testcase.addCleanup(patcher.stop)
 
     app = Flask(__name__)
     app.config["TESTING"] = True
     app.config["SECRET_KEY"] = "test-secret"
     app.register_blueprint(remote_mod.remote_bp, url_prefix="/api/remote")
-
-    # Patch auth helpers so before_request uses our mock
-    from app.auth import decorators as auth_dec
-    from app.modules.workspace import session_access
-
-    auth_dec._load_user_from_token = _mock_load_user
-    remote_mod._load_user_from_token = _mock_load_user
-    session_access._load_user_from_token = _mock_load_user
 
     return app
 
@@ -85,7 +98,7 @@ class TestVSCodeStart(unittest.TestCase):
     def test_auth_required(self):
         """No session token returns 401."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = client.post(
                 "/api/remote/vscode/start",
@@ -96,7 +109,7 @@ class TestVSCodeStart(unittest.TestCase):
     def test_missing_machine_id(self):
         """Missing machine_id returns 400."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_post(
                 client,
@@ -111,7 +124,7 @@ class TestVSCodeStart(unittest.TestCase):
     def test_missing_project_path(self):
         """Missing project_path returns 400."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_post(
                 client,
@@ -127,7 +140,7 @@ class TestVSCodeStart(unittest.TestCase):
     def test_missing_both_params(self):
         """Missing both machine_id and project_path returns 400."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_post(
                 client,
@@ -145,7 +158,7 @@ class TestVSCodeStart(unittest.TestCase):
         # MagicMock tenant_id is non-None and would 404) so the test exercises
         # its intended path — an unassigned user is denied with 403.
         mgr.get_machine.return_value = {"tenant_id": None}
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_post(
                 client,
@@ -160,7 +173,7 @@ class TestVSCodeStart(unittest.TestCase):
         mgr = MagicMock()
         mgr.check_user_access.return_value = True
         mgr.is_agent_connected.return_value = False
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_post(
                 client,
@@ -178,7 +191,7 @@ class TestVSCodeStart(unittest.TestCase):
         mgr = MagicMock()
         mgr.check_user_access.return_value = True
         mgr.is_agent_connected.return_value = True
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_post(
                 client,
@@ -212,7 +225,7 @@ class TestVSCodeStart(unittest.TestCase):
         # check_user_access; model the non-admin as an assigned "user" so the
         # start succeeds.
         mgr.get_user_permission.return_value = "user"
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_post(
                 client,
@@ -237,7 +250,7 @@ class TestVSCodeStop(unittest.TestCase):
     def test_auth_required(self):
         """No session token returns 401."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = client.post(
                 "/api/remote/vscode/stop",
@@ -248,7 +261,7 @@ class TestVSCodeStop(unittest.TestCase):
     def test_missing_vscode_id(self):
         """Missing vscode_id returns 400."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_post(
                 client,
@@ -263,7 +276,7 @@ class TestVSCodeStop(unittest.TestCase):
     def test_missing_machine_id(self):
         """Missing machine_id returns 400."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_post(
                 client,
@@ -276,7 +289,7 @@ class TestVSCodeStop(unittest.TestCase):
     def test_missing_both_params(self):
         """Missing both params returns 400."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_post(
                 client,
@@ -292,7 +305,7 @@ class TestVSCodeStop(unittest.TestCase):
         mgr.check_user_access.return_value = False
         # Tenant-agnostic machine (see TestVSCodeStart.test_access_denied_non_admin).
         mgr.get_machine.return_value = {"tenant_id": None}
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_post(
                 client,
@@ -306,7 +319,7 @@ class TestVSCodeStop(unittest.TestCase):
         """Successful stop sends command and cleans up store."""
         mgr = MagicMock()
         mgr.check_user_access.return_value = True
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
 
         import app.modules.workspace.vscode_store as vs_mod
 
@@ -356,7 +369,7 @@ class TestVSCodeStatus(unittest.TestCase):
     def test_auth_required(self):
         """No session token returns 401."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = client.get("/api/remote/vscode/vs1/status")
             self.assertEqual(resp.status_code, 401)
@@ -364,7 +377,7 @@ class TestVSCodeStatus(unittest.TestCase):
     def test_unknown_vscode_id_returns_unknown(self):
         """Unknown vscode_id returns status=unknown."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
 
         from app.modules.workspace import vscode_store as vs_mod
 
@@ -388,7 +401,7 @@ class TestVSCodeStatus(unittest.TestCase):
     def test_running_status_returns_proxy_url(self):
         """Running status returns proxy URL with token."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
 
         from app.modules.workspace import vscode_store as vs_mod
 
@@ -425,7 +438,7 @@ class TestVSCodeStatus(unittest.TestCase):
     def test_error_status_returns_error_message(self):
         """Error status returns the error message."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
 
         from app.modules.workspace import vscode_store as vs_mod
 
@@ -462,7 +475,7 @@ class TestVSCodeStatus(unittest.TestCase):
         mgr.check_user_access.return_value = False
         # Tenant-agnostic machine (see TestVSCodeStart.test_access_denied_non_admin).
         mgr.get_machine.return_value = {"tenant_id": None}
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
 
         from app.modules.workspace import vscode_store as vs_mod
 
@@ -498,7 +511,7 @@ class TestVSCodeAttach(unittest.TestCase):
     def test_auth_required(self):
         """No session token returns 401."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = client.post(
                 "/api/remote/vscode/vs1/attach",
@@ -509,7 +522,7 @@ class TestVSCodeAttach(unittest.TestCase):
     def test_missing_machine_id(self):
         """Missing machine_id returns 400."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_post(
                 client,
@@ -525,7 +538,7 @@ class TestVSCodeAttach(unittest.TestCase):
         mgr.check_user_access.return_value = False
         # Tenant-agnostic machine (see TestVSCodeStart.test_access_denied_non_admin).
         mgr.get_machine.return_value = {"tenant_id": None}
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_post(
                 client,
@@ -539,7 +552,7 @@ class TestVSCodeAttach(unittest.TestCase):
         """Successful attach sends attach_vscode command."""
         mgr = MagicMock()
         mgr.check_user_access.return_value = True
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_post(
                 client,
@@ -568,7 +581,7 @@ class TestVSCodeProxy(unittest.TestCase):
 
     def _make_app_with_store(self, mgr, store_find_result=None):
         """Create app and swap vscode_info_store."""
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
 
         from app.modules.workspace import vscode_store as vs_mod
 
@@ -585,7 +598,7 @@ class TestVSCodeProxy(unittest.TestCase):
     def test_proxy_does_not_require_session_cookie(self):
         """Proxy auth is handled by vscode token, not Open ACE session cookie."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = client.get("/api/remote/vscode/vs1/proxy/")
             self.assertEqual(resp.status_code, 404)
@@ -800,7 +813,7 @@ class TestVSCodeWs(unittest.TestCase):
     def test_non_ws_request_returns_400(self):
         """Non-WebSocket request returns 400 with error message."""
         mgr = MagicMock()
-        app = _make_app(mgr)
+        app = _make_app(self, mgr)
         with app.test_client() as client:
             resp = _auth_get(
                 client,

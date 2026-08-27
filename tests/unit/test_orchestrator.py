@@ -7,6 +7,8 @@ import pytest
 
 from app.modules.workspace.autonomous.models import AgentTaskResult
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(716)]
+
 
 @pytest.fixture(autouse=True)
 def _trusted_repo_boundary_for_state_machine_tests(monkeypatch):
@@ -237,8 +239,8 @@ class TestOrchestratorAdvance:
 
             orch = AutonomousOrchestrator("nonexistent")
 
-        # Should return without error
-        orch.advance()
+        # Should return without error (None) for a missing workflow.
+        assert orch.advance() is None
 
 
 class TestOrchestratorRunAgentContract:
@@ -894,15 +896,22 @@ class TestOrchestratorWait:
 
     def test_wait_no_issue_returns(self):
         wf = _make_workflow(current_phase="wait", github_issue_number=None)
-        orch, _ = self._make_orchestrator(wf)
+        orch, mock_repo = self._make_orchestrator(wf)
         # _do_wait unconditionally binds GitHubOps via _get_gh() (even on the
         # no-issue early-return path); stub _gh so it doesn't touch the DB.
         orch._gh = MagicMock()
-        # Should return without error
+        # No-issue wait must be a pure continuation: a wait-outcome
+        # PhaseResult carrying no workload (no phase transition, empty
+        # workflow patch, no milestone events).
         ctx = orch._build_workflow_context(wf)
         result = orch._do_wait(ctx, orch._build_phase_deps())
+        assert result.outcome == "wait"
+        assert result.next_phase is None
+        assert result.workflow_patch == {}
+        assert result.milestone_events == []
         if result is not None:
             orch._commit_phase_result(result)
+        mock_repo.create_milestone.assert_not_called()
 
     @patch("app.modules.workspace.autonomous.orchestrator.GitHubOps")
     def test_wait_detects_completion(self, mock_gh_cls):

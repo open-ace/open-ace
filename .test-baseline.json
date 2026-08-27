@@ -4,12 +4,12 @@
   "created_before_modification": true,
   "layers": {
     "default": {
-      "min_tests": 7475,
+      "min_tests": 7975,
       "min_files": 250,
       "last_updated": "2026-08-27",
-      "update_reason": "Issue #2429 batch 14: B-group in-process wave 1 (6 dirs) migrated 572 items (558 unit incl. 2376's 370-item parametrize corpora, 8 routes, 6 subprocess); min raised by exactly +572 (6903+572); actuals measured locally, CI clean re-confirmed",
-      "actual_collected": 11109,
-      "actual_files": 755,
+      "update_reason": "Issue #2429 batch 15: B-group wave 2 (dirs 716+610) migrated 500 items (355 unit, 42 integration flat, 103 integration/routes); min raised by exactly +500 (7475+500); actuals measured locally, CI clean re-confirmed",
+      "actual_collected": 11609,
+      "actual_files": 769,
       "threshold_percent": 96
     },
     "critical": {
@@ -30,12 +30,12 @@
       "note": "Currently excluded by norecursedirs"
     },
     "issues": {
-      "min_tests": 599,
-      "min_files": 126,
+      "min_tests": 99,
+      "min_files": 110,
       "last_updated": "2026-08-27",
-      "update_reason": "Issue #2429 batch 14: B-group in-process wave 1 \u2014 6 dirs / 572 items / 29 glob files: all 572 migrated (repairs: 1469 stale 559 expectation + self-referential --issue 1469 made drain-proof via legacy-inventory-derived numbers, 2020 scheduler HOME-leak pinned at the task_isolation resolver seam); 2 standalone playwright scripts relocated to tests/e2e/ + governance inventory rows (+2, sanctioned minimal hand-edit \u2014 no add-row write command exists; validate=0 errors, governance tests 45/45); 172 manual diagnostic script relocated to scripts/ with a retargeted unit guard",
-      "actual_collected": 812,
-      "actual_files": 141,
+      "update_reason": "Issue #2429 batch 15: B-group wave 2 \u2014 dirs 716/610, 500 items / 16 glob files, all migrated (repairs: 716 scheduler conf-seam pin + agent_runner #2019 proxy stub + autonomous_api shared-checkout env pin, 610 git_endpoints rewritten to real route import killing the MagicMock __spec__ import-machinery class; isolation fixes: cross-file workflow rate-limiter state + remote-agent sys.modules config leak); 2 standalone playwright scripts rehomed to tests/e2e + governance rows (+2, sanctioned hand-edit; validate 0 errors; governance tests 45/45)",
+      "actual_collected": 312,
+      "actual_files": 125,
       "threshold_percent": 97
     }
   },
@@ -47,7 +47,7 @@
     "Baseline created before pytest.ini modification to enable e2e_*.py collection",
     "tests/e2e currently excluded by norecursedirs in pytest.ini",
     "Issue item baseline is enforced by ci.yml; the extended runner scales the file baseline per shard",
-    "Default count from: python scripts/ci.py run default-collection (11109 items after #2429 batch 14)",
-    "Issue count from: clean-checkout issue-collection (812 items, 141 files after #2429 batch 14)"
+    "Default count from: python scripts/ci.py run default-collection (11609 items after #2429 batch 15)",
+    "Issue count from: clean-checkout issue-collection (312 items, 125 files after #2429 batch 15; local dev venv may read 313/126 when playwright is installed \u2014 dir 41 importorskip)"
   ]
 }

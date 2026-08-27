@@ -145,7 +145,7 @@ def _trusted_repo_boundary(monkeypatch):
     trusted-git-context registration, owner lookup) when they cannot
     touch a real repository; these tests use synthetic paths. Dedicated
     guardrail tests exercise the fail-closed behavior itself. (Same
-    pattern as tests/issues/716 and 740.)
+    pattern as tests/unit/test_orchestrator.py and tests/issues/740.)
     """
     from app.modules.workspace.autonomous.github_ops import GitHubOps
     from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator

@@ -26,7 +26,7 @@ import pytest
 # remote-agent directory itself to sys.path and mock the heavy deps before
 # importing the class under test.
 # ---------------------------------------------------------------------------
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "remote-agent"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "remote-agent"))
 
 # Patch heavy / external dependencies that the agent pulls in at import time.
 # We do this *before* importing agent.py so its top-level imports resolve.
@@ -37,6 +37,36 @@ sys.modules.setdefault("session_sync", MagicMock())
 sys.modules.setdefault("system_info", MagicMock())
 
 from agent import RemoteAgent  # noqa: E402
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(610)]
+
+# Un-leak the remote-agent tree from the shared unit-test process (#2429).
+# Importing ``agent`` resolves its siblings (config, tls_config, …) as
+# top-level modules and caches them in sys.modules, and the setdefault mocks
+# above may have installed a fake ``requests``. In the legacy tests/issues
+# lane that never mixed with other files; in tests/unit the leakage shadows
+# unrelated modules for later tests in the same process (scripts/shared's
+# ``config`` used by test_db.py was the observed casualty). Undo the sys.path
+# entry and drop every top-level module this import added — except ``agent``
+# itself: the tests patch into it (``patch("agent.subprocess.run")``) and its
+# already-bound references keep working regardless of sys.modules.
+_remote_agent_dir = os.path.join(os.path.dirname(__file__), "..", "..", "remote-agent")
+sys.path.remove(_remote_agent_dir)
+_leaked = [
+    name
+    for name, mod in list(sys.modules.items())
+    if name != "agent"
+    and "." not in name
+    and isinstance(getattr(mod, "__file__", None), str)
+    and os.path.abspath(mod.__file__).startswith(os.path.abspath(_remote_agent_dir) + os.sep)
+]
+_leaked += [
+    name
+    for name in ("requests", "cli_settings", "executor", "session_sync", "system_info")
+    if isinstance(sys.modules.get(name), MagicMock)
+]
+for _leaked_name in set(_leaked):
+    del sys.modules[_leaked_name]
 
 # ---------------------------------------------------------------------------
 # Helpers

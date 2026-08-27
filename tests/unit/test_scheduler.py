@@ -9,7 +9,30 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.modules.workspace.autonomous import task_isolation
 from app.services.autonomous_scheduler import AutonomousScheduler
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(716)]
+
+
+def _pin_concurrency_conf_chain(monkeypatch, tmp_path):
+    """Point the cap resolver's fallback candidates at nonexistent tmp paths.
+
+    ``get_max_concurrent_workflows`` resolves its cap through
+    ``task_isolation.resolve_agent_task_policy_path``, whose candidate chain
+    falls back to the *real* ``/etc/openace/agent-launcher.conf`` and
+    ``~/.open-ace/agent-launcher.conf``. On machines that carry a user conf
+    (e.g. ``agent_max_concurrent_workflows=3``) that fallback silently beats
+    the ``MAX_CONCURRENT_WORKFLOWS`` default under test, so both module
+    constants are pinned here to make the whole chain miss — the batch-14
+    ``_pin_conf_fallback_chain`` pattern (tests/unit/test_scheduler_concurrency.py).
+    """
+    monkeypatch.setattr(
+        task_isolation, "DEFAULT_AGENT_LAUNCHER_CONF", str(tmp_path / "missing-system.conf")
+    )
+    monkeypatch.setattr(
+        task_isolation, "USER_AGENT_LAUNCHER_CONF", str(tmp_path / "missing-user.conf")
+    )
 
 
 class TestSchedulerSingleton:
@@ -57,7 +80,7 @@ class TestSchedulerStartStop:
         thread.join.assert_called_once_with(timeout=20)
 
     def test_server_shutdown_stops_autonomous_scheduler(self):
-        server_source = (Path(__file__).resolve().parents[3] / "server.py").read_text(
+        server_source = (Path(__file__).resolve().parents[2] / "server.py").read_text(
             encoding="utf-8"
         )
 
@@ -181,8 +204,10 @@ class TestSchedulerProcessWorkflows:
             "app.routes.autonomous._get_repo",
             return_value=mock_repo,
         ):
-            # Should not raise
-            scheduler._process_workflows()
+            # Should not raise — an empty worklist is a clean None round-trip
+            # that must not schedule anything.
+            assert scheduler._process_workflows() is None
+            assert not scheduler._in_progress_ids
 
     def test_db_error_handled(self):
         scheduler = AutonomousScheduler()
@@ -194,13 +219,18 @@ class TestSchedulerProcessWorkflows:
             "app.routes.autonomous._get_repo",
             return_value=mock_repo,
         ):
-            # Should not raise
-            scheduler._process_workflows()
+            # Should not raise — the listing error must be swallowed (None
+            # return) without scheduling anything.
+            assert scheduler._process_workflows() is None
+            assert not scheduler._in_progress_ids
 
-    def test_max_concurrency(self):
+    def test_max_concurrency(self, monkeypatch, tmp_path):
         """Should not process more than MAX_CONCURRENT_WORKFLOWS."""
         from app.services.autonomous_scheduler import MAX_CONCURRENT_WORKFLOWS
 
+        # Pin the conf fallback chain: an ambient ~/.open-ace/agent-launcher.conf
+        # (cap 3) would otherwise beat the constant via get_max_concurrent_workflows().
+        _pin_concurrency_conf_chain(monkeypatch, tmp_path)
         scheduler = AutonomousScheduler()
 
         workflows = [{"workflow_id": f"wf-{i}", "status": "pending"} for i in range(10)]
@@ -351,12 +381,15 @@ class TestSchedulerProcessWorkflows:
 
         mock_repo.update_workflow.assert_not_called()
 
-    def test_pending_workflows_are_prioritized_ahead_of_waiting(self, monkeypatch):
+    def test_pending_workflows_are_prioritized_ahead_of_waiting(self, monkeypatch, tmp_path):
         """Execution slots should prefer pending work over wait-phase polling."""
         # Cap concurrency to 1 slot so the prioritized workflow deterministically
         # wins it (the ThreadPool's construction order is otherwise non-deterministic,
         # making called_ids[0] racy).
         monkeypatch.setattr("app.services.autonomous_scheduler.MAX_CONCURRENT_WORKFLOWS", 1)
+        # Pin the conf fallback chain so the monkeypatched constant above is the
+        # effective cap again (an ambient user conf would override it with 3).
+        _pin_concurrency_conf_chain(monkeypatch, tmp_path)
         scheduler = AutonomousScheduler()
         mock_repo = MagicMock()
         mock_repo.get_queued_workflows.return_value = []
