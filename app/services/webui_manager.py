@@ -787,9 +787,7 @@ class WebUIManager:
             instance = self._start_instance_internal(user_id, system_account, base_url)
             return instance.url, instance.token
 
-    def _start_single_user_instance(
-        self, user_id: int, system_account: str, base_url: str
-    ) -> None:
+    def _start_single_user_instance(self, user_id: int, system_account: str, base_url: str) -> None:
         """
         Start the single-user WebUI instance on port 3100.
 
@@ -874,7 +872,9 @@ class WebUIManager:
             return
 
         instance = self._single_user_instance
-        logger.info(f"Stopping single-user WebUI instance: pid={instance.pid}, port={instance.port}")
+        logger.info(
+            f"Stopping single-user WebUI instance: pid={instance.pid}, port={instance.port}"
+        )
 
         if instance.process is not None:
             try:
@@ -1525,22 +1525,8 @@ class WebUIManager:
         # Include single-user instance (Issue #3129)
         if self._single_user_instance is not None:
             i = self._single_user_instance
-            instances.append({
-                "user_id": i.user_id,
-                "system_account": i.system_account,
-                "port": i.port,
-                "pid": i.pid,
-                "url": i.url,
-                "allocated_at": i.allocated_at.isoformat(),
-                "last_activity": i.last_activity.isoformat(),
-                "is_alive": i.is_alive(),
-                "mode": "single-user",
-            })
-
-        # Include multi-user instances
-        with self._lock:
-            for i in self._instances.values():
-                instances.append({
+            instances.append(
+                {
                     "user_id": i.user_id,
                     "system_account": i.system_account,
                     "port": i.port,
@@ -1549,8 +1535,26 @@ class WebUIManager:
                     "allocated_at": i.allocated_at.isoformat(),
                     "last_activity": i.last_activity.isoformat(),
                     "is_alive": i.is_alive(),
-                    "mode": "multi-user",
-                })
+                    "mode": "single-user",
+                }
+            )
+
+        # Include multi-user instances
+        with self._lock:
+            for i in self._instances.values():
+                instances.append(
+                    {
+                        "user_id": i.user_id,
+                        "system_account": i.system_account,
+                        "port": i.port,
+                        "pid": i.pid,
+                        "url": i.url,
+                        "allocated_at": i.allocated_at.isoformat(),
+                        "last_activity": i.last_activity.isoformat(),
+                        "is_alive": i.is_alive(),
+                        "mode": "multi-user",
+                    }
+                )
 
         return instances
 
