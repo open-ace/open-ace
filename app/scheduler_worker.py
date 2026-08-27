@@ -327,8 +327,8 @@ class SchedulerWorker:
             degraded_reason = "; ".join(issues)
             set_fetch_degraded(degraded_reason)
             logger.error(
-                f"Fetch set to degraded mode due to critical issues. "
-                f"Scheduler will not run data collection jobs until fixed."
+                "Fetch set to degraded mode due to critical issues. "
+                "Scheduler will not run data collection jobs until fixed."
             )
         elif scheduler_fetch_sudo and warnings:
             # 警告级别不影响运行，但记录状态
