@@ -6,6 +6,7 @@
  * - Create/Edit/Delete tenants
  * - Quota management
  * - Suspend/Activate tenants
+ * - Quota checking with result modal (Issue #3132)
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -29,8 +30,10 @@ import { useConfirm } from '@/components/common';
 import { tenantApi, type Tenant, type CreateTenantRequest, type UpdateTenantRequest } from '@/api';
 import { formatDateTime } from '@/utils';
 import { usePageRefresh } from '@/hooks';
+import { useTenantQuotaCheck } from '@/hooks/useTenantQuotaCheck';
 import { TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
 import { formatQuotaForDisplay } from '@/utils/quotaFormatter';
+import { QuotaCheckResultModal } from './QuotaCheckResultModal';
 
 // Tenant i18n fixes (Issue #1500)
 // Type-safe label mappings for plan and status
@@ -147,6 +150,10 @@ export const TenantManagement: React.FC = () => {
   });
   const [formError, setFormError] = useState<string | null>(null);
   const [trialDaysError, setTrialDaysError] = useState<string | null>(null);
+
+  // Issue #3132: Quota check state
+  const { checkingTenants, checkResult, checkQuota, clearResult } = useTenantQuotaCheck();
+  const [showCheckResultModal, setShowCheckResultModal] = useState(false);
 
   // Dynamic options with useMemo for performance (Issue #1500)
   const statusOptions = useMemo(() => getTenantStatusOptions(language), [language]);
@@ -395,6 +402,25 @@ export const TenantManagement: React.FC = () => {
     }
   };
 
+  // Issue #3132: Handle quota check button click
+  const handleCheckQuota = async (tenant: Tenant) => {
+    await checkQuota(tenant);
+    // Open result modal after check completes
+    setShowCheckResultModal(true);
+  };
+
+  // Issue #3132: Handle closing the check result modal
+  const handleCloseCheckResultModal = () => {
+    setShowCheckResultModal(false);
+    clearResult();
+  };
+
+  // Issue #3132: Handle "Edit Quota" button click from the check result modal
+  const handleEditQuotaFromModal = (tenant: Tenant) => {
+    handleCloseCheckResultModal();
+    handleOpenQuota(tenant);
+  };
+
   const getStatusVariant = (status: string) => {
     switch (status) {
       case 'active':
@@ -595,6 +621,26 @@ export const TenantManagement: React.FC = () => {
                           title={t('editQuota', language) ?? 'Edit Quota'}
                         >
                           <i className="bi bi-sliders" />
+                        </Button>
+                        <Button
+                          variant="outline-info"
+                          size="sm"
+                          onClick={() => handleCheckQuota(tenant)}
+                          disabled={checkingTenants.has(tenant.id)}
+                          title={t('checkQuota', language) ?? 'Check Quota'}
+                        >
+                          {checkingTenants.has(tenant.id) ? (
+                            <>
+                              <span
+                                className="spinner-border spinner-border-sm me-1"
+                                role="status"
+                                aria-hidden="true"
+                              />
+                              {t('checkingQuota', language)}
+                            </>
+                          ) : (
+                            <i className="bi bi-speedometer2" />
+                          )}
                         </Button>
                         {tenant.status === 'suspended' ? (
                           <Button
@@ -911,6 +957,15 @@ export const TenantManagement: React.FC = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Issue #3132: Quota Check Result Modal */}
+      <QuotaCheckResultModal
+        isOpen={showCheckResultModal}
+        result={checkResult}
+        onClose={handleCloseCheckResultModal}
+        onEditQuota={handleEditQuotaFromModal}
+        language={language}
+      />
     </div>
   );
 };
