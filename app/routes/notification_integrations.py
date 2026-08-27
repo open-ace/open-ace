@@ -55,7 +55,11 @@ def channel_status():
                     ),
                 },
                 "feishu_bot": {"status": "no_configuration_required"},
-                "feishu_app": {"status": "configured" if feishu else "needs_configuration"},
+                "feishu_app": {
+                    "status": "configured" if feishu else "needs_configuration",
+                    "verification_status": feishu.get("verification_status") if feishu else None,
+                    "last_tested_at": feishu.get("last_tested_at") if feishu else None,
+                },
                 "dingtalk_app": {
                     "status": (
                         "configured"
