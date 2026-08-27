@@ -23,6 +23,8 @@ from app.modules.workspace.autonomous.github_ops import GitHubOps, GitHubOpsErro
 from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator, WorkflowPaused
 from app.modules.workspace.autonomous.phases import merge as merge_phase
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(822)]
+
 
 def _make_workflow(**overrides):
     base = {

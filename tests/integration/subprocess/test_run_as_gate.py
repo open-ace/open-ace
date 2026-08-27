@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(2018), pytest.mark.security]
+
 _ROOT = Path(__file__).resolve().parents[3]
 _WRAPPER = _ROOT / "scripts" / "openace-run-as.sh"
 

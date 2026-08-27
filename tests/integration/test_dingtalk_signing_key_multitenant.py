@@ -32,6 +32,8 @@ from app.modules.governance.alert_notifier import (
 )
 from app.utils.smtp_crypto import get_password_manager
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1829), pytest.mark.security]
+
 DT_URL = "https://oapi.dingtalk.com/robot/send?access_token=abc123"
 _FIXED_NOW = 1_750_000_000.0  # deterministic timestamp for signature asserts
 

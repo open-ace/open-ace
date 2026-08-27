@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Tests for the model-gateway admin route security and the encrypted repository."""
+"""Tests for the model-gateway admin route security.
 
-import json
-import sqlite3
+Repository-level tests (real tmp-path SQLite semantics) live in
+tests/integration/test_model_gateway_repository.py.
+"""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
 from flask import Flask
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(720), pytest.mark.security]
 
 
 @pytest.fixture
@@ -110,99 +114,6 @@ class TestAdminSecurity:
         assert "enabled" in data
         assert data["enabled"] is False
         assert data["data"] is None
-
-
-# ── Repository encryption round-trip (SQLite temp DB) ──────────────────
-
-
-_DDL = """
-CREATE TABLE model_gateway_config (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    mode TEXT DEFAULT 'direct',
-    base_url TEXT,
-    encrypted_api_key TEXT,
-    encryption_version INTEGER DEFAULT 1,
-    model_prefix_mode INTEGER DEFAULT 0,
-    model_prefix TEXT,
-    created_by INTEGER,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-"""
-
-
-class TestRepository:
-    def test_save_get_decrypt_delete_roundtrip(self, tmp_path, monkeypatch):
-        from app.modules.workspace.model_gateway.repository import ModelGatewayConfigRepository
-
-        monkeypatch.setattr(
-            "app.modules.workspace.model_gateway.repository.is_postgresql",
-            lambda: False,
-        )
-
-        db_path = str(tmp_path / "gw.db")
-
-        def fake_conn(self):
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            return conn
-
-        monkeypatch.setattr(ModelGatewayConfigRepository, "_get_connection", fake_conn)
-
-        # Initialize schema
-        with sqlite3.connect(db_path) as c:
-            c.execute(_DDL)
-
-        repo = ModelGatewayConfigRepository()
-        saved = repo.save_config(
-            base_url="https://gw.example.com/v1",
-            api_key="sk-super-secret-key",
-            model_prefix_mode=True,
-            model_prefix="openai",
-            created_by=5,
-        )
-        assert saved["api_key_masked"]
-        assert saved["model_prefix_mode"] is True
-
-        # Display config: ciphertext removed, plaintext key never present
-        cfg = repo.get_config()
-        assert cfg["base_url"] == "https://gw.example.com/v1"
-        assert "encrypted_api_key" not in cfg
-        assert "sk-super-secret-key" not in json.dumps(cfg)
-
-        # Runtime accessor decrypts back to the original key
-        with_key = repo.get_config_with_key()
-        assert with_key is not None
-        assert with_key.base_url == "https://gw.example.com/v1"
-        assert with_key.api_key == "sk-super-secret-key"
-        assert with_key.model_prefix_mode is True
-        assert with_key.model_prefix == "openai"
-
-        assert repo.delete_config() is True
-        assert repo.get_config() is None
-
-    def test_get_returns_none_when_unconfigured(self, tmp_path, monkeypatch):
-        from app.modules.workspace.model_gateway.repository import ModelGatewayConfigRepository
-
-        monkeypatch.setattr(
-            "app.modules.workspace.model_gateway.repository.is_postgresql",
-            lambda: False,
-        )
-
-        db_path = str(tmp_path / "gw2.db")
-
-        def fake_conn(self):
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            return conn
-
-        monkeypatch.setattr(ModelGatewayConfigRepository, "_get_connection", fake_conn)
-        with sqlite3.connect(db_path) as c:
-            c.execute(_DDL)
-
-        repo = ModelGatewayConfigRepository()
-        assert repo.get_config() is None
-        assert repo.get_config_with_key() is None
 
 
 # ── Issue #2170: API Key Fallback Logic ───────────────────────────────────
@@ -418,177 +329,6 @@ class TestApiKeyFallback:
         svc.get_config_with_key.assert_not_called()
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
-
-
-# ── Issue #2170: Integration Tests (Real SQLite Database) ─────────────────────
-
-
-class TestApiKeyFallbackIntegration:
-    """Integration tests for Issue #2170 on real SQLite database."""
-
-    def test_full_update_flow_preserves_api_key(self, tmp_path, monkeypatch):
-        """P1: End-to-end verification of API key preservation."""
-        from app.modules.workspace.model_gateway.repository import ModelGatewayConfigRepository
-
-        # Setup: Use real SQLite database
-        monkeypatch.setattr(
-            "app.modules.workspace.model_gateway.repository.is_postgresql",
-            lambda: False,
-        )
-
-        db_path = str(tmp_path / "gw_integration.db")
-
-        def fake_conn(self):
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            return conn
-
-        monkeypatch.setattr(ModelGatewayConfigRepository, "_get_connection", fake_conn)
-
-        # Initialize schema
-        with sqlite3.connect(db_path) as c:
-            c.execute(_DDL)
-
-        repo = ModelGatewayConfigRepository()
-
-        # Step 1: Initial save with api_key
-        initial_config = repo.save_config(
-            base_url="https://gateway.example.com/v1",
-            api_key="sk-initial-secret-key",
-            model_prefix_mode=True,
-            model_prefix="openai",
-            created_by=1,
-        )
-        assert initial_config["base_url"] == "https://gateway.example.com/v1"
-        assert initial_config["model_prefix"] == "openai"
-
-        # Step 2: Retrieve stored config (simulating fallback)
-        stored = repo.get_config_with_key()
-        assert stored is not None
-        assert stored.api_key == "sk-initial-secret-key"
-        assert stored.base_url == "https://gateway.example.com/v1"
-
-        # Step 3: Update base_url without providing api_key (use stored key)
-        updated_config = repo.save_config(
-            base_url="https://new-gateway.example.com/v1",
-            api_key=stored.api_key,  # Fallback value
-            model_prefix_mode=False,
-            model_prefix=None,
-            created_by=1,
-        )
-        assert updated_config["base_url"] == "https://new-gateway.example.com/v1"
-
-        # Step 4: Verify key is preserved
-        final_stored = repo.get_config_with_key()
-        assert final_stored is not None
-        assert final_stored.api_key == "sk-initial-secret-key"
-        assert final_stored.base_url == "https://new-gateway.example.com/v1"
-
-        # Verify old key is gone (single row replacement)
-        repo.delete_config()
-        assert repo.get_config() is None
-
-    def test_update_with_new_key_overwrites_old(self, tmp_path, monkeypatch):
-        """P1: Verify new api_key replaces old key."""
-        from app.modules.workspace.model_gateway.repository import ModelGatewayConfigRepository
-
-        monkeypatch.setattr(
-            "app.modules.workspace.model_gateway.repository.is_postgresql",
-            lambda: False,
-        )
-
-        db_path = str(tmp_path / "gw_new_key.db")
-
-        def fake_conn(self):
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            return conn
-
-        monkeypatch.setattr(ModelGatewayConfigRepository, "_get_connection", fake_conn)
-
-        with sqlite3.connect(db_path) as c:
-            c.execute(_DDL)
-
-        repo = ModelGatewayConfigRepository()
-
-        # Initial save
-        repo.save_config(
-            base_url="https://gateway.example.com/v1",
-            api_key="old-secret-key",
-            model_prefix_mode=False,
-            model_prefix=None,
-            created_by=1,
-        )
-
-        # Update with new key
-        repo.save_config(
-            base_url="https://gateway.example.com/v1",
-            api_key="new-secret-key",
-            model_prefix_mode=False,
-            model_prefix=None,
-            created_by=1,
-        )
-
-        # Verify new key is stored
-        stored = repo.get_config_with_key()
-        assert stored is not None
-        assert stored.api_key == "new-secret-key"
-
-    def test_empty_key_preservation_in_database(self, tmp_path, monkeypatch):
-        """P1: Verify empty api_key is preserved correctly."""
-        from app.modules.workspace.model_gateway.repository import ModelGatewayConfigRepository
-
-        monkeypatch.setattr(
-            "app.modules.workspace.model_gateway.repository.is_postgresql",
-            lambda: False,
-        )
-
-        db_path = str(tmp_path / "gw_empty_key.db")
-
-        def fake_conn(self):
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row
-            return conn
-
-        monkeypatch.setattr(ModelGatewayConfigRepository, "_get_connection", fake_conn)
-
-        with sqlite3.connect(db_path) as c:
-            c.execute(_DDL)
-
-        repo = ModelGatewayConfigRepository()
-
-        # Save with empty key
-        repo.save_config(
-            base_url="https://gateway.example.com/v1",
-            api_key="",
-            model_prefix_mode=False,
-            model_prefix=None,
-            created_by=1,
-        )
-
-        # Retrieve and verify empty key is preserved
-        stored = repo.get_config_with_key()
-        assert stored is not None
-        assert stored.api_key == ""
-
-        # Update without providing api_key (use stored empty key)
-        repo.save_config(
-            base_url="https://gateway.example.com/v2",
-            api_key=stored.api_key,
-            model_prefix_mode=False,
-            model_prefix=None,
-            created_by=1,
-        )
-
-        # Verify empty key is still there
-        final = repo.get_config_with_key()
-        assert final is not None
-        assert final.api_key == ""
-        assert final.base_url == "https://gateway.example.com/v2"
-
-
 # ── Issue #2809: Test Connection SSRF Protection ─────────────────────────────
 
 
@@ -795,9 +535,18 @@ class TestTestConnectionSSRFProtection:
 @pytest.mark.regression
 @pytest.mark.issue(2809)
 class TestServiceLayerSSRFValidation:
-    """Integration tests for service-layer SSRF validation."""
+    """Integration tests for service-layer SSRF validation.
 
-    def test_loopback_blocked_before_request(self):
+    Hardening: the rejection-focused tests below patch
+    ``app.utils.outbound_url_guard.safe_request`` even though validation is
+    expected to reject the URL before any request. The service imports
+    ``safe_request`` from that module at call time, so the patch guarantees a
+    validation regression can never open a real socket; the asserted outcomes
+    (SSRF rejection) are unchanged.
+    """
+
+    @patch("app.utils.outbound_url_guard.safe_request")
+    def test_loopback_blocked_before_request(self, mock_safe_request):
         """P0: Loopback must be blocked before any HTTP request is made."""
         from app.modules.workspace.model_gateway.service import ModelGatewayService
 
@@ -812,8 +561,11 @@ class TestServiceLayerSSRFValidation:
         assert result["ok"] is False
         assert result["blocked"] is True
         assert "localhost" in result["message"].lower() or "blocked" in result["message"].lower()
+        # Fail-safe: no outbound request may ever be attempted for this URL.
+        mock_safe_request.assert_not_called()
 
-    def test_private_network_blocked(self):
+    @patch("app.utils.outbound_url_guard.safe_request")
+    def test_private_network_blocked(self, mock_safe_request):
         """P0: Private network IPs must be blocked."""
         from app.modules.workspace.model_gateway.service import ModelGatewayService
 
@@ -826,8 +578,10 @@ class TestServiceLayerSSRFValidation:
 
         assert result["ok"] is False
         assert result["blocked"] is True
+        mock_safe_request.assert_not_called()
 
-    def test_ipv6_loopback_blocked(self):
+    @patch("app.utils.outbound_url_guard.safe_request")
+    def test_ipv6_loopback_blocked(self, mock_safe_request):
         """P0: IPv6 loopback must be blocked."""
         from app.modules.workspace.model_gateway.service import ModelGatewayService
 
@@ -840,8 +594,10 @@ class TestServiceLayerSSRFValidation:
 
         assert result["ok"] is False
         assert result["blocked"] is True
+        mock_safe_request.assert_not_called()
 
-    def test_link_local_blocked(self):
+    @patch("app.utils.outbound_url_guard.safe_request")
+    def test_link_local_blocked(self, mock_safe_request):
         """P0: Link-local addresses (169.254.x.x) must be blocked."""
         from app.modules.workspace.model_gateway.service import ModelGatewayService
 
@@ -854,8 +610,10 @@ class TestServiceLayerSSRFValidation:
 
         assert result["ok"] is False
         assert result["blocked"] is True
+        mock_safe_request.assert_not_called()
 
-    def test_non_allowed_port_blocked(self):
+    @patch("app.utils.outbound_url_guard.safe_request")
+    def test_non_allowed_port_blocked(self, mock_safe_request):
         """P0: Non-whitelisted ports must be blocked."""
         from app.modules.workspace.model_gateway.service import ModelGatewayService
 
@@ -869,6 +627,7 @@ class TestServiceLayerSSRFValidation:
         assert result["ok"] is False
         assert result["blocked"] is True
         assert "port" in result["message"].lower()
+        mock_safe_request.assert_not_called()
 
     def test_valid_https_url_passes_validation(self):
         """P0: Valid HTTPS URLs to public hosts should pass validation."""
@@ -960,7 +719,8 @@ class TestServiceLayerSSRFValidation:
                     assert result["blocked"] is True
                     assert "security policy" in result["message"].lower()
 
-    def test_empty_base_url_rejected(self):
+    @patch("app.utils.outbound_url_guard.safe_request")
+    def test_empty_base_url_rejected(self, mock_safe_request):
         """P0: Empty base_url should be rejected."""
         from app.modules.workspace.model_gateway.service import ModelGatewayService
 
@@ -973,6 +733,8 @@ class TestServiceLayerSSRFValidation:
 
         assert result["ok"] is False
         assert "required" in result["message"].lower()
+        # Fail-safe: no outbound request may ever be attempted.
+        mock_safe_request.assert_not_called()
 
     def test_ssrf_disable_switch_respected(self):
         """P1: OPENACE_LLM_PROXY_DISABLE_SSRF_CHECK should disable validation (emergency mode)."""
@@ -1052,3 +814,7 @@ class TestServiceLayerSSRFValidation:
                         # Verify timeout was passed correctly
                         call_kwargs = mock_req.call_args[1]
                         assert call_kwargs["timeout"] == (3, 7)
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

@@ -10,7 +10,7 @@ model:
     (no UID-level serialization collision).
 
 These SKIP unless the host is a provisioned Linux-root lane (mirrors the
-``tests/issues/2018/test_run_as_integration.py`` guard, plus a writable cgroup
+``tests/integration/subprocess/test_run_as_integration.py`` guard, plus a writable cgroup
 v2 hierarchy for the resource-limit cases). Run with::
 
     sudo pytest tests/issues/2020/test_run_as_integration_2020.py

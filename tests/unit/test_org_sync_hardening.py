@@ -14,10 +14,19 @@ Covers the six findings tracked in #1827:
   #6 [MED] DingTalk user sync issued one user/get per user (N+1)
           -> batched topapi/v2/user/list
 
-The SQLite-bound tests patch the module-level ``is_postgresql`` to False so the
-dev environment's globally-configured Postgres URL cannot corrupt them (the same
+The SQLite-bound tests patch the module-level ``is_postgresql`` to False — in
+BOTH ``app.repositories.database`` and ``app.modules.workspace.collaboration``
+(the latter from-imports the helper, so without pinning it there
+``_ensure_supporting_tables`` would dial the ambient Postgres URL) — so the dev
+environment's globally-configured Postgres URL cannot corrupt them (the same
 isolation tests/issues/1773 applies). The real Postgres self-heal path lives in
 tests/integration/test_org_sync_lock_recovery.py.
+
+Drift repair (batch 12 migration): production #3028/#3029 changed the directory
+snapshot / department-users contracts. The fakes here were realigned:
+``_fetch_directory_snapshot`` now takes ``warnings``/``errors`` and the DingTalk
+variant returns the ``(departments, users, snapshot_complete)`` 3-tuple, and
+``_fetch_department_users`` returns ``(users, complete)``.
 """
 
 from __future__ import annotations
@@ -53,6 +62,8 @@ from app.services.feishu_org_sync import (
     FeishuUser,
 )
 
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1827)]
+
 # ---------------------------------------------------------------------------
 # SQLite sync environment (mirrors tests/issues/1773 + 1787 fixtures)
 # ---------------------------------------------------------------------------
@@ -70,6 +81,11 @@ def sqlite_db(tmp_path, monkeypatch):
     # A globally-configured Postgres URL in dev would otherwise make the
     # module-level is_postgresql()/adapt_sql() helpers poison SQLite repo calls.
     monkeypatch.setattr(db_module, "is_postgresql", lambda: False)
+    # collaboration.py from-imports is_postgresql at module load, so pinning the
+    # re-export is required too — otherwise _ensure_supporting_tables ->
+    # CollaborationManager._ensure_tables dials the ambient Postgres URL.
+    # (Precedent: tests/unit/test_dingtalk_sync_snapshot_protection.py:59-61.)
+    monkeypatch.setattr("app.modules.workspace.collaboration.is_postgresql", lambda: False)
     db = Database(db_url=f"sqlite:///{tmp_path / 'org-sync-1827.db'}")
     load_schema_from_file(db_url=db.db_url, dialect="sqlite")
     try:
@@ -83,16 +99,17 @@ def sqlite_db(tmp_path, monkeypatch):
 class _FakeDingTalk(DingTalkOrgSyncService):
     """Deterministic DingTalk service that bypasses live API calls."""
 
-    def __init__(self, *args, departments=None, users=None, **kwargs):
+    def __init__(self, *args, departments=None, users=None, snapshot_complete=True, **kwargs):
         super().__init__(*args, **kwargs)
         self._departments = list(departments or [])
         self._users = list(users or [])
+        self._snapshot_complete = snapshot_complete
 
     def _get_access_token(self, app_key, app_secret):
         return "test-token"
 
-    def _fetch_directory_snapshot(self, token, root_department_id, warnings=None):
-        return self._departments, self._users
+    def _fetch_directory_snapshot(self, token, root_department_id, warnings=None, errors=None):
+        return self._departments, self._users, self._snapshot_complete
 
 
 class _FakeFeishu(FeishuOrgSyncService):
@@ -106,7 +123,7 @@ class _FakeFeishu(FeishuOrgSyncService):
     def _get_tenant_access_token(self, app_id, app_secret):
         return "test-token"
 
-    def _fetch_directory_snapshot(self, token):
+    def _fetch_directory_snapshot(self, token, warnings=None, errors=None):
         return self._departments, self._users
 
 
@@ -178,11 +195,15 @@ def test_dingtalk_load_synced_teams_called_once_per_run(sqlite_db):
 
     service._load_synced_teams = counting
 
-    service.sync_org()
+    result = service.sync_org()
 
     assert (
         len(calls) == 1
     ), f"_load_synced_teams must run once per sync, not per department; got {len(calls)}"
+    # Strengthened (#3028 contract): a fully-successful fake snapshot must be
+    # reported as complete on the result so destructive cleanup is authorized.
+    assert result.snapshot_complete is True
+    assert result.departments_seen == 3
 
 
 def test_dingtalk_sync_memberships_uses_scoped_where_in(sqlite_db):
@@ -209,7 +230,7 @@ def test_dingtalk_sync_memberships_uses_scoped_where_in(sqlite_db):
 
     db.fetch_all = recording_fetch_all
 
-    service.sync_org()
+    result = service.sync_org()
 
     assert any(
         "FROM team_members WHERE team_id IN" in q for q in recorded
@@ -217,6 +238,9 @@ def test_dingtalk_sync_memberships_uses_scoped_where_in(sqlite_db):
     assert not any(
         q == "SELECT team_id, user_id, role FROM team_members" for q in recorded
     ), "the unscoped full-table membership scan must be gone"
+    # Strengthened (#3028 contract): the snapshot-completeness flag threads
+    # through the sync result, and a complete snapshot keeps the run successful.
+    assert result.snapshot_complete is True
 
 
 def test_feishu_sync_memberships_uses_scoped_where_in(sqlite_db):
@@ -239,10 +263,12 @@ def test_feishu_sync_memberships_uses_scoped_where_in(sqlite_db):
 
     db.fetch_all = recording_fetch_all
 
-    service.sync_org()
+    result = service.sync_org()
 
     assert any("FROM team_members WHERE team_id IN" in q for q in recorded)
     assert not any(q == "SELECT team_id, user_id, role FROM team_members" for q in recorded)
+    # Strengthened: the membership work actually reconciled the fake user.
+    assert result.users_seen == 1
 
 
 # ===========================================================================
@@ -635,7 +661,8 @@ def test_feishu_check_stale_sync_noop_when_within_budget(sqlite_db, caplog):
 
 
 def test_dingtalk_fetch_department_users_paginates(monkeypatch):
-    """v2/user/list paging must walk every page via next_cursor (WP-6)."""
+    """v2/user/list paging must walk every page via next_cursor (WP-6) and
+    report the department snapshot as complete (#3028 contract)."""
     monkeypatch.setattr(dt_module, "_TRANSIENT_SLEEP", lambda _s: None)
 
     class FakeHttp:
@@ -675,18 +702,23 @@ def test_dingtalk_fetch_department_users_paginates(monkeypatch):
         config_override={"dingtalk": {"app_key": "k", "app_secret": "s"}},
         http_session=FakeHttp(),
     )
-    users = service._fetch_department_users("token", "100")
+    users, complete = service._fetch_department_users("token", "100")
     assert [u.user_id for u in users] == ["u1", "u2"]
+    assert complete is True, "a fully-paged walk must report the snapshot as complete"
     assert service.http.calls == 2, "both pages must be fetched"
 
 
 def test_dingtalk_fetch_department_users_skips_department_on_hard_error(monkeypatch):
     """A non-transient errcode on a page warns and skips the department without
-    aborting (WP-6)."""
+    aborting (WP-6), and must report the snapshot as incomplete (#3028 contract)."""
     monkeypatch.setattr(dt_module, "_TRANSIENT_SLEEP", lambda _s: None)
 
     class FakeHttp:
+        def __init__(self):
+            self.calls = 0
+
         def post(self, url, params=None, json=None, timeout=None):
+            self.calls += 1
             # 88 (quota) is NOT a transient errcode -> no retry, hard skip.
             return _FakeResponse({"errcode": 88, "errmsg": "quota exceeded"})
 
@@ -695,11 +727,12 @@ def test_dingtalk_fetch_department_users_skips_department_on_hard_error(monkeypa
         http_session=FakeHttp(),
     )
     warnings: list[str] = []
-    users = service._fetch_department_users("token", "100", warnings=warnings)
+    users, complete = service._fetch_department_users("token", "100", warnings=warnings)
     assert users == []
+    assert complete is False, "a failed page must flag the snapshot as incomplete"
     assert any("100" in w and "errcode=88" in w for w in warnings)
-    # No retry on a non-transient errcode: exactly one call.
-    assert service.http.calls if hasattr(service.http, "calls") else True
+    # Strengthened: no retry on a non-transient errcode — exactly one call.
+    assert service.http.calls == 1
 
 
 # ===========================================================================

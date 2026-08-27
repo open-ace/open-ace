@@ -10,22 +10,36 @@ The cache keys on ``(app_key, app_secret)`` and lives until the API's real
 
 from __future__ import annotations
 
-import importlib
+import importlib.util
 import sys
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SHARED_DIR = REPO_ROOT / "scripts" / "shared"
+import pytest
+
+pytestmark = [pytest.mark.regression, pytest.mark.issue(1829)]
 
 
 def _load_cache_mod():
-    if str(SHARED_DIR) not in sys.path:
-        sys.path.insert(0, str(SHARED_DIR))
-    import dingtalk_user_cache as mod
+    """Load scripts/shared/dingtalk_user_cache.py as an isolated module.
 
-    return importlib.reload(mod)
+    Follows the tests/unit loader precedent (spec_from_file_location) instead of
+    the legacy sys.path + importlib.reload dance: each call executes a fresh
+    module instance, so the process-local ``_access_token_cache`` starts empty
+    per test without mutating interpreter-global import state.
+    """
+    module_path = (
+        Path(__file__).resolve().parents[2] / "scripts" / "shared" / "dingtalk_user_cache.py"
+    )
+    module_dir = module_path.parent
+    if str(module_dir) not in sys.path:
+        sys.path.insert(0, str(module_dir))
+    spec = importlib.util.spec_from_file_location("dingtalk_user_cache_1829", module_path)
+    mod = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _resp(token: str, expire_in: int):
