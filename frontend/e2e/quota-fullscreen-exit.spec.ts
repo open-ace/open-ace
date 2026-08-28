@@ -8,18 +8,88 @@
  * 4. A toast notification should be shown to inform the user
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { test, expect } from '@playwright/test';
 
+/**
+ * The workspace surface these tests exercise is gated behind
+ * workspace.enabled in the lane's ~/.open-ace/config.json (freshly
+ * initialized homes default it to false, and the specs run on the same
+ * host as the server). The config endpoint re-reads the file per request,
+ * so flipping it needs no restart — same pattern as the python e2e lanes
+ * (tests/e2e/ui/test_language_sync.py's _ensure_workspace_enabled).
+ */
+function ensureWorkspaceEnabled(): void {
+  const configPath = path.join(process.env.HOME ?? '', '.open-ace', 'config.json');
+  let config: Record<string, unknown> = {};
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  } catch {
+    // missing/corrupt file — start from an empty object
+  }
+  const workspace = (config.workspace ?? {}) as Record<string, unknown>;
+  if (workspace.enabled !== true) {
+    workspace.enabled = true;
+    config.workspace = workspace;
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    workspaceWasEnabledByUs = true;
+  }
+}
+
+let workspaceWasEnabledByUs = false;
+
+function restoreWorkspaceFlag(): void {
+  if (!workspaceWasEnabledByUs) {
+    return;
+  }
+  const configPath = path.join(process.env.HOME ?? '', '.open-ace', 'config.json');
+  try {
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+    const workspace = (config.workspace ?? {}) as Record<string, unknown>;
+    workspace.enabled = false;
+    config.workspace = workspace;
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  } catch {
+    // best-effort restore only
+  }
+}
+
 test.describe('Issue 53: Auto exit fullscreen on quota exceeded', () => {
+  test.beforeAll(() => {
+    ensureWorkspaceEnabled();
+  });
+
+  test.afterAll(() => {
+    restoreWorkspaceFlag();
+  });
+
   test.beforeEach(async ({ page }) => {
-    // Login first
+    // The workspace surface needs a webui URL; the lane has no qwen-code-webui
+    // instance, so /api/workspace/user-url would 503 forever. Fulfill it with
+    // a placeholder (same pattern as the python lanes' session-restore tests).
+    await page.route('**/api/workspace/user-url', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          url: 'http://127.0.0.1:1/',
+          token: 'e2e-mock-token',
+        }),
+      })
+    );
+
+    // Login first (current Login.tsx contract: #username/#password; the app
+    // navigates to "/" after submit — there is no /dashboard route).
     await page.goto('/login');
-    await page.fill('input[name="username"]', 'admin');
-    await page.fill('input[name="password"]', 'admin123');
+    await page.fill('#username', 'admin');
+    await page.fill('#password', 'admin123');
     await page.click('button[type="submit"]');
 
-    // Wait for redirect to dashboard
-    await page.waitForURL(/dashboard/, { timeout: 10000 });
+    // Wait for the post-login landing (root WorkLayout shell)
+    await page.waitForURL(/\/(work)?$/, { timeout: 10000 });
   });
 
   test('should show quota exceeded warning when quota is over limit', async ({ page }) => {
@@ -63,11 +133,12 @@ test.describe('Issue 53: Auto exit fullscreen on quota exceeded', () => {
     const fullscreenBtn = await page.locator('.fullscreen-toggle-btn');
     await fullscreenBtn.click();
 
-    // Wait for fullscreen mode
-    await page.waitForSelector('.fullscreen-mode', { timeout: 5000 });
+    // Wait for fullscreen mode — both .work-layout and .workspace receive
+    // the class, so scope to the workspace element.
+    await page.waitForSelector('.workspace.fullscreen-mode', { timeout: 5000 });
 
     // Verify fullscreen mode is active
-    const workspace = await page.locator('.fullscreen-mode');
+    const workspace = page.locator('.workspace.fullscreen-mode');
     await expect(workspace).toBeVisible();
 
     // Take screenshot
