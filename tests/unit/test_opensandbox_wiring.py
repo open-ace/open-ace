@@ -126,3 +126,165 @@ def test_sweep_survives_a_provider_failure_on_one_row(api, monkeypatch):
     }
     # One bad row must never abort a sweep that walks many.
     _destroy_orphan_sandbox(wf, remote_session_manager=None)
+
+
+# ── agent-runner wiring (spec §6.5, §6.6) ─────────────────────────────
+
+
+class _PidlessTransport:
+    """A container-backend transport: no pid, no local process."""
+
+    def __init__(self, stdout_lines=()):
+        self.written: list[bytes] = []
+        self._stdout = list(stdout_lines)
+        self.stdin_closed = False
+        self.shutdown_calls: list[float] = []
+        self.returncode = None
+
+    def write_stdin(self, data: bytes) -> None:
+        self.written.append(data)
+
+    def close_stdin(self) -> None:
+        self.stdin_closed = True
+
+    def readline_stdout(self) -> bytes:
+        return self._stdout.pop(0) if self._stdout else b""
+
+    def readline_stderr(self) -> bytes:
+        return b""
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+    def shutdown(self, grace: float = 5.0) -> None:
+        self.shutdown_calls.append(grace)
+        self.returncode = 0
+
+    @property
+    def pid(self):
+        return None
+
+
+def _runner():
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+    runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
+    runner._local_sessions = {}
+    runner._activity_callback = None
+    runner._resolve_sidebar_session = lambda *a, **k: ""
+    return runner
+
+
+def _session(transport):
+    from app.modules.workspace.autonomous.agent_runner import _LocalSession
+
+    session = _LocalSession(session_id="s-1", process=None, transport=transport)
+    session.workflow_id = "wf-1"
+    return session
+
+
+def test_agent_receives_the_prompt_over_a_pidless_transport():
+    # The end-to-end assertion. A call-site-swap test would pass while the
+    # `session.process is None` guards silently swallowed every write, leaving
+    # the agent launched and never spoken to.
+    runner = _runner()
+    transport = _PidlessTransport()
+    session = _session(transport)
+    assert runner._write_stdin(session, '{"type":"user"}') is True
+    assert transport.written and b'"type":"user"' in transport.written[0]
+
+
+def test_reader_consumes_stdout_over_a_pidless_transport():
+    runner = _runner()
+    transport = _PidlessTransport(
+        [json.dumps({"type": "system", "subtype": "init", "session_id": "cli-1"}).encode()]
+    )
+    session = _session(transport)
+    runner._read_stdout(session)
+    assert session.cli_session_id == "cli-1"
+
+
+def test_local_session_derives_a_transport_from_a_raw_popen():
+    # Sessions built directly from a Popen — several suites and the remote
+    # tracker do this — must still have a working seam.
+    from types import SimpleNamespace
+
+    from app.modules.workspace.autonomous.agent_runner import _LocalSession
+    from app.modules.workspace.autonomous.sandbox.transport import LocalProcessTransport
+
+    proc = SimpleNamespace(stdout=None, stderr=None, stdin=None, returncode=0, pid=42)
+    session = _LocalSession(session_id="s-1", process=proc)
+    assert isinstance(session.transport, LocalProcessTransport)
+    assert session.transport.process is proc
+
+
+def test_pause_and_resume_reach_the_provider_for_a_pidless_transport():
+    # The old guard was `not session.process`, which returned False before the
+    # provider branch could run — making pause permanently unavailable for a
+    # container backend, while acceptance criterion 2 requires it.
+    from app.modules.workspace.autonomous.sandbox.types import ExecHandle
+
+    paused: list[str] = []
+
+    class _Provider:
+        def pause(self, exec_handle):
+            paused.append("pause")
+
+        def resume(self, exec_handle):
+            paused.append("resume")
+
+    runner = _runner()
+    session = _session(_PidlessTransport())
+    session.sandbox_provider = _Provider()
+    session.exec_handle = ExecHandle(sandbox_id="sb-1", command_id="cmd-1")
+    runner._local_sessions["s-1"] = session
+
+    assert runner.pause_session("s-1") is True
+    assert runner.resume_session("s-1") is True
+    assert paused == ["pause", "resume"]
+
+
+def test_pause_still_refuses_a_finished_session():
+    runner = _runner()
+    transport = _PidlessTransport()
+    transport.returncode = 0
+    session = _session(transport)
+    runner._local_sessions["s-1"] = session
+    assert runner.pause_session("s-1") is False
+
+
+def test_select_sandbox_provider_returns_the_injected_one_without_config(monkeypatch, tmp_path):
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+    from app.modules.workspace.autonomous.sandbox.legacy_posix import LegacyPosixProvider
+
+    monkeypatch.delenv("OPENACE_SANDBOX_BACKENDS", raising=False)
+    monkeypatch.setattr(
+        "app.modules.workspace.autonomous.sandbox.opensandbox.config."
+        "DEFAULT_BACKEND_CONFIG_PATH",
+        str(tmp_path / "etc.json"),
+    )
+    monkeypatch.setattr(
+        "app.modules.workspace.autonomous.sandbox.opensandbox.config.USER_BACKEND_CONFIG_PATH",
+        str(tmp_path / "user.json"),
+    )
+    runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
+    injected = LegacyPosixProvider()
+    runner._sandbox_provider = injected
+    runner.remote_session_manager = None
+    assert runner._select_sandbox_provider("local", tenant_id=1) is injected
+
+
+def test_required_production_policy_cannot_fallback_to_legacy(api, monkeypatch):
+    # Through the documented single branch point, with a config present.
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+    from app.modules.workspace.autonomous.sandbox.legacy_posix import LegacyPosixProvider
+    from app.modules.workspace.autonomous.sandbox.opensandbox.provider import OpenSandboxProvider
+
+    runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
+    runner._sandbox_provider = LegacyPosixProvider()
+    runner.remote_session_manager = None
+    selected = runner._select_sandbox_provider("local", tenant_id=1, project_path="/workspace")
+    assert isinstance(selected, OpenSandboxProvider)
