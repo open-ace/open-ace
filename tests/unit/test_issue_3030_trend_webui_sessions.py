@@ -6,8 +6,11 @@ Verifies that:
 3. get_trend_data() merges both daily_stats and agent_sessions
 4. get_key_metrics() merges session data into totals
 5. Edge cases: empty data, host_name filter, tenant_id filter, date filters
+
+Issue #3166: Added tests for mixed date type handling (datetime.date vs str).
 """
 
+from datetime import date
 from unittest.mock import MagicMock
 
 import pytest
@@ -393,3 +396,126 @@ class TestGetKeyMetricsMerge:
             host_name="my-host",
             tenant_id=42,
         )
+
+
+class TestMixedDateTypes:
+    """Test Issue #3166: get_trend_data handles mixed date types correctly.
+
+    PostgreSQL returns datetime.date for CAST(created_at AS DATE),
+    while daily_stats returns string dates. This class tests that
+    the merge and sort logic handles this correctly.
+    """
+
+    def _make_service(self):
+        mock_repo = MagicMock()
+        svc = UsageService(usage_repo=mock_repo)
+        return svc, mock_repo
+
+    def setup_method(self):
+        get_cache().clear()
+
+    def test_mixed_date_types_no_type_error(self):
+        """Should not raise TypeError when merging date objects with strings."""
+        svc, mock_repo = self._make_service()
+        # daily_stats returns string dates
+        mock_repo.get_daily_by_tool.return_value = [
+            {"date": "2026-08-01", "tool_name": "qwen", "tokens": 10000},
+        ]
+        # agent_sessions returns datetime.date objects
+        mock_repo.get_session_trend_by_tool.return_value = [
+            {"date": date(2026, 8, 2), "tool_name": "qwen", "tokens": 5000},
+        ]
+
+        # Should not raise TypeError
+        result = svc.get_trend_data("2026-08-01", "2026-08-31")
+
+        assert len(result) == 2
+
+    def test_same_date_different_types_merge_correctly(self):
+        """Same date with different types should merge into one record."""
+        svc, mock_repo = self._make_service()
+        # Both sources have the same date but different types
+        mock_repo.get_daily_by_tool.return_value = [
+            {"date": "2026-08-01", "tool_name": "qwen", "tokens": 10000},
+        ]
+        mock_repo.get_session_trend_by_tool.return_value = [
+            {"date": date(2026, 8, 1), "tool_name": "qwen", "tokens": 5000},
+        ]
+
+        result = svc.get_trend_data("2026-08-01", "2026-08-31")
+
+        # Should merge into a single record with summed tokens
+        assert len(result) == 1
+        assert result[0]["tokens"] == 15000
+        assert result[0]["date"] == "2026-08-01"
+
+    def test_sorting_with_mixed_date_types(self):
+        """Sorting should work correctly with mixed date types."""
+        svc, mock_repo = self._make_service()
+        # Multiple dates with different types
+        mock_repo.get_daily_by_tool.return_value = [
+            {"date": "2026-08-03", "tool_name": "qwen", "tokens": 3000},
+            {"date": "2026-08-01", "tool_name": "qwen", "tokens": 1000},
+        ]
+        mock_repo.get_session_trend_by_tool.return_value = [
+            {"date": date(2026, 8, 2), "tool_name": "qwen", "tokens": 2000},
+        ]
+
+        result = svc.get_trend_data("2026-08-01", "2026-08-31")
+
+        # Should be sorted by date ascending
+        assert len(result) == 3
+        assert result[0]["date"] == "2026-08-01"
+        assert result[1]["date"] == "2026-08-02"
+        assert result[2]["date"] == "2026-08-03"
+
+    def test_normalize_date_static_method(self):
+        """Test _normalize_date handles all date types correctly."""
+        svc = UsageService()
+
+        # String date
+        assert svc._normalize_date("2026-08-01") == "2026-08-01"
+
+        # datetime.date object
+        assert svc._normalize_date(date(2026, 8, 1)) == "2026-08-01"
+
+        # datetime.datetime object
+        from datetime import datetime
+
+        assert svc._normalize_date(datetime(2026, 8, 1, 12, 30, 0)) == "2026-08-01"
+
+    def test_multiple_tools_same_date_mixed_types(self):
+        """Multiple tools on same date with mixed types should merge correctly."""
+        svc, mock_repo = self._make_service()
+        mock_repo.get_daily_by_tool.return_value = [
+            {"date": "2026-08-01", "tool_name": "qwen", "tokens": 10000},
+            {"date": "2026-08-01", "tool_name": "claude", "tokens": 5000},
+        ]
+        mock_repo.get_session_trend_by_tool.return_value = [
+            {"date": date(2026, 8, 1), "tool_name": "qwen", "tokens": 5000},
+        ]
+
+        result = svc.get_trend_data("2026-08-01", "2026-08-31")
+
+        # qwen should merge, claude should be separate
+        assert len(result) == 2
+        qwen_record = next(r for r in result if r["tool_name"] == "qwen")
+        claude_record = next(r for r in result if r["tool_name"] == "claude")
+        assert qwen_record["tokens"] == 15000
+        assert claude_record["tokens"] == 5000
+
+    def test_only_date_objects(self):
+        """Should work correctly when all dates are datetime.date objects."""
+        svc, mock_repo = self._make_service()
+        mock_repo.get_daily_by_tool.return_value = [
+            {"date": date(2026, 8, 1), "tool_name": "qwen", "tokens": 10000},
+        ]
+        mock_repo.get_session_trend_by_tool.return_value = [
+            {"date": date(2026, 8, 2), "tool_name": "qwen", "tokens": 5000},
+        ]
+
+        result = svc.get_trend_data("2026-08-01", "2026-08-31")
+
+        assert len(result) == 2
+        assert result[0]["date"] == "2026-08-01"
+        assert result[1]["date"] == "2026-08-02"
