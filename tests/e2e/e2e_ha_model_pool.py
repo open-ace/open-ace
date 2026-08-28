@@ -188,7 +188,9 @@ def step2_local_session_models(page):
             f"empty (empty_reason: {empty_reason[:80]})",
         )
     else:
-        record("Local models list present", is_list and len(models) > 0, f"models count: {len(models)}")
+        record(
+            "Local models list present", is_list and len(models) > 0, f"models count: {len(models)}"
+        )
 
     page.goto(f"{BASE_URL}/work")
     pause(1)

@@ -714,9 +714,7 @@ def step_test_non_admin_permissions():
     assert r5.status_code == 200, f"Non-admin list should work, got {r5.status_code}"
     non_admin_wfs = r5.json().get("workflows", [])
     admin_wf_in_list = any(w["workflow_id"] == admin_wf_id for w in non_admin_wfs)
-    assert (
-        not admin_wf_in_list
-    ), "Admin's workflow must not appear in the non-admin user's list"
+    assert not admin_wf_in_list, "Admin's workflow must not appear in the non-admin user's list"
     log("PERM", "  ✅ Admin's workflow not in non-admin's list")
 
     log("PERM", "✅ Non-admin permission isolation verified")
@@ -828,15 +826,12 @@ def step_test_workflow_creation_params():
     created_workflow_ids.append(wf_id)
     r2 = api("get", f"/api/autonomous/workflows/{wf_id}")
     wf = r2.json()["workflow"]
-    assert (
-        wf["branch_strategy"] == "worktree"
-    ), f"Expected worktree, got {wf['branch_strategy']}"
+    assert wf["branch_strategy"] == "worktree", f"Expected worktree, got {wf['branch_strategy']}"
     # Issue #1573 contract: the worktree strategy always pre-generates an
     # auto-dev/<id> branch for scheduler conflict checks; the user's input is
     # preserved verbatim in original_branch_name.
     assert wf["branch_name"].startswith("auto-dev/"), (
-        f"Worktree strategy should pre-generate an auto-dev branch, "
-        f"got '{wf['branch_name']}'"
+        f"Worktree strategy should pre-generate an auto-dev branch, " f"got '{wf['branch_name']}'"
     )
     assert (
         wf.get("original_branch_name") == "test-branch"
@@ -1048,9 +1043,9 @@ def step_test_new_task_modal_form(page):
     model_selects = page.locator(
         "[role='dialog'] select.form-select, .modal select.form-select"
     ).filter(has=page.locator("option[value='']"))
-    model_hint = page.locator(
-        "[role='dialog'] .form-text, .modal .form-text"
-    ).filter(has_text="No models configured for this tool")
+    model_hint = page.locator("[role='dialog'] .form-text, .modal .form-text").filter(
+        has_text="No models configured for this tool"
+    )
     if model_selects.count() >= 1:
         model_select = model_selects.first
         model_options = model_select.locator("option")
@@ -1088,14 +1083,14 @@ def step_test_new_task_modal_form(page):
                 )
 
                 # Model select should still have at least the default option
-                assert new_model_count >= 1, "Model selector should have at least the default option"
+                assert (
+                    new_model_count >= 1
+                ), "Model selector should have at least the default option"
                 shot(page, "gap-01c-model-after-tool-change")
             else:
                 # Without configured models the hint must persist after a
                 # tool switch (the newly selected tool has no models either).
-                assert (
-                    model_hint.count() > 0
-                ), "No-models hint should persist after switching tools"
+                assert model_hint.count() > 0, "No-models hint should persist after switching tools"
                 log(
                     "MODAL-FORM",
                     "  ✅ No-models state persists across tool switches (no API keys)",

@@ -43,6 +43,7 @@ def utc_today(days_offset: int = 0) -> str:
     """
     return (datetime.now(timezone.utc) + timedelta(days=days_offset)).strftime("%Y-%m-%d")
 
+
 passed = 0
 failed = 0
 errors = []
