@@ -282,3 +282,25 @@ def test_explicit_env_path_wins(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENACE_SANDBOX_BACKENDS", str(path))
     cfg = load_backend_config()
     assert cfg is not None and cfg.default_tier == "gvisor"
+
+
+# ── production-required tenants (acceptance criterion 12) ─────────────
+
+
+def test_production_required_tenant_is_recognised():
+    cfg = parse_backend_config(_raw(production_required_tenants=["42"]))
+    assert cfg.requires_production_isolation("42") is True
+    assert cfg.requires_production_isolation("7") is False
+    assert cfg.requires_production_isolation(None) is False
+
+
+def test_tenant_keys_are_the_integer_tenant_id_as_a_string():
+    # The repo's tenant identity is an integer tenant_id; there is no name->id
+    # mapping anywhere, so a slug key would be unsuppliable.
+    cfg = parse_backend_config(_raw(tenant_tiers={42: "gvisor"}))
+    assert cfg.tier_for(tenant="42", project_path=None) == "gvisor"
+
+
+def test_no_production_required_list_means_no_tenant_is_required():
+    cfg = parse_backend_config(_raw())
+    assert cfg.requires_production_isolation("42") is False

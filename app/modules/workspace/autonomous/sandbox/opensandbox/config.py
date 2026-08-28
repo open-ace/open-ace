@@ -172,11 +172,26 @@ class SandboxBackendConfig:
     endpoints: Mapping[str, EndpointConfig]
     tenant_tiers: Mapping[str, str] = field(default_factory=dict)
     project_tiers: Mapping[str, str] = field(default_factory=dict)
+    # Tenants for which Legacy is not an acceptable answer. This is the sole
+    # input to isolation_tier.requires_production_isolation; without it that
+    # predicate had no defined source and acceptance criterion 12 ("production
+    # required policy must not silently fall back") rested on nothing.
+    production_required_tenants: frozenset[str] = field(default_factory=frozenset)
     image_allowlist: frozenset[str] = field(default_factory=frozenset)
     image_signer_identity: str = ""
     resource_defaults: Mapping[str, str] = field(default_factory=dict)
     sandbox_ttl_seconds: int = 3600
     changeset_limits: ChangesetLimits = field(default_factory=ChangesetLimits)
+
+    def requires_production_isolation(self, tenant: str | None) -> bool:
+        """True when this tenant may not fall back to a weaker backend.
+
+        Tenant keys are the decimal string of the integer ``tenant_id`` this
+        repository actually carries (``CommandExecutionEvidence.tenant_id``);
+        there is no tenant-name→id mapping anywhere in the codebase, so a slug
+        key would have been something nothing could supply.
+        """
+        return bool(tenant) and str(tenant) in self.production_required_tenants
 
     def tier_for(self, *, tenant: str | None, project_path: str | None) -> str:
         """Resolve the isolation tier: project override, then tenant, then default."""
@@ -288,8 +303,9 @@ def parse_backend_config(raw: Mapping[str, Any]) -> SandboxBackendConfig:
     return SandboxBackendConfig(
         default_tier=default_tier,
         endpoints=endpoints,
-        tenant_tiers=dict(raw.get("tenant_tiers") or {}),
-        project_tiers=dict(raw.get("project_tiers") or {}),
+        tenant_tiers={str(k): str(v) for k, v in (raw.get("tenant_tiers") or {}).items()},
+        project_tiers={str(k): str(v) for k, v in (raw.get("project_tiers") or {}).items()},
+        production_required_tenants=frozenset(_str_list(raw, "production_required_tenants")),
         image_allowlist=image_allowlist,
         image_signer_identity=str(raw.get("image_signer_identity") or ""),
         resource_defaults={str(k): str(v) for k, v in (raw.get("resource_defaults") or {}).items()},
