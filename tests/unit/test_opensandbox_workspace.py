@@ -17,6 +17,7 @@ from app.modules.workspace.autonomous.sandbox.opensandbox.workspace import (
     ChangeSetEntry,
     apply_changeset,
     build_snapshot,
+    derive_deletions,
     parse_manifest,
     validate_changeset,
 )
@@ -359,3 +360,31 @@ def test_envrc_is_treated_as_a_secret(tmp_path):
         )
     }
     assert reasons == {"secret_path"}
+
+
+# ── deletions are derived control-plane side (N5) ─────────────────────
+
+
+def test_derive_deletions_finds_files_the_sandbox_no_longer_has(tmp_path):
+    (tmp_path / "kept.py").write_text("x", encoding="utf-8")
+    (tmp_path / "gone.py").write_text("x", encoding="utf-8")
+    entries = [ChangeSetEntry(path="kept.py", mode=0o644, size=1)]
+    assert derive_deletions(entries, worktree_path=str(tmp_path)) == ["gone.py"]
+
+
+def test_derive_deletions_never_reports_git_or_secrets_as_deleted(tmp_path):
+    # These are absent from the manifest because build_snapshot never uploaded
+    # them. Treating that as a deletion would delete the trusted repository.
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "HEAD").write_text("ref", encoding="utf-8")
+    (tmp_path / ".env").write_text("SECRET=1", encoding="utf-8")
+    (tmp_path / "deploy.pem").write_text("key", encoding="utf-8")
+    (tmp_path / "kept.py").write_text("x", encoding="utf-8")
+    entries = [ChangeSetEntry(path="kept.py", mode=0o644, size=1)]
+    assert derive_deletions(entries, worktree_path=str(tmp_path)) == []
+
+
+def test_derive_deletions_handles_nested_paths(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "old.py").write_text("x", encoding="utf-8")
+    assert derive_deletions([], worktree_path=str(tmp_path)) == ["src/old.py"]

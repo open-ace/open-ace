@@ -315,3 +315,30 @@ def test_start_is_required_before_io():
     )
     with pytest.raises(SandboxError):
         transport.write_stdin(b"x")
+
+
+def test_iter_events_interleaves_stderr_with_stdout():
+    # Draining stderr only after exit withholds it for the whole turn and leaves
+    # stderr_digest empty for a run that never terminates.
+    transport, _, _ = _transport([_out(b"a\n"), _err(b"b\n"), _out(b"c\n"), _exit(0)])
+    kinds = [e["type"] for e in transport.iter_events()]
+    assert "stderr" in kinds[:-1]
+
+
+def test_iter_events_honours_a_deadline_instead_of_blocking_forever():
+    # readline blocks until data or close, so a CLI that hangs writing nothing
+    # would block any Protocol-level consumer of stream() indefinitely.
+    transport, _, _ = _transport(connection=_FakeConnection(hold=True))
+    events = list(transport.iter_events(deadline_seconds=0.3))
+    assert events[-1] == {"type": "status", "text": "timeout"}
+
+
+def test_read_available_never_blocks():
+    stream = _line_stream()
+    assert stream.read_available() == b""
+
+
+def _line_stream():
+    from app.modules.workspace.autonomous.sandbox.opensandbox.transport import _LineStream
+
+    return _LineStream()

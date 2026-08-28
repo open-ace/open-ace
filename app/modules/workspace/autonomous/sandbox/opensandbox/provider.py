@@ -311,6 +311,12 @@ class OpenSandboxProvider:
                     command_id=exec_handle.command_id,
                     exit_code=0,
                 )
+            elif kind == "status" and str(event.get("text")) == "timeout":
+                terminal = SandboxEvent(
+                    kind=SandboxEventKind.COMMAND_TIMED_OUT,
+                    sandbox_id=sandbox_id,
+                    command_id=exec_handle.command_id,
+                )
             elif kind == "error":
                 terminal = self._terminal_from_error(event, sandbox_id, exec_handle.command_id)
         if terminal is None:
@@ -399,7 +405,12 @@ class OpenSandboxProvider:
 
     def apply_changes(self, handle: SandboxHandle, worktree_path: str) -> None:
         """Validate a collected ChangeSet and apply it to the trusted worktree."""
-        entries, deleted = self.collect_changes(handle)
+        entries, _ = self.collect_changes(handle)
+        # The producer cannot report removals — it reports what is present, and
+        # the sandbox has no baseline to diff against. Deriving them here is
+        # what stops a file the agent deleted from silently surviving in the
+        # trusted worktree while the commit that follows looks correct.
+        deleted = workspace_mod.derive_deletions(entries, worktree_path=worktree_path)
         workspace_mod.apply_changeset(
             entries,
             root=worktree_path,
@@ -813,10 +824,6 @@ class OpenSandboxProvider:
         """
         for attempt in range(max(attempts, 1)):
             if attempt:
-                # Without a delay the loop completes in milliseconds while a real
-                # pod termination takes seconds, so every destroy would report
-                # unconfirmed and inspect would claim STOPPED for a sandbox that
-                # was in fact deleted.
                 time.sleep(self._destroy_poll_interval)
             try:
                 record = self._api.get_sandbox(sandbox_id)
@@ -824,7 +831,17 @@ class OpenSandboxProvider:
                 return False
             if record is None:
                 return True  # 404 is a confirmed teardown
-            if str((record.get("status") or {}).get("state") or "") == "Terminated":
+            state = str((record.get("status") or {}).get("state") or "")
+            if state in ("Terminated", "Stopping"):
+                # `Stopping` counts. Kubernetes pod deletion runs to
+                # terminationGracePeriodSeconds (30 by default), so waiting for
+                # `Terminated` would mean every successful teardown reported
+                # unconfirmed and asked the reconciler to retry — training
+                # operators to ignore the one signal that matters. A 204 plus an
+                # observed `Stopping` means the delete was accepted and the
+                # sandbox is going away, which is honest enough for inspect and
+                # does not block the caller for half a minute. A sandbox still
+                # `Running` after the budget is genuinely unconfirmed.
                 return True
         return False
 

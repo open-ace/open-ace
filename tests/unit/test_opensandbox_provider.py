@@ -185,11 +185,27 @@ def test_destroy_marks_destroyed_and_is_idempotent():
 def test_destroy_that_never_confirms_does_not_report_destroyed():
     # Reporting DESTROYED for a sandbox still consuming quota and network is the
     # same lie as marking a workflow row destroyed without destroying anything.
+    # A sandbox still Running after the poll budget is the genuinely
+    # unconfirmed case.
     provider, api = _provider()
     handle = provider.create(_spec())
     api.stall_delete = True
     provider.destroy(handle)
     assert provider.inspect(handle) != SandboxStatus.DESTROYED
+
+
+def test_destroy_confirms_on_stopping_rather_than_waiting_for_terminated():
+    # Kubernetes pod deletion runs to terminationGracePeriodSeconds (30 by
+    # default). Requiring `Terminated` would make every successful teardown
+    # report unconfirmed and ask the reconciler to retry, training operators to
+    # ignore the one signal that matters.
+    events: list[tuple[str, dict]] = []
+    provider, api = _provider(event_sink=lambda name, data: events.append((name, data)))
+    handle = provider.create(_spec())
+    api.linger_in_stopping = True
+    provider.destroy(handle)
+    assert provider.inspect(handle) == SandboxStatus.DESTROYED
+    assert not any(name == "sandbox_destroy_unconfirmed" for name, _ in events)
 
 
 # ── stream (spec §6.3) ────────────────────────────────────────────────
@@ -766,3 +782,17 @@ def test_generation_is_recorded_in_the_sandbox_metadata():
     provider, api = _provider(generation=3)
     provider.create(_spec())
     assert api.created_bodies[0]["metadata"]["openace.generation"] == "3"
+
+
+def test_a_file_deleted_in_the_sandbox_is_removed_from_the_worktree(tmp_path):
+    # A removal is a normal outcome of a refactor. The producer cannot report
+    # one, so without derivation the stale file survives in the trusted worktree
+    # and the commit that follows looks correct.
+    (tmp_path / "kept.py").write_text("old", encoding="utf-8")
+    (tmp_path / "gone.py").write_text("old", encoding="utf-8")
+    provider, api = _provider()
+    handle = provider.create(_spec())
+    api.set_manifest({"kept.py": b"new"})
+    provider.apply_changes(handle, str(tmp_path))
+    assert (tmp_path / "kept.py").read_bytes() == b"new"
+    assert not (tmp_path / "gone.py").exists()

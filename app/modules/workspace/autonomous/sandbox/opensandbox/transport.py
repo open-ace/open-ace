@@ -52,6 +52,7 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import time
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
@@ -94,6 +95,32 @@ class _LineStream:
 
     def close(self) -> None:
         self._chunks.put(_SENTINEL)
+
+    def read_available(self) -> bytes:
+        """Return a buffered line without waiting, or ``b""`` if none is ready.
+
+        Distinct from :meth:`readline`, which blocks until data or close: this
+        is for draining, where a blocking read would spin.
+        """
+        newline = self._buffer.find(b"\n")
+        if newline < 0:
+            try:
+                chunk = self._chunks.get_nowait()
+            except queue.Empty:
+                return b""
+            if chunk is _SENTINEL:
+                # The close marker, not data — concatenating it would raise.
+                self._closed = True
+            else:
+                self._buffer += chunk
+            newline = self._buffer.find(b"\n")
+        if newline < 0:
+            if self._closed and self._buffer:
+                line, self._buffer = self._buffer, b""
+                return line
+            return b""
+        line, self._buffer = self._buffer[: newline + 1], self._buffer[newline + 1 :]
+        return line
 
     def readline(self, timeout: float | None = None) -> bytes:
         """Block until a full line, or until the stream closes.
@@ -271,7 +298,7 @@ class PtyWebSocketTransport:
                 pass
         self._close_conn()
 
-    def iter_events(self) -> Iterator[dict]:
+    def iter_events(self, deadline_seconds: float | None = None) -> Iterator[dict]:
         """Yield ``{"type": ...}`` events until the shell exits.
 
         Same shape as the SSE events the ``/command`` branch produces, so
@@ -281,23 +308,35 @@ class PtyWebSocketTransport:
         exactly the confusion that made ``stream()`` raise on every agent turn.
         """
         self._require_started()
-        while True:
-            if self._finished.is_set():
-                # Drain whatever is still buffered before reporting the exit.
-                for kind, stream in (("stdout", self._stdout), ("stderr", self._stderr)):
-                    while True:
-                        line = stream.readline(timeout=0.0)
-                        if not line:
-                            break
-                        yield {"type": kind, "text": line.decode("utf-8", errors="replace")}
+        deadline = None if deadline_seconds is None else time.monotonic() + deadline_seconds
+        timed_out = False
+        while not self._finished.is_set():
+            if deadline is not None and time.monotonic() > deadline:
+                # Without this a CLI that hangs writing nothing would block any
+                # Protocol-level consumer of stream() forever.
+                timed_out = True
                 break
-            line = self._stdout.readline(timeout=self._read_timeout)
-            if line:
-                yield {"type": "stdout", "text": line.decode("utf-8", errors="replace")}
-                continue
-            if self._finished.is_set():
-                continue
-            break
+            # Both streams each pass, so stderr is interleaved with stdout as it
+            # arrives rather than arriving in a burst after exit — which also
+            # keeps stderr_digest populated for a run that never terminates.
+            produced = False
+            for kind, stream in (("stdout", self._stdout), ("stderr", self._stderr)):
+                line = stream.read_available()
+                if line:
+                    produced = True
+                    yield {"type": kind, "text": line.decode("utf-8", errors="replace")}
+            if not produced:
+                self._finished.wait(timeout=self._read_timeout)
+        # Drain what is still buffered before reporting the terminal event.
+        for kind, stream in (("stdout", self._stdout), ("stderr", self._stderr)):
+            while True:
+                line = stream.read_available()
+                if not line:
+                    break
+                yield {"type": kind, "text": line.decode("utf-8", errors="replace")}
+        if timed_out:
+            yield {"type": "status", "text": "timeout"}
+            return
         if self._protocol_break:
             yield {"type": "error", "error": {"ename": "PtyStreamLost", "evalue": PTY_STREAM_LOST}}
         elif self._exit_code == 0:

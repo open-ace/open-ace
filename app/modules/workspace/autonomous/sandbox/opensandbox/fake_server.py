@@ -55,9 +55,14 @@ class FakeOpenSandboxApi:
         self.pty_sessions: dict[str, dict] = {}
         self.renewed: list[tuple[str, str]] = []
         self.list_filters: list[dict] = []
-        # When set, DELETE is accepted but the sandbox never reaches a terminal
-        # state — the provider must NOT report DESTROYED for it.
+        # When set, DELETE is accepted but the sandbox never even begins to
+        # stop — it stays Running. That is the genuinely unconfirmed case: an
+        # observed `Stopping` means the delete took, so only an unchanged
+        # `Running` proves it did not.
         self.stall_delete = False
+        # When set, DELETE takes but the sandbox lingers in Stopping — the
+        # normal production shape, given the grace period.
+        self.linger_in_stopping = False
 
         self._ids = itertools.count(1)
         self._command_ids = itertools.count(1)
@@ -112,7 +117,8 @@ class FakeOpenSandboxApi:
             }
             return record
         if sandbox_id in self.deleted and not self.stall_delete:
-            record["status"] = {"state": "Terminated", "reason": "", "message": ""}
+            state = "Stopping" if self.linger_in_stopping else "Terminated"
+            record["status"] = {"state": state, "reason": "", "message": ""}
         return record
 
     def list_sandboxes(self, metadata: dict | None = None) -> list[dict]:
@@ -130,9 +136,7 @@ class FakeOpenSandboxApi:
         # 404 is success: destroy() must be idempotent.
         record = self.sandboxes.get(sandbox_id)
         if self.stall_delete:
-            # Accepted, but it stays Stopping forever.
-            if record is not None:
-                record["status"] = {"state": "Stopping", "reason": "", "message": ""}
+            # Accepted, but nothing happens: the sandbox stays Running.
             return
         self.deleted.add(sandbox_id)
         if record is not None:

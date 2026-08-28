@@ -48,9 +48,16 @@ def build() -> dict:
                         }
                     )
                     continue
+                stat_result = os.stat(absolute)
+                mode = stat_result.st_mode & 0o777
+                # Chunked: reading a whole file into memory inside a
+                # memory-limited pod can OOM-kill the container — and execd with
+                # it, so the failure would surface as a signal on an unrelated
+                # command rather than as "the manifest step ran out of memory".
+                digest = hashlib.sha256()
                 with open(absolute, "rb") as handle:
-                    data = handle.read()
-                mode = os.stat(absolute).st_mode & 0o777
+                    for block in iter(lambda: handle.read(1 << 20), b""):
+                        digest.update(block)
             except OSError:
                 # Unreadable or vanished mid-walk: omit it rather than emitting
                 # an entry the control plane would reject the whole ChangeSet for.
@@ -59,13 +66,13 @@ def build() -> dict:
                 {
                     "path": relative,
                     "mode": mode,
-                    "size": len(data),
-                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "size": stat_result.st_size,
+                    "sha256": digest.hexdigest(),
                 }
             )
-    # `deleted` is always empty from this producer: it reports what IS present.
-    # The control plane derives removals by comparing against the trusted
-    # worktree, because the sandbox has no baseline to diff against.
+    # Always empty, and deliberately so: this reports what IS present. The
+    # sandbox has no baseline to diff against, so the control plane derives
+    # removals itself in workspace.derive_deletions.
     return {"files": entries, "deleted": []}
 
 

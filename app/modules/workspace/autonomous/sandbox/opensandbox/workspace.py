@@ -161,6 +161,32 @@ def snapshot_upload_mode(is_directory: bool = False) -> int:
     return _DEFAULT_DIR_MODE if is_directory else _DEFAULT_FILE_MODE
 
 
+def derive_deletions(entries: Sequence[ChangeSetEntry], *, worktree_path: str) -> list[str]:
+    """Return worktree paths the sandbox no longer has.
+
+    The manifest reports what IS present in the sandbox; the sandbox has no
+    baseline to diff against, so removals are invisible from that side. The
+    control plane derives them here: anything the trusted worktree holds that
+    the manifest does not, and that :func:`build_snapshot` would have uploaded
+    in the first place.
+
+    The exclusion symmetry is load-bearing. A path the snapshot never uploaded
+    (``.git``, a credential file) is absent from the manifest for that reason
+    alone, and treating it as a deletion would delete the trusted repository.
+    """
+    present = {entry.path for entry in entries}
+    deleted: list[str] = []
+    root = Path(worktree_path).resolve()
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _EXCLUDED_DIRS]
+        for filename in filenames:
+            relative = (Path(dirpath) / filename).relative_to(root).as_posix()
+            if relative in present or _is_secret_path(relative):
+                continue
+            deleted.append(relative)
+    return deleted
+
+
 def parse_manifest(payload: bytes | str) -> tuple[list[ChangeSetEntry], list[str]]:
     """Parse the supervisor's manifest into ``(entries, deleted)``.
 

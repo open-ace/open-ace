@@ -2662,7 +2662,10 @@ class AutonomousAgentRunner:
         # this they would escape _run_local with no AgentTaskResult at all.
         try:
             provider = self._select_sandbox_provider(
-                "local", tenant_id=tenant_id, project_path=project_path
+                "local",
+                tenant_id=tenant_id,
+                project_path=project_path,
+                generation=self._resolve_sandbox_generation(workflow_id),
             )
             sandbox_handle = provider.create(
                 SandboxSpec(
@@ -3727,6 +3730,7 @@ class AutonomousAgentRunner:
         *,
         tenant_id: int | None = None,
         project_path: str | None = None,
+        generation: int = 1,
     ) -> Any:
         """Pick the SandboxProvider for a task (#2022 P4 ③).
 
@@ -3754,7 +3758,27 @@ class AutonomousAgentRunner:
             project_path=project_path,
             config=self._load_backend_config(),
             fallback=self._sandbox_provider,
+            generation=generation,
         )
+
+    def _resolve_sandbox_generation(self, workflow_id: str) -> int:
+        """Read the workflow's current ``sandbox_generation``, defaulting to 1.
+
+        The reconciler bumps this on every restart sweep. The provider compares
+        a handle's generation against it, so passing a constant here would make
+        the stale-handle guard accept exactly the handles it exists to reject.
+        """
+        if not workflow_id:
+            return 1
+        try:
+            from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+            workflow = AutonomousWorkflowRepository().get_workflow(workflow_id)
+            if workflow and workflow.get("sandbox_generation"):
+                return int(workflow["sandbox_generation"])
+        except Exception:
+            pass  # a missing row or an unavailable DB must not fail the run
+        return 1
 
     def _load_backend_config(self):
         """Load the sandbox backend config, cached on the config file's mtime.
