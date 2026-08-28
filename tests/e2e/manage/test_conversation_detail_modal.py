@@ -188,7 +188,12 @@ async def test_frontend_build():
     import os
 
     # Check if the build directory exists
-    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # This file lives at <repo>/tests/e2e/manage/ — four dirname() hops reach
+    # the repo root, where the Vite build output (static/js/dist) actually
+    # lives. Three hops landed on tests/ and always failed the premise check.
+    PROJECT_ROOT = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
     build_dir = os.path.join(PROJECT_ROOT, "static", "js", "dist")
     assert os.path.exists(build_dir), f"frontend build directory not found: {build_dir}"
     print(f"✓ Build directory exists: {build_dir}")

@@ -191,8 +191,12 @@ export const QuotaAlerts: React.FC = () => {
     setFormData({
       daily_token_quota: user.daily_token_quota ?? undefined,
       monthly_token_quota: user.monthly_token_quota ?? undefined,
-      daily_request_quota: user.daily_request_quota,
-      monthly_request_quota: user.monthly_request_quota,
+      // Null (unlimited) request quotas must normalize to undefined like the
+      // token fields: handleSubmitQuota validates
+      // formData.<field>.toString() only when the value is !== undefined, so
+      // a stored null throws a TypeError and the Save silently no-ops.
+      daily_request_quota: user.daily_request_quota ?? undefined,
+      monthly_request_quota: user.monthly_request_quota ?? undefined,
     });
     setShowQuotaModal(true);
   };

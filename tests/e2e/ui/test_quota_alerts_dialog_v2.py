@@ -114,10 +114,17 @@ def test_quota_alerts_dialog_close():
             # Step 5: Modify quota value
             print("\n[Step 5] Modify quota value...")
             modal = page.locator(".modal.show")
-            inputs = modal.locator('input[type="number"]')
+            # QuotaAlerts renders its four quota fields as TextInput
+            # type="text" (input.form-control) — empty means unlimited;
+            # the old input[type="number"] selector matched nothing.
+            inputs = modal.locator('input.form-control[type="text"]')
             if inputs.count() > 0:
-                inputs.first.fill("100")
-                print("  ✓ Modified quota value to 100")
+                # Stay within the lane tenant's daily pool (10M raw, already
+                # fully allocated to this admin) — larger values are rejected
+                # 400 by tenant quota policy and the dialog legitimately
+                # stays open with the error.
+                inputs.first.fill("5")
+                print("  ✓ Modified quota value to 5")
                 take_screenshot(page, "alerts_v2_06_value_modified.png")
             else:
                 assert inputs.count() > 0, "quota modal has no number inputs"

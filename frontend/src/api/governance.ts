@@ -154,7 +154,15 @@ export const governanceApi = {
 
   // Content Filter
   async getFilterRules(): Promise<ContentFilterRule[]> {
-    return apiClient.get<ContentFilterRule[]>('/api/filter-rules');
+    // GET /api/filter-rules returns a paginated envelope
+    // ({rules, total, limit, offset} — see app/routes/governance.py).
+    // SecurityCenter consumes the bare rule array; unwrapping here keeps
+    // rules.map() from throwing ("N.map is not a function") and blanking
+    // the whole Security Center page.
+    const response = await apiClient.get<{ rules?: ContentFilterRule[] } | ContentFilterRule[]>(
+      '/api/filter-rules'
+    );
+    return Array.isArray(response) ? response : (response.rules ?? []);
   },
 
   async createFilterRule(data: CreateFilterRuleRequest): Promise<{ success: boolean; id: number }> {

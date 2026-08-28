@@ -117,7 +117,10 @@ def test_debug_save_detailed():
 
             # Check current input values
             print("\n[Step 4] Check current input values...")
-            inputs = modal.locator('input[type="number"]')
+            # QuotaAlerts renders its four quota fields as TextInput
+            # type="text" (input.form-control); the old
+            # input[type="number"] selector matched nothing.
+            inputs = modal.locator('input.form-control[type="text"]')
             print(f"  Found {inputs.count()} inputs")
 
             for i in range(inputs.count()):
@@ -135,8 +138,10 @@ def test_debug_save_detailed():
                 current_value = monthly_input.input_value()
                 print(f"  Current monthly token quota: {current_value}")
 
-                # Set a different value
-                new_value = "500" if current_value != "500" else "300"
+                # Set a different value within the lane tenant's monthly
+                # pool (init_db seeds tenant 1 with 300M raw monthly; values
+                # above it are rejected 400 by tenant quota policy).
+                new_value = "200" if current_value != "200" else "150"
                 monthly_input.fill(new_value)
                 print(f"  New monthly token quota: {new_value}")
                 take_screenshot(page, "detailed_02_value_modified.png")
