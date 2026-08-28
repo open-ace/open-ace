@@ -843,3 +843,224 @@ class TestInsightsReportRepository:
         result = repo.get_report_by_id(1, user_id=1)
         assert result["id"] == 1
         mock_db.fetch_one.assert_called_once()
+
+
+class TestInsightsServiceExtractModelFromCliSettings:
+    """Test _extract_model_from_cli_settings method for Issue #3187."""
+
+    def _make_service(self):
+        return InsightsService(
+            user_repo=MagicMock(),
+            message_repo=MagicMock(),
+            insights_repo=MagicMock(),
+        )
+
+    def test_extract_model_from_none_settings(self):
+        """None cli_settings returns None."""
+        svc = self._make_service()
+        result = svc._extract_model_from_cli_settings(None)
+        assert result is None
+
+    def test_extract_model_from_empty_string(self):
+        """Empty string cli_settings returns None."""
+        svc = self._make_service()
+        result = svc._extract_model_from_cli_settings("")
+        assert result is None
+
+    def test_extract_model_from_invalid_json(self):
+        """Invalid JSON returns None and logs warning."""
+        svc = self._make_service()
+        result = svc._extract_model_from_cli_settings("not json")
+        assert result is None
+
+    def test_extract_model_top_level_structure(self):
+        """Top-level modelProviders.openai[0].id is extracted."""
+        svc = self._make_service()
+        cli_settings = json.dumps({"modelProviders": {"openai": [{"id": "deepseek-chat"}]}})
+        result = svc._extract_model_from_cli_settings(cli_settings)
+        assert result == "deepseek-chat"
+
+    def test_extract_model_qwen_code_prefixed_structure(self):
+        """qwen-code.modelProviders.openai[0].id is extracted (Issue #3187)."""
+        svc = self._make_service()
+        cli_settings = json.dumps(
+            {"qwen-code": {"modelProviders": {"openai": [{"id": "deepseek-chat"}]}}}
+        )
+        result = svc._extract_model_from_cli_settings(cli_settings)
+        assert result == "deepseek-chat"
+
+    def test_extract_model_claude_code_prefixed_structure(self):
+        """claude-code.modelProviders.openai[0].id is extracted."""
+        svc = self._make_service()
+        cli_settings = json.dumps(
+            {"claude-code": {"modelProviders": {"openai": [{"id": "claude-3-opus"}]}}}
+        )
+        result = svc._extract_model_from_cli_settings(cli_settings)
+        assert result == "claude-3-opus"
+
+    def test_extract_model_multiple_tool_prefixes(self):
+        """Multiple tool prefixes: top-level takes priority."""
+        svc = self._make_service()
+        cli_settings = json.dumps(
+            {
+                "modelProviders": {"openai": [{"id": "top-level-model"}]},
+                "qwen-code": {"modelProviders": {"openai": [{"id": "nested-model"}]}},
+            }
+        )
+        result = svc._extract_model_from_cli_settings(cli_settings)
+        assert result == "top-level-model"
+
+    def test_extract_model_no_model_providers(self):
+        """No modelProviders key returns None."""
+        svc = self._make_service()
+        cli_settings = json.dumps({"other": "data"})
+        result = svc._extract_model_from_cli_settings(cli_settings)
+        assert result is None
+
+    def test_extract_model_empty_openai_list(self):
+        """Empty openai list returns None."""
+        svc = self._make_service()
+        cli_settings = json.dumps({"modelProviders": {"openai": []}})
+        result = svc._extract_model_from_cli_settings(cli_settings)
+        assert result is None
+
+    def test_extract_model_missing_id_in_model(self):
+        """Model dict without id returns None."""
+        svc = self._make_service()
+        cli_settings = json.dumps({"modelProviders": {"openai": [{"name": "some-model"}]}})
+        result = svc._extract_model_from_cli_settings(cli_settings)
+        assert result is None
+
+
+class TestInsightsServiceModelPriority:
+    """Test model selection priority for Issue #3187."""
+
+    def _make_service(self):
+        mock_user = MagicMock()
+        mock_msg = MagicMock()
+        mock_insights = MagicMock()
+        svc = InsightsService(
+            user_repo=mock_user,
+            message_repo=mock_msg,
+            insights_repo=mock_insights,
+        )
+        return svc, mock_user, mock_msg, mock_insights
+
+    def test_model_priority_cli_settings_over_config(self):
+        """CLI settings model takes priority over config.insights.model."""
+        svc, _, _, _ = self._make_service()
+
+        with (patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,):
+            mock_proxy = MagicMock()
+            # CLI settings has deepseek-chat
+            mock_proxy.resolve_api_key_for_scope.return_value = (
+                "api-key",
+                "https://api.deepseek.com/v1",
+                1,
+                json.dumps(
+                    {"qwen-code": {"modelProviders": {"openai": [{"id": "deepseek-chat"}]}}}
+                ),
+                None,
+            )
+            mock_get.return_value = mock_proxy
+
+            api_key, base_url, model = svc._get_api_credentials({"insights": {"model": "glm-5"}})
+            assert model == "deepseek-chat"
+
+    def test_model_priority_config_over_none_cli(self):
+        """Config model is used when CLI settings has no model."""
+        svc, _, _, _ = self._make_service()
+
+        with (patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,):
+            mock_proxy = MagicMock()
+            # CLI settings has no model
+            mock_proxy.resolve_api_key_for_scope.return_value = (
+                "api-key",
+                "https://api.example.com/v1",
+                1,
+                None,
+                None,
+            )
+            mock_get.return_value = mock_proxy
+
+            api_key, base_url, model = svc._get_api_credentials(
+                {"insights": {"model": "configured-model"}}
+            )
+            assert model is None  # No model from CLI settings
+
+            # In generate_insights, the priority is: cli_model > config_model > default
+            # So None from CLI means config model will be used
+            insights_cfg = {"model": "configured-model"}
+            final_model = model or insights_cfg.get("model") or "glm-5.1"
+            assert final_model == "configured-model"
+
+    def test_model_priority_default_when_no_config(self):
+        """Default model is used when neither CLI nor config has model."""
+        svc, _, _, _ = self._make_service()
+
+        with (patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,):
+            mock_proxy = MagicMock()
+            mock_proxy.resolve_api_key_for_scope.return_value = (
+                "api-key",
+                "https://api.example.com/v1",
+                1,
+                None,
+                None,
+            )
+            mock_get.return_value = mock_proxy
+
+            api_key, base_url, model = svc._get_api_credentials({})
+            assert model is None
+
+            # In generate_insights with no config model
+            insights_cfg = {}
+            final_model = model or insights_cfg.get("model") or "glm-5.1"
+            assert final_model == "glm-5.1"
+
+    def test_generate_insights_uses_cli_model_not_config(self):
+        """Integration test: generate_insights uses CLI model, not config default."""
+        svc, mock_user, mock_msg, mock_insights = self._make_service()
+        mock_insights.get_report.return_value = None
+        mock_user.get_user_by_id.return_value = {
+            "username": "testuser",
+            "system_account": "sys",
+        }
+        mock_msg.get_user_messages_stats.return_value = {"total_messages": 50}
+        mock_msg.get_user_conversation_samples.return_value = [{"messages": []}]
+        mock_insights.save_report.return_value = 42
+
+        ai_response = json.dumps(
+            {
+                "overall_score": 7,
+                "overall_assessment": "Good",
+                "strengths": ["Clear"],
+                "areas_for_improvement": [],
+            }
+        )
+
+        with (
+            patch.object(svc, "_load_config", return_value={"insights": {"model": "glm-5"}}),
+            patch.dict("os.environ", {}, clear=True),
+            patch("app.modules.workspace.api_key_proxy.get_api_key_proxy_service") as mock_get,
+            patch.object(svc, "_call_ai_api", return_value=ai_response) as mock_call,
+        ):
+            mock_proxy = MagicMock()
+            # CLI settings has deepseek-chat, config has glm-5
+            mock_proxy.resolve_api_key_for_scope.return_value = (
+                "api-key",
+                "https://api.deepseek.com/v1",
+                1,
+                json.dumps(
+                    {"qwen-code": {"modelProviders": {"openai": [{"id": "deepseek-chat"}]}}}
+                ),
+                None,
+            )
+            mock_get.return_value = mock_proxy
+
+            result, error = svc.generate_insights(1, "2026-01-01", "2026-01-31")
+            assert error is None
+            assert result["overall_score"] == 7
+
+            # Verify the model passed to _call_ai_api is deepseek-chat, not glm-5
+            call_args = mock_call.call_args
+            assert call_args[1]["model"] == "deepseek-chat"

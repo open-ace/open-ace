@@ -914,7 +914,6 @@ generate_default_config() {
     }
   },
   "insights": {
-    "model": "glm-5",
     "temperature": 0.3,
     "max_tokens": 4096
   }

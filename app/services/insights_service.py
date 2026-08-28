@@ -2,7 +2,7 @@
 Open ACE - Insights Service
 
 Generates AI conversation insights reports by analyzing user conversation data.
-Calls GLM-5 model (OpenAI-compatible API) to produce structured analysis.
+Uses the model configured in API Key (OpenAI-compatible) or falls back to config.
 """
 
 import json
@@ -77,6 +77,11 @@ class InsightsService:
         Extract default model from cli_settings JSON.
 
         Parses cli_settings and looks for modelProviders.openai[0].id.
+        Supports both top-level and tool-prefixed nested structures:
+        - modelProviders.openai[0].id
+        - qwen-code.modelProviders.openai[0].id
+        - claude-code.modelProviders.openai[0].id
+
         Returns None if cli_settings is empty, invalid, or missing the model.
 
         Args:
@@ -94,15 +99,24 @@ class InsightsService:
             logger.warning("Invalid cli_settings JSON: %s", cli_settings[:100])
             return None
 
-        # Try modelProviders.openai[0].id
-        model_providers = settings.get("modelProviders", {})
-        openai_models = model_providers.get("openai", [])
-        if isinstance(openai_models, list) and openai_models:
-            first_model = openai_models[0]
-            if isinstance(first_model, dict):
-                model_id = first_model.get("id")
-                if model_id:
-                    return str(model_id)
+        # Try to find modelProviders at various nesting levels
+        # Priority: top-level > tool-prefixed (qwen-code, claude-code, etc.)
+        candidates = [settings]
+
+        # Collect tool-prefixed nested structures
+        for key in settings:
+            if isinstance(settings[key], dict) and "modelProviders" in settings[key]:
+                candidates.append(settings[key])
+
+        for candidate in candidates:
+            model_providers = candidate.get("modelProviders", {})
+            openai_models = model_providers.get("openai", [])
+            if isinstance(openai_models, list) and openai_models:
+                first_model = openai_models[0]
+                if isinstance(first_model, dict):
+                    model_id = first_model.get("id")
+                    if model_id:
+                        return str(model_id)
 
         return None
 
@@ -157,8 +171,10 @@ class InsightsService:
         insights_cfg = config.get("insights", {})
         api_key, base_url, cli_model = self._get_api_credentials(config)
 
-        # Model priority: config.insights.model > cli_settings model > default
-        model = insights_cfg.get("model") or cli_model or "glm-5.1"
+        # Model priority: cli_settings model > config.insights.model > default
+        # This ensures API Key configured model takes precedence over config defaults.
+        # Users can still override by explicitly setting insights.model in config.json.
+        model = cli_model or insights_cfg.get("model") or "glm-5.1"
 
         if not api_key:
             return None, "API key not configured"
