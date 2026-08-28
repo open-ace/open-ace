@@ -93,8 +93,12 @@ export const ssoApi = {
     await apiClient.post<{ message: string }>('/api/sso/providers', data);
   },
 
+  async enableProvider(providerName: string): Promise<void> {
+    await apiClient.patch<{ message: string }>(`/api/sso/providers/${providerName}/enable`);
+  },
+
   async disableProvider(providerName: string): Promise<void> {
-    await apiClient.delete<{ message: string }>(`/api/sso/providers/${providerName}`);
+    await apiClient.patch<{ message: string }>(`/api/sso/providers/${providerName}/disable`);
   },
 
   async getProviderDetail(providerName: string): Promise<SSOProviderDetail> {
