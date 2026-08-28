@@ -218,6 +218,11 @@ event.
 | `not_an_agent_turn` | `get_transport` on a plain command | internal — an agent turn needs an `OpenSandboxTurnSpec` |
 | `command_too_long` | assembled env + argv exceeds `MAX_ARG_STRLEN` | trim the environment |
 | `pty_stream_lost` | the PTY socket dropped without an exit frame | reported as a crash, never a completion — see §7 |
+| `workspace_setup_failed` | the repo synthesis command failed inside the sandbox | usually `git` missing from the image, or `/workspace` not writable |
+| `manifest_producer_failed` / `manifest_missing` | the ChangeSet producer failed or left no output | usually `python3` missing from the image |
+| `pause_unconfirmed` / `resume_unconfirmed` | the sandbox never reported the expected state | the request was accepted but the transition did not complete; check server health |
+| `invalid_snapshot` | `upload_workspace` was given something other than a worktree path | internal |
+| `sandbox_unavailable` | a refusal reached the agent runner | the message carries the underlying reason code |
 
 ChangeSet rejections use their own set: `absolute_path`, `path_escape`,
 `repo_integrity`, `symlink_escape`, `file_too_large`, `too_many_files`,
@@ -242,7 +247,13 @@ explicit attestations and is refused without them.
 
 **The workspace is a synthesised repository.** The agent gets `git init` plus
 one commit of the snapshot — no remote, no credential helper, no link to the
-trusted repository. Commit and push stay control-plane side.
+trusted repository. Commit and push stay control-plane side. `HOME` is at
+`/home/agent`, deliberately outside `/workspace`, so the agent's caches never
+enter that repository.
+
+**The image must provide `git` and `python3`.** The provider runs the repo
+synthesis and the ChangeSet manifest producer inside the sandbox; both fail
+closed with a structured reason code if the binaries are absent.
 
 ---
 
