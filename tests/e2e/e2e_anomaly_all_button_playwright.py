@@ -24,7 +24,7 @@ Run:
 import os
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
@@ -36,6 +36,16 @@ from tests.e2e.sync_helpers import login_as
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "tests", "screenshots", "e2e-anomaly-all")
+
+
+def utc_today(days_offset: int = 0) -> str:
+    """Mirror the frontend's date rendering (``new Date().toISOString().split('T')[0]``).
+
+    AnomalyDetection/TrendAnalysis build date-range values with JS ``Date``
+    objects and serialize them via ``toISOString()``, i.e. the UTC date — not
+    the browser's local date. Expected values must be computed the same way.
+    """
+    return (datetime.now(timezone.utc) + timedelta(days=days_offset)).strftime("%Y-%m-%d")
 
 passed = 0
 failed = 0
@@ -115,9 +125,9 @@ def test_default_date_range(page):  # allow-no-assert: smoke test - visual verif
     check("30" in (button_text or ""), f"Active button shows '30' (text: '{button_text}')")
 
     start_value, end_value = datepicker_values(page)
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = utc_today()
     check(end_value == today, f"End date shows today ({end_value} vs {today})")
-    expected_start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    expected_start = utc_today(days_offset=-30)
     check(
         start_value == expected_start,
         f"Start date shows 30 days ago ({start_value} vs {expected_start})",
@@ -158,9 +168,10 @@ def test_all_button_date_range(page):  # allow-no-assert: smoke test - visual ve
             f"End equals data_range.max_date ({end_value} vs {captured_data_range['max_date']})",
         )
     else:
-        # Empty database: the page falls back to 365 days ago -> today.
-        today = datetime.now().strftime("%Y-%m-%d")
-        fallback_start = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        # Empty database: the API returns null min/max_date and the page falls
+        # back to 365 days ago -> today (UTC-rendered, see utc_today()).
+        today = utc_today()
+        fallback_start = utc_today(days_offset=-365)
         check(
             end_value == today,
             f"Empty DB fallback: end is today ({end_value} vs {today})",
@@ -175,37 +186,27 @@ def test_all_button_date_range(page):  # allow-no-assert: smoke test - visual ve
     shot(page, "05-all-date-range")
 
 
-def test_data_range_api(page):  # allow-no-assert: smoke test - visual verification only
-    """Trigger and capture /api/analysis/data-range."""
+def fetch_data_range_api(page):
+    """Fetch /api/analysis/data-range directly (shares the page session cookie).
+
+    The frontend react-query cache may serve data-range without re-emitting a
+    network response, so a response listener alone is unreliable; the direct
+    request gives the authoritative contract for the 'All' expectations.
+    """
     global captured_data_range
-    print("\n[TEST] /api/analysis/data-range endpoint...")
-
-    def handle_response(response):
-        if "/api/analysis/data-range" in response.url:
-            try:
-                body = response.json()
-                if body and isinstance(body, dict):
-                    globals()["captured_data_range"] = body
-                    print(f"    [INFO] data_range: {body}")
-            except Exception:  # allow-swallow: UI element may not exist
-                pass
-
-    page.on("response", handle_response)
-
-    # Re-trigger by toggling to 30 days then back to All
-    thirty = find_button_by_text(page, "30")
-    if thirty.count() > 0:
-        thirty.click()
-        pause(1)
-    find_all_button(page).click()
-    pause(2)
-
-    captured_data_range = globals().get("captured_data_range")
-    if captured_data_range:
+    print("\n[TEST] Fetch /api/analysis/data-range directly...")
+    resp = page.request.get(f"{BASE_URL}/api/analysis/data-range")
+    check(resp.status == 200, f"data-range endpoint returns 200 ({resp.status})")
+    # The endpoint always answers with JSON (object or null) — a non-JSON
+    # body is a contract failure worth failing on.
+    body = resp.json()
+    if isinstance(body, dict) and body.get("min_date"):
+        captured_data_range = body
         check("min_date" in captured_data_range, "data_range contains min_date")
         check("max_date" in captured_data_range, "data_range contains max_date")
+        print(f"    [INFO] data_range: {body}")
     else:
-        print("    [INFO] No data_range captured (database may be empty -> null response)")
+        print("    [INFO] data_range is null (database may be empty)")
     shot(page, "06-api-data-range")
 
 
@@ -286,7 +287,7 @@ def run_tests():
             navigate_to_anomaly(page)
             test_default_date_range(page)
             test_all_button_click(page)
-            test_data_range_api(page)
+            fetch_data_range_api(page)
             test_all_button_date_range(page)
             test_manual_date_transition_overwrites(page)
             test_manual_edit_within_all_preserved(page)

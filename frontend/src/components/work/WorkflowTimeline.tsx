@@ -664,11 +664,15 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
 
   const resolvedIssueUrl = useMemo(() => {
     const directUrl =
-      workflow.requirements_issue_url ??
-      definitionSnapshot?.resolved_issue_url ??
+      // The backend stores requirements_issue_url as '' (column DEFAULT '')
+      // for "no URL", so fall through on empty strings like deriveRepoUrl();
+      // with ?? the definition modal would hide the snapshot's
+      // resolved_issue_url for workflows whose row URL wasn't persisted (#2491).
+      workflow.requirements_issue_url ||
+      definitionSnapshot?.resolved_issue_url ||
       definitionSnapshot?.parsed_issue_selectors?.find(
         (selector) => selector.requirements_issue_url
-      )?.requirements_issue_url ??
+      )?.requirements_issue_url ||
       '';
 
     if (directUrl) {

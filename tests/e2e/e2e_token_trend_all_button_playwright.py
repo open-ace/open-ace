@@ -20,7 +20,7 @@ Run:
 import os
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
@@ -33,9 +33,20 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "tests", "screenshots", "e2e-token-trend-all")
 
+
+def utc_today(days_offset: int = 0) -> str:
+    """Mirror the frontend's date rendering (``new Date().toISOString().split('T')[0]``).
+
+    TrendAnalysis builds date-range values with JS ``Date`` objects and
+    serializes them via ``toISOString()``, i.e. the UTC date — not the
+    browser's local date. Expected values must be computed the same way.
+    """
+    return (datetime.now(timezone.utc) + timedelta(days=days_offset)).strftime("%Y-%m-%d")
+
 passed = 0
 failed = 0
 errors = []
+captured_data_range = None
 
 
 def ensure_dir():
@@ -74,6 +85,16 @@ def datepicker_values(page):
     return texts[0].replace("/", "-"), texts[1].replace("/", "-")
 
 
+def quick_range_group(page):
+    """The quick-range button group (the page's FIRST .btn-group).
+
+    TrendAnalysis also renders a user-segmentation toggle btn-group whose
+    active button carries .btn-primary, so unscoped `.btn-group .btn-primary`
+    locators hit strict-mode violations.
+    """
+    return page.locator(".btn-group").first
+
+
 def login(page):
     """Login as admin user."""
     print("\n[TEST] Login as admin...")
@@ -95,8 +116,10 @@ def test_default_date_range(page):  # allow-no-assert: smoke test - visual verif
     """Test that default date range is 30 days."""
     print("\n[TEST] Default date range (30 days)...")
 
+    quick = quick_range_group(page)
+
     # Check that "30 天" or "30 Days" button is active (primary)
-    active_button = page.locator(".btn-group .btn-primary")
+    active_button = quick.locator(".btn-primary")
     check(active_button.is_visible(), "Primary button is visible")
 
     # Verify active button text contains "30"
@@ -104,11 +127,11 @@ def test_default_date_range(page):  # allow-no-assert: smoke test - visual verif
     check("30" in button_text, f"Active button shows '30' (text: '{button_text}')")
 
     start_value, end_value = datepicker_values(page)
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = utc_today()
     check(end_value == today, f"End date shows today ({end_value} vs {today})")
 
     # Start date should be about 30 days ago
-    expected_start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    expected_start = utc_today(days_offset=-30)
     check(
         start_value == expected_start,
         f"Start date shows 30 days ago ({start_value} vs {expected_start})",
@@ -121,17 +144,19 @@ def test_all_button_click(page):  # allow-no-assert: smoke test - visual verific
     """Test clicking the "All" button updates date range."""
     print("\n[TEST] Click 'All' button...")
 
+    quick = quick_range_group(page)
+
     # Click "All" button (全/All)
-    all_button = page.locator(".btn-group button:text('All')").first
+    all_button = quick.locator("button:text('All')").first
     if all_button.count() == 0:
         # Try Chinese text
-        all_button = page.locator(".btn-group button:text('全部')").first
+        all_button = quick.locator("button:text('全部')").first
     check(all_button.count() > 0, "'All' button found")
     all_button.click()
     pause(2)  # Wait for API response and date update
 
     # Check that "All" button is now active (primary)
-    active_button = page.locator(".btn-group .btn-primary")
+    active_button = quick.locator(".btn-primary")
     button_text = active_button.text_content()
     check(
         "All" in button_text or "全部" in button_text,
@@ -139,6 +164,30 @@ def test_all_button_click(page):  # allow-no-assert: smoke test - visual verific
     )
 
     shot(page, "04-all-button-active")
+
+
+def fetch_data_range_api(page):
+    """Fetch /api/analysis/data-range directly (shares the page session cookie).
+
+    The frontend react-query cache may serve data-range without re-emitting a
+    network response, so a response listener alone is unreliable; the direct
+    request gives the authoritative contract for the 'All' expectations.
+    """
+    global captured_data_range
+    print("\n[TEST] Fetch /api/analysis/data-range directly...")
+    resp = page.request.get(f"{BASE_URL}/api/analysis/data-range")
+    check(resp.status == 200, f"data-range endpoint returns 200 ({resp.status})")
+    # The endpoint always answers with JSON (object or null) — a non-JSON
+    # body is a contract failure worth failing on.
+    body = resp.json()
+    if isinstance(body, dict) and body.get("min_date"):
+        captured_data_range = body
+        check("min_date" in captured_data_range, "data_range contains min_date")
+        check("max_date" in captured_data_range, "data_range contains max_date")
+        print(f"    [INFO] data_range: {body}")
+    else:
+        print("    [INFO] data_range is null (database may be empty)")
+    shot(page, "07-api-response")
 
 
 def test_all_button_date_range(page):  # allow-no-assert: smoke test - visual verification only
@@ -150,20 +199,30 @@ def test_all_button_date_range(page):  # allow-no-assert: smoke test - visual ve
     print(f"    [INFO] Start date: {start_value}")
     print(f"    [INFO] End date: {end_value}")
 
-    # End date should be today (max_date from data_range)
-    today = datetime.now().strftime("%Y-%m-%d")
-    check(end_value == today, f"End date shows today ({end_value} vs {today})")
-
-    # Start date should NOT be 30 days ago - should be actual data min_date
-    thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-    # If database has data older than 30 days, start_date should be different
-    if start_value != thirty_days_ago:
-        check(True, f"Start date is NOT hardcoded 30 days ago (actual: {start_value})")
-    else:
-        # This could happen if database only has 30 days of data
-        print(
-            "    [INFO] Start date happens to equal 30 days ago - may be correct if data is limited"
+    if captured_data_range and captured_data_range.get("min_date"):
+        # Populated database: 'All' must reflect the actual data span.
+        check(
+            start_value == captured_data_range["min_date"],
+            f"Start equals data_range.min_date ({start_value} vs {captured_data_range['min_date']})",
         )
+        check(
+            end_value == captured_data_range["max_date"],
+            f"End equals data_range.max_date ({end_value} vs {captured_data_range['max_date']})",
+        )
+    else:
+        # Empty database: end is today and start falls back to 365 days ago
+        # (UTC-rendered, see utc_today()).
+        today = utc_today()
+        check(end_value == today, f"End date shows today ({end_value} vs {today})")
+
+        thirty_days_ago = utc_today(days_offset=-30)
+        if start_value != thirty_days_ago:
+            check(True, f"Start date is NOT hardcoded 30 days ago (actual: {start_value})")
+        else:
+            # This could happen if database only has 30 days of data
+            print(
+                "    [INFO] Start date happens to equal 30 days ago - may be correct if data is limited"
+            )
 
     # Verify start date is NOT in the future
     start_date_obj = datetime.strptime(start_value, "%Y-%m-%d")
@@ -191,51 +250,21 @@ def test_chart_data_displayed(page):  # allow-no-assert: smoke test - visual ver
     shot(page, "06-chart-displayed")
 
 
-def test_api_response_data_range(page):  # allow-no-assert: smoke test - visual verification only
-    """Test that API response includes data_range field."""
-    print("\n[TEST] API response data_range...")
-
-    def handle_response(response):
-        if "/api/analysis/batch" in response.url:
-            try:
-                body = response.json()
-                if "data_range" in body:
-                    print(f"    [INFO] API data_range: {body['data_range']}")
-            except:
-                pass
-
-    page.on("response", handle_response)
-
-    # Trigger a new API call by clicking 30 days then All again
-    thirty_button = page.locator(".btn-group button:text('30')").first
-    if thirty_button.count() == 0:
-        thirty_button = page.locator(".btn-group button:text('30 天')").first
-    thirty_button.click()
-    pause(1)
-
-    all_button = page.locator(".btn-group button:text('All')").first
-    if all_button.count() == 0:
-        all_button = page.locator(".btn-group button:text('全部')").first
-    all_button.click()
-    pause(2)
-
-    check(True, "API response captured (check logs for data_range)")
-    shot(page, "07-api-response")
-
-
 def test_date_inputs_manual_change(page):  # allow-no-assert: smoke test - visual verification only
     """Test that manually changing date inputs deactivates quick buttons."""
     print("\n[TEST] Manual date input change...")
 
+    quick = quick_range_group(page)
+
     # First click "30" to ensure it's active
-    thirty_button = page.locator(".btn-group button:text('30')").first
+    thirty_button = quick.locator("button:text('30')").first
     if thirty_button.count() == 0:
-        thirty_button = page.locator(".btn-group button:text('30 天')").first
+        thirty_button = quick.locator("button:text('30 天')").first
     thirty_button.click()
     pause(0.5)
 
     # Check "30" is active
-    active_button = page.locator(".btn-group .btn-primary")
+    active_button = quick.locator(".btn-primary")
     check("30" in active_button.text_content(), "'30' button is active before manual change")
 
     if page.locator("input[type='date']").count() == 0:
@@ -251,7 +280,7 @@ def test_date_inputs_manual_change(page):  # allow-no-assert: smoke test - visua
 
     # Now check which button is active - should be "All" or no button primary
     # Based on current implementation, manual change sets quickRange to 'all'
-    active_button = page.locator(".btn-group .btn-primary")
+    active_button = quick.locator(".btn-primary")
     button_text = active_button.text_content()
     check(
         "All" in button_text or "全部" in button_text,
@@ -265,8 +294,9 @@ def test_language_i18n(page):  # allow-no-assert: smoke test - visual verificati
     """Test i18n for button labels."""
     print("\n[TEST] Language i18n...")
 
-    # Check that button labels are displayed
-    buttons = page.locator(".btn-group button")
+    # Check that button labels are displayed (scoped to the quick-range group;
+    # the page also renders a segmentation btn-group)
+    buttons = quick_range_group(page).locator("button")
     button_texts = [b.text_content() for b in buttons.all()]
 
     print(f"    [INFO] Button texts: {button_texts}")
@@ -301,9 +331,9 @@ def run_tests():
             navigate_to_token_trend(page)
             test_default_date_range(page)
             test_all_button_click(page)
+            fetch_data_range_api(page)
             test_all_button_date_range(page)
             test_chart_data_displayed(page)
-            test_api_response_data_range(page)
             test_date_inputs_manual_change(page)
             test_language_i18n(page)
 

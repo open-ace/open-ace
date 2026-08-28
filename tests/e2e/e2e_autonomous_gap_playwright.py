@@ -48,12 +48,23 @@ HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "tests", "screenshots", "e2e-autonomous-740-gap")
 TEST_USER = os.environ.get("TEST_REAL_USER", "admin")
 TEST_PASS = "admin123"
-NON_ADMIN_USER = os.environ.get("TEST_NON_ADMIN_USER", "test_user")
-NON_ADMIN_PASS = "test123"
+NON_ADMIN_USER = os.environ.get("TEST_NON_ADMIN_USER", "e2e_plain_gap740")
+NON_ADMIN_PASS = "Plain#740Gap!"
+
+# Dedicated identities. POST /workflows enforces a per-user in-memory rate
+# limit (10 creations/hour) shared by every script in the e2e lane when they
+# all act as admin; a dedicated tenant_admin user gives this script its own
+# deterministic creation budget. The plain user makes the permission-isolation
+# checks deterministic (the isolated home only provisions `admin`).
+BOT_USERNAME = "e2e_bot_gap740"
+BOT_EMAIL = "e2e-bot-gap740@example.com"
+BOT_PASSWORD = "E2eBot#740Gap!"
+PLAIN_EMAIL = "e2e-plain-gap740@example.com"
 
 # ── Test state ──────────────────────────────────────────
 
 auth_token = None
+bot_token = None
 non_admin_token = None
 created_workflow_ids = []
 
@@ -91,6 +102,11 @@ def api(method, path, token=None, **kwargs):
 
 
 def create_workflow_via_api(overrides=None, token=None):
+    """Create a workflow via the API.
+
+    Defaults to the dedicated bot identity so the per-user creation rate
+    limit (10/hour) is budgeted to this script alone.
+    """
     base = {
         "title": f"Gap Test {uuid.uuid4().hex[:8]}",
         "requirements_text": "Build a simple hello world feature",
@@ -104,8 +120,47 @@ def create_workflow_via_api(overrides=None, token=None):
     }
     if overrides:
         base.update(overrides)
-    r = api("post", "/api/autonomous/workflows", token=token, json=base)
+    r = api("post", "/api/autonomous/workflows", token=token or bot_token or auth_token, json=base)
     return r
+
+
+def _provision_user(username, email, password, role):
+    """Create a user via the admin API (idempotent) and return its session token."""
+    r = api(
+        "post",
+        "/api/admin/users",
+        json={
+            "username": username,
+            "email": email,
+            "password": password,
+            "role": role,
+            "tenant_id": 1,
+        },
+    )
+    if r.status_code == 201:
+        log("IDENT", f"✅ Created {username} ({role})")
+    elif r.status_code == 400 and "already exists" in r.text:
+        log("IDENT", f"✅ {username} already exists (reusing)")
+    else:
+        raise AssertionError(f"Cannot provision {username}: {r.status_code} {r.text[:200]}")
+
+    r2 = _session.post(
+        f"{BASE_URL}/api/auth/login",
+        json={"username": username, "password": password},
+    )
+    assert r2.status_code == 200, f"Login for {username} failed: {r2.status_code} {r2.text[:200]}"
+    token = r2.cookies.get("session_token")
+    assert token, f"No session_token cookie for {username}"
+    return token
+
+
+def ensure_test_identities():
+    """Provision the dedicated creation bot and the plain non-admin user."""
+    global bot_token, non_admin_token
+    bot_token = _provision_user(BOT_USERNAME, BOT_EMAIL, BOT_PASSWORD, "tenant_admin")
+    log("IDENT", f"✅ Bot '{BOT_USERNAME}' login successful")
+    non_admin_token = _provision_user(NON_ADMIN_USER, PLAIN_EMAIL, NON_ADMIN_PASS, "user")
+    log("IDENT", f"✅ Non-admin '{NON_ADMIN_USER}' login successful")
 
 
 def create_workflow_via_repo(
@@ -170,119 +225,141 @@ def cleanup_all_test_workflows():
 
 
 def create_milestone_workflow():
-    """Create a workflow with 4 milestones for API testing. Returns (wf_id, [ms_ids])."""
-    r = create_workflow_via_api({"title": "Gap Milestone Test"})
-    if r.status_code == 429:
-        log("SETUP", "⚠️  Rate limited, cannot create milestone workflow")
-        return None, []
-    assert r.status_code == 201, f"Create failed: {r.status_code}"
-    wf_id = r.json()["workflow"]["workflow_id"]
-    created_workflow_ids.append(wf_id)
+    """Seed a workflow with 4 milestones (repository-level) for API testing.
 
+    Repo seeding is deterministic and independent of the workflow-creation
+    rate limit; the workflow is owned by the admin account so both the admin
+    token (full access) and the non-admin token (must be denied) exercise
+    their real permission paths.
+
+    Returns (wf_id, [ms_ids]).
+    """
     try:
         from app.repositories.autonomous_repo import AutonomousWorkflowRepository
 
         repo = AutonomousWorkflowRepository()
-        now = time.strftime("%Y-%m-%dT%H:%M:%SZ")
-        ms_ids = []
-
-        # Milestone 1: completed repo_setup
-        ms1_id = str(uuid.uuid4())
-        repo.create_milestone(
-            {
-                "workflow_id": wf_id,
-                "milestone_id": ms1_id,
-                "phase": "preparation",
-                "dev_round": 1,
-                "round_number": 1,
-                "milestone_type": "repo_setup",
-                "status": "completed",
-                "title": "Repository Setup",
-                "session_id": "sess-setup-001",
-                "started_at": now,
-                "completed_at": now,
-            }
-        )
-        ms_ids.append(ms1_id)
-
-        # Milestone 2: completed plan_created
-        ms2_id = str(uuid.uuid4())
-        repo.create_milestone(
-            {
-                "workflow_id": wf_id,
-                "milestone_id": ms2_id,
-                "phase": "planning",
-                "dev_round": 1,
-                "round_number": 1,
-                "milestone_type": "plan_created",
-                "status": "completed",
-                "title": "Plan Created",
-                "session_id": "sess-plan-001",
-                "plan_content": "Step 1: Write code\nStep 2: Test",
-                "started_at": now,
-                "completed_at": now,
-            }
-        )
-        ms_ids.append(ms2_id)
-
-        # Milestone 3: in_progress dev_started
-        ms3_id = str(uuid.uuid4())
-        repo.create_milestone(
-            {
-                "workflow_id": wf_id,
-                "milestone_id": ms3_id,
-                "phase": "development",
-                "dev_round": 1,
-                "round_number": 1,
-                "milestone_type": "dev_started",
-                "status": "in_progress",
-                "title": "Development In Progress",
-                "session_id": "sess-dev-001",
-                "started_at": now,
-            }
-        )
-        ms_ids.append(ms3_id)
-
-        # Milestone 4: completed pr_created with commits
-        ms4_id = str(uuid.uuid4())
-        repo.create_milestone(
-            {
-                "workflow_id": wf_id,
-                "milestone_id": ms4_id,
-                "phase": "pr_review",
-                "dev_round": 1,
-                "round_number": 1,
-                "milestone_type": "pr_created",
-                "status": "completed",
-                "title": "PR Created",
-                "session_id": "sess-pr-001",
-                "commit_shas": "abc123\ndef456",
-                "diff_stats": json.dumps({"additions": 100, "deletions": 20, "files": 3}),
-                "review_content": "Code review passed.",
-                "started_at": now,
-                "completed_at": now,
-            }
-        )
-        ms_ids.append(ms4_id)
-
-        # Set workflow to waiting state
-        repo.update_workflow(
-            wf_id,
-            {
-                "status": "waiting",
-                "current_phase": "wait",
-                "github_pr_number": 42,
-                "github_pr_url": "https://github.com/test/repo/pull/42",
-                "requirements_issue_url": "https://github.com/test/repo/issues/1",
-                "branch_name": "auto-dev/test-feature",
-            },
-        )
-
-        log("SETUP", f"Created workflow {wf_id[:8]} with 4 milestones")
-        return wf_id, ms_ids
     except ImportError as e:
-        log("SETUP", f"⚠️  Cannot import app: {e}")
-        return wf_id, []
+        log("SETUP", f"⚠️  Cannot import app module: {e}")
+        return None, []
+
+    workflow = repo.create_workflow(
+        {
+            "user_id": 1,  # default admin (the account this script logs in as)
+            "title": "Gap Milestone Test",
+            "status": "pending",
+            "requirements_text": "Build a simple hello world feature",
+            "cli_tool": "claude-code",
+            "workspace_type": "local",
+            "project_path": "/tmp/e2e-test-project",
+            "branch_strategy": "new-branch",
+            "branch_name": "",
+            "max_plan_rounds": 3,
+            "max_pr_review_rounds": 5,
+        }
+    )
+    if not workflow:
+        log("SETUP", "⚠️  repo.create_workflow returned no workflow")
+        return None, []
+    wf_id = workflow["workflow_id"]
+    created_workflow_ids.append(wf_id)
+
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    ms_ids = []
+
+    # Milestone 1: completed repo_setup
+    ms1_id = str(uuid.uuid4())
+    repo.create_milestone(
+        {
+            "workflow_id": wf_id,
+            "milestone_id": ms1_id,
+            "phase": "preparation",
+            "dev_round": 1,
+            "round_number": 1,
+            "milestone_type": "repo_setup",
+            "status": "completed",
+            "title": "Repository Setup",
+            "session_id": "sess-setup-001",
+            "started_at": now,
+            "completed_at": now,
+        }
+    )
+    ms_ids.append(ms1_id)
+
+    # Milestone 2: completed plan_created
+    ms2_id = str(uuid.uuid4())
+    repo.create_milestone(
+        {
+            "workflow_id": wf_id,
+            "milestone_id": ms2_id,
+            "phase": "planning",
+            "dev_round": 1,
+            "round_number": 1,
+            "milestone_type": "plan_created",
+            "status": "completed",
+            "title": "Plan Created",
+            "session_id": "sess-plan-001",
+            "plan_content": "Step 1: Write code\nStep 2: Test",
+            "started_at": now,
+            "completed_at": now,
+        }
+    )
+    ms_ids.append(ms2_id)
+
+    # Milestone 3: in_progress dev_started
+    ms3_id = str(uuid.uuid4())
+    repo.create_milestone(
+        {
+            "workflow_id": wf_id,
+            "milestone_id": ms3_id,
+            "phase": "development",
+            "dev_round": 1,
+            "round_number": 1,
+            "milestone_type": "dev_started",
+            "status": "in_progress",
+            "title": "Development In Progress",
+            "session_id": "sess-dev-001",
+            "started_at": now,
+        }
+    )
+    ms_ids.append(ms3_id)
+
+    # Milestone 4: completed pr_created with commits
+    ms4_id = str(uuid.uuid4())
+    repo.create_milestone(
+        {
+            "workflow_id": wf_id,
+            "milestone_id": ms4_id,
+            "phase": "pr_review",
+            "dev_round": 1,
+            "round_number": 1,
+            "milestone_type": "pr_created",
+            "status": "completed",
+            "title": "PR Created",
+            "session_id": "sess-pr-001",
+            "commit_shas": "abc123\ndef456",
+            "diff_stats": json.dumps({"additions": 100, "deletions": 20, "files": 3}),
+            "review_content": "Code review passed.",
+            "started_at": now,
+            "completed_at": now,
+        }
+    )
+    ms_ids.append(ms4_id)
+
+    # Set workflow to waiting state
+    repo.update_workflow(
+        wf_id,
+        {
+            "status": "waiting",
+            "current_phase": "wait",
+            "github_pr_number": 42,
+            "github_pr_url": "https://github.com/test/repo/pull/42",
+            "requirements_issue_url": "https://github.com/test/repo/issues/1",
+            "branch_name": "auto-dev/test-feature",
+        },
+    )
+
+    log("SETUP", f"Created workflow {wf_id[:8]} with 4 milestones")
+    return wf_id, ms_ids
 
 
 # ══════════════════════════════════════════════════════════
@@ -329,15 +406,28 @@ def step_test_fork_milestone_api():
         assert wf["status"] != "paused", f"Original should not be paused, got {wf['status']}"
         log("FORK-API", f"  ✅ Original workflow still active: {wf['status']}")
 
-        # Verify milestones after fork point were cancelled
+        # Current fork contract: milestones after the fork point are NOT
+        # cancelled — the parent gets a completed `workflow_forked` marker
+        # milestone recording the fork branch and the fork workflow id.
         r3 = api("get", f"/api/autonomous/workflows/{wf_id}/timeline")
         milestones = r3.json().get("milestones", [])
-        cancelled = [m for m in milestones if m.get("status") == "cancelled"]
-        log("FORK-API", f"  {len(cancelled)} milestone(s) cancelled after fork point")
-        assert len(cancelled) > 0, "Milestones after fork point should be cancelled"
+        fork_markers = [
+            m
+            for m in milestones
+            if m.get("milestone_type") == "workflow_forked" and m.get("status") == "completed"
+        ]
+        assert (
+            len(fork_markers) == 1
+        ), f"Expected exactly 1 completed workflow_forked marker, got {len(fork_markers)}"
+        assert fork_markers[0].get("fork_branch") == fork_branch, (
+            f"Marker should record the fork branch ({fork_markers[0].get('fork_branch')} "
+            f"vs {fork_branch})"
+        )
+        assert fork_markers[0].get("fork_workflow_id") == fork_wf.get(
+            "workflow_id"
+        ), "Marker should reference the fork workflow"
+        log("FORK-API", "  ✅ workflow_forked marker created (branch + fork workflow recorded)")
 
-    elif r.status_code == 429:
-        log("FORK-API", "  ⚠️  Rate limited")
     else:
         raise AssertionError(f"Fork API failed: {r.status_code} {r.text}")
 
@@ -380,12 +470,47 @@ def step_test_cancel_milestone_api():
         assert wf["status"] == "waiting", f"Status should be waiting, got {wf['status']}"
         assert wf["current_phase"] == "wait", f"Phase should be wait, got {wf['current_phase']}"
         log("CANCEL-API", "  ✅ Workflow set to waiting after cancel")
-    elif r.status_code == 429:
-        log("CANCEL-API", "  ⚠️  Rate limited")
     else:
         raise AssertionError(f"Cancel API failed: {r.status_code} {r.text}")
 
     log("CANCEL-API", "✅ Cancel milestone API verified")
+
+
+def seed_workflow_via_repo(title, status="pending"):
+    """Deterministically seed a workflow row (repo-level, no rate-limit impact).
+
+    Owned by the admin account so subsequent API calls with the admin token
+    exercise the real owner path.
+    """
+    try:
+        from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+        repo = AutonomousWorkflowRepository()
+    except ImportError as e:
+        log("SETUP", f"⚠️  Cannot import app module: {e}")
+        return None
+
+    workflow = repo.create_workflow(
+        {
+            "user_id": 1,  # default admin (the account this script logs in as)
+            "title": title,
+            "status": status,
+            "requirements_text": "Build a simple hello world feature",
+            "cli_tool": "claude-code",
+            "workspace_type": "local",
+            "project_path": "/tmp/e2e-test-project",
+            "branch_strategy": "new-branch",
+            "branch_name": "",
+            "max_plan_rounds": 3,
+            "max_pr_review_rounds": 5,
+        }
+    )
+    if not workflow:
+        log("SETUP", "⚠️  repo.create_workflow returned no workflow")
+        return None
+    wf_id = workflow["workflow_id"]
+    created_workflow_ids.append(wf_id)
+    return wf_id
 
 
 # ══════════════════════════════════════════════════════════
@@ -397,13 +522,9 @@ def step_test_retry_api():
     """Test POST /workflows/<id>/retry — retry failed workflow."""
     log("RETRY-API", "Testing retry API")
 
-    r = create_workflow_via_api({"title": "Retry Test"})
-    if r.status_code == 429:
-        log("RETRY-API", "⚠️  Rate limited, skipping")
+    wf_id = seed_workflow_via_repo("Retry Test")
+    if not wf_id:
         return
-    assert r.status_code == 201
-    wf_id = r.json()["workflow"]["workflow_id"]
-    created_workflow_ids.append(wf_id)
 
     # Set workflow to failed state
     try:
@@ -485,8 +606,6 @@ def step_test_mark_done_api():
         assert wf["status"] == "merging", f"Status should be merging, got {wf['status']}"
         assert wf["current_phase"] == "merge", f"Phase should be merge, got {wf['current_phase']}"
         log("DONE-API", "  ✅ Workflow transitioned to merging after mark done")
-    elif r.status_code == 429:
-        log("DONE-API", "  ⚠️  Rate limited")
     else:
         raise AssertionError(f"Mark done API failed: {r.status_code} {r.text}")
 
@@ -502,13 +621,9 @@ def step_test_max_retry_count():
     """Test that retry fails after MAX_RETRY_COUNT (5) attempts."""
     log("MAX-RETRY", "Testing max retry count enforcement")
 
-    r = create_workflow_via_api({"title": "Max Retry Test"})
-    if r.status_code == 429:
-        log("MAX-RETRY", "⚠️  Rate limited, skipping")
+    wf_id = seed_workflow_via_repo("Max Retry Test")
+    if not wf_id:
         return
-    assert r.status_code == 201
-    wf_id = r.json()["workflow"]["workflow_id"]
-    created_workflow_ids.append(wf_id)
 
     try:
         from app.repositories.autonomous_repo import AutonomousWorkflowRepository
@@ -571,50 +686,38 @@ def step_test_non_admin_permissions():
         log("PERM", "⚠️  Non-admin user not available, skipping")
         return
 
-    # Create a workflow as admin
-    r = create_workflow_via_api({"title": "Admin Private Workflow"})
-    if r.status_code == 429:
-        log("PERM", "⚠️  Rate limited, skipping")
+    # Admin-owned workflow (repo-seeded; deterministic)
+    admin_wf_id = seed_workflow_via_repo("Admin Private Workflow")
+    if not admin_wf_id:
         return
-    assert r.status_code == 201
-    admin_wf_id = r.json()["workflow"]["workflow_id"]
-    created_workflow_ids.append(admin_wf_id)
 
     # Non-admin should NOT be able to get admin's workflow
     r2 = api("get", f"/api/autonomous/workflows/{admin_wf_id}", token=non_admin_token)
     log("PERM", f"  Non-admin get admin workflow: {r2.status_code}")
-    if r2.status_code == 403:
-        log("PERM", "  ✅ Non-admin correctly denied access to admin's workflow (403)")
-    elif r2.status_code == 200:
-        # Admin user sees all, so if the non-admin token is actually admin, this might happen
-        log("PERM", "  ⚠️  Non-admin could see admin's workflow (may be admin user)")
-    else:
-        log("PERM", f"  Status: {r2.status_code}")
+    assert r2.status_code == 403, f"Non-admin should be denied (403), got {r2.status_code}"
+    log("PERM", "  ✅ Non-admin correctly denied access to admin's workflow (403)")
 
     # Non-admin should NOT be able to delete admin's workflow
     r3 = api("delete", f"/api/autonomous/workflows/{admin_wf_id}", token=non_admin_token)
     log("PERM", f"  Non-admin delete admin workflow: {r3.status_code}")
-    if r3.status_code == 403:
-        log("PERM", "  ✅ Non-admin correctly denied delete on admin's workflow (403)")
-    elif r3.status_code == 200:
-        log("PERM", "  ⚠️  Non-admin could delete admin's workflow (may be admin user)")
-        created_workflow_ids.remove(admin_wf_id)  # already deleted
+    assert r3.status_code == 403, f"Non-admin delete should be denied (403), got {r3.status_code}"
+    log("PERM", "  ✅ Non-admin correctly denied delete on admin's workflow (403)")
 
     # Non-admin should NOT be able to pause admin's workflow
     r4 = api("post", f"/api/autonomous/workflows/{admin_wf_id}/pause", token=non_admin_token)
     log("PERM", f"  Non-admin pause admin workflow: {r4.status_code}")
-    if r4.status_code == 403:
-        log("PERM", "  ✅ Non-admin correctly denied pause on admin's workflow (403)")
+    assert r4.status_code == 403, f"Non-admin pause should be denied (403), got {r4.status_code}"
+    log("PERM", "  ✅ Non-admin correctly denied pause on admin's workflow (403)")
 
-    # Non-admin listing — should only see own workflows (if not admin)
+    # Non-admin listing — should only see own workflows
     r5 = api("get", "/api/autonomous/workflows", token=non_admin_token)
-    if r5.status_code == 200:
-        non_admin_wfs = r5.json().get("workflows", [])
-        admin_wf_in_list = any(w["workflow_id"] == admin_wf_id for w in non_admin_wfs)
-        if not admin_wf_in_list:
-            log("PERM", "  ✅ Admin's workflow not in non-admin's list")
-        else:
-            log("PERM", "  ⚠️  Admin's workflow appeared in non-admin's list (user may be admin)")
+    assert r5.status_code == 200, f"Non-admin list should work, got {r5.status_code}"
+    non_admin_wfs = r5.json().get("workflows", [])
+    admin_wf_in_list = any(w["workflow_id"] == admin_wf_id for w in non_admin_wfs)
+    assert (
+        not admin_wf_in_list
+    ), "Admin's workflow must not appear in the non-admin user's list"
+    log("PERM", "  ✅ Admin's workflow not in non-admin's list")
 
     log("PERM", "✅ Non-admin permission isolation verified")
 
@@ -720,27 +823,32 @@ def step_test_workflow_creation_params():
             "task_timeout": 7200,
         }
     )
-    if r.status_code == 201:
-        wf_id = r.json()["workflow"]["workflow_id"]
-        created_workflow_ids.append(wf_id)
-        r2 = api("get", f"/api/autonomous/workflows/{wf_id}")
-        wf = r2.json()["workflow"]
-        assert (
-            wf["branch_strategy"] == "worktree"
-        ), f"Expected worktree, got {wf['branch_strategy']}"
-        assert wf["branch_name"] == "test-branch", f"Expected test-branch, got {wf['branch_name']}"
-        assert wf["max_plan_rounds"] == 3, f"Expected 3, got {wf['max_plan_rounds']}"
-        assert wf["max_pr_review_rounds"] == 5, f"Expected 5, got {wf['max_pr_review_rounds']}"
-        assert wf["permission_mode"] == "auto-edit"
-        assert wf["model"] == "claude-sonnet-4-6"
-        assert wf["requirements_issue_url"] == "https://github.com/test/repo/issues/99"
-        log("CREATE-PARAMS", "  ✅ Full parameters workflow created and verified (with issue URL)")
-        # Also check task_timeout (merged from timeout test)
-        log("CREATE-PARAMS", f"  task_timeout: {wf.get('task_timeout')}")
-    elif r.status_code == 429:
-        log("CREATE-PARAMS", "  ⚠️  Rate limited")
-    else:
-        log("CREATE-PARAMS", f"  ⚠️  Full params create: {r.status_code}")
+    assert r.status_code == 201, f"Full params create failed: {r.status_code} {r.text[:200]}"
+    wf_id = r.json()["workflow"]["workflow_id"]
+    created_workflow_ids.append(wf_id)
+    r2 = api("get", f"/api/autonomous/workflows/{wf_id}")
+    wf = r2.json()["workflow"]
+    assert (
+        wf["branch_strategy"] == "worktree"
+    ), f"Expected worktree, got {wf['branch_strategy']}"
+    # Issue #1573 contract: the worktree strategy always pre-generates an
+    # auto-dev/<id> branch for scheduler conflict checks; the user's input is
+    # preserved verbatim in original_branch_name.
+    assert wf["branch_name"].startswith("auto-dev/"), (
+        f"Worktree strategy should pre-generate an auto-dev branch, "
+        f"got '{wf['branch_name']}'"
+    )
+    assert (
+        wf.get("original_branch_name") == "test-branch"
+    ), f"User branch input should be preserved in original_branch_name, got {wf.get('original_branch_name')}"
+    assert wf["max_plan_rounds"] == 3, f"Expected 3, got {wf['max_plan_rounds']}"
+    assert wf["max_pr_review_rounds"] == 5, f"Expected 5, got {wf['max_pr_review_rounds']}"
+    assert wf["permission_mode"] == "auto-edit"
+    assert wf["model"] == "claude-sonnet-4-6"
+    assert wf["requirements_issue_url"] == "https://github.com/test/repo/issues/99"
+    log("CREATE-PARAMS", "  ✅ Full parameters workflow created and verified (with issue URL)")
+    # Also check task_timeout (merged from timeout test)
+    log("CREATE-PARAMS", f"  task_timeout: {wf.get('task_timeout')}")
 
     log("CREATE-PARAMS", "✅ Workflow creation parameters verified")
 
@@ -763,13 +871,10 @@ def step_test_idempotent_milestone():
         log("IDEMPOTENT", "⚠️  Cannot import app module")
         return
 
-    # Create a workflow
-    r = create_workflow_via_api({"title": "Idempotent Test"})
-    if r.status_code == 429:
-        log("IDEMPOTENT", "⚠️  Rate limited")
+    # Create a workflow (repo-seeded; deterministic)
+    wf_id = seed_workflow_via_repo("Idempotent Test")
+    if not wf_id:
         return
-    assert r.status_code == 201
-    wf_id = r.json()["workflow"]["workflow_id"]
     created_workflow_ids.append(wf_id)
 
     # Create a milestone directly
@@ -855,11 +960,17 @@ def step_test_new_task_modal_form(page):
     log("MODAL-FORM", "Testing new task modal form + tool/model selection")
 
     page.goto(f"{BASE_URL}/work/autonomous")
+    # Pin the UI language to English so hint-text assertions are stable.
+    page.evaluate(
+        "() => { localStorage.setItem('language','en'); localStorage.setItem('i18nextLng','en'); }"
+    )
+    page.reload()
     page.wait_for_timeout(2000)
 
-    # Click New Task button — scope to the autonomous panel header (contains .bi-robot)
-    # to avoid matching global navigation buttons
-    plus_btn = page.locator("div.border-bottom:has(.bi-robot) button")
+    # Click New Task button — scope to the autonomous panel header (contains
+    # .bi-robot) and target the plus button specifically: the header also
+    # holds a fullscreen toggle that plain `button` matching would hit first.
+    plus_btn = page.locator("div.border-bottom:has(.bi-robot) button:has(.bi-plus-lg)")
     assert plus_btn.count() > 0, "New Task button should exist in autonomous panel header"
     plus_btn.first.click()
     page.wait_for_timeout(2000)  # wait for React render + API calls (tools, models)
@@ -892,7 +1003,9 @@ def step_test_new_task_modal_form(page):
         f"  Textarea: {textarea_count}, Selects: {select_count}, Text inputs: {input_count}",
     )
     assert textarea_count > 0, "Modal should have a textarea for requirements"
-    assert select_count >= 2, "Modal should have at least 2 selects (tool + model)"
+    # Tool + branch-strategy selects always render; the model select only
+    # appears when models are configured for the selected tool.
+    assert select_count >= 2, "Modal should have at least 2 selects (tool + branch strategy)"
 
     # ── Agent Tool Selector ──
     # The tool selector is the first <select> in the modal
@@ -903,7 +1016,7 @@ def step_test_new_task_modal_form(page):
         tool_selects = page.locator("select.form-select")
     assert (
         tool_selects.count() >= 2
-    ), f"Should have at least 2 form-select dropdowns (tool + model), got {tool_selects.count()}"
+    ), f"Should have at least 2 form-select dropdowns (tool + branch strategy), got {tool_selects.count()}"
 
     # Tool selector is the first one
     tool_select = tool_selects.nth(0)
@@ -926,21 +1039,38 @@ def step_test_new_task_modal_form(page):
     shot(page, "gap-01a-tool-selector")
 
     # ── Model Selector ──
-    # The model selector is the second <select>
-    model_select = tool_selects.nth(1)
-    model_options = model_select.locator("option")
-    # First option should be the default/empty option
-    first_model_val = model_options.nth(0).get_attribute("value")
-    log("MODAL-FORM", f"  Model selector first option value: '{first_model_val}'")
-    assert first_model_val == "", "First model option should be empty (default)"
+    # The model <select> only renders when models are configured for the
+    # selected tool; without API keys the modal shows the no-models hint
+    # instead (autoNoModelsForTool). Assert whichever contract branch holds.
+    # The select is identified by its empty-value placeholder option — the
+    # tool and branch-strategy selects have no empty-valued options.
+    model_select = None
+    model_selects = page.locator(
+        "[role='dialog'] select.form-select, .modal select.form-select"
+    ).filter(has=page.locator("option[value='']"))
+    model_hint = page.locator(
+        "[role='dialog'] .form-text, .modal .form-text"
+    ).filter(has_text="No models configured for this tool")
+    if model_selects.count() >= 1:
+        model_select = model_selects.first
+        model_options = model_select.locator("option")
+        # First option should be the default/empty option
+        first_model_val = model_options.nth(0).get_attribute("value")
+        log("MODAL-FORM", f"  Model selector first option value: '{first_model_val}'")
+        assert first_model_val == "", "First model option should be empty (default)"
 
-    # Count available models (excluding empty default)
-    model_count = model_options.count() - 1  # subtract the default empty option
-    log("MODAL-FORM", f"  Available models: {model_count}")
+        # Count available models (excluding empty default)
+        model_count = model_options.count() - 1  # subtract the default empty option
+        log("MODAL-FORM", f"  Available models: {model_count}")
+    else:
+        assert (
+            model_hint.count() > 0
+        ), "Without configured models the modal must show the no-models hint"
+        log("MODAL-FORM", "  ✅ No-models hint shown (no API keys configured for the tool)")
     shot(page, "gap-01b-model-selector")
 
     # ── Tool → Model Linkage ──
-    # Select a different tool and verify model list updates
+    # Select a different tool and verify the model area updates
     if tool_option_count >= 2:
         # Try selecting a different tool
         second_tool_val = tool_option_values[1] if len(tool_option_values) > 1 else None
@@ -948,17 +1078,28 @@ def step_test_new_task_modal_form(page):
             tool_select.select_option(value=second_tool_val)
             page.wait_for_timeout(1500)  # wait for React re-render + API call
 
-            # Verify model dropdown updated
-            new_model_options = model_select.locator("option")
-            new_model_count = new_model_options.count()
-            log(
-                "MODAL-FORM",
-                f"  After selecting tool '{second_tool_val}': {new_model_count} model options",
-            )
+            if model_select is not None:
+                # Verify model dropdown updated
+                new_model_options = model_select.locator("option")
+                new_model_count = new_model_options.count()
+                log(
+                    "MODAL-FORM",
+                    f"  After selecting tool '{second_tool_val}': {new_model_count} model options",
+                )
 
-            # Model select should still have at least the default option
-            assert new_model_count >= 1, "Model selector should have at least the default option"
-            shot(page, "gap-01c-model-after-tool-change")
+                # Model select should still have at least the default option
+                assert new_model_count >= 1, "Model selector should have at least the default option"
+                shot(page, "gap-01c-model-after-tool-change")
+            else:
+                # Without configured models the hint must persist after a
+                # tool switch (the newly selected tool has no models either).
+                assert (
+                    model_hint.count() > 0
+                ), "No-models hint should persist after switching tools"
+                log(
+                    "MODAL-FORM",
+                    "  ✅ No-models state persists across tool switches (no API keys)",
+                )
 
             # Switch back to claude-code
             tool_select.select_option(value="claude-code")
@@ -986,11 +1127,13 @@ def step_test_new_task_modal_form(page):
         log("MODAL-FORM", f"  ⚠️  Requirements toggle: {req_buttons.count()} buttons")
 
     # ── Branch Strategy Selector ──
-    branch_selects = page.locator("[role='dialog'] select.form-select, .modal select.form-select")
-    # Third select should be branch strategy (tool=0, model=1, branch_strategy=2)
-    if branch_selects.count() >= 3:
-        branch_select = branch_selects.nth(2)
-        branch_options = branch_select.locator("option")
+    # Locate the branch-strategy select via its 'worktree' option (the model
+    # select may not render when no models are configured).
+    branch_select = page.locator(
+        "[role='dialog'] select.form-select, .modal select.form-select"
+    ).filter(has=page.locator("option[value='worktree']"))
+    if branch_select.count() >= 1:
+        branch_options = branch_select.first.locator("option")
         log("MODAL-FORM", f"  Branch strategy options: {branch_options.count()}")
         assert branch_options.count() >= 3, "Should have 3 branch strategy options"
 
@@ -1047,8 +1190,8 @@ def step_test_milestone_api_ownership():
         json={"branch_name": "fork-test"},
     )
     log("OWNER", f"  Non-admin fork: {r.status_code}")
-    if r.status_code == 403:
-        log("OWNER", "  ✅ Non-admin correctly denied fork on admin's workflow (403)")
+    assert r.status_code == 403, f"Non-admin fork should be denied (403), got {r.status_code}"
+    log("OWNER", "  ✅ Non-admin correctly denied fork on admin's workflow (403)")
 
     # Non-admin should NOT be able to cancel admin's milestone
     r = api(
@@ -1057,14 +1200,14 @@ def step_test_milestone_api_ownership():
         token=non_admin_token,
     )
     log("OWNER", f"  Non-admin cancel: {r.status_code}")
-    if r.status_code == 403:
-        log("OWNER", "  ✅ Non-admin correctly denied cancel on admin's workflow (403)")
+    assert r.status_code == 403, f"Non-admin cancel should be denied (403), got {r.status_code}"
+    log("OWNER", "  ✅ Non-admin correctly denied cancel on admin's workflow (403)")
 
     # Non-admin should NOT be able to get admin's timeline
     r = api("get", f"/api/autonomous/workflows/{wf_id}/timeline", token=non_admin_token)
     log("OWNER", f"  Non-admin timeline: {r.status_code}")
-    if r.status_code == 403:
-        log("OWNER", "  ✅ Non-admin correctly denied timeline on admin's workflow (403)")
+    assert r.status_code == 403, f"Non-admin timeline should be denied (403), got {r.status_code}"
+    log("OWNER", "  ✅ Non-admin correctly denied timeline on admin's workflow (403)")
 
     # Non-admin should NOT be able to get session
     r = api(
@@ -1073,8 +1216,8 @@ def step_test_milestone_api_ownership():
         token=non_admin_token,
     )
     log("OWNER", f"  Non-admin session: {r.status_code}")
-    if r.status_code == 403:
-        log("OWNER", "  ✅ Non-admin correctly denied session on admin's workflow (403)")
+    assert r.status_code == 403, f"Non-admin session should be denied (403), got {r.status_code}"
+    log("OWNER", "  ✅ Non-admin correctly denied session on admin's workflow (403)")
 
     log("OWNER", "✅ Milestone API ownership checks verified")
 
@@ -1088,13 +1231,9 @@ def step_test_retry_ui_interaction(page):
     """Test retry button click on failed workflow."""
     log("RETRY-UI", "Testing retry button UI interaction")
 
-    r = create_workflow_via_api({"title": "Retry UI Test"})
-    if r.status_code == 429:
-        log("RETRY-UI", "⚠️  Rate limited, skipping")
+    wf_id = seed_workflow_via_repo("Retry UI Test")
+    if not wf_id:
         return
-    assert r.status_code == 201
-    wf_id = r.json()["workflow"]["workflow_id"]
-    created_workflow_ids.append(wf_id)
 
     # Set to failed
     try:
@@ -1192,8 +1331,9 @@ def step_test_mark_done_ui(page):
         if modal.count() > 0:
             shot(page, "gap-05-branch-selector")
 
-            # Verify branches are listed
-            branches = page.locator(".list-group-item")
+            # Verify branches are listed (scoped to the modal — the workflow
+            # list items behind it also carry .list-group-item)
+            branches = page.locator("[role='dialog'] .list-group-item")
             branch_count = branches.count()
             log("DONE-UI", f"  Branch selector shows {branch_count} branch(es)")
 
@@ -1243,13 +1383,9 @@ def step_test_workflow_status_badges(page):
     ]
 
     for status, phase in statuses_to_test:
-        r = create_workflow_via_api({"title": f"Badge Test {status}"})
-        if r.status_code == 429:
+        wf_id = seed_workflow_via_repo(f"Badge Test {status}")
+        if not wf_id:
             continue
-        if r.status_code != 201:
-            continue
-        wf_id = r.json()["workflow"]["workflow_id"]
-        created_workflow_ids.append(wf_id)
         repo.update_workflow(
             wf_id,
             {
@@ -1295,8 +1431,10 @@ def step_test_create_workflow_via_ui(page):
     page.goto(f"{BASE_URL}/work/autonomous")
     page.wait_for_timeout(2000)
 
-    # Click New Task button — scope to autonomous panel header (contains .bi-robot)
-    plus_btn = page.locator("div.border-bottom:has(.bi-robot) button")
+    # Click New Task button — scope to the autonomous panel header (contains
+    # .bi-robot) and target the plus button specifically (the header also
+    # holds a fullscreen toggle).
+    plus_btn = page.locator("div.border-bottom:has(.bi-robot) button:has(.bi-plus-lg)")
     assert plus_btn.count() > 0, "New Task button should exist in autonomous panel header"
     plus_btn.first.click()
     page.wait_for_timeout(2000)  # wait for React render + API calls
@@ -2227,19 +2365,14 @@ def run_tests():
     log("LOGIN", "✅ Admin login successful")
     passed += 1
 
-    # Non-admin login
+    # Provision the dedicated creation bot (own rate budget) and the plain
+    # non-admin user used by the permission-isolation checks.
     try:
-        r2 = _session.post(
-            f"{BASE_URL}/api/auth/login",
-            json={"username": NON_ADMIN_USER, "password": NON_ADMIN_PASS},
-        )
-        if r2.status_code == 200:
-            non_admin_token = r2.cookies.get("session_token")
-            log("LOGIN", f"✅ Non-admin '{NON_ADMIN_USER}' login successful")
-        else:
-            log("LOGIN", f"⚠️  Non-admin not available ({r2.status_code})")
+        ensure_test_identities()
+        passed += 1
     except Exception as e:
-        log("LOGIN", f"⚠️  Non-admin login skipped: {e}")
+        print(f"  ❌ IDENTITY PROVISIONING FAILED: {e}", flush=True)
+        failed += 1
 
     # ── Phase 2: Cleanup ──
     cleanup_all_test_workflows()
