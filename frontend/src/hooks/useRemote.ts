@@ -178,7 +178,11 @@ export function useCreateRemoteSession() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (data: CreateRemoteSessionRequest) => remoteApi.createSession(data),
+    mutationFn: (data: CreateRemoteSessionRequest) => {
+      // Issue #3206: Generate idempotency key for deduplication
+      const idempotencyKey = crypto.randomUUID();
+      return remoteApi.createSession(data, idempotencyKey);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },

@@ -83,6 +83,25 @@ _STATE_MESSAGES = {
     "error": "Remote session encountered an error",
 }
 
+# ════════════════════════════════════════════
+# Issue #3206: Idempotency and dedup constants
+# ════════════════════════════════════════════
+
+# Idempotency key cache TTL (seconds)
+IDEMPOTENCY_KEY_TTL_SECONDS = int(os.environ.get("IDEMPOTENCY_KEY_TTL_SECONDS", "60"))
+
+# Deduplication window for session creation (seconds)
+REMOTE_SESSION_DEDUP_WINDOW_SECONDS = int(
+    os.environ.get("REMOTE_SESSION_DEDUP_WINDOW_SECONDS", "5")
+)
+
+# Retry-After header value for 429 responses (seconds)
+RETRY_AFTER_SECONDS = int(os.environ.get("RETRY_AFTER_SECONDS", "60"))
+
+# Cache key prefixes
+_IDEMPOTENCY_KEY_PREFIX = "rs:idempotency:"
+_DEDUP_KEY_PREFIX = "rs:dedup:"
+
 
 def _check_session_state(session_info: dict, operation: str) -> tuple | None:
     """Check if session state allows the operation.
@@ -210,6 +229,169 @@ def _check_machine_exists_for_session(session_info: dict, operation: str) -> tup
             ),
             409,
         )
+
+    return None
+
+
+# ════════════════════════════════════════════
+# Issue #3206: Idempotency and dedup helpers
+# ════════════════════════════════════════════
+
+
+def _get_idempotency_cache_key(idempotency_key: str) -> str:
+    """Generate cache key for idempotency key."""
+    return f"{_IDEMPOTENCY_KEY_PREFIX}{idempotency_key}"
+
+
+def _get_dedup_cache_key(user_id: int, machine_id: str, project_path: str) -> str:
+    """Generate cache key for deduplication window.
+
+    Uses SHA256 hash of project_path to avoid special characters in key.
+    """
+    path_hash = hashlib.sha256(project_path.encode(), usedforsecurity=False).hexdigest()[:16]
+    return f"{_DEDUP_KEY_PREFIX}{user_id}:{machine_id[:8]}:{path_hash}"
+
+
+def _check_idempotency_key(idempotency_key: str) -> dict | None:
+    """Check if idempotency key exists in cache.
+
+    Returns:
+        Cached session data if key exists, None otherwise.
+    """
+    if not idempotency_key:
+        return None
+
+    try:
+        from app.utils.cache import get_cache
+
+        cache = get_cache()
+        key = _get_idempotency_cache_key(idempotency_key)
+        return cache.get(key)
+    except Exception as e:
+        logger.error("Failed to check idempotency key: %s", e)
+        return None
+
+
+def _store_idempotency_key(idempotency_key: str, session_data: dict) -> bool:
+    """Store session data under idempotency key.
+
+    Returns:
+        True if stored successfully, False otherwise.
+    """
+    if not idempotency_key:
+        return False
+
+    try:
+        from app.utils.cache import get_cache
+
+        cache = get_cache()
+        key = _get_idempotency_cache_key(idempotency_key)
+        return cache.set(key, session_data, IDEMPOTENCY_KEY_TTL_SECONDS)
+    except Exception as e:
+        logger.error("Failed to store idempotency key: %s", e)
+        return False
+
+
+def _check_dedup_window(user_id: int, machine_id: str, project_path: str) -> dict | None:
+    """Check if a session was recently created in deduplication window.
+
+    Returns:
+        Cached session data if within window, None otherwise.
+    """
+    try:
+        from app.utils.cache import get_cache
+
+        cache = get_cache()
+        key = _get_dedup_cache_key(user_id, machine_id, project_path)
+        return cache.get(key)
+    except Exception as e:
+        logger.error("Failed to check dedup window: %s", e)
+        return None
+
+
+def _store_dedup_window(
+    user_id: int, machine_id: str, project_path: str, session_data: dict
+) -> bool:
+    """Store session data in deduplication window.
+
+    Returns:
+        True if stored successfully, False otherwise.
+    """
+    try:
+        from app.utils.cache import get_cache
+
+        cache = get_cache()
+        key = _get_dedup_cache_key(user_id, machine_id, project_path)
+        return cache.set(key, session_data, REMOTE_SESSION_DEDUP_WINDOW_SECONDS)
+    except Exception as e:
+        logger.error("Failed to store dedup window: %s", e)
+        return False
+
+
+def _check_remote_session_concurrent_limit(user_id: int) -> Response | None:
+    """Check if user has reached max_sessions_per_user limit for remote sessions.
+
+    Issue #3206: Mirrors autonomous._check_user_concurrent_limit for remote sessions.
+
+    Returns:
+        429 Response if limit reached, None to proceed.
+    """
+    from app.repositories.tenant_repo import TenantRepository
+
+    DEFAULT_MAX_SESSIONS = 5
+
+    try:
+        # Get user's tenant quota
+        from app.repositories.user_repo import UserRepository
+
+        user_repo = UserRepository()
+        user = user_repo.get_user_by_id(user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        tenant_id = user.get("tenant_id")
+        max_sessions = DEFAULT_MAX_SESSIONS
+
+        if tenant_id:
+            tenant_repo = TenantRepository()
+            tenant = tenant_repo.get_by_id(tenant_id)
+            if tenant:
+                max_sessions = tenant.quota.max_sessions_per_user
+
+        # Count user's active remote sessions
+        from app.repositories.database import adapt_sql, get_db_connection
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                adapt_sql(
+                    "SELECT COUNT(*) as cnt FROM agent_sessions "
+                    "WHERE user_id = ? AND status = 'active' AND workspace_type = 'remote'"
+                ),
+                (user_id,),
+            )
+            row = cursor.fetchone()
+            active_count = row["cnt"] if isinstance(row, dict) else row[0]
+
+        if active_count >= max_sessions:
+            logger.warning(
+                "User %s reached max concurrent remote sessions limit (%s)",
+                user_id,
+                max_sessions,
+            )
+            response = jsonify(
+                {
+                    "success": False,
+                    "error": f"User has reached maximum concurrent sessions limit ({max_sessions})",
+                    "retry_after": RETRY_AFTER_SECONDS,
+                }
+            )
+            response.headers["Retry-After"] = str(RETRY_AFTER_SECONDS)
+            return response, 429
+
+    except Exception as exc:
+        logger.error("Concurrent limit check failed: %s", exc)
+        # Fail-open: allow creation if check fails
 
     return None
 
@@ -1513,6 +1695,44 @@ def create_remote_session():
     if not project_path:
         return jsonify({"error": "project_path is required"}), 400
 
+    # ════════════════════════════════════════════
+    # Issue #3206: Idempotency and dedup checks
+    # ════════════════════════════════════════════
+
+    # Check idempotency key from request header
+    idempotency_key = request.headers.get("Idempotency-Key", "")
+    user_id = g.user["id"]
+
+    # 1. Check idempotency key first (most precise)
+    if idempotency_key:
+        cached_session = _check_idempotency_key(idempotency_key)
+        if cached_session:
+            logger.info(
+                "Idempotency key hit for remote session creation: user=%s, key=%s",
+                user_id,
+                idempotency_key[:8],
+            )
+            return jsonify({"success": True, "session": cached_session})
+
+    # 2. Check dedup window (fallback for requests without idempotency key)
+    cached_session = _check_dedup_window(user_id, machine_id, project_path)
+    if cached_session:
+        logger.info(
+            "Dedup window hit for remote session creation: user=%s, machine=%s",
+            user_id,
+            machine_id[:8],
+        )
+        return jsonify({"success": True, "session": cached_session})
+
+    # 3. Check concurrent session limit
+    limit_error = _check_remote_session_concurrent_limit(user_id)
+    if limit_error:
+        return limit_error
+
+    # ════════════════════════════════════════════
+    # End Issue #3206 checks
+    # ════════════════════════════════════════════
+
     # P2-1: Permission check moved to decorator @machine_access_required
     session_mgr = get_remote_session_manager()
 
@@ -1574,6 +1794,10 @@ def create_remote_session():
     )
 
     if result and result.get("success") is not False:
+        # Issue #3206: Store in idempotency and dedup caches
+        if idempotency_key:
+            _store_idempotency_key(idempotency_key, result)
+        _store_dedup_window(user_id, machine_id, project_path, result)
         return jsonify({"success": True, "session": result})
     return (
         jsonify(
