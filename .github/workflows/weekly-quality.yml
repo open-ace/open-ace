@@ -18,7 +18,12 @@ jobs:
   cross-browser-e2e:
     name: Chromium, Firefox and WebKit E2E
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    # Issue #3170: 545 tests in total across the five browser projects
+    # (chromium/firefox/webkit + 2 mobile viewports) on a single worker with
+    # CI retries — ~88 minutes of test execution did not finish once the
+    # server actually booted (both historical runs died at boot, so runtime
+    # was unknown).
+    timeout-minutes: 240
     env:
       # Issue #3170: the playwright webServer boots the real `server.py`,
       # whose development-mode contract refuses to start without SECRET_KEY

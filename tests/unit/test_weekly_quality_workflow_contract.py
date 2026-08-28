@@ -54,3 +54,11 @@ def test_server_booting_job_pins_secret_key_and_browser_cache_path():
         step for step in job["steps"] if step.get("run", "").startswith("npm run test:e2e")
     )
     assert run_step["env"]["HOME"] == "${{ runner.temp }}/openace-home"
+
+
+def test_cross_browser_job_timeout_covers_the_full_matrix():
+    # The lane runs the full suite once per browser project on a single
+    # worker; 90 minutes was never measured (both historical runs died at
+    # server boot) and canceled the first real attempt (#3170).
+    job = _cross_browser_job()
+    assert int(job["timeout-minutes"]) >= 240
