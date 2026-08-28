@@ -72,6 +72,7 @@ PACKAGE_PATTERNS = (
     "requirements*.in",
     "requirements*.lock",
     "requirements*.txt",
+    "scripts/ci/**",
     "scripts/install-central/**",
 )
 DEPENDENCY_PATTERNS = (
