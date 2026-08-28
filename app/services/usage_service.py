@@ -5,7 +5,7 @@ Business logic for usage data operations.
 """
 
 import logging
-from datetime import datetime
+from datetime import date, datetime
 
 from app.repositories.usage_repo import UsageRepository
 from app.utils.cache import cached
@@ -301,7 +301,7 @@ class UsageService:
         )
 
     @staticmethod
-    def _normalize_date(date_value: str | datetime | object) -> str:
+    def _normalize_date(date_value: str | date | datetime) -> str:
         """Normalize date value to ISO format string (YYYY-MM-DD).
 
         Issue #3166: Different data sources return different date types:
@@ -320,10 +320,8 @@ class UsageService:
             return date_value
         if isinstance(date_value, datetime):
             return date_value.date().isoformat()
-        # Handle datetime.date or other date-like objects
-        if hasattr(date_value, "isoformat"):
-            return date_value.isoformat()
-        return str(date_value)
+        # At this point, date_value is datetime.date
+        return date_value.isoformat()
 
     @cached(ttl=60, key_prefix="usage", skip_args=[0])
     def get_trend_data(
