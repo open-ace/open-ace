@@ -85,6 +85,11 @@ dev = [
 [project.scripts]
 openace = "cli:main"
 
+[tool.setuptools]
+# Top-level modules referenced by console scripts must be packaged explicitly;
+# packages.find only covers the app*/scripts* package trees (issue #3171).
+py-modules = ["cli"]
+
 [tool.setuptools.packages.find]
 include = ["app*", "scripts*"]
 

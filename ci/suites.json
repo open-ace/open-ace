@@ -258,6 +258,10 @@
           "--wheel",
           "--outdir",
           "dist/"
+        ],
+        [
+          "{python}",
+          "scripts/ci/verify_wheel_entry.py"
         ]
       ]
     },
