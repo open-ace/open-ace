@@ -74,3 +74,13 @@ def test_local_tag_consumers_require_the_build_step_to_load_the_image():
     size = next(step for step in steps if step.get("name") == "Check image size")
     assert TAG_PATTERN.search(size["run"]) and "docker images" in size["run"]
     assert "GITHUB_STEP_SUMMARY" in size["run"]
+
+
+def test_production_image_precreates_logs_dir_for_non_root_entrypoint():
+    # docker-entrypoint.sh runs `mkdir -p /app/logs` (Issue #1205) as uid 1000
+    # before dispatching one-shot commands, /app itself is root-owned, and the
+    # gitignored logs/ directory never ships in CI build contexts — the image
+    # must therefore pre-create it with open-ace ownership.
+    dockerfile = (REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    production = dockerfile.split("FROM production AS development")[0]
+    assert "mkdir -p /app/logs && chown open-ace:open-ace /app/logs" in production
