@@ -76,22 +76,32 @@ def select_provider(
         return fallback
 
     tenant_key = None if tenant is None else str(tenant)
+    # NOTE: no `except SandboxError` here, deliberately. A tier with no endpoint
+    # or an unset API-key env var raises SandboxConfigError, and catching it
+    # would silently run the whole deployment on Legacy for every tenant not in
+    # production_required_tenants — the exact quiet downgrade this gate exists to
+    # prevent, and invisible because the provider was never constructed so there
+    # is no event_sink to report it. A misconfigured backend must be loud for
+    # everyone. Only ImportError is tolerated, and only because the package being
+    # absent is a genuinely different situation from it being misconfigured.
     try:
         from app.modules.workspace.autonomous.sandbox.opensandbox.provider import (
             OpenSandboxProvider,
         )
         from app.modules.workspace.autonomous.sandbox.registry import _default_api_factory
-
-        return OpenSandboxProvider(
-            config,
-            api_factory=api_factory or _default_api_factory,
-            tenant=tenant_key,
-            project_path=project_path,
-            event_sink=event_sink,
-            connect_factory=connect_factory,
-        )
-    except SandboxError:
+    except ImportError:  # pragma: no cover - package always present
         if required:
-            # Re-raise: this tenant may not run anywhere weaker.
-            raise
+            raise SandboxError(
+                f"tenant {tenant!r} requires production isolation but the "
+                "OpenSandbox backend is unavailable"
+            ) from None
         return fallback
+
+    return OpenSandboxProvider(
+        config,
+        api_factory=api_factory or _default_api_factory,
+        tenant=tenant_key,
+        project_path=project_path,
+        event_sink=event_sink,
+        connect_factory=connect_factory,
+    )

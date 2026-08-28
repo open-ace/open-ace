@@ -27,6 +27,7 @@ the workflow row lie about what protected the run.
 | `execd_token_required` | `server-*.yaml` — a non-empty `EXECD_ACCESS_TOKEN` |
 | `secure_access_required` | the provider always sets `secureAccess: true`; keep it attested so a tier cannot opt out |
 | `ephemeral_storage_enforced` | `sandbox-podtemplate.yaml` volume `sizeLimit`s |
+| — (not an attestation, but required) | `sandbox-podtemplate.yaml` mounts a **writable** volume at `/home/agent`. `HOME` lives outside `/workspace` on purpose: under `/workspace` the repo synthesis's `git add -A` stages the agent's whole home tree — pip wheels, npm, pre-commit environments — into the initial commit. |
 | `inode_quota_enforced` | **nothing here.** Leave it `false` unless the node filesystem carries a real project quota — see below. |
 
 ### `pod_pids_limit` is a kubelet setting, not a manifest
@@ -50,6 +51,20 @@ limit is enforced by kubelet eviction polling with no inode dimension. Neither
 is an inode quota. Turning this on without an actual project quota (XFS pquota
 or equivalent) writes `"enforced": {"inode": true}` into the workflow row for a
 guarantee nothing provides.
+
+## The pod template is per-tier
+
+`sandbox-podtemplate.yaml` hardcodes `runtimeClassName: gvisor`. **The Kata tier
+needs its own copy** with `runtimeClassName: kata-qemu`, referenced from
+`configmap-kata.yaml`. Applying the shipped template for both tiers gives you a
+Kata *server* scheduling gVisor *sandboxes* — the provider's `/proc/version`
+probe catches it and refuses every run, which is the correct outcome but an
+avoidable one.
+
+```bash
+sed 's/runtimeClassName: gvisor/runtimeClassName: kata-qemu/; s/opensandbox-sandbox/opensandbox-sandbox-kata/' \
+  sandbox-podtemplate.yaml > sandbox-podtemplate-kata.yaml
+```
 
 ## Two tiers, because the runtime is server-level
 

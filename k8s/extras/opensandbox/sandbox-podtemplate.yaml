@@ -39,11 +39,13 @@ template:
           capabilities:
             drop: ["ALL"]
         volumeMounts:
-          # HOME must be writable: the repo synthesis step (spec §7.1) runs
-          # `git init` + a commit before any PTY session exists, and git needs
-          # somewhere to write objects and config under a read-only rootfs.
+          # HOME must be writable — the repo synthesis runs `git init` + a
+          # commit and git needs somewhere to write config under a read-only
+          # rootfs — and must live OUTSIDE /workspace, or `git add -A` stages
+          # the whole home tree (pip wheels, npm, pre-commit envs) into the
+          # initial commit.
           - name: home
-            mountPath: /workspace/home
+            mountPath: /home/agent
           - name: workspace
             mountPath: /workspace
           - name: tmp

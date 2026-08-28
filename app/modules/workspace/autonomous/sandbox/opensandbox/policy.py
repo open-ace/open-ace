@@ -62,8 +62,27 @@ _DIGEST_PINNED = re.compile(r"@sha256:[0-9a-f]{64}$")
 
 # The workspace root every mount and every command must stay under.
 _WORKSPACE_ROOT = "/workspace"
+_AGENT_HOME = "/home/agent"
+
+# The container's PID 1. It must create the HOME/TMP/XDG tree :func:`build_env`
+# points the agent at: the pod runs with a read-only rootfs and /workspace is an
+# empty emptyDir, so nothing else brings those directories into existence and
+# pip, npm, pre-commit and Python's own tempfile all fail without them.
+#
+# This is why the create body sets `entrypoint` explicitly rather than relying on
+# the image's own — a script baked into the image would be overridden here.
+_ENTRYPOINT = [
+    "/bin/sh",
+    "-c",
+    f"mkdir -p {_AGENT_HOME}/tmp {_AGENT_HOME}/.cache {_AGENT_HOME}/.config "
+    f"{_AGENT_HOME}/.local/share {_WORKSPACE_ROOT} && exec tail -f /dev/null",
+]
 
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Linux caps a single execve argument at MAX_ARG_STRLEN (128 KiB) regardless of
+# ARG_MAX. Leave headroom for the shell wrapper upstream adds.
+_MAX_COMMAND_BYTES = 120 * 1024
 
 # Upstream's SandboxState -> our SandboxStatus. Unknown states map to ERROR
 # rather than to a benign default: a state we do not recognise is not a state
@@ -341,7 +360,12 @@ def build_env(
     allowlist means a secret added to the control plane later cannot leak by
     default.
     """
-    home = f"{_WORKSPACE_ROOT}/home"
+    # Deliberately OUTSIDE the workspace. With HOME under /workspace the repo
+    # synthesis (`git add -A` at /workspace) stages the agent's entire home tree
+    # into the initial commit, and every later ~/.cache write — pip wheels, npm,
+    # pre-commit environments, easily tens of thousands of files — shows up as a
+    # repo modification and blows through the ChangeSet file/byte limits.
+    home = _AGENT_HOME
     env: dict[str, str] = {
         "HOME": home,
         "TMPDIR": f"{home}/tmp",
@@ -369,13 +393,26 @@ def build_pty_command(command: Sequence[str], *, env: Mapping[str, str]) -> str:
     agent's environment, including the short-lived per-run proxy token, can
     reach the process. ``buildPTYCommand`` runs it as ``bash -c "<command>"``.
 
-    Every name is validated and every value is ``shlex.quote``d. A value
-    containing a newline is refused outright rather than quoted: a newline
-    terminates the ``export`` statement, and no quoting downstream would contain
-    the command it introduces.
+    Every name is validated and every value is ``shlex.quote``d, argv included.
+
+    A value containing a newline is refused rather than quoted. ``shlex.quote``
+    would in fact handle it correctly — bash keeps an embedded newline inside
+    single quotes — so this is a policy choice, not a quoting necessity: no
+    legitimate agent environment value contains a newline, and refusing keeps
+    the assembled command auditable as a single line.
+
+    The assembled string is one ``execve`` argument, capped by Linux
+    ``MAX_ARG_STRLEN`` (128 KiB) regardless of ``ARG_MAX``. Exceeding it fails
+    with a bare ``E2BIG`` that is very hard to diagnose, so it is refused here
+    with a reason instead.
     """
     exports: list[str] = []
     for name, value in env.items():
+        if value is None or str(value) == "":
+            # An empty export is not the same as an unset variable, and some CLI
+            # adapters distinguish them (an empty ANTHROPIC_API_KEY is not "no
+            # key"). Omit rather than assert emptiness.
+            continue
         if not _ENV_NAME.match(str(name)):
             raise SandboxError(f"invalid environment variable name {name!r}")
         text = str(value)
@@ -387,7 +424,13 @@ def build_pty_command(command: Sequence[str], *, env: Mapping[str, str]) -> str:
         exports.append(f"export {name}={shlex.quote(text)}")
     argv = " ".join(shlex.quote(part) for part in command)
     prefix = "; ".join(exports)
-    return f"{prefix}; exec {argv}" if prefix else f"exec {argv}"
+    assembled = f"{prefix}; exec {argv}" if prefix else f"exec {argv}"
+    if len(assembled.encode("utf-8")) > _MAX_COMMAND_BYTES:
+        raise SandboxError(
+            f"assembled PTY command is {len(assembled)} bytes, over the "
+            f"{_MAX_COMMAND_BYTES}-byte limit (Linux MAX_ARG_STRLEN); trim the environment"
+        )
+    return assembled
 
 
 def build_command_request(
@@ -447,7 +490,7 @@ def build_create_request(
     return {
         # image is an ImageSpec object, not a bare string.
         "image": {"uri": spec.runtime.image if spec.runtime else endpoint.default_image},
-        "entrypoint": ["/bin/sh", "-c", "tail -f /dev/null"],
+        "entrypoint": _ENTRYPOINT,
         "resourceLimits": build_resource_limits(policy, cfg, endpoint),
         "networkPolicy": build_network_policy(spec, endpoint),
         "timeout": ttl,

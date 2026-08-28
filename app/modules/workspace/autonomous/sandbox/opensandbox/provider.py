@@ -26,16 +26,20 @@ obvious reading, and getting them wrong is silent rather than loud:
 
 from __future__ import annotations
 
+import itertools
 import shlex
+import time
 import uuid
 from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from app.modules.workspace.autonomous.command_evidence.types import (
     CommandExecutionEvidence,
     TerminalReason,
+    compute_output_digest,
     derive_terminal_reason,
 )
 from app.modules.workspace.autonomous.sandbox.opensandbox import policy as policy_mod
@@ -65,6 +69,12 @@ PROVIDER_NAME = "opensandbox"
 # Where the agent's tree lives inside the sandbox.
 _WORKSPACE = "/workspace"
 
+# How much stderr tail to keep on the evidence row.
+_STDERR_EXCERPT_CHARS = 4000
+
+# Upper bound on remembered destroyed-sandbox ids.
+_DESTROYED_MEMO_LIMIT = 4096
+
 # Self-contained repo synthesis. Runs AFTER upload_workspace, never in the
 # entrypoint: the entrypoint fires during create, before any file has landed,
 # so it would commit an empty tree and leave the snapshot untracked. The
@@ -72,11 +82,20 @@ _WORKSPACE = "/workspace"
 # non-root uid, so there is no writable ~/.gitconfig and no ambient identity —
 # git would fail with "Please tell me who you are" and produce a repo with no
 # HEAD.
+# The producer script and its output both live in /tmp, not /workspace, so
+# neither can appear in the manifest they generate.
+_MANIFEST_SCRIPT_PATH = "/tmp/openace-manifest.py"  # noqa: S108 - ephemeral sandbox
+_MANIFEST_OUTPUT_PATH = "/tmp/openace-manifest.json"  # noqa: S108 - ephemeral sandbox
+
 _GIT_SYNTHESIS = (
     "git init -q && git add -A && "
     "git -c user.name='Open ACE' -c user.email='agent@open-ace.invalid' "
-    "-c commit.gpgsign=false commit -q -m 'snapshot' --allow-empty"
+    "-c commit.gpgsign=false commit -q -m 'snapshot'"
 )
+# No --allow-empty on purpose: if upload_workspace's uploads silently failed,
+# `git add -A` stages nothing and an allow-empty commit would succeed, producing
+# a valid-looking repository with an empty tree — the original failure made
+# undetectable. Without it the commit fails and _run_foreground raises.
 
 
 class OpenSandboxError(SandboxError):
@@ -124,6 +143,9 @@ class _SandboxState:
     started_at: str = ""
     completed_at: str = ""
     stderr: str = ""
+    # Set when the sandbox itself reached Failed without an OOM reason: the run
+    # crashed rather than never having run.
+    crashed: bool = False
 
 
 class OpenSandboxProvider:
@@ -138,6 +160,7 @@ class OpenSandboxProvider:
         project_path: str | None = None,
         event_sink: Callable[[str, dict], None] | None = None,
         connect_factory: Callable[[str, dict], Any] | None = None,
+        destroy_poll_interval: float = 0.5,
     ) -> None:
         self._config = config
         self._api_factory = api_factory
@@ -147,9 +170,13 @@ class OpenSandboxProvider:
         # Injected through to PtyWebSocketTransport so unit tests drive a fake
         # connection instead of opening a real socket.
         self._connect_factory = connect_factory
+        self._destroy_poll_interval = destroy_poll_interval
         self._endpoint = config.endpoint_for(tenant=tenant, project_path=project_path)
         self._api = api_factory(self._endpoint)
         self._state: dict[str, _SandboxState] = {}
+        # Sandbox ids whose teardown we actually observed, so inspect() can
+        # answer DESTROYED without keeping a full state object alive.
+        self._destroyed: set[str] = set()
         # Probes run once per endpoint per process; until they pass, the
         # capabilities they gate are not declared.
         self._probes_passed = False
@@ -199,7 +226,13 @@ class OpenSandboxProvider:
         tree and leave the snapshot as untracked files afterwards.
         """
         self._require_current(handle)
-        source = str(snapshot or handle.spec.project_path)
+        if snapshot is not None and not isinstance(snapshot, str):
+            raise self._refuse(
+                f"upload_workspace expects a worktree path or None, got "
+                f"{type(snapshot).__name__}",
+                "invalid_snapshot",
+            )
+        source = snapshot or handle.spec.project_path
         for entry in workspace_mod.build_snapshot(source):
             self._api.upload_file(
                 handle.sandbox_id,
@@ -207,7 +240,9 @@ class OpenSandboxProvider:
                 entry.data,
                 workspace_mod.snapshot_upload_mode(),
             )
-        self._run_foreground(handle.sandbox_id, _GIT_SYNTHESIS)
+        self._run_foreground(
+            handle.sandbox_id, _GIT_SYNTHESIS, reason_code="workspace_setup_failed"
+        )
         self._emit("workspace_uploaded", {"sandbox_id": handle.sandbox_id})
 
     def exec(
@@ -236,7 +271,15 @@ class OpenSandboxProvider:
             command_id=exec_handle.command_id,
         )
         terminal: SandboxEvent | None = None
-        for event in state.transport or []:
+        # The two branches produce different objects: /command yields SSE dicts,
+        # a PTY turn yields them from the live transport. iter_events() gives
+        # both the same shape so there is one mapping below.
+        source = (
+            state.transport.iter_events()
+            if state.is_pty and state.transport is not None
+            else (state.transport or [])
+        )
+        for event in source:
             kind = event.get("type")
             if kind == "stdout":
                 yield SandboxEvent(
@@ -277,14 +320,29 @@ class OpenSandboxProvider:
         )
 
     def pause(self, exec_handle: ExecHandle) -> None:
+        # Upstream's pause is asynchronous (202, then Pausing -> Paused). Setting
+        # the overlay on acceptance would report PAUSED for a sandbox that is
+        # still Running if the pause later fails.
         self._api.pause_sandbox(exec_handle.sandbox_id)
-        self._state_for(exec_handle.sandbox_id).overlay = SandboxStatus.PAUSED
-        self._emit("sandbox_paused", {"sandbox_id": exec_handle.sandbox_id})
+        if self._confirm_state(exec_handle.sandbox_id, "Paused"):
+            self._state_for(exec_handle.sandbox_id).overlay = SandboxStatus.PAUSED
+            self._emit("sandbox_paused", {"sandbox_id": exec_handle.sandbox_id})
+        else:
+            self._emit(
+                "sandbox_pause_unconfirmed",
+                {"sandbox_id": exec_handle.sandbox_id, "reason_code": "pause_unconfirmed"},
+            )
 
     def resume(self, exec_handle: ExecHandle) -> None:
         self._api.resume_sandbox(exec_handle.sandbox_id)
-        self._state_for(exec_handle.sandbox_id).overlay = None
-        self._emit("sandbox_resumed", {"sandbox_id": exec_handle.sandbox_id})
+        if self._confirm_state(exec_handle.sandbox_id, "Running"):
+            self._state_for(exec_handle.sandbox_id).overlay = None
+            self._emit("sandbox_resumed", {"sandbox_id": exec_handle.sandbox_id})
+        else:
+            self._emit(
+                "sandbox_resume_unconfirmed",
+                {"sandbox_id": exec_handle.sandbox_id, "reason_code": "resume_unconfirmed"},
+            )
 
     def stop(self, exec_handle: ExecHandle) -> None:
         state = self._state_for(exec_handle.sandbox_id)
@@ -301,14 +359,48 @@ class OpenSandboxProvider:
         self._emit("sandbox_stopped", {"sandbox_id": exec_handle.sandbox_id})
 
     def collect_changes(self, handle: SandboxHandle) -> Any:
-        """Return the supervisor's manifest, or ``None`` when there is none."""
+        """Produce and return this sandbox's ChangeSet as ``(entries, deleted)``.
+
+        Uploads the producer, runs it inside the sandbox, and downloads its
+        output. A failure **raises** rather than returning ``None``: an empty
+        result is indistinguishable from "the agent changed nothing", and
+        silently discarding a run's work product is precisely the quiet failure
+        this backend exists to avoid.
+        """
+        self._require_current(handle)
+        self._api.upload_file(
+            handle.sandbox_id, _MANIFEST_SCRIPT_PATH, _manifest_producer_source(), 0o755
+        )
+        self._run_foreground(
+            handle.sandbox_id,
+            f"python3 {_MANIFEST_SCRIPT_PATH}",
+            reason_code="manifest_producer_failed",
+        )
         try:
-            payload = self._api.download_file(
-                handle.sandbox_id, f"{_WORKSPACE}/.openace-manifest.json"
-            )
-        except SandboxError:
-            return None
-        return workspace_mod.parse_manifest(payload)
+            payload = self._api.download_file(handle.sandbox_id, _MANIFEST_OUTPUT_PATH)
+        except SandboxError as exc:
+            raise self._refuse(
+                f"manifest producer left no output at {_MANIFEST_OUTPUT_PATH}: {exc}",
+                "manifest_missing",
+            ) from exc
+        entries, deleted = workspace_mod.parse_manifest(payload)
+        self._emit(
+            "changeset_collected",
+            {"sandbox_id": handle.sandbox_id, "files": len(entries), "deleted": len(deleted)},
+        )
+        return entries, deleted
+
+    def apply_changes(self, handle: SandboxHandle, worktree_path: str) -> None:
+        """Validate a collected ChangeSet and apply it to the trusted worktree."""
+        entries, deleted = self.collect_changes(handle)
+        workspace_mod.apply_changeset(
+            entries,
+            root=worktree_path,
+            limits=self._config.changeset_limits,
+            fetch=lambda path: self._api.download_file(handle.sandbox_id, f"{_WORKSPACE}/{path}"),
+            deleted=deleted,
+        )
+        self._emit("changeset_applied", {"sandbox_id": handle.sandbox_id})
 
     def collect_execution_evidence(self, handle: SandboxHandle) -> list[Any]:
         state = self._state.get(handle.sandbox_id)
@@ -320,17 +412,22 @@ class OpenSandboxProvider:
             signal=signal,
             timed_out=timed_out,
             cancelled=state.terminal_kind == SandboxEventKind.COMMAND_CANCELLED,
-            has_result=exit_code is not None or timed_out or signal is not None,
+            has_result=(exit_code is not None or timed_out or signal is not None or state.crashed),
         )
+        stderr_digest = compute_output_digest(state.stderr) if state.stderr else None
         return [
             CommandExecutionEvidence(
                 command_id=state.command_id,
                 sandbox_id=handle.sandbox_id,
                 sandbox_generation=handle.generation,
-                cwd=handle.spec.project_path,
+                # Where the command actually ran, which is the sandbox tree —
+                # not the host path the spec carries.
+                cwd=_WORKSPACE,
                 exit_code=exit_code,
                 signal=signal,
                 terminal_reason=reason.value,
+                stderr_digest=stderr_digest,
+                output_excerpt=state.stderr[-_STDERR_EXCERPT_CHARS:] if state.stderr else "",
                 started_at=_parse_timestamp(state.started_at),
                 completed_at=_parse_timestamp(state.completed_at),
             )
@@ -347,7 +444,11 @@ class OpenSandboxProvider:
             except Exception:  # noqa: BLE001 - best effort
                 pass
         if confirmed:
-            self._state[sandbox_id] = _SandboxState(overlay=SandboxStatus.DESTROYED)
+            self._destroyed.add(sandbox_id)
+            if len(self._destroyed) > _DESTROYED_MEMO_LIMIT:
+                # Bounded: this provider can outlive thousands of sandboxes in a
+                # long-running scheduler, and an unbounded set is a slow leak.
+                self._destroyed.pop()
             self._emit("sandbox_destroyed", {"sandbox_id": sandbox_id})
         else:
             # Leave the overlay unset so inspect reports the true state, and
@@ -369,6 +470,8 @@ class OpenSandboxProvider:
             pass
 
     def inspect(self, handle: SandboxHandle) -> SandboxStatus:
+        if handle.sandbox_id in self._destroyed:
+            return SandboxStatus.DESTROYED
         state = self._state.get(handle.sandbox_id)
         if state is not None and state.overlay is not None:
             return state.overlay
@@ -499,19 +602,39 @@ class OpenSandboxProvider:
         policy = handle.spec.policy
         body = policy_mod.build_command_request(
             command,
-            cwd=handle.spec.project_path or _WORKSPACE,
+            # NOT handle.spec.project_path — that is the control plane's host
+            # path (agent_runner passes the same value it uses for the local
+            # Popen's cwd). Inside the container the tree is at _WORKSPACE.
+            cwd=_WORKSPACE,
             envs=env,
             wall_clock_limit=getattr(policy, "wall_clock_limit", 0) if policy else 0,
             uid=self._endpoint.exec_uid,
             gid=self._endpoint.exec_gid,
         )
-        events = list(self._api.run_command(handle.sandbox_id, body))
-        command_id = self._command_id_from(events)
+        events = self._api.run_command(handle.sandbox_id, body)
+        # Read only as far as the `init` event, which is the sole source of the
+        # command id. Draining the whole stream here would block exec() until
+        # the command finished — nothing would stream incrementally, and stop()
+        # could never be called because the caller would still be inside exec().
+        command_id, pending = self._read_until_init(events)
         state = self._state_for(handle.sandbox_id)
         state.command_id = command_id
         state.is_pty = False
-        state.transport = events
+        state.transport = pending
         return ExecHandle(sandbox_id=handle.sandbox_id, command_id=command_id)
+
+    @staticmethod
+    def _read_until_init(events: Any) -> tuple[str, Any]:
+        """Consume up to and including ``init``; return its id plus the rest."""
+        iterator = iter(events)
+        seen: list[dict] = []
+        command_id = ""
+        for event in iterator:
+            seen.append(event)
+            if event.get("type") == "init" and event.get("text"):
+                command_id = str(event["text"])
+                break
+        return command_id or uuid.uuid4().hex, itertools.chain(seen, iterator)
 
     def _exec_agent_turn(
         self,
@@ -531,7 +654,7 @@ class OpenSandboxProvider:
         transport = PtyWebSocketTransport(
             self._api,
             sandbox_id=handle.sandbox_id,
-            cwd=handle.spec.project_path or _WORKSPACE,
+            cwd=_WORKSPACE,
             command=pty_command,
             connect_factory=self._connect_factory,
         )
@@ -543,8 +666,13 @@ class OpenSandboxProvider:
         state.transport = transport
         return ExecHandle(sandbox_id=handle.sandbox_id, command_id=command_id)
 
-    def _run_foreground(self, sandbox_id: str, command: str) -> None:
-        list(
+    def _run_foreground(self, sandbox_id: str, command: str, *, reason_code: str) -> str:
+        """Run a control-plane command and FAIL CLOSED on a non-zero exit.
+
+        Discarding the result would let workspace setup fail silently and leave
+        the agent running against a tree that was never prepared.
+        """
+        events = list(
             self._api.run_command(
                 sandbox_id,
                 {
@@ -557,6 +685,15 @@ class OpenSandboxProvider:
                 },
             )
         )
+        stdout = "".join(str(e.get("text") or "") for e in events if e.get("type") == "stdout")
+        for event in events:
+            if event.get("type") != "error":
+                continue
+            detail = (event.get("error") or {}).get("evalue", "")
+            raise self._refuse(
+                f"sandbox setup command failed ({detail}): {command[:80]}", reason_code
+            )
+        return stdout
 
     def _terminal_from_error(self, event: dict, sandbox_id: str, command_id: str) -> SandboxEvent:
         error = event.get("error") or {}
@@ -616,6 +753,19 @@ class OpenSandboxProvider:
         SIGKILL would be recorded as a clean finish.
         """
         timed_out = state.terminal_kind == SandboxEventKind.COMMAND_TIMED_OUT
+        if state.is_pty:
+            # execd never saw this command id (a PTY session is not a command),
+            # so command_status would 404 and the run would always record
+            # MISSING_RESULT. The transport holds the exit frame's code.
+            transport = state.transport
+            break_reason = getattr(transport, "protocol_break_reason", "") if transport else ""
+            if break_reason:
+                return None, None, False  # -> CRASH via has_result below
+            exit_code = getattr(transport, "returncode", None)
+            if exit_code is None:
+                return None, None, timed_out
+            signal = exit_code - 128 if 128 < exit_code < 192 else None
+            return exit_code, signal, timed_out
         status = self._command_status(sandbox_id, state.command_id)
         if status is None:
             # execd unreachable. Ask the control plane what became of the pod.
@@ -624,6 +774,11 @@ class OpenSandboxProvider:
             state_name = str(((record or {}).get("status") or {}).get("state") or "")
             if state_name == "Failed" and ("oom" in reason or "evict" in reason):
                 return None, 9, False
+            if state_name == "Failed":
+                # Crashed, not "never ran". has_result=True with no exit code
+                # is what derive_terminal_reason maps to CRASH.
+                state.crashed = True
+                return None, None, False
             return None, None, timed_out
         state.started_at = str(status.get("started_at") or "")
         state.completed_at = str(status.get("finished_at") or "")
@@ -642,14 +797,20 @@ class OpenSandboxProvider:
                 return str(event["text"])
         return uuid.uuid4().hex
 
-    def _confirm_terminal(self, sandbox_id: str, attempts: int = 5) -> bool:
+    def _confirm_terminal(self, sandbox_id: str, attempts: int = 5) -> bool:  # noqa: D401
         """Poll until the sandbox is observably gone.
 
         Upstream's DELETE returns 204 and the sandbox then goes Stopping →
         Terminated, so a single read would almost always see Stopping and
         report an unconfirmed destroy for a teardown that in fact succeeded.
         """
-        for _ in range(max(attempts, 1)):
+        for attempt in range(max(attempts, 1)):
+            if attempt:
+                # Without a delay the loop completes in milliseconds while a real
+                # pod termination takes seconds, so every destroy would report
+                # unconfirmed and inspect would claim STOPPED for a sandbox that
+                # was in fact deleted.
+                time.sleep(self._destroy_poll_interval)
             try:
                 record = self._api.get_sandbox(sandbox_id)
             except SandboxError:
@@ -657,6 +818,21 @@ class OpenSandboxProvider:
             if record is None:
                 return True  # 404 is a confirmed teardown
             if str((record.get("status") or {}).get("state") or "") == "Terminated":
+                return True
+        return False
+
+    def _confirm_state(self, sandbox_id: str, expected: str, attempts: int = 5) -> bool:
+        """Poll until the sandbox reports *expected*, or give up."""
+        for attempt in range(max(attempts, 1)):
+            if attempt:
+                time.sleep(self._destroy_poll_interval)
+            try:
+                record = self._api.get_sandbox(sandbox_id)
+            except SandboxError:
+                return False
+            if record is None:
+                return False
+            if str((record.get("status") or {}).get("state") or "") == expected:
                 return True
         return False
 
@@ -698,6 +874,11 @@ class OpenSandboxProvider:
             self._event_sink(name, payload)
         except Exception:  # noqa: BLE001 - auditing must never break the run
             pass
+
+
+def _manifest_producer_source() -> bytes:
+    """Read the producer script that runs inside the sandbox."""
+    return (Path(__file__).with_name("manifest_producer.py")).read_bytes()
 
 
 def _parse_timestamp(value: str) -> datetime | None:

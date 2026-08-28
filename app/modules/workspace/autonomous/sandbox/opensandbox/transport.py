@@ -51,9 +51,8 @@ from __future__ import annotations
 
 import json
 import queue
-import struct
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
 from app.modules.workspace.autonomous.sandbox.provider import SandboxError
@@ -97,19 +96,30 @@ class _LineStream:
         self._chunks.put(_SENTINEL)
 
     def readline(self, timeout: float | None = None) -> bytes:
+        """Block until a full line, or until the stream closes.
+
+        ``b""`` means EOF and nothing else. Returning it on a mere timeout would
+        be indistinguishable from a finished stream, and the runner's readers
+        treat ``b""`` as "break out of the loop" — so a multi-second gap between
+        stream-json messages (model latency, a long tool call) would
+        permanently end the reader mid-run.
+
+        ``timeout`` therefore bounds each internal wait, not the call: the loop
+        keeps waiting until data arrives or the producer closes the stream.
+        """
         while True:
             newline = self._buffer.find(b"\n")
             if newline >= 0:
                 line, self._buffer = self._buffer[: newline + 1], self._buffer[newline + 1 :]
                 return line
             if self._closed:
-                # Flush any trailing partial line, then report EOF.
+                # Flush any trailing partial line, then report a real EOF.
                 line, self._buffer = self._buffer, b""
                 return line
             try:
                 chunk = self._chunks.get(timeout=timeout)
             except queue.Empty:
-                return b""
+                continue  # quiet period, NOT end of stream
             if chunk is _SENTINEL:
                 self._closed = True
                 continue
@@ -148,6 +158,8 @@ class PtyWebSocketTransport:
         self._exit_code: int | None = None
         self._finished = threading.Event()
         self._protocol_break: str = ""
+        # Distinguishes a first-attach snapshot from a replay after live output.
+        self._seen_live_frame = False
         self._shutdown_done = False
         self._started = False
 
@@ -196,13 +208,22 @@ class PtyWebSocketTransport:
             self._break_stream(f"stdin write failed: {exc}")
 
     def close_stdin(self) -> None:
-        """No-op: the wire has no half-close.
+        """Signal end-of-input to the shell.
 
-        Closing the socket would tear down the shell, so ``close_stdin`` cannot
-        mean what it does for a pipe. The CLI is ended by its own terminal
-        message or by :meth:`shutdown`.
+        The wire has no half-close — closing the socket would tear down the
+        session — so this sends SIGHUP instead. The runner closes stdin
+        deliberately to make the CLI terminate; leaving this inert would let a
+        CLI reading stream-json from a never-closing pipe block until the
+        wall-clock deadline and be misreported as a timeout.
         """
         self._require_started()
+        conn = self._conn
+        if conn is None or self._finished.is_set():
+            return
+        try:
+            conn.send(json.dumps({"type": "signal", "signal": "SIGHUP"}))
+        except Exception:  # noqa: BLE001 - best effort; shutdown still follows
+            pass
 
     def readline_stdout(self) -> bytes:
         self._require_started()
@@ -250,6 +271,43 @@ class PtyWebSocketTransport:
                 pass
         self._close_conn()
 
+    def iter_events(self) -> Iterator[dict]:
+        """Yield ``{"type": ...}`` events until the shell exits.
+
+        Same shape as the SSE events the ``/command`` branch produces, so
+        ``OpenSandboxProvider.stream`` has one mapping for both branches. The
+        transport itself is deliberately NOT iterable: an object that is
+        sometimes a list of events and sometimes a live connection invites
+        exactly the confusion that made ``stream()`` raise on every agent turn.
+        """
+        self._require_started()
+        while True:
+            if self._finished.is_set():
+                # Drain whatever is still buffered before reporting the exit.
+                for kind, stream in (("stdout", self._stdout), ("stderr", self._stderr)):
+                    while True:
+                        line = stream.readline(timeout=0.0)
+                        if not line:
+                            break
+                        yield {"type": kind, "text": line.decode("utf-8", errors="replace")}
+                break
+            line = self._stdout.readline(timeout=self._read_timeout)
+            if line:
+                yield {"type": "stdout", "text": line.decode("utf-8", errors="replace")}
+                continue
+            if self._finished.is_set():
+                continue
+            break
+        if self._protocol_break:
+            yield {"type": "error", "error": {"ename": "PtyStreamLost", "evalue": PTY_STREAM_LOST}}
+        elif self._exit_code == 0:
+            yield {"type": "execution_complete", "execution_time": 0}
+        else:
+            yield {
+                "type": "error",
+                "error": {"ename": "CommandExecError", "evalue": str(self._exit_code)},
+            }
+
     # ── reader ────────────────────────────────────────────────────────
 
     def _read_loop(self) -> None:
@@ -276,17 +334,24 @@ class PtyWebSocketTransport:
             return False
         kind, payload = frame[0], frame[1:]
         if kind == _STDOUT:
+            self._seen_live_frame = True
             self._stdout.feed(payload)
         elif kind == _STDERR:
+            self._seen_live_frame = True
             self._stderr.feed(payload)
         elif kind == _REPLAY:
-            # Channel-merged and unsplittable. Record the break and DROP the
-            # bytes: interleaving them into stdout would corrupt the
-            # stream-json parser, which is worse than losing them.
-            self._protocol_break = PTY_STREAM_LOST
-            _ = payload[:_REPLAY_HEADER_BYTES] and struct.unpack(
-                ">q", payload[:_REPLAY_HEADER_BYTES]
-            )
+            # Channel-merged and unsplittable, so the bytes are always dropped:
+            # interleaving them into stdout would corrupt the stream-json parser,
+            # which is worse than losing them.
+            #
+            # But a replay frame on the FIRST attach is normal, not a break.
+            # pty_ws.go starts the shell (step 4) before attaching (steps 5-6),
+            # so anything the shell writes in that window — a bash notice, a CLI
+            # banner — comes back as a snapshot on our very first connection.
+            # Only a replay arriving after live frames indicates we missed
+            # output we should have seen.
+            if self._seen_live_frame:
+                self._protocol_break = PTY_STREAM_LOST
         return False
 
     def _handle_text(self, message: str) -> bool:

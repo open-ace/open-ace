@@ -42,6 +42,7 @@ class FakeOpenSandboxApi:
         scripted_timeout: bool = False,
         pod_oom: bool = False,
         runtime_kernel: str = "Linux version 4.4.0 #1 SMP gVisor",
+        stderr_text: str = "",
         egress_enforcement_mode: str = "dns+nft",
         egress_default_action: str = "deny",
         require_endpoint_token: bool = True,
@@ -65,6 +66,11 @@ class FakeOpenSandboxApi:
         self._scripted_timeout = scripted_timeout
         self._pod_oom = pod_oom
         self._runtime_kernel = runtime_kernel
+        self._stderr_text = stderr_text
+        # What the in-sandbox manifest producer will "produce": a {path: bytes}
+        # map, or None to model a producer that left no output.
+        self._manifest: dict[str, bytes] | None = {}
+        self._failed_state: tuple[str, str] | None = None
         self._egress_enforcement_mode = egress_enforcement_mode
         self._egress_default_action = egress_default_action
         self._require_endpoint_token = require_endpoint_token
@@ -93,6 +99,10 @@ class FakeOpenSandboxApi:
         record = self.sandboxes.get(sandbox_id)
         if record is None:
             return None
+        if self._failed_state is not None:
+            reason, message = self._failed_state
+            record["status"] = {"state": "Failed", "reason": reason, "message": message}
+            return record
         if self._pod_oom:
             # The container (and execd with it) was OOM-killed.
             record["status"] = {
@@ -176,6 +186,14 @@ class FakeOpenSandboxApi:
     def run_command(self, sandbox_id: str, body: dict) -> Iterator[dict]:
         self._require_execd(sandbox_id)
         self.command_bodies.append(body)
+        command = str(body.get("command") or "")
+        if "openace-manifest.py" in command:
+            # The producer runs inside the sandbox and writes to /tmp.
+            if self._manifest is not None:
+                payload = scripted_manifest(self._manifest)
+                self.uploaded.setdefault(sandbox_id, {})["/tmp/openace-manifest.json"] = payload
+                for path, data in self._manifest.items():
+                    self.uploaded[sandbox_id][f"/workspace/{path}"] = data
         command_id = f"cmd-{next(self._command_ids)}"
         exit_code = self._scripted_exit_code
         self._commands[command_id] = {
@@ -191,6 +209,8 @@ class FakeOpenSandboxApi:
     def _script_events(self, command_id: str, exit_code: int) -> list[dict]:
         events: list[dict] = [{"type": "init", "text": command_id}]
         events.append({"type": "stdout", "text": "working\n"})
+        if self._stderr_text:
+            events.append({"type": "stderr", "text": self._stderr_text})
         if self._scripted_timeout:
             # No terminal event at all: the stream just ends.
             return events
@@ -260,6 +280,18 @@ class FakeOpenSandboxApi:
         """Simulate the container being OOM-killed after it started running."""
         self._pod_oom = value
 
+    def set_failed(self, reason: str, message: str = "") -> None:
+        """Simulate the sandbox reaching Failed for a NON-OOM reason."""
+        self._failed_state = (reason, message)
+
+    def set_manifest(self, files: dict[str, bytes] | None) -> None:
+        """Script what the in-sandbox manifest producer will emit.
+
+        ``None`` models a producer that ran but left no output, which the
+        provider must treat as an error rather than as "no changes".
+        """
+        self._manifest = files
+
     def proc_version(self, sandbox_id: str) -> str:
         """What ``cat /proc/version`` returns — the runtime-class probe's input."""
         return self._runtime_kernel
@@ -273,8 +305,12 @@ class FakeOpenSandboxApi:
         return record
 
     def _require_execd(self, sandbox_id: str) -> None:
-        """Execd is unreachable when the pod died — which is what an OOM looks like."""
-        if self._pod_oom:
+        """Execd dies with the pod, which is what any Failed state looks like.
+
+        Modelling execd as still reachable on a Failed sandbox would let the
+        provider read a tidy exit code that production never provides.
+        """
+        if self._pod_oom or self._failed_state is not None:
             raise OpenSandboxApiError("connection refused: execd is gone")
         self._require(sandbox_id)
 

@@ -2657,20 +2657,32 @@ class AutonomousAgentRunner:
         # than reaching for the constructor-injected one. _select_sandbox_provider
         # had exactly one caller (inside _run_remote), so routing only that method
         # would have left this path on Legacy forever.
-        provider = self._select_sandbox_provider(
-            "local", tenant_id=tenant_id, project_path=project_path
-        )
-        sandbox_handle = provider.create(
-            SandboxSpec(
-                task_id=session_id,
-                project_path=project_path,
-                cli_tool=cli_tool,
-                system_account=system_account,
-                # #2022 P5: express #2020 HOME/TMP/quota via the spec (not just
-                # enforce ad hoc); Legacy doesn't consume it yet, future providers do.
-                policy=self._load_task_policy(),
+        # A fail-closed refusal (a missing attestation, a probe mismatch) and a
+        # malformed backend config are both SandboxError, not OSError — without
+        # this they would escape _run_local with no AgentTaskResult at all.
+        try:
+            provider = self._select_sandbox_provider(
+                "local", tenant_id=tenant_id, project_path=project_path
             )
-        )
+            sandbox_handle = provider.create(
+                SandboxSpec(
+                    task_id=session_id,
+                    project_path=project_path,
+                    cli_tool=cli_tool,
+                    system_account=system_account,
+                    # #2022 P5: express #2020 HOME/TMP/quota via the spec (not just
+                    # enforce ad hoc); Legacy doesn't consume it yet, future providers do.
+                    policy=self._load_task_policy(),
+                )
+            )
+        except SandboxError as e:
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error=f"Sandbox unavailable: {e}",
+                error_code=getattr(e, "reason_code", "") or "sandbox_unavailable",
+            )
         # Preserve the old log: the wrapped launch argv (sudo/openace-run-as for
         # cross-user, verbatim for same-user). build_launch_argv is pure, so
         # calling it for display is harmless; exec re-derives it internally.
@@ -2702,7 +2714,10 @@ class AutonomousAgentRunner:
             # and task completion leaves an orphan the reconciler can destroy.
             # Local has no external session id → None.
             self._notify_sandbox_created(session_id, sandbox_handle, None)
-        except (OSError, subprocess.SubprocessError) as e:
+        except (OSError, subprocess.SubprocessError, SandboxError) as e:
+            # SandboxError belongs here too: without it an exec failure from a
+            # container backend skips this handler and the sandbox leaks until
+            # its TTL.
             provider.destroy(sandbox_handle)
             return self._stamp_sandbox_attribution(
                 AgentTaskResult(
@@ -3721,27 +3736,45 @@ class AutonomousAgentRunner:
         ``remote_session_manager``. The runner no longer decides isolation
         mechanics inline — it asks the provider.
         """
-        if workspace_type == "remote" and self.remote_session_manager is not None:
-            return RemoteMachineProvider(self.remote_session_manager)
+        if workspace_type == "remote":
+            # Remote never routes through the local isolation gate: doing so
+            # could hand a remote workspace an OpenSandboxProvider.
+            if self.remote_session_manager is not None:
+                return RemoteMachineProvider(self.remote_session_manager)
+            return self._sandbox_provider
         # #2023: local runs route through the isolation gate. A tenant listed in
         # production_required_tenants gets OpenSandbox or an exception — there is
         # no path from "required" to Legacy. With no backend configured the gate
         # returns the injected provider unchanged, so behaviour and constructor
         # injection are both preserved.
-        try:
-            from app.modules.workspace.autonomous.sandbox.isolation_tier import select_provider
-            from app.modules.workspace.autonomous.sandbox.opensandbox.config import (
-                load_backend_config,
-            )
+        from app.modules.workspace.autonomous.sandbox.isolation_tier import select_provider
 
-            return select_provider(
-                tenant=tenant_id,
-                project_path=project_path,
-                config=load_backend_config(),
-                fallback=self._sandbox_provider,
-            )
-        except ImportError:  # pragma: no cover - package always present
-            return self._sandbox_provider
+        return select_provider(
+            tenant=tenant_id,
+            project_path=project_path,
+            config=self._load_backend_config(),
+            fallback=self._sandbox_provider,
+        )
+
+    def _load_backend_config(self):
+        """Load the sandbox backend config, cached on the config file's mtime.
+
+        Re-reading and re-parsing on every task would do three stat calls plus a
+        JSON parse per run for a file that changes at deploy time.
+        """
+        from app.modules.workspace.autonomous.sandbox.opensandbox.config import (
+            load_backend_config,
+            resolve_backend_config_path,
+        )
+
+        path = resolve_backend_config_path()
+        stamp = (path, os.path.getmtime(path)) if path else (None, 0.0)
+        cached = getattr(self, "_backend_config_cache", None)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
+        config = load_backend_config()
+        self._backend_config_cache = (stamp, config)
+        return config
 
     def _run_remote(
         self,
@@ -4594,10 +4627,10 @@ class AutonomousAgentRunner:
             if not session.completed.is_set():
                 session._stopped.wait(2.0)
                 if session.transport is not None:
-                    # Two steps on purpose: poll() reaps the child, and
-                    # returncode is what carries the result. Collapsing them
-                    # into `if poll() is not None` changes the semantics —
-                    # poll() can return None on the call that reaps.
+                    # Two steps on purpose. `returncode` is the non-reaping
+                    # accessor the pause/resume guards share, so the transport
+                    # keeps the two operations separate; this loop is the one
+                    # place that should actively reap, then read the result.
                     session.transport.poll()
                     if session.transport.returncode is not None:
                         session.completed.set()

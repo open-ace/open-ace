@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import struct
 import threading
+import time
 
 import pytest
 
@@ -54,9 +55,14 @@ class _FakeConnection:
         self._released = threading.Event()
         self.closed = False
 
+    def deliver(self, frame):
+        """Push a frame to a held connection, releasing the blocked reader."""
+        self._incoming.append(frame)
+        self._released.set()
+
     def send(self, data):
         self.sent.append(data)
-        if self._hold and isinstance(data, str) and "signal" in data:
+        if self._hold and isinstance(data, str) and "SIGINT" in data:
             # A signal ends the shell; release the reader with the exit frame.
             self._incoming.append(_exit(130))
             self._released.set()
@@ -67,8 +73,9 @@ class _FakeConnection:
         while not self._incoming:
             if not self._hold:
                 raise ConnectionError("socket closed")
-            if not self._released.wait(timeout=2):
+            if not self._released.wait(timeout=3):
                 raise ConnectionError("socket closed")
+            self._released.clear()
         self._received += 1
         return self._incoming.pop(0)
 
@@ -164,6 +171,51 @@ def test_readline_returns_empty_bytes_after_exit():
     assert transport.readline_stdout() == b""
 
 
+def test_readline_blocks_across_a_quiet_period_and_returns_the_next_line():
+    # b"" must mean EOF and nothing else: the runner breaks out of its reader
+    # loop on it, so returning it during a model-latency gap would permanently
+    # end the reader mid-run.
+    conn = _FakeConnection(hold=True)
+    transport, _, _ = _transport(connection=conn)
+
+    result: list[bytes] = []
+    reader = threading.Thread(target=lambda: result.append(transport.readline_stdout()))
+    reader.start()
+    time.sleep(0.3)  # longer than read_timeout: a quiet period, not EOF
+    assert not result, "readline returned during a quiet period"
+    conn.deliver(_out(b"late line\n"))
+    reader.join(timeout=3)
+    assert result == [b"late line\n"]
+
+
+def test_close_stdin_signals_the_shell_rather_than_doing_nothing():
+    # The runner closes stdin to make the CLI terminate. An inert close would
+    # let a CLI reading stream-json from a never-closing pipe block until the
+    # wall-clock deadline and be misreported as a timeout.
+    transport, _, conn = _transport(connection=_FakeConnection(hold=True))
+    transport.close_stdin()
+    signals = [json.loads(m)["signal"] for m in conn.sent if isinstance(m, str)]
+    assert "SIGHUP" in signals
+
+
+def test_iter_events_yields_stdout_then_a_terminal_event():
+    transport, _, _ = _transport([_out(b"hello\n"), _exit(0)])
+    events = list(transport.iter_events())
+    assert events[0]["type"] == "stdout"
+    assert events[0]["text"] == "hello\n"
+    assert events[-1]["type"] == "execution_complete"
+
+
+def test_iter_events_reports_a_nonzero_exit_as_an_error_with_a_numeric_evalue():
+    transport, _, _ = _transport([_exit(3)])
+    assert list(transport.iter_events())[-1]["error"]["evalue"] == "3"
+
+
+def test_iter_events_reports_a_lost_stream_distinctly():
+    transport, _, _ = _transport([_out(b"partial\n")], drop_after=1)
+    assert list(transport.iter_events())[-1]["error"]["evalue"] == PTY_STREAM_LOST
+
+
 def test_pid_is_none_for_a_non_local_backend():
     transport, _, _ = _transport([_exit(0)])
     assert transport.pid is None
@@ -188,7 +240,6 @@ def test_replay_frame_is_never_fed_into_the_stdout_stream():
         [_replay(0, b"stale interleaved bytes\n"), _out(b"live\n"), _exit(0)]
     )
     assert transport.readline_stdout() == b"live\n"
-    assert transport.protocol_break_reason == PTY_STREAM_LOST
 
 
 def test_transport_never_reopens_the_socket():

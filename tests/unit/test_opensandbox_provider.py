@@ -556,3 +556,191 @@ def test_sandbox_is_refused_when_the_sidecar_is_not_enforcing():
     provider, _ = _provider(FakeOpenSandboxApi(egress_enforcement_mode="dns"))
     with pytest.raises(SandboxError):
         provider.create(_spec())
+
+
+# ── the agent-turn path (previously untested end to end) ──────────────
+
+
+class _ScriptedPtyConnection:
+    """A PTY socket that emits scripted frames then an exit frame."""
+
+    def __init__(self, frames=(), exit_code=0):
+        import json as _json
+        import struct as _struct
+
+        self.sent: list = []
+        self._frames = list(frames) + [_json.dumps({"type": "exit", "exit_code": exit_code})]
+        self._struct = _struct
+
+    def send(self, data):
+        self.sent.append(data)
+
+    def recv(self, timeout=None):
+        if not self._frames:
+            raise ConnectionError("closed")
+        return self._frames.pop(0)
+
+    def close(self):
+        pass
+
+
+def _turn(frames=(), exit_code=0, api=None):
+    conn = _ScriptedPtyConnection(frames, exit_code)
+    provider, api = _provider(api, connect_factory=lambda url, headers: conn)
+    handle = provider.create(_spec())
+    exec_handle = provider.exec(
+        handle,
+        command=["claude", "--input-format", "stream-json"],
+        env={},
+        exec_policy=OpenSandboxTurnSpec(prompt="hi", proxy_token="tok"),
+    )
+    return provider, api, handle, exec_handle
+
+
+def test_stream_emits_the_canonical_sequence_for_an_agent_turn():
+    # Every previous stream() test went through the /command branch. The PTY
+    # branch raised TypeError because the transport is not iterable — the whole
+    # agent path was untested.
+    provider, _, _, exec_handle = _turn([b"\x01hello\n"])
+    kinds = [e.kind for e in provider.stream(exec_handle)]
+    assert kinds[0] == SandboxEventKind.PROCESS_STARTED
+    assert SandboxEventKind.COMMAND_STARTED in kinds
+    assert SandboxEventKind.STDOUT_CHUNK in kinds
+    assert SandboxEventKind.COMMAND_COMPLETED in kinds
+    assert kinds[-1] == SandboxEventKind.PROCESS_EXITED
+
+
+def test_agent_turn_evidence_carries_the_exit_frames_code():
+    # A PTY session is not a command, so execd 404s the local uuid and every
+    # turn recorded MISSING_RESULT. The exit frame is the only source of truth.
+    provider, _, handle, exec_handle = _turn(exit_code=0)
+    list(provider.stream(exec_handle))
+    row = provider.collect_execution_evidence(handle)[0]
+    assert row.exit_code == 0
+    assert row.terminal_reason == TerminalReason.COMPLETED.value
+
+
+def test_agent_turn_nonzero_exit_is_recorded_as_a_failure_not_missing_result():
+    provider, _, handle, exec_handle = _turn(exit_code=1)
+    list(provider.stream(exec_handle))
+    row = provider.collect_execution_evidence(handle)[0]
+    assert row.exit_code == 1
+    assert row.terminal_reason == TerminalReason.COMPLETED.value
+
+
+def test_agent_turn_signal_exit_decodes_to_signal():
+    provider, _, handle, exec_handle = _turn(exit_code=137)
+    list(provider.stream(exec_handle))
+    row = provider.collect_execution_evidence(handle)[0]
+    assert (row.signal, row.terminal_reason) == (9, TerminalReason.SIGNAL.value)
+
+
+def test_exec_runs_in_the_sandbox_workspace_not_the_host_path():
+    # spec.project_path is the CONTROL PLANE's path. Inside the container the
+    # tree is at /workspace, so a command started in the host path runs in a
+    # directory that does not exist.
+    provider, api = _provider()
+    handle = provider.create(_spec(project_path="/srv/repos/open-ace"))
+    provider.exec(handle, command=["ls"], env=None, exec_policy=None)
+    assert api.command_bodies[-1]["cwd"] == "/workspace"
+
+
+def test_evidence_cwd_is_where_the_command_actually_ran():
+    provider, _ = _provider()
+    handle = provider.create(_spec(project_path="/srv/repos/open-ace"))
+    exec_handle = provider.exec(handle, command=["ls"], env=None, exec_policy=None)
+    list(provider.stream(exec_handle))
+    assert provider.collect_execution_evidence(handle)[0].cwd == "/workspace"
+
+
+def test_entrypoint_creates_the_directories_build_env_points_at():
+    provider, api = _provider()
+    provider.create(_spec())
+    body = api.created_bodies[0]
+    entrypoint = " ".join(body["entrypoint"])
+    assert "mkdir -p" in entrypoint
+    # Every directory build_env points the agent at must be created, or on a
+    # read-only rootfs with an empty /workspace none of them exist and pip, npm,
+    # pre-commit and tempfile all fail.
+    for key in ("TMPDIR", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"):
+        assert body["env"][key] in entrypoint, key
+
+
+def test_agent_home_is_outside_the_workspace():
+    # With HOME under /workspace, the repo synthesis `git add -A` stages the
+    # agent's entire home tree — pip wheels, npm, pre-commit envs — into the
+    # initial commit.
+    provider, api = _provider()
+    provider.create(_spec())
+    assert not api.created_bodies[0]["env"]["HOME"].startswith("/workspace")
+
+
+def test_non_oom_failed_sandbox_is_a_crash_not_missing_result():
+    # MISSING_RESULT maps to NOT_RUN, a materially more forgiving verdict than
+    # FAILED for a sandbox that crashed.
+    api = FakeOpenSandboxApi()
+    provider, _ = _provider(api)
+    handle = provider.create(_spec())
+    provider.exec(handle, command=["x"], env=None, exec_policy=None)
+    api.set_failed("Error", "scheduling failed")
+    row = provider.collect_execution_evidence(handle)[0]
+    assert row.terminal_reason == TerminalReason.CRASH.value
+
+
+def test_evidence_carries_a_stderr_digest():
+    provider, _ = _provider(FakeOpenSandboxApi(stderr_text="boom\n"))
+    handle = provider.create(_spec())
+    exec_handle = provider.exec(handle, command=["x"], env=None, exec_policy=None)
+    list(provider.stream(exec_handle))
+    row = provider.collect_execution_evidence(handle)[0]
+    assert row.stderr_digest
+
+
+def test_upload_workspace_fails_closed_when_git_synthesis_fails(tmp_path):
+    # A silent failure here leaves the agent running against a tree that was
+    # never prepared — the failure repo synthesis exists to prevent.
+    (tmp_path / "main.py").write_text("x", encoding="utf-8")
+    provider, _ = _provider(FakeOpenSandboxApi(scripted_exit_code=1))
+    handle = provider.create(_spec(project_path=str(tmp_path)))
+    with pytest.raises(SandboxError, match="setup"):
+        provider.upload_workspace(handle, str(tmp_path))
+
+
+def test_upload_workspace_refuses_a_non_path_snapshot():
+    provider, _ = _provider()
+    handle = provider.create(_spec())
+    with pytest.raises(SandboxError):
+        provider.upload_workspace(handle, {"not": "a path"})
+
+
+# ── ChangeSet round trip (previously unreachable) ─────────────────────
+
+
+def test_collect_changes_produces_and_returns_a_manifest(tmp_path):
+    provider, api = _provider()
+    handle = provider.create(_spec())
+    api.set_manifest({"src/main.py": b"print(1)"})
+    entries, deleted = provider.collect_changes(handle)
+    assert [e.path for e in entries] == ["src/main.py"]
+    assert deleted == []
+    # The producer itself is uploaded outside the workspace so it cannot appear
+    # in the manifest it generates.
+    assert any(p.startswith("/tmp/") for p in api.uploaded[handle.sandbox_id])
+
+
+def test_collect_changes_raises_rather_than_reporting_no_changes():
+    # Returning None here would be indistinguishable from "the agent changed
+    # nothing", silently discarding a run's work product.
+    provider, api = _provider()
+    handle = provider.create(_spec())
+    api.set_manifest(None)
+    with pytest.raises(SandboxError, match="manifest"):
+        provider.collect_changes(handle)
+
+
+def test_apply_changes_writes_the_agent_edits_into_the_trusted_worktree(tmp_path):
+    provider, api = _provider()
+    handle = provider.create(_spec())
+    api.set_manifest({"src/main.py": b"print(1)"})
+    provider.apply_changes(handle, str(tmp_path))
+    assert (tmp_path / "src" / "main.py").read_bytes() == b"print(1)"

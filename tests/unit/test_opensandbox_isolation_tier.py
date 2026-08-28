@@ -99,10 +99,24 @@ def test_gate_returns_the_injected_provider_when_no_config_is_present():
     assert _select(tenant="7", config=None, fallback=injected) is injected
 
 
-def test_unrequired_tenant_falls_back_when_the_tier_is_unconfigured():
-    injected = LegacyPosixProvider()
+def test_misconfigured_tier_does_not_silently_downgrade_a_non_required_tenant():
+    # A tier with no endpoint is an operator mistake, and running the whole
+    # deployment on Legacy because of it — with no audit event, since the
+    # provider is never constructed — is exactly the quiet downgrade this gate
+    # exists to prevent. It must be loud for everyone, not only for tenants on
+    # the required list.
     cfg = _cfg(tenant_tiers={"7": "kata"}, production_required_tenants=[])
-    assert _select(tenant="7", config=cfg, fallback=injected) is injected
+    with pytest.raises(SandboxError):
+        _select(tenant="7", config=cfg, fallback=LegacyPosixProvider())
+
+
+def test_a_missing_api_key_is_loud_rather_than_a_silent_legacy_downgrade(monkeypatch):
+    monkeypatch.delenv("OSB_KEY", raising=False)
+    cfg = _cfg(production_required_tenants=[])
+    provider = _select(tenant="7", config=cfg)
+    # Construction succeeds; the key is read on first use and raises there.
+    with pytest.raises(SandboxError):
+        provider._endpoint.api_key()
 
 
 def test_no_tenant_and_no_config_returns_the_fallback():
