@@ -1,9 +1,27 @@
 """
 Test issue 92: Move Logout button above language selector.
 
+#2491 R3a realignment: the baselined failure clicked ``#login-btn`` and waited
+for ``#sidebar``. The React app has neither: the login submit control is
+``button[type="submit"]`` inside ``form.login-form``
+(``frontend/src/components/features/Login.tsx`` lines 289-320) and the manage
+sidebar is ``nav.manage-sidebar``
+(``frontend/src/components/layout/ManageLayout.tsx`` line 361). The sidebar
+footer (``#nav-logout`` / ``#lang-select`` / ``.sidebar-footer``) no longer
+exists: both actions moved into the header — the language switcher is the
+globe dropdown (``frontend/src/components/layout/Header.tsx`` lines 121-164,
+icon ``bi-globe``) and Logout is the last item of the user dropdown
+(Header.tsx lines 191-210, items: email text, Settings, Logout; clicking it
+redirects to /login via ``useAuth.logout``). The relative-position intent is
+re-targeted to that layout: the language control precedes the user menu in
+the header DOM, Logout is reachable inside the user menu, and clicking it
+returns to the login page.
+
 This test verifies that:
-1. The Logout button is positioned above the language selector
-2. Both elements are visible in the sidebar footer
+1. The Logout action is available in the header user menu (last item)
+2. The language selector is available in the same header (globe dropdown)
+3. The language dropdown toggle appears before the user-menu toggle
+4. Clicking Logout navigates back to the login page
 """
 
 import os
@@ -25,8 +43,8 @@ pytestmark = [pytest.mark.regression, pytest.mark.issue(92)]
 
 # Test configuration
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/") + "/"
-USERNAME = os.environ.get("USERNAME", "testuser91")
-PASSWORD = os.environ.get("PASSWORD", "test123")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 VIEWPORT_SIZE = {"width": 1400, "height": 900}
 
@@ -48,7 +66,7 @@ def _skip_if_no_server():
 
 
 def test_logout_position():
-    """Test that Logout button is above language selector."""
+    """Logout and language controls live in the header; Logout ends the session."""
     _skip_if_no_server()
     with sync_playwright() as p:
         # Launch browser
@@ -65,88 +83,83 @@ def test_logout_position():
             page.wait_for_load_state("networkidle")
             time.sleep(1)
 
-            # Step 2: Login
+            # Step 2: Login (submit button inside .login-form)
             print("Step 2: Login...")
             page.fill("#username", USERNAME)
             page.fill("#password", PASSWORD)
-            page.click("#login-btn")
-
-            # Wait for sidebar to appear (indicates successful login)
-            page.wait_for_selector("#sidebar", timeout=15000)
+            page.click(".login-form button[type='submit']")
+            # Login lands on "/" (work shell); the manage header/sidebar this
+            # test verifies lives under /manage — navigate there explicitly.
+            page.wait_for_url(f"{BASE_URL}", timeout=15000)
+            page.goto(f"{BASE_URL}manage/dashboard")
             time.sleep(2)
 
-            expect(page.locator("#sidebar")).to_be_visible()
+            expect(page.locator("nav.manage-sidebar")).to_be_visible()
             test_results.append(("Login", "PASS", "Successfully logged in"))
 
-            # Take screenshot of sidebar
+            # Take screenshot of the manage layout
             screenshot_path = os.path.join(SCREENSHOT_DIR, "sidebar_layout.png")
             page.screenshot(path=screenshot_path)
             print(f"Screenshot saved: {screenshot_path}")
 
-            # Step 3: Verify Logout button exists and is visible
-            print("Step 3: Verify Logout button...")
-            logout_btn = page.locator("#nav-logout")
-            expect(logout_btn).to_be_visible()
-            test_results.append(("Logout Button Visible", "PASS", "Logout button is visible"))
+            # Step 3: The language selector is the header globe dropdown
+            print("Step 3: Verify language selector...")
+            globe = page.locator("header button:has(i.bi-globe)")
+            expect(globe).to_be_visible()
+            globe.click()
+            time.sleep(0.5)
+            lang_items = page.locator(".dropdown-menu.show .dropdown-item")
+            lang_texts = [lang_items.nth(i).inner_text() for i in range(lang_items.count())]
+            if "Chinese" in lang_texts and "English" in lang_texts:
+                test_results.append(("Language Selector Visible", "PASS", f"options: {lang_texts}"))
+            else:
+                test_results.append(("Language Selector Visible", "FAIL", f"options: {lang_texts}"))
+            page.keyboard.press("Escape")
+            time.sleep(0.5)
 
-            # Step 4: Verify language selector exists and is visible
-            print("Step 4: Verify language selector...")
-            lang_select = page.locator("#lang-select")
-            expect(lang_select).to_be_visible()
-            test_results.append(
-                ("Language Selector Visible", "PASS", "Language selector is visible")
-            )
-
-            # Step 5: Verify Logout button is above language selector
-            print("Step 5: Verify Logout button position...")
-            logout_box = logout_btn.bounding_box()
-            lang_box = lang_select.bounding_box()
-
-            if logout_box and lang_box:
-                # Logout button should have smaller Y coordinate (higher on page)
-                if logout_box["y"] < lang_box["y"]:
-                    test_results.append(
-                        (
-                            "Logout Above Language",
-                            "PASS",
-                            f"Logout Y: {logout_box['y']:.0f}, Lang Y: {lang_box['y']:.0f}",
-                        )
-                    )
-                else:
-                    test_results.append(
-                        (
-                            "Logout Above Language",
-                            "FAIL",
-                            f"Logout Y: {logout_box['y']:.0f} should be < Lang Y: {lang_box['y']:.0f}",
-                        )
-                    )
+            # Step 4: The user menu contains the Logout action (last item)
+            print("Step 4: Verify Logout in user menu...")
+            user_toggle = page.locator("header .dropdown-toggle.d-flex")
+            expect(user_toggle).to_be_visible()
+            user_toggle.click()
+            time.sleep(0.5)
+            menu_items = page.locator(".dropdown-menu.show .dropdown-item")
+            item_texts = [menu_items.nth(i).inner_text() for i in range(menu_items.count())]
+            if item_texts and item_texts[-1] == "Logout":
+                test_results.append(("Logout Button Visible", "PASS", f"menu items: {item_texts}"))
             else:
                 test_results.append(
-                    ("Logout Above Language", "FAIL", "Could not get bounding boxes")
+                    ("Logout Button Visible", "FAIL", f"Logout should be last, got: {item_texts}")
                 )
 
-            # Step 6: Verify the order in DOM
-            print("Step 6: Verify DOM order...")
-            # Get the parent container
-            sidebar_footer = page.locator(".sidebar-footer")
-            footer_html = sidebar_footer.inner_html()
-
-            # Check that nav-logout appears before lang-select in the HTML
-            logout_pos = footer_html.find("nav-logout")
-            lang_pos = footer_html.find("lang-select")
-
-            if logout_pos != -1 and lang_pos != -1 and logout_pos < lang_pos:
+            # Step 5: Language control precedes the user menu in the header
+            print("Step 5: Verify control order in header...")
+            lang_box = globe.bounding_box()
+            user_box = user_toggle.bounding_box()
+            if lang_box and user_box and lang_box["x"] < user_box["x"]:
                 test_results.append(
                     (
-                        "DOM Order Correct",
+                        "Language Before User Menu",
                         "PASS",
-                        f"Logout at position {logout_pos}, Lang at position {lang_pos}",
+                        f"lang x: {lang_box['x']:.0f} < user x: {user_box['x']:.0f}",
                     )
                 )
             else:
                 test_results.append(
-                    ("DOM Order Correct", "FAIL", f"Logout at {logout_pos}, Lang at {lang_pos}")
+                    (
+                        "Language Before User Menu",
+                        "FAIL",
+                        f"lang x: {lang_box and lang_box['x']}, user x: {user_box and user_box['x']}",
+                    )
                 )
+
+            # Step 6: Clicking Logout returns to the login page
+            print("Step 6: Click Logout...")
+            logout_item = page.locator(".dropdown-menu.show .dropdown-item", has_text="Logout")
+            logout_item.click()
+            page.wait_for_url("**/login**", timeout=15000)
+            expect(page.locator(".login-form")).to_be_visible()
+            test_results.append(("Logout Navigation", "PASS", f"redirected to {page.url}"))
 
         except (AssertionError, PlaywrightError) as e:
             test_results.append(("Error", "FAIL", str(e)))
