@@ -1698,9 +1698,15 @@ def _destroy_orphan_sandbox(wf: dict, remote_session_manager: Any) -> None:
     calls ``destroy_attribution`` with the persisted ids. The per-call provider
     instance that ran the task (and held its ``sandbox_id`` -> handle map) is
     gone after a restart, so ``destroy(handle)`` cannot resolve the session —
-    only the persisted strings remain. Local/gVisor rows without an external id
-    no-op (the proc died with the server); ``destroy_attribution`` swallows its
-    own failures so a bad row never aborts the sweep.
+    only the persisted strings remain. Rows whose provider owns no external
+    resource (Legacy) no-op, because the proc died with the server;
+    ``destroy_attribution`` swallows its own failures so a bad row never aborts
+    the sweep.
+
+    #2023: ``opensandbox`` rows DO own an external resource. Their sandbox keeps
+    running on the OpenSandbox server after a control-plane restart, so treating
+    them like Legacy would leak every one of them while the workflow row claimed
+    it had been destroyed.
 
     Scope firewall: this acts ONLY on the autonomous workflow row's own
     persisted ``sandbox_remote_session_id`` — it never enumerates or stops
@@ -1711,9 +1717,20 @@ def _destroy_orphan_sandbox(wf: dict, remote_session_manager: Any) -> None:
     remote_sid = raw_sid if isinstance(raw_sid, str) else ""
     raw_sandbox = wf.get("sandbox_id")
     sandbox_id = raw_sandbox if isinstance(raw_sandbox, str) else ""
-    # Only remote_machine has an external resource still alive after a restart;
-    # legacy/gVisor rows without an id have nothing to stop.
-    if provider_name != "remote_machine" or not remote_sid:
+    # Which providers own an external resource that outlives this process?
+    # remote_machine keys off its session id; opensandbox keys off sandbox_id —
+    # its sandbox keeps running (up to its TTL) after a control-plane restart,
+    # and _reconcile_orphan_sandboxes marks the row destroyed regardless, so
+    # without this branch every OpenSandbox sandbox leaks silently while the DB
+    # claims otherwise. Legacy has nothing to stop: the process died with the
+    # server, and the DB reset is the real cleanup.
+    if provider_name == "remote_machine":
+        has_external_resource = bool(remote_sid)
+    elif provider_name == "opensandbox":
+        has_external_resource = bool(sandbox_id)
+    else:
+        has_external_resource = False
+    if not has_external_resource:
         return
     try:
         from app.modules.workspace.autonomous.sandbox.registry import provider_for
@@ -1741,9 +1758,10 @@ def _reconcile_orphan_sandboxes(repo=None, remote_session_manager=None):
     #2022 P6: real resource teardown now. A ``remote_machine`` orphan carries the
     persisted ``sandbox_remote_session_id`` (the manager row id written mid-run
     via ``on_sandbox_created``); the sweep rebuilds a provider via the registry
-    and stops that session by id. Local/gVisor rows have no external id — the
-    proc died with the server, so ``destroy_attribution`` is a no-op and the
-    DB-reset is the real cleanup. Then reset state/generation/sandbox_id/
+    and stops that session by id. An ``opensandbox`` orphan (#2023) carries a
+    live sandbox keyed by ``sandbox_id``. Legacy rows have no external resource
+    — the proc died with the server, so ``destroy_attribution`` is a no-op and
+    the DB-reset is the real cleanup. Then reset state/generation/sandbox_id/
     remote_session_id so a second sweep is a no-op.
     """
     logger.info("Reconciling orphan sandbox state...")
