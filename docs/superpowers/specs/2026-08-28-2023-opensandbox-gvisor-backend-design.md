@@ -2,7 +2,7 @@
 
 Date: 2026-08-28
 Issue: https://github.com/open-ace/open-ace/issues/2023
-Status: approved design (revision 3 — after two independent review rounds)
+Status: approved design (revision 4 — after three independent review rounds)
 
 ## 0. Revision note
 
@@ -398,7 +398,7 @@ caches the result for the process lifetime:
 | Contract | Calls |
 | --- | --- |
 | `create` | `POST /v1/sandboxes` with `image: {uri: <digest-pinned>}`, `entrypoint` (idle supervisor), `resourceLimits` (§6.1), `networkPolicy` (deny + tier allowlist), `timeout` = TTL, `secureAccess: true`, `env` (§6.2), `metadata` = string-valued `{openace.task_id, openace.tenant, openace.generation, openace.provider}` |
-| `upload_workspace` | resolve + validate execd URL (§3.1), then `POST /files/upload` per file |
+| `upload_workspace` | resolve + validate execd URL (§3.1), `POST /files/upload` per file, **then** synthesise the git repository (§7.1) via a foreground `POST /command` — after the files land, never in the entrypoint |
 | `exec` | discriminated by `exec_policy` (the contract's `Any` slot, mirroring `RemoteMachineProvider`'s `RemoteTurnSpec`): an `OpenSandboxTurnSpec` selects the PTY transport (§6.5), anything else runs `POST /command` **foreground** with a `shlex.quote`-joined argv. The provider records the branch per `command_id` so `stream`/`stop` resolve the same way. |
 | `stream` | §6.3 |
 | `pause`/`resume` | `POST /v1/sandboxes/{id}/pause|resume`, then poll `GET /v1/sandboxes/{id}` to `Paused`/`Running` before returning |
@@ -441,11 +441,28 @@ which `buildPTYCommand` runs as `bash -c "<command>"` (§2.4):
 command = "export HOME=… TMPDIR=… OPENACE_PROXY_TOKEN=…; exec <cli> …"
 ```
 
-every value `shlex.quote`d. This keeps the token's lifetime short (it is minted
-per run and never persisted into the sandbox spec) and keeps `create()`
-signature-compatible with the frozen contract. Static, non-secret values
-(`PATH`, `XDG_*`) may additionally ride on `CreateSandboxRequest.env`; the
-per-run secrets never do.
+every value `shlex.quote`d, **and the argv quoted the same way** — the PTY branch
+has the identical injection surface as the `/command` branch, so a branch name or
+path carrying shell metacharacters must not be treated differently there. This
+keeps the token's lifetime short (minted per run, never persisted into the
+sandbox spec) and keeps `create()` signature-compatible with the frozen contract.
+
+Three details:
+
+- **Unset is not empty.** An `export` is emitted only for keys with a non-empty
+  value. `export K=''` sets `K` to the empty string, and some CLI adapters treat
+  an empty `ANTHROPIC_API_KEY` differently from an absent one.
+- **A newline is refused, not quoted.** A newline ends the `export` statement and
+  introduces a command no downstream quoting can contain.
+- **Length is bounded.** The whole string is one `execve` argument, capped by
+  Linux `MAX_ARG_STRLEN` (128 KiB) regardless of `ARG_MAX`. Realistic env plus
+  argv is a few KB, but exceeding it fails with a bare `E2BIG` that is very hard
+  to diagnose, so the provider checks the assembled length and raises a
+  structured `command_too_long` refusal instead.
+
+Static, non-secret values (`PATH`, `HOME`, `TMPDIR`, `XDG_*`) additionally ride
+on `CreateSandboxRequest.env` because §7.1's repo synthesis runs before any PTY
+session exists; the per-run secrets never do.
 
 ### 6.3 `stream` event mapping
 
@@ -513,13 +530,16 @@ verified inventory in `agent_runner.py` is:
 | 2661 | `build_launch_argv(...)` for a log line | guard with `hasattr` — it is a Legacy-only hatch, not on the Protocol, and calling it unconditionally raises `AttributeError` on any other provider **before `exec` runs** |
 | 2676 | `get_process(exec_handle)` | `get_transport(exec_handle)` |
 | 2727 | `_on_pid_registered(session_id, process.pid)` | skip when `transport.pid is None` |
-| 2756, 2761 | `returncode is None` → `wait(timeout=5)` | `poll()` / `wait(timeout=5)` |
+| 2756, 2761 | `completed`-gated `returncode is None` → `wait(timeout=5)` | `poll()` / `wait(timeout=5)`, kept **outside** `shutdown()`. This window exists so the isolated launcher can finish its `.git` integrity check after the CLI's terminal event; folding it into `shutdown()` would start signalling mid-check. |
 | 2764–2770 | `os.killpg(os.getpgid(process.pid), SIGTERM/SIGKILL)` + waits | `transport.shutdown(grace=5.0)` — "signal the process group" has no meaning for a container backend, and `os.getpgid(None)` raises `TypeError`, which none of the surrounding `except` clauses catch |
 | 2801, 2842 | `returncode` → `_classify_isolated_exit_code` / `_classify_sidebar_start_failure` | `poll()` |
+| **4146** | `if session.process is None: return False` in `_write_stdin` | `session.transport is None` — **the single most important row here.** Under §6.5's "`process` populated only by `LocalProcessTransport`" rule this guard is `True` for OpenSandbox, so `_send_sdk_init` and `_send_message` silently write nothing: the agent is launched and never given the prompt. |
 | 4148–4149 | `stdin.write` / `flush` | `write_stdin` |
+| **4179** | `if session.process is None: break` in `_read_stdout` | `session.transport is None` — otherwise the reader breaks on its first iteration and no stream-json is ever parsed |
 | 4181 | `stdout.readline` | `readline_stdout` |
 | 4371–4372 | `stdin.close` | `close_stdin` |
 | 4534–4536 | `poll()` / `returncode` | `poll()` |
+| **4543** | `if session.process is None: break` in `_read_stderr` | `session.transport is None` — otherwise `session.last_stderr` stays empty, which also feeds `_classify_isolated_exit_code` at 2801 |
 | 4545 | `stderr.readline` | `readline_stderr` |
 | 4600, 4628, 4637 | `returncode` / `wait` in `stop_session` | `poll()` / `wait` |
 | 4655, 4683 | `not session.process` guard in `pause_session` / `resume_session` | **reorder** — see below |
@@ -531,12 +551,21 @@ class AgentTransport(Protocol):
     def close_stdin(self) -> None: ...
     def readline_stdout(self) -> bytes: ...   # b"" at EOF
     def readline_stderr(self) -> bytes: ...
-    def poll(self) -> int | None: ...
+    def poll(self) -> int | None: ...         # may reap, like Popen.poll()
     def wait(self, timeout: float | None = None) -> int | None: ...
     def shutdown(self, grace: float = 5.0) -> None: ...   # graceful -> forceful
     @property
     def pid(self) -> int | None: ...          # None for non-local backends
+    @property
+    def returncode(self) -> int | None: ...   # cached, NEVER reaps
 ```
+
+`returncode` and `poll` are deliberately separate. `pause_session` and
+`resume_session` read `Popen.returncode` today — a plain attribute, no syscall.
+Routing their guard through `poll()` would add a `waitpid(WNOHANG)` on a path
+that runs concurrently with `_wait_for_completion`'s own `poll()`, and `Popen`
+is not documented as safe for concurrent reaping from several threads. The
+reordered guards read `returncode`; only the polling loop calls `poll`.
 
 - `LocalProcessTransport` wraps the existing `Popen` one-to-one, with
   `shutdown()` performing exactly today's `SIGTERM` → wait → `SIGKILL`
@@ -593,8 +622,11 @@ the same basis on which `vscode_ws_bridge.py` and `terminal_ws_bridge.py` alread
 drive `websockets.sync.client` in this process.
 
 **Rollout:** the OpenSandbox path is reachable only when a backend config exists
-*and* the tenant/project resolves to a tier. With no config the behaviour is
-byte-identical to today.
+*and* the tenant/project resolves to a tier. With no config the local path is
+**behaviourally equivalent** to today — not byte-identical, since Task 11's edits
+are unconditional. The pin for that equivalence is the pre-existing local-path
+suite, which must pass unchanged: `tests/unit/test_agent_runner_signal_routing.py`
+and everything under `pytest tests/unit -k "agent_runner"`.
 
 ### 6.6 Selection gate, reconciliation and audit
 
@@ -612,6 +644,18 @@ byte-identical to today.
   `_LocalSession.sandbox_provider` and both `_stamp_sandbox_attribution` calls.
   A tenant in `production_required_tenants` gets OpenSandbox **or a raise**;
   there is no code path from "required" to Legacy.
+- **Tenant supply.** `_run_local` has no tenant parameter today (it carries
+  `user_id`, and the runner derives `tenant_id` ad hoc by user lookup elsewhere).
+  It gains an explicit `tenant_id: int | None = None`, threaded from
+  `run_agent_task`, rather than an inline lookup — the value must be the same
+  one the evidence rows are stamped with, and a second derivation path would
+  drift from the first.
+- **Injection is preserved.** `__init__:788` is
+  `sandbox_provider or LegacyPosixProvider()`, and
+  `tests/unit/test_agent_runner_signal_routing.py` injects a provider seven
+  times. With no backend config the gate returns `self._sandbox_provider`
+  **unchanged** — it must not construct a fresh `LegacyPosixProvider()`, which
+  would silently discard the injected one.
 - `autonomous_scheduler._destroy_orphan_sandbox` currently returns before
   `provider_for(...)` for anything that is not `remote_machine`
   (`:1717`), while `_reconcile_orphan_sandboxes` then marks the row
@@ -664,21 +708,55 @@ repo's own `agent_bin/` ships guard wrappers for `git`, `gh`, `pytest`,
 to git. Without a repository, every `git status` / `git diff` / `git log` fails
 and `pre-commit` cannot run.
 
-So the sandbox entrypoint **synthesises a fresh repository**: `git init` plus a
-single commit of the uploaded snapshot, with no remote, no credential helper and
-no link to the trusted common-dir. The agent gets a working `git` whose entire
-history is the snapshot it was given; the control plane still owns the real
-repository, and the ChangeSet remains a file manifest rather than a git diff.
-This is the "credential-free snapshot" branch of the issue's pipeline with the
-one addition the live agent needs. The read-only-clone variant stays out of
-scope (§9) — it would expose real history and remote metadata for no benefit the
-synthesised repo does not already provide.
+So the provider **synthesises a fresh repository** inside the sandbox: `git init`
+plus a single commit of the uploaded snapshot, with no remote, no credential
+helper and no link to the trusted common-dir. The agent gets a working `git`
+whose entire history is the snapshot it was given; the control plane still owns
+the real repository, and the ChangeSet remains a file manifest rather than a git
+diff. The read-only-clone variant stays out of scope (§9) — it would expose real
+history and remote metadata for no benefit this does not already provide.
+
+Three details decide whether this actually works.
+
+**It runs after the upload, not in the entrypoint.** The lifecycle order is
+`create` → `upload_workspace` → `exec`, and the container entrypoint runs during
+`create`. An entrypoint that ran `git init && git add -A && git commit` would
+execute against an empty `/workspace`, commit nothing, and leave the snapshot
+landing afterwards as entirely untracked files — `git diff` empty, `git status`
+showing the whole tree as new, `pre-commit` staging against a `HEAD` that does
+not exist. Synthesis is therefore an explicit step **between**
+`upload_workspace` and the first `exec`, issued as a foreground `POST /command`.
+
+**It carries its own identity.** Refusal 9 makes `readonly_rootfs` and
+`nonroot_enforced` mandatory, so there is no writable `~/.gitconfig` and no
+ambient identity; `git commit` would fail with "Please tell me who you are" and
+silently produce a repo with no `HEAD`. The command is self-contained:
+
+```
+git init -q && git add -A && git -c user.name='Open ACE' -c user.email='agent@open-ace.invalid'     -c commit.gpgsign=false commit -q -m 'snapshot'
+```
+
+**`HOME` must exist and be writable before it runs.** §6.2 delivers the agent
+env through the PTY command string, which does not exist yet at this point. So
+the static, non-secret half — `HOME`, `TMPDIR`, `XDG_*` — additionally rides on
+`CreateSandboxRequest.env`, and §11's pod template mounts a writable volume at
+`HOME` alongside the read-only rootfs. The per-run secrets still travel only via
+the PTY command.
 
 ### 7.2 Manifest and validation
 
 The manifest is JSON: `{"files": [{path, mode, size, sha256, symlink_target}],
-"deleted": [path]}`. The explicit `deleted` list exists because the sandbox has
-no `.git` baseline to diff against, so a deletion is otherwise invisible.
+"deleted": [path]}`. The explicit `deleted` list exists because the control
+plane has no baseline to diff the returned tree against, so a deletion is
+otherwise invisible.
+
+**The supervisor excludes `.git/` from the manifest** — the same exclusion
+`build_snapshot` applies on the way in. §7.1 puts a real repository inside the
+sandbox, so a manifest built by naively walking `/workspace` would carry hundreds
+of `.git/objects/**` entries; every one is rejected as `repo_integrity`, and
+because apply is all-or-nothing, **no ChangeSet would ever be applicable**. The
+validator keeps rejecting `.git` as defence in depth; the supervisor not
+producing it is what makes the pipeline work.
 
 **Apply is additive-plus-explicit-deletes, never a full sync.** It writes the
 `files` entries and removes exactly the `deleted` entries. It never removes a
@@ -804,6 +882,18 @@ otherwise have shipped:
   `test_stopped_overlay_clears_on_next_exec`.
 - `test_agent_can_run_git_in_the_sandbox` — the synthesised repository (§7.1).
 - `test_build_launch_argv_is_not_called_for_a_non_legacy_provider`.
+
+Round three adds:
+
+- `test_agent_receives_the_prompt_over_a_pidless_transport` — drives `_run_local`
+  with a fake pidless transport and asserts the SDK-init and prompt bytes reached
+  `write_stdin` and that a stdout line was parsed. An end-to-end "the agent was
+  actually spoken to" assertion, not a call-site swap assertion.
+- `test_repo_synthesis_runs_after_upload_and_produces_a_commit`.
+- `test_manifest_from_a_sandbox_with_a_synthesised_repo_applies_cleanly`.
+- `test_pause_guard_reads_returncode_without_reaping`.
+- `test_gate_returns_the_injected_provider_when_no_config_is_present`.
+- `test_pty_command_over_the_length_cap_is_refused`.
 
 Plus: `#2022` contract-conformance against `OpenSandboxProvider` with the fake
 modelling upstream's real timing (§6.4); capability-realism probes asserting each

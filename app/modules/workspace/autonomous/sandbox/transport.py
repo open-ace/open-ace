@@ -44,6 +44,9 @@ class AgentTransport(Protocol):
     @property
     def pid(self) -> int | None: ...
 
+    @property
+    def returncode(self) -> int | None: ...
+
 
 class LocalProcessTransport:
     """:class:`AgentTransport` over a local ``subprocess.Popen``.
@@ -69,6 +72,19 @@ class LocalProcessTransport:
     @property
     def pid(self) -> int | None:
         return self._process.pid
+
+    @property
+    def returncode(self) -> int | None:
+        """The last observed exit status, **without** reaping.
+
+        ``pause_session``/``resume_session`` read ``Popen.returncode`` today — a
+        plain attribute, no syscall. Routing that guard through :meth:`poll`
+        would add a ``waitpid(WNOHANG)`` on a path that runs concurrently with
+        ``_wait_for_completion``'s own ``poll()``, and ``Popen`` is not
+        documented as safe for concurrent reaping from several threads. Keeping
+        the two operations separate preserves today's semantics exactly.
+        """
+        return self._process.returncode
 
     def write_stdin(self, data: bytes) -> None:
         stdin = self._process.stdin

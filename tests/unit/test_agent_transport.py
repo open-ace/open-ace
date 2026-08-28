@@ -147,3 +147,20 @@ def test_legacy_provider_get_transport_wraps_its_own_popen():
         assert transport.process is provider.get_process(exec_handle)
     finally:
         provider.destroy(handle)
+
+
+def test_returncode_does_not_reap_while_poll_does():
+    # pause_session/resume_session read the cached attribute today. Routing that
+    # guard through poll() would add a waitpid() on a path that runs
+    # concurrently with _wait_for_completion's own poll(), which Popen does not
+    # document as safe.
+    process = _spawn("import sys\nsys.stdin.readline()")
+    transport = LocalProcessTransport(process)
+    try:
+        assert transport.returncode is None
+        transport.write_stdin(b"go\n")
+        transport.close_stdin()
+        transport.wait(timeout=5)
+        assert transport.returncode == 0
+    finally:
+        transport.shutdown(grace=1.0)

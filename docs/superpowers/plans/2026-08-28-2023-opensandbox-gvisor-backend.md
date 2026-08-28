@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.10+, `requests`, `websockets.sync.client` (both already required), `pytest`.
 
-**Spec:** `docs/superpowers/specs/2026-08-28-2023-opensandbox-gvisor-backend-design.md` (revision 3)
+**Spec:** `docs/superpowers/specs/2026-08-28-2023-opensandbox-gvisor-backend-design.md` (revision 4)
 
 ---
 
@@ -650,7 +650,18 @@ def test_required_production_policy_cannot_fallback_to_legacy():
                       LegacyPosixProvider)
 
 def test_run_local_resolves_its_provider_through_the_isolation_gate():
-def test_local_path_is_byte_identical_when_no_backend_config_present(monkeypatch):
+def test_agent_receives_the_prompt_over_a_pidless_transport():
+    # The end-to-end assertion. A call-site-swap assertion would pass while the
+    # `session.process is None` guards silently swallowed every write and read.
+    assert b'"type":"user"' in b"".join(fake_transport.written)
+    assert parsed_stdout_lines
+
+def test_local_path_is_behaviourally_equivalent_when_no_backend_config_present(monkeypatch):
+    # Not byte-identical — Task 11's edits are unconditional. The pin is the
+    # pre-existing suite: test_agent_runner_signal_routing.py and
+    # `pytest tests/unit -k "agent_runner"` must pass unchanged.
+
+def test_gate_returns_the_injected_provider_when_no_config_is_present():
 def test_run_local_uses_get_transport_not_get_process():
 def test_build_launch_argv_is_not_called_for_a_non_legacy_provider():
     # It is a Legacy-only escape hatch, not on the Protocol, and line 2661
@@ -676,20 +687,39 @@ def test_local_session_process_is_still_populated_for_the_legacy_path():
 
 - [ ] **Step 3: Implement**
 
+0. `_run_local` gains `tenant_id: int | None = None`, threaded from
+   `run_agent_task` — it has no tenant parameter today, and an inline user
+   lookup would be a second derivation path that drifts from the one the
+   evidence rows are stamped with.
 1. `_run_local` resolves a per-run provider via
-   `self._select_sandbox_provider("local", tenant=…, project_path=project_path)`
+   `self._select_sandbox_provider("local", tenant=tenant_id, project_path=project_path)`
    and threads it through all nine `self._sandbox_provider` sites (2645, 2661,
-   2665, 2676, 2682, 2695, 2714, 2779, 2881).
+   2665, 2676, 2682, 2695, 2714, 2779, 2881). With no backend config the gate
+   returns `self._sandbox_provider` **unchanged**, preserving constructor
+   injection — `test_agent_runner_signal_routing.py` injects a provider seven
+   times.
 2. Guard 2661's `build_launch_argv` behind `hasattr`.
 3. Swap 2676 to `get_transport`; store `transport` on `_LocalSession` and keep
    `process` populated only by `LocalProcessTransport`.
-4. Replace the 2756–2770 kill-escalation block with `transport.shutdown(grace=5.0)`.
+4. Replace **2764–2770** (the kill escalation) with `transport.shutdown(grace=5.0)`.
+   4a. **Keep 2756–2761 verbatim** via `transport.poll()` / `transport.wait(timeout=5)`.
+       That `completed`-gated wait is the window the isolated launcher needs to
+       finish its `.git` integrity check after the CLI's terminal event; folding
+       it into `shutdown()` would start signalling mid-check — a behaviour change
+       on the Legacy hot path, in the task whose whole safety argument is that
+       Legacy behaviour does not change.
 5. Convert 2801, 2842, 4534–4536, 4600, 4628, 4637 to `poll()`/`wait()`;
-   4148/4181/4371/4545 to the transport IO methods.
+   4148/4181/4371/4545 to the transport IO methods; **and 4146, 4179, 4543 —
+   the `if session.process is None` guards sitting directly above the IO — to
+   `session.transport is None`.** Missing these is not cosmetic: with
+   `process=None` for OpenSandbox, `_write_stdin` returns `False` so the agent
+   never receives the prompt, and both readers break on their first iteration.
 6. Guard `_on_pid_registered` on `transport.pid is not None`.
 7. Reorder the `pause_session`/`resume_session` guards so the provider branch
-   runs before the `session.process` precondition, and rewrite the docstring
-   invariant. Document that `mark_session_*_by_pid` is inapplicable to a
+   runs before the precondition, and make that precondition
+   `transport.returncode is None` — **not** `poll()`, which would add a
+   `waitpid()` on a path concurrent with `_wait_for_completion`'s own `poll()`.
+   Rewrite the docstring invariant. Document that `mark_session_*_by_pid` is inapplicable to a
    pidless transport and that `pause_session` is the only path there.
 8. Replace the stale `NOTE (#2023)` at 2669 with one naming `AgentTransport`.
 

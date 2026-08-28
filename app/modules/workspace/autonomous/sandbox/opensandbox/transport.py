@@ -177,6 +177,11 @@ class PtyWebSocketTransport:
         # No local process exists. Callers must not pass this to os.getpgid.
         return None
 
+    @property
+    def returncode(self) -> int | None:
+        """Last observed exit status without side effects (mirrors Popen.returncode)."""
+        return self._exit_code
+
     # ── IO ────────────────────────────────────────────────────────────
 
     def write_stdin(self, data: bytes) -> None:
