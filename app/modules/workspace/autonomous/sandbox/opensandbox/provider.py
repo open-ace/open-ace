@@ -161,6 +161,7 @@ class OpenSandboxProvider:
         event_sink: Callable[[str, dict], None] | None = None,
         connect_factory: Callable[[str, dict], Any] | None = None,
         destroy_poll_interval: float = 0.5,
+        generation: int = 1,
     ) -> None:
         self._config = config
         self._api_factory = api_factory
@@ -171,6 +172,12 @@ class OpenSandboxProvider:
         # connection instead of opening a real socket.
         self._connect_factory = connect_factory
         self._destroy_poll_interval = destroy_poll_interval
+        # The workflow's sandbox_generation. Bumped by the reconciler on every
+        # restart sweep, so a handle minted before a bump must not operate on a
+        # sandbox created after it. Comparing against a literal 1 would accept
+        # exactly the stale handles this check exists to reject, and refuse the
+        # legitimate ones.
+        self._generation = generation
         self._endpoint = config.endpoint_for(tenant=tenant, project_path=project_path)
         self._api = api_factory(self._endpoint)
         self._state: dict[str, _SandboxState] = {}
@@ -203,7 +210,7 @@ class OpenSandboxProvider:
         self._state[sandbox_id] = _SandboxState()
         handle = SandboxHandle(
             sandbox_id=sandbox_id,
-            generation=1,
+            generation=self._generation,
             provider_name=PROVIDER_NAME,
             spec=spec,
             initial_status=SandboxStatus.CREATED,
@@ -529,7 +536,7 @@ class OpenSandboxProvider:
                 spec,
                 self._config,
                 self._endpoint,
-                generation=1,
+                generation=self._generation,
                 tenant=self._tenant,
                 # Probes cannot have run yet for the first sandbox, so the
                 # capability gate is evaluated against the post-probe set; a
@@ -851,7 +858,7 @@ class OpenSandboxProvider:
 
     def _require_current(self, handle: SandboxHandle) -> None:
         """Reject a handle minted before a reconciliation bumped the generation."""
-        if not is_current_generation(handle.generation, 1):
+        if not is_current_generation(handle.generation, self._generation):
             raise self._refuse(
                 f"handle generation {handle.generation} is stale for sandbox "
                 f"{handle.sandbox_id}",

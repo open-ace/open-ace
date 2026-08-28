@@ -744,3 +744,25 @@ def test_apply_changes_writes_the_agent_edits_into_the_trusted_worktree(tmp_path
     api.set_manifest({"src/main.py": b"print(1)"})
     provider.apply_changes(handle, str(tmp_path))
     assert (tmp_path / "src" / "main.py").read_bytes() == b"print(1)"
+
+
+def test_a_handle_from_a_previous_generation_is_refused_after_a_bump():
+    # The reconciler bumps sandbox_generation on every restart sweep. Comparing
+    # against a literal 1 accepted exactly the stale handles this check exists
+    # to reject, and refused the legitimate ones.
+    provider, api = _provider()
+    old = provider.create(_spec())
+    assert old.generation == 1
+
+    bumped, _ = _provider(api, generation=2)
+    fresh = bumped.create(_spec())
+    assert fresh.generation == 2
+    with pytest.raises(SandboxError, match="stale"):
+        bumped.exec(old, command=["ls"], env=None, exec_policy=None)
+    bumped.exec(fresh, command=["ls"], env=None, exec_policy=None)
+
+
+def test_generation_is_recorded_in_the_sandbox_metadata():
+    provider, api = _provider(generation=3)
+    provider.create(_spec())
+    assert api.created_bodies[0]["metadata"]["openace.generation"] == "3"

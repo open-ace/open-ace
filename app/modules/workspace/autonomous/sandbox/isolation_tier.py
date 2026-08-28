@@ -46,6 +46,7 @@ def select_provider(
     api_factory: Callable[[Any], Any] | None = None,
     event_sink: Callable[[str, dict], None] | None = None,
     connect_factory: Callable[[str, dict], Any] | None = None,
+    generation: int = 1,
 ) -> SandboxProvider:
     """Return the provider for this task, or raise rather than downgrade.
 
@@ -104,4 +105,5 @@ def select_provider(
         project_path=project_path,
         event_sink=event_sink,
         connect_factory=connect_factory,
+        generation=generation,
     )

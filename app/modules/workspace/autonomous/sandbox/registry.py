@@ -53,6 +53,7 @@ def provider_for(
     api_factory: Callable[[Any], Any] | None = None,
     tenant: str | None = None,
     project_path: str | None = None,
+    generation: int = 1,
 ) -> SandboxProvider:
     """Rebuild a SandboxProvider from its persisted name (#2022 P6).
 
@@ -80,6 +81,7 @@ def provider_for(
             api_factory=api_factory,
             tenant=tenant,
             project_path=project_path,
+            generation=generation,
         )
     if normalized == "remote_machine":
         if remote_session_manager is None:
@@ -96,6 +98,7 @@ def _build_opensandbox(
     api_factory: Callable[[Any], Any] | None,
     tenant: str | None,
     project_path: str | None,
+    generation: int,
 ) -> SandboxProvider:
     from app.modules.workspace.autonomous.sandbox.opensandbox.config import load_backend_config
     from app.modules.workspace.autonomous.sandbox.opensandbox.provider import OpenSandboxProvider
@@ -113,4 +116,5 @@ def _build_opensandbox(
         tenant=tenant,
         project_path=project_path,
         event_sink=event_sink,
+        generation=generation,
     )
