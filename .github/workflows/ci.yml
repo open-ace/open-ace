@@ -426,6 +426,10 @@ jobs:
         with:
           context: .
           push: false
+          # Issue #3169: load the image into the local Docker engine — the
+          # verify/size steps below run `docker run`/`docker images` against
+          # this tag in the same job and never push to a registry.
+          load: true
           tags: open-ace:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
