@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.10+, `requests`, `websockets.sync.client` (both already required), `pytest`.
 
-**Spec:** `docs/superpowers/specs/2026-08-28-2023-opensandbox-gvisor-backend-design.md` (revision 2)
+**Spec:** `docs/superpowers/specs/2026-08-28-2023-opensandbox-gvisor-backend-design.md` (revision 3)
 
 ---
 
@@ -231,8 +231,22 @@ def test_memory_bytes_and_cgroup_cpu_max_convert_to_k8s_quantities():
     assert build_resource_limits(AgentTaskPolicy(cpu_max="200000 100000"), ...)["cpu"] == "2000m"
 def test_policy_wins_over_resource_defaults_and_defaults_fill_only_zeros():
 def test_pids_max_above_attested_pod_limit_is_refused():
+def test_zero_wall_clock_falls_back_to_configured_ttl_not_60s():
+    # wall_clock_limit defaults to 0 and read_agent_task_policy returns
+    # all-defaults with no agent-launcher.conf — the common case. A naive
+    # max(wall_clock_limit, 60) would kill every agent run at one minute.
+    assert build_create_request(...)["timeout"] == 3600
+def test_zero_wall_clock_omits_command_timeout_rather_than_sending_zero():
+    # Upstream: "If omitted, the server will not enforce any timeout." Sending
+    # 0 is not the same as omitting the key.
+    assert "timeout" not in build_command_request([...], wall_clock_limit=0, ...)
 def test_wall_clock_maps_to_sandbox_ttl_and_command_timeout_ms():
 def test_ttl_never_below_upstream_minimum_60():
+def test_tier_without_pod_hardening_attestations_is_refused():
+    # Nothing in implied_required_capabilities requires FILESYSTEM_ACL,
+    # CPU_MEM_PIDS_TIME_QUOTA or CREDENTIAL_TOKEN_BINDING, so without an
+    # explicit refusal a tier attesting no pod hardening would decline to
+    # declare them and then run the agent as root anyway.
 
 def test_env_built_from_allowlist_never_inherits_process_env(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "ghp_x"); monkeypatch.setenv("GH_TOKEN", "ghp_x")
@@ -405,23 +419,44 @@ that genuinely need the raw object.
 ```python
 def test_stdin_is_framed_with_0x00_prefix():
 def test_stdout_and_stderr_frames_demultiplex_into_separate_streams():
-    # 0x01 -> stdout, 0x02 -> stderr (pipe mode only)
 def test_partial_frames_accumulate_into_whole_lines():
 def test_exit_frame_resolves_poll_and_wait_with_its_exit_code():
 def test_pid_is_none_for_a_non_local_backend():
-def test_reconnect_replays_from_output_offset_without_losing_output():
-def test_signal_is_sent_as_a_json_text_frame():
-def test_wait_times_out_and_returns_none_when_the_shell_never_exits():
+def test_shutdown_sends_sigint_then_deletes_the_pty_session():
+
+def test_pty_transport_refuses_to_reconnect_to_a_stopped_session():
+    # pty_ws.go:139-152 starts the shell whenever !session.IsRunning(), and
+    # IsRunning() is pid != 0 which is cleared on exit. Re-attaching would
+    # launch a SECOND agent process, not resume the first.
+    with pytest.raises(SandboxError, match="pty_stream_lost"):
+        transport.wait(timeout=1)
+    assert connect_factory.call_count == 1
+
+def test_replay_frame_0x03_is_never_fed_into_the_stdout_stream():
+    # 0x03 is [8-byte BE offset][raw bytes] from a SINGLE replay buffer shared
+    # by both streams — it cannot be re-split, and feeding an interleaved blob
+    # into the stream-json parser corrupts it.
+
+def test_dropped_socket_without_exit_frame_resolves_to_crash_not_hang():
+    # GET /pty/{id} carries no exit code, so a missed exit frame is
+    # unrecoverable. wait() must honour its deadline and report CRASH.
+    assert transport.wait(timeout=0.1) is None
+    assert transport.terminal_reason_hint == "pty_stream_lost"
+
+def test_wait_always_honours_its_deadline():
 ```
 
 - [ ] **Step 2: Run to verify failure**
-- [ ] **Step 3: Implement `PtyWebSocketTransport`** per spec §2.4/§6.5, using
-`websockets.sync.client.connect` (already used in
-`app/modules/workspace/vscode_ws_bridge.py`). Reader thread demultiplexes into
-two line-buffered queues; `?since=<output_offset>` on reconnect.
+- [ ] **Step 3: Implement `PtyWebSocketTransport`** per spec §2.4/§6.5.
+Constructor takes `connect_factory` so unit tests drive a fake connection
+object — a real socket would violate `tests/unit/`'s no-network contract and
+belong in `tests/integration/`. A reader thread demultiplexes `0x01`/`0x02`
+into two line-buffered queues; `0x03` is recorded as a protocol break, never
+merged into stdout. A dropped socket is terminal: no reconnect, no
+`takeover=1`, and a 409 is an error rather than a retry.
 
 - [ ] **Step 4: Run tests** → PASS
-- [ ] **Step 5: Commit** — `feat(#2023): execd PTY pipe-mode transport`
+- [ ] **Step 5: Commit** — `feat(#2023): execd PTY pipe-mode transport, fail-closed on drop`
 
 ---
 
@@ -515,15 +550,20 @@ dicts keyed by `sandbox_id` and is **popped** on destroy.
 def test_registry_resolves_opensandbox_name():
 def test_registry_raises_when_backend_config_absent():
 def test_registry_still_rejects_unknown_provider_names():
-def test_provider_for_accepts_an_optional_event_sink_without_breaking_callers():
+def test_provider_for_accepts_optional_event_sink_and_api_factory():
+    # Keyword-only + optional keeps all four test_sandbox_registry.py cases green.
 def test_reconcile_orphans_paginates_past_the_first_page():
 def test_reconcile_orphans_never_raises_on_a_bad_row():
 ```
 
 - [ ] **Step 2: Run to verify failure**
 - [ ] **Step 3: Implement.** `registry.provider_for` gains an `"opensandbox"`
-branch (loads config, raises when absent) and a keyword-only optional
-`event_sink`; the final unknown-name raise is untouched.
+branch (loads config, raises when absent) and **two** keyword-only optional
+parameters, `event_sink` and `api_factory`; the final unknown-name raise is
+untouched. `api_factory` is required, not decoration: `_destroy_orphan_sandbox`
+builds its provider through `provider_for`, so without it Task 10's test has no
+seam to inject a fake API and would construct a real HTTP client against
+whatever `base_url` the config names.
 `isolation_tier.select_provider(*, tenant, project_path, config, requires_production_isolation)`
 returns OpenSandbox or raises; it returns Legacy only when production isolation
 is not required.
@@ -545,6 +585,11 @@ def test_node_and_control_plane_restart_reconcile_sandbox():
     # while production leaks: _destroy_orphan_sandbox returns early for every
     # provider except remote_machine, and _reconcile_orphan_sandboxes then marks
     # the row destroyed regardless.
+    # Point OPENACE_SANDBOX_BACKENDS at a tmp_path config and monkeypatch the
+    # api_factory Task 9 threaded through provider_for, so the fake API is the
+    # one the provider actually uses.
+    monkeypatch.setenv("OPENACE_SANDBOX_BACKENDS", str(config_path))
+    monkeypatch.setattr(registry, "_default_api_factory", lambda endpoint: api)
     wf = {"workflow_id": "w1", "sandbox_provider": "opensandbox",
           "sandbox_id": "sb-1", "sandbox_remote_session_id": None}
     _destroy_orphan_sandbox(wf, remote_session_manager=None)
@@ -586,37 +631,67 @@ nothing to stop" — that assumption is what this task overturns.
 
 **Files:** Modify `app/modules/workspace/autonomous/agent_runner.py`; Test `tests/unit/test_opensandbox_wiring.py`
 
+This is the highest-risk task in the plan: it touches the hot path of every
+local autonomous workflow. Task 6 landed `LocalProcessTransport` as a
+pass-through precisely so this task can be verified by "the existing local
+tests still pass".
+
 - [ ] **Step 1: Write the failing tests**
 
 ```python
 def test_required_production_policy_cannot_fallback_to_legacy():
-    # Asserted through the documented single branch point, not a standalone helper.
-    runner = AgentRunner(...)
+    # Drives _run_local itself. _select_sandbox_provider has exactly ONE caller
+    # (line 3724, inside _run_remote); _run_local uses self._sandbox_provider
+    # directly at nine sites. Testing the selector in isolation would pass green
+    # while _run_local still ran Legacy.
     with pytest.raises(SandboxError):
-        runner._select_sandbox_provider("local", tenant="acme")   # required, unconfigured
-    assert isinstance(runner._select_sandbox_provider("local", tenant="dev"), LegacyPosixProvider)
+        runner._run_local(..., tenant_id=42)     # in production_required_tenants
+    assert isinstance(_provider_used_by_run_local(runner, tenant_id=7),
+                      LegacyPosixProvider)
 
+def test_run_local_resolves_its_provider_through_the_isolation_gate():
 def test_local_path_is_byte_identical_when_no_backend_config_present(monkeypatch):
-    # The rollout guarantee: absent config == today's behaviour.
-
 def test_run_local_uses_get_transport_not_get_process():
+def test_build_launch_argv_is_not_called_for_a_non_legacy_provider():
+    # It is a Legacy-only escape hatch, not on the Protocol, and line 2661
+    # calls it unconditionally just to build a log line -> AttributeError
+    # BEFORE exec even runs.
+def test_teardown_does_not_dereference_pid_for_a_pidless_transport():
+    # 2764-2770 does os.killpg(os.getpgid(process.pid), ...). os.getpgid(None)
+    # raises TypeError, which neither surrounding except clause catches, so
+    # every OpenSandbox run would crash at teardown.
 def test_pid_registration_is_skipped_when_transport_pid_is_none():
+def test_pause_and_resume_reach_the_provider_for_a_pidless_transport():
+    # pause_session/resume_session begin with `not session.process` BEFORE the
+    # provider branch, so pause/resume would be permanently dead for this
+    # backend while AC 2 requires them.
 def test_cancellation_still_routes_through_the_provider_for_a_pidless_transport():
+def test_local_session_process_is_still_populated_for_the_legacy_path():
+    # One source of truth: transport is always set; process only by
+    # LocalProcessTransport. Nulling it universally would change Legacy
+    # behaviour at a dozen sites.
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
-- [ ] **Step 3: Implement.** In `_run_local`, replace
-`process = self._sandbox_provider.get_process(exec_handle)` with
-`transport = provider.get_transport(exec_handle)`, store it on `_LocalSession`,
-and update the seven `session.process.*` call sites
-(`:4148`, `:4181`, `:4371`, `:4534`, `:4545`, `:4600`, `:4628`) to the transport
-methods. Guard `_on_pid_registered` on `transport.pid is not None`. Route
-`_select_sandbox_provider` through `isolation_tier.select_provider`, preserving
-the existing remote branch.
+- [ ] **Step 3: Implement**
 
-Delete the now-stale `NOTE (#2023)` comment at `:2669` describing the seam as
-deferred, and replace it with one naming `AgentTransport` as the seam.
+1. `_run_local` resolves a per-run provider via
+   `self._select_sandbox_provider("local", tenant=…, project_path=project_path)`
+   and threads it through all nine `self._sandbox_provider` sites (2645, 2661,
+   2665, 2676, 2682, 2695, 2714, 2779, 2881).
+2. Guard 2661's `build_launch_argv` behind `hasattr`.
+3. Swap 2676 to `get_transport`; store `transport` on `_LocalSession` and keep
+   `process` populated only by `LocalProcessTransport`.
+4. Replace the 2756–2770 kill-escalation block with `transport.shutdown(grace=5.0)`.
+5. Convert 2801, 2842, 4534–4536, 4600, 4628, 4637 to `poll()`/`wait()`;
+   4148/4181/4371/4545 to the transport IO methods.
+6. Guard `_on_pid_registered` on `transport.pid is not None`.
+7. Reorder the `pause_session`/`resume_session` guards so the provider branch
+   runs before the `session.process` precondition, and rewrite the docstring
+   invariant. Document that `mark_session_*_by_pid` is inapplicable to a
+   pidless transport and that `pause_session` is the only path there.
+8. Replace the stale `NOTE (#2023)` at 2669 with one naming `AgentTransport`.
 
 - [ ] **Step 4: Run the full sandbox + runner suites**
 
@@ -630,21 +705,34 @@ untouched by the transport swap.
 
 ### Task 12: Kubernetes manifests
 
-**Files:** Create `k8s/extras/opensandbox/{runtimeclasses,server-gvisor,server-kata,configmap-gvisor,configmap-kata,sandbox-podtemplate,networkpolicy,rbac,image-policy,kustomization}.yaml`, `README.md`
+**Files:** Create `k8s/extras/opensandbox/{runtimeclasses,server-gvisor,server-kata,configmap-gvisor,configmap-kata,sandbox-podtemplate,networkpolicy,rbac,image-policy,kustomization}.yaml`, `README.md`, and `k8s/extras/opensandbox/sandbox-entrypoint.sh`
 
-- [ ] **Step 1: Write the manifests** per spec §11. The sandbox pod template must
+- [ ] **Step 1: Write `sandbox-entrypoint.sh`**
+
+Synthesises the repository the live agent needs (spec §7.1): `git init` in the
+workspace, a local-only `user.name`/`user.email`, and one commit of the uploaded
+snapshot. No remote, no credential helper, no link to the trusted common-dir.
+Without it every `git status`/`git diff`/`git log` the agent runs fails and
+`pre-commit` cannot run — the repo ships guard wrappers for `git`/`gh` in
+`agent_bin/` precisely because the agent shells out to them.
+
+Add a test in `tests/unit/test_opensandbox_provider.py`:
+`test_agent_can_run_git_in_the_sandbox` — the fake runs the entrypoint's git
+init and a subsequent `git status` succeeds.
+
+- [ ] **Step 2: Write the manifests** per spec §11. The sandbox pod template must
 carry exactly the properties §4's attestations promise (`runAsNonRoot`,
 `readOnlyRootFilesystem`, dropped capabilities, `allowPrivilegeEscalation: false`,
 seccomp `RuntimeDefault`, dedicated `ServiceAccount`), and the README must state
 that each attestation in `sandbox-backends.json` is only true if the
 corresponding manifest is applied.
 
-- [ ] **Step 2: Validate**
+- [ ] **Step 3: Validate**
 
 Run: `python -c "import yaml,glob; [list(yaml.safe_load_all(open(f))) for f in glob.glob('k8s/extras/opensandbox/*.yaml')]; print('ok')"`
 Expected: `ok`
 
-- [ ] **Step 3: Commit** — `feat(#2023): Kubernetes manifests for gVisor and Kata tiers`
+- [ ] **Step 4: Commit** — `feat(#2023): Kubernetes manifests and sandbox entrypoint for gVisor and Kata tiers`
 
 ---
 

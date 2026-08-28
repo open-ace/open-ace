@@ -2,7 +2,7 @@
 
 Date: 2026-08-28
 Issue: https://github.com/open-ace/open-ace/issues/2023
-Status: approved design (revision 2 — after independent review)
+Status: approved design (revision 3 — after two independent review rounds)
 
 ## 0. Revision note
 
@@ -102,22 +102,38 @@ GET    /pty/:sessionId/ws    -> WebSocket
 `ws://<execd>/pty/<session_id>/ws?pty=0`. Binary frames: the holder **sends
 stdin as `0x00` + raw bytes** and receives `0x01` + bytes (stdout) or `0x02` +
 bytes (stderr — pipe mode only). On shell exit the server sends a JSON `exit`
-frame carrying `exit_code`, then closes. `?since=<offset>` replays from a byte
-offset (`output_offset` from `GET /pty/:id`) after a reconnect; `?takeover=1`
-evicts the current holder. JSON text frames carry `resize`, `signal`
-(e.g. `{"type":"signal","signal":"SIGINT"}`) and `ping`.
+frame carrying `exit_code`, then closes. JSON text frames carry `resize`,
+`signal` (e.g. `{"type":"signal","signal":"SIGINT"}`) and `ping`. A second
+read/write connection gets HTTP 409 before the upgrade unless `?takeover=1`.
 
-Two constraints that shape the design:
+Four further facts, each of which changes the design:
 
 - `CreatePTYSessionRequest` is **only** `{cwd, command}` — no `envs`, no
-  `uid`/`gid`.
+  `uid`/`gid`. But `command` is real: `buildPTYCommand` (`pty_session.go:242-248`)
+  runs `bash -c "<command>"` when it is non-empty. That is the env-delivery
+  mechanism (§6.2).
 - `pty_session.go:265,333` sets `cmd.Env = os.Environ()` with **no** extra-env
   merge, and pipe mode's `SysProcAttr` is `{Setpgid: true}` with **no
-  `Credential`**.
+  `Credential`** — so the agent's uid is whatever the container runs as,
+  settable only by the pod `securityContext` / image `USER`.
+- **Attaching starts a shell.** `pty_ws.go:139-152`: `if !session.IsRunning() {
+  session.StartPipe() }`, and `IsRunning()` is `s.pid != 0` with `s.pid = 0` set
+  on exit. Re-opening the socket on a finished session therefore **launches a
+  second agent process**, not a resumed view of the first.
+- **Replay is a third frame kind, and it is channel-merged.** `model/pty_ws.go`
+  defines `BinReplay = 0x03` as `[8-byte BE offset][raw bytes]`, and
+  `pty_ws.go:236-239` sends it to the *holder*, not only to viewers. It comes
+  from a single `replayBuffer` shared by both streams — `PTY.md`: "In pipe mode
+  this is a combined stream without separate stdout/stderr channels." There is
+  no way to re-split it.
+- `PTYSessionStatusResponse` is `{session_id, running, output_offset}` — **no
+  exit code**. `session.ExitCode()` exists in Go but is not exposed over HTTP,
+  so an exit code missed on the socket is unrecoverable.
 
-Therefore the agent's environment must be set once at **sandbox-create** time via
-`CreateSandboxRequest.env`, and the agent's uid is whatever the container runs
-as — settable only by the pod `securityContext` / image `USER`, never by us.
+Together these make PTY **reconnect unusable** for a stream-json session: a
+reconnect either relaunches the agent (session finished) or delivers an
+interleaved blob that would corrupt the JSON stream (session live). §6.5 fails
+closed on a drop instead.
 
 ### 2.5 Secure runtime is server-level
 
@@ -215,10 +231,28 @@ First existing of `OPENACE_SANDBOX_BACKENDS` → `/etc/openace/sandbox-backends.
       },
       "pool": {"pool_ref": "", "egress_preapplied": false,
                "recycle_delete": false, "image_digest": ""}
+    },
+    "kata": {
+      "base_url": "http://opensandbox-kata.open-ace.svc.cluster.local:8080/v1",
+      "api_key_env": "OPENSANDBOX_API_KEY_KATA",
+      "runtime_class": "kata-qemu",
+      "default_image": "ghcr.io/open-ace/agent@sha256:0f3c...e91a",
+      "execd_port": 44772,
+      "execd_endpoint_host_allowlist": ["*.open-ace.svc.cluster.local"],
+      "egress_allow_hosts": ["api.anthropic.com"],
+      "attestations": {
+        "egress_enforced": true, "egress_mode_dns_nft": true,
+        "metadata_cidr_blocked": true, "execd_token_required": true,
+        "secure_access_required": true, "nonroot_enforced": true,
+        "readonly_rootfs": true, "seccomp_runtime_default": true,
+        "dedicated_service_account": true, "pod_pids_limit": 512,
+        "ephemeral_storage_enforced": true, "inode_quota_enforced": false
+      }
     }
   },
-  "tenant_tiers": {"acme-corp": "kata"},
+  "tenant_tiers": {"42": "kata"},
   "project_tiers": {},
+  "production_required_tenants": ["42"],
   "image_allowlist": ["ghcr.io/open-ace/agent@sha256:0f3c...e91a"],
   "image_signer_identity": "https://github.com/open-ace/open-ace/.github/workflows/release.yml@refs/heads/main",
   "resource_defaults": {"cpu": "2", "memory": "4Gi", "ephemeral-storage": "8Gi"},
@@ -246,7 +280,15 @@ attestation degrades silently.
 
 ### 4.2 Resolution and fail-closed rules
 
-- Tier: `project_tiers` → `tenant_tiers` → `default_tier`.
+- Tier: `project_tiers` (by project path) → `tenant_tiers` → `default_tier`.
+- **Tenant keys are the decimal string of the integer `tenant_id`** this
+  repository actually carries (`CommandExecutionEvidence.tenant_id: int`), not a
+  slug. There is no name→id mapping anywhere in the codebase, so inventing one
+  here would have produced a key nothing could supply.
+- `production_required_tenants` lists the tenants for which Legacy is not an
+  acceptable answer. It is the sole input to
+  `isolation_tier.requires_production_isolation`; without it that predicate had
+  no defined source and acceptance criterion 12 rested on nothing.
 - A tier with no configured endpoint raises `SandboxConfigError`; it never falls
   back to another tier.
 - Malformed config raises rather than defaulting.
@@ -277,10 +319,10 @@ layer, which is what the attestations describe.
 | `NAMESPACE_ISOLATION` | always, **and** the §5.3 runtime probe passes | separate container + the server's gVisor/Kata runtime class |
 | `NETWORK_EGRESS_POLICY` | `egress_enforced` ∧ `egress_mode_dns_nft` ∧ `metadata_cidr_blocked`, **and** the §5.3 policy probe passes | egress sidecar `deny_all` in `dns+nft` mode + cluster `NetworkPolicy` |
 | `PRIVATE_HOME_TMP_XDG` | always | one fresh container per sandbox; `HOME`/`TMPDIR`/`XDG_*` set via `CreateSandboxRequest.env` |
-| `FILESYSTEM_ACL` | `nonroot_enforced` ∧ `readonly_rootfs` ∧ `dedicated_service_account` | pod `securityContext` (`runAsNonRoot`, `readOnlyRootFilesystem`, dropped caps, `allowPrivilegeEscalation: false`) — **not** the `uid` we pass |
+| `FILESYSTEM_ACL` | `nonroot_enforced` ∧ `readonly_rootfs` ∧ `seccomp_runtime_default` ∧ `dedicated_service_account` | pod `securityContext` (`runAsNonRoot`, `readOnlyRootFilesystem`, seccomp `RuntimeDefault`, dropped caps, `allowPrivilegeEscalation: false`) — **not** the `uid` we pass |
 | `CPU_MEM_PIDS_TIME_QUOTA` | `pod_pids_limit > 0` | `resourceLimits` cpu/memory (kubelet) + kubelet `podPidsLimit` + the sandbox `timeout` TTL |
 | `CREDENTIAL_TOKEN_BINDING` | `execd_token_required` ∧ `secure_access_required` | `env` constructed from an allowlist, never inherited; no GitHub write credential ever enters; execd reachable only with a token, sandbox endpoints only with `secureAccess` |
-| `STORAGE_INODE_QUOTA` | `inode_quota_enforced` (**default `false`**) | a real filesystem quota in the pod template |
+| `STORAGE_INODE_QUOTA` | `inode_quota_enforced` ∨ `ephemeral_storage_enforced` (both **default `false`**) | a real filesystem quota in the pod template. The disjunction matters: `implied_required_capabilities` requires this capability whenever `policy.ephemeral_storage_limit > 0`, so gating on `inode_quota_enforced` alone made §6.1's `ephemeral-storage` branch unreachable and the attestation inert. §5.2 refusal 8 then refuses the *inode* dimension specifically. |
 
 `STORAGE_INODE_QUOTA` defaults off deliberately. `ulimit -f` caps a single
 file's size, and a Kubernetes `ephemeral-storage` limit is enforced by kubelet
@@ -310,6 +352,24 @@ its own blast radius.
    `provider.validate_spec_capabilities`.
 7. `secure_access_required` absent (peer sandboxes would be reachable
    unauthenticated).
+8. `policy.inode_limit > 0` while `inode_quota_enforced` is absent — the
+   ephemeral-storage attestation alone does not bound inode count.
+9. **Any of the pod-hardening attestations absent**: `nonroot_enforced`,
+   `readonly_rootfs`, `seccomp_runtime_default`, `dedicated_service_account`,
+   `execd_token_required`, or `pod_pids_limit == 0`.
+
+Refusal 9 exists because declaring honestly is not the same as running safely.
+Production specs arrive with `required_capabilities=frozenset()`, and
+`implied_required_capabilities` only derives `NETWORK_EGRESS_POLICY`,
+`NAMESPACE_ISOLATION` and `STORAGE_INODE_QUOTA` from spec fields — nothing
+implies `FILESYSTEM_ACL`, `CPU_MEM_PIDS_TIME_QUOTA` or
+`CREDENTIAL_TOKEN_BINDING`. Without refusal 9, a tier attesting none of the pod
+hardening would *correctly* decline to declare those three capabilities and
+then **run the agent anyway** — as root, on a writable rootfs, against an
+unauthenticated execd. The declaration would be honest and the execution would
+have degraded silently, which is the thing §4.1 promises cannot happen. The
+issue's §3 runtime-policy list requires these properties, so the provider
+refuses rather than treating them as advisory.
 
 Because production specs arrive with `runtime`, `network_egress` and
 `volumes` all `None` (`agent_runner.py:2645-2656`), the provider **synthesises
@@ -339,7 +399,7 @@ caches the result for the process lifetime:
 | --- | --- |
 | `create` | `POST /v1/sandboxes` with `image: {uri: <digest-pinned>}`, `entrypoint` (idle supervisor), `resourceLimits` (§6.1), `networkPolicy` (deny + tier allowlist), `timeout` = TTL, `secureAccess: true`, `env` (§6.2), `metadata` = string-valued `{openace.task_id, openace.tenant, openace.generation, openace.provider}` |
 | `upload_workspace` | resolve + validate execd URL (§3.1), then `POST /files/upload` per file |
-| `exec` | agent turn → PTY transport (§6.5); discrete command → `POST /command` **foreground** with `shlex.quote`-joined argv |
+| `exec` | discriminated by `exec_policy` (the contract's `Any` slot, mirroring `RemoteMachineProvider`'s `RemoteTurnSpec`): an `OpenSandboxTurnSpec` selects the PTY transport (§6.5), anything else runs `POST /command` **foreground** with a `shlex.quote`-joined argv. The provider records the branch per `command_id` so `stream`/`stop` resolve the same way. |
 | `stream` | §6.3 |
 | `pause`/`resume` | `POST /v1/sandboxes/{id}/pause|resume`, then poll `GET /v1/sandboxes/{id}` to `Paused`/`Running` before returning |
 | `stop` | PTY: `{"type":"signal","signal":"SIGINT"}` then `DELETE /pty/{id}`; command: `DELETE /command?id=` |
@@ -358,7 +418,7 @@ the policy leaves at `0`.
 | `memory_max_bytes` | `resourceLimits["memory"]` | bytes → `"<n>"` (Kubernetes accepts a plain byte count) |
 | `cpu_max` | `resourceLimits["cpu"]` | cgroup-v2 `"<max> <period>"` → millicores `f"{max/period*1000:.0f}m"`; `"max"` → `resource_defaults["cpu"]` |
 | `ephemeral_storage_limit` | `resourceLimits["ephemeral-storage"]` | bytes → `"<n>"`, only when attested |
-| `wall_clock_limit` | sandbox `timeout` (s, ≥60) **and** per-command `timeout` (ms) | the sandbox TTL is `max(wall_clock_limit, 60)`; the command timeout is `wall_clock_limit * 1000` |
+| `wall_clock_limit` | sandbox `timeout` (s, ≥60) **and** per-command `timeout` (ms) | TTL is `max(wall_clock_limit, sandbox_ttl_seconds, 60)` when `wall_clock_limit > 0`, else `sandbox_ttl_seconds`. The per-command `timeout` key is **omitted entirely** when `wall_clock_limit == 0`, because upstream's contract is "if omitted, the server will not enforce any timeout" and sending `0` is not the same as omitting it. `wall_clock_limit` defaults to `0` and `read_agent_task_policy` returns all-defaults when no `agent-launcher.conf` exists — the common case — so a naive `max(wall_clock_limit, 60)` would have given every agent run a 60-second lifetime. |
 | `pids_max` | *not sent* | enforced by kubelet `podPidsLimit`; a policy `pids_max` above the attested limit is refused at `create()` rather than silently ignored |
 | `inode_limit` | *not sent* | fail-closes unless `inode_quota_enforced` (§5.1) |
 
@@ -368,9 +428,24 @@ The applied values — not the requested ones — are what §6.6 records.
 
 Built from `{}`, never `dict(os.environ)`: `HOME`, `TMPDIR`, `XDG_CACHE_HOME`,
 `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `PATH`, and the LLM-proxy variables. No
-`GITHUB_TOKEN`, `GH_TOKEN` or `GH_CONFIG_DIR` is ever emitted. Because PTY
-sessions take no per-session env (§2.4), this is set once on
-`CreateSandboxRequest.env`.
+`GITHUB_TOKEN`, `GH_TOKEN` or `GH_CONFIG_DIR` is ever emitted.
+
+**Delivery.** `CreateSandboxRequest.env` cannot carry it: the contract is
+`create(spec)` with no env parameter, `SandboxSpec` has no env field, and the
+runner builds the env — including a **short-lived signed proxy token minted per
+run** — only in time for `exec(handle, command, env, exec_policy)`. PTY sessions
+take no `envs` either. The delivery vehicle is `CreatePTYSessionRequest.command`,
+which `buildPTYCommand` runs as `bash -c "<command>"` (§2.4):
+
+```
+command = "export HOME=… TMPDIR=… OPENACE_PROXY_TOKEN=…; exec <cli> …"
+```
+
+every value `shlex.quote`d. This keeps the token's lifetime short (it is minted
+per run and never persisted into the sandbox spec) and keeps `create()`
+signature-compatible with the frozen contract. Static, non-secret values
+(`PATH`, `XDG_*`) may additionally ride on `CreateSandboxRequest.env`; the
+per-run secrets never do.
 
 ### 6.3 `stream` event mapping
 
@@ -409,7 +484,18 @@ timing, and the fix is in the provider, not in the fake:
   Interrupting a command does not change the sandbox state upstream, so `stop()`
   sets the overlay to `STOPPED`.
 - `test_destroy_marks_destroyed` expects `DESTROYED` immediately. `destroy()`
-  polls to a terminal state and sets the overlay to `DESTROYED` regardless.
+  polls to a terminal state and sets the overlay to `DESTROYED` **only when the
+  poll actually observed `Terminated` or a `404`**. On timeout, or a `409`/`5xx`
+  from `DELETE`, the overlay is left unset so `inspect` reports the true
+  `STOPPED`/`ERROR`, and an audit event fires with reason code
+  `destroy_unconfirmed` so the reconciler retries. Reporting `DESTROYED` for a
+  sandbox still consuming quota and network would be the same lie as
+  `_reconcile_orphan_sandboxes` marking a row `destroyed` without destroying
+  anything — the bug §6.6 exists to fix.
+
+The `STOPPED` overlay is cleared on the next `exec`. Otherwise cancelling one
+agent turn would make `inspect` report `STOPPED` for the rest of the sandbox's
+life, including while a later `exec` is running.
 
 `fake_server.py` models upstream's **real** timing (create → `Running`, delete →
 `Stopping` then `Terminated`) so the overlay is genuinely exercised rather than
@@ -419,12 +505,25 @@ papered over.
 
 `_run_local` drives the CLI over an interactive stdin
 (`--input-format stream-json`) through the Legacy-only escape hatch
-`get_process()`. The coupling is narrow and bounded — `stdin.write`/`flush`
-(`:4148`), `stdin.close` (`:4371`), `stdout.readline` (`:4181`),
-`stderr.readline` (`:4545`), `poll`/`returncode` (`:4534`, `:4600`),
-`wait(timeout=)` (`:4628`), and `pid` for registration.
+`get_process()`. The coupling is wider than a first read suggests; the complete
+verified inventory in `agent_runner.py` is:
 
-A new `AgentTransport` Protocol captures exactly that surface:
+| Site | Use | Transport equivalent |
+| --- | --- | --- |
+| 2661 | `build_launch_argv(...)` for a log line | guard with `hasattr` — it is a Legacy-only hatch, not on the Protocol, and calling it unconditionally raises `AttributeError` on any other provider **before `exec` runs** |
+| 2676 | `get_process(exec_handle)` | `get_transport(exec_handle)` |
+| 2727 | `_on_pid_registered(session_id, process.pid)` | skip when `transport.pid is None` |
+| 2756, 2761 | `returncode is None` → `wait(timeout=5)` | `poll()` / `wait(timeout=5)` |
+| 2764–2770 | `os.killpg(os.getpgid(process.pid), SIGTERM/SIGKILL)` + waits | `transport.shutdown(grace=5.0)` — "signal the process group" has no meaning for a container backend, and `os.getpgid(None)` raises `TypeError`, which none of the surrounding `except` clauses catch |
+| 2801, 2842 | `returncode` → `_classify_isolated_exit_code` / `_classify_sidebar_start_failure` | `poll()` |
+| 4148–4149 | `stdin.write` / `flush` | `write_stdin` |
+| 4181 | `stdout.readline` | `readline_stdout` |
+| 4371–4372 | `stdin.close` | `close_stdin` |
+| 4534–4536 | `poll()` / `returncode` | `poll()` |
+| 4545 | `stderr.readline` | `readline_stderr` |
+| 4600, 4628, 4637 | `returncode` / `wait` in `stop_session` | `poll()` / `wait` |
+| 4655, 4683 | `not session.process` guard in `pause_session` / `resume_session` | **reorder** — see below |
+| 4718, 4730 | `mark_session_*_by_pid` matching `process.pid == pid` | inapplicable — see below |
 
 ```python
 class AgentTransport(Protocol):
@@ -434,36 +533,85 @@ class AgentTransport(Protocol):
     def readline_stderr(self) -> bytes: ...
     def poll(self) -> int | None: ...
     def wait(self, timeout: float | None = None) -> int | None: ...
+    def shutdown(self, grace: float = 5.0) -> None: ...   # graceful -> forceful
     @property
     def pid(self) -> int | None: ...          # None for non-local backends
 ```
 
-- `LocalProcessTransport` wraps the existing `Popen` one-to-one — **zero
-  behaviour change** on the local path, which is what keeps this safe to land.
-- `PtyWebSocketTransport` opens `POST /pty` then
-  `ws://…/pty/{id}/ws?pty=0` with `websockets.sync.client.connect`, writes
+- `LocalProcessTransport` wraps the existing `Popen` one-to-one, with
+  `shutdown()` performing exactly today's `SIGTERM` → wait → `SIGKILL`
+  process-group escalation. **Zero behaviour change** on the local path, which
+  is what makes this safe to land.
+- `PtyWebSocketTransport` opens `POST /pty` (carrying the env-bearing `command`
+  from §6.2) then `ws://…/pty/{id}/ws?pty=0` via `websockets.sync.client`, writes
   stdin as `0x00` + bytes, demultiplexes `0x01`/`0x02` into two line-buffered
-  queues, and resolves `poll`/`wait` from the JSON `exit` frame. `pid` is
-  `None`. On a dropped socket it reconnects with `?since=<output_offset>` from
-  `GET /pty/{id}` so replay does not lose output.
+  queues, and resolves `poll`/`wait` from the JSON `exit` frame. `pid` is `None`;
+  `shutdown()` sends `{"type":"signal","signal":"SIGINT"}` then
+  `DELETE /pty/{id}` (upstream delivers signals to the process group, so this
+  reaches the whole tree). It takes a `connect_factory` so unit tests drive a
+  fake connection rather than standing up a real socket.
 
-`_run_local` changes from `provider.get_process(exec_handle)` to
-`provider.get_transport(exec_handle)`, and `_on_pid_registered` is skipped when
-`pid is None`. Cancellation, pause and resume already route through the
-provider (`agent_runner.py:4572`, `:4663`, `:4689`), so the `os.getpgid`
-fallback simply stays unused for this backend.
+**`_LocalSession` keeps one source of truth.** `transport` is always set;
+`process` is populated **only** by `LocalProcessTransport` (exposing the wrapped
+`Popen`), so the Legacy path keeps its current object identity while every
+call site above reads `transport`. Setting `process=None` universally would
+change Legacy behaviour at a dozen sites on the hot path of every autonomous
+workflow — the opposite of the rollout guarantee.
+
+**Pause/resume must be reordered.** `pause_session` (`:4655`) and
+`resume_session` (`:4683`) both begin
+`if not session or not session.process or session.process.returncode is not None: return False`,
+**before** the provider branch at `:4661`/`:4687`. With a pidless transport they
+would return `False` without ever reaching the provider, making pause and resume
+permanently unavailable for this backend — while acceptance criterion 2 requires
+them and `#2022`'s `test_pause_resume_transitions_status` exercises them. The
+guard becomes "session exists and `transport.poll() is None`", and the
+docstring's "reached only for local sessions with a live process" invariant is
+rewritten.
+
+`mark_session_paused_by_pid` / `mark_session_resumed_by_pid` (`:4718`, `:4730`)
+match on `process.pid` and are structurally inapplicable to a pidless transport.
+They are the Strategy-2/3 fallbacks that freeze `_wait_for_completion`'s timeout
+budget; for OpenSandbox, `pause_session` is the only path, and the provider
+branch there sets `session._paused`, which is what actually freezes the budget.
+This is documented rather than papered over.
+
+**No reconnect.** §2.4 establishes that re-attaching either relaunches the agent
+(finished session) or delivers a channel-merged `0x03` replay blob that would
+corrupt the stream-json parser (live session), and that a missed `exit` frame is
+unrecoverable because `GET /pty/{id}` carries no exit code. So a dropped socket
+is **terminal**: the transport stops, `poll()`/`wait()` resolve via
+`GET /pty/{id}`, and `running: false` with no exit frame yields a structured
+`CRASH` with reason code `pty_stream_lost` — never a hang and never a silent
+`COMPLETED`. `wait(timeout=)` always honours its deadline so
+`_wait_for_completion` cannot block indefinitely.
+
+**Threading.** `_read_stdout`/`_read_stderr` are `threading.Thread(daemon=True)`,
+and both `server.py` and `app/scheduler_worker.py` call `monkey.patch_all()`, so
+those are greenlets and the transport's blocking socket reads stay cooperative —
+the same basis on which `vscode_ws_bridge.py` and `terminal_ws_bridge.py` already
+drive `websockets.sync.client` in this process.
 
 **Rollout:** the OpenSandbox path is reachable only when a backend config exists
 *and* the tenant/project resolves to a tier. With no config the behaviour is
-byte-identical to today. That is the gradual rollout the issue asks for.
+byte-identical to today.
 
 ### 6.6 Selection gate, reconciliation and audit
 
-- `isolation_tier.select_provider` is called from
-  `agent_runner._select_sandbox_provider` — the documented single branch point.
-  A tenant requiring production isolation gets OpenSandbox **or a raise**; there
-  is no code path from "required" to Legacy. A helper nothing calls would not
-  satisfy the acceptance criterion.
+- `isolation_tier.select_provider` must reach **`_run_local`**, not merely
+  `_select_sandbox_provider`. That method has exactly one caller —
+  `agent_runner.py:3724`, inside `_run_remote` — while `_run_local` uses the
+  constructor-injected `self._sandbox_provider` directly at nine sites (2645,
+  2661, 2665, 2676, 2682, 2695, 2714, 2779, 2881), and `__init__:788` defaults
+  it to `LegacyPosixProvider()`. Routing only the selector through the gate
+  would leave the local path on Legacy and turn the gate into the helper
+  nothing calls — the same failure shape as the unreachable
+  `destroy_attribution` below, one level up. So `_run_local` resolves a
+  per-run `provider = self._select_sandbox_provider("local", tenant=…,
+  project_path=project_path)` and threads it through all nine sites, including
+  `_LocalSession.sandbox_provider` and both `_stamp_sandbox_attribution` calls.
+  A tenant in `production_required_tenants` gets OpenSandbox **or a raise**;
+  there is no code path from "required" to Legacy.
 - `autonomous_scheduler._destroy_orphan_sandbox` currently returns before
   `provider_for(...)` for anything that is not `remote_machine`
   (`:1717`), while `_reconcile_orphan_sandboxes` then marks the row
@@ -472,8 +620,12 @@ byte-identical to today. That is the gradual rollout the issue asks for.
   provider own an external resource" — `remote_machine` with a session id, or
   `opensandbox` with a `sandbox_id`.
 - Audit events: the provider takes an optional `event_sink` callable
-  (`Callable[[str, dict], None]`) and `provider_for` gains a keyword-only
-  optional parameter, which keeps `tests/unit/test_sandbox_registry.py` green.
+  (`Callable[[str, dict], None]`) and `provider_for` gains **two** keyword-only
+  optional parameters, `event_sink` and `api_factory`, which keeps
+  `tests/unit/test_sandbox_registry.py` green. `api_factory` is not decoration:
+  `_destroy_orphan_sandbox` builds its provider through `provider_for`, so
+  without it the scheduler-layer reconciliation test has no seam to inject a
+  fake API through and would silently construct a real HTTP client.
   Every lifecycle call **and every refusal** emits one. Refusals also carry a
   structured `reason_code` on the raised `SandboxError` so a caller that has no
   sink still surfaces the cause.
@@ -504,9 +656,23 @@ outside the worktree. Files are uploaded `0644`, directories `0755`, with
 may run as root, and root-owned files under a restrictive mode would leave the
 agent unable to edit its own workspace.
 
-Excluding `.git/` means the agent sees a working tree, not a repository. That is
-the issue's "credential-free snapshot" branch and it removes any path from the
-sandbox to the trusted common-dir or a credential helper.
+Excluding `.git/` means the agent sees a working tree, not a repository — and
+now that the agent actually runs in the sandbox (§6.5), that would break it. The
+repo's own `agent_bin/` ships guard wrappers for `git`, `gh`, `pytest`,
+`python`, and `_build_agent_env` sets `OPENACE_REAL_GIT` / `OPENACE_REAL_GH` /
+`GH_CONFIG_DIR` / `GIT_TERMINAL_PROMPT=0` precisely because the agent shells out
+to git. Without a repository, every `git status` / `git diff` / `git log` fails
+and `pre-commit` cannot run.
+
+So the sandbox entrypoint **synthesises a fresh repository**: `git init` plus a
+single commit of the uploaded snapshot, with no remote, no credential helper and
+no link to the trusted common-dir. The agent gets a working `git` whose entire
+history is the snapshot it was given; the control plane still owns the real
+repository, and the ChangeSet remains a file manifest rather than a git diff.
+This is the "credential-free snapshot" branch of the issue's pipeline with the
+one addition the live agent needs. The read-only-clone variant stays out of
+scope (§9) — it would expose real history and remote metadata for no benefit the
+synthesised repo does not already provide.
 
 ### 7.2 Manifest and validation
 
@@ -620,6 +786,24 @@ The eight the issue requires:
 | `test_node_and_control_plane_restart_reconcile_sandbox` | asserted at the **scheduler** layer: `_destroy_orphan_sandbox` on an `opensandbox` row reaches `destroy_attribution`; the paginated sweep destroys unclaimed sandboxes across more than one page; never raises |
 | `test_required_production_policy_cannot_fallback_to_legacy` | asserted through `agent_runner._select_sandbox_provider`, not a standalone helper: a required-isolation tenant yields OpenSandbox or raises, never Legacy |
 | `test_execution_evidence_matches_provider_contract` | `sandbox_id`, `sandbox_generation`, `exit_code`, `signal`, `terminal_reason`, `stderr_digest`, `started_at`, `completed_at`; the reason comes from `derive_terminal_reason`, not a parallel table |
+
+Regression cases the second review round added, each pinning a defect that would
+otherwise have shipped:
+
+- `test_run_local_resolves_its_provider_through_the_isolation_gate` — drives
+  `_run_local` itself, not the selector in isolation.
+- `test_pty_transport_refuses_to_reconnect_to_a_stopped_session` and
+  `test_dropped_socket_without_exit_frame_resolves_to_crash_not_hang`.
+- `test_teardown_does_not_dereference_pid_for_a_pidless_transport` — the
+  `os.getpgid(None)` `TypeError` no surrounding `except` catches.
+- `test_pause_and_resume_reach_the_provider_for_a_pidless_transport`.
+- `test_tier_without_pod_hardening_attestations_is_refused`.
+- `test_zero_wall_clock_falls_back_to_configured_ttl_not_60s` and
+  `test_zero_wall_clock_omits_command_timeout_rather_than_sending_zero`.
+- `test_destroy_that_times_out_does_not_report_destroyed` and
+  `test_stopped_overlay_clears_on_next_exec`.
+- `test_agent_can_run_git_in_the_sandbox` — the synthesised repository (§7.1).
+- `test_build_launch_argv_is_not_called_for_a_non_legacy_provider`.
 
 Plus: `#2022` contract-conformance against `OpenSandboxProvider` with the fake
 modelling upstream's real timing (§6.4); capability-realism probes asserting each
