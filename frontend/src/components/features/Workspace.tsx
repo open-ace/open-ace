@@ -574,11 +574,9 @@ export const Workspace: React.FC = () => {
 
         // Only process session update if we can identify the source tab
         if (sessionId && sourceTabId) {
-          // Issue #3189: Log successful session update
-          console.log('[Workspace] qwen-code-session-update: Processing session update', {
+          // Issue #3189: Log successful session update (debug level to reduce noise)
+          console.debug('[Workspace] qwen-code-session-update: Processing session update', {
             tabId: sourceTabId,
-            sessionId,
-            encodedProjectName,
           });
 
           // Filter out generic "Conversation(xxx...)" titles from iframe

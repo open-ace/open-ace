@@ -873,12 +873,17 @@ def list_sessions():
         # Valid values for status and session_type (whitelist validation)
         VALID_STATUS_VALUES = {"active", "paused", "completed", "stopped", "error"}
         VALID_SESSION_TYPE_VALUES = {"chat", "agent", "workflow", "terminal"}
+        # Issue #3189: Valid values for workspace_type
+        VALID_WORKSPACE_TYPE_VALUES = {"local", "remote", "terminal"}
 
         # Validate status and session_type parameters
         if status and status not in VALID_STATUS_VALUES:
             status = None  # Invalid value, ignore filter
         if session_type and session_type not in VALID_SESSION_TYPE_VALUES:
             session_type = None  # Invalid value, ignore filter
+        # Issue #3189: Validate workspace_type parameter
+        if workspace_type and workspace_type not in VALID_WORKSPACE_TYPE_VALUES:
+            workspace_type = None  # Invalid value, ignore filter
 
         # Placeholder style convention for this file: build parameterized SQL by
         # interpolating {p} from get_param_placeholder(). Do NOT wrap these queries
