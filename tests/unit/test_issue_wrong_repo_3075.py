@@ -399,3 +399,191 @@ class TestPreparationIssueCreation:
 
             # Verify create_issue was NOT called (error raised before)
             mock_gh.create_issue.assert_not_called()
+
+
+class TestIssue3199ExistingProject:
+    """Test Issue #3199: existing project without project_repo_url should resolve from local git remote."""
+
+    def _make_existing_project_workflow(self, tmp_path):
+        """Create a test workflow dict for existing project scenario."""
+        return {
+            "id": "test-workflow-id-3199",
+            "workflow_id": "wf-3199-test",
+            "current_phase": "preparation",
+            "status": "preparing",
+            "is_new_project": False,  # Key: existing project, not new
+            "branch_strategy": "new-branch",
+            "requirements_text": "Add a README file",
+            "github_issue_number": None,
+            "project_repo_url": "",  # Empty: user didn't specify a repo URL
+            "project_path": str(tmp_path),
+            "title": "Test Existing Project",
+        }
+
+    def _setup_orchestrator(self, wf, mock_gh):
+        """Helper to create a partially-mocked orchestrator."""
+        from app.modules.workspace.autonomous.orchestrator import AutonomousOrchestrator
+
+        repo = MagicMock()
+        repo.get_workflow.return_value = wf
+
+        orch = AutonomousOrchestrator.__new__(AutonomousOrchestrator)
+        orch.repo = repo
+        orch._workflow_id = wf.get("workflow_id", "wf-3199-test")
+        orch._gh = None
+        orch._shutdown_requested = threading.Event()
+        orch._session_usage_offsets = {}
+        orch._update_workflow = MagicMock(side_effect=lambda updates: wf.update(updates))
+        orch._create_milestone = MagicMock(return_value={"milestone_id": "ms"})
+        orch.emit_phase_change = MagicMock()
+        orch._get_gh = MagicMock(return_value=mock_gh)
+        return orch, repo
+
+    def test_existing_project_resolves_repo_from_local_remote(self, tmp_path):
+        """Verify existing project resolves owner/repo from local git remote.
+
+        Issue #3199: User selected an existing Git project directory that has a
+        GitHub origin remote. The issue_repo should be resolved from the local
+        git remote, not from project_repo_url (which is empty for existing projects).
+        """
+        wf = self._make_existing_project_workflow(tmp_path)
+        wf.update(
+            {
+                "user_id": 1,
+            }
+        )
+
+        mock_gh = MagicMock(name="gh")
+        # get_repo_name() returns the owner/repo from local git remote
+        mock_gh.get_repo_name.return_value = "user/existing-project"
+        mock_gh.create_issue.return_value = {
+            "number": 123,
+            "url": "https://github.com/user/existing-project/issues/123",
+        }
+        mock_gh.get_current_branch.return_value = "main"
+        mock_gh.list_worktrees.return_value = []
+
+        # Mock _run_git with a function that handles different commands
+        def mock_run_git(args, check=True, **kwargs):
+            stdout = ""
+            rc = 0
+            if "fetch" in args:
+                stdout = ""
+                rc = 0
+            elif "show-ref" in args:
+                # Return success for refs/remotes/origin/main
+                if "origin/main" in args:
+                    stdout = "refs/remotes/origin/main"
+                    rc = 0
+                else:
+                    rc = 1
+            elif "rev-parse" in args:
+                stdout = "abc123"  # Commit SHA
+            elif "branch" in args and "-a" in args:
+                stdout = "  main\n  remotes/origin/main"
+            return MagicMock(returncode=rc, stdout=stdout, stderr="")
+
+        mock_gh._run_git.side_effect = mock_run_git
+
+        orch, repo = self._setup_orchestrator(wf, mock_gh)
+
+        with (
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.GitHubOps",
+                return_value=mock_gh,
+            ),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.UserRepository"
+            ) as mock_user_repo_cls,
+        ):
+            mock_user_repo_cls.return_value.get_user_by_id.return_value = {
+                "system_account": "alice"
+            }
+            ctx = WorkflowContext(
+                workflow=wf,
+                definition_snapshot=None,
+                repository_context=None,
+                session_bindings={},
+                cancellation=threading.Event(),
+            )
+            deps = PhaseDeps(
+                host=orch,
+                gh=mock_gh,
+                git_workspace=MagicMock(),
+                evidence=MagicMock(),
+                sandbox=MagicMock(),
+                repo=repo,
+                agent_runner=MagicMock(),
+            )
+
+            result = orch._do_preparation(ctx, deps)
+
+        # Verify get_repo_name was called to resolve owner/repo from local remote
+        mock_gh.get_repo_name.assert_called()
+
+        # Verify create_issue was called with the correct repo
+        mock_gh.create_issue.assert_called_once()
+        call_kwargs = mock_gh.create_issue.call_args
+        assert call_kwargs.kwargs.get("repo") == "user/existing-project", (
+            f"Expected repo='user/existing-project', got "
+            f"repo={call_kwargs.kwargs.get('repo')!r}"
+        )
+        assert result.next_phase == "planning"
+
+    def test_existing_project_no_remote_raises_clear_error(self, tmp_path):
+        """Verify clear error when existing project has no GitHub remote configured.
+
+        Issue #3199: When the user selects a project directory that has no GitHub
+        origin remote, the error message should guide the user to configure one.
+        """
+        wf = self._make_existing_project_workflow(tmp_path)
+        wf.update(
+            {
+                "user_id": 1,
+            }
+        )
+
+        mock_gh = MagicMock(name="gh")
+        # get_repo_name() returns empty string (no remote configured)
+        mock_gh.get_repo_name.return_value = ""
+        mock_gh._run_git.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_gh.get_current_branch.return_value = "main"
+        mock_gh.list_worktrees.return_value = []
+
+        orch, repo = self._setup_orchestrator(wf, mock_gh)
+
+        with (
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.GitHubOps",
+                return_value=mock_gh,
+            ),
+            patch(
+                "app.modules.workspace.autonomous.orchestrator.UserRepository"
+            ) as mock_user_repo_cls,
+        ):
+            mock_user_repo_cls.return_value.get_user_by_id.return_value = {
+                "system_account": "alice"
+            }
+            ctx = WorkflowContext(
+                workflow=wf,
+                definition_snapshot=None,
+                repository_context=None,
+                session_bindings={},
+                cancellation=threading.Event(),
+            )
+            deps = PhaseDeps(
+                host=orch,
+                gh=mock_gh,
+                git_workspace=MagicMock(),
+                evidence=MagicMock(),
+                sandbox=MagicMock(),
+                repo=repo,
+                agent_runner=MagicMock(),
+            )
+
+            # Should raise clear error about missing GitHub remote
+            with pytest.raises(GitHubOpsError, match="Cannot determine target repository"):
+                orch._do_preparation(ctx, deps)
+
+            # Verify create_issue was NOT called
+            mock_gh.create_issue.assert_not_called()

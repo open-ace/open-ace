@@ -10119,13 +10119,35 @@ class AutonomousOrchestrator:
                 except GitHubOpsError:
                     pass
 
+            # Issue #3199: For existing projects (is_new_project=False), also try
+            # resolving owner/repo from the local git remote. This handles the case
+            # where the user selected an existing Git project directory that has a
+            # GitHub origin remote configured.
+            if not issue_repo and not wf.get("is_new_project"):
+                try:
+                    resolved = gh.get_repo_name()
+                    if resolved:
+                        issue_repo = resolved
+                        logger.info(
+                            "Resolved issue_repo from local git remote: %s",
+                            issue_repo,
+                        )
+                except GitHubOpsError as e:
+                    logger.warning(
+                        "Failed to resolve owner/repo from local git remote: %s",
+                        e,
+                    )
+
             # Last-resort guard: if we still cannot determine the target
-            # repo for a new-project workflow, raise rather than silently
-            # creating the issue in the wrong (cwd-inferred) repository.
-            if not issue_repo and wf.get("is_new_project"):
+            # repo, raise rather than silently creating the issue in the
+            # wrong (cwd-inferred) repository or failing with "not a git repository".
+            if not issue_repo:
                 raise GitHubOpsError(
                     "Cannot determine target repository for issue creation. "
-                    f"repo_url={repo_url!r}, issue_repo_url={issue_repo_url!r}"
+                    "For existing projects, ensure the project directory has a GitHub "
+                    "origin remote configured (git remote -v). "
+                    f"project_path={project_path!r}, repo_url={repo_url!r}, "
+                    f"issue_repo_url={issue_repo_url!r}"
                 )
 
             try:
