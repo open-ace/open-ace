@@ -288,6 +288,9 @@ class SinglePtyTerminalServer:
         # One-shot guard so resize_pty() warns once about the pipe-mode resize
         # limitation instead of spamming on every keystroke-driven resize.
         self._resize_warned = False
+        # Windows pipe mode: track if last character was CR for lone-LF normalization.
+        # This handles the case where CR and LF appear in separate read chunks.
+        self._last_char_was_cr = False
 
     def spawn_pty(self) -> bool:
         """Spawn PTY process once at startup."""
@@ -508,6 +511,55 @@ class SinglePtyTerminalServer:
         if not self._pty_alive:
             await self._notify_pty_exit()
 
+    def _normalize_lone_lf(self, data: bytes) -> bytes:
+        """Normalize lone LF to CRLF for Windows pipe terminal output.
+
+        xterm.js expects CRLF for line breaks. Windows pipe output may contain
+        lone LF without preceding CR, causing the cursor to move down but stay
+        at the same column position. This method converts any LF not preceded
+        by CR to CRLF.
+
+        Must be stateful to handle CR and LF appearing in separate read chunks.
+        """
+        if not data:
+            return data
+
+        result = bytearray()
+        for i, byte in enumerate(data):
+            if byte == ord("\n"):
+                # Check if this LF is preceded by CR in this chunk
+                if i > 0 and data[i - 1] == ord("\r"):
+                    # Already has preceding CR, keep as-is
+                    result.append(byte)
+                elif self._last_char_was_cr:
+                    # Previous chunk ended with CR, this chunk starts with LF
+                    # This is already CRLF across chunk boundary
+                    result.append(byte)
+                    self._last_char_was_cr = False
+                else:
+                    # Lone LF: insert CR before LF
+                    result.append(ord("\r"))
+                    result.append(byte)
+            elif byte == ord("\r"):
+                result.append(byte)
+                # Track CR for next chunk (if LF follows in next chunk)
+                # But if next char is not LF, we need to clear this flag
+                if i + 1 < len(data):
+                    # Next char exists in this chunk
+                    if data[i + 1] != ord("\n"):
+                        # CR not followed by LF in this chunk, clear flag
+                        self._last_char_was_cr = False
+                    # else: CR followed by LF in this chunk, flag will be handled by LF branch
+                else:
+                    # CR is last char in this chunk, set flag for next chunk
+                    self._last_char_was_cr = True
+            else:
+                # Any other character clears the CR flag
+                self._last_char_was_cr = False
+                result.append(byte)
+
+        return bytes(result)
+
     async def _relay_pipe_output_loop(self) -> None:
         """Read subprocess output continuously and broadcast to WebSockets."""
         loop = asyncio.get_event_loop()
@@ -533,6 +585,8 @@ class SinglePtyTerminalServer:
                 if raw_data:
                     # Windows: convert system code page output to UTF-8
                     data = _decode_windows_output(raw_data, encoding)
+                    # Normalize lone LF to CRLF for xterm.js compatibility (Issue #3181)
+                    data = self._normalize_lone_lf(data)
                     await self.broadcast_output(data)
                 else:
                     logger.info("Terminal output stream closed (process likely exited)")

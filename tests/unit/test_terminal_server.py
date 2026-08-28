@@ -541,3 +541,148 @@ def test_resize_pty_path_updates_bookkeeping_without_io(monkeypatch):
 
     assert server._pty_cols == 132
     assert server._pty_rows == 43
+
+
+# --- Issue #3181: lone-LF normalization for Windows pipe terminal output ---
+
+
+class _NormalizeLoneLfTests:
+    """Test helper class for _normalize_lone_lf method tests."""
+
+    @staticmethod
+    def create_server():
+        terminal_server = load_terminal_server()
+        server = terminal_server.SinglePtyTerminalServer()
+        server._last_char_was_cr = False
+        return server
+
+
+def test_normalize_lone_lf_converts_lone_lf_to_crlf(monkeypatch):
+    """Lone LF without preceding CR should be converted to CRLF."""
+    server = _NormalizeLoneLfTests.create_server()
+
+    # PowerShell output with lone LF
+    result = server._normalize_lone_lf(b"line-one\nline-two\n")
+
+    assert result == b"line-one\r\nline-two\r\n"
+
+
+def test_normalize_lone_lf_preserves_existing_crlf(monkeypatch):
+    """Existing CRLF should not be double-converted."""
+    server = _NormalizeLoneLfTests.create_server()
+
+    # Already has CRLF
+    result = server._normalize_lone_lf(b"line-one\r\nline-two\r\n")
+
+    assert result == b"line-one\r\nline-two\r\n"
+
+
+def test_normalize_lone_lf_handles_mixed_newlines(monkeypatch):
+    """Mixed lone LF and CRLF should be handled correctly."""
+    server = _NormalizeLoneLfTests.create_server()
+
+    # Mix of lone LF and CRLF
+    result = server._normalize_lone_lf(b"line-one\nline-two\r\nline-three\n")
+
+    assert result == b"line-one\r\nline-two\r\nline-three\r\n"
+
+
+def test_normalize_lone_lf_handles_cr_lf_across_chunks(monkeypatch):
+    """CR at end of chunk and LF at start of next chunk should not produce extra CR."""
+    server = _NormalizeLoneLfTests.create_server()
+
+    # First chunk ends with CR
+    result1 = server._normalize_lone_lf(b"line-one\r")
+    assert result1 == b"line-one\r"
+    assert server._last_char_was_cr is True
+
+    # Second chunk starts with LF
+    result2 = server._normalize_lone_lf(b"\nline-two")
+    assert result2 == b"\nline-two"
+    assert server._last_char_was_cr is False
+
+
+def test_normalize_lone_lf_cr_not_followed_by_lf(monkeypatch):
+    """CR not followed by LF should clear the state flag."""
+    server = _NormalizeLoneLfTests.create_server()
+
+    # CR followed by other character
+    result = server._normalize_lone_lf(b"line-one\rX")
+
+    assert result == b"line-one\rX"
+    assert server._last_char_was_cr is False
+
+
+def test_normalize_lone_lf_empty_input(monkeypatch):
+    """Empty input should return empty."""
+    server = _NormalizeLoneLfTests.create_server()
+
+    result = server._normalize_lone_lf(b"")
+
+    assert result == b""
+    assert server._last_char_was_cr is False
+
+
+def test_normalize_lone_lf_consecutive_empty_lines(monkeypatch):
+    """Consecutive empty lines (multiple lone LFs) should be converted correctly."""
+    server = _NormalizeLoneLfTests.create_server()
+
+    result = server._normalize_lone_lf(b"\n\n\n")
+
+    assert result == b"\r\n\r\n\r\n"
+
+
+def test_normalize_lone_lf_regular_text_unchanged(monkeypatch):
+    """Regular text without newlines should pass through unchanged."""
+    server = _NormalizeLoneLfTests.create_server()
+
+    result = server._normalize_lone_lf(b"hello world")
+
+    assert result == b"hello world"
+
+
+def test_normalize_lone_lf_preserves_ansi_sequences(monkeypatch):
+    """ANSI escape sequences should not be affected."""
+    server = _NormalizeLoneLfTests.create_server()
+
+    # ANSI color sequence with lone LF
+    result = server._normalize_lone_lf(b"\x1b[32mOK\x1b[0m\nDone")
+
+    assert result == b"\x1b[32mOK\x1b[0m\r\nDone"
+
+
+def test_normalize_lone_lf_preserves_utf8_multibyte(monkeypatch):
+    """UTF-8 multibyte characters should not be affected."""
+    server = _NormalizeLoneLfTests.create_server()
+
+    # UTF-8 Chinese characters with lone LF
+    result = server._normalize_lone_lf(b"\xe4\xb8\xad\xe6\x96\x87\n")
+
+    assert result == b"\xe4\xb8\xad\xe6\x96\x87\r\n"
+
+
+def test_normalize_lone_lf_multiple_chunks_simulation(monkeypatch):
+    """Simulate multiple chunks to verify state persistence."""
+    server = _NormalizeLoneLfTests.create_server()
+
+    # Chunk 1: text with lone LF
+    result1 = server._normalize_lone_lf(b"line1\n")
+    assert result1 == b"line1\r\n"
+
+    # Chunk 2: text with CRLF
+    result2 = server._normalize_lone_lf(b"line2\r\n")
+    assert result2 == b"line2\r\n"
+
+    # Chunk 3: text ending with CR
+    result3 = server._normalize_lone_lf(b"line3\r")
+    assert result3 == b"line3\r"
+    assert server._last_char_was_cr is True
+
+    # Chunk 4: LF at start
+    result4 = server._normalize_lone_lf(b"\nline4")
+    assert result4 == b"\nline4"
+    assert server._last_char_was_cr is False
+
+    # Chunk 5: lone LF again
+    result5 = server._normalize_lone_lf(b"line5\n")
+    assert result5 == b"line5\r\n"
