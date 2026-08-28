@@ -1113,7 +1113,9 @@ export const Workspace: React.FC = () => {
           })
           .catch((err) => {
             console.error('[Workspace] Failed to verify terminal:', err);
-            setError(t('terminalNotFound', language) || 'Terminal does not exist or has been stopped');
+            setError(
+              t('terminalNotFound', language) || 'Terminal does not exist or has been stopped'
+            );
             setTerminalVerified(false);
           });
         return;
