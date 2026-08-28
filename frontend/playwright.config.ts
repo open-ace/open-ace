@@ -22,6 +22,9 @@ export default defineConfig({
 
   // Reporter
   reporter: [
+    // Live per-test output: html+json only write at the end, so a CI timeout
+    // leaves no progress evidence in the job log (#3170).
+    ...(process.env.CI ? [(['line'] as const)] : []),
     ['html', { outputFolder: 'playwright-report' }],
     ['json', { outputFile: 'playwright-report/results.json' }],
   ],
