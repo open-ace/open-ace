@@ -37,6 +37,7 @@ from app.modules.workspace.autonomous.command_evidence.types import (
     derive_terminal_reason,
 )
 from app.modules.workspace.autonomous.sandbox.provider import validate_spec_capabilities
+from app.modules.workspace.autonomous.sandbox.transport import LocalProcessTransport
 from app.modules.workspace.autonomous.sandbox.types import (
     ExecHandle,
     SandboxCapability,
@@ -232,6 +233,20 @@ class LegacyPosixProvider:
         exposing a local process would not make sense cross-backend.
         """
         return self._procs[exec_handle.command_id]
+
+    def get_transport(self, exec_handle: ExecHandle) -> LocalProcessTransport:
+        """Return the :class:`AgentTransport` for an execution (#2023).
+
+        The seam ``#2022`` anticipated: ``_run_local`` consumes this instead of
+        the raw ``Popen`` from :meth:`get_process`, so a backend with no local
+        process (OpenSandbox's PTY transport) can drive the same CLI
+        stream-json protocol. Legacy's implementation is a strict pass-through,
+        so routing the runner through it changes nothing here.
+
+        :meth:`get_process` stays for callers that genuinely need the raw
+        object.
+        """
+        return LocalProcessTransport(self._procs[exec_handle.command_id])
 
     def build_launch_argv(
         self,
