@@ -300,6 +300,31 @@ class UsageService:
             tenant_id=tenant_id,
         )
 
+    @staticmethod
+    def _normalize_date(date_value: str | datetime | object) -> str:
+        """Normalize date value to ISO format string (YYYY-MM-DD).
+
+        Issue #3166: Different data sources return different date types:
+        - get_daily_by_tool() returns string dates
+        - get_session_trend_by_tool() returns datetime.date objects
+
+        This method ensures consistent date format for merging and sorting.
+
+        Args:
+            date_value: Date value from any source (str, datetime.date, datetime).
+
+        Returns:
+            str: ISO format date string (YYYY-MM-DD).
+        """
+        if isinstance(date_value, str):
+            return date_value
+        if isinstance(date_value, datetime):
+            return date_value.date().isoformat()
+        # Handle datetime.date or other date-like objects
+        if hasattr(date_value, "isoformat"):
+            return date_value.isoformat()
+        return str(date_value)
+
     @cached(ttl=60, key_prefix="usage", skip_args=[0])
     def get_trend_data(
         self,
@@ -313,6 +338,9 @@ class UsageService:
 
         Issue #3030: Merge daily_stats (CLI data) with agent_sessions (WebUI data)
         to ensure trend charts include all session types.
+
+        Issue #3166: Normalize date values to consistent format before merging
+        and sorting to avoid TypeError from mixed date/str types.
 
         Args:
             start_date: Start date string (YYYY-MM-DD).
@@ -331,26 +359,28 @@ class UsageService:
             start_date, end_date, host_name, tenant_id
         )
 
-        # 3. Merge both data sources
+        # 3. Merge both data sources with normalized dates
         merged: dict[tuple, dict] = {}
         for entry in dm_trend:
-            key = (entry["date"], entry["tool_name"])
+            normalized_date = self._normalize_date(entry["date"])
+            key = (normalized_date, entry["tool_name"])
             if key in merged:
                 merged[key]["tokens"] += entry.get("tokens", 0)
             else:
                 merged[key] = {
-                    "date": entry["date"],
+                    "date": normalized_date,
                     "tool_name": entry["tool_name"],
                     "tokens": entry.get("tokens", 0),
                 }
 
         for entry in session_trend:
-            key = (entry["date"], entry["tool_name"])
+            normalized_date = self._normalize_date(entry["date"])
+            key = (normalized_date, entry["tool_name"])
             if key in merged:
                 merged[key]["tokens"] += entry.get("tokens", 0)
             else:
                 merged[key] = {
-                    "date": entry["date"],
+                    "date": normalized_date,
                     "tool_name": entry["tool_name"],
                     "tokens": entry.get("tokens", 0),
                 }
