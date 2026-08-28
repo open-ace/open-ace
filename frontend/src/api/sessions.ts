@@ -114,6 +114,10 @@ export interface SessionFilters {
   session_type?: string;
   search?: string;
   search_days?: number; // Limit message search to recent N days
+  // Issue #3189: Additional filters for session recovery fallback
+  project_path?: string;
+  workspace_type?: 'local' | 'remote' | 'terminal';
+  remote_machine_id?: string;
 }
 
 export interface SessionsListResponse {
@@ -161,6 +165,10 @@ export const sessionsApi = {
     if (filters.session_type) params.session_type = filters.session_type;
     if (filters.search) params.search = filters.search;
     if (filters.search_days) params.search_days = String(filters.search_days);
+    // Issue #3189: Additional filters for session recovery fallback
+    if (filters.project_path) params.project_path = filters.project_path;
+    if (filters.workspace_type) params.workspace_type = filters.workspace_type;
+    if (filters.remote_machine_id) params.remote_machine_id = filters.remote_machine_id;
 
     const response = await apiClient.get<SessionsListResponse>('/api/workspace/sessions', params);
     return response;

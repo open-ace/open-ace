@@ -860,6 +860,9 @@ def list_sessions():
         host_name = request.args.get("host_name")
         search = request.args.get("search")
         search_days = request.args.get("search_days")
+        project_path = request.args.get("project_path")  # Issue #3189: Filter by project path
+        workspace_type = request.args.get("workspace_type")  # Issue #3189: Filter by workspace type
+        remote_machine_id = request.args.get("remote_machine_id")  # Issue #3189: Filter by remote machine
         page = int(request.args.get("page", 1))
         limit = int(request.args.get("limit", 20))
 
@@ -920,6 +923,19 @@ def list_sessions():
         if session_type:
             base_conditions.append(f"session_type = {p}")
             base_params.append(session_type)
+
+        # Issue #3189: Filter by project path, workspace type, and remote machine
+        if project_path:
+            base_conditions.append(f"project_path = {p}")
+            base_params.append(project_path)
+
+        if workspace_type:
+            base_conditions.append(f"workspace_type = {p}")
+            base_params.append(workspace_type)
+
+        if remote_machine_id:
+            base_conditions.append(f"remote_machine_id = {p}")
+            base_params.append(remote_machine_id)
 
         base_where_clause = " AND ".join(base_conditions)
 
