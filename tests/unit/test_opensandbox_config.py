@@ -427,3 +427,56 @@ def test_root_exec_uid_is_rejected():
 def test_exec_uid_defaults_to_non_root():
     endpoint = parse_backend_config(_raw()).endpoint_for(tenant=None, project_path=None)
     assert endpoint.exec_uid != 0 and endpoint.exec_gid != 0
+
+
+# ── rollout allowlist: the tenant/project gradual-rollout knob ─────────
+
+
+def test_rollout_defaults_to_all_so_a_bare_config_means_use_the_backend():
+    cfg = parse_backend_config(_raw())
+    assert cfg.rollout_includes(tenant="7", project_path=None) is True
+    assert cfg.rollout_includes(tenant=None, project_path=None) is True
+
+
+def test_allowlist_mode_covers_only_listed_tenants():
+    cfg = parse_backend_config(_raw(rollout={"mode": "allowlist", "tenants": ["42"]}))
+    assert cfg.rollout_includes(tenant="42", project_path=None) is True
+    assert cfg.rollout_includes(tenant=42, project_path=None) is True
+    assert cfg.rollout_includes(tenant="7", project_path=None) is False
+
+
+def test_allowlist_mode_covers_listed_projects():
+    cfg = parse_backend_config(
+        _raw(rollout={"mode": "allowlist", "projects": ["/srv/repos/pilot"]})
+    )
+    assert cfg.rollout_includes(tenant="7", project_path="/srv/repos/pilot") is True
+    assert cfg.rollout_includes(tenant="7", project_path="/srv/repos/other") is False
+
+
+def test_a_required_tenant_excluded_from_the_rollout_is_a_config_error():
+    # "must use the sandbox" and "not rolled out to the sandbox" is an incoherent
+    # pair. Letting either silently win would be the quiet downgrade this design
+    # exists to prevent.
+    with pytest.raises(SandboxConfigError, match="rollout"):
+        parse_backend_config(
+            _raw(
+                rollout={"mode": "allowlist", "tenants": ["7"]},
+                production_required_tenants=["42"],
+            )
+        )
+
+
+def test_a_required_tenant_inside_the_rollout_is_accepted():
+    cfg = parse_backend_config(
+        _raw(
+            rollout={"mode": "allowlist", "tenants": ["42"]},
+            production_required_tenants=["42"],
+        )
+    )
+    assert cfg.requires_production_isolation("42") is True
+    assert cfg.rollout_includes(tenant="42", project_path=None) is True
+
+
+def test_unknown_rollout_mode_is_rejected():
+    with pytest.raises(SandboxConfigError):
+        parse_backend_config(_raw(rollout={"mode": "sometimes"}))

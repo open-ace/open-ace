@@ -67,6 +67,14 @@ def select_provider(
             )
         return fallback
 
+    if not config.rollout_includes(tenant=tenant, project_path=project_path):
+        if required:  # pragma: no cover - parse-time validation rejects this pair
+            raise SandboxError(
+                f"tenant {tenant!r} requires production isolation but is excluded "
+                "from the rollout allowlist"
+            )
+        return fallback
+
     tenant_key = None if tenant is None else str(tenant)
     try:
         from app.modules.workspace.autonomous.sandbox.opensandbox.provider import (

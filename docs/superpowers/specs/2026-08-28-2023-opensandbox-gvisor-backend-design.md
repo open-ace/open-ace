@@ -250,6 +250,7 @@ First existing of `OPENACE_SANDBOX_BACKENDS` → `/etc/openace/sandbox-backends.
       }
     }
   },
+  "rollout": {"mode": "allowlist", "tenants": ["42"], "projects": []},
   "tenant_tiers": {"42": "kata"},
   "project_tiers": {},
   "production_required_tenants": ["42"],
@@ -285,6 +286,15 @@ attestation degrades silently.
   repository actually carries (`CommandExecutionEvidence.tenant_id: int`), not a
   slug. There is no name→id mapping anywhere in the codebase, so inventing one
   here would have produced a key nothing could supply.
+- `rollout` is the gradual-rollout switch the issue's 上线策略 section asks for:
+  `mode: "allowlist"` runs only the listed tenants/projects on OpenSandbox and
+  leaves everything else on Legacy. Without it the only switch was whether the
+  config file exists, which is all-or-nothing per deployment. It answers a
+  *different* question from `tenant_tiers`, which picks gVisor vs Kata and
+  cannot route anything back to Legacy. A tenant that is required but excluded
+  from the rollout is rejected at parse time — that pair is incoherent, and
+  letting either side silently win is the quiet downgrade this design exists to
+  prevent.
 - `production_required_tenants` lists the tenants for which Legacy is not an
   acceptable answer. It is the sole input to
   `isolation_tier.requires_production_isolation`; without it that predicate had
@@ -622,7 +632,7 @@ the same basis on which `vscode_ws_bridge.py` and `terminal_ws_bridge.py` alread
 drive `websockets.sync.client` in this process.
 
 **Rollout:** the OpenSandbox path is reachable only when a backend config exists
-*and* the tenant/project resolves to a tier. With no config the local path is
+*and* the task is inside `rollout` (§4). With no config the local path is
 **behaviourally equivalent** to today — not byte-identical, since Task 11's edits
 are unconditional. The pin for that equivalence is the pre-existing local-path
 suite, which must pass unchanged: `tests/unit/test_agent_runner_signal_routing.py`

@@ -108,3 +108,44 @@ def test_unrequired_tenant_falls_back_when_the_tier_is_unconfigured():
 def test_no_tenant_and_no_config_returns_the_fallback():
     injected = LegacyPosixProvider()
     assert _select(config=None, fallback=injected) is injected
+
+
+# ── rollout: the per-tenant/project switch between Legacy and sandbox ──
+
+
+def test_tenant_outside_the_rollout_allowlist_stays_on_legacy():
+    # This is the gradual-rollout knob. Without it the only switch was whether
+    # the config file exists, which is all-or-nothing per deployment.
+    injected = LegacyPosixProvider()
+    cfg = _cfg(
+        rollout={"mode": "allowlist", "tenants": ["42"]},
+        production_required_tenants=["42"],
+    )
+    assert _select(tenant="7", config=cfg, fallback=injected) is injected
+
+
+def test_tenant_inside_the_rollout_allowlist_gets_opensandbox():
+    cfg = _cfg(
+        rollout={"mode": "allowlist", "tenants": ["42"]},
+        production_required_tenants=["42"],
+    )
+    assert isinstance(_select(tenant="42", config=cfg), OpenSandboxProvider)
+
+
+def test_project_allowlist_routes_a_single_repository_to_the_sandbox():
+    cfg = _cfg(
+        rollout={"mode": "allowlist", "projects": ["/srv/repos/pilot"]},
+        production_required_tenants=[],
+    )
+    assert isinstance(
+        _select(tenant="7", project_path="/srv/repos/pilot", config=cfg), OpenSandboxProvider
+    )
+    injected = LegacyPosixProvider()
+    assert (
+        _select(tenant="7", project_path="/srv/repos/other", config=cfg, fallback=injected)
+        is injected
+    )
+
+
+def test_default_all_mode_keeps_every_tenant_on_the_sandbox():
+    assert isinstance(_select(tenant="7"), OpenSandboxProvider)

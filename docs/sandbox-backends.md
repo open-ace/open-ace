@@ -91,6 +91,7 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
       }
     }
   },
+  "rollout": {"mode": "allowlist", "tenants": ["42"], "projects": []},
   "tenant_tiers": {"42": "kata"},
   "production_required_tenants": ["42"],
   "image_allowlist": ["ghcr.io/open-ace/agent@sha256:<64 hex>"],
@@ -104,6 +105,9 @@ Points worth knowing before you edit it:
 - **Tenant keys are `str(tenant_id)`**, the integer this codebase carries — not
   a slug. There is no name→id mapping anywhere, so a slug key would match
   nothing.
+- **`rollout` decides Legacy vs OpenSandbox; `tenant_tiers` decides gVisor vs
+  Kata.** They are different questions — `tenant_tiers` cannot route a tenant
+  back to Legacy, because every tier is an OpenSandbox endpoint.
 - **`production_required_tenants` is the no-downgrade list.** A tenant on it
   gets OpenSandbox or an exception; there is no path from "required" to Legacy.
 - **An explicitly requested config path that does not exist raises.** It does
@@ -116,18 +120,47 @@ Points worth knowing before you edit it:
 
 ---
 
-## 4. Rollout
+## 4. Choosing Legacy or OpenSandbox
 
-1. Deploy the gVisor tier only. Leave `tenant_tiers` and
-   `production_required_tenants` empty — every tenant still resolves to the
-   default tier, so this is already live for everyone; roll back by removing the
-   config file.
-2. To pilot narrowly instead, use `project_tiers` to route a single repository
-   path.
-3. Add the Kata tier and move high-security tenants onto it with
-   `tenant_tiers`.
-4. Add those tenants to `production_required_tenants` once you want a missing
-   backend to be an error rather than a downgrade.
+Two settings decide this, and they answer different questions.
+
+**`rollout` — may this task use the backend?**
+
+```json
+"rollout": {
+  "mode": "allowlist",
+  "tenants": ["42"],
+  "projects": ["/srv/repos/pilot"]
+}
+```
+
+- `mode: "all"` (the default) — every task on this deployment uses OpenSandbox.
+- `mode: "allowlist"` — only the listed tenants and project paths use it.
+  **Everything else runs on Legacy**, unchanged.
+
+Tenant keys are `str(tenant_id)`; project keys are absolute paths matched
+exactly. A task matching either list is in.
+
+**`production_required_tenants` — must it?**
+
+A tenant on this list gets OpenSandbox or an exception; it can never fall back
+to Legacy. This is the stronger statement, and the two must agree: a tenant that
+is *required* but excluded from the rollout is rejected at config load rather
+than letting one setting quietly win.
+
+With no config file at all, everything runs on Legacy — behaviourally identical
+to before this backend existed. That is also the rollback: remove the file.
+
+### A suggested sequence
+
+1. Deploy the gVisor tier with `rollout.mode = "allowlist"` and a single project
+   path. One repository moves; nothing else changes.
+2. Widen `rollout.tenants` a tenant at a time.
+3. Add the Kata tier and route high-security tenants to it with `tenant_tiers`
+   (this picks *which* tier, not *whether* to use one).
+4. Add those tenants to `production_required_tenants` once a missing backend
+   should be an error rather than a downgrade.
+5. Switch to `rollout.mode = "all"` when the backend is the default everywhere.
 
 ---
 

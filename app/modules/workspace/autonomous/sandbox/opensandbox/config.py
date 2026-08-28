@@ -129,6 +129,34 @@ class PoolConfig:
 
 
 @dataclass(frozen=True)
+class RolloutConfig:
+    """Which tenants and projects the OpenSandbox backend is switched on for.
+
+    Without this, the only switch is whether the config file exists at all —
+    which makes the backend all-or-nothing per deployment and leaves no way to
+    run one tenant on it while everyone else stays on Legacy. The issue asks for
+    a gradual rollout by tenant and project, so ``allowlist`` mode is what makes
+    that possible.
+
+    ``all`` is the default because a config file that says nothing about rollout
+    most plausibly means "use this backend", and because it is what the backend
+    did before this block existed.
+    """
+
+    mode: str = "all"  # "all" | "allowlist"
+    tenants: frozenset[str] = field(default_factory=frozenset)
+    projects: frozenset[str] = field(default_factory=frozenset)
+
+    def includes(self, *, tenant: str | None, project_path: str | None) -> bool:
+        """Whether this task should run on the OpenSandbox backend at all."""
+        if self.mode != "allowlist":
+            return True
+        if tenant is not None and str(tenant) in self.tenants:
+            return True
+        return bool(project_path) and str(project_path) in self.projects
+
+
+@dataclass(frozen=True)
 class EndpointConfig:
     """One OpenSandbox server, tagged with the runtime class it was configured for.
 
@@ -210,6 +238,19 @@ class SandboxBackendConfig:
     resource_defaults: Mapping[str, str] = field(default_factory=dict)
     sandbox_ttl_seconds: int = 3600
     changeset_limits: ChangesetLimits = field(default_factory=ChangesetLimits)
+    rollout: RolloutConfig = field(default_factory=RolloutConfig)
+
+    def rollout_includes(self, *, tenant: str | int | None, project_path: str | None) -> bool:
+        """Whether this task is in the OpenSandbox rollout.
+
+        Separate from :meth:`requires_production_isolation`: rollout answers
+        "may this task use the backend", the other answers "must it". A tenant
+        that is required but not rolled out is a contradiction, and
+        :func:`parse_backend_config` rejects that combination outright rather
+        than letting one setting silently win.
+        """
+        tenant_key = None if tenant is None else str(tenant)
+        return self.rollout.includes(tenant=tenant_key, project_path=project_path)
 
     def requires_production_isolation(self, tenant: str | None) -> bool:
         """True when this tenant may not fall back to a weaker backend.
@@ -347,12 +388,30 @@ def parse_backend_config(raw: Mapping[str, Any]) -> SandboxBackendConfig:
             f"(configured tiers: {sorted(endpoints)})"
         )
 
+    rollout = _parse_rollout(raw.get("rollout") or {})
+    required_tenants = frozenset(_str_list(raw, "production_required_tenants"))
+    # A tenant that must use the backend but is excluded from the rollout is an
+    # incoherent pair, and silently letting either one win would be the exact
+    # kind of quiet downgrade this design exists to prevent.
+    excluded_but_required = sorted(
+        tenant
+        for tenant in required_tenants
+        if not rollout.includes(tenant=tenant, project_path=None)
+    )
+    if excluded_but_required:
+        raise SandboxConfigError(
+            f"tenants {excluded_but_required} are in production_required_tenants but are "
+            "not covered by the rollout allowlist; add them to rollout.tenants or drop "
+            "them from production_required_tenants"
+        )
+
     return SandboxBackendConfig(
         default_tier=default_tier,
         endpoints=endpoints,
         tenant_tiers={str(k): str(v) for k, v in (raw.get("tenant_tiers") or {}).items()},
         project_tiers={str(k): str(v) for k, v in (raw.get("project_tiers") or {}).items()},
-        production_required_tenants=frozenset(_str_list(raw, "production_required_tenants")),
+        production_required_tenants=required_tenants,
+        rollout=rollout,
         image_allowlist=image_allowlist,
         image_signer_identity=str(raw.get("image_signer_identity") or ""),
         resource_defaults={str(k): str(v) for k, v in (raw.get("resource_defaults") or {}).items()},
@@ -469,6 +528,19 @@ def _parse_pool(tier: str, raw: Any) -> PoolConfig:
         egress_preapplied=bool(raw.get("egress_preapplied")),
         recycle_delete=bool(raw.get("recycle_delete")),
         image_digest=image_digest,
+    )
+
+
+def _parse_rollout(raw: Any) -> RolloutConfig:
+    if not isinstance(raw, dict):
+        raise SandboxConfigError("rollout must be an object")
+    mode = str(raw.get("mode") or "all").strip().lower()
+    if mode not in ("all", "allowlist"):
+        raise SandboxConfigError(f"rollout.mode must be 'all' or 'allowlist', got {mode!r}")
+    return RolloutConfig(
+        mode=mode,
+        tenants=frozenset(_str_list(raw, "tenants")),
+        projects=frozenset(_str_list(raw, "projects")),
     )
 
 
