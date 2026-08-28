@@ -22,8 +22,12 @@ class UserRole(Enum):
     READONLY = "readonly"
 
 
-# Admin roles that have system-wide access
+# Admin roles that have system-wide access (includes legacy 'admin' for compatibility)
 ADMIN_ROLES = frozenset({"admin", "platform_admin", "tenant_admin"})
+
+# Roles that can be persisted to the database (excludes legacy 'admin')
+# These are the only roles accepted in create/update/restore operations
+PERSISTABLE_ROLES = frozenset({"platform_admin", "tenant_admin", "manager", "user", "readonly"})
 
 
 @dataclass

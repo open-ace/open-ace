@@ -26,7 +26,7 @@ export interface CreateUserRequest {
   username: string;
   email: string;
   password: string;
-  role?: 'admin' | 'platform_admin' | 'tenant_admin' | 'manager' | 'user' | 'readonly';
+  role?: 'platform_admin' | 'tenant_admin' | 'manager' | 'user' | 'readonly';
   system_account?: string;
   tenant_id?: number;
 }
@@ -34,7 +34,7 @@ export interface CreateUserRequest {
 export interface UpdateUserRequest {
   username?: string;
   email?: string;
-  role?: 'admin' | 'platform_admin' | 'tenant_admin' | 'manager' | 'user' | 'readonly';
+  role?: 'platform_admin' | 'tenant_admin' | 'manager' | 'user' | 'readonly';
   is_active?: boolean;
   system_account?: string;
   password?: string;
@@ -144,7 +144,7 @@ export interface RestoreUserRequest {
   username?: string;
   email?: string;
   password?: string;
-  role?: 'admin' | 'platform_admin' | 'tenant_admin' | 'manager' | 'user' | 'readonly';
+  role?: 'platform_admin' | 'tenant_admin' | 'manager' | 'user' | 'readonly';
 }
 
 export interface RestoreUserResponse {
