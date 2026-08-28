@@ -293,7 +293,14 @@ RUN chmod 755 /usr/local/bin/openace-chown /usr/local/bin/openace-useradd \
                     /usr/local/bin/openace-git /usr/local/bin/openace-gh \
                     /etc/openace/git-wrapper.json /etc/openace/gh-wrapper.json && \
     chmod 0644 /etc/openace/git-wrapper.json /etc/openace/gh-wrapper.json && \
-    mkdir -p /var/lock && chmod 1777 /var/lock
+    mkdir -p /var/lock && chmod 1777 /var/lock && \
+    mkdir -p /app/logs && chown open-ace:open-ace /app/logs
+
+# /app itself stays root-owned (WORKDIR creates it before USER switching, and
+# COPY --chown only affects copied contents), while docker-entrypoint.sh's
+# `mkdir -p /app/logs` (Issue #1205) runs as uid 1000 before the command
+# dispatch. CI build contexts never contain a gitignored logs/ directory, so
+# the image must pre-create it open-ace-owned or every non-root boot fails.
 
 # NOTE: The image defaults to the non-root open-ace user (uid 1000) so that
 # `docker run`, docker-compose, and Kubernetes all execute the entrypoint as
