@@ -1,0 +1,29 @@
+# Per-sandbox identity with no Kubernetes API permissions (Issue #2023).
+#
+# Backs the `dedicated_service_account` attestation. There is deliberately no
+# Role or RoleBinding: a sandbox must not be able to read Secrets, list Pods, or
+# reach the API server at all. automountServiceAccountToken is false on the pod
+# template as well, so the token is never even projected into the container.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: open-ace-sandboxes
+  labels:
+    kubernetes.io/metadata.name: open-ace-sandboxes
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opensandbox-sandbox
+  namespace: open-ace-sandboxes
+automountServiceAccountToken: false
+
+---
+# The OpenSandbox server itself DOES need API access — it creates sandbox pods.
+# Scoped to the sandbox namespace only.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opensandbox-server
+  namespace: open-ace

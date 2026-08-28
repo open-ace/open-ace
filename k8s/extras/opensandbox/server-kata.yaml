@@ -1,0 +1,98 @@
+# OpenSandbox server for the kata isolation tier (Issue #2023).
+#
+# One Deployment per tier, because the secure runtime is a SERVER-level setting
+# upstream — "All sandboxes on that server transparently use the configured
+# runtime". The backend config routes a tenant to this endpoint by tier; a tier
+# with no endpoint raises rather than falling back to a weaker one.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opensandbox-kata
+  namespace: open-ace
+  labels:
+    app.kubernetes.io/name: opensandbox
+    app.kubernetes.io/component: kata
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: opensandbox
+      app.kubernetes.io/component: kata
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: opensandbox
+        app.kubernetes.io/component: kata
+    spec:
+      serviceAccountName: opensandbox-server
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: server
+          image: opensandbox/server:latest
+          args: ["--config", "/etc/opensandbox/sandbox.toml"]
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            # The API key the control plane presents. sandbox-backends.json
+            # references it by env-var NAME only; the value never appears there.
+            - name: OPEN_SANDBOX_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: opensandbox-keys
+                  key: kata-api-key
+            # Must be non-empty. execd's auth middleware SHORT-CIRCUITS on an
+            # empty token, leaving execd reachable with no credential at all —
+            # which is what the execd_token_required attestation asserts against.
+            - name: EXECD_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: opensandbox-keys
+                  key: kata-execd-token
+          volumeMounts:
+            - name: config
+              mountPath: /etc/opensandbox
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+      volumes:
+        - name: config
+          configMap:
+            name: opensandbox-config-kata
+        - name: tmp
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensandbox-kata
+  namespace: open-ace
+spec:
+  selector:
+    app.kubernetes.io/name: opensandbox
+    app.kubernetes.io/component: kata
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

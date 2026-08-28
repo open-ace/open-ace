@@ -1,0 +1,23 @@
+# Secure container runtimes for OpenSandbox sandbox pods (Issue #2023).
+#
+# gVisor/Kata selection is a SERVER-level setting in OpenSandbox
+# ("All sandboxes on that server transparently use the configured runtime"),
+# so each isolation tier needs its own server Deployment + ConfigMap pointing
+# at one of these RuntimeClasses. That is why the backend config routes tiers
+# to separate endpoints rather than passing a runtime field per request.
+#
+# Prerequisites on every node that will schedule sandbox pods:
+#   gVisor    — runsc + containerd-shim-runsc-v1
+#   Kata      — kata-containers + hardware virtualization (VT-x/AMD-V) + KVM
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+handler: runsc
+
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-qemu
+handler: kata-qemu

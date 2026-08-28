@@ -1,0 +1,33 @@
+# Admission-time image verification (Issue #2023).
+#
+# Division of responsibility, stated here so it is legible at the point of
+# deployment: the PROVIDER enforces allowlist membership and digest pinning in
+# Python. It does NOT verify cosign signatures or SBOM attestations — that
+# belongs at admission, which is what this policy does. Reading "image
+# allowlist, signature and SBOM" as fully enforced in the provider would be
+# wrong.
+#
+# Requires Kyverno (or an equivalent policy controller) in the cluster.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: opensandbox-verify-agent-image
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-cosign-signature
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaces: ["open-ace-sandboxes"]
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/open-ace/agent*"
+          attestors:
+            - entries:
+                - keyless:
+                    # Must match image_signer_identity in sandbox-backends.json.
+                    subject: "https://github.com/open-ace/open-ace/.github/workflows/release.yml@refs/heads/main"
+                    issuer: "https://token.actions.githubusercontent.com"

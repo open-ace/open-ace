@@ -1,0 +1,41 @@
+# Cluster-layer egress control for sandbox pods (Issue #2023).
+#
+# This is the layer that actually blocks the metadata endpoint and RFC1918
+# ranges. The OpenSandbox egress sidecar enforces by DNS name, which does not
+# stop a connection made to a bare IP — so `metadata_cidr_blocked` in
+# sandbox-backends.json attests to THIS manifest being applied, not to the
+# sidecar. Both are required before NETWORK_EGRESS_POLICY is declared.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opensandbox-sandbox-egress
+  namespace: open-ace-sandboxes
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opensandbox-sandbox
+  policyTypes:
+    - Egress
+  egress:
+    # DNS only to the cluster resolver.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Everything else: public internet only, with the metadata address and every
+    # private range carved out.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.0.0/16   # link-local, incl. 169.254.169.254 metadata
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10    # CGNAT
+              - 127.0.0.0/8

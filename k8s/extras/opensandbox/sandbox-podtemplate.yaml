@@ -1,0 +1,60 @@
+# The sandbox pod template each OpenSandbox server applies (Issue #2023).
+#
+# EVERY property here backs an attestation in sandbox-backends.json. The
+# provider cannot observe any of them through the sandbox API, so it declares
+# the matching capability only because an operator asserted it — and refuses to
+# run at all when the assertion is absent (spec §5.2 refusal 9). Removing a
+# field here without removing its attestation makes the workflow row lie.
+#
+#   runAsNonRoot / runAsUser        -> nonroot_enforced
+#   readOnlyRootFilesystem          -> readonly_rootfs
+#   seccompProfile RuntimeDefault   -> seccomp_runtime_default
+#   serviceAccountName (no RBAC)    -> dedicated_service_account
+#   podPidsLimit (kubelet, see README) -> pod_pids_limit
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: opensandbox-sandbox
+  namespace: open-ace-sandboxes
+template:
+  metadata:
+    labels:
+      app.kubernetes.io/name: opensandbox-sandbox
+  spec:
+    runtimeClassName: gvisor
+    serviceAccountName: opensandbox-sandbox
+    automountServiceAccountToken: false
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    containers:
+      - name: sandbox
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+          # HOME must be writable: the repo synthesis step (spec §7.1) runs
+          # `git init` + a commit before any PTY session exists, and git needs
+          # somewhere to write objects and config under a read-only rootfs.
+          - name: home
+            mountPath: /workspace/home
+          - name: workspace
+            mountPath: /workspace
+          - name: tmp
+            mountPath: /tmp
+    volumes:
+      - name: home
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: workspace
+        emptyDir:
+          sizeLimit: 8Gi
+      - name: tmp
+        emptyDir:
+          sizeLimit: 1Gi

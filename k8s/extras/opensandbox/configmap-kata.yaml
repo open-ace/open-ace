@@ -1,0 +1,26 @@
+# OpenSandbox server configuration for the gVisor tier (Issue #2023).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opensandbox-config-kata
+  namespace: open-ace
+data:
+  sandbox.toml: |
+    [runtime]
+    type = "kubernetes"
+    execd_image = "opensandbox/execd:latest"
+    namespace = "open-ace-sandboxes"
+
+    [secure_runtime]
+    # Server-level, not per-request. The provider's boot probe reads
+    # /proc/version in a fresh sandbox and refuses to run if the kernel does not
+    # match the tier's declared runtime_class, so this value is verified rather
+    # than trusted.
+    type = "kata"
+    k8s_runtime_class = "kata-qemu"
+
+    [egress]
+    # dns+nft, not dns: DNS-only enforcement cannot stop a connection made to a
+    # bare IP. The provider probes the sidecar's /policy and fails closed when
+    # enforcementMode is anything else.
+    mode = "dns+nft"
