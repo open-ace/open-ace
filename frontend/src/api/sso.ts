@@ -5,9 +5,11 @@
 import { apiClient } from './client';
 
 // Types
+export type ProviderType = 'oauth2' | 'oidc' | 'saml';
+
 export interface SSOProvider {
   name: string;
-  type: 'oauth2' | 'oidc';
+  type: ProviderType;
   is_enabled: boolean;
   is_predefined?: boolean;
   client_id?: string;
@@ -21,14 +23,14 @@ export interface SSOProvider {
 
 export interface PredefinedProvider {
   name: string;
-  type: 'oauth2' | 'oidc';
+  type: ProviderType;
   display_name: string;
   icon?: string;
 }
 
 export interface RegisterProviderRequest {
   name: string;
-  provider_type?: 'oauth2' | 'oidc';
+  provider_type?: ProviderType;
   client_id: string;
   client_secret: string;
   redirect_uri?: string;
@@ -44,6 +46,7 @@ export interface RegisterProviderRequest {
 
 export interface SSOProviderDetail extends SSOProvider {
   tenant_id?: number;
+  extra_params?: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;
 }

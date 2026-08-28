@@ -1688,6 +1688,25 @@ export const translations: Record<Language, Translations> = {
     providerUpdated: 'Provider updated successfully',
     updatedAt: 'Updated At',
 
+    // SAML Provider
+    spEntityId: 'SP Entity ID',
+    enterSpEntityId: 'Enter SP entity ID',
+    idpEntityId: 'IdP Entity ID',
+    enterIdpEntityId: 'Enter IdP entity ID',
+    idpEntityIdRequired: 'IdP Entity ID is required',
+    idpSsoUrl: 'IdP SSO URL',
+    enterIdpSsoUrl: 'Enter IdP SSO URL',
+    idpSsoUrlRequired: 'IdP SSO URL is required',
+    idpCertificate: 'X.509 Certificate',
+    enterIdpCertificate: 'Paste the X.509 certificate (PEM format)',
+    idpCertificateRequired: 'X.509 certificate is required',
+    idpCertificateHint: 'Paste the certificate in PEM format (-----BEGIN CERTIFICATE-----...)',
+    idpMetadataUrl: 'IdP Metadata URL',
+    enterIdpMetadataUrl: 'Enter IdP metadata URL (optional)',
+    samlIdpConfiguration: 'SAML IdP Configuration',
+    samlIdpConfigurationHint:
+      'Configure your Identity Provider settings. Obtain these values from your IdP administrator.',
+
     // Insights
     insights: 'AI Insights',
     insightsTitle: 'AI Conversation Insights',
@@ -3905,6 +3924,24 @@ export const translations: Record<Language, Translations> = {
     providerUpdated: '提供者更新成功',
     updatedAt: '更新时间',
 
+    // SAML Provider
+    spEntityId: 'SP 实体 ID',
+    enterSpEntityId: '请输入 SP 实体 ID',
+    idpEntityId: 'IdP 实体 ID',
+    enterIdpEntityId: '请输入 IdP 实体 ID',
+    idpEntityIdRequired: 'IdP 实体 ID 为必填项',
+    idpSsoUrl: 'IdP SSO URL',
+    enterIdpSsoUrl: '请输入 IdP SSO URL',
+    idpSsoUrlRequired: 'IdP SSO URL 为必填项',
+    idpCertificate: 'X.509 证书',
+    enterIdpCertificate: '请粘贴 X.509 证书（PEM 格式）',
+    idpCertificateRequired: 'X.509 证书为必填项',
+    idpCertificateHint: '请粘贴 PEM 格式的证书（-----BEGIN CERTIFICATE-----...）',
+    idpMetadataUrl: 'IdP Metadata URL',
+    enterIdpMetadataUrl: '请输入 IdP Metadata URL（可选）',
+    samlIdpConfiguration: 'SAML IdP 配置',
+    samlIdpConfigurationHint: '配置您的身份提供商设置。请从 IdP 管理员处获取这些值。',
+
     // Insights
     insights: 'AI 洞察',
     insightsTitle: 'AI 对话洞察报告',
@@ -4839,6 +4876,25 @@ export const translations: Record<Language, Translations> = {
     no: 'いいえ',
     providerUpdated: 'プロバイダーが正常に更新されました',
     updatedAt: '更新日時',
+
+    // SAML Provider
+    spEntityId: 'SP エンティティ ID',
+    enterSpEntityId: 'SP エンティティ ID を入力',
+    idpEntityId: 'IdP エンティティ ID',
+    enterIdpEntityId: 'IdP エンティティ ID を入力',
+    idpEntityIdRequired: 'IdP エンティティ ID は必須です',
+    idpSsoUrl: 'IdP SSO URL',
+    enterIdpSsoUrl: 'IdP SSO URL を入力',
+    idpSsoUrlRequired: 'IdP SSO URL は必須です',
+    idpCertificate: 'X.509 証明書',
+    enterIdpCertificate: 'X.509 証明書を貼り付け（PEM 形式）',
+    idpCertificateRequired: 'X.509 証明書は必須です',
+    idpCertificateHint: 'PEM 形式の証明書を貼り付け（-----BEGIN CERTIFICATE-----...）',
+    idpMetadataUrl: 'IdP メタデータ URL',
+    enterIdpMetadataUrl: 'IdP メタデータ URL を入力（オプション）',
+    samlIdpConfiguration: 'SAML IdP 設定',
+    samlIdpConfigurationHint: 'IdP 設定を構成します。これらの値は IdP 管理者から取得してください。',
+
     saveFailed: '設定保存失敗',
     failedToLoadSSOSettings: 'SSO設定の読み込みに失敗しました。ページを更新してください。',
     ssoSettingNotLoaded: 'SSO設定を読み込んでいます。しばらくお待ちください。',
@@ -6920,6 +6976,24 @@ export const translations: Record<Language, Translations> = {
     no: '아니오',
     providerUpdated: '제공업체가 성공적으로 업데이트되었습니다',
     updatedAt: '업데이트 시간',
+
+    // SAML Provider
+    spEntityId: 'SP 엔티티 ID',
+    enterSpEntityId: 'SP 엔티티 ID 입력',
+    idpEntityId: 'IdP 엔티티 ID',
+    enterIdpEntityId: 'IdP 엔티티 ID 입력',
+    idpEntityIdRequired: 'IdP 엔티티 ID는 필수입니다',
+    idpSsoUrl: 'IdP SSO URL',
+    enterIdpSsoUrl: 'IdP SSO URL 입력',
+    idpSsoUrlRequired: 'IdP SSO URL은 필수입니다',
+    idpCertificate: 'X.509 인증서',
+    enterIdpCertificate: 'X.509 인증서 붙여넣기 (PEM 형식)',
+    idpCertificateRequired: 'X.509 인증서는 필수입니다',
+    idpCertificateHint: 'PEM 형식의 인증서를 붙여넣기 (-----BEGIN CERTIFICATE-----...)',
+    idpMetadataUrl: 'IdP 메타데이터 URL',
+    enterIdpMetadataUrl: 'IdP 메타데이터 URL 입력 (선택)',
+    samlIdpConfiguration: 'SAML IdP 설정',
+    samlIdpConfigurationHint: 'IdP 설정을 구성합니다. IdP 관리자로부터 이 값을 확인하세요.',
 
     // Report
     myUsageReport: '내 사용 보고서',

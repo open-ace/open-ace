@@ -46,6 +46,7 @@ const PREDEFINED_PROVIDERS = [
   { value: 'microsoft', label: 'Microsoft' },
   { value: 'github', label: 'GitHub' },
   { value: 'okta', label: 'Okta' },
+  { value: 'saml', label: 'SAML 2.0' },
 ];
 
 export const SSOSettings: React.FC = () => {
@@ -93,6 +94,7 @@ export const SSOSettings: React.FC = () => {
     token_url: '',
     userinfo_url: '',
     issuer_url: '',
+    extra_params: {},
   });
 
   // Provider detail modal state
@@ -197,6 +199,7 @@ export const SSOSettings: React.FC = () => {
       token_url: '',
       userinfo_url: '',
       issuer_url: '',
+      extra_params: {},
     });
     setClientSecretConfirm('');
     setShowModal(true);
@@ -258,13 +261,20 @@ export const SSOSettings: React.FC = () => {
   const handlePredefinedChange = (value: string) => {
     const isPredefined = value !== '';
     // Reset credential fields when switching providers to prevent stale values
+    let providerType: 'oauth2' | 'oidc' | 'saml' = 'oauth2';
+    if (value === 'okta' || value === 'google' || value === 'microsoft') {
+      providerType = 'oidc';
+    } else if (value === 'saml') {
+      providerType = 'saml';
+    }
     setFormData({
       ...formData,
       name: value,
       predefined: isPredefined,
-      provider_type: value === 'okta' ? 'oidc' : 'oauth2',
+      provider_type: providerType,
       client_id: '',
       client_secret: '',
+      extra_params: {},
     });
     setClientSecretConfirm('');
   };
@@ -281,15 +291,34 @@ export const SSOSettings: React.FC = () => {
       return;
     }
 
-    if (!formData.client_secret.trim()) {
+    // SAML providers do not require client_secret
+    const isSaml = formData.provider_type === 'saml';
+    if (!isSaml && !formData.client_secret.trim()) {
       setRegisterError(t('clientSecretRequired', language));
       return;
     }
 
-    // Validate client_secret confirmation
-    if (formData.client_secret !== clientSecretConfirm) {
+    // Validate client_secret confirmation (only when client_secret is provided)
+    if (formData.client_secret && formData.client_secret !== clientSecretConfirm) {
       setRegisterError(t('clientSecretMismatch', language));
       return;
+    }
+
+    // SAML providers require IdP configuration
+    if (isSaml) {
+      const extraParams = formData.extra_params as Record<string, unknown> | undefined;
+      if (!extraParams?.idp_entity_id) {
+        setRegisterError(t('idpEntityIdRequired', language));
+        return;
+      }
+      if (!extraParams?.idp_sso_url) {
+        setRegisterError(t('idpSsoUrlRequired', language));
+        return;
+      }
+      if (!extraParams?.idp_certificate) {
+        setRegisterError(t('idpCertificateRequired', language));
+        return;
+      }
     }
 
     // Custom provider requires name
@@ -380,6 +409,7 @@ export const SSOSettings: React.FC = () => {
         token_url: detail.token_url ?? '',
         userinfo_url: detail.userinfo_url ?? '',
         issuer_url: detail.issuer_url ?? '',
+        extra_params: detail.extra_params ?? {},
         updated_at: detail.updated_at,
       });
       setEditClientSecretConfirm('');
@@ -823,18 +853,22 @@ export const SSOSettings: React.FC = () => {
                 options={[
                   { value: 'oauth2', label: 'OAuth 2.0' },
                   { value: 'oidc', label: 'OpenID Connect' },
+                  { value: 'saml', label: 'SAML 2.0' },
                 ]}
                 value={formData.provider_type ?? 'oauth2'}
                 onChange={(value) =>
-                  setFormData({ ...formData, provider_type: value as 'oauth2' | 'oidc' })
+                  setFormData({ ...formData, provider_type: value as 'oauth2' | 'oidc' | 'saml' })
                 }
               />
             </div>
 
-            {/* Client ID */}
+            {/* Client ID / SP Entity ID */}
             <div className="col-md-6">
               <label className="form-label" htmlFor="register-client-id">
-                {t('clientId', language)} *
+                {formData.provider_type === 'saml'
+                  ? t('spEntityId', language)
+                  : t('clientId', language)}{' '}
+                *
               </label>
               <TextInput
                 id="register-client-id"
@@ -842,41 +876,159 @@ export const SSOSettings: React.FC = () => {
                 autoComplete="off"
                 value={formData.client_id}
                 onChange={(value: string) => setFormData({ ...formData, client_id: value })}
-                placeholder={t('enterClientId', language)}
+                placeholder={
+                  formData.provider_type === 'saml'
+                    ? t('enterSpEntityId', language)
+                    : t('enterClientId', language)
+                }
               />
             </div>
 
-            {/* Client Secret */}
-            <div className="col-md-6">
-              <label className="form-label" htmlFor="register-client-secret">
-                {t('clientSecret', language)} *
-              </label>
-              <TextInput
-                id="register-client-secret"
-                name="oauth_provider_client_secret"
-                type="password"
-                autoComplete="new-password"
-                value={formData.client_secret}
-                onChange={(value: string) => setFormData({ ...formData, client_secret: value })}
-                placeholder={t('enterClientSecret', language)}
-              />
-            </div>
+            {/* Client Secret - Not required for SAML */}
+            {formData.provider_type !== 'saml' && (
+              <>
+                <div className="col-md-6">
+                  <label className="form-label" htmlFor="register-client-secret">
+                    {t('clientSecret', language)} *
+                  </label>
+                  <TextInput
+                    id="register-client-secret"
+                    name="oauth_provider_client_secret"
+                    type="password"
+                    autoComplete="new-password"
+                    value={formData.client_secret}
+                    onChange={(value: string) => setFormData({ ...formData, client_secret: value })}
+                    placeholder={t('enterClientSecret', language)}
+                  />
+                </div>
 
-            {/* Client Secret Confirm */}
-            <div className="col-md-6">
-              <label className="form-label" htmlFor="register-client-secret-confirm">
-                {t('clientSecretConfirm', language)} *
-              </label>
-              <TextInput
-                id="register-client-secret-confirm"
-                name="oauth_provider_client_secret_confirmation"
-                type="password"
-                autoComplete="new-password"
-                value={clientSecretConfirm}
-                onChange={(value: string) => setClientSecretConfirm(value)}
-                placeholder={t('enterClientSecretConfirm', language)}
-              />
-            </div>
+                {/* Client Secret Confirm */}
+                <div className="col-md-6">
+                  <label className="form-label" htmlFor="register-client-secret-confirm">
+                    {t('clientSecretConfirm', language)} *
+                  </label>
+                  <TextInput
+                    id="register-client-secret-confirm"
+                    name="oauth_provider_client_secret_confirmation"
+                    type="password"
+                    autoComplete="new-password"
+                    value={clientSecretConfirm}
+                    onChange={(value: string) => setClientSecretConfirm(value)}
+                    placeholder={t('enterClientSecretConfirm', language)}
+                  />
+                </div>
+              </>
+            )}
+
+            {/* SAML Provider Fields */}
+            {formData.provider_type === 'saml' && (
+              <>
+                <div className="col-12">
+                  <hr />
+                  <h6>{t('samlIdpConfiguration', language)}</h6>
+                  <small className="text-muted d-block mb-2">
+                    {t('samlIdpConfigurationHint', language)}
+                  </small>
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label" htmlFor="register-idp-entity-id">
+                    {t('idpEntityId', language)} *
+                  </label>
+                  <TextInput
+                    id="register-idp-entity-id"
+                    name="saml_idp_entity_id"
+                    autoComplete="off"
+                    value={
+                      ((formData.extra_params as Record<string, unknown>)
+                        ?.idp_entity_id as string) ?? ''
+                    }
+                    onChange={(value: string) =>
+                      setFormData({
+                        ...formData,
+                        extra_params: {
+                          ...(formData.extra_params as Record<string, unknown>),
+                          idp_entity_id: value,
+                        },
+                      })
+                    }
+                    placeholder={t('enterIdpEntityId', language)}
+                  />
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label" htmlFor="register-idp-sso-url">
+                    {t('idpSsoUrl', language)} *
+                  </label>
+                  <TextInput
+                    id="register-idp-sso-url"
+                    name="saml_idp_sso_url"
+                    autoComplete="off"
+                    value={
+                      ((formData.extra_params as Record<string, unknown>)?.idp_sso_url as string) ??
+                      ''
+                    }
+                    onChange={(value: string) =>
+                      setFormData({
+                        ...formData,
+                        extra_params: {
+                          ...(formData.extra_params as Record<string, unknown>),
+                          idp_sso_url: value,
+                        },
+                      })
+                    }
+                    placeholder={t('enterIdpSsoUrl', language)}
+                  />
+                </div>
+                <div className="col-12">
+                  <label className="form-label" htmlFor="register-idp-certificate">
+                    {t('idpCertificate', language)} *
+                  </label>
+                  <textarea
+                    id="register-idp-certificate"
+                    className="form-control font-monospace"
+                    rows={6}
+                    placeholder={t('enterIdpCertificate', language)}
+                    value={
+                      ((formData.extra_params as Record<string, unknown>)?.idp_certificate as
+                        string | undefined) ?? ''
+                    }
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        extra_params: {
+                          ...(formData.extra_params as Record<string, unknown>),
+                          idp_certificate: e.target.value,
+                        },
+                      })
+                    }
+                  />
+                  <small className="text-muted">{t('idpCertificateHint', language)}</small>
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label" htmlFor="register-idp-metadata-url">
+                    {t('idpMetadataUrl', language)}
+                  </label>
+                  <TextInput
+                    id="register-idp-metadata-url"
+                    name="saml_idp_metadata_url"
+                    autoComplete="off"
+                    value={
+                      ((formData.extra_params as Record<string, unknown>)?.idp_metadata_url as
+                        string | undefined) ?? ''
+                    }
+                    onChange={(value: string) =>
+                      setFormData({
+                        ...formData,
+                        extra_params: {
+                          ...(formData.extra_params as Record<string, unknown>),
+                          idp_metadata_url: value,
+                        },
+                      })
+                    }
+                    placeholder={t('enterIdpMetadataUrl', language)}
+                  />
+                </div>
+              </>
+            )}
 
             {/* Redirect URI */}
             <div className="col-md-6">
@@ -1060,6 +1212,72 @@ export const SSOSettings: React.FC = () => {
                   <small>{providerDetail.issuer_url ?? '-'}</small>
                 </p>
               </div>
+              {/* SAML-specific fields */}
+              {providerDetail.type === 'saml' && providerDetail.extra_params && (
+                <>
+                  <div className="col-12">
+                    <hr />
+                    <h6>{t('samlIdpConfiguration', language)}</h6>
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label fw-semibold">{t('idpEntityId', language)}</label>
+                    <p className="form-control-static">
+                      <small>
+                        {((providerDetail.extra_params as Record<string, unknown>)
+                          ?.idp_entity_id as string) ?? '-'}
+                      </small>
+                    </p>
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label fw-semibold">{t('idpSsoUrl', language)}</label>
+                    <p className="form-control-static">
+                      <small>
+                        {((providerDetail.extra_params as Record<string, unknown>)
+                          ?.idp_sso_url as string) ?? '-'}
+                      </small>
+                    </p>
+                  </div>
+                  <div className="col-12">
+                    <label className="form-label fw-semibold">
+                      {t('idpCertificate', language)}
+                    </label>
+                    <p className="form-control-static">
+                      <code
+                        style={{
+                          display: 'block',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-all',
+                          fontSize: '0.75rem',
+                        }}
+                      >
+                        {(
+                          (providerDetail.extra_params as Record<string, unknown>)
+                            ?.idp_certificate as string
+                        )?.substring(0, 100) ?? '-'}
+                        {(
+                          (providerDetail.extra_params as Record<string, unknown>)
+                            ?.idp_certificate as string
+                        )?.length > 100 && '...'}
+                      </code>
+                    </p>
+                  </div>
+                  {(providerDetail.extra_params as Record<string, unknown>)?.idp_metadata_url && (
+                    <div className="col-md-6">
+                      <label className="form-label fw-semibold">
+                        {t('idpMetadataUrl', language)}
+                      </label>
+                      <p className="form-control-static">
+                        <small>
+                          {
+                            (providerDetail.extra_params as Record<string, unknown>)
+                              ?.idp_metadata_url as string
+                          }
+                        </small>
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
               {providerDetail.created_at && (
                 <div className="col-md-6">
                   <label className="form-label fw-semibold">{t('createdAt', language)}</label>
@@ -1126,10 +1344,13 @@ export const SSOSettings: React.FC = () => {
                 </p>
               </div>
 
-              {/* Client ID */}
+              {/* Client ID / SP Entity ID */}
               <div className="col-md-6">
                 <label className="form-label" htmlFor="edit-client-id">
-                  {t('clientId', language)} *
+                  {providerDetail.type === 'saml'
+                    ? t('spEntityId', language)
+                    : t('clientId', language)}{' '}
+                  *
                 </label>
                 <TextInput
                   id="edit-client-id"
@@ -1139,7 +1360,11 @@ export const SSOSettings: React.FC = () => {
                   onChange={(value: string) =>
                     setEditFormData({ ...editFormData, client_id: value })
                   }
-                  placeholder={t('enterClientId', language)}
+                  placeholder={
+                    providerDetail.type === 'saml'
+                      ? t('enterSpEntityId', language)
+                      : t('enterClientId', language)
+                  }
                 />
               </div>
 
@@ -1279,6 +1504,112 @@ export const SSOSettings: React.FC = () => {
                   placeholder="https://provider.com"
                 />
               </div>
+
+              {/* SAML-specific fields for edit */}
+              {providerDetail.type === 'saml' && (
+                <>
+                  <div className="col-12">
+                    <hr />
+                    <h6>{t('samlIdpConfiguration', language)}</h6>
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label" htmlFor="edit-idp-entity-id">
+                      {t('idpEntityId', language)} *
+                    </label>
+                    <TextInput
+                      id="edit-idp-entity-id"
+                      name="saml_idp_entity_id_edit"
+                      autoComplete="off"
+                      value={
+                        ((editFormData.extra_params as Record<string, unknown>)?.idp_entity_id as
+                          string | undefined) ?? ''
+                      }
+                      onChange={(value: string) =>
+                        setEditFormData({
+                          ...editFormData,
+                          extra_params: {
+                            ...(editFormData.extra_params as Record<string, unknown>),
+                            idp_entity_id: value,
+                          },
+                        })
+                      }
+                      placeholder={t('enterIdpEntityId', language)}
+                    />
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label" htmlFor="edit-idp-sso-url">
+                      {t('idpSsoUrl', language)} *
+                    </label>
+                    <TextInput
+                      id="edit-idp-sso-url"
+                      name="saml_idp_sso_url_edit"
+                      autoComplete="off"
+                      value={
+                        ((editFormData.extra_params as Record<string, unknown>)?.idp_sso_url as
+                          string | undefined) ?? ''
+                      }
+                      onChange={(value: string) =>
+                        setEditFormData({
+                          ...editFormData,
+                          extra_params: {
+                            ...(editFormData.extra_params as Record<string, unknown>),
+                            idp_sso_url: value,
+                          },
+                        })
+                      }
+                      placeholder={t('enterIdpSsoUrl', language)}
+                    />
+                  </div>
+                  <div className="col-12">
+                    <label className="form-label" htmlFor="edit-idp-certificate">
+                      {t('idpCertificate', language)} *
+                    </label>
+                    <textarea
+                      id="edit-idp-certificate"
+                      className="form-control font-monospace"
+                      rows={6}
+                      placeholder={t('enterIdpCertificate', language)}
+                      value={
+                        ((editFormData.extra_params as Record<string, unknown>)?.idp_certificate as
+                          string | undefined) ?? ''
+                      }
+                      onChange={(e) =>
+                        setEditFormData({
+                          ...editFormData,
+                          extra_params: {
+                            ...(editFormData.extra_params as Record<string, unknown>),
+                            idp_certificate: e.target.value,
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label" htmlFor="edit-idp-metadata-url">
+                      {t('idpMetadataUrl', language)}
+                    </label>
+                    <TextInput
+                      id="edit-idp-metadata-url"
+                      name="saml_idp_metadata_url_edit"
+                      autoComplete="off"
+                      value={
+                        ((editFormData.extra_params as Record<string, unknown>)
+                          ?.idp_metadata_url as string | undefined) ?? ''
+                      }
+                      onChange={(value: string) =>
+                        setEditFormData({
+                          ...editFormData,
+                          extra_params: {
+                            ...(editFormData.extra_params as Record<string, unknown>),
+                            idp_metadata_url: value,
+                          },
+                        })
+                      }
+                      placeholder={t('enterIdpMetadataUrl', language)}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </form>
         ) : (
