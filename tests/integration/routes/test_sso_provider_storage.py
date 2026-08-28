@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -176,3 +176,221 @@ def test_test_url_accessible_blocks_redirect_to_private_address():
     assert not result["success"]
     assert "blocked non-public address" in result["error"]
     assert mock_safe.call_count == 2
+
+
+# Issue #3175: Test updated_at timestamp format compatibility
+
+
+def test_get_provider_detail_returns_iso8601_format(client, sso_manager):
+    """GET endpoint should return updated_at in ISO 8601 format."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    sso_manager.db.execute(
+        """
+        INSERT INTO sso_providers (name, provider_type, config, tenant_id, is_active, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "test-iso",
+            "oauth2",
+            json.dumps(
+                {
+                    "name": "test-iso",
+                    "provider_type": "oauth2",
+                    "client_id": "test-client",
+                    "client_secret": "test-secret",
+                    "authorization_url": "https://example.com/oauth/authorize",
+                    "token_url": "https://example.com/oauth/token",
+                    "scope": ["openid"],
+                }
+            ),
+            None,
+            adapt_boolean_value(True),
+            now,
+        ),
+    )
+
+    resp = client.get("/api/sso/providers/test-iso", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 200
+
+    data = resp.get_json()
+    assert "updated_at" in data
+    # Should be ISO 8601 format, not RFC 1123
+    updated_at = data["updated_at"]
+    assert "T" in updated_at  # ISO 8601 contains 'T' separator
+    assert "GMT" not in updated_at  # RFC 1123 contains 'GMT'
+
+
+def test_update_provider_accepts_rfc1123_timestamp(client, sso_manager):
+    """PUT endpoint should accept RFC 1123 format for optimistic lock check."""
+    # Use time without microseconds - RFC 1123 doesn't support microseconds
+    now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+    sso_manager.db.execute(
+        """
+        INSERT INTO sso_providers (name, provider_type, config, tenant_id, is_active, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "test-rfc",
+            "oauth2",
+            json.dumps(
+                {
+                    "name": "test-rfc",
+                    "provider_type": "oauth2",
+                    "client_id": "test-client",
+                    "client_secret": "test-secret",
+                    "authorization_url": "https://example.com/oauth/authorize",
+                    "token_url": "https://example.com/oauth/token",
+                    "scope": ["openid"],
+                }
+            ),
+            None,
+            adapt_boolean_value(True),
+            now,
+        ),
+    )
+
+    # Simulate frontend sending RFC 1123 format (legacy Flask jsonify behavior)
+    rfc1123_time = now.strftime("%a, %d %b %Y %H:%M:%S GMT")
+
+    resp = client.put(
+        "/api/sso/providers/test-rfc",
+        headers={"Authorization": "Bearer t"},
+        json={
+            "client_id": "updated-client",
+            "updated_at": rfc1123_time,
+        },
+    )
+
+    # Should succeed (200), not return 409
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.get_json()}"
+
+
+def test_update_provider_accepts_iso8601_timestamp(client, sso_manager):
+    """PUT endpoint should accept ISO 8601 format for optimistic lock check."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    sso_manager.db.execute(
+        """
+        INSERT INTO sso_providers (name, provider_type, config, tenant_id, is_active, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "test-iso-update",
+            "oauth2",
+            json.dumps(
+                {
+                    "name": "test-iso-update",
+                    "provider_type": "oauth2",
+                    "client_id": "test-client",
+                    "client_secret": "test-secret",
+                    "authorization_url": "https://example.com/oauth/authorize",
+                    "token_url": "https://example.com/oauth/token",
+                    "scope": ["openid"],
+                }
+            ),
+            None,
+            adapt_boolean_value(True),
+            now,
+        ),
+    )
+
+    # Simulate frontend sending ISO 8601 format (current GET endpoint behavior)
+    iso_time = now.isoformat()
+
+    resp = client.put(
+        "/api/sso/providers/test-iso-update",
+        headers={"Authorization": "Bearer t"},
+        json={
+            "client_id": "updated-client",
+            "updated_at": iso_time,
+        },
+    )
+
+    # Should succeed (200), not return 409
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.get_json()}"
+
+
+def test_update_provider_returns_409_on_real_conflict(client, sso_manager):
+    """PUT endpoint should return 409 when there's a real concurrent modification."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    sso_manager.db.execute(
+        """
+        INSERT INTO sso_providers (name, provider_type, config, tenant_id, is_active, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "test-conflict",
+            "oauth2",
+            json.dumps(
+                {
+                    "name": "test-conflict",
+                    "provider_type": "oauth2",
+                    "client_id": "test-client",
+                    "client_secret": "test-secret",
+                    "authorization_url": "https://example.com/oauth/authorize",
+                    "token_url": "https://example.com/oauth/token",
+                    "scope": ["openid"],
+                }
+            ),
+            None,
+            adapt_boolean_value(True),
+            now,
+        ),
+    )
+
+    # Use an old timestamp to simulate concurrent modification
+    old_time = (now - timedelta(hours=1)).isoformat()
+
+    resp = client.put(
+        "/api/sso/providers/test-conflict",
+        headers={"Authorization": "Bearer t"},
+        json={
+            "client_id": "updated-client",
+            "updated_at": old_time,
+        },
+    )
+
+    # Should return 409 for real conflict
+    assert resp.status_code == 409
+    assert "已被他人修改" in resp.get_json()["error"]
+
+
+def test_update_provider_returns_400_on_invalid_timestamp(client, sso_manager):
+    """PUT endpoint should return 400 for invalid timestamp format."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    sso_manager.db.execute(
+        """
+        INSERT INTO sso_providers (name, provider_type, config, tenant_id, is_active, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "test-invalid",
+            "oauth2",
+            json.dumps(
+                {
+                    "name": "test-invalid",
+                    "provider_type": "oauth2",
+                    "client_id": "test-client",
+                    "client_secret": "test-secret",
+                    "authorization_url": "https://example.com/oauth/authorize",
+                    "token_url": "https://example.com/oauth/token",
+                    "scope": ["openid"],
+                }
+            ),
+            None,
+            adapt_boolean_value(True),
+            now,
+        ),
+    )
+
+    resp = client.put(
+        "/api/sso/providers/test-invalid",
+        headers={"Authorization": "Bearer t"},
+        json={
+            "client_id": "updated-client",
+            "updated_at": "not-a-valid-timestamp",
+        },
+    )
+
+    # Should return 400 for invalid format
+    assert resp.status_code == 400
+    assert "无效的时间戳格式" in resp.get_json()["error"]

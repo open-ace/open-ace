@@ -31,6 +31,47 @@ from app.utils.outbound_url_guard import OutboundUrlBlockedError, safe_request
 
 logger = logging.getLogger(__name__)
 
+
+def _parse_timestamp(ts: str) -> datetime | None:
+    """Parse RFC 1123, ISO 8601, or SQLite datetime string.
+
+    Issue #3175: Accept multiple formats for optimistic lock comparison.
+    GET endpoint now returns ISO 8601, but PUT must accept:
+    - ISO 8601 (current GET endpoint format)
+    - RFC 1123 (legacy Flask jsonify format)
+    - SQLite datetime string (from SQLite databases)
+
+    Args:
+        ts: Timestamp string in various formats.
+
+    Returns:
+        datetime object with timezone info, or None if parsing fails.
+    """
+    from email.utils import parsedate_to_datetime
+
+    # Try ISO 8601 first (current format from GET endpoint)
+    try:
+        # Handle both 'Z' suffix and explicit timezone offsets
+        normalized = ts.replace("Z", "+00:00") if ts.endswith("Z") else ts
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        pass
+
+    # Try RFC 1123 (legacy format from Flask jsonify)
+    try:
+        return parsedate_to_datetime(ts)
+    except (ValueError, TypeError):
+        pass
+
+    # Try SQLite datetime string format (e.g., "2026-08-28 06:55:31.973892")
+    try:
+        # Replace space with T to make it ISO 8601 compatible
+        sqlite_normalized = ts.replace(" ", "T")
+        return datetime.fromisoformat(sqlite_normalized)
+    except ValueError:
+        return None
+
+
 # Issue #1826 F6: Transition warning for SSO_NULL_TENANT_POLICY=warn
 # Check at module load time and emit deprecation notice if warn policy is configured
 _null_tenant_policy = os.environ.get("SSO_NULL_TENANT_POLICY", "reject")
@@ -495,8 +536,26 @@ def get_provider_detail(provider_name: str):
             "userinfo_url": config_data.get("userinfo_url"),
             "issuer_url": config_data.get("issuer_url"),
             "extra_params": sanitize_config_for_audit(config_data.get("extra_params", {})),
-            "created_at": row.get("created_at"),
-            "updated_at": row.get("updated_at"),
+            "created_at": (
+                row.get("created_at").isoformat()
+                if isinstance(row.get("created_at"), datetime)
+                else (
+                    # SQLite may return datetime as string - convert to ISO 8601
+                    row.get("created_at").replace(" ", "T")
+                    if isinstance(row.get("created_at"), str) and row.get("created_at")
+                    else row.get("created_at")
+                )
+            ),
+            "updated_at": (
+                row.get("updated_at").isoformat()
+                if isinstance(row.get("updated_at"), datetime)
+                else (
+                    # SQLite may return datetime as string - convert to ISO 8601
+                    row.get("updated_at").replace(" ", "T")
+                    if isinstance(row.get("updated_at"), str) and row.get("updated_at")
+                    else row.get("updated_at")
+                )
+            ),
         }
 
         return jsonify(response)
@@ -628,25 +687,62 @@ def update_provider(provider_name: str):
     except Exception:
         return jsonify({"error": "Failed to parse existing configuration"}), 500
 
-    # Optimistic lock check
+    # Optimistic lock check - Issue #3175: Compare time values, not strings
     expected_updated_at = data.get("updated_at")
     if expected_updated_at:
         current_updated_at = existing.get("updated_at")
         if current_updated_at:
+            # Normalize current_updated_at to UTC naive datetime
             if isinstance(current_updated_at, datetime):
-                current_str = current_updated_at.isoformat()
+                if current_updated_at.tzinfo:
+                    # Convert to UTC and remove timezone info for comparison
+                    current_dt = current_updated_at.astimezone(timezone.utc).replace(tzinfo=None)
+                else:
+                    # Already naive, assume UTC
+                    current_dt = current_updated_at
+            elif isinstance(current_updated_at, str):
+                # SQLite may return datetime as string
+                parsed_current = _parse_timestamp(current_updated_at)
+                if parsed_current:
+                    if parsed_current.tzinfo:
+                        current_dt = parsed_current.astimezone(timezone.utc).replace(tzinfo=None)
+                    else:
+                        current_dt = parsed_current
+                else:
+                    # Invalid stored timestamp - skip check
+                    logger.warning(f"Invalid stored updated_at format: {current_updated_at}")
+                    current_dt = None
             else:
-                current_str = str(current_updated_at)
-            if current_str != expected_updated_at:
-                return (
-                    jsonify(
-                        {
-                            "error": "配置已被他人修改，请刷新后重新编辑",
-                            "current_updated_at": current_str,
-                        }
-                    ),
-                    409,
-                )
+                # Non-datetime type (shouldn't happen, but handle gracefully)
+                logger.warning(f"Unexpected updated_at type: {type(current_updated_at)}")
+                current_dt = None
+
+            # Parse and normalize expected_updated_at
+            expected_dt = _parse_timestamp(expected_updated_at)
+            if expected_dt:
+                # Convert to UTC naive datetime for comparison
+                if expected_dt.tzinfo:
+                    expected_dt = expected_dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+                # Issue #3175: Truncate microseconds before comparison
+                # RFC 1123 format only supports second precision, so we compare
+                # at second granularity to handle format differences.
+                current_dt_seconds = current_dt.replace(microsecond=0) if current_dt else None
+                expected_dt_seconds = expected_dt.replace(microsecond=0)
+
+                # Compare time values (at second granularity)
+                if current_dt_seconds and current_dt_seconds != expected_dt_seconds:
+                    return (
+                        jsonify(
+                            {
+                                "error": "配置已被他人修改，请刷新后重新编辑",
+                            }
+                        ),
+                        409,
+                    )
+            else:
+                # Invalid timestamp format
+                return jsonify({"error": "无效的时间戳格式"}), 400
     else:
         logger.warning(f"Update provider {provider_name} without updated_at (old client)")
 
