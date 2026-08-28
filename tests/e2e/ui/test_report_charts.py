@@ -25,7 +25,7 @@ pytestmark = [pytest.mark.regression, pytest.mark.issue(91)]
 
 
 # Test configuration
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888/")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/") + "/"
 USERNAME = os.environ.get("USERNAME", "testuser91")
 PASSWORD = os.environ.get("PASSWORD", "test123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
@@ -43,7 +43,7 @@ os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 def _skip_if_no_server():
     try:
-        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+        requests.get(f"{BASE_URL}login", timeout=5).raise_for_status()
     except (requests.exceptions.RequestException, ConnectionError, OSError):
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
@@ -62,7 +62,7 @@ def test_report_charts():
         try:
             # Step 1: Navigate to login page
             print("Step 1: Navigate to login page...")
-            page.goto(BASE_URL + "login")
+            page.goto(f"{BASE_URL}login")
             page.wait_for_load_state("networkidle")
             time.sleep(1)
 

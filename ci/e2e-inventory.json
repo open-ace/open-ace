@@ -3210,19 +3210,19 @@
     },
     {
       "path": "tests/e2e/terminal/test_terminal_demo.py",
-      "mode": "pytest-automated",
+      "mode": "standalone-automated",
       "owner": "issue-394",
       "issue": 394,
       "home_lane": "nightly",
-      "executor": "pytest",
+      "executor": "standalone",
       "capabilities": [
         "browser",
         "server"
       ],
       "timeout_seconds": 240,
       "cadence": "nightly",
-      "collects": true,
-      "notes": "migrated from tests/issues/394 (#2429 batch 17)"
+      "collects": false,
+      "notes": "test_terminal skips in pytest lane by design (needs live machine_id fixture); executed standalone via main() - #2491 R1"
     },
     {
       "path": "tests/e2e/ui/check_custom_dropdown.py",

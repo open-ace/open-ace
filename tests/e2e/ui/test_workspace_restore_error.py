@@ -26,7 +26,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.insert(0, project_root)
 
 # UI 测试配置
-BASE_URL = "http://localhost:19888"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/") + "/"
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 VIEWPORT_SIZE = {"width": 1400, "height": 900}
@@ -40,7 +40,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def _skip_if_no_server():
     try:
-        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+        requests.get(f"{BASE_URL}login", timeout=5).raise_for_status()
     except (requests.exceptions.RequestException, ConnectionError, OSError):
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
@@ -64,7 +64,7 @@ def test_workspace_restore():
         try:
             # Step 1: Login
             print("\n[1] 登录系统...")
-            page.goto(f"{BASE_URL}/login", timeout=DEFAULT_TIMEOUT)
+            page.goto(f"{BASE_URL}login", timeout=DEFAULT_TIMEOUT)
             page.fill("#username", USERNAME)
             page.fill("#password", PASSWORD)
             page.click('button[type="submit"]')
@@ -109,7 +109,7 @@ def test_workspace_restore():
 
             # Step 3: Navigate to workspace
             print("\n[3] 导航到工作区...")
-            page.goto(f"{BASE_URL}/work/workspace", timeout=DEFAULT_TIMEOUT)
+            page.goto(f"{BASE_URL}work/workspace", timeout=DEFAULT_TIMEOUT)
             page.wait_for_load_state("networkidle", timeout=30000)
             page.wait_for_timeout(5000)  # Wait for tabs to load
 

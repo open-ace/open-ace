@@ -25,7 +25,7 @@ from playwright.sync_api import expect, sync_playwright
 pytestmark = [pytest.mark.regression, pytest.mark.issue(94)]
 
 # Test configuration
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888/")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/") + "/"
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
@@ -43,7 +43,7 @@ os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 def _skip_if_no_server():
     try:
-        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+        requests.get(f"{BASE_URL}login", timeout=5).raise_for_status()
     except (requests.exceptions.RequestException, ConnectionError, OSError):
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
@@ -62,7 +62,7 @@ async def test_conversation_history_ui():
         try:
             # Step 1: Navigate to login page
             print("Step 1: Navigate to login page...")
-            await page.goto(BASE_URL + "login")
+            await page.goto(f"{BASE_URL}login")
             await page.wait_for_load_state("networkidle")
             time.sleep(1)
 
@@ -242,7 +242,7 @@ def test_conversation_history_ui_sync():
         try:
             # Step 1: Navigate to login page
             print("Step 1: Navigate to login page...")
-            page.goto(BASE_URL + "login")
+            page.goto(f"{BASE_URL}login")
             page.wait_for_load_state("networkidle")
             time.sleep(1)
 

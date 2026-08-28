@@ -25,7 +25,7 @@ from playwright.async_api import async_playwright
 pytestmark = [pytest.mark.regression, pytest.mark.issue(34)]
 
 
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888/")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/") + "/"
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 SCREENSHOT_DIR = "screenshots"
@@ -56,7 +56,7 @@ def print_test_report(results):
 
 def _skip_if_no_server():
     try:
-        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+        requests.get(f"{BASE_URL}login", timeout=5).raise_for_status()
     except (requests.exceptions.RequestException, ConnectionError, OSError):
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
@@ -335,14 +335,12 @@ async def test_issue34():
             results.append(("其他列排序测试", True, ""))
 
         except PlaywrightError as e:
-            results.append(("测试执行", False, str(e)))
+            results.append(("测试执行", False, f"{e.__class__.__name__}: {e}"))
             await page.screenshot(path=f"{SCREENSHOT_DIR}/issue34_error_{timestamp}.png")
         finally:
             await browser.close()
 
     # 打印报告
     success = print_test_report(results)
-    assert success, (
-        f"issue-34 sort check(s) failed: " f"{[name for name, ok, _ in results if not ok]}"
-    )
+    assert success, f"issue-34 sort check(s) failed: " f"{[r for r in results if not r[1]]}"
     return success

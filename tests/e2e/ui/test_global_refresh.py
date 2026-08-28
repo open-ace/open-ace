@@ -8,6 +8,7 @@ Test script for Issue #98: 全局 refresh 和 auto-refresh 功能
 """
 
 import asyncio
+import os
 
 import pytest
 import requests
@@ -17,12 +18,12 @@ from playwright.async_api import async_playwright
 pytestmark = [pytest.mark.regression, pytest.mark.issue(98)]
 
 
-BASE_URL = "http://localhost:19888"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/") + "/"
 
 
 def _skip_if_no_server():
     try:
-        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+        requests.get(f"{BASE_URL}login", timeout=5).raise_for_status()
     except (requests.exceptions.RequestException, ConnectionError, OSError):
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
@@ -39,7 +40,7 @@ async def test_global_refresh():
         try:
             # Step 1: Navigate to login page
             print("\n[Step 1] Navigating to login page...")
-            await page.goto(f"{BASE_URL}/login", wait_until="networkidle", timeout=30000)
+            await page.goto(f"{BASE_URL}login", wait_until="networkidle", timeout=30000)
             await page.wait_for_timeout(1000)
 
             # Step 2: Login
@@ -54,7 +55,7 @@ async def test_global_refresh():
             print("\n[Step 3] Checking Work mode (should NOT have refresh controls)...")
 
             # Navigate to work mode
-            await page.goto(f"{BASE_URL}/work", wait_until="networkidle", timeout=30000)
+            await page.goto(f"{BASE_URL}work", wait_until="networkidle", timeout=30000)
             await page.wait_for_timeout(2000)
 
             # Wait for header to be visible
@@ -88,7 +89,7 @@ async def test_global_refresh():
             print("\n[Step 4] Checking Manage mode (should have refresh controls on left)...")
 
             # Navigate to manage mode
-            await page.goto(f"{BASE_URL}/manage/dashboard", wait_until="networkidle", timeout=30000)
+            await page.goto(f"{BASE_URL}manage/dashboard", wait_until="networkidle", timeout=30000)
             await page.wait_for_timeout(2000)
 
             # Wait for header to be visible

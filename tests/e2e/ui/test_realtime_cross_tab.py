@@ -27,7 +27,7 @@ pytestmark = [pytest.mark.regression, pytest.mark.issue(71)]
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
 
-BASE_URL = "http://localhost:19888"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/") + "/"
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 VIEWPORT_SIZE = {"width": 1400, "height": 900}
@@ -125,7 +125,7 @@ def check_for_tool_execution(frame):
 
 def _skip_if_no_server():
     try:
-        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+        requests.get(f"{BASE_URL}login", timeout=5).raise_for_status()
     except (requests.exceptions.RequestException, ConnectionError, OSError):
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
@@ -155,7 +155,7 @@ def test_realtime_cross_tab():
         try:
             # ========== 初始化 ==========
             print("\n[初始化] 登录...")
-            page.goto(f"{BASE_URL}/login", timeout=DEFAULT_TIMEOUT)
+            page.goto(f"{BASE_URL}login", timeout=DEFAULT_TIMEOUT)
             page.fill("#username", USERNAME)
             page.fill("#password", PASSWORD)
             page.click('button[type="submit"]')
@@ -163,7 +163,7 @@ def test_realtime_cross_tab():
             print("    ✓ 登录成功")
 
             print("\n[初始化] 导航到 Workspace...")
-            page.goto(f"{BASE_URL}/work/workspace", timeout=DEFAULT_TIMEOUT)
+            page.goto(f"{BASE_URL}work/workspace", timeout=DEFAULT_TIMEOUT)
             page.wait_for_load_state("networkidle", timeout=60000)
             page.wait_for_timeout(8000)
 
