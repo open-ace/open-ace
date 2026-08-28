@@ -662,6 +662,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
   );
   /* eslint-enable @typescript-eslint/prefer-nullish-coalescing */
 
+  /* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
   const resolvedIssueUrl = useMemo(() => {
     const directUrl =
       // The backend stores requirements_issue_url as '' (column DEFAULT '')
@@ -693,6 +694,7 @@ export const WorkflowTimeline: React.FC<WorkflowTimelineProps> = ({
     workflow.github_issue_number,
     workflow.requirements_issue_url,
   ]);
+  /* eslint-enable @typescript-eslint/prefer-nullish-coalescing */
 
   const isActive = ACTIVE_WORKFLOW_STATUSES.includes(workflow.status);
   const isPaused = workflow.status === 'paused';
