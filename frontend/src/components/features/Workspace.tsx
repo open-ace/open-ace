@@ -136,6 +136,8 @@ export const Workspace: React.FC = () => {
 
   // Issue #2892: Session verification state
   const [sessionVerified, setSessionVerified] = useState<boolean | null>(null);
+  // Issue #2892: Terminal verification state for terminal session restoration
+  const [terminalVerified, setTerminalVerified] = useState<boolean | null>(null);
 
   // Remote projects list (Issue #417: Populate "Your Projects" for remote workspace)
   const [remoteProjects, setRemoteProjects] = useState<RemoteProject[]>([]);
@@ -1089,6 +1091,40 @@ export const Workspace: React.FC = () => {
     // Skip if session verification failed
     if (restoreSessionId && urlWorkspaceType !== 'terminal' && sessionVerified === false) {
       return;
+    }
+
+    // Issue #2892: Validate terminal exists before restoration
+    if (urlWorkspaceType === 'terminal' && urlTerminalId && urlMachineId) {
+      if (terminalVerified === null) {
+        remoteApi
+          .getTerminalStatus(urlTerminalId, urlMachineId)
+          .then((response) => {
+            if (!response.success || response.terminal.status === 'error') {
+              setError(
+                t('terminalNotFound', language) || 'Terminal does not exist or has been stopped'
+              );
+              setTerminalVerified(false);
+            } else if (response.terminal.status !== 'running') {
+              setError(t('terminalNotRunning', language) || 'Terminal is not running');
+              setTerminalVerified(false);
+            } else {
+              setTerminalVerified(true);
+            }
+          })
+          .catch((err) => {
+            console.error('[Workspace] Failed to verify terminal:', err);
+            setError(
+              t('terminalNotFound', language) || 'Terminal does not exist or has been stopped'
+            );
+            setTerminalVerified(false);
+          });
+        return;
+      }
+
+      // Skip if terminal verification failed
+      if (terminalVerified === false) {
+        return;
+      }
     }
 
     // Determine if we should restore from store or create new

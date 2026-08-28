@@ -217,6 +217,8 @@ export const translations: Record<Language, Translations> = {
     workspaceLoadFailedDocs: 'View deployment documentation',
     sessionNotFound: 'Session does not exist or has been deleted',
     projectNotFound: 'Project path does not exist',
+    terminalNotFound: 'Terminal does not exist or has been stopped',
+    terminalNotRunning: 'Terminal is not running',
     security: 'Security',
 
     // Mode - Dual-track system
@@ -2498,6 +2500,8 @@ export const translations: Record<Language, Translations> = {
     workspaceLoadFailedDocs: '查看部署文档',
     sessionNotFound: '会话不存在或已被删除',
     projectNotFound: '项目路径不存在',
+    terminalNotFound: '终端不存在或已被停止',
+    terminalNotRunning: '终端未运行',
     security: '安全',
 
     // Mode - Dual-track system
