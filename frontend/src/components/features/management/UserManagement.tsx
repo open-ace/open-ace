@@ -101,7 +101,6 @@ export const UserManagement: React.FC = () => {
   });
 
   const roleOptions = [
-    { value: 'admin', label: t('roleAdmin', language) },
     { value: 'platform_admin', label: t('rolePlatformAdmin', language) },
     { value: 'tenant_admin', label: t('roleTenantAdmin', language) },
     { value: 'manager', label: t('roleManager', language) },

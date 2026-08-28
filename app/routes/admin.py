@@ -80,6 +80,42 @@ def reject_privilege_escalation(role: object) -> tuple[Any, int] | None:
     return jsonify({"error": "Cannot assign platform-level role"}), 403
 
 
+def validate_persistable_role(role: object) -> tuple[Any, int] | None:
+    """Validate that the role is in the list of persistable roles.
+
+    Issue #3179: The legacy 'admin' role is no longer accepted in
+    create/update/restore operations. Only roles in PERSISTABLE_ROLES
+    (platform_admin, tenant_admin, manager, user, readonly) are allowed.
+
+    Returns ``None`` when the role is valid or not provided,
+    otherwise returns a 400 error response.
+    """
+    from app.models.user import PERSISTABLE_ROLES
+
+    if role is None:
+        return None
+
+    role_str = cast("str", role)
+    if role_str in PERSISTABLE_ROLES:
+        return None
+
+    logger.warning(
+        "Invalid role rejected: role=%s valid_roles=%s path=%s",
+        role_str,
+        list(PERSISTABLE_ROLES),
+        request.path,
+    )
+    return (
+        jsonify(
+            {
+                "error": "Invalid role",
+                "message": f"Role must be one of: {', '.join(sorted(PERSISTABLE_ROLES))}",
+            }
+        ),
+        400,
+    )
+
+
 @admin_bp.route("/admin/users", methods=["GET"])
 @admin_required
 def api_get_users():
@@ -137,6 +173,11 @@ def api_create_user():
     escalation = reject_privilege_escalation(role)
     if escalation is not None:
         return escalation
+
+    # Issue #3179: Validate that role is a persistable role
+    invalid_role = validate_persistable_role(role)
+    if invalid_role is not None:
+        return invalid_role
 
     # Validate inputs
     if not validate_username(username):
@@ -279,6 +320,11 @@ def api_update_user(user_id):
     escalation = reject_privilege_escalation(data.get("role"))
     if escalation is not None:
         return escalation
+
+    # Issue #3179: Validate that role is a persistable role
+    invalid_role = validate_persistable_role(data.get("role"))
+    if invalid_role is not None:
+        return invalid_role
 
     # Use the value the scope guard returns, never the raw body value. A value
     # the guard cannot normalize (0, -1, "", "abc") comes back as None, which
@@ -494,6 +540,11 @@ def api_restore_user(user_id):
         escalation = reject_privilege_escalation(role)
         if escalation is not None:
             return escalation
+
+        # Issue #3179: Validate that role is a persistable role
+        invalid_role = validate_persistable_role(role)
+        if invalid_role is not None:
+            return invalid_role
 
     # Validate password if provided
     password = data.get("password")
