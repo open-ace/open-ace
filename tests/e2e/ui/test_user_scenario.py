@@ -14,6 +14,7 @@ preserved against that markup.
 """
 
 import os
+import re
 import sys
 import time
 
@@ -44,6 +45,54 @@ def _skip_if_no_server():
         requests.get(f"{BASE_URL}login", timeout=5).raise_for_status()
     except (requests.exceptions.RequestException, ConnectionError, OSError):
         pytest.skip(f"test server not reachable at {BASE_URL}")
+
+
+def _parse_available_hint(label_text):
+    """Parse the "(Available: X ...)" hint from a quota field label.
+
+    QuotaAlerts.tsx renders each quota input's label with the available
+    tenant pool for that field (``可用:`` in zh, ``Available:`` otherwise),
+    e.g. ``Monthly Token Quota (M)(Available: 10.00M (Max: 100000M))``.
+    Returns the available amount as float, or None when the hint is absent.
+    """
+    match = re.search(r"(?:Available|可用)\s*:\s*([0-9][0-9,]*(?:\.[0-9]+)?)", label_text)
+    if not match:
+        return None
+    return float(match.group(1).replace(",", ""))
+
+
+def _fill_in_policy_quota(modal):
+    """Fill all quota fields with values guaranteed to save in-policy.
+
+    Earlier quota tests in the same shard may have reallocated the admin's
+    quotas, so hardcoded values ("200" monthly, ...) can exceed the
+    remaining tenant pool — the API answers 400 and the modal legitimately
+    stays open. Instead keep each field's current value (a re-save is never
+    a quota increase, so it always passes the tenant allocation check), or
+    when a field is empty (unlimited) fill "1" only if the label's
+    Available hint allows it.
+    """
+    fields = modal.locator(
+        'div.col-md-6:has(label.form-label):has(input.form-control[type="text"])'
+    )
+    count = fields.count()
+    assert count >= 4, f"quota modal should expose 4 quota fields, found {count}"
+    decisions = []
+    for index in range(count):
+        label_text = fields.nth(index).locator("label.form-label").inner_text()
+        available = _parse_available_hint(label_text)
+        field_input = fields.nth(index).locator('input.form-control[type="text"]')
+        current = field_input.input_value().strip()
+        if current:
+            decision = f"keep {current}"
+        elif available is not None and available >= 1:
+            field_input.fill("1")
+            decision = "fill 1 (unlimited before, pool allows 1)"
+        else:
+            decision = "leave unlimited"
+        decisions.append(decision)
+        print(f"  Field {index + 1}: {decision} (hint available={available})")
+    return decisions
 
 
 def test_user_scenario():
@@ -134,28 +183,22 @@ def test_user_scenario():
 
             # Quota fields are TextInput type="text" (4 fields, in order:
             # daily token, monthly token, daily request, monthly request).
-            # All four must be populated: the modal's submit handler crashes
-            # on null quotas (frontend/src/components/features/
-            # management/QuotaAlerts.tsx handleSubmitQuota calls .toString()
-            # on null request quotas), and the lane tenant caps monthly
-            # tokens at 300M, so 200 stays within the allocation.
+            # All four must be populated for the save contract; the values
+            # are chosen dynamically from each label's Available hint so the
+            # save stays in-policy even when earlier shard tests have
+            # reallocated the tenant pool (hardcoded "200" monthly can
+            # exceed the remaining pool -> 400 -> modal legitimately open).
             inputs = modal.locator('input[type="text"].form-control')
             print(f"  Found {inputs.count()} quota text inputs")
             assert (
                 inputs.count() >= 4
             ), f"quota modal should expose 4 quota text inputs, found {inputs.count()}"
 
-            # Modify monthly token quota (and keep the other fields valid)
-            print("\n[Step 4] Modify monthly token quota...")
-            monthly_input = inputs.nth(1)
-            current_value = monthly_input.input_value()
-            print(f"  Current monthly token quota: {current_value or '(unlimited)'}")
-            for index, value in enumerate(["10", "200", "10000", "1000"]):
-                inputs.nth(index).fill(value)
-            print(
-                "  Set quotas: daily_token=10, monthly_token=200, "
-                "daily_request=10000, monthly_request=1000"
-            )
+            # Fill quota fields with in-policy values (keep current, or the
+            # minimal "1" when a field is unlimited and the pool allows it).
+            print("\n[Step 4] Fill quota fields in-policy...")
+            decisions = _fill_in_policy_quota(modal)
+            print(f"  Quota decisions: {decisions}")
             take_screenshot(page, "user_03_value_modified.png")
 
             # Click save

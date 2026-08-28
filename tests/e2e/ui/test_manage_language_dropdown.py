@@ -58,14 +58,22 @@ def _skip_if_no_server():
 
 
 def _open_language_menu(page):
-    """Open the Header language dropdown; return the menu locator."""
+    """Open the Header language dropdown; return the menu locator.
+
+    The menu must be scoped to the globe dropdown itself: the Header renders
+    the help dropdown BEFORE the language dropdown (frontend/src/components/
+    layout/Header.tsx), so an unscoped ``ul.dropdown-menu`` locator resolves
+    to the help menu, which never becomes visible. Same pattern as
+    tests/e2e/browser/test_manage_analysis_roi_i18n.py.
+    """
     toggle = page.locator("button.header-icon-btn.dropdown-toggle").filter(
         has=page.locator("i.bi-globe")
     )
+    toggle.first.wait_for(state="visible", timeout=10000)
     toggle.first.click()
-    menu = page.locator("ul.dropdown-menu").first
-    menu.wait_for(state="visible", timeout=5000)
-    return menu
+    menu = page.locator("div.dropdown:has(button.dropdown-toggle i.bi-globe) ul.dropdown-menu")
+    menu.first.wait_for(state="visible", timeout=5000)
+    return menu.first
 
 
 def test_manage_language_dropdown():

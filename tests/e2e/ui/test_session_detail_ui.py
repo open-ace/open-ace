@@ -15,6 +15,7 @@ Usage:
 import os
 import sys
 import time
+import uuid
 from pathlib import Path
 
 # Add project root to path
@@ -32,6 +33,72 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 TIMEOUT = 30000
+
+SEED_PREFIX = "e2e69"
+
+
+def _seed_sessions(count=3):
+    """Seed completed qwen sessions for user_id=1 so the work left-rail
+    SessionList has rows to click (fed by /api/workspace/sessions). Rows are
+    untitled so the detail modal title falls back to "Session <8-char id>"
+    (SessionList.tsx line 273)."""
+    import sqlite3
+    from datetime import datetime, timedelta
+
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return []
+    ids = []
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            existing = conn.execute(
+                "SELECT COUNT(*) FROM agent_sessions WHERE session_id LIKE ?",
+                (f"{SEED_PREFIX}%",),
+            ).fetchone()[0]
+            for i in range(count - existing):
+                sid = f"{SEED_PREFIX}{uuid.uuid4().hex}"
+                ts = (datetime.now() - timedelta(minutes=i)).isoformat(timespec="seconds")
+                conn.execute(
+                    "INSERT INTO agent_sessions "
+                    "(session_id, session_type, tool_name, status, total_tokens, "
+                    "message_count, request_count, user_id, tenant_id, project_path, "
+                    "workspace_type, created_at, updated_at) "
+                    "VALUES (?, 'chat', 'qwen', 'completed', 500, 10, 5, 1, 1, "
+                    f"'/tmp/{SEED_PREFIX}-project', 'local', ?, ?)",
+                    (sid, ts, ts),
+                )
+                ids.append(sid)
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+    return ids
+
+
+def _cleanup_sessions():
+    import sqlite3
+
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("DELETE FROM agent_sessions WHERE session_id LIKE ?", (f"{SEED_PREFIX}%",))
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _seeded_sessions():
+    _seed_sessions()
+    yield
+    _cleanup_sessions()
 
 
 def _skip_if_no_server():

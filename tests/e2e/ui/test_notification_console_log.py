@@ -46,10 +46,40 @@ def _skip_if_no_server():
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
 
+def _ensure_workspace_disabled():
+    """Establish this test's own premise: workspace NOT configured.
+
+    The /work page gates on workspace.enabled alone (Workspace.tsx), and
+    earlier shard files (e.g. test_language_sync) flip it to true in the
+    shared lane config (~/.open-ace/config.json). An enabled=true / url=""
+    state renders the workspace surface instead of the gate, so this test
+    would depend on shard order without this step. /api/workspace/config
+    re-reads the file per request, so setting enabled=false and url="" here
+    deterministically yields the "Workspace not configured" gate below.
+    """
+    config_path = os.path.expanduser("~/.open-ace/config.json")
+    config = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            config = {}
+    workspace = config.setdefault("workspace", {})
+    if workspace.get("enabled") is False and not workspace.get("url"):
+        return
+    workspace["enabled"] = False
+    workspace["url"] = ""
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+
+
 def test_console_logs():
     """Console-log capture for the workspace tab-notification surface."""
 
     _skip_if_no_server()
+    _ensure_workspace_disabled()
     print("=" * 60)
     print("Console Log Test for Tab Notification")
     print("=" * 60)
