@@ -26,7 +26,7 @@ pytestmark = [pytest.mark.regression, pytest.mark.issue(77)]
 
 
 # Configuration
-BASE_URL = "http://localhost:19888"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/") + "/"
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "77")
@@ -43,7 +43,7 @@ async def take_screenshot(page, name):
 
 def _skip_if_no_server():
     try:
-        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+        requests.get(f"{BASE_URL}login", timeout=5).raise_for_status()
     except (requests.exceptions.RequestException, ConnectionError, OSError):
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
@@ -63,12 +63,12 @@ async def test_sidebar_scrollbar():
 
         try:
             # Login first
-            await page.goto(f"{BASE_URL}/login")
+            await page.goto(f"{BASE_URL}login")
             await page.wait_for_load_state("networkidle")
             await page.fill("#username", USERNAME)
             await page.fill("#password", PASSWORD)
             await page.click("#login-btn")
-            await page.wait_for_url(f"{BASE_URL}/", timeout=10000)
+            await page.wait_for_url(f"{BASE_URL}", timeout=10000)
             await page.wait_for_load_state("networkidle")
 
             # Take screenshot of sidebar

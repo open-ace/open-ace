@@ -15,7 +15,7 @@ pytestmark = [pytest.mark.regression, pytest.mark.issue(29)]
 
 
 # 配置
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888/")
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/") + "/"
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 SCREENSHOT_DIR = "screenshots"
@@ -23,7 +23,7 @@ SCREENSHOT_DIR = "screenshots"
 
 def _skip_if_no_server():
     try:
-        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+        requests.get(f"{BASE_URL}login", timeout=5).raise_for_status()
     except (requests.exceptions.RequestException, ConnectionError, OSError):
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
@@ -152,8 +152,8 @@ async def test_issue29():
                 results.append(("验证列选择器中无 Conversation ID", True, ""))
 
         except PlaywrightError as e:
-            print(f"   ✗ 测试出错: {str(e)}")
-            results.append(("测试执行", False, str(e)))
+            print(f"   ✗ 测试出错: {e.__class__.__name__}: {e}")
+            results.append(("测试执行", False, f"{e.__class__.__name__}: {e}"))
             await page.screenshot(
                 path=f"{SCREENSHOT_DIR}/issue29_error_{timestamp}.png", full_page=True
             )
@@ -179,7 +179,6 @@ async def test_issue29():
         print("=" * 60)
 
         assert failed == 0, (
-            f"{failed} issue-29 check(s) failed: "
-            f"{[name for name, success, _ in results if not success]}"
+            f"{failed} issue-29 check(s) failed: " f"{[r for r in results if not r[1]]}"
         )
         return failed == 0

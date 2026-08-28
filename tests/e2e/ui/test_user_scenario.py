@@ -14,7 +14,7 @@ from playwright.sync_api import sync_playwright
 pytestmark = [pytest.mark.regression, pytest.mark.issue(55)]
 
 
-BASE_URL = "http://localhost:19888"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/") + "/"
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
@@ -30,7 +30,7 @@ def take_screenshot(page, name):
 
 def _skip_if_no_server():
     try:
-        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+        requests.get(f"{BASE_URL}login", timeout=5).raise_for_status()
     except (requests.exceptions.RequestException, ConnectionError, OSError):
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
@@ -78,7 +78,7 @@ def test_user_scenario():
 
             # Login
             print("\n[Step 1] Login...")
-            page.goto(f"{BASE_URL}/login")
+            page.goto(f"{BASE_URL}login")
             page.wait_for_load_state("networkidle", timeout=10000)
             page.fill("#username", USERNAME)
             page.fill("#password", PASSWORD)
@@ -93,7 +93,7 @@ def test_user_scenario():
 
             # Navigate to quota page
             print("\n[Step 2] Navigate to /manage/quota...")
-            page.goto(f"{BASE_URL}/manage/quota")
+            page.goto(f"{BASE_URL}manage/quota")
             page.wait_for_load_state("networkidle", timeout=10000)
             time.sleep(3)
             print("  ✓ Quota page loaded")

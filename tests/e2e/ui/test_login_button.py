@@ -26,7 +26,7 @@ pytestmark = [pytest.mark.regression, pytest.mark.issue(78)]
 
 
 # Configuration
-BASE_URL = "http://localhost:19888"
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888").rstrip("/") + "/"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots", "issues", "78")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 
@@ -41,7 +41,7 @@ async def take_screenshot(page, name):
 
 def _skip_if_no_server():
     try:
-        requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
+        requests.get(f"{BASE_URL}login", timeout=5).raise_for_status()
     except (requests.exceptions.RequestException, ConnectionError, OSError):
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
@@ -61,7 +61,7 @@ async def test_login_button():
 
         try:
             # Navigate to login page
-            await page.goto(f"{BASE_URL}/login")
+            await page.goto(f"{BASE_URL}login")
             await page.wait_for_load_state("networkidle")
 
             # Take screenshot of login page
@@ -69,16 +69,18 @@ async def test_login_button():
             print(f"  Screenshot: {screenshot_path}")
 
             # Check Sign In button exists and is visible
-            login_btn = await page.locator("#login-btn")
-            expect(login_btn).to_be_visible()
+            login_btn = page.locator("#login-btn")
+            await expect(login_btn).to_be_visible()
 
             # Check button has correct text
-            btn_text = login_btn.inner_text()
+            btn_text = await login_btn.inner_text()
             assert "Sign In" in btn_text, f"Button text should contain 'Sign In', got: {btn_text}"
             print(f"  ✓ Sign In button is visible with text: '{btn_text}'")
 
             # Check button has background color (not transparent)
-            btn_style = login_btn.evaluate("el => window.getComputedStyle(el).backgroundColor")
+            btn_style = await login_btn.evaluate(
+                "el => window.getComputedStyle(el).backgroundColor"
+            )
             print(f"  ✓ Button background color: {btn_style}")
             assert btn_style != "rgba(0, 0, 0, 0)", "Button should have a background color"
 
