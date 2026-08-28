@@ -71,3 +71,21 @@ def test_nightly_suite_metrics_have_independent_90_day_artifact():
     assert upload["if"] == "always()"
     assert upload["with"]["if-no-files-found"] == "error"
     assert upload["with"]["retention-days"] == "90"
+
+
+def test_ci_health_metrics_collector_failure_cannot_be_swallowed():
+    workflow = PROJECT_ROOT / ".github" / "workflows" / "ci-health-metrics.yml"
+    data = yaml.load(workflow.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    steps = data["jobs"]["collect"]["steps"]
+
+    collect = next(step for step in steps if step.get("name") == "Collect bounded Actions history")
+    # Without pipefail the `... | tee collector.log` pipeline masks the
+    # collector's exit code and the scheduled run reports fake green (#2493).
+    assert "set -euo pipefail" in collect["run"]
+    assert "tee test-results/ci-health/collector.log" in collect["run"]
+
+    publish = next(step for step in steps if step.get("name") == "Publish CI health summary")
+    assert publish["if"] == "always()"
+    assert "test-results/ci-health/report.md" in publish["run"]
+    assert "test-results/ci-health/report.json" in publish["run"]
+    assert "exit 1" in publish["run"]

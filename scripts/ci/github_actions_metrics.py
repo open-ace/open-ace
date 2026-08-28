@@ -282,12 +282,14 @@ def load_policy(path: Path) -> dict[str, Any]:
         "max_collector_requests",
         "reserve_remaining",
         "max_jobs_per_attempt",
+        "pr_contract_epoch",
         "cohorts",
     }
     if policy.get("version") != 1 or not required.issubset(policy):
         raise MetricsError(f"invalid CI health policy: {path}")
     if policy["sample_cap"] != 25 or policy["max_jobs_per_attempt"] != 100:
         raise MetricsError("unsupported sampling or job-page policy")
+    parse_time(policy.get("pr_contract_epoch"), "policy.pr_contract_epoch")
     return policy
 
 
@@ -388,17 +390,57 @@ def resolve_pr_runtime(
     run: dict[str, Any],
     max_jobs: int,
     jobs_cache: dict[tuple[int, int], tuple[dict[str, Any], dict[str, str]]],
-) -> None:
+    *,
+    epoch: datetime,
+) -> str | None:
+    """Resolve PR runtime linkage from the Select suites job log.
+
+    The linkage attempt is the first attempt that contains exactly one
+    ``Select suites`` job. Runs without any executed attempt (e.g. an
+    ``action_required`` attempt 1 that never produced jobs), and pre-epoch
+    runs whose executed attempts predate the job, are out-of-contract: they
+    return a skip reason for the cohort report instead of failing collection.
+    Post-epoch runs that executed jobs but lack the job are contract breaks
+    and fail closed.
+    """
     run_id = run["id"]
-    jobs_payload, jobs_headers = client.get(
-        f"/repos/{repo}/actions/runs/{run_id}/attempts/1/jobs", {"per_page": max_jobs}
+    attempt_count = run.get("run_attempt")
+    if not isinstance(attempt_count, int) or attempt_count < 1:
+        raise MetricsError(f"run {run_id} has invalid run_attempt")
+    jobs_by_attempt: dict[int, list[dict[str, Any]]] = {}
+    for number in range(1, attempt_count + 1):
+        cache_key = (run_id, number)
+        if cache_key not in jobs_cache:
+            jobs_payload, jobs_headers = client.get(
+                f"/repos/{repo}/actions/runs/{run_id}/attempts/{number}/jobs",
+                {"per_page": max_jobs},
+            )
+            jobs_cache[cache_key] = (jobs_payload, jobs_headers)
+        jobs_payload, jobs_headers = jobs_cache[cache_key]
+        jobs_by_attempt[number] = _validate_raw_jobs(
+            run_id, number, jobs_payload, jobs_headers, max_jobs
+        )
+    select_counts = {
+        number: sum(1 for job in jobs if job.get("name") == "Select suites")
+        for number, jobs in jobs_by_attempt.items()
+    }
+    if any(count > 1 for count in select_counts.values()):
+        raise MetricsError(f"run {run_id} has an attempt with multiple Select suites jobs")
+    linkage_attempt = next(
+        (number for number in sorted(select_counts) if select_counts[number] == 1), None
     )
-    jobs = _validate_raw_jobs(run_id, 1, jobs_payload, jobs_headers, max_jobs)
-    jobs_cache[(run_id, 1)] = (jobs_payload, jobs_headers)
-    select_jobs = [job for job in jobs if job.get("name") == "Select suites"]
-    if len(select_jobs) != 1:
-        raise MetricsError(f"run {run_id} does not have one Select suites job")
-    log, _ = client.get_text(f"/repos/{repo}/actions/jobs/{select_jobs[0]['id']}/logs")
+    if linkage_attempt is None:
+        if not any(jobs_by_attempt.values()):
+            return "no_executed_attempt"
+        if parse_time(run.get("created_at"), "run.created_at") < epoch:
+            return "pre_contract_epoch"
+        raise MetricsError(
+            f"run {run_id} does not have one Select suites job in any executed attempt"
+        )
+    select_job = next(
+        job for job in jobs_by_attempt[linkage_attempt] if job.get("name") == "Select suites"
+    )
+    log, _ = client.get_text(f"/repos/{repo}/actions/jobs/{select_job['id']}/logs")
     merge_candidates = set(re.findall(r"\+([0-9a-f]{40}):refs/remotes/pull/(\d+)/merge", log))
     base_candidates = set(re.findall(r"BASE_SHA:\s*([0-9a-f]{40})", log))
     selected_candidates = {
@@ -608,17 +650,34 @@ def collect_attempts(
                     }
                 )
             else:
-                normalized.update(
-                    {
-                        "queue": measured_delta(
-                            job.get("created_at"), job.get("started_at"), "job.queue"
-                        ),
-                        "execution": measured_delta(
-                            job.get("started_at"), job.get("completed_at"), "job.execution"
-                        ),
-                    }
-                )
-                canonical_jobs.append({**normalized, "attempt": number})
+                if job_conclusion == "skipped":
+                    # Skipped jobs never execute, and GitHub gives their
+                    # timestamps no ordering guarantees at evaluation time
+                    # (observed live, run 31827030734 job 94853500968:
+                    # created/started 18:05:39Z but completed 18:05:30Z —
+                    # completion before both start and creation). Queue and
+                    # execution have no meaning; timestamps are recorded
+                    # as-is and only presence/parseability is enforced.
+                    normalized.update(
+                        {
+                            "timing_state": "skipped_evaluation",
+                            "queue": None,
+                            "execution": None,
+                        }
+                    )
+                    canonical_jobs.append({**normalized, "attempt": number})
+                else:
+                    normalized.update(
+                        {
+                            "queue": measured_delta(
+                                job.get("created_at"), job.get("started_at"), "job.queue"
+                            ),
+                            "execution": measured_delta(
+                                job.get("started_at"), job.get("completed_at"), "job.execution"
+                            ),
+                        }
+                    )
+                    canonical_jobs.append({**normalized, "attempt": number})
             normalized_jobs.append(normalized)
         attempts.append(
             {
@@ -683,12 +742,16 @@ def aggregate_contract(runs: list[dict[str, Any]], min_samples: int) -> dict[str
     job_execution: list[float] = []
     slow_jobs = []
     inherited_job_count = 0
+    skipped_job_count = 0
     for run in runs:
         for attempt in run["attempts"]:
             workflow_queue.append(attempt["queue"]["seconds"])
             for job in attempt["jobs"]:
                 if job["timing_state"] == "inherited_snapshot":
                     inherited_job_count += 1
+                    continue
+                if job["timing_state"] == "skipped_evaluation":
+                    skipped_job_count += 1
                     continue
                 job_queue.append(job["queue"]["seconds"])
                 job_execution.append(job["execution"]["seconds"])
@@ -719,6 +782,7 @@ def aggregate_contract(runs: list[dict[str, Any]], min_samples: int) -> dict[str
         "retry_recovery_count": recoveries,
         "retry_recovery_rate": recoveries / sample_count if sample_count else None,
         "inherited_job_snapshot_count": inherited_job_count,
+        "skipped_job_no_execution_count": skipped_job_count,
         "first_attempt_wall": summarize_values(
             first_walls, min_samples, cohort_samples=sample_count
         ),
@@ -751,6 +815,15 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"| {len(cohort['contracts'])} |"
         )
     for cohort in report["cohorts"]:
+        if cohort.get("skipped_runs"):
+            breakdown = ", ".join(
+                f"{reason}={count}"
+                for reason, count in sorted(
+                    Counter(item["reason"] for item in cohort["skipped_runs"]).items()
+                )
+            )
+            lines.extend(["", f"Out-of-contract runs skipped ({cohort['id']}): {breakdown}"])
+    for cohort in report["cohorts"]:
         if cohort["payload_link_states"]:
             states = ", ".join(
                 f"{state}={count}" for state, count in sorted(cohort["payload_link_states"].items())
@@ -768,6 +841,7 @@ def render_markdown(report: dict[str, Any]) -> str:
                     f"- eventual-pass rate: {contract['eventual_pass_rate']}",
                     f"- retry recoveries: {contract['retry_recovery_count']}",
                     f"- inherited job snapshots: {contract['inherited_job_snapshot_count']}",
+                    f"- skipped jobs (never executed): {contract['skipped_job_no_execution_count']}",
                 ]
             )
     lines.extend(
@@ -793,6 +867,7 @@ def collect(
 ) -> dict[str, Any]:
     rate_limit(client, budget)
     cutoff = now - timedelta(days=policy["window_days"])
+    epoch = parse_time(policy["pr_contract_epoch"], "policy.pr_contract_epoch")
     cohort_sources = []
     unique_commits: set[str] = set()
     pr_runs: list[dict[str, Any]] = []
@@ -849,15 +924,22 @@ def collect(
     budget.preflight(conservative_estimate)
 
     jobs_cache: dict[tuple[int, int], tuple[dict[str, Any], dict[str, str]]] = {}
+    skip_reason_by_run: dict[int, str] = {}
+    aggregated_pr_runs: list[dict[str, Any]] = []
     for run in pr_runs:
-        resolve_pr_runtime(
+        reason = resolve_pr_runtime(
             client,
             repo,
             run,
             policy["max_jobs_per_attempt"],
             jobs_cache,
+            epoch=epoch,
         )
-        unique_commits.add(run["_runtime_merge_sha"])
+        if reason is not None:
+            skip_reason_by_run[run["id"]] = reason
+        else:
+            aggregated_pr_runs.append(run)
+            unique_commits.add(run["_runtime_merge_sha"])
 
     # All variable PR requests have completed. This exact second guard covers
     # every remaining tree, attempt metadata, and uncached jobs request.
@@ -873,7 +955,7 @@ def collect(
     trees = {commit: load_tree(client, repo, commit) for commit in sorted(unique_commits)}
 
     suite_blob_by_run: dict[int, str] = {}
-    for run in pr_runs:
+    for run in aggregated_pr_runs:
         suite_blob = trees[run["_runtime_merge_sha"]].get("ci/suites.json")
         if not suite_blob:
             raise MetricsError(f"run {run['id']} checkout tree lacks ci/suites.json")
@@ -884,7 +966,7 @@ def collect(
     suite_catalogs = {
         blob_sha: load_suite_catalog(client, repo, blob_sha) for blob_sha in sorted(suite_blob_shas)
     }
-    for run in pr_runs:
+    for run in aggregated_pr_runs:
         unknown = set(run["_selected_suites"]) - suite_catalogs[suite_blob_by_run[run["id"]]]
         if unknown:
             raise MetricsError(
@@ -894,8 +976,15 @@ def collect(
     cohort_reports = []
     for source in cohort_sources:
         cohort = source["definition"]
+        skipped_runs = [
+            {"run_id": run["id"], "reason": skip_reason_by_run[run["id"]]}
+            for run in source["runs"]
+            if run["id"] in skip_reason_by_run
+        ]
         normalized = []
         for run in source["runs"]:
+            if run["id"] in skip_reason_by_run:
+                continue
             digest, contract = contract_hash(run, cohort, trees, policy["derivation_version"])
             attempts = collect_attempts(
                 client,
@@ -913,6 +1002,8 @@ def collect(
                 "id": cohort["id"],
                 "eligible_count": source["eligible_count"],
                 "sampled_count": len(normalized),
+                "skipped_count": len(skipped_runs),
+                "skipped_runs": skipped_runs,
                 "invalid_count": 0,
                 "sample_cap": policy["sample_cap"],
                 "sampling_truncated_by_policy": source["sampling_truncated_by_policy"],
