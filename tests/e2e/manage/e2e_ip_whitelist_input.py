@@ -154,10 +154,20 @@ def _open_security_settings_tab(page):
 
     The default tab is Content Filter; the IP whitelist textarea only
     exists on the Security Settings tab (one textarea there), so every
-    UI check must switch explicitly.
+    UI check must switch explicitly. The tab strip is a ul.nav-tabs of
+    button.nav-link items (SecurityCenter.tsx) rendered by the lazy SPA
+    chunk — wait for it instead of racing a fixed 1s sleep.
     """
     page.goto(f"{BASE_URL}/manage/security", wait_until="domcontentloaded", timeout=30000)
-    pause(1)
+    try:
+        page.wait_for_selector("ul.nav-tabs button.nav-link", timeout=15000)
+    except PlaywrightError:
+        # Surface why the tab strip never rendered (blank page / redirect)
+        # instead of failing on the first tab click below.
+        raise AssertionError(
+            "Security Center tab strip never rendered — body: "
+            f"{page.locator('body').inner_text()[:300]!r}, url: {page.url}"
+        )
     try:
         page.click("text=Security Settings", timeout=5000)
     except PlaywrightError:

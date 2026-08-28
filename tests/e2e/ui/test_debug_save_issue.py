@@ -106,7 +106,10 @@ def test_debug_save():
 
             # Modify monthly token quota (second input)
             print("\n[Step 4] Modify monthly token quota...")
-            inputs = modal.locator('input[type="number"]')
+            # QuotaAlerts renders its four quota fields as TextInput
+            # type="text" (input.form-control); the old
+            # input[type="number"] selector matched nothing.
+            inputs = modal.locator('input.form-control[type="text"]')
             print(f"  Found {inputs.count()} inputs")
 
             assert inputs.count() >= 2, "quota modal lacks the expected number inputs"

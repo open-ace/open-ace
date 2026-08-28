@@ -37,8 +37,51 @@ SCREENSHOT_DIR = os.path.join(
 )
 
 
+def _seed_user_daily_stats():
+    """Seed user_daily_stats rows so the trend charts have data.
+
+    UsageOverview only renders the Token/Request trend cards when
+    /api/quota/usage/me returns a non-empty usage.trend, and that trend is
+    served from the pre-aggregated user_daily_stats table (app/routes/
+    quota.py -> usage_repo.get_user_request_trend_by_user_id). A freshly
+    initialized lane home has no rows, so both cards stayed hidden (the
+    baselined failure). Idempotent on a fixed date.
+    """
+    import sqlite3
+    from datetime import date, timedelta
+
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return
+    seed_date = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            cols = [row[1] for row in conn.execute("PRAGMA table_info(user_daily_stats)")]
+            if "user_id" not in cols:
+                return
+            existing = conn.execute(
+                "SELECT COUNT(*) FROM user_daily_stats WHERE user_id = 1 AND date = ?",
+                (seed_date,),
+            ).fetchone()[0]
+            if not existing:
+                conn.execute(
+                    "INSERT INTO user_daily_stats "
+                    "(user_id, date, requests, tokens, input_tokens, output_tokens, "
+                    "cache_tokens) "
+                    "VALUES (1, ?, 12, 3400000, 2000000, 1400000, 0)",
+                    (seed_date,),
+                )
+                conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+
+
 def test_usage_trend_stats():
     """测试 usage 页面趋势图的平均值和最高值显示"""
+    _seed_user_daily_stats()
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
     console_messages = []
@@ -96,9 +139,9 @@ def test_usage_trend_stats():
             print("Step 3: 检查 Token 趋势图...")
             try:
                 # 检查 Token 趋势图标题
-                token_trend_card = page.locator(
-                    ".card:has(h5:has-text('Token'), h5:has-text('token'))"
-                ).first
+                # Card renders its title as <h4 class="card-title"> (common/
+                # Card.tsx); the old h5 selector matched nothing.
+                token_trend_card = page.locator(".card:has(.card-title:has-text('Token'))").first
                 expect(token_trend_card).to_be_visible(timeout=10000)
                 results.append(("Token 趋势图卡片", "通过", ""))
                 print("  ✓ Token 趋势图卡片可见")
@@ -144,7 +187,7 @@ def test_usage_trend_stats():
             try:
                 # 检查 Request 趋势图标题
                 request_trend_card = page.locator(
-                    ".card:has(h5:has-text('Request'), h5:has-text('请求'))"
+                    ".card:has(.card-title:has-text('Request'))"
                 ).first
                 expect(request_trend_card).to_be_visible(timeout=10000)
                 results.append(("Request 趋势图卡片", "通过", ""))

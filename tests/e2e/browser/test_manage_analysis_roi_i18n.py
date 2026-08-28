@@ -60,10 +60,23 @@ LEAK_PATTERNS = [
 
 
 def _switch_language(page, index):
-    """通过 Header 的语言下拉切换语言。"""
-    page.locator("button.dropdown-toggle .bi-globe").click()
-    page.wait_for_timeout(300)
-    page.locator(".dropdown-menu .dropdown-item").nth(index).click()
+    """通过 Header 的语言下拉切换语言。
+
+    Header.tsx renders the help dropdown BEFORE the language dropdown, so the
+    toggle is addressed via its globe icon (button.header-icon-btn with
+    i.bi-globe) instead of "first dropdown-toggle"; the menu is awaited
+    visible before clicking the item (the nightly lane hit click timeouts
+    when the menu was still animating in).
+    """
+    toggle = page.locator("button.dropdown-toggle").filter(has=page.locator("i.bi-globe"))
+    toggle.first.wait_for(state="visible", timeout=10000)
+    toggle.first.click()
+    # Scope the menu to the globe dropdown itself — the page (and the user
+    # menu in the same Header) render other hidden ul.dropdown-menu lists
+    # whose visibility must not be waited on.
+    menu = page.locator("div.dropdown:has(button.dropdown-toggle i.bi-globe) ul.dropdown-menu")
+    menu.first.wait_for(state="visible", timeout=10000)
+    menu.first.locator("button.dropdown-item").nth(index).click()
     page.wait_for_timeout(500)
 
 

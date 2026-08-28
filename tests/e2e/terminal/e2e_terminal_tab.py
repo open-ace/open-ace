@@ -518,6 +518,18 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port, machine_name)
     # ?machine_id=... query string the status poll appends
     page.route("**/api/remote/terminal/*/status*", handle_status)
 
+    # Workspace's tab-initialization effect gates on the user-url query
+    # settling (isLoading); where no qwen-code-webui binary exists the
+    # endpoint 503s forever and even the URL-restored terminal tab below
+    # never mounts. Fulfil it with a placeholder — the terminal tab under
+    # test carries no iframe URL, so the placeholder is never loaded.
+    def handle_user_url(route):
+        route.fulfill(
+            json={"success": True, "url": "http://127.0.0.1:1/", "token": "e2e-mock-token"}
+        )
+
+    page.route("**/api/workspace/user-url", handle_user_url)
+
     try:
         # Seed one local tab through the product's own URL-param path. The
         # tab strip — and Workspace's NewSessionModal wiring, including
@@ -525,6 +537,14 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port, machine_name)
         # workspace the sidebar button opens SessionList's modal, whose
         # terminal path calls the API directly and creates NO tab (the
         # "Create clicked but no xterm" failure mode).
+        #
+        # #2491 drift: the default tab (and with it the tab strip) only
+        # materializes once /api/workspace/user-url settles successfully;
+        # without a qwen-code-webui binary the endpoint 503s forever and
+        # the page is stuck on "Starting your workspace instance". The
+        # user-url mock above settles it so the newTab=true path works in
+        # every environment; the seeded tab's placeholder iframe is never
+        # the tab under test.
         page.goto(f"{BASE_URL}/work/workspace?newTab=true", wait_until="networkidle", timeout=30000)
         time.sleep(2)
 
@@ -701,6 +721,7 @@ def _check_terminal_connection_and_interaction(page, mock_ws_port, machine_name)
         page.unroute("**/api/remote/terminal/start")
         page.unroute("**/api/remote/terminal/stop")
         page.unroute("**/api/remote/terminal/*/status*")
+        page.unroute("**/api/workspace/user-url")
 
 
 # ═══════════════════════════════════════════════════════════
