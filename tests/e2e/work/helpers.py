@@ -109,9 +109,36 @@ def _clear_admin_password_flag():
         conn.close()
 
 
+def _cached_token_is_alive() -> bool:
+    """Probe the lane server: does the cached session token still authenticate?
+
+    The nightly lane runs ONE pytest process for the whole shard (~an hour)
+    against ONE server whose sessions expire (security_settings default
+    session_timeout is 30 minutes). A token cached by an early module — e.g.
+    browser/test_codex_frontend.py, the first file in the shard — is dead by
+    the time the work/* modules run last, so the cache must be validated,
+    never trusted.
+    """
+    if not _auth_token:
+        return False
+    try:
+        r = requests.get(
+            f"{BASE_URL}/api/auth/check",
+            cookies={"session_token": _auth_token},
+            timeout=10,
+        )
+        return r.status_code == 200 and bool(r.json().get("authenticated"))
+    except (requests.RequestException, ValueError):
+        return False
+
+
 def ensure_lane_login():
-    """Idempotently prepare lane auth: clear the password-change flag, login admin."""
-    if _auth_token:
+    """Idempotently prepare lane auth: clear the password-change flag, login admin.
+
+    Re-logins when the cached token no longer authenticates (mid-shard session
+    expiry in the nightly lane); see _cached_token_is_alive.
+    """
+    if _auth_token and _cached_token_is_alive():
         return _auth_token
     _clear_admin_password_flag()
     return api_login()
@@ -132,6 +159,20 @@ def api_login(username=None, password=None):
     return _auth_token
 
 
+def _relogin_on_rejected_session(status_code: int) -> bool:
+    """Handle a 401 caused by the cached lane token dying mid-run.
+
+    Session expiry (30-minute default) can invalidate the process-cached token
+    between module fixtures. Re-login once and let the caller retry with the
+    fresh token; assertions stay in place, so genuine auth failures still fail.
+    """
+    if status_code != 401:
+        return False
+    _clear_admin_password_flag()
+    api_login()
+    return True
+
+
 def api_get(path, params=None, expect_success=True):
     """Authenticated GET request."""
     assert _auth_token, "Not logged in"
@@ -140,6 +181,12 @@ def api_get(path, params=None, expect_success=True):
         params=params,
         cookies={"session_token": _auth_token},
     )
+    if r.status_code == 401 and _relogin_on_rejected_session(r.status_code):
+        r = requests.get(
+            f"{BASE_URL}/api{path}",
+            params=params,
+            cookies={"session_token": _auth_token},
+        )
     if expect_success:
         assert r.status_code == 200, f"GET {path} failed: {r.status_code} {r.text[:300]}"
         data = r.json()
@@ -157,6 +204,14 @@ def api_post(path, data=None, token=None):
         json=data,
         cookies={"session_token": t},
     )
+    # Only the shared lane token is retried; an explicitly passed token keeps
+    # its 401 semantics (callers test deliberately rejected credentials).
+    if r.status_code == 401 and token is None and _relogin_on_rejected_session(r.status_code):
+        r = requests.post(
+            f"{BASE_URL}/api{path}",
+            json=data,
+            cookies={"session_token": _auth_token},
+        )
     return r
 
 

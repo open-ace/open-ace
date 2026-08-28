@@ -39,6 +39,25 @@ USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 
 
+async def _api_login(session) -> str:
+    """Login as the lane admin and return the session_token cookie value.
+
+    /api/conversation-history and /api/conversation-timeline (messages
+    blueprint) require auth; an unauthenticated GET returns 401. The token is
+    returned explicitly instead of relying on aiohttp's cookie jar, which does
+    not replay the host-only cookie the lane server sets on its IP-literal
+    origin — pass it via ``cookies={"session_token": token}`` on each request.
+    """
+    async with session.post(
+        f"{BASE_URL}/api/auth/login",
+        json={"username": USERNAME, "password": PASSWORD},
+    ) as resp:
+        assert resp.status == 200, f"login failed: {resp.status}"
+        morsel = resp.cookies.get("session_token")
+        assert morsel and morsel.value, "login response missing session_token cookie"
+        return morsel.value
+
+
 def _skip_if_no_server():
     try:
         requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
@@ -245,10 +264,12 @@ async def test_api_timeline_no_toolresult():
     results = []
 
     async with aiohttp.ClientSession() as session:
+        token = await _api_login(session)
         # 获取 session 列表
         print("1. 获取 session 列表...")
         async with session.get(
-            f"{BASE_URL}/api/conversation-history?start={utils.get_days_ago(7)}&end={utils.get_today()}&page=1&limit=20"
+            f"{BASE_URL}/api/conversation-history?start={utils.get_days_ago(7)}&end={utils.get_today()}&page=1&limit=20",
+            cookies={"session_token": token},
         ) as resp:
             assert resp.status == 200, f"session list API returned {resp.status}"
 
@@ -271,7 +292,10 @@ async def test_api_timeline_no_toolresult():
 
         print(f"2. 测试 session: {session_id}")
 
-        async with session.get(f"{BASE_URL}/api/conversation-timeline/{session_id}") as resp:
+        async with session.get(
+            f"{BASE_URL}/api/conversation-timeline/{session_id}",
+            cookies={"session_token": token},
+        ) as resp:
             assert resp.status == 200, f"timeline API returned {resp.status}"
 
             timeline_data = await resp.json()

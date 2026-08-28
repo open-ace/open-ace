@@ -39,6 +39,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -51,7 +52,10 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 WEB_BASE = os.environ.get("WEB_BASE", os.environ.get("BASE_URL", "http://localhost:19888"))
-API_BASE = os.environ.get("API_BASE", "http://localhost:19888")
+# API_BASE must follow BASE_URL too: the nightly lane serves the API on an
+# ephemeral port exported as BASE_URL; the fixed 19888 fallback curls a port
+# nobody listens on there (login yields http=0, no session token).
+API_BASE = os.environ.get("API_BASE", os.environ.get("BASE_URL", "http://localhost:19888"))
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
@@ -192,7 +196,16 @@ def test_pagination():
         browser = p.chromium.launch(headless=HEADLESS)
         context = browser.new_context(viewport={"width": 1400, "height": 900})
         context.add_cookies(
-            [{"name": "session_token", "value": token, "domain": "localhost", "path": "/"}]
+            [
+                {
+                    "name": "session_token",
+                    "value": token,
+                    # Cookie domain must match the browsed origin; the lane
+                    # serves WEB_BASE on 127.0.0.1, not localhost.
+                    "domain": urlsplit(WEB_BASE).hostname or "localhost",
+                    "path": "/",
+                }
+            ]
         )
         page = context.new_page()
 
