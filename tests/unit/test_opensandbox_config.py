@@ -14,6 +14,7 @@ import json
 
 import pytest
 
+from app.modules.workspace.autonomous.sandbox.opensandbox import config as config_module
 from app.modules.workspace.autonomous.sandbox.opensandbox.config import (
     SandboxConfigError,
     load_backend_config,
@@ -28,6 +29,7 @@ _KATA_DIGEST = "ghcr.io/open-ace/agent@sha256:" + "b" * 64
 
 def _endpoint(**overrides) -> dict:
     base = {
+        "execd_token_env": "OSB_EXECD_TOKEN",
         "base_url": "http://osb.open-ace.svc.cluster.local:8080/v1",
         "api_key_env": "OSB_KEY_GVISOR",
         "runtime_class": "gvisor",
@@ -70,11 +72,11 @@ def test_tenant_tier_overrides_default():
                 ),
             },
             image_allowlist=[_DIGEST, _KATA_DIGEST],
-            tenant_tiers={"acme": "kata"},
+            tenant_tiers={"42": "kata"},
         )
     )
-    assert cfg.endpoint_for(tenant="acme", project_path=None).runtime_class == "kata-qemu"
-    assert cfg.endpoint_for(tenant="other", project_path=None).runtime_class == "gvisor"
+    assert cfg.endpoint_for(tenant="42", project_path=None).runtime_class == "kata-qemu"
+    assert cfg.endpoint_for(tenant="7", project_path=None).runtime_class == "gvisor"
 
 
 def test_project_tier_beats_tenant_tier():
@@ -89,19 +91,19 @@ def test_project_tier_beats_tenant_tier():
                 ),
             },
             image_allowlist=[_DIGEST, _KATA_DIGEST],
-            tenant_tiers={"acme": "gvisor"},
+            tenant_tiers={"42": "gvisor"},
             project_tiers={"/srv/high-sec": "kata"},
         )
     )
-    assert cfg.endpoint_for(tenant="acme", project_path="/srv/high-sec").tier == "kata"
+    assert cfg.endpoint_for(tenant="42", project_path="/srv/high-sec").tier == "kata"
 
 
 def test_tier_pointing_at_missing_endpoint_fails_closed():
     # Never fall back to a weaker tier — that is the acceptance item
     # "production required policy cannot silently fall back".
-    cfg = parse_backend_config(_raw(tenant_tiers={"acme": "kata"}))
+    cfg = parse_backend_config(_raw(tenant_tiers={"42": "kata"}))
     with pytest.raises(SandboxConfigError):
-        cfg.endpoint_for(tenant="acme", project_path=None)
+        cfg.endpoint_for(tenant="42", project_path=None)
 
 
 def test_default_tier_absent_from_endpoints_is_rejected():
@@ -203,11 +205,11 @@ def test_egress_allow_hosts_are_per_endpoint():
                 ),
             },
             image_allowlist=[_DIGEST, _KATA_DIGEST],
-            tenant_tiers={"acme": "kata"},
+            tenant_tiers={"42": "kata"},
         )
     )
     assert len(cfg.endpoint_for(tenant=None, project_path=None).egress_allow_hosts) == 2
-    assert len(cfg.endpoint_for(tenant="acme", project_path=None).egress_allow_hosts) == 1
+    assert len(cfg.endpoint_for(tenant="42", project_path=None).egress_allow_hosts) == 1
 
 
 # ── images ────────────────────────────────────────────────────────────
@@ -265,8 +267,29 @@ def test_api_key_missing_from_env_fails_closed(monkeypatch):
 # ── loading ───────────────────────────────────────────────────────────
 
 
-def test_missing_config_file_returns_none(tmp_path):
-    assert load_backend_config(str(tmp_path / "absent.json")) is None
+def test_explicitly_requested_config_that_is_absent_raises(tmp_path, monkeypatch):
+    # Falling through to the system/user config would mean a typo'd env var, or
+    # a config lost during a deploy, silently resolves to None — and None means
+    # "no OpenSandbox backend", handing every non-required tenant to Legacy with
+    # no signal. That is acceptance criterion 12's failure mode.
+    monkeypatch.delenv("OPENACE_SANDBOX_BACKENDS", raising=False)
+    with pytest.raises(SandboxConfigError):
+        load_backend_config(str(tmp_path / "absent.json"))
+
+
+def test_absent_env_var_path_also_raises(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENACE_SANDBOX_BACKENDS", str(tmp_path / "absent.json"))
+    with pytest.raises(SandboxConfigError):
+        load_backend_config()
+
+
+def test_no_config_anywhere_returns_none(tmp_path, monkeypatch):
+    # Pin the search paths at tmp_path so the result does not depend on whether
+    # the developer's machine happens to have /etc/openace/sandbox-backends.json.
+    monkeypatch.delenv("OPENACE_SANDBOX_BACKENDS", raising=False)
+    monkeypatch.setattr(config_module, "DEFAULT_BACKEND_CONFIG_PATH", str(tmp_path / "etc.json"))
+    monkeypatch.setattr(config_module, "USER_BACKEND_CONFIG_PATH", str(tmp_path / "user.json"))
+    assert load_backend_config() is None
 
 
 def test_malformed_config_raises_rather_than_defaulting(tmp_path):
@@ -304,3 +327,93 @@ def test_tenant_keys_are_the_integer_tenant_id_as_a_string():
 def test_no_production_required_list_means_no_tenant_is_required():
     cfg = parse_backend_config(_raw())
     assert cfg.requires_production_isolation("42") is False
+
+
+# ── tenant key coercion (B7) ──────────────────────────────────────────
+
+
+def test_int_and_str_tenant_ids_resolve_to_the_same_tier():
+    # The runner holds an integer tenant_id and config keys are strings. Without
+    # coercion in tier_for, a production-required tenant passed as an int is
+    # correctly flagged by requires_production_isolation and then routed to the
+    # DEFAULT tier — flagged as needing Kata, given gVisor.
+    cfg = parse_backend_config(
+        _raw(
+            endpoints={
+                "gvisor": _endpoint(),
+                "kata": _endpoint(
+                    runtime_class="kata-qemu",
+                    api_key_env="OSB_KEY_KATA",
+                    default_image=_KATA_DIGEST,
+                ),
+            },
+            image_allowlist=[_DIGEST, _KATA_DIGEST],
+            tenant_tiers={"42": "kata"},
+            production_required_tenants=["42"],
+        )
+    )
+    assert cfg.tier_for(tenant=42, project_path=None) == "kata"
+    assert cfg.tier_for(tenant="42", project_path=None) == "kata"
+    assert cfg.requires_production_isolation(42) is True
+
+
+# ── execd token, egress port, runtime user (B4/B5/B15) ────────────────
+
+
+def test_execd_token_required_without_an_env_var_is_rejected():
+    # Refusal 9 makes execd_token_required mandatory for a usable tier, so a
+    # tier that attests it but names no env var would send no token and 401 on
+    # every execd call.
+    with pytest.raises(SandboxConfigError):
+        parse_backend_config(
+            _raw(
+                endpoints={
+                    "gvisor": _endpoint(
+                        attestations={"execd_token_required": True}, execd_token_env=""
+                    )
+                }
+            )
+        )
+
+
+def test_execd_token_read_from_its_env_var(monkeypatch):
+    monkeypatch.setenv("OSB_EXECD_TOKEN", "execd-secret")
+    cfg = parse_backend_config(
+        _raw(
+            endpoints={
+                "gvisor": _endpoint(
+                    attestations={"execd_token_required": True},
+                    execd_token_env="OSB_EXECD_TOKEN",
+                )
+            }
+        )
+    )
+    assert cfg.endpoint_for(tenant=None, project_path=None).execd_token() == "execd-secret"
+
+
+def test_execd_token_missing_from_env_fails_closed(monkeypatch):
+    monkeypatch.delenv("OSB_EXECD_TOKEN", raising=False)
+    cfg = parse_backend_config(
+        _raw(
+            endpoints={
+                "gvisor": _endpoint(
+                    attestations={"execd_token_required": True},
+                    execd_token_env="OSB_EXECD_TOKEN",
+                )
+            }
+        )
+    )
+    with pytest.raises(SandboxConfigError):
+        cfg.endpoint_for(tenant=None, project_path=None).execd_token()
+
+
+def test_egress_port_defaults_to_the_sidecar_not_execd():
+    # The egress sidecar is a separate service; GET /policy on execd's port 404s.
+    endpoint = parse_backend_config(_raw()).endpoint_for(tenant=None, project_path=None)
+    assert endpoint.egress_port == 18080
+    assert endpoint.execd_port == 44772
+
+
+def test_runtime_user_and_group_have_defaults():
+    endpoint = parse_backend_config(_raw()).endpoint_for(tenant=None, project_path=None)
+    assert endpoint.runtime_user and endpoint.runtime_group

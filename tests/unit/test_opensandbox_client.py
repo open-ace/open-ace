@@ -64,6 +64,7 @@ class _Session:
 
 def _endpoint(**overrides) -> EndpointConfig:
     base = {
+        "execd_token_env": "",
         "tier": "gvisor",
         "base_url": "http://osb.open-ace.svc.cluster.local:8080/v1",
         "api_key_env": "OSB_KEY",
@@ -97,10 +98,37 @@ def test_every_lifecycle_call_sends_api_key_header_and_disables_proxies():
     assert call["proxies"] == {"http": None, "https": None}
 
 
-def test_execd_calls_use_the_apikey_header_not_bearer():
-    # Upstream defines AccessToken as apiKey in header X-EXECD-ACCESS-TOKEN.
-    # An Authorization: Bearer would 401 on every execd call.
-    assert EXECD_TOKEN_HEADER == "X-EXECD-ACCESS-TOKEN"
+def test_execd_calls_actually_send_the_execd_token(monkeypatch):
+    # Upstream defines AccessToken as apiKey in header X-EXECD-ACCESS-TOKEN, and
+    # refusal 9 makes execd_token_required mandatory for a usable tier — so a
+    # client that never attaches it 401s on every execd call.
+    monkeypatch.setenv("OSB_EXECD_TOKEN", "execd-secret")
+    session = _Session(
+        [
+            _Response(200, {"endpoint": "http://osb.open-ace.svc.cluster.local/p"}),
+            _Response(200, {"running": False, "exit_code": 0}),
+        ]
+    )
+    _api(session, _endpoint(execd_token_env="OSB_EXECD_TOKEN")).command_status("sb-1", "cmd-1")
+    assert session.calls[-1]["headers"][EXECD_TOKEN_HEADER] == "execd-secret"
+
+
+def test_server_supplied_per_sandbox_token_overrides_the_static_one(monkeypatch):
+    monkeypatch.setenv("OSB_EXECD_TOKEN", "static")
+    session = _Session(
+        [
+            _Response(
+                200,
+                {
+                    "endpoint": "http://osb.open-ace.svc.cluster.local/p",
+                    "headers": {EXECD_TOKEN_HEADER: "per-sandbox"},
+                },
+            ),
+            _Response(200, {"running": False, "exit_code": 0}),
+        ]
+    )
+    _api(session, _endpoint(execd_token_env="OSB_EXECD_TOKEN")).command_status("sb-1", "cmd-1")
+    assert session.calls[-1]["headers"][EXECD_TOKEN_HEADER] == "per-sandbox"
 
 
 def test_non_2xx_raises_with_status_and_upstream_code():
@@ -126,9 +154,16 @@ def test_get_sandbox_returns_none_on_404():
 # ── pagination ────────────────────────────────────────────────────────
 
 
-def test_list_sandboxes_follows_pagination_until_a_short_page():
-    page1 = {"sandboxes": [{"id": f"sb-{i}"} for i in range(20)]}
-    page2 = {"sandboxes": [{"id": "sb-20"}]}
+def test_list_sandboxes_reads_the_upstream_items_key():
+    # Upstream's ListSandboxesResponse is {items, pagination}, both required.
+    body = {"items": [{"id": "sb-1"}], "pagination": {"hasNextPage": False}}
+    session = _Session([_Response(200, body)])
+    assert len(_api(session).list_sandboxes()) == 1
+
+
+def test_list_sandboxes_stops_on_has_next_page_false():
+    page1 = {"items": [{"id": f"sb-{i}"} for i in range(20)], "pagination": {"hasNextPage": True}}
+    page2 = {"items": [{"id": "sb-20"}], "pagination": {"hasNextPage": False}}
     session = _Session([_Response(200, page1), _Response(200, page2)])
     api = HttpOpenSandboxApi(_endpoint(), session=session, page_size=20)
     assert len(api.list_sandboxes()) == 21
@@ -136,8 +171,35 @@ def test_list_sandboxes_follows_pagination_until_a_short_page():
     assert session.calls[1]["params"]["page"] == 2
 
 
+def test_list_sandboxes_keeps_paging_when_the_server_clamps_page_size():
+    # A server that clamps pageSize to its own maximum returns a "short" page on
+    # request 1. Trusting the short-page heuristic there would stop the orphan
+    # sweep after one page — silently, in the situation reconciliation exists for.
+    page1 = {"items": [{"id": f"sb-{i}"} for i in range(5)], "pagination": {"hasNextPage": True}}
+    page2 = {"items": [{"id": "sb-5"}], "pagination": {"hasNextPage": False}}
+    session = _Session([_Response(200, page1), _Response(200, page2)])
+    api = HttpOpenSandboxApi(_endpoint(), session=session, page_size=20)
+    assert len(api.list_sandboxes()) == 6
+
+
+def test_list_sandboxes_falls_back_to_short_page_when_pagination_is_absent():
+    page1 = {"items": [{"id": f"sb-{i}"} for i in range(20)]}
+    page2 = {"items": [{"id": "sb-20"}]}
+    session = _Session([_Response(200, page1), _Response(200, page2)])
+    api = HttpOpenSandboxApi(_endpoint(), session=session, page_size=20)
+    assert len(api.list_sandboxes()) == 21
+
+
+def test_list_sandboxes_sends_the_metadata_filter():
+    # Without it the orphan sweep lists every sandbox on a shared server and
+    # would destroy other teams' and other products' workloads.
+    session = _Session([_Response(200, {"items": [], "pagination": {"hasNextPage": False}})])
+    _api(session).list_sandboxes({"openace.provider": "opensandbox"})
+    assert "openace.provider" in session.calls[0]["params"]["metadata"]
+
+
 def test_list_sandboxes_stops_at_the_max_page_guard():
-    full = {"sandboxes": [{"id": f"sb-{i}"} for i in range(20)]}
+    full = {"items": [{"id": f"sb-{i}"} for i in range(20)], "pagination": {"hasNextPage": True}}
     session = _Session([_Response(200, full) for _ in range(200)])
     api = HttpOpenSandboxApi(_endpoint(), session=session, page_size=20, max_list_pages=3)
     api.list_sandboxes()
@@ -289,3 +351,89 @@ def test_pty_ws_url_is_pipe_mode_and_carries_the_since_offset():
     assert url.startswith("ws://")
     assert "pty=0" in url  # pipe mode: stderr stays a separate stream
     assert "since=42" in url
+
+
+# ── egress sidecar is a separate service (B5) ─────────────────────────
+
+
+def test_egress_policy_targets_the_sidecar_port_not_execd():
+    # The sidecar is its own service on its own port; GET /policy against
+    # execd's 44772 is a 404, and the §5.3 probe that upgrades
+    # NETWORK_EGRESS_POLICY from an operator's word to a verified fact would
+    # never run.
+    session = _Session(
+        [
+            _Response(200, {"endpoint": "http://osb.open-ace.svc.cluster.local/egress"}),
+            _Response(200, {"defaultAction": "deny", "enforcementMode": "dns+nft"}),
+        ]
+    )
+    policy = _api(session).egress_policy("sb-1")
+    assert "/endpoints/18080" in session.calls[0]["url"]
+    assert policy["enforcementMode"] == "dns+nft"
+
+
+def test_egress_auth_header_survives_the_endpoint_header_filter():
+    session = _Session(
+        [
+            _Response(
+                200,
+                {
+                    "endpoint": "http://osb.open-ace.svc.cluster.local/egress",
+                    "headers": {"OPENSANDBOX-EGRESS-AUTH": "egress-tok", "X-Evil": "1"},
+                },
+            ),
+            _Response(200, {"defaultAction": "deny", "enforcementMode": "dns+nft"}),
+        ]
+    )
+    _api(session).egress_policy("sb-1")
+    assert session.calls[-1]["headers"]["OPENSANDBOX-EGRESS-AUTH"] == "egress-tok"
+    assert "X-Evil" not in session.calls[-1]["headers"]
+
+
+# ── upload ownership (B15) ────────────────────────────────────────────
+
+
+def test_upload_file_sets_owner_group_and_mode():
+    # execd may run as root; a root-owned 0644 file is unwritable by the
+    # non-root agent that refusal 9 mandates, so the agent could not edit its
+    # own workspace.
+    session = _Session(
+        [
+            _Response(200, {"endpoint": "http://osb.open-ace.svc.cluster.local/p"}),
+            _Response(200, {}),
+        ]
+    )
+    _api(session).upload_file("sb-1", "/workspace/a.py", b"x", mode=0o644)
+    metadata = json.loads(session.calls[-1]["files"][0][1][1])
+    assert metadata["mode"] == 0o644
+    assert metadata["owner"] == "openace"
+    assert metadata["group"] == "openace"
+
+
+# ── streamed response lifetime (B20) ──────────────────────────────────
+
+
+def test_run_command_closes_the_response_when_the_iterator_is_abandoned():
+    # stream() abandons this iterator on timeout or stop; without the finally
+    # the pooled connection is never released and a long-lived scheduler
+    # process exhausts the pool.
+    closed: list[bool] = []
+
+    class _Streamed(_Response):
+        def close(self):
+            closed.append(True)
+
+    streamed = _Streamed(200, content=b'data: {"type":"stdout","text":"a"}\n\n')
+    session = _Session(
+        [_Response(200, {"endpoint": "http://osb.open-ace.svc.cluster.local/p"}), streamed]
+    )
+    events = _api(session).run_command("sb-1", {"command": "ls"})
+    next(events)
+    events.close()
+    assert closed == [True]
+
+
+def test_malformed_midstream_sse_event_surfaces_as_an_error_not_silence():
+    raw = b'data: {"type":"stdout","text":"a"}\n\ndata: {broken\n\ndata: {"type":"execution_complete"}\n\n'
+    kinds = [e["type"] for e in iter_sse_events(_Response(content=raw))]
+    assert kinds == ["stdout", "error", "execution_complete"]

@@ -144,10 +144,33 @@ class EndpointConfig:
     runtime_class: str
     default_image: str
     execd_port: int = 44772
+    # Egress sidecar is a SEPARATE service on its own port with its own auth
+    # header — GET /policy against execd's port is a 404.
+    egress_port: int = 18080
+    # execd requires X-EXECD-ACCESS-TOKEN whenever the server sets one, and
+    # refusal 9 makes execd_token_required mandatory, so every usable tier needs
+    # this. Read from the environment, never stored in the JSON.
+    execd_token_env: str = ""
+    # execd may run as root; files uploaded root-owned under a restrictive mode
+    # would leave the non-root agent unable to edit its own workspace.
+    runtime_user: str = "openace"
+    runtime_group: str = "openace"
     execd_endpoint_host_allowlist: tuple[str, ...] = ()
     egress_allow_hosts: tuple[str, ...] = ()
     attestations: Attestations = field(default_factory=Attestations)
     pool: PoolConfig = field(default_factory=PoolConfig)
+
+    def execd_token(self) -> str:
+        """Read the execd access token, or "" when the tier declares none."""
+        if not self.execd_token_env:
+            return ""
+        value = os.environ.get(self.execd_token_env, "")
+        if not value:
+            raise SandboxConfigError(
+                f"endpoint {self.tier!r}: execd token env var "
+                f"{self.execd_token_env!r} is unset or empty"
+            )
+        return value
 
     def api_key(self) -> str:
         """Read the API key from the configured environment variable.
@@ -195,10 +218,14 @@ class SandboxBackendConfig:
 
     def tier_for(self, *, tenant: str | None, project_path: str | None) -> str:
         """Resolve the isolation tier: project override, then tenant, then default."""
-        if project_path and project_path in self.project_tiers:
-            return self.project_tiers[project_path]
-        if tenant and tenant in self.tenant_tiers:
-            return self.tenant_tiers[tenant]
+        if project_path and str(project_path) in self.project_tiers:
+            return self.project_tiers[str(project_path)]
+        # str() here is load-bearing, not defensive: the runner holds an integer
+        # tenant_id, config keys are strings, and requires_production_isolation
+        # already coerces. Without the same coercion a production-required
+        # tenant would be correctly flagged and then routed to the DEFAULT tier.
+        if tenant and str(tenant) in self.tenant_tiers:
+            return self.tenant_tiers[str(tenant)]
         return self.default_tier
 
     def endpoint_for(self, *, tenant: str | None, project_path: str | None) -> EndpointConfig:
@@ -242,8 +269,23 @@ def candidate_backend_config_paths(explicit: str | None = None) -> tuple[str, ..
 
 
 def resolve_backend_config_path(explicit: str | None = None) -> str | None:
-    """Return the first existing candidate path, else ``None``."""
-    for candidate in candidate_backend_config_paths(explicit):
+    """Return the first existing candidate path, else ``None``.
+
+    An explicitly requested path — a caller argument or
+    ``$OPENACE_SANDBOX_BACKENDS`` — that does not exist **raises**. Searching on
+    would mean a typo'd env var or a config lost during a deploy silently
+    resolves to the user-level file, or to ``None``; and ``None`` means "no
+    OpenSandbox backend", which hands every non-required tenant back to Legacy
+    with no signal at all.
+    """
+    requested = explicit or os.environ.get(BACKEND_CONFIG_ENV)
+    if requested:
+        if Path(requested).is_file():
+            return requested
+        raise SandboxConfigError(
+            f"sandbox backend config {requested!r} was explicitly requested but does not exist"
+        )
+    for candidate in (DEFAULT_BACKEND_CONFIG_PATH, USER_BACKEND_CONFIG_PATH):
         if Path(candidate).is_file():
             return candidate
     return None
@@ -342,6 +384,11 @@ def _parse_endpoint(tier: str, body: Any, image_allowlist: frozenset[str]) -> En
     egress_hosts = tuple(_str_list(body, "egress_allow_hosts"))
     for host in egress_hosts:
         _require_egress_host(tier, host)
+    if attestations.execd_token_required and not str(body.get("execd_token_env") or "").strip():
+        raise SandboxConfigError(
+            f"endpoint {tier!r}: execd_token_required is attested but execd_token_env "
+            "is unset; the client would send no token and every execd call would 401"
+        )
     if attestations.egress_enforced and not egress_hosts:
         raise SandboxConfigError(
             f"endpoint {tier!r}: egress_enforced is attested but egress_allow_hosts is empty; "
@@ -357,6 +404,10 @@ def _parse_endpoint(tier: str, body: Any, image_allowlist: frozenset[str]) -> En
         runtime_class=str(body["runtime_class"]).strip(),
         default_image=default_image,
         execd_port=_int_or_raise(body.get("execd_port", 44772), f"endpoint {tier!r} execd_port"),
+        egress_port=_int_or_raise(body.get("egress_port", 18080), f"endpoint {tier!r} egress_port"),
+        execd_token_env=str(body.get("execd_token_env") or "").strip(),
+        runtime_user=str(body.get("runtime_user") or "openace").strip(),
+        runtime_group=str(body.get("runtime_group") or "openace").strip(),
         execd_endpoint_host_allowlist=host_allowlist,
         egress_allow_hosts=egress_hosts,
         attestations=attestations,

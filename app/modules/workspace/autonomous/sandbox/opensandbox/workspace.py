@@ -26,6 +26,7 @@ appear in a manifest, that would delete the trusted repository itself.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import os
 import shutil
@@ -62,8 +63,7 @@ _SECRET_GLOBS: tuple[str, ...] = (
     "id_rsa*",
     "id_ecdsa*",
     "id_ed25519*",
-    ".env",
-    ".env.*",
+    ".env*",
     ".git-credentials",
     ".netrc",
     ".npmrc",
@@ -270,17 +270,65 @@ def apply_changeset(
         )
 
     resolved_root = Path(root).resolve()
-    staging = Path(tempfile.mkdtemp(prefix=".openace-changeset-", dir=str(resolved_root)))
+    max_file = limits.max_file_bytes
+    max_total = limits.max_total_bytes
+    # Sibling of the worktree, not inside it: a crash between mkdtemp and the
+    # finally would otherwise leave a directory that the next build_snapshot
+    # uploads and `git status` reports.
+    staging = Path(tempfile.mkdtemp(prefix=".openace-changeset-", dir=str(resolved_root.parent)))
     try:
-        staged: list[tuple[Path, Path, int]] = []
+        staged: list[tuple[Path, Path, int, str]] = []
+        total = 0
         for entry in entries:
+            destination = resolved_root / entry.path
+            if entry.symlink_target:
+                # Validated as a symlink, so apply it as one. Writing fetched
+                # bytes here would turn a validated link into a regular file and
+                # leave the worktree structurally different from what was checked.
+                staged.append((staging / entry.path, destination, 0, entry.symlink_target))
+                continue
+            data = fetch(entry.path)
+            # The limits above were checked against the manifest's SELF-REPORTED
+            # size. Re-check the bytes actually delivered, or a supervisor that
+            # declares `size: 10` and returns 10 GB defeats both bounds — and the
+            # party being bounded is the one doing the reporting.
+            if len(data) != entry.size:
+                raise SandboxError(
+                    f"ChangeSet rejected: {entry.path} declared {entry.size} bytes "
+                    f"but delivered {len(data)}"
+                )
+            if len(data) > max_file:
+                raise SandboxError(
+                    f"ChangeSet rejected: {entry.path} exceeds max_file_bytes={max_file}"
+                )
+            total += len(data)
+            if total > max_total:
+                # Defence in depth. The per-file exact-size check above already
+                # makes this unreachable for an honest manifest, and validation
+                # catches a dishonest declared total — but a future relaxation of
+                # either should not silently remove the aggregate bound.
+                raise SandboxError(
+                    f"ChangeSet rejected: delivered bytes exceed max_total_bytes={max_total}"
+                )
+            if entry.sha256:
+                digest = hashlib.sha256(data).hexdigest()
+                if digest != entry.sha256:
+                    raise SandboxError(
+                        f"ChangeSet rejected: {entry.path} sha256 mismatch "
+                        f"(declared {entry.sha256[:12]}…, got {digest[:12]}…)"
+                    )
             staged_path = staging / entry.path
             staged_path.parent.mkdir(parents=True, exist_ok=True)
-            staged_path.write_bytes(fetch(entry.path))
-            staged.append((staged_path, resolved_root / entry.path, entry.mode & 0o777))
+            staged_path.write_bytes(data)
+            staged.append((staged_path, destination, entry.mode & 0o777, ""))
 
-        for staged_path, destination, mode in staged:
+        for staged_path, destination, mode, symlink_target in staged:
             destination.parent.mkdir(parents=True, exist_ok=True)
+            if symlink_target:
+                if destination.is_symlink() or destination.exists():
+                    destination.unlink()
+                os.symlink(symlink_target, destination)
+                continue
             shutil.move(str(staged_path), str(destination))
             os.chmod(destination, mode)
 
@@ -292,8 +340,15 @@ def apply_changeset(
                 # Deleting an already-absent path is the desired end state, not
                 # an error — a retried apply must stay idempotent.
                 continue
-            except IsADirectoryError:
-                shutil.rmtree(target, ignore_errors=True)
+            except (IsADirectoryError, PermissionError):
+                # Linux raises IsADirectoryError for unlink() on a directory;
+                # macOS raises PermissionError (EPERM). Catching only the former
+                # made the rmtree fallback dead there, and the delete silently
+                # did nothing.
+                if target.is_dir():
+                    shutil.rmtree(target, ignore_errors=True)
+                else:
+                    raise
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
@@ -355,7 +410,7 @@ def _path_rejection(path: str, root: Path) -> str | None:
     # repository's refs, config or hooks — the exact thing excluding it from the
     # snapshot was meant to prevent.
     if any(part in _REPO_INTEGRITY_DIRS for part in parts):
-        return "path_escape"
+        return "repo_integrity"
     try:
         resolved = (root / path).resolve()
     except OSError:

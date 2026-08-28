@@ -189,9 +189,12 @@ def test_changeset_rejects_secret_bearing_paths(tmp_path, path):
 def test_changeset_rejects_dot_git_paths(tmp_path):
     # A manifest entry under .git would let the sandbox rewrite the trusted
     # repository's refs or config.
+    # A distinct code from a `..` traversal: ".git/config" means the sandbox
+    # tried to rewrite the trusted repo, ".ssh/id_rsa" means it tried to plant a
+    # credential, and an operator reading the audit event must tell them apart.
     entries = [ChangeSetEntry(path=".git/config", mode=0o644, size=1)]
     reasons = {r.reason for r in validate_changeset(entries, root=str(tmp_path), limits=_limits())}
-    assert reasons == {"path_escape"}
+    assert reasons == {"repo_integrity"}
 
 
 def test_deleted_entries_get_the_same_path_checks(tmp_path):
@@ -203,11 +206,11 @@ def test_deleted_entries_get_the_same_path_checks(tmp_path):
     }
     assert reasons["/etc/passwd"] == "absolute_path"
     assert reasons["../out"] == "path_escape"
-    assert reasons[".git/HEAD"] == "path_escape"
+    assert reasons[".git/HEAD"] == "repo_integrity"
 
 
 def test_in_tree_symlink_is_allowed(tmp_path):
-    entries = [ChangeSetEntry(path="link", mode=0o120000, size=1, symlink_target="src/main.py")]
+    entries = [ChangeSetEntry(path="link", mode=0o120000, size=0, symlink_target="src/main.py")]
     assert validate_changeset(entries, root=str(tmp_path), limits=_limits()) == []
 
 
@@ -270,3 +273,89 @@ def test_apply_deleting_a_missing_path_is_not_an_error(tmp_path):
     apply_changeset(
         [], root=str(tmp_path), limits=_limits(), fetch=lambda p: b"", deleted=["nope.py"]
     )
+
+
+# ── apply verifies delivered bytes, not the manifest's self-report (B6) ──
+
+
+def test_apply_rejects_content_larger_than_the_declared_size(tmp_path):
+    # Validation bounds the manifest's SELF-REPORTED size. Without re-checking
+    # the delivered bytes, a supervisor that declares 10 and returns 10 GB
+    # defeats both limits — and the party being bounded is the reporter.
+    with pytest.raises(SandboxError, match="declared"):
+        apply_changeset(
+            [ChangeSetEntry(path="a.py", mode=0o644, size=3)],
+            root=str(tmp_path),
+            limits=_limits(),
+            fetch=lambda path: b"x" * 5000,
+        )
+    assert not (tmp_path / "a.py").exists()
+
+
+def test_apply_rejects_a_sha256_mismatch(tmp_path):
+    with pytest.raises(SandboxError, match="sha256"):
+        apply_changeset(
+            [ChangeSetEntry(path="a.py", mode=0o644, size=1, sha256="d" * 64)],
+            root=str(tmp_path),
+            limits=_limits(),
+            fetch=lambda path: b"x",
+        )
+
+
+def test_apply_accepts_a_matching_sha256(tmp_path):
+    import hashlib
+
+    digest = hashlib.sha256(b"x").hexdigest()
+    apply_changeset(
+        [ChangeSetEntry(path="a.py", mode=0o644, size=1, sha256=digest)],
+        root=str(tmp_path),
+        limits=_limits(),
+        fetch=lambda path: b"x",
+    )
+    assert (tmp_path / "a.py").read_bytes() == b"x"
+
+
+# ── symlinks are applied as symlinks (B16) ────────────────────────────
+
+
+def test_apply_creates_an_in_tree_symlink_as_a_symlink(tmp_path):
+    # validate_changeset has a dedicated symlink branch; applying the entry as a
+    # regular file would leave the worktree structurally different from what was
+    # validated and silently corrupt a repo that legitimately uses symlinks.
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("x", encoding="utf-8")
+    apply_changeset(
+        [ChangeSetEntry(path="link.py", mode=0o120000, size=0, symlink_target="src/main.py")],
+        root=str(tmp_path),
+        limits=_limits(),
+        fetch=lambda path: pytest.fail("a symlink entry must not be fetched"),
+    )
+    assert (tmp_path / "link.py").is_symlink()
+    assert os.readlink(tmp_path / "link.py") == "src/main.py"
+
+
+# ── staging (B23) ─────────────────────────────────────────────────────
+
+
+def test_staging_directory_is_not_left_inside_the_worktree(tmp_path):
+    root = tmp_path / "tree"
+    root.mkdir()
+    apply_changeset(
+        [ChangeSetEntry(path="a.py", mode=0o644, size=1)],
+        root=str(root),
+        limits=_limits(),
+        fetch=lambda path: b"x",
+    )
+    assert not any(p.name.startswith(".openace-changeset-") for p in root.iterdir())
+
+
+def test_envrc_is_treated_as_a_secret(tmp_path):
+    reasons = {
+        r.reason
+        for r in validate_changeset(
+            [ChangeSetEntry(path=".envrc", mode=0o644, size=1)],
+            root=str(tmp_path),
+            limits=_limits(),
+        )
+    }
+    assert reasons == {"secret_path"}

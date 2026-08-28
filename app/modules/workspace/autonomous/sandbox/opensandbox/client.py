@@ -34,9 +34,10 @@ of it is forwarded.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+import logging
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Protocol
-from urllib.parse import urlencode, urlparse, urlunparse
+from urllib.parse import quote, urlencode, urlparse, urlunparse
 
 import requests
 
@@ -45,20 +46,28 @@ from app.modules.workspace.autonomous.sandbox.provider import SandboxError
 if TYPE_CHECKING:  # pragma: no cover - annotations only
     from app.modules.workspace.autonomous.sandbox.opensandbox.config import EndpointConfig
 
+logger = logging.getLogger(__name__)
+
 LIFECYCLE_API_KEY_HEADER = "OPEN-SANDBOX-API-KEY"
 EXECD_TOKEN_HEADER = "X-EXECD-ACCESS-TOKEN"
+EGRESS_AUTH_HEADER = "OPENSANDBOX-EGRESS-AUTH"
 
 # Upstream ``GET /sandboxes`` defaults to ``pageSize`` 20. A single-request
 # sweep would silently miss everything past the first page — precisely when the
 # orphan reconciler matters most.
-_LIST_PAGE_SIZE = 100
+_LIST_PAGE_SIZE = 20
 _DEFAULT_MAX_LIST_PAGES = 100
 
 # The only server-supplied endpoint headers we will forward. Upstream returns an
 # opaque ``{string: string}`` map alongside the endpoint URL; forwarding it
 # verbatim would be header injection into every subsequent request.
 _ALLOWED_ENDPOINT_HEADER_KEYS = frozenset(
-    {"x-sandbox-access-token", "x-openace-access-token", EXECD_TOKEN_HEADER.lower()}
+    {
+        "x-sandbox-access-token",
+        "x-openace-access-token",
+        EXECD_TOKEN_HEADER.lower(),
+        EGRESS_AUTH_HEADER.lower(),
+    }
 )
 
 # Proxy lookup is disabled on every call: under gevent it can recurse (#2237).
@@ -84,7 +93,7 @@ class OpenSandboxApi(Protocol):
     # Lifecycle
     def create_sandbox(self, body: dict) -> dict: ...
     def get_sandbox(self, sandbox_id: str) -> dict | None: ...
-    def list_sandboxes(self) -> list[dict]: ...
+    def list_sandboxes(self, metadata: Mapping[str, str] | None = None) -> list[dict]: ...
     def delete_sandbox(self, sandbox_id: str) -> None: ...
     def pause_sandbox(self, sandbox_id: str) -> None: ...
     def resume_sandbox(self, sandbox_id: str) -> None: ...
@@ -122,26 +131,57 @@ def iter_sse_events(response: Any) -> Iterator[dict]:
         if line.startswith(":"):
             continue
         if line == "":
-            event = _decode_sse_buffer(buffer)
+            event = _decode_sse_buffer(buffer, tolerate_undecodable=False)
             buffer = []
             if event is not None:
                 yield event
             continue
         if line.startswith("data:"):
             buffer.append(line[5:].lstrip())
-    # A complete final event with no trailing blank line is still valid.
-    event = _decode_sse_buffer(buffer)
+    # Only the FINAL buffer may be undecodable — a truncated tail is a normal
+    # way for a stream to end. A malformed event mid-stream is a real signal (a
+    # lost stdout chunk, a lost error) and must not vanish silently.
+    event = _decode_sse_buffer(buffer, tolerate_undecodable=True)
     if event is not None:
         yield event
 
 
-def _decode_sse_buffer(buffer: list[str]) -> dict | None:
+def _closing_events(response: Any) -> Iterator[dict]:
+    """Yield SSE events and always release the connection.
+
+    ``stream()`` abandons this iterator on timeout or stop, so without the
+    ``finally`` the pooled connection is never returned and a long-lived
+    scheduler process exhausts the session pool.
+    """
+    try:
+        yield from iter_sse_events(response)
+    finally:
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
+
+
+def _encode_metadata_filter(metadata: Mapping[str, str]) -> str:
+    """Encode a metadata filter in upstream's documented form.
+
+    ``k=v`` pairs joined by an encoded ``&``, with the value itself encoded —
+    e.g. ``project%3DApollo%26note%3DDemo``.
+    """
+    return "&".join(
+        f"{quote(str(k), safe='')}={quote(str(v), safe='')}" for k, v in metadata.items()
+    )
+
+
+def _decode_sse_buffer(buffer: list[str], *, tolerate_undecodable: bool) -> dict | None:
     if not buffer:
         return None
     try:
         event = json.loads("".join(buffer))
     except ValueError:
-        return None  # truncated tail
+        if tolerate_undecodable:
+            return None
+        logger.warning("undecodable SSE event mid-stream; surfacing as an error event")
+        return {"type": "error", "error": {"ename": "SSEDecodeError", "evalue": "<undecodable>"}}
     if not isinstance(event, dict) or event.get("type") == "ping":
         return None
     return event
@@ -164,8 +204,10 @@ class HttpOpenSandboxApi:
         self._timeout = timeout
         self._page_size = page_size
         self._max_list_pages = max_list_pages
-        # sandbox_id -> (base_url, extra_headers) resolved from endpoints/{port}
+        # sandbox_id -> (base_url, extra_headers) resolved from endpoints/{port},
+        # cached per service because each is a separate port.
         self._execd: dict[str, tuple[str, dict[str, str]]] = {}
+        self._egress: dict[str, tuple[str, dict[str, str]]] = {}
 
     # ── Lifecycle ─────────────────────────────────────────────────────
 
@@ -176,8 +218,13 @@ class HttpOpenSandboxApi:
         response = self._lifecycle("GET", f"/sandboxes/{sandbox_id}", allow_404=True)
         return None if response.status_code == 404 else self._json(response)
 
-    def list_sandboxes(self) -> list[dict]:
-        """Return every sandbox, following pagination.
+    def list_sandboxes(self, metadata: Mapping[str, str] | None = None) -> list[dict]:
+        """Return every sandbox matching *metadata*, following pagination.
+
+        ``metadata`` is not optional in practice: the orphan sweep destroys
+        every sandbox the control plane does not claim, and on a shared
+        OpenSandbox server an unfiltered list would include other teams' and
+        other products' sandboxes.
 
         Stops on a short page, or at ``max_list_pages`` — the guard exists so a
         server that keeps returning full pages cannot spin the reconciler
@@ -185,13 +232,22 @@ class HttpOpenSandboxApi:
         """
         collected: list[dict] = []
         for page in range(1, self._max_list_pages + 1):
-            body = self._json(
-                self._lifecycle(
-                    "GET", "/sandboxes", params={"page": page, "pageSize": self._page_size}
-                )
-            )
-            batch = body.get("sandboxes") or body.get("items") or []
+            params: dict[str, Any] = {"page": page, "pageSize": self._page_size}
+            if metadata:
+                params["metadata"] = _encode_metadata_filter(metadata)
+            body = self._json(self._lifecycle("GET", "/sandboxes", params=params))
+            batch = body.get("items") or []
             collected.extend(batch)
+            pagination = body.get("pagination")
+            if isinstance(pagination, dict) and "hasNextPage" in pagination:
+                # Authoritative signal. Preferred over the short-page heuristic
+                # because a server that clamps pageSize to its own maximum
+                # returns a "short" page on request 1 — which would silently
+                # stop the orphan sweep after one page, in exactly the situation
+                # reconciliation exists for.
+                if not pagination["hasNextPage"]:
+                    break
+                continue
             if len(batch) < self._page_size:
                 break
         return collected
@@ -201,6 +257,7 @@ class HttpOpenSandboxApi:
         # destroy() is required to be idempotent by the #2022 contract.
         self._lifecycle("DELETE", f"/sandboxes/{sandbox_id}", allow_404=True)
         self._execd.pop(sandbox_id, None)
+        self._egress.pop(sandbox_id, None)
 
     def pause_sandbox(self, sandbox_id: str) -> None:
         self._lifecycle("POST", f"/sandboxes/{sandbox_id}/pause")
@@ -221,7 +278,16 @@ class HttpOpenSandboxApi:
     def upload_file(self, sandbox_id: str, path: str, data: bytes, mode: int) -> None:
         # Upstream reads a JSON metadata part followed by the file part, in that
         # order, so the ordering here is load-bearing rather than cosmetic.
-        metadata = json.dumps({"path": path, "mode": mode})
+        # owner/group matter as much as mode: execd may run as root, and a
+        # root-owned 0644 file is unwritable by the non-root agent.
+        metadata = json.dumps(
+            {
+                "path": path,
+                "mode": mode,
+                "owner": self._endpoint.runtime_user,
+                "group": self._endpoint.runtime_group,
+            }
+        )
         self._execd_request(
             sandbox_id,
             "POST",
@@ -239,7 +305,7 @@ class HttpOpenSandboxApi:
 
     def run_command(self, sandbox_id: str, body: dict) -> Iterator[dict]:
         response = self._execd_request(sandbox_id, "POST", "/command", json=body, stream=True)
-        return iter_sse_events(response)
+        return _closing_events(response)
 
     def command_status(self, sandbox_id: str, command_id: str) -> dict | None:
         response = self._execd_request(
@@ -251,8 +317,22 @@ class HttpOpenSandboxApi:
         self._execd_request(sandbox_id, "DELETE", "/command", params={"id": command_id})
 
     def egress_policy(self, sandbox_id: str) -> dict:
-        """Read the egress sidecar's live policy, for the §5.3 verification probe."""
-        return self._json(self._execd_request(sandbox_id, "GET", "/policy"))
+        """Read the egress sidecar's live policy, for the §5.3 verification probe.
+
+        The sidecar is a separate service on ``egress_port`` with its own
+        ``OPENSANDBOX-EGRESS-AUTH`` header — issuing this against execd's port
+        would simply 404, and the probe that upgrades NETWORK_EGRESS_POLICY from
+        an operator's word to a verified fact would never run.
+        """
+        base, headers = self._resolve_port(sandbox_id, self._endpoint.egress_port, self._egress)
+        return self._json(
+            self._request(
+                "GET",
+                f"{base.rstrip('/')}/policy",
+                headers=dict(headers),
+                allow_redirects=False,
+            )
+        )
 
     # ── PTY ───────────────────────────────────────────────────────────
 
@@ -302,22 +382,32 @@ class HttpOpenSandboxApi:
     def _execd_request(
         self, sandbox_id: str, method: str, path: str, *, allow_404: bool = False, **kwargs
     ) -> Any:
-        base, headers = self._resolve_execd(sandbox_id)
+        base, resolved_headers = self._resolve_execd(sandbox_id)
+        headers: dict[str, str] = {}
+        token = self._endpoint.execd_token()
+        if token:
+            headers[EXECD_TOKEN_HEADER] = token
+        # A server-supplied per-sandbox token takes precedence over the static
+        # one: upstream's secureAccess mints a credential per sandbox.
+        headers.update(resolved_headers)
         url = f"{base.rstrip('/')}{path}"
         # allow_redirects=False: the execd host was server-supplied and already
         # allowlisted; a redirect would move the request off that host after the
         # check, taking the token and the payload with it.
         return self._request(
-            method, url, headers=dict(headers), allow_404=allow_404, allow_redirects=False, **kwargs
+            method, url, headers=headers, allow_404=allow_404, allow_redirects=False, **kwargs
         )
 
     def _resolve_execd(self, sandbox_id: str) -> tuple[str, dict[str, str]]:
-        cached = self._execd.get(sandbox_id)
+        return self._resolve_port(sandbox_id, self._endpoint.execd_port, self._execd)
+
+    def _resolve_port(
+        self, sandbox_id: str, port: int, cache: dict[str, tuple[str, dict[str, str]]]
+    ) -> tuple[str, dict[str, str]]:
+        cached = cache.get(sandbox_id)
         if cached is not None:
             return cached
-        body = self._json(
-            self._lifecycle("GET", f"/sandboxes/{sandbox_id}/endpoints/{self._endpoint.execd_port}")
-        )
+        body = self._json(self._lifecycle("GET", f"/sandboxes/{sandbox_id}/endpoints/{port}"))
         url = str(body.get("endpoint") or "")
         if not url:
             raise OpenSandboxApiError(f"sandbox {sandbox_id}: no execd endpoint returned")
@@ -326,7 +416,7 @@ class HttpOpenSandboxApi:
         self._assert_execd_host_allowed(url)
         headers = _filter_endpoint_headers(body.get("headers") or {})
         resolved = (url, headers)
-        self._execd[sandbox_id] = resolved
+        cache[sandbox_id] = resolved
         return resolved
 
     def _assert_execd_host_allowed(self, url: str) -> None:
