@@ -388,3 +388,55 @@ def test_derive_deletions_handles_nested_paths(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "old.py").write_text("x", encoding="utf-8")
     assert derive_deletions([], worktree_path=str(tmp_path)) == ["src/old.py"]
+
+
+def test_an_unreadable_file_is_never_proposed_for_deletion(tmp_path):
+    # It is absent from the manifest because build_snapshot could not upload it.
+    # Proposing it as a deletion would remove a file from the user's trusted
+    # worktree that the agent never saw.
+    unreadable = tmp_path / "locked.py"
+    unreadable.write_text("x", encoding="utf-8")
+    unreadable.chmod(0o000)
+    try:
+        assert derive_deletions([], worktree_path=str(tmp_path)) == []
+        assert {e.path for e in build_snapshot(str(tmp_path))} == set()
+    finally:
+        unreadable.chmod(0o644)
+
+
+def test_an_out_of_tree_symlink_is_never_proposed_for_deletion(tmp_path):
+    root = tmp_path / "tree"
+    root.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    os.symlink(outside, root / "escape.txt")
+    (root / "kept.py").write_text("x", encoding="utf-8")
+    entries = [ChangeSetEntry(path="kept.py", mode=0o644, size=1)]
+    assert derive_deletions(entries, worktree_path=str(root)) == []
+
+
+def test_deletion_and_snapshot_agree_on_what_is_uploadable(tmp_path):
+    # The symmetry is structural: anything build_snapshot yields is a candidate
+    # for deletion, and nothing else ever is.
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "HEAD").write_text("ref", encoding="utf-8")
+    (tmp_path / ".env").write_text("S=1", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "a.py").write_text("x", encoding="utf-8")
+    uploaded = {e.path for e in build_snapshot(str(tmp_path))}
+    assert set(derive_deletions([], worktree_path=str(tmp_path))) == uploaded
+
+
+def test_directories_emptied_by_a_deletion_are_pruned(tmp_path):
+    (tmp_path / "src" / "legacy").mkdir(parents=True)
+    (tmp_path / "src" / "legacy" / "old.py").write_text("x", encoding="utf-8")
+    (tmp_path / "src" / "keep.py").write_text("x", encoding="utf-8")
+    apply_changeset(
+        [],
+        root=str(tmp_path),
+        limits=_limits(),
+        fetch=lambda p: b"",
+        deleted=["src/legacy/old.py"],
+    )
+    assert not (tmp_path / "src" / "legacy").exists()
+    assert (tmp_path / "src" / "keep.py").exists()

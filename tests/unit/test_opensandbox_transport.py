@@ -342,3 +342,12 @@ def _line_stream():
     from app.modules.workspace.autonomous.sandbox.opensandbox.transport import _LineStream
 
     return _LineStream()
+
+
+def test_read_available_assembles_a_line_split_across_chunks():
+    # One dequeue per call would return b"" on the first chunk, and the drain
+    # loop breaks on b"" — dropping the final line of a turn.
+    stream = _line_stream()
+    stream.feed(b"par")
+    stream.feed(b"tial\n")
+    assert stream.read_available() == b"partial\n"

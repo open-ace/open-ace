@@ -103,16 +103,19 @@ class _LineStream:
         is for draining, where a blocking read would spin.
         """
         newline = self._buffer.find(b"\n")
-        if newline < 0:
+        while newline < 0:
+            # Loop, not a single dequeue: a line split across chunks
+            # (b"par", b"tial\n") would otherwise return b"" on the first call,
+            # and the drain loop breaks on b"" — dropping the final line.
             try:
                 chunk = self._chunks.get_nowait()
             except queue.Empty:
-                return b""
+                break
             if chunk is _SENTINEL:
                 # The close marker, not data — concatenating it would raise.
                 self._closed = True
-            else:
-                self._buffer += chunk
+                break
+            self._buffer += chunk
             newline = self._buffer.find(b"\n")
         if newline < 0:
             if self._closed and self._buffer:

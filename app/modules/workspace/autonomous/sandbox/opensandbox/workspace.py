@@ -132,6 +132,27 @@ def build_snapshot(worktree_path: str) -> Iterator[SnapshotEntry]:
     inside a container running as a different user.
     """
     root = Path(worktree_path).resolve()
+    for absolute, relative in _uploadable_files(root):
+        try:
+            data = absolute.read_bytes()
+        except OSError:
+            # Unreadable now though it passed the predicate — a race. Skipping
+            # keeps the snapshot honest, and derive_deletions applies the SAME
+            # predicate, so a file skipped here is never proposed for deletion.
+            continue
+        yield SnapshotEntry(path=relative, data=data, mode=_DEFAULT_FILE_MODE)
+
+
+def _uploadable_files(root: Path) -> Iterator[tuple[Path, str]]:
+    """Yield ``(absolute, worktree-relative)`` for every file worth uploading.
+
+    The single definition of "``build_snapshot`` would have uploaded this".
+    :func:`derive_deletions` shares it, and that sharing is load-bearing: any
+    path this skips is absent from the sandbox's manifest for that reason alone,
+    so a deletion pass with a narrower filter would propose deleting files the
+    agent never saw. Re-implementing the predicate in both places is exactly how
+    that divergence happens.
+    """
     for dirpath, dirnames, filenames in os.walk(root):
         # Prune in place so os.walk does not descend into excluded trees.
         dirnames[:] = [d for d in dirnames if d not in _EXCLUDED_DIRS]
@@ -144,11 +165,10 @@ def build_snapshot(worktree_path: str) -> Iterator[SnapshotEntry]:
                 continue
             if not absolute.is_file():
                 continue
-            try:
-                data = absolute.read_bytes()
-            except OSError:
+            if not os.access(absolute, os.R_OK):
+                # Unreadable: never uploaded, so never deleted either.
                 continue
-            yield SnapshotEntry(path=relative, data=data, mode=_DEFAULT_FILE_MODE)
+            yield absolute, relative
 
 
 def snapshot_upload_mode(is_directory: bool = False) -> int:
@@ -170,21 +190,20 @@ def derive_deletions(entries: Sequence[ChangeSetEntry], *, worktree_path: str) -
     the manifest does not, and that :func:`build_snapshot` would have uploaded
     in the first place.
 
-    The exclusion symmetry is load-bearing. A path the snapshot never uploaded
-    (``.git``, a credential file) is absent from the manifest for that reason
-    alone, and treating it as a deletion would delete the trusted repository.
+    The exclusion symmetry is load-bearing, and is guaranteed structurally by
+    sharing :func:`_uploadable_files` with :func:`build_snapshot`. A path the
+    snapshot never uploaded — ``.git``, a credential file, an out-of-tree
+    symlink, an unreadable file — is absent from the manifest for that reason
+    alone. A narrower filter here would propose deleting files the agent never
+    saw, which is the one failure in this pipeline that destroys work rather
+    than refusing to do it.
     """
     present = {entry.path for entry in entries}
-    deleted: list[str] = []
     root = Path(worktree_path).resolve()
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in _EXCLUDED_DIRS]
-        for filename in filenames:
-            relative = (Path(dirpath) / filename).relative_to(root).as_posix()
-            if relative in present or _is_secret_path(relative):
-                continue
-            deleted.append(relative)
-    return deleted
+    # Same predicate as build_snapshot, by construction rather than by
+    # reimplementation — see _uploadable_files.
+    uploaded = {relative for _, relative in _uploadable_files(root)}
+    return sorted(uploaded - present)
 
 
 def parse_manifest(payload: bytes | str) -> tuple[list[ChangeSetEntry], list[str]]:
@@ -375,6 +394,10 @@ def apply_changeset(
                     shutil.rmtree(target, ignore_errors=True)
                 else:
                     raise
+            # Git ignores empty directories so the commit is unaffected either
+            # way, but leaving them means the next snapshot/deletion cycle sees
+            # a tree the sandbox does not have.
+            _prune_empty_parents(target.parent, resolved_root)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
@@ -421,6 +444,29 @@ def _validate_entry(
 
     budget.files += 1
     budget.total_bytes += max(entry.size, 0)
+
+
+def _prune_empty_parents(directory: Path, root: Path) -> None:
+    """Remove directories left empty by a deletion, up to (not including) *root*.
+
+    Git ignores empty directories so the commit is unaffected either way, but
+    leaving them means the next snapshot/deletion cycle sees a tree the sandbox
+    does not have.
+    """
+    current = directory
+    while current != root and root in current.parents:
+        try:
+            next(current.iterdir())
+            return  # not empty
+        except StopIteration:
+            pass
+        except OSError:
+            return
+        try:
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent
 
 
 def _path_rejection(path: str, root: Path) -> str | None:
