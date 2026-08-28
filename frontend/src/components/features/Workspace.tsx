@@ -139,6 +139,9 @@ export const Workspace: React.FC = () => {
   // Issue #2892: Terminal verification state for terminal session restoration
   const [terminalVerified, setTerminalVerified] = useState<boolean | null>(null);
 
+  // Issue #2899: Session restoration state
+  const [isRestoringSessions, setIsRestoringSessions] = useState(false);
+
   // Remote projects list (Issue #417: Populate "Your Projects" for remote workspace)
   const [remoteProjects, setRemoteProjects] = useState<RemoteProject[]>([]);
 
@@ -279,6 +282,49 @@ export const Workspace: React.FC = () => {
 
     return userWebUI.token;
   }, [userWebUI]);
+
+  // Issue #2899: Restore missing sessionIds from backend
+  const restoreMissingSessionIds = useCallback(
+    async (tabsToRestore: WorkspaceTab[]): Promise<WorkspaceTab[]> => {
+      const updatedTabs = [...tabsToRestore];
+
+      for (let i = 0; i < updatedTabs.length; i++) {
+        const tab = updatedTabs[i];
+        // Only restore tabs with encodedProjectName but missing sessionId (non-terminal)
+        if (!tab.sessionId && tab.encodedProjectName && tab.tabType !== 'terminal') {
+          try {
+            const response = await sessionsApi.getSessions(
+              {
+                project_path: tab.encodedProjectName,
+                workspace_type: tab.workspaceType as 'local' | 'remote' | 'terminal',
+                remote_machine_id: tab.machineId,
+                status: 'active', // Prefer active sessions
+              },
+              1,
+              1
+            );
+
+            if (response.data?.sessions?.[0]) {
+              const recentSession = response.data.sessions[0];
+              updatedTabs[i] = {
+                ...tab,
+                sessionId: recentSession.session_id,
+              };
+              console.info('[Workspace] Restored sessionId from backend:', {
+                tabId: tab.id,
+                sessionId: recentSession.session_id,
+              });
+            }
+          } catch (error) {
+            console.warn('[Workspace] Failed to restore sessionId:', error);
+          }
+        }
+      }
+
+      return updatedTabs;
+    },
+    []
+  );
 
   // Load workspace config and user webui URL
   useEffect(() => {
@@ -1493,6 +1539,28 @@ export const Workspace: React.FC = () => {
       }
 
       setTabsInitialized(true);
+
+      // Issue #2899: Asynchronously restore missing sessionIds from backend
+      setIsRestoringSessions(true);
+      restoreMissingSessionIds(initialTabs)
+        .then((restoredTabs) => {
+          // Update tabs with restored sessionIds
+          setTabs((currentTabs) => {
+            // Merge restored sessionIds into current tabs
+            return currentTabs.map((currentTab) => {
+              const restoredTab = restoredTabs.find((t) => t.id === currentTab.id);
+              if (restoredTab?.sessionId && !currentTab.sessionId) {
+                // Update store with restored sessionId
+                updateStoredTab(currentTab.id, { sessionId: restoredTab.sessionId });
+                return restoredTab;
+              }
+              return currentTab;
+            });
+          });
+        })
+        .finally(() => {
+          setIsRestoringSessions(false);
+        });
     }
   }, [
     config,
@@ -1511,29 +1579,9 @@ export const Workspace: React.FC = () => {
 
     setStoredActiveTabId,
     sessionVerified, // Issue #2892
+    restoreMissingSessionIds, // Issue #2899
+    updateStoredTab, // Issue #2899
   ]);
-
-  // Listen for browser back/forward (Issue #2899)
-  useEffect(() => {
-    if (!tabsInitialized || tabs.length === 0) return;
-
-    const handlePopState = () => {
-      const url = new URL(window.location.href);
-      const sessionId = url.searchParams.get('sessionId');
-
-      if (sessionId) {
-        // Find the corresponding tab and switch to it
-        const tab = tabs.find((t) => t.sessionId === sessionId);
-        if (tab && tab.id !== activeTabId) {
-          setActiveTabId(tab.id);
-          setStoredActiveTabId(tab.id);
-        }
-      }
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, [tabs, activeTabId, tabsInitialized, setActiveTabId, setStoredActiveTabId]);
 
   // Handle URL parameter for creating new tab
   useEffect(() => {
@@ -1966,6 +2014,64 @@ export const Workspace: React.FC = () => {
       setSwitchProjectRequest(null);
     }
   }, [switchProjectRequest, createNewTab]);
+
+  // Listen for browser back/forward (Issue #2899)
+  useEffect(() => {
+    if (!tabsInitialized || tabs.length === 0 || isRestoringSessions) return;
+
+    const handlePopState = async () => {
+      const url = new URL(window.location.href);
+      const sessionId = url.searchParams.get('sessionId');
+
+      if (sessionId) {
+        // Find the corresponding tab and switch to it
+        const tab = tabs.find((t) => t.sessionId === sessionId);
+
+        if (!tab) {
+          // Tab not found, try to restore from backend
+          try {
+            const sessionDetail = await sessionsApi.getSession(sessionId);
+            if (sessionDetail?.data) {
+              // Create new tab to restore session
+              createNewTab(sessionId, {
+                workspaceType: sessionDetail.data.workspace_type as 'local' | 'remote',
+                machineId: sessionDetail.data.remote_machine_id ?? undefined,
+                machineName: sessionDetail.data.machine_name ?? undefined,
+                projectPath: sessionDetail.data.project_path ?? undefined,
+              });
+            }
+          } catch (error: any) {
+            // Handle session not found
+            if (error?.response?.status === 404 || error?.message?.includes('not found')) {
+              toast.warning(t('sessionNotFound', language));
+              // Clear invalid sessionId from URL
+              url.searchParams.delete('sessionId');
+              window.history.replaceState({}, '', url.toString());
+            } else {
+              console.warn('[Workspace] Failed to restore session from URL:', error);
+            }
+          }
+        } else if (tab.id !== activeTabId) {
+          setActiveTabId(tab.id);
+          setStoredActiveTabId(tab.id);
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [
+    tabs,
+    activeTabId,
+    tabsInitialized,
+    isRestoringSessions,
+    setActiveTabId,
+    setStoredActiveTabId,
+    createNewTab,
+    language,
+    toast,
+    t,
+  ]);
 
   // Actually remove a tab (shared by closeTab and remote close confirmation)
   const doCloseTab = useCallback(
