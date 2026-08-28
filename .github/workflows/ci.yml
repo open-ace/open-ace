@@ -425,6 +425,10 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: .
+          # Issue #3169: build the web (production) image — without an
+          # explicit target Docker builds the LAST stage (migration), whose
+          # entrypoint ignores the command and execs server.py.
+          target: production
           push: false
           # Issue #3169: load the image into the local Docker engine — the
           # verify/size steps below run `docker run`/`docker images` against
@@ -437,7 +441,13 @@ jobs:
       - name: Verify code-server installation
         run: |
           echo "=== Verifying code-server installation (Issue #2238) ==="
-          docker run --rm open-ace:${{ github.sha }} bash /app/scripts/verify-code-server.sh
+          # The production image is FLASK_ENV=production, so its entrypoint's
+          # fail-closed security-mode validation (docker-entrypoint.sh) needs
+          # an explicit OPENACE_SECURITY_MODE even for one-shot verification
+          # commands; development fits a verify-only container that never
+          # starts the application.
+          docker run --rm -e OPENACE_SECURITY_MODE=development \
+            open-ace:${{ github.sha }} bash /app/scripts/verify-code-server.sh
       - name: Check image size
         run: |
           echo "=== Checking Docker image size ==="
