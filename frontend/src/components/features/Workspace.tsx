@@ -559,8 +559,26 @@ export const Workspace: React.FC = () => {
           }
         }
 
+        // Issue #3189: Add observability for message handling
+        if (!sourceTabId) {
+          console.warn(
+            '[Workspace] qwen-code-session-update: Could not find source tab for message',
+            {
+              sessionId,
+              encodedProjectName,
+              eventSource: event.source ? 'present' : 'missing',
+              iframeCount: iframeRefs.current.size,
+            }
+          );
+        }
+
         // Only process session update if we can identify the source tab
         if (sessionId && sourceTabId) {
+          // Issue #3189: Log successful session update (debug level to reduce noise)
+          console.debug('[Workspace] qwen-code-session-update: Processing session update', {
+            tabId: sourceTabId,
+          });
+
           // Filter out generic "Conversation(xxx...)" titles from iframe
           const isGenericTitle = title && /^Conversation\([a-f0-9]+\.\.\.\)$/i.test(title);
           // Only update title if it's explicitly provided (not undefined) and not generic
@@ -1299,6 +1317,25 @@ export const Workspace: React.FC = () => {
       } else if (safeStoredTabs.length > 0) {
         // Case 2: Restore from store - regenerate URLs for each tab
         // Issue #2953: Use safe values from validation hook
+
+        // Issue #3189: Log tabs missing sessionId for diagnostics
+        const tabsNeedingSessionId = safeStoredTabs.filter(
+          (tab) => !tab.sessionId && tab.encodedProjectName
+        );
+        if (tabsNeedingSessionId.length > 0) {
+          console.warn(
+            '[Workspace] Some tabs are missing sessionId but have encodedProjectName. Session recovery may be incomplete.',
+            {
+              count: tabsNeedingSessionId.length,
+              tabs: tabsNeedingSessionId.map((t) => ({
+                id: t.id,
+                title: t.title,
+                encodedProjectName: t.encodedProjectName,
+              })),
+            }
+          );
+        }
+
         initialTabs = safeStoredTabs.map((storedTab) => {
           // Terminal tabs don't need URL regeneration
           if (storedTab.tabType === 'terminal') {

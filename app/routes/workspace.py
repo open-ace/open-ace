@@ -860,6 +860,11 @@ def list_sessions():
         host_name = request.args.get("host_name")
         search = request.args.get("search")
         search_days = request.args.get("search_days")
+        project_path = request.args.get("project_path")  # Issue #3189: Filter by project path
+        workspace_type = request.args.get("workspace_type")  # Issue #3189: Filter by workspace type
+        remote_machine_id = request.args.get(
+            "remote_machine_id"
+        )  # Issue #3189: Filter by remote machine
         page = int(request.args.get("page", 1))
         limit = int(request.args.get("limit", 20))
 
@@ -870,12 +875,17 @@ def list_sessions():
         # Valid values for status and session_type (whitelist validation)
         VALID_STATUS_VALUES = {"active", "paused", "completed", "stopped", "error"}
         VALID_SESSION_TYPE_VALUES = {"chat", "agent", "workflow", "terminal"}
+        # Issue #3189: Valid values for workspace_type
+        VALID_WORKSPACE_TYPE_VALUES = {"local", "remote", "terminal"}
 
         # Validate status and session_type parameters
         if status and status not in VALID_STATUS_VALUES:
             status = None  # Invalid value, ignore filter
         if session_type and session_type not in VALID_SESSION_TYPE_VALUES:
             session_type = None  # Invalid value, ignore filter
+        # Issue #3189: Validate workspace_type parameter
+        if workspace_type and workspace_type not in VALID_WORKSPACE_TYPE_VALUES:
+            workspace_type = None  # Invalid value, ignore filter
 
         # Placeholder style convention for this file: build parameterized SQL by
         # interpolating {p} from get_param_placeholder(). Do NOT wrap these queries
@@ -920,6 +930,19 @@ def list_sessions():
         if session_type:
             base_conditions.append(f"session_type = {p}")
             base_params.append(session_type)
+
+        # Issue #3189: Filter by project path, workspace type, and remote machine
+        if project_path:
+            base_conditions.append(f"project_path = {p}")
+            base_params.append(project_path)
+
+        if workspace_type:
+            base_conditions.append(f"workspace_type = {p}")
+            base_params.append(workspace_type)
+
+        if remote_machine_id:
+            base_conditions.append(f"remote_machine_id = {p}")
+            base_params.append(remote_machine_id)
 
         base_where_clause = " AND ".join(base_conditions)
 
