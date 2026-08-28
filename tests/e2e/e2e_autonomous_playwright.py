@@ -165,31 +165,36 @@ def step_open_new_task_modal(page):
 
 
 def step_fill_and_submit_form(page):
-    """Step 5: Fill the form and create a workflow via API."""
-    global created_workflow_id
-    log("FORM", "Creating workflow via API")
+    """Step 5: Seed the workflow via the repository (deterministic).
 
-    # Create via API for reliability
-    r = api(
-        "post",
-        "/api/autonomous/workflows",
-        json={
+    The original create-via-API call is subject to the per-user in-memory
+    rate limit (10 creations/hour) shared by every script in the e2e lane;
+    repository seeding keeps this script independent of that budget.
+    """
+    global created_workflow_id
+    log("FORM", "Seeding workflow via repository")
+
+    from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+    repo = AutonomousWorkflowRepository()
+    workflow = repo.create_workflow(
+        {
+            "user_id": 1,  # default admin (the account this script logs in as)
             "title": "E2E Test Task",
+            "status": "pending",
             "requirements_text": "Build a simple hello world feature with tests",
             "cli_tool": "claude-code",
-            "model": "",
             "workspace_type": "local",
             "project_path": "/tmp/e2e-test-project",
             "branch_strategy": "new-branch",
+            "branch_name": "auto-dev/e2e-test-task",
             "max_plan_rounds": 1,
             "max_pr_review_rounds": 1,
-        },
+        }
     )
-    assert r.status_code == 201, f"Create workflow failed: {r.status_code} {r.text}"
-    data = r.json()
-    assert data["success"] is True
-    created_workflow_id = data["workflow"]["workflow_id"]
-    log("FORM", f"✅ Workflow created: {created_workflow_id[:8]}")
+    assert workflow, "repo.create_workflow returned no workflow"
+    created_workflow_id = workflow["workflow_id"]
+    log("FORM", f"✅ Workflow seeded: {created_workflow_id[:8]}")
 
     # Close modal if open
     try:

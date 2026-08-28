@@ -73,9 +73,20 @@ TEST_PASS = "admin123"
 NON_ADMIN_USER = os.environ.get("TEST_NON_ADMIN_USER", "test_user")
 NON_ADMIN_PASS = "test123"
 
+# Dedicated identity for workflow-creation API calls. POST /workflows enforces
+# a per-user in-memory rate limit (10 creations/hour) that is shared by every
+# script in the e2e lane when they all act as admin. Provisioning a dedicated
+# tenant_admin user gives this script its own deterministic budget; the admin
+# role also bypasses local path-permission checks, mirroring the admin account
+# this script otherwise acts as.
+BOT_USERNAME = "e2e_bot_c740"
+BOT_EMAIL = "e2e-bot-c740@example.com"
+BOT_PASSWORD = "E2eBot#740Pass!"
+
 # ── Test state ──────────────────────────────────────────
 
 auth_token = None
+bot_token = None
 non_admin_token = None
 created_workflow_ids = []  # track all created workflows for cleanup
 
@@ -120,8 +131,12 @@ def api(method, path, token=None, **kwargs):
         return _session.delete(url, headers=headers, **kwargs)
 
 
-def create_workflow_via_api(overrides=None):
-    """Helper to create a workflow via API and return the response."""
+def create_workflow_via_api(overrides=None, token=None):
+    """Helper to create a workflow via API and return the response.
+
+    Defaults to the dedicated bot identity so the per-user creation rate
+    limit (10/hour) is budgeted to this script alone.
+    """
     base = {
         "title": f"E2E Test {uuid.uuid4().hex[:8]}",
         "requirements_text": "Build a simple hello world feature with tests",
@@ -135,8 +150,40 @@ def create_workflow_via_api(overrides=None):
     }
     if overrides:
         base.update(overrides)
-    r = api("post", "/api/autonomous/workflows", json=base)
+    r = api("post", "/api/autonomous/workflows", token=token or bot_token or auth_token, json=base)
     return r
+
+
+def ensure_test_bot_user():
+    """Create (or reuse) the dedicated tenant_admin user and log in as it."""
+    global bot_token
+    log("BOT", f"Provisioning dedicated creation identity '{BOT_USERNAME}'")
+    r = api(
+        "post",
+        "/api/admin/users",
+        json={
+            "username": BOT_USERNAME,
+            "email": BOT_EMAIL,
+            "password": BOT_PASSWORD,
+            "role": "tenant_admin",
+            "tenant_id": 1,
+        },
+    )
+    if r.status_code == 201:
+        log("BOT", f"✅ Created {BOT_USERNAME} (user_id={r.json().get('user_id')})")
+    elif r.status_code == 400 and "already exists" in r.text:
+        log("BOT", f"✅ {BOT_USERNAME} already exists (reusing)")
+    else:
+        raise AssertionError(f"Cannot provision {BOT_USERNAME}: {r.status_code} {r.text[:200]}")
+
+    r2 = _session.post(
+        f"{BASE_URL}/api/auth/login",
+        json={"username": BOT_USERNAME, "password": BOT_PASSWORD},
+    )
+    assert r2.status_code == 200, f"Bot login failed: {r2.status_code} {r2.text[:200]}"
+    bot_token = r2.cookies.get("session_token")
+    assert bot_token, "No bot session_token cookie"
+    log("BOT", "✅ Bot login successful")
 
 
 def cleanup_all_test_workflows():
@@ -543,8 +590,11 @@ def step_test_token_usage(page, wf_id):
     page.goto(f"{BASE_URL}/work/autonomous?workflow={wf_id}")
     page.wait_for_timeout(2000)
 
+    # Token usage renders in the timeline header meta row as a formatted
+    # value (formatTokens: 50000 -> "50.00K") plus the request count.
     page_content = page.content()
-    assert "bi-lightning" in page_content, "Token usage icon should be present"
+    assert "50.00K" in page_content, "Formatted token usage (50.00K) should be displayed"
+    assert ">25<" in page_content, "Total requests (25) should be displayed"
 
     shot(page, "13-token-usage")
     log("TOKENS", "✅ Token usage display verified")
@@ -556,14 +606,33 @@ def step_test_token_usage(page, wf_id):
 
 
 def step_create_workflow_with_milestones():
-    """Create a workflow and insert mock milestones for UI testing."""
+    """Seed a workflow (repository-level) with mock milestones for UI testing.
+
+    Repo seeding keeps this independent of the workflow-creation rate limit;
+    the UI steps run as the admin account, which lists every workflow.
+    """
     global created_workflow_ids
     log("MILESTONES", "Creating workflow with mock milestones")
 
-    r = create_workflow_via_api({"title": "Milestone Test Workflow"})
-    assert r.status_code == 201, f"Create failed: {r.status_code} {r.text}"
-    data = r.json()
-    wf_id = data["workflow"]["workflow_id"]
+    from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+    repo = AutonomousWorkflowRepository()
+    workflow = repo.create_workflow(
+        {
+            "user_id": 1,  # default admin (the account the browser logs in as)
+            "title": "Milestone Test Workflow",
+            "status": "pending",
+            "requirements_text": "Build a simple hello world feature with tests",
+            "cli_tool": "claude-code",
+            "workspace_type": "local",
+            "project_path": "/tmp/e2e-test-project",
+            "branch_strategy": "new-branch",
+            "max_plan_rounds": 1,
+            "max_pr_review_rounds": 1,
+        }
+    )
+    assert workflow, "repo.create_workflow returned no workflow"
+    wf_id = workflow["workflow_id"]
     created_workflow_ids.append(wf_id)
 
     # Add mock milestones directly via DB
@@ -846,8 +915,10 @@ def step_test_github_badges(page, wf_id):
     page.wait_for_timeout(2000)
     shot(page, "19-github-badges")
 
-    # Check for PR badge (bi-git-pull-request)
-    pr_badge = page.locator(".bi-git-pull-request")
+    # Check for PR badge — the PR pill uses bi-file-earmark-diff
+    # (bi-git-pull-request does not exist in bootstrap-icons and used to
+    # render an empty glyph; the timeline intentionally replaced it).
+    pr_badge = page.locator(".bi-file-earmark-diff")
     pr_count = pr_badge.count()
 
     # Check for Issue badge (bi-card-text in a link context)
@@ -860,7 +931,7 @@ def step_test_github_badges(page, wf_id):
     assert issue_count > 0, "Issue badge should be rendered when requirements_issue_url exists"
 
     # Verify PR badge is clickable
-    pr_link = page.locator("a:has(.bi-git-pull-request)")
+    pr_link = page.locator("a:has(.bi-file-earmark-diff)")
     if pr_link.count() > 0:
         href = pr_link.first.get_attribute("href")
         assert href and "pull/42" in href, f"PR badge should link to PR. Got href: {href}"
@@ -964,13 +1035,27 @@ def step_test_delete_workflow(page):
     """Test delete workflow button with two-click confirmation."""
     log("DELETE", "Testing delete workflow (two-click confirm)")
 
-    # Create a workflow to delete
-    r = create_workflow_via_api({"title": "To Be Deleted"})
-    if r.status_code == 429:
-        log("DELETE", "  ⚠️  Rate limited, skipping")
-        return
-    assert r.status_code == 201
-    wf_id = r.json()["workflow"]["workflow_id"]
+    # Seed a workflow to delete directly via the repository (deterministic;
+    # not subject to the creation rate limit).
+    from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+    repo = AutonomousWorkflowRepository()
+    workflow = repo.create_workflow(
+        {
+            "user_id": 1,  # default admin (the account the browser logs in as)
+            "title": "To Be Deleted",
+            "status": "pending",
+            "requirements_text": "Delete-me workflow",
+            "cli_tool": "claude-code",
+            "workspace_type": "local",
+            "project_path": "/tmp/e2e-test-project",
+            "branch_strategy": "new-branch",
+            "max_plan_rounds": 1,
+            "max_pr_review_rounds": 1,
+        }
+    )
+    assert workflow, "repo.create_workflow returned no workflow"
+    wf_id = workflow["workflow_id"]
 
     # Stop it first so the delete button appears
     api("post", f"/api/autonomous/workflows/{wf_id}/stop")
@@ -1389,8 +1474,16 @@ def run_tests():
         failed += 1
         return
 
-    # ── Phase 2: Clean up existing workflows to avoid rate limiting ──
-    log("SETUP", "Cleaning up existing workflows to reset rate limiter")
+    # ── Phase 2: Provision the dedicated creation identity (own rate budget) ──
+    try:
+        ensure_test_bot_user()
+        passed += 1
+    except Exception as e:
+        print(f"  ❌ BOT PROVISIONING FAILED: {e}", flush=True)
+        failed += 1
+
+    # ── Phase 3: Clean up workflows left by earlier runs ──
+    log("SETUP", "Cleaning up existing workflows")
     cleanup_all_test_workflows()
     passed += 1
 

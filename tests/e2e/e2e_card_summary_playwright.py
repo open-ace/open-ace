@@ -76,21 +76,30 @@ def get_repo():
     return AutonomousWorkflowRepository()
 
 
-def create_workflow_via_api(overrides=None):
-    base = {
-        "title": f"CardSummary {uuid.uuid4().hex[:8]}",
-        "requirements_text": "Build a hello world feature with tests",
-        "cli_tool": "claude-code",
-        "model": "",
-        "workspace_type": "local",
-        "project_path": "/tmp/e2e-card-summary",
-        "branch_strategy": "new-branch",
-        "max_plan_rounds": 1,
-        "max_pr_review_rounds": 1,
-    }
-    if overrides:
-        base.update(overrides)
-    return api("post", "/api/autonomous/workflows", json=base)
+def create_workflow_via_repo(repo, title):
+    """Seed a completed workflow directly via the repository.
+
+    Repo-level seeding keeps this E2E independent of the per-user workflow
+    creation rate limit (10/hour) enforced in-memory by the API route.
+    """
+    workflow = repo.create_workflow(
+        {
+            "user_id": 1,  # default admin (the account this script logs in as)
+            "title": title,
+            "status": "completed",
+            "current_phase": "done",
+            "requirements_text": "Build a hello world feature with tests",
+            "cli_tool": "claude-code",
+            "workspace_type": "local",
+            "project_path": "/tmp/e2e-card-summary",
+            "branch_strategy": "new-branch",
+            "max_plan_rounds": 1,
+            "max_pr_review_rounds": 1,
+        }
+    )
+    wf_id = workflow["workflow_id"]
+    created_workflow_ids.append(wf_id)
+    return wf_id
 
 
 def cleanup_workflows():
@@ -157,11 +166,7 @@ def _seed_milestone(
 
 def seed_tldr_workflow(repo, title):
     """plan_finalized with a tldr — card must show the TL;DR text."""
-    r = create_workflow_via_api({"title": title})
-    assert r.status_code == 201, r.text
-    wf_id = r.json()["workflow"]["workflow_id"]
-    created_workflow_ids.append(wf_id)
-    repo.update_workflow(wf_id, {"status": "completed", "current_phase": "done"})
+    wf_id = create_workflow_via_repo(repo, title)
     _seed_milestone(
         repo,
         wf_id,
@@ -179,11 +184,7 @@ def seed_tldr_workflow(repo, title):
 
 def seed_summary_only_workflow(repo, title):
     """plan_finalized with result_summary but empty tldr — card falls back."""
-    r = create_workflow_via_api({"title": title})
-    assert r.status_code == 201, r.text
-    wf_id = r.json()["workflow"]["workflow_id"]
-    created_workflow_ids.append(wf_id)
-    repo.update_workflow(wf_id, {"status": "completed", "current_phase": "done"})
+    wf_id = create_workflow_via_repo(repo, title)
     _seed_milestone(
         repo,
         wf_id,
@@ -201,11 +202,7 @@ def seed_summary_only_workflow(repo, title):
 
 def seed_empty_workflow(repo, title):
     """repo_setup milestone with no tldr / result_summary — no summary line."""
-    r = create_workflow_via_api({"title": title})
-    assert r.status_code == 201, r.text
-    wf_id = r.json()["workflow"]["workflow_id"]
-    created_workflow_ids.append(wf_id)
-    repo.update_workflow(wf_id, {"status": "completed", "current_phase": "done"})
+    wf_id = create_workflow_via_repo(repo, title)
     _seed_milestone(
         repo,
         wf_id,
@@ -221,6 +218,9 @@ def seed_empty_workflow(repo, title):
 
 
 # ── Browser assertions ──────────────────────────────────
+# The one-line summary renders as <p class="timeline-milestone-preview"> on
+# the milestone card (WorkflowTimeline.tsx); the preview prefers tldr over
+# result_summary and is omitted entirely when both are empty.
 def open_timeline_english(context, page, workflow_title, shot_name=None):
     """Auth + English + client-side nav to a seeded workflow's timeline."""
     context.add_cookies([{"name": "session_token", "value": auth_token, "url": BASE_URL}])
@@ -250,7 +250,7 @@ def open_timeline_english(context, page, workflow_title, shot_name=None):
 def step_browser_tldr(context, page, wf_id):
     log("BROWSER", "Verifying card shows TL;DR text")
     open_timeline_english(context, page, "TLDR Card 993", "01-tldr")
-    summary = page.locator(".workflow-timeline-card-summary")
+    summary = page.locator(".timeline-milestone-preview")
     assert summary.count() >= 1, "summary line missing on tldr milestone card"
     assert (
         "TLDR-LOGIN-MARKER" in summary.first.inner_text()
@@ -261,7 +261,7 @@ def step_browser_tldr(context, page, wf_id):
 def step_browser_summary_fallback(context, page, wf_id):
     log("BROWSER", "Verifying card falls back to result_summary when tldr empty")
     open_timeline_english(context, page, "SummaryOnly Card 993", "02-summary-only")
-    summary = page.locator(".workflow-timeline-card-summary")
+    summary = page.locator(".timeline-milestone-preview")
     assert summary.count() >= 1, "summary line missing on summary-only card"
     assert (
         "SUMMARY-ONLY-MARKER" in summary.first.inner_text()
@@ -272,7 +272,7 @@ def step_browser_summary_fallback(context, page, wf_id):
 def step_browser_empty(context, page, wf_id):
     log("BROWSER", "Verifying no summary line when both tldr and result_summary empty")
     open_timeline_english(context, page, "Empty Card 993", "03-empty")
-    summary = page.locator(".workflow-timeline-card-summary")
+    summary = page.locator(".timeline-milestone-preview")
     assert (
         summary.count() == 0
     ), "no summary line should render when tldr and result_summary are both empty"

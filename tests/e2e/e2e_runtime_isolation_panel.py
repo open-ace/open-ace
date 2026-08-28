@@ -115,41 +115,53 @@ def step_login():
 
 def step_create_workflow():
     global created_workflow_id
-    log("CREATE", "create workflow via API")
-    r = api(
-        "post",
-        "/api/autonomous/workflows",
-        json={
+    log("CREATE", "create workflow via repository (deterministic seeding)")
+    # Repo-level seeding keeps this E2E independent of the per-user workflow
+    # creation rate limit (10/hour) that the API route enforces in-memory.
+    from app.repositories.autonomous_repo import AutonomousWorkflowRepository
+
+    repo = AutonomousWorkflowRepository()
+    workflow = repo.create_workflow(
+        {
+            "user_id": 1,  # default admin (the account this script logs in as)
             "title": "#2020 Phase B panel E2E",
+            "status": "pending",
             "requirements_text": "Seed effective policy and verify the panel renders",
             "cli_tool": "claude-code",
-            "model": "",
             "workspace_type": "local",
             "project_path": "/tmp/e2e-2020-phase-b-project",
             "branch_strategy": "new-branch",
             "max_plan_rounds": 1,
             "max_pr_review_rounds": 1,
-        },
+        }
     )
-    assert r.status_code == 201, f"create failed: {r.status_code} {r.text}"
-    created_workflow_id = r.json()["workflow"]["workflow_id"]
+    assert workflow, "repo.create_workflow returned no workflow"
+    created_workflow_id = workflow["workflow_id"]
     seed_effective_policy(created_workflow_id)
 
 
 def step_verify_panel(page):
     log("UI", "open autonomous page + select workflow")
-    page.goto(f"{BASE_URL}/autonomous-dev")
+    # The autonomous UI lives at /work/autonomous (React route); the
+    # ?workflow=<id> query deep-links straight to the seeded workflow.
     page.context.add_cookies([{"name": "session_token", "value": auth_token, "url": BASE_URL}])
+    page.goto(f"{BASE_URL}/work/autonomous?workflow={created_workflow_id}")
+    # Pin the UI language to English so the "not enforced" assertion is stable.
+    page.evaluate(
+        "() => { localStorage.setItem('language','en'); localStorage.setItem('i18nextLng','en'); }"
+    )
     page.reload()
-    page.wait_for_selector(f"text={created_workflow_id[:8]}", timeout=15000)
-    page.click(f"text={created_workflow_id[:8]}")
-    panel = page.wait_for_selector("[data-testid='runtime-isolation-panel']", timeout=15000)
+    panel = page.locator("[data-testid='runtime-isolation-panel']")
+    panel.wait_for(state="visible", timeout=15000)
     expect(panel).to_be_visible()
     # Provider badge + an enforced limit value render.
     expect(
         page.locator("[data-testid='runtime-isolation-panel']").locator("text=legacy_posix")
     ).to_be_visible()
     log("UI", "✅ Runtime & Isolation panel rendered with provider")
+    # Expand the collapsed panel so the per-limit enforcement badges render.
+    page.locator("[data-testid='runtime-isolation-panel'] .runtime-isolation-panel__toggle").click()
+    page.wait_for_selector(".runtime-isolation-panel__body", timeout=5000)
     # Honest enforcement: storage shows "not enforced" for Legacy.
     body = page.locator("[data-testid='runtime-isolation-panel']").inner_text()
     assert "not enforced" in body, "Legacy storage/inode should show 'not enforced'"

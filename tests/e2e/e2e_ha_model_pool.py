@@ -176,9 +176,21 @@ def step2_local_session_models(page):
 
     record("Local session-models returns 200", r.status_code == 200)
     record("Response has success=True", data.get("success") is True)
-    # models 可能为空（取决于是否配置了 API key），但不应报错
-    has_models = bool(data.get("models"))
-    record("Local models list present", has_models, f"models count: {len(data.get('models', []))}")
+    # 契约（GET /api/workspace/session-models）：models 始终是列表；未配置
+    # API key 时允许为空，但此时必须返回非空 empty_reason 说明原因。
+    models = data.get("models")
+    is_list = isinstance(models, list)
+    if is_list and len(models) == 0:
+        empty_reason = (data.get("empty_reason") or "").strip()
+        record(
+            "Local models list present",
+            bool(empty_reason),
+            f"empty (empty_reason: {empty_reason[:80]})",
+        )
+    else:
+        record(
+            "Local models list present", is_list and len(models) > 0, f"models count: {len(models)}"
+        )
 
     page.goto(f"{BASE_URL}/work")
     pause(1)

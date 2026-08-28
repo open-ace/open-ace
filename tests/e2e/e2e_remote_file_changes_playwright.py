@@ -34,7 +34,9 @@ from playwright.sync_api import sync_playwright
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
 WEBUI_URL = os.environ.get("WEBUI_URL", "http://localhost:3000")
-TEST_USER = os.environ.get("TEST_REAL_USER", "test_user")
+# The lane runner's isolated home provisions only the default admin account
+# (scripts/init_db.py), so default to admin; TEST_REAL_USER stays overridable.
+TEST_USER = os.environ.get("TEST_REAL_USER", "admin")
 TEST_PASS = "admin123"
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "tests", "screenshots", "e2e-file-changes-remote")
 
@@ -146,7 +148,8 @@ def register_machine(admin_tok, name, capabilities):
     return mid
 
 
-def assign_machine(admin_tok, mid, user_id=89):
+def assign_machine(admin_tok, mid, user_id):
+    """Assign machine permission to the actual test user (id resolved at runtime)."""
     r = requests.post(
         f"{BASE_URL}/api/remote/machines/{mid}/assign",
         json={"user_id": user_id, "permission": "admin"},
