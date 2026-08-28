@@ -862,7 +862,9 @@ def list_sessions():
         search_days = request.args.get("search_days")
         project_path = request.args.get("project_path")  # Issue #3189: Filter by project path
         workspace_type = request.args.get("workspace_type")  # Issue #3189: Filter by workspace type
-        remote_machine_id = request.args.get("remote_machine_id")  # Issue #3189: Filter by remote machine
+        remote_machine_id = request.args.get(
+            "remote_machine_id"
+        )  # Issue #3189: Filter by remote machine
         page = int(request.args.get("page", 1))
         limit = int(request.args.get("limit", 20))
 
