@@ -285,9 +285,10 @@ class ApiClient {
     body?: unknown,
     signal?: AbortSignal,
     timeout?: number,
-    raw?: boolean
+    raw?: boolean,
+    headers?: Record<string, string>
   ): Promise<T> {
-    return this.request<T>(endpoint, { method: 'POST', body, signal, timeout, raw });
+    return this.request<T>(endpoint, { method: 'POST', body, signal, timeout, raw, headers });
   }
 
   async put<T>(endpoint: string, body?: unknown, signal?: AbortSignal): Promise<T> {

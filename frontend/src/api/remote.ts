@@ -382,9 +382,11 @@ export const remoteApi = {
   },
 
   createSession(
-    data: CreateRemoteSessionRequest
+    data: CreateRemoteSessionRequest,
+    idempotencyKey?: string
   ): Promise<{ success: boolean; session: RemoteSession }> {
-    return apiClient.post('/api/remote/sessions', data);
+    const headers = idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined;
+    return apiClient.post('/api/remote/sessions', data, undefined, undefined, undefined, headers);
   },
 
   getSession(sessionId: string): Promise<{ success: boolean; session: RemoteSession }> {
