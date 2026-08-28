@@ -509,3 +509,50 @@ def test_evidence_timestamps_are_datetimes_not_strings():
     row = provider.collect_execution_evidence(handle)[0]
     assert isinstance(row.started_at, datetime)
     assert isinstance(row.completed_at, datetime)
+
+
+# ── acceptance criterion 8: the remaining two fail-closed classes ──────
+
+
+def test_fork_bomb_produces_a_structured_signal_not_a_silent_pass():
+    # The pids bound is the kubelet's podPidsLimit, which the tier must attest;
+    # a process killed under it surfaces as 128+9 through execd. What matters
+    # here is that it never reads back as a clean completion.
+    provider, _ = _provider(FakeOpenSandboxApi(scripted_exit_code=137))
+    handle = provider.create(_spec())
+    exec_handle = provider.exec(handle, command=[":(){ :|:& };:"], env=None, exec_policy=None)
+    list(provider.stream(exec_handle))
+    row = provider.collect_execution_evidence(handle)[0]
+    assert row.terminal_reason == TerminalReason.SIGNAL.value
+    assert row.terminal_reason != TerminalReason.COMPLETED.value
+
+
+def test_tier_without_an_attested_pids_limit_is_refused():
+    # Without the attestation there is no fork-bomb bound at all, so the tier
+    # must not run an agent rather than run one unprotected.
+    cfg = _cfg(attestations={**_FULL, "pod_pids_limit": 0})
+    provider, _ = _provider(cfg=cfg)
+    with pytest.raises(SandboxError):
+        provider.create(_spec())
+
+
+def test_network_scan_target_is_not_reachable_through_the_generated_policy():
+    # A scan works by connecting to hosts nobody allowlisted. The generated
+    # policy is deny-default with only the operator's hosts allowed, and the
+    # sidecar is verified to be enforcing in dns+nft mode before the sandbox is
+    # used at all.
+    provider, api = _provider()
+    provider.create(_spec())
+    policy = api.created_bodies[0]["networkPolicy"]
+    assert policy["defaultAction"] == "deny"
+    allowed = {rule["target"] for rule in policy["egress"]}
+    for target in ("10.0.0.1", "169.254.169.254", "scanner.example.com", "*"):
+        assert target not in allowed
+
+
+def test_sandbox_is_refused_when_the_sidecar_is_not_enforcing():
+    # The scan defence rests on the sidecar actually enforcing; an unverified
+    # boolean would leave it resting on nothing.
+    provider, _ = _provider(FakeOpenSandboxApi(egress_enforcement_mode="dns"))
+    with pytest.raises(SandboxError):
+        provider.create(_spec())
