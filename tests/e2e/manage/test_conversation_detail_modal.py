@@ -20,16 +20,42 @@ pytestmark = [pytest.mark.regression, pytest.mark.issue(79)]
 
 # The issues lane runs the server on an ephemeral port exported as BASE_URL.
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
+USERNAME = os.environ.get("TEST_USERNAME", "admin")
+PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
+
+
+async def _login(session) -> str:
+    """Login as the lane admin and return the session_token cookie value.
+
+    /api/conversation-history and /api/conversation-timeline (messages
+    blueprint) require auth; an unauthenticated GET returns 401. The token is
+    returned explicitly instead of relying on aiohttp's cookie jar, which does
+    not replay the host-only cookie the lane server sets on its IP-literal
+    origin — pass it via ``cookies={"session_token": token}`` on each request.
+    """
+    async with session.post(
+        f"{BASE_URL}/api/auth/login",
+        json={"username": USERNAME, "password": PASSWORD},
+    ) as resp:
+        assert resp.status == 200, f"login failed: {resp.status}"
+        morsel = resp.cookies.get("session_token")
+        assert morsel and morsel.value, "login response missing session_token cookie"
+        return morsel.value
 
 
 async def _fetch_first_session_id() -> str | None:
     """Fetch a session_id from the conversation-history API (or None)."""
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"{BASE_URL}/api/conversation-history?limit=5") as resp:
+        token = await _login(session)
+        async with session.get(
+            f"{BASE_URL}/api/conversation-history?limit=5",
+            cookies={"session_token": token},
+        ) as resp:
             if resp.status != 200:
                 print(f"✗ Failed to get conversation history: {resp.status}")
                 return None
-            data = await resp.json()
+            payload = await resp.json()
+            data = payload.get("data", [])
             print(f"✓ Got {len(data)} conversations")
             if not data:
                 return None
@@ -46,10 +72,17 @@ async def test_conversation_history_api():
     print("\n=== Testing Conversation History API ===")
     session_id = None
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"{BASE_URL}/api/conversation-history?limit=5") as resp:
+        token = await _login(session)
+        async with session.get(
+            f"{BASE_URL}/api/conversation-history?limit=5",
+            cookies={"session_token": token},
+        ) as resp:
             assert resp.status == 200, f"conversation-history API returned {resp.status}"
-            data = await resp.json()
-            assert isinstance(data, list), f"expected a list payload, got {type(data)}"
+            payload = await resp.json()
+            # Endpoint contract (app/routes/messages.py): {"data": [...], "total": N}
+            assert isinstance(payload, dict), f"expected a dict payload, got {type(payload)}"
+            data = payload.get("data")
+            assert isinstance(data, list), f"expected payload['data'] list, got {type(data)}"
             print(f"✓ Got {len(data)} conversations")
             if data:
                 session_id = data[0].get("session_id")
@@ -67,7 +100,11 @@ async def test_conversation_timeline_api():
         return
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"{BASE_URL}/api/conversation-timeline/{session_id}") as resp:
+        token = await _login(session)
+        async with session.get(
+            f"{BASE_URL}/api/conversation-timeline/{session_id}",
+            cookies={"session_token": token},
+        ) as resp:
             assert resp.status == 200, f"timeline API returned {resp.status}"
             if resp.status == 200:
                 messages = await resp.json()
