@@ -19,6 +19,15 @@ jobs:
     name: Chromium, Firefox and WebKit E2E
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    env:
+      # Issue #3170: the playwright webServer boots the real `server.py`,
+      # whose development-mode contract refuses to start without SECRET_KEY
+      # (same test key style as scripts/run_extended_tests.py). The absolute
+      # browser cache path keeps install/run resolving identically even though
+      # the E2E step swaps HOME for an isolated one (extended-tests.yml uses
+      # the same pattern).
+      SECRET_KEY: weekly-cross-browser-e2e-secret-key-32chars
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
       - uses: actions/checkout@v6
         with:
