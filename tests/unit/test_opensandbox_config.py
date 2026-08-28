@@ -417,3 +417,13 @@ def test_egress_port_defaults_to_the_sidecar_not_execd():
 def test_runtime_user_and_group_have_defaults():
     endpoint = parse_backend_config(_raw()).endpoint_for(tenant=None, project_path=None)
     assert endpoint.runtime_user and endpoint.runtime_group
+
+
+def test_root_exec_uid_is_rejected():
+    with pytest.raises(SandboxConfigError):
+        parse_backend_config(_raw(endpoints={"gvisor": _endpoint(exec_uid=0)}))
+
+
+def test_exec_uid_defaults_to_non_root():
+    endpoint = parse_backend_config(_raw()).endpoint_for(tenant=None, project_path=None)
+    assert endpoint.exec_uid != 0 and endpoint.exec_gid != 0

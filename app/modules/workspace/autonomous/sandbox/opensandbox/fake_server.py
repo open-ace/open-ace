@@ -53,6 +53,10 @@ class FakeOpenSandboxApi:
         self.deleted: set[str] = set()
         self.pty_sessions: dict[str, dict] = {}
         self.renewed: list[tuple[str, str]] = []
+        self.list_filters: list[dict] = []
+        # When set, DELETE is accepted but the sandbox never reaches a terminal
+        # state — the provider must NOT report DESTROYED for it.
+        self.stall_delete = False
 
         self._ids = itertools.count(1)
         self._command_ids = itertools.count(1)
@@ -96,23 +100,36 @@ class FakeOpenSandboxApi:
                 "reason": "OOMKilled",
                 "message": "container exceeded its memory limit",
             }
+            return record
+        if sandbox_id in self.deleted and not self.stall_delete:
+            record["status"] = {"state": "Terminated", "reason": "", "message": ""}
         return record
 
-    def list_sandboxes(self) -> list[dict]:
-        return [r for sid, r in self.sandboxes.items() if sid not in self.deleted]
+    def list_sandboxes(self, metadata: dict | None = None) -> list[dict]:
+        self.list_filters.append(dict(metadata or {}))
+        rows = [r for sid, r in self.sandboxes.items() if sid not in self.deleted]
+        if metadata:
+            rows = [
+                r
+                for r in rows
+                if all((r.get("metadata") or {}).get(k) == v for k, v in metadata.items())
+            ]
+        return rows
 
     def delete_sandbox(self, sandbox_id: str) -> None:
         # 404 is success: destroy() must be idempotent.
-        self.deleted.add(sandbox_id)
         record = self.sandboxes.get(sandbox_id)
+        if self.stall_delete:
+            # Accepted, but it stays Stopping forever.
+            if record is not None:
+                record["status"] = {"state": "Stopping", "reason": "", "message": ""}
+            return
+        self.deleted.add(sandbox_id)
         if record is not None:
             # Upstream goes Stopping, then Terminated — not straight to gone.
-            state = record["status"].get("state")
-            record["status"] = {
-                "state": "Terminated" if state == "Stopping" else "Stopping",
-                "reason": "",
-                "message": "",
-            }
+            # The transition happens over successive READS, which is what makes
+            # the provider's poll-to-terminal real rather than decorative.
+            record["status"] = {"state": "Stopping", "reason": "", "message": ""}
 
     def pause_sandbox(self, sandbox_id: str) -> None:
         self._require(sandbox_id)["status"] = {"state": "Paused", "reason": "", "message": ""}
@@ -238,6 +255,10 @@ class FakeOpenSandboxApi:
         return f"ws://execd.invalid/pty/{pty_session_id}/ws?pty=0"
 
     # ── probes ────────────────────────────────────────────────────────
+
+    def set_pod_oom(self, value: bool) -> None:
+        """Simulate the container being OOM-killed after it started running."""
+        self._pod_oom = value
 
     def proc_version(self, sandbox_id: str) -> str:
         """What ``cat /proc/version`` returns — the runtime-class probe's input."""

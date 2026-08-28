@@ -155,6 +155,11 @@ class EndpointConfig:
     # would leave the non-root agent unable to edit its own workspace.
     runtime_user: str = "openace"
     runtime_group: str = "openace"
+    # uid/gid for POST /command. Never 0: refusing root here is defence in depth
+    # only — the agent can reach execd itself and ask for uid 0 — but a control
+    # plane that asks for root would be a bug worth failing on.
+    exec_uid: int = 1000
+    exec_gid: int = 1000
     execd_endpoint_host_allowlist: tuple[str, ...] = ()
     egress_allow_hosts: tuple[str, ...] = ()
     attestations: Attestations = field(default_factory=Attestations)
@@ -379,6 +384,13 @@ def _parse_endpoint(tier: str, body: Any, image_allowlist: frozenset[str]) -> En
     if default_image not in image_allowlist:
         raise SandboxConfigError(f"endpoint {tier!r}: default_image is not in image_allowlist")
 
+    for uid_key in ("exec_uid", "exec_gid"):
+        if _int_or_raise(body.get(uid_key, 1000), f"endpoint {tier!r} {uid_key}") == 0:
+            raise SandboxConfigError(
+                f"endpoint {tier!r}: {uid_key} must not be 0; the control plane never "
+                "asks for root inside a sandbox"
+            )
+
     attestations = _parse_attestations(tier, body.get("attestations") or {})
 
     egress_hosts = tuple(_str_list(body, "egress_allow_hosts"))
@@ -408,6 +420,8 @@ def _parse_endpoint(tier: str, body: Any, image_allowlist: frozenset[str]) -> En
         execd_token_env=str(body.get("execd_token_env") or "").strip(),
         runtime_user=str(body.get("runtime_user") or "openace").strip(),
         runtime_group=str(body.get("runtime_group") or "openace").strip(),
+        exec_uid=_int_or_raise(body.get("exec_uid", 1000), f"endpoint {tier!r} exec_uid"),
+        exec_gid=_int_or_raise(body.get("exec_gid", 1000), f"endpoint {tier!r} exec_gid"),
         execd_endpoint_host_allowlist=host_allowlist,
         egress_allow_hosts=egress_hosts,
         attestations=attestations,
