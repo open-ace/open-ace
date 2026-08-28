@@ -23,31 +23,44 @@ export async function login(page: Page, username = 'admin', password = 'admin123
     await page.waitForURL(/\/(manage|work)\//, { timeout: 15000 });
   } catch {
     // Fallback: wait for any URL change away from /login
-    const navigated = await page.waitForURL(/^(?!.*\/login).+$/, { timeout: 5000 }).then(() => true).catch(() => false);
+    const navigated = await page
+      .waitForURL(/^(?!.*\/login).+$/, { timeout: 5000 })
+      .then(() => true)
+      .catch(() => false);
     if (!navigated) {
       console.warn(`Login redirect failed — still at ${page.url()}, navigating to /`);
       await page.goto('/');
     }
   }
 
-  // Handle ForceChangePasswordModal if it appears (for users with must_change_password=true)
-  // The modal is loaded lazily via Suspense, so it may take time to appear in CI environments
+  // Post-login modal contract (#3214): the seeded-lane user must NOT carry
+  // must_change_password (lanes init with OPENACE_DEFAULT_ADMIN_MUST_CHANGE_
+  // PASSWORD=false, same contract as the python e2e lanes). If the forced
+  // password-change modal DOES appear, the lane is misconfigured and every
+  // test would otherwise hang — fail fast with a clear diagnostic instead.
+  // The historical "Skip tour" modal is gone from the product (no Skip
+  // button exists in any current dialog), so a bounded short wait replaces
+  // the old 15s unconditional one (545 logins x 15s of dead waiting would
+  // sink the weekly lane on a single worker).
   const modalDialog = page.locator('[role="dialog"][aria-modal="true"]');
-  const skipButton = modalDialog.locator('button:has-text("Skip"), button:has-text("跳过")');
-
-  // Wait for modal to appear (up to 15s for CI environments with slow networks)
-  // Playwright's waitFor polls every ~100ms, so it returns immediately when visible
-  const modalVisible = await modalDialog.waitFor({ state: 'visible', timeout: 15000 })
+  const modalVisible = await modalDialog
+    .waitFor({ state: 'visible', timeout: 2500 })
     .then(() => true)
     .catch(() => false);
 
   if (modalVisible) {
-    // Wait for Skip button to be visible and clickable
-    await skipButton.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
-    // Click Skip button to dismiss the modal
-    await skipButton.click({ force: true });
-    // Wait for modal to disappear completely
-    await modalDialog.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+    const forceChange = modalDialog.locator('[data-testid="force-change-password-modal"]');
+    if (await forceChange.count()) {
+      throw new Error(
+        'Lane contract violation: the forced password-change modal appeared after login. ' +
+          'The test lane must seed its database with ' +
+          'OPENACE_DEFAULT_ADMIN_MUST_CHANGE_PASSWORD=false (see scripts/init_db.py and the ' +
+          'weekly-quality workflow) — the modal has no Skip button by design and cannot be ' +
+          'dismissed from tests.'
+      );
+    }
+    // Unknown dismissible dialog: tolerate and continue (spec-level
+    // assertions remain responsible for the UI state they depend on).
   }
 
   // Wait for page to be ready
@@ -60,19 +73,25 @@ export async function login(page: Page, username = 'admin', password = 'admin123
 export async function waitForApp(page: Page) {
   await page.waitForLoadState('networkidle');
 
-  // Fallback: handle ForceChangePasswordModal if login helper missed it
+  // Same contract as login(): the forced password-change modal means the
+  // lane is misconfigured — fail fast rather than timeout downstream.
   const modalDialog = page.locator('[role="dialog"][aria-modal="true"]');
   const isModalVisible = await modalDialog.isVisible().catch(() => false);
   if (isModalVisible) {
-    const skipButton = modalDialog.locator('button:has-text("Skip"), button:has-text("跳过")');
-    if (await skipButton.isVisible().catch(() => false)) {
-      await skipButton.click({ force: true });
-      await modalDialog.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+    const forceChange = modalDialog.locator('[data-testid="force-change-password-modal"]');
+    if (await forceChange.count()) {
+      throw new Error(
+        'Lane contract violation: forced password-change modal is open — the lane must seed ' +
+          'with OPENACE_DEFAULT_ADMIN_MUST_CHANGE_PASSWORD=false (see scripts/init_db.py).'
+      );
     }
   }
 
   // Wait for main content to be visible
-  await page.locator('main').waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+  await page
+    .locator('main')
+    .waitFor({ state: 'visible', timeout: 10000 })
+    .catch(() => {});
 }
 
 /**

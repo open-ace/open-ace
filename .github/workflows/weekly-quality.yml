@@ -58,6 +58,11 @@ jobs:
       - name: Initialize isolated test database
         env:
           HOME: ${{ runner.temp }}/openace-home
+          # Same lane contract as the python e2e lanes (run_extended_tests.py):
+          # the seeded admin must not require a forced password change — the
+          # frontend specs' shared login helper hard-fails on that modal by
+          # design (#3214).
+          OPENACE_DEFAULT_ADMIN_MUST_CHANGE_PASSWORD: "false"
         run: |
           mkdir -p "$HOME/.open-ace"
           sqlite3 "$HOME/.open-ace/ace.db" < schema/schema-sqlite.sql

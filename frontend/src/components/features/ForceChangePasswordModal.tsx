@@ -77,51 +77,57 @@ export const ForceChangePasswordModal: React.FC = () => {
         </Button>
       }
     >
-      <div className="alert alert-warning mb-3">
-        <i className="bi bi-exclamation-triangle-fill me-2" />
-        {t('mustChangePasswordHint', language) ??
-          'Your password was reset by an administrator. You must change it before continuing.'}
-      </div>
-
-      {(error ?? changePasswordError) && (
-        <div className="alert alert-danger mb-3" role="alert">
+      <div data-testid="force-change-password-modal">
+        <div className="alert alert-warning mb-3">
           <i className="bi bi-exclamation-triangle-fill me-2" />
-          {error ?? (changePasswordError as Error)?.message}
+          {t('mustChangePasswordHint', language) ??
+            'Your password was reset by an administrator. You must change it before continuing.'}
         </div>
-      )}
 
-      <div className="mb-3">
-        <label className="form-label">{t('currentPassword', language) ?? 'Current Password'}</label>
-        <TextInput
-          type="password"
-          value={currentPassword}
-          onChange={(value: string) => setCurrentPassword(value)}
-          placeholder={t('enterCurrentPassword', language) ?? 'Enter current password'}
-          aria-label="current-password"
-        />
-      </div>
+        {(error ?? changePasswordError) && (
+          <div className="alert alert-danger mb-3" role="alert">
+            <i className="bi bi-exclamation-triangle-fill me-2" />
+            {error ?? (changePasswordError as Error)?.message}
+          </div>
+        )}
 
-      <div className="mb-3">
-        <label className="form-label">{t('newPassword', language) ?? 'New Password'}</label>
-        <TextInput
-          type="password"
-          value={newPassword}
-          onChange={(value: string) => setNewPassword(value)}
-          placeholder={t('enterNewPassword', language) ?? 'Enter new password'}
-          aria-label="new-password"
-        />
-        <PasswordPolicyHint />
-      </div>
+        <div className="mb-3">
+          <label className="form-label">
+            {t('currentPassword', language) ?? 'Current Password'}
+          </label>
+          <TextInput
+            type="password"
+            value={currentPassword}
+            onChange={(value: string) => setCurrentPassword(value)}
+            placeholder={t('enterCurrentPassword', language) ?? 'Enter current password'}
+            aria-label="current-password"
+          />
+        </div>
 
-      <div className="mb-3">
-        <label className="form-label">{t('confirmPassword', language) ?? 'Confirm Password'}</label>
-        <TextInput
-          type="password"
-          value={confirmPassword}
-          onChange={(value: string) => setConfirmPassword(value)}
-          placeholder={t('confirmPassword', language) ?? 'Confirm password'}
-          aria-label="confirm-password"
-        />
+        <div className="mb-3">
+          <label className="form-label">{t('newPassword', language) ?? 'New Password'}</label>
+          <TextInput
+            type="password"
+            value={newPassword}
+            onChange={(value: string) => setNewPassword(value)}
+            placeholder={t('enterNewPassword', language) ?? 'Enter new password'}
+            aria-label="new-password"
+          />
+          <PasswordPolicyHint />
+        </div>
+
+        <div className="mb-3">
+          <label className="form-label">
+            {t('confirmPassword', language) ?? 'Confirm Password'}
+          </label>
+          <TextInput
+            type="password"
+            value={confirmPassword}
+            onChange={(value: string) => setConfirmPassword(value)}
+            placeholder={t('confirmPassword', language) ?? 'Confirm password'}
+            aria-label="confirm-password"
+          />
+        </div>
       </div>
     </Modal>
   );
