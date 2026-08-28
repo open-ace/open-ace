@@ -494,3 +494,18 @@ def test_capabilities_reflect_the_resolved_endpoint():
     caps = provider.capabilities()
     assert SandboxCapability.NAMESPACE_ISOLATION in caps
     assert SandboxCapability.NETWORK_EGRESS_POLICY in caps
+
+
+def test_evidence_timestamps_are_datetimes_not_strings():
+    # execd reports RFC3339 strings; CommandExecutionEvidence types these as
+    # datetime, so handing the string through would put the wrong type in the
+    # evidence row.
+    from datetime import datetime
+
+    provider, _ = _provider()
+    handle = provider.create(_spec())
+    exec_handle = provider.exec(handle, command=["ls"], env=None, exec_policy=None)
+    list(provider.stream(exec_handle))
+    row = provider.collect_execution_evidence(handle)[0]
+    assert isinstance(row.started_at, datetime)
+    assert isinstance(row.completed_at, datetime)

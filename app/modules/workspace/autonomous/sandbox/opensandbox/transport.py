@@ -159,7 +159,8 @@ class PtyWebSocketTransport:
             self._sandbox_id, cwd=self._cwd, command=self._command
         )
         url = self._api.pty_ws_url(self._sandbox_id, self._pty_session_id)
-        headers = getattr(self._api, "execd_headers", lambda _sid: {})(self._sandbox_id)
+        header_getter = getattr(self._api, "execd_headers", None)
+        headers: dict[str, str] = header_getter(self._sandbox_id) if header_getter else {}
         self._conn = self._connect_factory(url, headers)
         self._started = True
         self._reader = threading.Thread(

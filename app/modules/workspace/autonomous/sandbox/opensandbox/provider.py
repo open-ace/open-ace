@@ -30,6 +30,7 @@ import shlex
 import uuid
 from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from app.modules.workspace.autonomous.command_evidence.types import (
@@ -330,8 +331,8 @@ class OpenSandboxProvider:
                 exit_code=exit_code,
                 signal=signal,
                 terminal_reason=reason.value,
-                started_at=state.started_at or None,
-                completed_at=state.completed_at or None,
+                started_at=_parse_timestamp(state.started_at),
+                completed_at=_parse_timestamp(state.completed_at),
             )
         ]
 
@@ -697,6 +698,22 @@ class OpenSandboxProvider:
             self._event_sink(name, payload)
         except Exception:  # noqa: BLE001 - auditing must never break the run
             pass
+
+
+def _parse_timestamp(value: str) -> datetime | None:
+    """Parse execd's RFC3339 timestamps into the datetimes evidence expects.
+
+    ``CommandStatusResponse`` reports ``started_at``/``finished_at`` as RFC3339
+    strings while ``CommandExecutionEvidence`` types them as ``datetime`` —
+    handing the string straight through would put the wrong type in the
+    evidence row.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 _ = (shlex, TerminalReason)  # re-exported semantics live in policy/evidence modules

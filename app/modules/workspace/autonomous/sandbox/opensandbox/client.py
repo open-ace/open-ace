@@ -36,7 +36,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterator, Mapping
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 from urllib.parse import quote, urlencode, urlparse, urlunparse
 
 import requests
@@ -71,7 +71,9 @@ _ALLOWED_ENDPOINT_HEADER_KEYS = frozenset(
 )
 
 # Proxy lookup is disabled on every call: under gevent it can recurse (#2237).
-_NO_PROXIES = {"http": None, "https": None}
+# requests treats a None value as "no proxy for this scheme", which is exactly
+# what disables the environment lookup; its type stub only admits str values.
+_NO_PROXIES: Any = {"http": None, "https": None}
 
 
 class OpenSandboxApiError(SandboxError):
@@ -299,9 +301,12 @@ class HttpOpenSandboxApi:
         )
 
     def download_file(self, sandbox_id: str, path: str) -> bytes:
-        return self._execd_request(
-            sandbox_id, "GET", "/files/download", params={"path": path}
-        ).content
+        return cast(
+            "bytes",
+            self._execd_request(
+                sandbox_id, "GET", "/files/download", params={"path": path}
+            ).content,
+        )
 
     def run_command(self, sandbox_id: str, body: dict) -> Iterator[dict]:
         response = self._execd_request(sandbox_id, "POST", "/command", json=body, stream=True)
