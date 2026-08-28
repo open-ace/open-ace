@@ -1,10 +1,26 @@
 """
 测试 Issue #32: Conversation Timeline 显示不直观
+
+#2491 R3a realignment: the baselined failure set
+``#analysis-start-date`` (dates are now ``DatePicker`` buttons,
+``frontend/src/components/common/DatePicker.tsx``) and clicked
+``button[onclick*="showTimelineModal"]`` expecting ``#timelineModal`` /
+``#timelineContainer`` / ``.timeline-item``. The current UI opens the
+conversation DETAIL modal from each row's eye button
+(``frontend/src/components/features/ConversationHistory.tsx`` lines 679-684,
+``<Button variant="outline-primary"><i className="bi bi-eye"/></Button>``).
+The modal (``ConversationDetailModal``, lines 884-1320) renders the improved
+card-style timeline: nav tabs "Timeline" / "Latency Curve", message-stat
+badges (messages / user / assistant / tool / tokens), ``.message-item`` cards
+with role badges and ``#序号`` message-number badges, a role filter and a
+latency tab with statistics. The repaired test seeds one conversation with
+user/assistant/tool messages and asserts that current shape.
 """
 
 import asyncio
 import os
-from datetime import datetime
+import sqlite3
+from datetime import datetime, timedelta
 
 import pytest
 import requests
@@ -20,6 +36,8 @@ USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 SCREENSHOT_DIR = "screenshots"
 
+SEED_MARKER = "e2e-issue32"
+
 
 def _skip_if_no_server():
     try:
@@ -28,213 +46,232 @@ def _skip_if_no_server():
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
 
+def _seed_conversation():
+    """Seed one conversation with user/assistant/tool messages (multi-role)."""
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return
+    conv_id = f"{SEED_MARKER}-conv-001"
+    try:
+        conn = sqlite3.connect(db_path, timeout=10)
+        try:
+            existing = conn.execute(
+                "SELECT COUNT(*) FROM daily_messages WHERE conversation_id = ?",
+                (conv_id,),
+            ).fetchone()[0]
+            if existing:
+                return
+            today = datetime.now().strftime("%Y-%m-%d")
+            messages = [
+                ("user", f"{SEED_MARKER} user question", 10, 6, 4, 0),
+                ("assistant", f"{SEED_MARKER} assistant reply", 20, 4, 16, 1),
+                ("tool", f"{SEED_MARKER} tool result", 5, 0, 5, 2),
+                ("assistant", f"{SEED_MARKER} follow-up reply", 20, 4, 16, 3),
+            ]
+            for role, content, tokens, input_tok, output_tok, offset in messages:
+                ts = (datetime.now() + timedelta(seconds=offset)).isoformat(timespec="seconds")
+                conn.execute(
+                    "INSERT INTO daily_messages "
+                    "(date, tool_name, host_name, role, content, tokens_used, "
+                    "input_tokens, output_tokens, timestamp, sender_name, "
+                    "message_id, agent_session_id, conversation_id, tenant_id) "
+                    "VALUES (?, 'claude-code', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                    (
+                        today,
+                        f"{SEED_MARKER}-host",
+                        role,
+                        content,
+                        tokens,
+                        input_tok,
+                        output_tok,
+                        ts,
+                        f"{SEED_MARKER}-sender",
+                        f"{SEED_MARKER}-msg-{offset}",
+                        conv_id,
+                        conv_id,
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+
+
+def _cleanup_seeded_conversation():
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path, timeout=10)
+        try:
+            conn.execute(
+                f"DELETE FROM daily_messages WHERE conversation_id LIKE '{SEED_MARKER}-%' "
+                f"OR host_name = '{SEED_MARKER}-host'"
+            )
+            conn.execute(
+                f"DELETE FROM daily_stats WHERE host_name = '{SEED_MARKER}-host' "
+                f"OR sender_name = '{SEED_MARKER}-sender'"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+
+
 @pytest.mark.asyncio
 async def test_issue32():
-    """测试 Conversation Timeline 的改进显示"""
+    """测试 Conversation 详情弹窗中的卡片式 Timeline 显示"""
 
     # 确保截图目录存在
     _skip_if_no_server()
+    _seed_conversation()
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-
-    # 生成时间戳
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results = []
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(viewport={"width": 1400, "height": 900})
         page = await context.new_page()
 
-        results = []
-
         try:
             # 1. 登录
             print("1. 登录系统...")
             await page.goto(f"{BASE_URL}login")
-            await page.wait_for_load_state("networkidle")
+            await page.wait_for_selector("#username", timeout=15000)
             await page.fill("#username", USERNAME)
             await page.fill("#password", PASSWORD)
             await page.click('button[type="submit"]')
-            await page.wait_for_load_state("networkidle")
-            await asyncio.sleep(2)
+            await page.wait_for_url("**/manage/**", timeout=15000)
+            await asyncio.sleep(1)
             print("   ✓ 登录成功")
             results.append(("登录", True, ""))
 
-            # 2. 导航到 Analysis 页面
-            print("2. 导航到 Analysis 页面...")
-            await page.click("text=Analysis")
-            await page.wait_for_load_state("networkidle")
-            await asyncio.sleep(2)
-            print("   ✓ 已进入 Analysis 页面")
-            results.append(("导航到 Analysis", True, ""))
-
-            # 设置日期范围以确保数据加载
-            print("2.5 设置日期范围...")
-            await page.evaluate("""() => {
-                document.getElementById('analysis-start-date').value = '2026-03-01';
-                document.getElementById('analysis-end-date').value = '2026-03-13';
-                onAnalysisDateChange();
-            }""")
-            await asyncio.sleep(2)
-
-            # 3. 点击 Conversation History Tab
-            print("3. 点击 Conversation History Tab...")
-
-            # 先截图看看当前状态
-            await page.screenshot(
-                path=f"{SCREENSHOT_DIR}/issue32_before_tab_click_{timestamp}.png", full_page=True
+            # 2. 导航到 Conversation History 页面
+            print("2. 导航到 Conversation History 页面...")
+            await page.goto(f"{BASE_URL}manage/analysis/conversation-history")
+            await page.wait_for_selector(".conversation-history", timeout=15000)
+            # The loading skeleton is also a table with rows; wait for it to
+            # detach before interacting with real rows.
+            await page.wait_for_selector(
+                ".conversation-history .skeleton", state="detached", timeout=15000
             )
-
-            await page.evaluate("""() => {
-                const tab = document.getElementById('conversation-history-tab');
-                console.log('Tab found:', tab);
-                if (tab) tab.click();
-            }""")
-            await asyncio.sleep(5)  # Wait longer for data to load
-
-            # 截图看看点击后的状态
-            await page.screenshot(
-                path=f"{SCREENSHOT_DIR}/issue32_after_tab_click_{timestamp}.png", full_page=True
-            )
-
-            # 等待表格初始化
-            try:
-                await page.wait_for_selector(
-                    "#conversation-history-table .tabulator-row", timeout=15000
-                )
-                print("   ✓ Conversation History 表格已加载")
-                results.append(("切换到 Conversation History", True, ""))
-            except:
-                # 检查表格是否存在
-                table_exists = await page.is_visible("#conversation-history-table")
-                print(f"   表格容器可见: {table_exists}")
-
-                # 检查表格内容
-                table_html = await page.evaluate("""() => {
-                    const table = document.getElementById('conversation-history-table');
-                    return table ? table.innerHTML : 'not found';
-                }""")
-                print(f"   表格内容: {table_html[:200]}...")
-
-                # 检查是否有 tabulator 类
-                has_tabulator = await page.evaluate("""() => {
-                    const table = document.getElementById('conversation-history-table');
-                    return table ? table.classList.contains('tabulator') : false;
-                }""")
-                print(f"   表格有 tabulator 类: {has_tabulator}")
-
-                if table_exists:
-                    print("   ✓ Conversation History 表格容器存在（可能无数据）")
-                    results.append(("切换到 Conversation History", True, "表格存在但可能无数据"))
-                else:
-                    print("   ✗ 失败: Conversation History 表格未找到")
-                    results.append(("切换到 Conversation History", False, "表格未找到"))
-                    return False
+            print("   ✓ 已进入 Conversation History 页面")
+            results.append(("导航到 Conversation History", True, ""))
 
             # 截图
-            screenshot_path = f"{SCREENSHOT_DIR}/issue32_conversation_history_{timestamp}.png"
-            await page.screenshot(path=screenshot_path, full_page=True)
-            print(f"   ✓ 截图已保存: {screenshot_path}")
+            await page.screenshot(
+                path=f"{SCREENSHOT_DIR}/issue32_conversation_history_{timestamp}.png",
+                full_page=True,
+            )
 
-            # 4. 找到并点击 Timeline 按钮
-            print("4. 点击 Timeline 按钮...")
+            # 3. 找到并点击行内的详情（眼睛）按钮打开 Timeline
+            print("3. 点击详情按钮打开 Timeline...")
+            eye_button = page.locator(".conversation-history tbody tr button:has(i.bi-eye)").first
+            await eye_button.click()
+            await asyncio.sleep(2)
+            print("   ✓ 详情按钮已点击")
+            results.append(("点击详情按钮", True, ""))
 
-            # 使用 JavaScript 找到并点击第一个 Timeline 按钮
-            timeline_button_found = await page.evaluate("""() => {
-                const buttons = document.querySelectorAll('button[onclick*="showTimelineModal"]');
-                if (buttons.length > 0) {
-                    buttons[0].click();
-                    return true;
-                }
-                return false;
-            }""")
-
-            if not timeline_button_found:
-                print("   ✗ 失败: 未找到 Timeline 按钮")
-                results.append(("点击 Timeline 按钮", False, "未找到 Timeline 按钮"))
-                return False
-
-            await asyncio.sleep(2)  # Wait for modal to open
-            print("   ✓ Timeline 按钮已点击")
-            results.append(("点击 Timeline 按钮", True, ""))
-
-            # 5. 验证 Timeline Modal 已打开
-            print("5. 验证 Timeline Modal 已打开...")
-            modal_visible = await page.is_visible("#timelineModal.show")
-
+            # 4. 验证详情 Modal 已打开
+            print("4. 验证详情 Modal 已打开...")
+            modal = page.locator(".modal.show")
+            modal_visible = await modal.count() > 0
             if not modal_visible:
-                print("   ✗ 失败: Timeline Modal 未打开")
-                results.append(("Timeline Modal 打开", False, "Modal 未显示"))
-                return False
-
-            print("   ✓ Timeline Modal 已打开")
-            results.append(("Timeline Modal 打开", True, ""))
+                print("   ✗ 失败: 详情 Modal 未打开")
+                results.append(("详情 Modal 打开", False, "Modal 未显示"))
+            else:
+                title = (await modal.locator(".modal-title").text_content() or "").strip()
+                print(f"   ✓ 详情 Modal 已打开: {title}")
+                results.append(("详情 Modal 打开", True, title))
 
             # 截图
             await page.screenshot(
                 path=f"{SCREENSHOT_DIR}/issue32_timeline_modal_{timestamp}.png", full_page=True
             )
 
-            # 6. 验证新的卡片式时间线显示
-            print("6. 验证新的卡片式时间线显示...")
+            if modal_visible:
+                # 5. 验证新的卡片式时间线显示（Timeline / Latency Curve 标签）
+                print("5. 验证 Timeline / Latency 标签...")
+                tabs = modal.locator(".nav-tabs .nav-link")
+                tab_texts = [
+                    (await tabs.nth(i).text_content() or "").strip()
+                    for i in range(await tabs.count())
+                ]
+                print(f"   标签: {tab_texts}")
+                has_timeline = any("Timeline" in t for t in tab_texts)
+                has_latency = any("Latency" in t for t in tab_texts)
+                if has_timeline and has_latency:
+                    results.append(("Timeline/Latency 标签", True, str(tab_texts)))
+                else:
+                    results.append(("Timeline/Latency 标签", False, str(tab_texts)))
 
-            # 检查 timeline container 是否存在
-            container_exists = await page.is_visible("#timelineContainer")
-            if container_exists:
-                print("   ✓ Timeline Container 存在")
-                results.append(("Timeline Container 存在", True, ""))
-            else:
-                print("   ✗ 失败: Timeline Container 不存在")
-                results.append(("Timeline Container 存在", False, "Container 未找到"))
-                return False
+                # 6. 消息统计徽章（消息数 / 用户 / AI / tokens）
+                print("6. 验证消息统计徽章...")
+                badges = modal.locator(".badge")
+                badge_texts = [
+                    (await badges.nth(i).text_content() or "").strip()
+                    for i in range(min(8, await badges.count()))
+                ]
+                print(f"   徽章: {badge_texts}")
+                stats_ok = any("Messages" in b for b in badge_texts) and any(
+                    "User" in b or "Assistant" in b for b in badge_texts
+                )
+                if stats_ok:
+                    results.append(("消息统计徽章", True, str(badge_texts[:4])))
+                else:
+                    results.append(("消息统计徽章", False, str(badge_texts[:4])))
 
-            # 检查 summary 是否存在
-            summary_exists = await page.is_visible(".timeline-summary")
-            if summary_exists:
-                summary_text = await page.text_content(".timeline-summary")
-                print(f"   ✓ Timeline Summary 存在: {summary_text}")
-                results.append(("Timeline Summary 存在", True, ""))
-            else:
-                print("   ✗ 失败: Timeline Summary 不存在")
-                results.append(("Timeline Summary 存在", False, "Summary 未找到"))
+                # 7. 卡片式消息项（含角色徽章与 #序号）
+                print("7. 验证卡片式消息项...")
+                message_items = modal.locator(".message-item")
+                item_count = await message_items.count()
+                print(f"   消息卡片数: {item_count}")
+                if item_count > 0:
+                    role_badges = modal.locator(".message-item .badge")
+                    role_texts = [
+                        (await role_badges.nth(i).text_content() or "").strip()
+                        for i in range(min(6, await role_badges.count()))
+                    ]
+                    print(f"   角色徽章: {role_texts}")
+                    numbered = any(t.startswith("#") for t in role_texts)
+                    roles_ok = any(t in ("user", "assistant", "tool") for t in role_texts)
+                    if roles_ok and numbered:
+                        results.append(
+                            ("卡片式消息项", True, f"{item_count} 张卡片, {role_texts[:4]}")
+                        )
+                    else:
+                        results.append(
+                            ("卡片式消息项", False, f"roles={role_texts[:4]}, numbered={numbered}")
+                        )
+                else:
+                    results.append(("卡片式消息项", False, "无消息卡片"))
 
-            # 检查 timeline items 是否存在
-            timeline_items_count = await page.evaluate("""() => {
-                return document.querySelectorAll('.timeline-item').length;
-            }""")
+                # 8. 切换到 Latency 标签（延迟统计与表格）
+                print("8. 切换到 Latency Curve 标签...")
+                await modal.locator(".nav-tabs .nav-link", has_text="Latency").click()
+                await asyncio.sleep(1.5)
+                latency_cards = modal.locator(".card.bg-light strong")
+                latency_tables = modal.locator("table")
+                latency_count = await latency_cards.count()
+                latency_table_count = await latency_tables.count()
+                print(f"   延迟统计卡片: {latency_count}, 表格: {latency_table_count}")
+                if latency_count > 0:
+                    results.append(("Latency 标签渲染", True, f"{latency_count} 个统计卡片"))
+                else:
+                    empty_states = modal.locator(".empty-state")
+                    if await empty_states.count() > 0:
+                        results.append(("Latency 标签渲染", False, "显示空状态"))
+                    else:
+                        results.append(("Latency 标签渲染", False, "无统计卡片"))
 
-            if timeline_items_count > 0:
-                print(f"   ✓ 找到 {timeline_items_count} 个 Timeline Items")
-                results.append(("Timeline Items 显示", True, f"{timeline_items_count} 个"))
-            else:
-                print("   ✗ 失败: 未找到 Timeline Items")
-                results.append(("Timeline Items 显示", False, "无 Timeline Items"))
-
-            # 检查卡片样式
-            cards_count = await page.evaluate("""() => {
-                return document.querySelectorAll('.timeline-item .card').length;
-            }""")
-
-            if cards_count > 0:
-                print(f"   ✓ 找到 {cards_count} 个卡片样式元素")
-                results.append(("卡片样式显示", True, f"{cards_count} 个"))
-            else:
-                print("   ✗ 失败: 未找到卡片样式元素")
-                results.append(("卡片样式显示", False, "无卡片样式"))
-
-            # 检查时间间隔显示
-            time_gap_exists = await page.is_visible(".timeline-item small.text-muted")
-            if time_gap_exists:
-                print("   ✓ 时间间隔显示存在")
-                results.append(("时间间隔显示", True, ""))
-            else:
-                print("   - 时间间隔显示不存在（可能是第一条消息）")
-                results.append(("时间间隔显示", True, "第一条消息无间隔"))
-
-            # 最终截图
-            await page.screenshot(
-                path=f"{SCREENSHOT_DIR}/issue32_timeline_detail_{timestamp}.png", full_page=True
-            )
-            print("   ✓ 详细截图已保存")
+                # 最终截图
+                await page.screenshot(
+                    path=f"{SCREENSHOT_DIR}/issue32_latency_tab_{timestamp}.png", full_page=True
+                )
+                print("   ✓ 详细截图已保存")
 
         except PlaywrightError as e:
             print(f"   ✗ 测试出错: {e.__class__.__name__}: {e}")
@@ -245,6 +282,7 @@ async def test_issue32():
 
         finally:
             await browser.close()
+            _cleanup_seeded_conversation()
 
         # 打印测试报告
         print("\n" + "=" * 60)

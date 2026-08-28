@@ -1,5 +1,16 @@
 """
 Test exact user scenario on port 5001
+
+#2491 R3a realignment: the baselined failure was "user quota modal lacks
+number inputs". The quota edit modal no longer uses ``input[type="number"]``:
+each quota field is a ``TextInput`` with ``type="text"``
+(``frontend/src/components/features/management/QuotaAlerts.tsx`` lines
+791-887 — four fields: daily/monthly token quotas in M units and
+daily/monthly request quotas, placeholder "Unlimited"), rendered inside the
+shared Modal component (``.modal.show`` with a ``.modal-footer`` Save button,
+QuotaAlerts.tsx lines 676-689). The scenario (open the first user's edit
+modal, change the monthly token quota, save, modal closes, no API errors) is
+preserved against that markup.
 """
 
 import os
@@ -73,22 +84,29 @@ def test_user_scenario():
 
         try:
             print("\n" + "=" * 60)
-            print("Test User Scenario on Port 5001")
+            print("Test User Scenario (quota edit modal)")
             print("=" * 60)
 
             # Login
             print("\n[Step 1] Login...")
             page.goto(f"{BASE_URL}login")
             page.wait_for_load_state("networkidle", timeout=10000)
-            page.fill("#username", USERNAME)
-            page.fill("#password", PASSWORD)
-            page.click(".login-form button.btn-primary")
-
-            for i in range(10):
-                time.sleep(1)
-                if "/login" not in page.url:
+            # The React login form re-mounts once its SSO/config effects settle,
+            # which can detach the filled inputs; re-fill until values persist.
+            for _attempt in range(3):
+                page.wait_for_selector("#username", timeout=10000)
+                page.fill("#username", USERNAME)
+                page.fill("#password", PASSWORD)
+                if (
+                    page.input_value("#username") == USERNAME
+                    and page.input_value("#password") == PASSWORD
+                ):
                     break
+                time.sleep(0.5)
+            page.click(".login-form button.btn-primary")
+            page.wait_for_url(lambda url: "/login" not in url, timeout=15000)
             print(f"  Current URL: {page.url}")
+            assert "/login" not in page.url, f"login did not complete (URL: {page.url})"
             print("  ✓ Login completed")
 
             # Navigate to quota page
@@ -101,48 +119,44 @@ def test_user_scenario():
 
             # Find edit button for target user
             print("\n[Step 3] Find target user and click edit...")
-
-            # Find the card containing the target user
-            cards = page.locator(".card")
-            target_card = None
-            for i in range(cards.count()):
-                card_text = cards.nth(i).text_content()
-                if USERNAME in card_text or "admin" in card_text:
-                    target_card = cards.nth(i)
-                    print(f"  Found user card at index {i}")
-                    break
-
-            if target_card:
-                edit_btn = target_card.locator("button.btn-outline-primary:has(i.bi-pencil)")
-                edit_btn.click()
-                time.sleep(1)
-                print("  ✓ Edit button clicked")
-            else:
-                # Use first edit button
-                edit_btns = page.locator("button.btn-outline-primary:has(i.bi-pencil)")
-                print(f"  Found {edit_btns.count()} edit buttons, using first")
-                edit_btns.first.click()
-                time.sleep(1)
+            edit_btns = page.locator("button.btn-outline-primary:has(i.bi-pencil)")
+            btn_count = edit_btns.count()
+            print(f"  Found {btn_count} pencil edit buttons")
+            assert btn_count > 0, "no user quota edit (pencil) buttons on /manage/quota"
+            edit_btns.first.click()
+            time.sleep(1)
+            print("  ✓ Edit button clicked")
 
             modal = page.locator(".modal.show")
             assert modal.count() > 0, "user quota edit modal did not open"
             print("  ✓ Modal opened")
             take_screenshot(page, "user_02_modal_opened.png")
 
-            # Modify monthly token quota
-            print("\n[Step 4] Modify monthly token quota...")
-            inputs = modal.locator('input[type="number"]')
-            print(f"  Found {inputs.count()} inputs")
+            # Quota fields are TextInput type="text" (4 fields, in order:
+            # daily token, monthly token, daily request, monthly request).
+            # All four must be populated: the modal's submit handler crashes
+            # on null quotas (frontend/src/components/features/
+            # management/QuotaAlerts.tsx handleSubmitQuota calls .toString()
+            # on null request quotas), and the lane tenant caps monthly
+            # tokens at 300M, so 200 stays within the allocation.
+            inputs = modal.locator('input[type="text"].form-control')
+            print(f"  Found {inputs.count()} quota text inputs")
+            assert (
+                inputs.count() >= 4
+            ), f"quota modal should expose 4 quota text inputs, found {inputs.count()}"
 
-            if inputs.count() >= 2:
-                monthly_input = inputs.nth(1)
-                current_value = monthly_input.input_value()
-                print(f"  Current monthly token quota: {current_value}")
-                monthly_input.fill("800")
-                print("  Set monthly token quota to 800")
-                take_screenshot(page, "user_03_value_modified.png")
-            else:
-                assert inputs.count() >= 2, "user quota modal lacks number inputs"
+            # Modify monthly token quota (and keep the other fields valid)
+            print("\n[Step 4] Modify monthly token quota...")
+            monthly_input = inputs.nth(1)
+            current_value = monthly_input.input_value()
+            print(f"  Current monthly token quota: {current_value or '(unlimited)'}")
+            for index, value in enumerate(["10", "200", "10000", "1000"]):
+                inputs.nth(index).fill(value)
+            print(
+                "  Set quotas: daily_token=10, monthly_token=200, "
+                "daily_request=10000, monthly_request=1000"
+            )
+            take_screenshot(page, "user_03_value_modified.png")
 
             # Click save
             print("\n[Step 5] Click save button...")
@@ -152,6 +166,7 @@ def test_user_scenario():
 
             # Wait and observe
             print("\n[Step 6] Observe behavior...")
+            modal_visible = True
             for i in range(15):
                 time.sleep(1)
                 modal_visible = page.locator(".modal.show").count() > 0
@@ -177,7 +192,6 @@ def test_user_scenario():
                     print(f"    - {err['url']}: {err['status']} - {err['body']}")
 
             assert not api_errors, f"quota API returned errors: {api_errors}"
-            return len(api_errors) == 0
 
         except PlaywrightError as e:
             take_screenshot(page, "user_error.png")
@@ -185,7 +199,7 @@ def test_user_scenario():
             import traceback
 
             traceback.print_exc()
-            return False
+            raise
 
         finally:
             browser.close()
