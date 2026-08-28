@@ -11,6 +11,7 @@ UI Test: Issue 55 - 测试 QuotaAlerts 页面的配额编辑对话框
 """
 
 import os
+import re
 import sys
 import time
 
@@ -43,6 +44,55 @@ def _skip_if_no_server():
         requests.get(f"{BASE_URL}/login", timeout=5).raise_for_status()
     except (requests.exceptions.RequestException, ConnectionError, OSError):
         pytest.skip(f"test server not reachable at {BASE_URL}")
+
+
+def _parse_available_hint(label_text):
+    """Parse the "(Available: X ...)" hint from a quota field label.
+
+    QuotaAlerts.tsx renders each quota input's label with the available
+    tenant pool for that field (``可用:`` in zh, ``Available:`` otherwise),
+    e.g. ``Daily Token Quota (M)(Available: 10.00M (Max: 100000M))``.
+    Returns the available amount as float, or None when the hint is absent.
+    """
+    match = re.search(r"(?:Available|可用)\s*:\s*([0-9][0-9,]*(?:\.[0-9]+)?)", label_text)
+    if not match:
+        return None
+    return float(match.group(1).replace(",", ""))
+
+
+def _fill_in_policy_quota(modal):
+    """Fill the modal's quota fields with values guaranteed in-policy.
+
+    Earlier quota tests in the same shard may have reallocated the admin's
+    quotas, so hardcoded values can exceed the remaining tenant pool (the
+    API then answers 400 and the modal legitimately stays open). Instead:
+    keep each field's current value (a re-save is never a quota increase, so
+    it always passes the tenant allocation check), or when the field is
+    empty (unlimited) fill "1" only if the label's Available hint allows it.
+    """
+    fields = modal.locator(
+        'div.col-md-6:has(label.form-label):has(input.form-control[type="text"])'
+    )
+    count = fields.count()
+    assert count >= 4, f"quota modal should expose 4 quota fields, found {count}"
+    decisions = []
+    for index in range(count):
+        label_text = fields.nth(index).locator("label.form-label").inner_text()
+        available = _parse_available_hint(label_text)
+        field_input = fields.nth(index).locator('input.form-control[type="text"]')
+        current = field_input.input_value().strip()
+        if current:
+            # Re-saving the current value is never an increase: keep it.
+            decision = f"keep {current}"
+        elif available is not None and available >= 1:
+            field_input.fill("1")
+            decision = "fill 1 (unlimited before, pool allows 1)"
+        else:
+            # No remaining pool: stay unlimited (empty) — still a valid save.
+            decision = "leave unlimited"
+        decisions.append(decision)
+        print(f"  Field {index + 1}: {decision} (hint available={available})")
+    return decisions
 
 
 def test_quota_alerts_dialog_close():
@@ -117,17 +167,11 @@ def test_quota_alerts_dialog_close():
             # QuotaAlerts renders its four quota fields as TextInput
             # type="text" (input.form-control) — empty means unlimited;
             # the old input[type="number"] selector matched nothing.
-            inputs = modal.locator('input.form-control[type="text"]')
-            if inputs.count() > 0:
-                # Stay within the lane tenant's daily pool (10M raw, already
-                # fully allocated to this admin) — larger values are rejected
-                # 400 by tenant quota policy and the dialog legitimately
-                # stays open with the error.
-                inputs.first.fill("5")
-                print("  ✓ Modified quota value to 5")
-                take_screenshot(page, "alerts_v2_06_value_modified.png")
-            else:
-                assert inputs.count() > 0, "quota modal has no number inputs"
+            # Values are chosen dynamically from each label's Available
+            # hint so the save stays in-policy even when earlier shard
+            # tests have reallocated the tenant pool.
+            _fill_in_policy_quota(modal)
+            take_screenshot(page, "alerts_v2_06_value_modified.png")
 
             # Step 6: Click save button
             print("\n[Step 6] Click save button...")

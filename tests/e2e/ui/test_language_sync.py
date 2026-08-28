@@ -23,6 +23,7 @@ it sync falls back to the iframe-reload path (the URL parameter).
 """
 
 import asyncio
+import copy
 import json
 import os
 import re
@@ -49,15 +50,8 @@ def _skip_if_no_server():
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
 
-def _ensure_workspace_enabled():
-    """Enable the workspace feature in the lane config (idempotent).
-
-    /api/workspace/config reports workspace.enabled from ~/.open-ace/
-    config.json (default false in a freshly initialized home) and the work
-    page gates the embedded webui iframe behind it. The endpoint re-reads
-    the file per request, so flipping it needs no server restart. Same
-    pattern as tests/e2e/terminal/e2e_terminal_tab.py.
-    """
+def _load_lane_config():
+    """Load the shared lane config (~/.open-ace/config.json) if present."""
     config_path = os.path.expanduser("~/.open-ace/config.json")
     config = {}
     if os.path.exists(config_path):
@@ -66,13 +60,53 @@ def _ensure_workspace_enabled():
                 config = json.load(f)
         except (OSError, json.JSONDecodeError):
             config = {}
+    return config_path, config
+
+
+def _write_lane_config(config_path, config):
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _restore_workspace_enabled():
+    """Snapshot workspace.enabled and restore it when this module ends.
+
+    _ensure_workspace_enabled() flips the SHARED lane config
+    (~/.open-ace/config.json); without restoration the leak breaks later
+    shard files that assert the unconfigured-workspace gate on /work
+    (test_notification_console_log / test_notification_timing: the page
+    gates on enabled alone, so enabled=true with an empty url renders the
+    workspace surface instead of the "Workspace not configured" gate).
+    """
+    config_path, config = _load_lane_config()
+    original_workspace = copy.deepcopy(config.get("workspace"))
+    yield
+    _, current = _load_lane_config()
+    if original_workspace is None:
+        current.pop("workspace", None)
+    else:
+        current["workspace"] = original_workspace
+    _write_lane_config(config_path, current)
+
+
+def _ensure_workspace_enabled():
+    """Enable the workspace feature in the lane config (idempotent).
+
+    /api/workspace/config reports workspace.enabled from ~/.open-ace/
+    config.json (default false in a freshly initialized home) and the work
+    page gates the embedded webui iframe behind it. The endpoint re-reads
+    the file per request, so flipping it needs no server restart. Same
+    pattern as tests/e2e/terminal/e2e_terminal_tab.py. The module fixture
+    above restores the previous value on teardown.
+    """
+    config_path, config = _load_lane_config()
     workspace = config.setdefault("workspace", {})
     if workspace.get("enabled"):
         return
     workspace["enabled"] = True
-    os.makedirs(os.path.dirname(config_path), exist_ok=True)
-    with open(config_path, "w") as f:
-        json.dump(config, f, indent=2)
+    _write_lane_config(config_path, config)
 
 
 async def _open_work_page(page):

@@ -9,6 +9,7 @@ Test script for Issue #98: Messages 页面的 refresh 和 auto refresh 都不工
 
 import asyncio
 import os
+import re
 import time
 
 import pytest
@@ -72,8 +73,14 @@ async def test_messages_refresh():
             print("  Screenshot saved: screenshots/issues/98/01_messages_page.png")
 
             # Step 4: Check if refresh button exists
+            # The Messages page renders the shared PageRefreshControl in
+            # compact mode (frontend/src/components/features/Messages.tsx
+            # lines 195-200): the manual refresh control is an icon button
+            # with data-testid="manual-refresh-button" — its label lives in
+            # the title attribute, so the old has-text("刷新") selector
+            # matched nothing.
             print("\n[Step 4] Checking refresh button...")
-            refresh_btn = page.locator('button:has-text("刷新"), button:has-text("Refresh")')
+            refresh_btn = page.locator('[data-testid="manual-refresh-button"]')
             btn_count = await refresh_btn.count()
             print(f"  Found {btn_count} refresh button(s)")
 
@@ -96,14 +103,25 @@ async def test_messages_refresh():
             assert btn_count > 0, "no refresh button on the Messages page"
 
             # Step 5: Check auto-refresh toggle
+            # In compact mode the auto-refresh switch lives inside the
+            # settings dropdown: [data-testid="dropdown-toggle"] opens a
+            # .dropdown-menu carrying the form-switch checkbox and the
+            # interval selector (PageRefreshControl.tsx compact branch).
             print("\n[Step 5] Checking auto-refresh toggle...")
-            auto_refresh_switch = page.locator("#messagesAutoRefreshSwitch")
-            switch_count = await auto_refresh_switch.count()
-            print(f"  Found {switch_count} auto-refresh switch(es)")
+            dropdown_toggle = page.locator('[data-testid="dropdown-toggle"]')
+            toggle_count = await dropdown_toggle.count()
+            print(f"  Found {toggle_count} refresh settings toggle(s)")
+            switch_count = 0
+            if toggle_count > 0:
+                await dropdown_toggle.first.click()
+                await page.wait_for_timeout(500)
+                auto_refresh_switch = page.locator(".dropdown-menu.show input[type='checkbox']")
+                switch_count = await auto_refresh_switch.count()
+                print(f"  Found {switch_count} auto-refresh switch(es) in dropdown")
 
             if switch_count > 0:
                 # Check if it's checked
-                is_checked = await auto_refresh_switch.is_checked()
+                is_checked = await auto_refresh_switch.first.is_checked()
                 print(f"  Auto-refresh is currently: {'ON' if is_checked else 'OFF'}")
 
                 # Take screenshot of the switch
@@ -116,12 +134,23 @@ async def test_messages_refresh():
                 # Turn on auto-refresh if not already on
                 if not is_checked:
                     print("  Turning on auto-refresh...")
-                    await auto_refresh_switch.check()
+                    await auto_refresh_switch.first.check()
                     await page.wait_for_timeout(500)
-                    is_checked = await auto_refresh_switch.is_checked()
+                    is_checked = await auto_refresh_switch.first.is_checked()
                     print(f"  Auto-refresh is now: {'ON' if is_checked else 'OFF'}")
 
-                # Wait for auto-refresh interval (30 seconds in code)
+                # Pick the shortest interval (30s) from the selector
+                interval_30s = page.locator(
+                    ".dropdown-menu.show button.dropdown-item", has_text=re.compile(r"30\s*s")
+                )
+                if await interval_30s.count() > 0:
+                    await interval_30s.first.click()
+                    print("  Set refresh interval to 30s")
+                else:
+                    await dropdown_toggle.first.click()
+                await page.wait_for_timeout(500)
+
+                # Wait for auto-refresh interval (30 seconds selected)
                 print("  Waiting 35 seconds for auto-refresh to trigger...")
                 await page.wait_for_timeout(35000)
 

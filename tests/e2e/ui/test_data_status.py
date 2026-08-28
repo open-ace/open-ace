@@ -1,17 +1,24 @@
 """
-UI 测试: Issue 68 - Data Status 远程机器状态检查功能
+UI 测试: Issue 68 - 远程机器状态检查功能
+
+#2491 realignment: the sidebar "Data Status" panel this test originally
+asserted (``#data-status-container`` / ``.refresh-btn`` / ``.data-status-item``)
+was removed from the product (commit 360fc592 "feat: remove Data Status panel
+from sidebar"; the ``dataStatus`` i18n key is orphaned). The remote-host
+status surface now lives on the Remote Machines page —
+``frontend/src/components/features/management/RemoteMachineManagement.tsx``
+served at ``/manage/remote/machines`` (App.tsx route "remote/machines"):
+total/online/offline machine stat cards (RemoteMachineManagement.tsx lines
+424-452), a machine table whose rows carry online/offline status badges
+(lines 477-505), or the registered-machines empty state on a fresh lane
+(lines 454-457), plus per-machine Active-Sessions refresh buttons. The test
+asserts that current contract and that the page renders without page errors.
 
 测试目标:
-1. 验证 Data Status 面板显示正确
-2. 验证刷新按钮存在并可点击
-3. 验证远程机器状态检查功能
-
-测试步骤:
-1. 登录系统
-2. 导航到 Dashboard 页面
-3. 检查 Data Status 面板
-4. 点击刷新按钮
-5. 验证远程机器状态更新
+1. 验证 Remote Machines 页面（远程机器状态面板）显示正确
+2. 验证机器统计卡（总数/在线/离线）存在
+3. 验证机器状态徽章或空状态（未注册机器）正确渲染
+4. 验证页面无脚本错误
 """
 
 import os
@@ -67,15 +74,16 @@ def _skip_if_no_server():
 
 @pytest.mark.asyncio
 async def test_data_status():
-    """Test Data Status remote host check functionality."""
+    """Test the remote machine status surface (Remote Machines page)."""
     _skip_if_no_server()
     print("\n" + "=" * 60)
-    print("UI 测试: Issue 68 - Data Status 远程机器状态检查")
+    print("UI 测试: Issue 68 - 远程机器状态检查（Remote Machines 页面）")
     print("=" * 60)
 
     ensure_screenshot_dir()
     screenshots = []
     test_passed = True
+    console_errors = []
 
     async with async_playwright() as p:
         # Launch browser
@@ -83,127 +91,116 @@ async def test_data_status():
         browser = await p.chromium.launch(headless=HEADLESS)
         context = await browser.new_context(viewport={"width": 1280, "height": 800})
         page = await context.new_page()
+        page.on(
+            "console",
+            lambda msg: console_errors.append(msg.text) if msg.type == "error" else None,
+        )
 
         try:
             # Step 1: Login
             print("\n步骤 1: 登录系统")
             await page.goto(f"{BASE_URL}/login")
-            await page.fill('input[name="username"]', USERNAME)
-            await page.fill('input[name="password"]', PASSWORD)
+            # The React login form re-mounts once its SSO/config effects
+            # settle, which can detach filled inputs; re-fill until the
+            # values persist (same pattern as test_user_scenario).
+            for _attempt in range(3):
+                await page.wait_for_selector("#username", timeout=10000)
+                await page.fill("#username", USERNAME)
+                await page.fill("#password", PASSWORD)
+                if (
+                    await page.input_value("#username") == USERNAME
+                    and await page.input_value("#password") == PASSWORD
+                ):
+                    break
+                time.sleep(0.5)
             await page.click('button[type="submit"]')
 
-            # Wait for redirect (could be / or /dashboard)
-            await page.wait_for_url("**/", timeout=10000)
+            # Admins land on /manage after login.
+            await page.wait_for_url("**/manage/**", timeout=10000)
             print("  ✓ 登录成功")
             screenshots.append(await take_screenshot(page, "01_login.png"))
 
-            # Step 2: Check Data Status panel
-            print("\n步骤 2: 检查 Data Status 面板")
-
-            # Wait for page to fully load
+            # Step 2: Open the Remote Machines page (current home of the
+            # remote-host status surface).
+            print("\n步骤 2: 打开 Remote Machines 页面")
+            await page.goto(f"{BASE_URL}/manage/remote/machines")
+            await page.wait_for_load_state("networkidle")
             time.sleep(3)
 
-            # Wait for sidebar to load
-            await page.wait_for_selector("#data-status-container", timeout=10000)
+            header = page.locator("h2")
+            header_count = await header.count()
+            assert header_count > 0, "Remote Machines page did not render a header"
+            header_text = (await header.first.inner_text()).strip()
+            print(f"  ✓ 页面标题: {header_text}")
+            assert (
+                header_text
+                in (
+                    "Remote Machines",
+                    "远程机器",
+                    "リモートマシン",
+                    "リモート・マシン",
+                    "원격 머신",
+                )
+                or "Remote" in header_text
+                or "机器" in header_text
+            ), f"unexpected Remote Machines page header: {header_text!r}"
+            screenshots.append(await take_screenshot(page, "02_machines_page.png"))
 
-            # Wait for data status to be populated
+            # Step 3: Machine stat cards (total / online / offline) must be
+            # rendered — the machine-status summary contract.
+            print("\n步骤 3: 检查机器统计卡")
+            stat_cards = page.locator(".row.g-3 .card .card-body .h3")
+            stat_count = await stat_cards.count()
+            assert (
+                stat_count >= 3
+            ), f"machine stats cards (total/online/offline) missing: found {stat_count}"
+            for i in range(stat_count):
+                value = (await stat_cards.nth(i).inner_text()).strip()
+                print(f"  - 统计值 {i + 1}: {value}")
+                assert value.isdigit(), f"machine stat card {i + 1} is not numeric: {value!r}"
+            print("  ✓ 机器统计卡（总数/在线/离线）已渲染")
+
+            # Step 4: Machine rows with status badges, or the registered-
+            # machines empty state on a fresh lane.
+            print("\n步骤 4: 检查机器状态列表")
             time.sleep(2)
-
-            print("  ✓ Data Status 面板已加载")
-
-            # Check if refresh button exists
-            refresh_btn = page.locator("#data-status-container .refresh-btn")
-            if await refresh_btn.count() > 0:
-                print("  ✓ 刷新按钮存在")
+            machine_rows = page.locator("table tbody tr")
+            row_count = await machine_rows.count()
+            if row_count > 0:
+                print(f"  发现 {row_count} 台机器")
+                badges = page.locator("table tbody tr .badge")
+                badge_count = await badges.count()
+                assert badge_count > 0, "machine rows must carry status badges"
+                for i in range(min(badge_count, 6)):
+                    badge_text = (await badges.nth(i).inner_text()).strip()
+                    print(f"  - 状态徽章: {badge_text}")
+                screenshots.append(await take_screenshot(page, "03_machine_rows.png"))
             else:
-                print("  ⚠ 刷新按钮不存在，等待加载...")
-                time.sleep(3)
-                refresh_btn = page.locator("#data-status-container .refresh-btn")
-                if await refresh_btn.count() > 0:
-                    print("  ✓ 刷新按钮存在")
-                else:
-                    print("  ✗ 刷新按钮不存在")
-                    test_passed = False
-            assert await refresh_btn.count() > 0, "Data Status refresh button missing"
+                body_text = await page.locator("body").inner_text()
+                empty_state = (
+                    "No machines registered" in body_text
+                    or "暂无已注册的机器" in body_text
+                    or "no machines" in body_text.lower()
+                )
+                assert (
+                    empty_state
+                ), "no machine rows rendered and no registered-machines empty state shown"
+                print("  ✓ 空状态正确显示（未注册机器）")
+                screenshots.append(await take_screenshot(page, "03_empty_state.png"))
 
-            screenshots.append(await take_screenshot(page, "02_data_status_panel.png"))
+            # Step 5: Page health — the machine status surface must render
+            # without page errors. "Failed to load resource" notices are
+            # excluded: on a fresh lane the platform-admin machines query
+            # legitimately answers 400 until a tenant is selected
+            # (app/routes/remote.py list_machines requires tenant_id for
+            # platform admins) and the UI surfaces that via its own state.
+            print("\n步骤 5: 检查页面错误")
+            js_errors = [e for e in console_errors if "Failed to load resource" not in e]
+            for err in console_errors:
+                print(f"  - console error: {err}")
+            assert not js_errors, f"Remote Machines page emitted JS errors: {js_errors[:5]}"
+            print("  ✓ 页面无脚本错误")
 
-            # Step 3: Check host items
-            print("\n步骤 3: 检查主机状态项")
-            host_items = page.locator(".data-status-item")
-            host_count = await host_items.count()
-            print(f"  发现 {host_count} 个主机")
-
-            for i in range(host_count):
-                item = host_items.nth(i)
-                host_name = await item.locator(".host-name").text_content()
-                last_updated = await item.locator(".last-updated").text_content()
-
-                # Check status indicator class
-                item_class = await item.get_attribute("class")
-                status = "unknown"
-                if "status-online" in item_class:
-                    status = "online"
-                elif "status-offline" in item_class:
-                    status = "offline"
-                elif "status-fresh" in item_class:
-                    status = "fresh"
-                elif "status-recent" in item_class:
-                    status = "recent"
-                elif "status-stale" in item_class:
-                    status = "stale"
-
-                print(f"  - {host_name}: {last_updated} ({status})")
-
-            # Step 4: Click refresh button
-            print("\n步骤 4: 点击刷新按钮检查远程机器状态")
-            if await refresh_btn.count() > 0:
-                await refresh_btn.click()
-                print("  ✓ 已点击刷新按钮")
-
-                # Wait for loading state
-                time.sleep(1)
-                screenshots.append(await take_screenshot(page, "03_refresh_loading.png"))
-
-                # Wait for response (up to 15 seconds for SSH check)
-                print("  等待远程机器状态检查...")
-                time.sleep(10)
-
-                # Check if refresh button is no longer loading
-                refresh_btn_after = page.locator("#data-status-container .refresh-btn")
-                if await refresh_btn_after.count() > 0:
-                    btn_class = await refresh_btn_after.get_attribute("class")
-                    if "loading" not in btn_class:
-                        print("  ✓ 刷新完成")
-                    else:
-                        print("  ⚠ 刷新仍在进行中")
-
-                screenshots.append(await take_screenshot(page, "04_after_refresh.png"))
-
-                # Step 5: Verify remote host status
-                print("\n步骤 5: 验证远程机器状态")
-                host_items_after = page.locator(".data-status-item")
-                for i in range(await host_items_after.count()):
-                    item = host_items_after.nth(i)
-                    host_name = await item.locator(".host-name").text_content()
-                    item_class = await item.get_attribute("class")
-
-                    if (
-                        "is_remote" in str(item)
-                        or "ai-lab" in host_name
-                        or "remote" in host_name.lower()
-                    ):
-                        if "status-online" in item_class:
-                            print(f"  ✓ {host_name}: 在线")
-                        elif "status-offline" in item_class:
-                            print(f"  ✓ {host_name}: 离线（状态检查正常工作）")
-                        else:
-                            print(f"  - {host_name}: 状态未知")
-            else:
-                print("  ✗ 无法找到刷新按钮")
-                test_passed = False
-
-            # Final screenshot
             screenshots.append(await take_screenshot(page, "05_final.png"))
 
         except PlaywrightError as e:

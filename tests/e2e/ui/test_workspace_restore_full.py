@@ -8,8 +8,18 @@ Test script for issue #70: Workspace restore error - 404 Not Found
 4. 保存工作区状态
 5. 刷新页面模拟重启
 6. 检查各个 tab 是否正常加载，是否有 404 错误
+
+#2491 R3b realignment: the workspace tab surface is gated behind
+workspace.enabled (Workspace.tsx renders the "Workspace not configured" gate
+when disabled), and the default tab only materializes once
+/api/workspace/user-url resolves successfully — without the qwen-code-webui
+binary it 503s forever. The test now enables the feature in the lane config
+for its duration (restoring the previous value; same pattern as
+tests/e2e/ui/test_language_sync.py) and fulfills user-url with a placeholder
+URL so a real tab (and its iframe) renders and can survive the reload.
 """
 
+import copy
 import json
 import os
 import sys
@@ -47,6 +57,43 @@ def _skip_if_no_server():
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
 
+def _load_lane_config():
+    config_path = os.path.expanduser("~/.open-ace/config.json")
+    config = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            config = {}
+    return config_path, config
+
+
+def _write_lane_config(config_path, config):
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+
+
+@pytest.fixture(autouse=True)
+def _workspace_enabled():
+    """Enable the workspace feature for the tab-restore flow; restore the
+    previous config value afterwards (shared lane config)."""
+    config_path, config = _load_lane_config()
+    original_workspace = copy.deepcopy(config.get("workspace"))
+    workspace = config.setdefault("workspace", {})
+    if not workspace.get("enabled"):
+        workspace["enabled"] = True
+        _write_lane_config(config_path, config)
+    yield
+    _, current = _load_lane_config()
+    if original_workspace is None:
+        current.pop("workspace", None)
+    else:
+        current["workspace"] = original_workspace
+    _write_lane_config(config_path, current)
+
+
 def test_workspace_restore():
     """Test workspace state persistence and conversation loading."""
 
@@ -63,6 +110,16 @@ def test_workspace_restore():
         browser = p.chromium.launch(headless=HEADLESS, slow_mo=300)
         context = browser.new_context(viewport=VIEWPORT_SIZE)
         page = context.new_page()
+
+        # Fulfill the webui base URL so the default workspace tab (and its
+        # iframe) materializes without a qwen-code-webui binary (same pattern
+        # as tests/e2e/ui/test_language_sync.py).
+        page.route(
+            "**/api/workspace/user-url",
+            lambda route: route.fulfill(
+                json={"success": True, "url": "http://127.0.0.1:1/", "token": "e2e-mock-token"}
+            ),
+        )
 
         try:
             # Step 1: Login

@@ -118,6 +118,11 @@ def check(desc, condition, detail=""):
 
 def test_conversation_history():
     global passed, failed
+    # Reset the module-level counters so pytest --reruns attempts report
+    # their own tallies instead of accumulating across attempts (the CI
+    # envelope double-counted one failing check as two).
+    passed = 0
+    failed = 0
     print("=" * 60)
     print("Conversation History Page E2E Test")
     print("=" * 60)
@@ -149,8 +154,19 @@ def test_conversation_history():
     )
 
     r = session.get(f"{BASE_URL}/api/senders")
-    senders = r.json() if r.status_code == 200 else []
-    check("GET /api/senders returns data", len(senders) > 0, f"({len(senders)} senders)")
+    senders_resp = r.json() if r.status_code == 200 else None
+    # /api/senders carries its own 5-minute in-process cache
+    # (app/routes/messages.py api_senders), so like /api/tools its CONTENT
+    # on the shared lane reflects whatever data existed when an earlier
+    # file's page load primed it — pinning "returns data" here failed the
+    # nightly shard whenever the cache was primed before this test's seed.
+    # Pin the contract; the seeded sender is asserted through the uncached
+    # conversation-history data below (non-vacuous).
+    check(
+        "GET /api/senders returns a sender list",
+        isinstance(senders_resp, list) and all(isinstance(s, str) for s in senders_resp),
+        f"({len(senders_resp or [])} senders)",
+    )
 
     r = session.get(
         f"{BASE_URL}/api/conversation-history",
@@ -162,9 +178,14 @@ def test_conversation_history():
     # The tools dropdown is fed by DISTINCT tool_name over daily_messages —
     # the same derivation /api/tools caches. Derive the expected tools from
     # the uncached rows so the page-visibility checks below always run
-    # against the seeded data (never vacuously).
+    # against the seeded data (never vacuously). The same holds for the
+    # sender (the /api/senders cache has identical staleness semantics).
     tools = sorted({row["tool_name"] for row in ch_data.get("data", []) if row.get("tool_name")})
     check("Seeded conversation exposes its tool", len(tools) > 0, f"(tools: {tools})")
+    senders = sorted(
+        {row["sender_name"] for row in ch_data.get("data", []) if row.get("sender_name")}
+    )
+    check("Seeded conversation exposes its sender", len(senders) > 0, f"(senders: {senders})")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS)

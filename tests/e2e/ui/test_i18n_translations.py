@@ -230,19 +230,28 @@ def test_main_page_i18n():
                 print("  ✗ English Messages nav not found")
                 results.append(("English Messages Nav", "FAIL", ""))
 
-            # Switch to Chinese - find lang selector in manage sidebar
-            # The lang selector is a dropdown button, not a select element
-            lang_dropdown = page.locator('button.dropdown-item:has-text("Chinese")')
-            if lang_dropdown.count() > 0:
-                # Click the dropdown toggle first
-                dropdown_toggle = page.locator('[data-bs-toggle="dropdown"]')
-                if dropdown_toggle.count() > 0:
-                    dropdown_toggle.first.click()
-                    page.wait_for_timeout(500)
-                lang_dropdown.first.click()
-                page.wait_for_timeout(1000)
+            # Switch to Chinese via the Header language dropdown. The toggle
+            # must be the globe one: the Header renders the help dropdown
+            # BEFORE the language dropdown (frontend/src/components/layout/
+            # Header.tsx), so an unscoped [data-bs-toggle="dropdown"] locator
+            # resolves to the help dropdown and the click times out. Same
+            # pattern as tests/e2e/ui/test_language_sync.py.
+            toggle = page.locator("header button:has(i.bi-globe)")
+            if toggle.count() > 0:
+                toggle.first.wait_for(state="visible", timeout=10000)
+                toggle.first.click()
+                page.wait_for_timeout(500)
+                zh_item = page.locator(
+                    "div.dropdown:has(button.dropdown-toggle i.bi-globe) "
+                    ".dropdown-menu.show button.dropdown-item"
+                ).filter(has_text="中文")
+                if zh_item.count() > 0:
+                    zh_item.first.click()
+                    page.wait_for_timeout(1000)
+                else:
+                    print("  Warning: Chinese language option not found")
             else:
-                print("  Warning: Chinese language option not found")
+                print("  Warning: language dropdown not found")
             page.wait_for_timeout(1000)
 
             # Take Chinese screenshot

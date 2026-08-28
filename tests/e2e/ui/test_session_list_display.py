@@ -9,6 +9,7 @@ This test verifies that:
 import os
 import sys
 import time
+import uuid
 from pathlib import Path
 
 # Add project root to path
@@ -26,6 +27,72 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:19888")
 USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 TIMEOUT = 30000
+
+SEED_PREFIX = "e2e59"
+
+
+def _seed_sessions(count=3):
+    """Seed completed qwen sessions for user_id=1 so the work left-rail
+    SessionList (fed by /api/workspace/sessions) has deterministic data.
+    Rows are untitled: the rail then shows the bare 4-char session id
+    (SessionList.tsx renders displaySessionId(session.id, 4))."""
+    import sqlite3
+    from datetime import datetime, timedelta
+
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return []
+    ids = []
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            existing = conn.execute(
+                "SELECT COUNT(*) FROM agent_sessions WHERE session_id LIKE ?",
+                (f"{SEED_PREFIX}%",),
+            ).fetchone()[0]
+            for i in range(count - existing):
+                sid = f"{SEED_PREFIX}{uuid.uuid4().hex}"
+                ts = (datetime.now() - timedelta(minutes=i)).isoformat(timespec="seconds")
+                conn.execute(
+                    "INSERT INTO agent_sessions "
+                    "(session_id, session_type, tool_name, status, total_tokens, "
+                    "message_count, request_count, user_id, tenant_id, project_path, "
+                    "workspace_type, created_at, updated_at) "
+                    "VALUES (?, 'chat', 'qwen', 'completed', 500, 10, 5, 1, 1, "
+                    f"'/tmp/{SEED_PREFIX}-project', 'local', ?, ?)",
+                    (sid, ts, ts),
+                )
+                ids.append(sid)
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+    return ids
+
+
+def _cleanup_sessions():
+    import sqlite3
+
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("DELETE FROM agent_sessions WHERE session_id LIKE ?", (f"{SEED_PREFIX}%",))
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _seeded_sessions():
+    _seed_sessions()
+    yield
+    _cleanup_sessions()
 
 
 def _skip_if_no_server():
@@ -117,8 +184,11 @@ def test_session_list_display():
                 if session_time.is_visible():
                     time_text = session_time.text_content().strip()
                     print(f"  Time field: '{time_text}'")
-                    # Check if format is short (contains "min" or "hr" or "day" or "刚刚" or "分钟前" etc.)
+                    # Check if format is short (contains "min" or "hr" or "day" or
+                    # "just now" (formatRelativeTime's <60s branch) or the
+                    # localized equivalents)
                     short_patterns = [
+                        "just now",
                         "min",
                         "hr",
                         "day",
@@ -148,8 +218,15 @@ def test_session_list_display():
                 if session_requests.is_visible():
                     req_text = session_requests.text_content().strip()
                     print(f"  Request count field: '{req_text}'")
-                    if "req" in req_text.lower():
-                        print("  ✓ Request count shows with 'req' suffix")
+                    # SessionList renders "<N> <t('request')>" — "Request"/
+                    # "请求"/... Accept the count plus any of the request
+                    # words (the old check only matched the English suffix).
+                    has_count = any(ch.isdigit() for ch in req_text)
+                    has_request_word = any(
+                        w in req_text.lower() for w in ("req", "请求", "リクエスト", "요청")
+                    )
+                    if has_count and has_request_word:
+                        print("  ✓ Request count displayed with request word")
                         results.append(("Request count display", True, req_text))
                     else:
                         print(f"  ⚠ Request count format: {req_text}")

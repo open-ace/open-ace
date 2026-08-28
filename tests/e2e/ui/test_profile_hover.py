@@ -94,77 +94,77 @@ async def test_issue86():
             await page.screenshot(path=screenshot_path)
             print(f"  截图保存: {screenshot_path}")
 
-            # Step 3: 验证 Logout 按钮存在
-            print("Step 3: 验证 Logout 按钮存在...")
+            # Step 3: 验证用户菜单与 Logout 入口
+            # #2491 R3b realignment: the Header no longer renders a dedicated
+            # #nav-logout button with hover-username behavior. The current
+            # contract (frontend/src/components/layout/Header.tsx lines
+            # 174-210) is a user dropdown: the toggle shows the username
+            # (always-visible identity, stronger than the old hover state)
+            # and the menu exposes Settings + a Logout dropdown-item.
+            print("Step 3: 验证用户菜单与 Logout 入口...")
 
-            nav_logout = page.locator("#nav-logout")
-            await expect(nav_logout).to_be_visible()
-            print("  ✓ Logout 按钮可见")
-            results.append(("Logout 按钮可见", True, ""))
+            user_toggle = page.locator(
+                "header .dropdown-toggle", has=page.locator("i.bi-person-circle")
+            )
+            await expect(user_toggle.first).to_be_visible()
+            print("  ✓ 用户菜单按钮可见")
+            results.append(("用户菜单可见", True, ""))
 
-            # Step 4: 验证默认状态显示 "Logout"
-            print("Step 4: 验证默认状态显示 'Logout'...")
+            # Step 4: 验证用户名常显（取代旧的悬停显示用户名契约）
+            print("Step 4: 验证用户名显示...")
 
-            logout_text_el = page.locator("#nav-logout-text")
-            logout_text = await logout_text_el.text_content()
-
-            if logout_text == "Logout":
-                print(f"  ✓ 默认状态正确: {logout_text}")
-                results.append(("默认状态显示 Logout", True, f"显示: {logout_text}"))
+            toggle_text = (await user_toggle.first.inner_text()).strip()
+            if USERNAME in toggle_text:
+                print(f"  ✓ 用户名可见: {toggle_text}")
+                results.append(("用户名可见", True, f"显示: {toggle_text}"))
             else:
-                print(f"  ✗ 默认状态不正确: 期望 'Logout', 实际 '{logout_text}'")
-                results.append(
-                    ("默认状态显示 Logout", False, f"期望 'Logout', 实际 '{logout_text}'")
-                )
+                print(f"  ✗ 用户名未显示: '{toggle_text}'")
+                results.append(("用户名可见", False, f"显示: {toggle_text}"))
 
-            # 截图：默认状态
+            # 截图：用户菜单默认状态
             screenshot_path = os.path.join(SCREENSHOT_DIR, "86", "logout_default.png")
             await page.screenshot(path=screenshot_path)
             print(f"  截图保存: {screenshot_path}")
 
-            # Step 5: 验证悬停时显示 "Logout 用户名"
-            print("Step 5: 验证悬停时显示 'Logout 用户名'...")
+            # Step 5: 打开用户菜单，验证 Logout 项存在
+            print("Step 5: 打开用户菜单验证 Logout 项...")
 
-            # 悬停在 Logout 按钮上
-            await nav_logout.hover()
-            time.sleep(0.3)
-
-            # 获取悬停后的文字
-            hover_text = await logout_text_el.text_content()
-            expected_hover_text = f"Logout {USERNAME}"
-
-            if hover_text == expected_hover_text:
-                print(f"  ✓ 悬停状态正确: {hover_text}")
-                results.append(("悬停显示用户名", True, f"显示: {hover_text}"))
+            await user_toggle.first.click()
+            await page.wait_for_timeout(500)
+            user_menu = page.locator(
+                "header div.dropdown:has(i.bi-person-circle) ul.dropdown-menu"
+            ).first
+            user_menu.wait_for(state="visible", timeout=5000)
+            logout_item = user_menu.locator("button.dropdown-item").filter(
+                has=page.locator("i.bi-box-arrow-right")
+            )
+            if await logout_item.count() > 0:
+                logout_text = (await logout_item.first.inner_text()).strip()
+                print(f"  ✓ Logout 项存在: '{logout_text}'")
+                results.append(("Logout 项存在", True, f"显示: {logout_text}"))
             else:
-                print(f"  ✗ 悬停状态不正确: 期望 '{expected_hover_text}', 实际 '{hover_text}'")
-                results.append(
-                    ("悬停显示用户名", False, f"期望 '{expected_hover_text}', 实际 '{hover_text}'")
-                )
+                print("  ✗ 用户菜单中未找到 Logout 项")
+                results.append(("Logout 项存在", False, "未找到"))
 
-            # 截图：悬停状态
+            # 截图：菜单打开状态
             screenshot_path = os.path.join(SCREENSHOT_DIR, "86", "logout_hover.png")
             await page.screenshot(path=screenshot_path)
             print(f"  截图保存: {screenshot_path}")
 
-            # Step 6: 验证移开鼠标后恢复 "Logout"
-            print("Step 6: 验证移开鼠标后恢复 'Logout'...")
+            # Step 6: 关闭菜单后界面恢复（点击页面其他位置）
+            print("Step 6: 关闭用户菜单...")
 
-            # 移动鼠标到其他位置
-            await page.mouse.move(0, 0)
-            time.sleep(0.3)
-
-            # 获取移开后的文字
-            final_text = await logout_text_el.text_content()
-
-            if final_text == "Logout":
-                print(f"  ✓ 移开鼠标后恢复: {final_text}")
-                results.append(("移开鼠标恢复 Logout", True, f"显示: {final_text}"))
+            await page.mouse.click(10, 250)
+            await page.wait_for_timeout(500)
+            still_open = page.locator(
+                "header div.dropdown:has(i.bi-person-circle) ul.dropdown-menu.show"
+            )
+            if await still_open.count() == 0:
+                print("  ✓ 用户菜单已关闭")
+                results.append(("菜单可关闭", True, ""))
             else:
-                print(f"  ✗ 移开鼠标后未恢复: 期望 'Logout', 实际 '{final_text}'")
-                results.append(
-                    ("移开鼠标恢复 Logout", False, f"期望 'Logout', 实际 '{final_text}'")
-                )
+                print("  ✗ 用户菜单未关闭")
+                results.append(("菜单可关闭", False, ""))
 
             # 截图：最终状态
             screenshot_path = os.path.join(SCREENSHOT_DIR, "86", "logout_final.png")

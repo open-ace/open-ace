@@ -159,7 +159,94 @@ def wait_table(page, timeout=10000):
         return False
 
 
-def test_pagination():
+SEED_PREFIX = "e2e-conv-page824-"
+SEED_CONVERSATIONS = 25  # > ITEMS_PER_PAGE (20) -> a multi-page dataset
+
+
+def _seed_conversation_rows():
+    """Self-seed the data precondition: >1 page of conversations.
+
+    The pagination contract needs a multi-page dataset; a freshly
+    initialized lane home has none, which used to reduce this test to a
+    skip. Seed distinct conversation_ids for user_id=1 (same pattern as
+    tests/e2e/manage/e2e_conversation_history.py) so the test RUNS, with
+    cleanup on teardown via the fixture below.
+    """
+    conv_ids = []
+    import sqlite3
+    from datetime import datetime, timedelta, timezone
+
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return conv_ids
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            # Date the rows with UTC "today": /api/conversation-history
+            # defaults its window to datetime.now(timezone.utc), which can
+            # lag the local calendar date (the frontend's default range uses
+            # local dates and always includes it either way).
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            existing = conn.execute(
+                "SELECT COUNT(DISTINCT conversation_id) FROM daily_messages "
+                "WHERE conversation_id LIKE ?",
+                (f"{SEED_PREFIX}%",),
+            ).fetchone()[0]
+            if existing < SEED_CONVERSATIONS:
+                for i in range(SEED_CONVERSATIONS - existing):
+                    conv_id = f"{SEED_PREFIX}{existing + i:02d}"
+                    conv_ids.append(conv_id)
+                    ts = (datetime.now() - timedelta(seconds=i)).isoformat(timespec="seconds")
+                    conn.execute(
+                        "INSERT INTO daily_messages "
+                        "(date, tool_name, host_name, role, content, tokens_used, "
+                        "input_tokens, output_tokens, timestamp, sender_name, "
+                        "message_id, agent_session_id, conversation_id, user_id) "
+                        "VALUES (?, 'claude-code', 'e2e-host-824', 'user', "
+                        "'e2e pagination probe', 10, 5, 5, ?, 'admin', "
+                        "'e2e-msg-824-" + str(existing + i) + "', ?, ?, 1)",
+                        (today, ts, conv_id, conv_id),
+                    )
+                conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+    return conv_ids
+
+
+def _cleanup_conversation_rows(seeded_ids):
+    """Delete exactly what this test seeded (fixture teardown)."""
+    import sqlite3
+
+    if not seeded_ids:
+        return
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "DELETE FROM daily_messages WHERE conversation_id LIKE ?",
+                (f"{SEED_PREFIX}%",),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+
+
+@pytest.fixture()
+def _multi_page_conversations():
+    """Seed the multi-page precondition and remove it afterwards."""
+    seeded = _seed_conversation_rows()
+    yield
+    _cleanup_conversation_rows(seeded)
+
+
+def test_pagination(_multi_page_conversations):
     print("=" * 60)
     print("Conversation History Pagination E2E Test (#824)")
     print(f"  WEB_BASE={WEB_BASE}  API_BASE={API_BASE}  HEADLESS={HEADLESS}")

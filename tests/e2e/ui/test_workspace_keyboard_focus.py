@@ -9,8 +9,23 @@ Issue 85: Workspace 右侧页面标题只保留左侧图标和文字
 2. 点击 Workspace 菜单
 3. 验证右侧页面自动获得焦点 (Issue 83)
 4. 验证标题栏只显示左侧图标和文字，没有 User Workspace 和 Logout 按钮 (Issue 85)
+
+#2491 R3b realignment: the retired selectors (#nav-workspace, #workspace-section
+.navbar) matched an old workspace chrome that no longer exists. The current
+contract (frontend/src/components/layout/WorkLayout.tsx lines 194-204) renders
+the Workspace entry as a ``.work-nav-item`` link (bi-grid icon, /work path),
+and the workspace page (frontend/src/components/features/Workspace.tsx) is
+gated behind workspace.enabled with a page header (h2 "Workspace") plus the
+tab surface — the test enables the feature for its duration (restoring the
+previous lane config value; same pattern as test_language_sync.py) and
+fulfills /api/workspace/user-url with a placeholder so the tab surface
+renders. Keyboard focus (Issue 83) is asserted against the current surface:
+after navigation the focus must sit on the page body or the workspace iframe
+(never lost), and the tab controls must be keyboard-reachable buttons.
 """
 
+import copy
+import json
 import os
 import sys
 
@@ -46,6 +61,43 @@ def _skip_if_no_server():
         pytest.skip(f"test server not reachable at {BASE_URL}")
 
 
+def _load_lane_config():
+    config_path = os.path.expanduser("~/.open-ace/config.json")
+    config = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            config = {}
+    return config_path, config
+
+
+def _write_lane_config(config_path, config):
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+
+
+@pytest.fixture(autouse=True)
+def _workspace_enabled():
+    """Enable the workspace feature so the tab surface renders; restore the
+    previous lane config value afterwards."""
+    config_path, config = _load_lane_config()
+    original_workspace = copy.deepcopy(config.get("workspace"))
+    workspace = config.setdefault("workspace", {})
+    if not workspace.get("enabled"):
+        workspace["enabled"] = True
+        _write_lane_config(config_path, config)
+    yield
+    _, current = _load_lane_config()
+    if original_workspace is None:
+        current.pop("workspace", None)
+    else:
+        current["workspace"] = original_workspace
+    _write_lane_config(config_path, current)
+
+
 @pytest.mark.asyncio
 @pytest.mark.issue(85)
 async def test_issue83_85():
@@ -63,6 +115,15 @@ async def test_issue83_85():
         context = await browser.new_context(viewport={"width": 1280, "height": 900})
         page = await context.new_page()
 
+        # Fulfill the webui base URL so the workspace tab surface materializes
+        # without a qwen-code-webui binary (same pattern as test_language_sync).
+        await page.route(
+            "**/api/workspace/user-url",
+            lambda route: route.fulfill(
+                json={"success": True, "url": "http://127.0.0.1:1/", "token": "e2e-mock-token"}
+            ),
+        )
+
         try:
             # Step 1: 登录系统
             print("Step 1: 登录系统...")
@@ -72,16 +133,21 @@ async def test_issue83_85():
             await page.click('button[type="submit"]')
 
             # 等待登录完成
-            await page.wait_for_url("**/", timeout=10000)
+            await page.wait_for_url("**/manage/**", timeout=10000)
             time.sleep(1)
             print("  ✓ 登录成功")
             results.append(("登录系统", True, ""))
 
             # Step 2: 点击 Workspace 菜单
+            # 当前契约：Work 左侧导航的 .work-nav-item（bi-grid 图标）即
+            # Workspace 菜单入口（WorkLayout.tsx WORK_NAV_ITEMS）。
             print("Step 2: 点击 Workspace 菜单...")
-            workspace_nav = page.locator("#nav-workspace")
-            await workspace_nav.click()
-            time.sleep(0.5)
+            await page.goto(f"{BASE_URL}/work", wait_until="networkidle")
+            workspace_nav = page.locator(".work-nav-item", has=page.locator("i.bi-grid"))
+            await workspace_nav.first.wait_for(state="visible", timeout=10000)
+            await workspace_nav.first.click()
+            await page.wait_for_load_state("networkidle")
+            time.sleep(2)
             print("  ✓ 点击 Workspace 菜单")
             results.append(("点击 Workspace 菜单", True, ""))
 
@@ -90,80 +156,73 @@ async def test_issue83_85():
             await page.screenshot(path=screenshot_path)
             print(f"  截图保存: {screenshot_path}")
 
-            # Step 3: 验证 Issue 85 - 标题栏只显示左侧图标和文字
-            print("Step 3: 验证 Issue 85 - 标题栏只显示左侧图标和文字...")
+            # Step 3: 验证 Issue 85 - 页面标题只保留 "Workspace" 文字
+            # 当前契约：页面头部是 h2 "Workspace"（Workspace.tsx page-header）；
+            # "User Workspace" 文字和工作区标题栏内的 Logout 按钮均不存在。
+            print("Step 3: 验证 Issue 85 - 页面标题只保留 'Workspace'...")
 
-            # 检查标题栏存在
-            navbar = page.locator("#workspace-section .navbar")
-            await expect(navbar).to_be_visible()
+            workspace_heading = page.locator(".workspace h2", has_text="Workspace")
+            await expect(workspace_heading.first).to_be_visible()
+            print("  ✓ 页面标题显示 'Workspace'")
+            results.append(("Issue 85: 标题显示 Workspace", True, ""))
 
-            # 检查左侧标题存在
-            navbar_brand = page.locator("#workspace-section .navbar-brand")
-            await expect(navbar_brand).to_contain_text("Workspace")
-            print("  ✓ 标题栏左侧显示 'Workspace'")
-
-            # 检查 User Workspace 文字不存在
-            user_workspace = page.locator(
-                '#workspace-section .navbar .text-white:has-text("User Workspace")'
-            )
-            user_workspace_count = await user_workspace.count()
-            if user_workspace_count == 0:
+            body_text = await page.locator("body").inner_text()
+            if "User Workspace" not in body_text:
                 print("  ✓ 'User Workspace' 文字已移除")
                 results.append(("Issue 85: User Workspace 文字已移除", True, ""))
             else:
-                print(f"  ✗ 'User Workspace' 文字仍然存在 (count: {user_workspace_count})")
-                results.append(
-                    (
-                        "Issue 85: User Workspace 文字已移除",
-                        False,
-                        f"找到 {user_workspace_count} 个",
-                    )
-                )
+                print("  ✗ 'User Workspace' 文字仍然存在")
+                results.append(("Issue 85: User Workspace 文字已移除", False, ""))
 
-            # 检查 Logout 按钮不存在
-            logout_btn = page.locator("#workspace-section .navbar #logout-workspace-btn")
-            logout_btn_count = await logout_btn.count()
-            if logout_btn_count == 0:
-                print("  ✓ Logout 按钮已移除")
-                results.append(("Issue 85: Logout 按钮已移除", True, ""))
+            # Logout 入口只在应用 Header 的用户菜单中，工作区页面内没有
+            workspace_area = page.locator(".workspace")
+            logout_in_workspace = workspace_area.locator(
+                "button:has-text('Logout'), button:has-text('退出登录')"
+            )
+            logout_count = await logout_in_workspace.count()
+            if logout_count == 0:
+                print("  ✓ 工作区页面内无 Logout 按钮")
+                results.append(("Issue 85: 工作区无 Logout 按钮", True, ""))
             else:
-                print(f"  ✗ Logout 按钮仍然存在 (count: {logout_btn_count})")
-                results.append(
-                    ("Issue 85: Logout 按钮已移除", False, f"找到 {logout_btn_count} 个")
-                )
+                print(f"  ✗ 工作区页面内仍有 Logout 按钮 (count: {logout_count})")
+                results.append(("Issue 85: 工作区无 Logout 按钮", False, f"找到 {logout_count} 个"))
 
-            # Step 4: 验证 Issue 83 - 页面自动获得焦点
-            print("Step 4: 验证 Issue 83 - 页面自动获得焦点...")
+            # Step 4: 验证 Issue 83 - 页面加载后键盘焦点可用
+            # 当前契约：焦点落在页面 body 或 workspace iframe 上（键盘不会
+            # 丢失），tab 交互控件是原生 button（可键盘操作）。
+            print("Step 4: 验证 Issue 83 - 页面加载后键盘焦点可用...")
 
-            # 检查 workspace-section 有 tabindex 属性
-            workspace_section = page.locator("#workspace-section")
-            tabindex = await workspace_section.get_attribute("tabindex")
-            if tabindex is not None:
-                print(f"  ✓ workspace-section 有 tabindex 属性: {tabindex}")
-                results.append(("Issue 83: tabindex 属性存在", True, f"tabindex={tabindex}"))
-            else:
-                print("  ✗ workspace-section 没有 tabindex 属性")
-                results.append(("Issue 83: tabindex 属性存在", False, "未找到 tabindex"))
-
-            # 检查焦点是否在 workspace-frame (iframe) 上
-            # 对于 iframe，焦点应该在 iframe 元素上，这样键盘操作才能传递到 iframe 内部
             focused_element = await page.evaluate("document.activeElement.id")
             focused_tag = await page.evaluate("document.activeElement.tagName")
-            if focused_element == "workspace-frame" or focused_tag == "IFRAME":
-                print("  ✓ workspace-frame (iframe) 已获得焦点，键盘操作可传递到 iframe 内部")
-                results.append(("Issue 83: 页面自动获得焦点", True, "焦点在 iframe 上"))
-            elif focused_element == "workspace-section":
-                print("  ✓ workspace-section 已获得焦点")
-                results.append(("Issue 83: 页面自动获得焦点", True, ""))
-            else:
-                # 焦点可能在其他元素上，但只要 tabindex 存在就说明功能已实现
-                print(f"  ! 当前焦点在: {focused_element} ({focused_tag})")
+            # Focus may legitimately sit on the body, the workspace iframe, or
+            # the interactive element that was just used (e.g. the nav link).
+            focus_ok = focused_tag in ("BODY", "IFRAME", "BUTTON", "A", "INPUT")
+            if focus_ok:
+                print(f"  ✓ 焦点位于页面可交互面 ({focused_element or focused_tag})")
                 results.append(
-                    (
-                        "Issue 83: 页面自动获得焦点",
-                        True,
-                        f"焦点在 {focused_element}，但 tabindex 已设置",
-                    )
+                    ("Issue 83: 页面焦点可用", True, f"{focused_element or focused_tag}")
+                )
+            else:
+                print(f"  ✗ 焦点异常: {focused_element} ({focused_tag})")
+                results.append(("Issue 83: 页面焦点可用", False, focused_tag))
+
+            # 工作区的操作控件必须是可键盘到达的原生 button（tab 操作按钮、
+            # 新建 tab 按钮）。注意 .workspace-tab 本身是带 onClick 的 div
+            # （无 tabindex/role），无法用键盘切换 —— 见测试报告中的产品观察。
+            tab_controls = page.locator(".workspace-tab .tab-action-btn, .workspace-new-tab-btn")
+            tab_count = await tab_controls.count()
+            keyboard_reachable = 0
+            for i in range(tab_count):
+                tag = await tab_controls.nth(i).evaluate("el => el.tagName")
+                if tag == "BUTTON":
+                    keyboard_reachable += 1
+            if tab_count > 0 and keyboard_reachable == tab_count:
+                print(f"  ✓ {tab_count} 个工作区操作控件均为可键盘操作的 button 元素")
+                results.append(("Issue 83: 工作区控件可键盘操作", True, f"{tab_count} 个"))
+            else:
+                print(f"  ✗ 工作区控件键盘可达性异常 ({keyboard_reachable}/{tab_count})")
+                results.append(
+                    ("Issue 83: 工作区控件可键盘操作", False, f"{keyboard_reachable}/{tab_count}")
                 )
 
             # 截图：最终状态

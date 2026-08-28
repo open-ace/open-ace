@@ -1,9 +1,19 @@
 """
 测试 Issue 30: 验证工具标签显示逻辑
+
+#2491 R3b realignment: the retired selectors (input[name="username"],
+#nav-messages, #messages-container) matched the pre-React chrome. The current
+contract: /manage/messages (frontend/src/components/features/Messages.tsx)
+renders ``.messages`` with ``.message-item`` cards, each carrying a
+``.message-source`` span whose class includes the source value
+(Messages.tsx lines 447-450). The page only shows messages when daily_messages
+has rows, so the test seeds its own rows (message_source set; same seeding
+pattern as tests/e2e/manage/e2e_conversation_history.py) and cleans them up.
 """
 
 import asyncio
 import os
+import uuid
 
 import pytest
 import requests
@@ -20,6 +30,81 @@ USERNAME = os.environ.get("TEST_USERNAME", "admin")
 PASSWORD = os.environ.get("TEST_PASSWORD", "admin123")
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCREENSHOT_DIR = os.path.join(PROJECT_ROOT, "screenshots")
+
+SEED_PREFIX = "e2e30"
+
+
+def _seed_messages(count=3):
+    """Seed daily_messages rows carrying message_source (label under test)."""
+    import sqlite3
+    from datetime import datetime, timezone
+
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return []
+    ids = []
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            existing = conn.execute(
+                "SELECT COUNT(*) FROM daily_messages WHERE message_id LIKE ?",
+                (f"{SEED_PREFIX}%",),
+            ).fetchone()[0]
+            # Date the rows with UTC today (the /api/messages window is
+            # backend-computed; the local calendar date can run ahead).
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            for i in range(count - existing):
+                mid = f"{SEED_PREFIX}-{uuid.uuid4().hex}"
+                now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                conn.execute(
+                    "INSERT INTO daily_messages "
+                    "(date, tool_name, host_name, role, content, tokens_used, "
+                    "input_tokens, output_tokens, timestamp, sender_name, "
+                    "message_id, agent_session_id, conversation_id, user_id, "
+                    "message_source) "
+                    "VALUES (?, 'claude-code', 'e2e-host-30', ?, "
+                    "'e2e tool label probe', 10, 5, 5, ?, 'admin', "
+                    "?, ?, ?, 1, 'cli')",
+                    (
+                        today,
+                        "user" if i % 2 == 0 else "assistant",
+                        now,
+                        mid,
+                        mid,
+                        mid,
+                    ),
+                )
+                ids.append(mid)
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+    return ids
+
+
+def _cleanup_messages():
+    import sqlite3
+
+    db_path = os.path.expanduser("~/.open-ace/ace.db")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("DELETE FROM daily_messages WHERE message_id LIKE ?", (f"{SEED_PREFIX}%",))
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _seeded_messages():
+    _seed_messages()
+    yield
+    _cleanup_messages()
 
 
 def _skip_if_no_server():
@@ -46,24 +131,30 @@ async def test_issue30_v4():
             # 1. 登录
             print("1. 登录系统...")
             await page.goto(f"{BASE_URL}/login")
-            await page.fill('input[name="username"]', USERNAME)
-            await page.fill('input[name="password"]', PASSWORD)
+            # The React login form re-mounts once its effects settle; re-fill
+            # until the values persist (same pattern as test_user_scenario).
+            for _attempt in range(3):
+                await page.wait_for_selector("#username", timeout=10000)
+                await page.fill("#username", USERNAME)
+                await page.fill("#password", PASSWORD)
+                if (
+                    await page.input_value("#username") == USERNAME
+                    and await page.input_value("#password") == PASSWORD
+                ):
+                    break
+                await asyncio.sleep(0.5)
             await page.click('button[type="submit"]')
-            await page.wait_for_url(f"{BASE_URL}/", timeout=5000)
+            await page.wait_for_url("**/manage/**", timeout=15000)
             print("   ✓ 登录成功")
 
-            # 2. 导航到 Messages 页面
+            # 2. 导航到 Messages 页面（当前路由 /manage/messages）
             print("2. 导航到 Messages 页面...")
-
-            # 点击 Messages 导航
-            await page.click("#nav-messages")
-            print("   已点击 Messages 导航")
-
-            # 等待消息容器可见
-            await page.wait_for_selector("#messages-container", state="visible", timeout=10000)
+            await page.goto(f"{BASE_URL}/manage/messages", wait_until="networkidle")
+            messages_container = page.locator(".messages")
+            await messages_container.first.wait_for(state="visible", timeout=10000)
             print("   消息容器已可见")
 
-            # 等待消息加载完成 - 等待 message-item 出现
+            # 等待消息加载完成 - 等待 message-item 出现（默认角色过滤已启用）
             try:
                 await page.wait_for_selector(".message-item", timeout=15000)
                 print("   消息项已加载")
@@ -81,7 +172,7 @@ async def test_issue30_v4():
             await page.screenshot(path=f"{SCREENSHOT_DIR}/issue30_v4_messages.png", full_page=True)
             print("   ✓ 截图保存: issue30_v4_messages.png")
 
-            # 4. 检查工具标签
+            # 4. 检查工具标签（.message-source 携带消息来源）
             print("\n3. 检查工具标签...")
             tool_badges = await page.query_selector_all(".message-source")
             print(f"   找到 {len(tool_badges)} 个工具标签")
@@ -100,36 +191,30 @@ async def test_issue30_v4():
                 for text, count in sorted(badge_texts.items(), key=lambda x: -x[1]):
                     print(f"   - {text}: {count} 个")
 
-                # 检查是否有组合格式
-                combined_labels = [t for t in badge_texts if "(" in t and ")" in t]
-                if combined_labels:
-                    print(f"\n   ✓ 发现组合格式标签: {combined_labels}")
-                    results.append(("组合格式标签", "通过"))
+                # 标签必须渲染出非空文本
+                if all(badge_texts.values()) and all(badge_texts.keys()):
+                    print("\n   ✓ 所有工具标签均显示非空文本")
+                    results.append(("工具标签显示", "通过"))
                 else:
-                    print("\n   ⚠ 未发现组合格式标签")
-                    results.append(("组合格式标签", "跳过"))
+                    print("\n   ✗ 存在空工具标签")
+                    results.append(("工具标签显示", "失败"))
 
-                # 检查 CSS class
+                # 检查 CSS class（class 应包含 message-source 与来源值）
                 print("\n4. 检查 CSS class...")
+                class_ok = True
                 for badge in tool_badges[:5]:
                     class_name = await badge.get_attribute("class")
-                    text = await badge.inner_text()
+                    text = (await badge.inner_text()).strip().lower()
                     print(f"   标签: '{text}' -> class: '{class_name}'")
-
-                results.append(("工具标签显示", "通过"))
+                    if not class_name or "message-source" not in class_name:
+                        class_ok = False
+                if class_ok:
+                    results.append(("工具标签 CSS class", "通过"))
+                else:
+                    results.append(("工具标签 CSS class", "失败"))
             else:
-                print("   ⚠ 没有找到工具标签")
-
-                # 检查页面内容
-                print("\n   检查页面内容...")
-                messages_container = await page.query_selector("#messages-container")
-                if messages_container:
-                    inner_html = await messages_container.inner_html()
-                    print(f"   messages-container 内容长度: {len(inner_html)}")
-                    if len(inner_html) < 100:
-                        print(f"   内容: {inner_html[:200]}")
-
-                results.append(("工具标签显示", "跳过"))
+                print("   ✗ 没有找到工具标签（消息数据应已注入）")
+                results.append(("工具标签显示", "失败"))
 
             results.append(("测试执行", "通过"))
 
