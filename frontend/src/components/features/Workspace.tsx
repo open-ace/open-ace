@@ -2007,7 +2007,7 @@ export const Workspace: React.FC = () => {
           } catch (error: any) {
             // Handle session not found
             if (error?.response?.status === 404 || error?.message?.includes('not found')) {
-              toast.warning(t('sessionNotFound', language), '');
+              toast.warning(t('sessionNotFound', language));
               // Clear invalid sessionId from URL
               url.searchParams.delete('sessionId');
               window.history.replaceState({}, '', url.toString());
