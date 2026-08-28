@@ -12,7 +12,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from flask import Flask
 
-
 # Import constants from remote.py
 from app.routes.remote import (
     _DEDUP_KEY_PREFIX,
@@ -78,9 +77,7 @@ class TestIdempotencyKeyHelpers:
             result = _check_idempotency_key(idempotency_key)
 
             assert result == cached_data
-            mock_cache.get.assert_called_once_with(
-                _get_idempotency_cache_key(idempotency_key)
-            )
+            mock_cache.get.assert_called_once_with(_get_idempotency_cache_key(idempotency_key))
 
     def test_check_idempotency_key_not_exists(self):
         """Test checking idempotency key that does not exist."""
