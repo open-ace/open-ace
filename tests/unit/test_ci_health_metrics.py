@@ -1,5 +1,6 @@
 """Contracts for CI runner JSONL and bounded Actions health metrics."""
 
+import base64
 import importlib.util
 import json
 import subprocess
@@ -23,6 +24,9 @@ ci = _load("openace_ci_metrics_runner", ROOT / "scripts" / "ci.py")
 metrics = _load(
     "openace_github_actions_metrics", ROOT / "scripts" / "ci" / "github_actions_metrics.py"
 )
+
+# Merge time of 16fd75b0, the commit that introduced the "Select suites" job.
+EPOCH = datetime(2026, 8, 9, 12, 23, 45, tzinfo=timezone.utc)
 
 
 def _records(path):
@@ -545,7 +549,7 @@ def test_pr_runtime_contract_uses_merge_parent_not_current_payload_base():
     client = RuntimeClient(responses, logs)
     cache = {}
 
-    metrics.resolve_pr_runtime(client, repo, run, 100, cache)
+    metrics.resolve_pr_runtime(client, repo, run, 100, cache, epoch=EPOCH)
 
     assert run["_execution_base_sha"] == runtime_base
     assert run["_runtime_head_sha"] == head
@@ -562,7 +566,7 @@ def test_pr_runtime_accepts_empty_dynamic_payload():
     repo, run, responses, logs, runtime_base, head = _runtime_fixture(payload_link=False)
     client = RuntimeClient(responses, logs)
 
-    metrics.resolve_pr_runtime(client, repo, run, 100, {})
+    metrics.resolve_pr_runtime(client, repo, run, 100, {}, epoch=EPOCH)
 
     assert run["_execution_base_sha"] == runtime_base
     assert run["_runtime_head_sha"] == head
@@ -573,7 +577,7 @@ def test_pr_runtime_treats_payload_number_conflict_as_diagnostic_only():
     repo, run, responses, logs, runtime_base, head = _runtime_fixture()
     run["pull_requests"][0]["number"] = 9999
 
-    metrics.resolve_pr_runtime(RuntimeClient(responses, logs), repo, run, 100, {})
+    metrics.resolve_pr_runtime(RuntimeClient(responses, logs), repo, run, 100, {}, epoch=EPOCH)
 
     assert run["_execution_base_sha"] == runtime_base
     assert run["_runtime_head_sha"] == head
@@ -586,7 +590,7 @@ def test_pr_runtime_allows_selection_and_execution_base_to_diverge():
     selection_base = "7" * 40
     logs[next(iter(logs))] = logs[next(iter(logs))].replace(runtime_base, selection_base)
 
-    metrics.resolve_pr_runtime(RuntimeClient(responses, logs), repo, run, 100, {})
+    metrics.resolve_pr_runtime(RuntimeClient(responses, logs), repo, run, 100, {}, epoch=EPOCH)
 
     assert run["_execution_base_sha"] == runtime_base
     assert run["_selection_base_sha"] == selection_base
@@ -596,14 +600,428 @@ def test_pr_runtime_allows_selection_and_execution_base_to_diverge():
 def test_pr_runtime_rejects_merge_parent_mismatch():
     repo, run, responses, logs, _, _ = _runtime_fixture(bad_parents=True)
     with pytest.raises(metrics.MetricsError, match="parents do not match"):
-        metrics.resolve_pr_runtime(RuntimeClient(responses, logs), repo, run, 100, {})
+        metrics.resolve_pr_runtime(RuntimeClient(responses, logs), repo, run, 100, {}, epoch=EPOCH)
 
 
 def test_pr_runtime_rejects_ambiguous_log_evidence():
     repo, run, responses, logs, _, _ = _runtime_fixture()
     logs[next(iter(logs))] += f"git fetch origin +{'4' * 40}:refs/remotes/pull/2492/merge\n"
     with pytest.raises(metrics.MetricsError, match="log evidence is ambiguous"):
-        metrics.resolve_pr_runtime(RuntimeClient(responses, logs), repo, run, 100, {})
+        metrics.resolve_pr_runtime(RuntimeClient(responses, logs), repo, run, 100, {}, epoch=EPOCH)
+
+
+def _select_suites_job(job_id=78):
+    job = _job(
+        job_id,
+        "success",
+        "2026-08-11T00:00:00Z",
+        "2026-08-11T00:00:01Z",
+        "2026-08-11T00:00:02Z",
+    )
+    job["name"] = "Select suites"
+    return job
+
+
+def _legacy_job(job_id=79):
+    return _job(
+        job_id,
+        "success",
+        "2026-08-11T00:00:00Z",
+        "2026-08-11T00:00:01Z",
+        "2026-08-11T00:00:02Z",
+    )
+
+
+def _multi_attempt_fixture(
+    *,
+    created_at: str,
+    attempt1_jobs: list[dict] | None,
+    attempt2_jobs: list[dict] | None,
+    select_job: dict | None = None,
+):
+    """Two-attempt PR run with per-attempt job payloads for linkage tests."""
+    repo = "open-ace/open-ace"
+    run_id = 4242
+    head = "2" * 40
+    runtime_base = "1" * 40
+    merge = "3" * 40
+    if select_job is None:
+        select_job = _select_suites_job()
+    responses = {}
+    for number, jobs in ((1, attempt1_jobs), (2, attempt2_jobs)):
+        responses[f"/repos/{repo}/actions/runs/{run_id}/attempts/{number}/jobs?per_page=100"] = {
+            "total_count": len(jobs or []),
+            "jobs": jobs or [],
+        }
+    responses[f"/repos/{repo}/git/commits/{merge}"] = {
+        "sha": merge,
+        "parents": [{"sha": runtime_base}, {"sha": head}],
+    }
+    logs = {
+        f"/repos/{repo}/actions/jobs/{select_job['id']}/logs": (
+            f"git fetch origin +{merge}:refs/remotes/pull/2492/merge\n"
+            f"BASE_SHA: {runtime_base}\n"
+            "Selected suites: legacy-pr, python-core\n"
+        )
+    }
+    run = {
+        "id": run_id,
+        "run_attempt": 2,
+        "created_at": created_at,
+        "head_sha": head,
+        "pull_requests": [],
+    }
+    return repo, run, responses, logs, runtime_base, head
+
+
+def test_pr_runtime_links_from_first_attempt_with_select_suites():
+    # Incident shape: attempt 1 concluded action_required with zero jobs; the
+    # approved attempt 2 executed the workflow and holds the Select suites job.
+    select_job = _select_suites_job(78)
+    repo, run, responses, logs, runtime_base, head = _multi_attempt_fixture(
+        created_at="2026-08-11T00:00:00Z",
+        attempt1_jobs=None,
+        attempt2_jobs=[select_job],
+    )
+    client = RuntimeClient(responses, logs)
+
+    assert metrics.resolve_pr_runtime(client, repo, run, 100, {}, epoch=EPOCH) is None
+
+    assert run["_execution_base_sha"] == runtime_base
+    assert run["_pr_number"] == 2492
+    assert run["_selected_suites"] == ("legacy-pr", "python-core")
+
+
+def test_pr_runtime_uses_later_attempt_when_first_executed_predates_job():
+    # Pre-epoch run re-run after the contract landed: attempt 1 executed the
+    # old workflow (no Select suites job), attempt 2 has it.
+    select_job = _select_suites_job(78)
+    repo, run, responses, logs, _, _ = _multi_attempt_fixture(
+        created_at="2026-08-08T00:00:00Z",
+        attempt1_jobs=[_legacy_job(79)],
+        attempt2_jobs=[select_job],
+    )
+
+    assert (
+        metrics.resolve_pr_runtime(RuntimeClient(responses, logs), repo, run, 100, {}, epoch=EPOCH)
+        is None
+    )
+    assert run["_pr_number"] == 2492
+
+
+def test_post_epoch_run_without_select_suites_fails_closed():
+    _, run, responses, _, _, _ = _multi_attempt_fixture(
+        created_at="2026-08-11T00:00:00Z",
+        attempt1_jobs=[_legacy_job(79)],
+        attempt2_jobs=[_legacy_job(80)],
+    )
+    with pytest.raises(metrics.MetricsError, match="one Select suites job"):
+        metrics.resolve_pr_runtime(
+            RuntimeClient(responses, {}), "open-ace/open-ace", run, 100, {}, epoch=EPOCH
+        )
+
+
+def test_duplicate_select_suites_jobs_fail_closed():
+    _, run, responses, _, _, _ = _multi_attempt_fixture(
+        created_at="2026-08-11T00:00:00Z",
+        attempt1_jobs=[_select_suites_job(78), _select_suites_job(81)],
+        attempt2_jobs=None,
+    )
+    with pytest.raises(metrics.MetricsError, match="multiple Select suites jobs"):
+        metrics.resolve_pr_runtime(
+            RuntimeClient(responses, {}), "open-ace/open-ace", run, 100, {}, epoch=EPOCH
+        )
+
+
+def test_pre_epoch_run_without_select_suites_is_skipped():
+    _, run, responses, _, _, _ = _multi_attempt_fixture(
+        created_at="2026-08-08T00:00:00Z",
+        attempt1_jobs=[_legacy_job(79)],
+        attempt2_jobs=[_legacy_job(82)],
+    )
+    assert (
+        metrics.resolve_pr_runtime(
+            RuntimeClient(responses, {}), "open-ace/open-ace", run, 100, {}, epoch=EPOCH
+        )
+        == "pre_contract_epoch"
+    )
+    assert "_runtime_merge_sha" not in run
+
+
+def test_run_without_any_executed_attempt_is_skipped():
+    _, run, responses, _, _, _ = _multi_attempt_fixture(
+        created_at="2026-08-11T00:00:00Z",
+        attempt1_jobs=None,
+        attempt2_jobs=None,
+    )
+    assert (
+        metrics.resolve_pr_runtime(
+            RuntimeClient(responses, {}), "open-ace/open-ace", run, 100, {}, epoch=EPOCH
+        )
+        == "no_executed_attempt"
+    )
+    assert "_runtime_merge_sha" not in run
+
+
+FIXED_NOW = datetime(2026, 8, 27, 0, 0, 0, tzinfo=timezone.utc)
+
+
+def _e2e_policy(tmp_path):
+    policy = {
+        "version": 1,
+        "derivation_version": 1,
+        "window_days": 30,
+        "pr_contract_epoch": "2026-08-09T12:23:45Z",
+        "sample_cap": 25,
+        "min_samples": 20,
+        "max_collector_requests": 700,
+        "reserve_remaining": 250,
+        "max_jobs_per_attempt": 100,
+        "cohorts": [
+            {
+                "id": "ci-pull-request",
+                "workflow": "ci.yml",
+                "event": "pull_request",
+                "contract_paths": ["ci/suites.json"],
+            }
+        ],
+    }
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps(policy), encoding="utf-8")
+    return path
+
+
+def _e2e_fixture(*, break_contract: bool):
+    """Full-flow API fixture: one aggregated PR run (+ one pre-epoch skip).
+
+    With break_contract=True the aggregated run becomes post-epoch without a
+    Select suites job, so collection must fail closed.
+    """
+    repo = "open-ace/open-ace"
+    head = "2" * 40
+    runtime_base = "1" * 40
+    merge = "3" * 40
+    blob = "b" * 40
+    cutoff = (FIXED_NOW - timedelta(days=30)).isoformat().replace("+00:00", "Z")
+    select_job = _job(
+        90,
+        "success",
+        "2026-08-26T09:41:31Z",
+        "2026-08-26T09:41:32Z",
+        "2026-08-26T09:41:33Z",
+    )
+    select_job["name"] = "Select suites"
+    legacy_job = dict(
+        _job(
+            91,
+            "success",
+            "2026-08-08T01:00:00Z",
+            "2026-08-08T01:00:01Z",
+            "2026-08-08T01:00:02Z",
+        )
+    )
+    aggregated_jobs = [legacy_job] if break_contract else [select_job]
+    runs = [
+        {
+            "id": 501,
+            "run_attempt": 1,
+            "event": "pull_request",
+            "status": "completed",
+            "created_at": "2026-08-26T09:41:30Z",
+            "head_sha": head,
+            "html_url": f"https://github.com/{repo}/actions/runs/501",
+            "pull_requests": [],
+        },
+        {
+            "id": 502,
+            "run_attempt": 1,
+            "event": "pull_request",
+            "status": "completed",
+            "created_at": "2026-08-08T00:00:00Z",
+            "head_sha": "5" * 40,
+            "html_url": f"https://github.com/{repo}/actions/runs/502",
+            "pull_requests": [],
+        },
+    ]
+    suites_document = {
+        "suites": {"legacy-pr": {"description": "x"}, "python-core": {"description": "y"}}
+    }
+    responses = [
+        {"path": "/rate_limit", "json": {"resources": {"core": {"remaining": 5000}}}},
+        {
+            "path": f"/repos/{repo}/actions/workflows/ci.yml/runs",
+            "params": {
+                "event": "pull_request",
+                "status": "completed",
+                "per_page": 25,
+                "created": f">={cutoff}",
+            },
+            "json": {"total_count": 2, "workflow_runs": runs},
+        },
+    ]
+    for status in ("in_progress", "queued"):
+        responses.append(
+            {
+                "path": f"/repos/{repo}/actions/workflows/ci.yml/runs",
+                "params": {
+                    "event": "pull_request",
+                    "status": status,
+                    "per_page": 1,
+                    "created": f">={cutoff}",
+                },
+                "json": {"total_count": 0, "workflow_runs": []},
+            }
+        )
+    responses.append(
+        {
+            "path": f"/repos/{repo}/actions/runs/501/attempts/1/jobs",
+            "params": {"per_page": 100},
+            "json": {"total_count": len(aggregated_jobs), "jobs": aggregated_jobs},
+        }
+    )
+    responses.append(
+        {
+            "path": f"/repos/{repo}/actions/runs/502/attempts/1/jobs",
+            "params": {"per_page": 100},
+            "json": {"total_count": 1, "jobs": [dict(legacy_job, id=92)]},
+        }
+    )
+    if not break_contract:
+        responses.extend(
+            [
+                {
+                    "path": f"/repos/{repo}/actions/jobs/{select_job['id']}/logs",
+                    "text": (
+                        f"git fetch origin +{merge}:refs/remotes/pull/2492/merge\n"
+                        f"BASE_SHA: {runtime_base}\n"
+                        "Selected suites: legacy-pr, python-core\n"
+                    ),
+                },
+                {
+                    "path": f"/repos/{repo}/git/commits/{merge}",
+                    "json": {
+                        "sha": merge,
+                        "parents": [{"sha": runtime_base}, {"sha": head}],
+                    },
+                },
+                {
+                    "path": f"/repos/{repo}/git/trees/{merge}",
+                    "params": {"recursive": "1"},
+                    "json": {
+                        "truncated": False,
+                        "tree": [{"path": "ci/suites.json", "type": "blob", "sha": blob}],
+                    },
+                },
+                {
+                    "path": f"/repos/{repo}/git/blobs/{blob}",
+                    "json": {
+                        "sha": blob,
+                        "encoding": "base64",
+                        "content": base64.b64encode(json.dumps(suites_document).encode()).decode(),
+                    },
+                },
+                {
+                    "path": f"/repos/{repo}/actions/runs/501/attempts/1",
+                    "json": _attempt_meta(
+                        1,
+                        "success",
+                        "2026-08-26T09:41:30Z",
+                        "2026-08-26T09:41:30Z",
+                        "2026-08-26T09:41:40Z",
+                    ),
+                },
+            ]
+        )
+    return {"responses": responses}
+
+
+class _FrozenDateTime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return FIXED_NOW if tz is not None else FIXED_NOW.replace(tzinfo=None)
+
+
+def test_collect_end_to_end_records_pre_epoch_skip_and_writes_reports(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(metrics, "datetime", _FrozenDateTime)
+    fixture = tmp_path / "fixture.json"
+    fixture.write_text(json.dumps(_e2e_fixture(break_contract=False)), encoding="utf-8")
+    out_json = tmp_path / "report.json"
+    out_md = tmp_path / "report.md"
+
+    rc = metrics.main(
+        [
+            "--repo",
+            "open-ace/open-ace",
+            "--policy",
+            str(_e2e_policy(tmp_path)),
+            "--input",
+            str(fixture),
+            "--output-json",
+            str(out_json),
+            "--output-markdown",
+            str(out_md),
+        ]
+    )
+
+    assert rc == 0
+    report = json.loads(out_json.read_text(encoding="utf-8"))
+    cohort = report["cohorts"][0]
+    assert cohort["sampled_count"] == 1
+    assert cohort["skipped_count"] == 1
+    assert cohort["skipped_runs"] == [{"run_id": 502, "reason": "pre_contract_epoch"}]
+    assert [run["run_id"] for run in cohort["runs"]] == [501]
+    markdown = out_md.read_text(encoding="utf-8")
+    assert "Out-of-contract runs skipped (ci-pull-request): pre_contract_epoch=1" in markdown
+
+
+def test_collect_end_to_end_contract_break_fails_closed_without_reports(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(metrics, "datetime", _FrozenDateTime)
+    fixture = tmp_path / "fixture.json"
+    fixture.write_text(json.dumps(_e2e_fixture(break_contract=True)), encoding="utf-8")
+    out_json = tmp_path / "report.json"
+    out_md = tmp_path / "report.md"
+
+    rc = metrics.main(
+        [
+            "--repo",
+            "open-ace/open-ace",
+            "--policy",
+            str(_e2e_policy(tmp_path)),
+            "--input",
+            str(fixture),
+            "--output-json",
+            str(out_json),
+            "--output-markdown",
+            str(out_md),
+        ]
+    )
+
+    assert rc == 1
+    assert "CI METRICS ERROR" in capsys.readouterr().err
+    assert not out_json.exists()
+    assert not out_md.exists()
+
+
+def test_policy_epoch_field_is_required_and_parseable(tmp_path):
+    live = metrics.load_policy(ROOT / "ci" / "ci-health-policy.json")
+    assert metrics.parse_time(live["pr_contract_epoch"], "epoch") == EPOCH
+
+    missing = dict(live)
+    del missing["pr_contract_epoch"]
+    path = tmp_path / "missing.json"
+    path.write_text(json.dumps(missing), encoding="utf-8")
+    with pytest.raises(metrics.MetricsError, match="invalid CI health policy"):
+        metrics.load_policy(path)
+
+    unparseable = dict(live, pr_contract_epoch="not-a-timestamp")
+    path = tmp_path / "unparseable.json"
+    path.write_text(json.dumps(unparseable), encoding="utf-8")
+    with pytest.raises(metrics.MetricsError, match="policy.pr_contract_epoch"):
+        metrics.load_policy(path)
 
 
 def test_attempts_keep_first_failure_and_retry_recovery_separate():
@@ -701,8 +1119,11 @@ def test_attempts_keep_first_failure_and_retry_recovery_separate():
     assert aggregate["eventual_conclusions"]["failure"] == 0
     assert aggregate["retry_recovery_count"] == 1
     assert aggregate["inherited_job_snapshot_count"] == 2
+    # The attempt-1 skipped job never executed: no queue sample, counted in
+    # skipped_job_no_execution_count instead.
+    assert aggregate["skipped_job_no_execution_count"] == 1
     assert aggregate["workflow_queue"]["count"] == 2
-    assert aggregate["job_queue"]["count"] == 4
+    assert aggregate["job_queue"]["count"] == 3
     assert attempts[1]["jobs"][1]["inherited_from_job_id"] == 3
     assert attempts[1]["jobs"][2]["inherited_from_job_id"] == 4
 
@@ -926,3 +1347,48 @@ def test_conclusion_schema_has_stable_zero_values_for_cancel_skip_and_neutral():
         "stale": 0,
         "startup_failure": 0,
     }
+
+
+def test_skipped_job_evaluation_quirk_has_no_queue_or_execution():
+    # GitHub gives skipped-job timestamps no ordering guarantees (observed
+    # live: run 31827030734 job 94853500968 — created/started 18:05:39Z,
+    # completed 18:05:30Z, i.e. completion before both start and creation).
+    # Such jobs never executed: timing must be None instead of failing the
+    # whole collection on impossible orderings.
+    repo = "open-ace/open-ace"
+    run_id = 31827030734
+    base = f"/repos/{repo}/actions/runs/{run_id}/attempts"
+    skipped = _job(
+        94853500968,
+        "skipped",
+        "2026-08-14T18:05:39Z",  # created (evaluation time)
+        "2026-08-14T18:05:39Z",  # started
+        "2026-08-14T18:05:30Z",  # completed 9s before created/started
+    )
+    responses = {
+        f"{base}/1": _attempt_meta(
+            1, "success", "2026-08-14T18:05:30Z", "2026-08-14T18:05:30Z", "2026-08-14T18:06:00Z"
+        ),
+        f"{base}/1/jobs?per_page=100": {"total_count": 1, "jobs": [skipped]},
+    }
+    run = {"id": run_id, "run_attempt": 1}
+    attempts = metrics.collect_attempts(AttemptClient(responses), repo, run, 100)
+    job = attempts[0]["jobs"][0]
+    assert job["conclusion"] == "skipped"
+    assert job["timing_state"] == "skipped_evaluation"
+    assert job["queue"] is None and job["execution"] is None
+    contract = metrics.aggregate_contract(
+        [
+            {
+                "first_conclusion": "success",
+                "eventual_conclusion": "success",
+                "recovered_on_retry": False,
+                "first_attempt_wall": {"seconds": 30.0},
+                "eventual_resolution": {"seconds": 30.0},
+                "attempts": attempts,
+            }
+        ],
+        min_samples=20,
+    )
+    assert contract["skipped_job_no_execution_count"] == 1
+    assert contract["job_queue"]["count"] == 0

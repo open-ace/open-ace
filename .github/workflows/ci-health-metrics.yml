@@ -32,6 +32,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           mkdir -p test-results/ci-health
           python scripts/ci/github_actions_metrics.py \
             --repo "$GITHUB_REPOSITORY" \
@@ -42,10 +43,11 @@ jobs:
       - name: Publish CI health summary
         if: always()
         run: |
-          if [ -f test-results/ci-health/report.md ]; then
+          if [ -f test-results/ci-health/report.md ] && [ -f test-results/ci-health/report.json ]; then
             cat test-results/ci-health/report.md >> "$GITHUB_STEP_SUMMARY"
           else
             echo "CI health collection failed; see collector artifact." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
 
       - name: Upload CI health evidence
