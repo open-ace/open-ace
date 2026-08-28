@@ -323,8 +323,23 @@ export const SSOSettings: React.FC = () => {
     try {
       await ssoApi.disableProvider(providerName);
       fetchProviders();
+      success(t('providerDisabled', language));
     } catch (err) {
       console.error('Failed to disable provider:', err);
+      toastError(t('disableProviderFailed', language));
+    }
+  };
+
+  const handleEnable = async (providerName: string) => {
+    if (!(await confirm({ message: t('confirmEnableProvider', language), variant: 'primary' })))
+      return;
+    try {
+      await ssoApi.enableProvider(providerName);
+      fetchProviders();
+      success(t('providerEnabled', language));
+    } catch (err) {
+      console.error('Failed to enable provider:', err);
+      toastError(t('enableProviderFailed', language));
     }
   };
 
@@ -691,14 +706,25 @@ export const SSOSettings: React.FC = () => {
                           <i className="bi bi-pencil me-1" />
                           {t('edit', language)}
                         </Button>
-                        <Button
-                          variant="outline-danger"
-                          size="sm"
-                          onClick={() => handleDisable(provider.name)}
-                        >
-                          <i className="bi bi-x-lg me-1" />
-                          {t('disable', language)}
-                        </Button>
+                        {provider.is_enabled ? (
+                          <Button
+                            variant="outline-danger"
+                            size="sm"
+                            onClick={() => handleDisable(provider.name)}
+                          >
+                            <i className="bi bi-x-lg me-1" />
+                            {t('disable', language)}
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outline-success"
+                            size="sm"
+                            onClick={() => handleEnable(provider.name)}
+                          >
+                            <i className="bi bi-check-lg me-1" />
+                            {t('enable', language)}
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>
