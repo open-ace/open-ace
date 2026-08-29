@@ -73,6 +73,7 @@ def _cfg(attestations=None, **overrides):
     }
     endpoint.update(overrides.pop("endpoint", {}))
     raw = {
+        "installation_id": "openace-test",
         "default_tier": "gvisor",
         "endpoints": {"gvisor": endpoint},
         "image_allowlist": [_DIGEST],

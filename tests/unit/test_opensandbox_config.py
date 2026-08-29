@@ -43,6 +43,7 @@ def _endpoint(**overrides) -> dict:
 
 def _raw(**overrides) -> dict:
     base = {
+        "installation_id": "openace-test",
         "default_tier": "gvisor",
         "endpoints": {"gvisor": _endpoint()},
         "image_allowlist": [_DIGEST],
@@ -480,3 +481,57 @@ def test_a_required_tenant_inside_the_rollout_is_accepted():
 def test_unknown_rollout_mode_is_rejected():
     with pytest.raises(SandboxConfigError):
         parse_backend_config(_raw(rollout={"mode": "sometimes"}))
+
+
+@pytest.mark.parametrize("value", ["false", "False", "0", "no", "", 0, 1, None, []])
+def test_a_non_boolean_attestation_is_refused_rather_than_coerced(value):
+    """`bool("false")` is True, and these flags grant security capabilities.
+
+    A templating layer that renders booleans as strings would have turned a
+    withheld attestation into a granted one — silently, and failing OPEN. Only
+    a real JSON boolean is accepted.
+    """
+    raw = _raw()
+    raw["endpoints"]["gvisor"]["attestations"] = dict(
+        raw["endpoints"]["gvisor"]["attestations"], nonroot_enforced=value
+    )
+    with pytest.raises(SandboxConfigError, match="boolean"):
+        parse_backend_config(raw)
+
+
+@pytest.mark.parametrize("flag", ["egress_preapplied", "recycle_delete"])
+def test_a_string_pool_flag_is_refused(flag):
+    """Same coercion hazard on the warm-pool guarantees.
+
+    These decide whether a recycled sandbox keeps its egress policy and whether
+    teardown really deletes; "false" reading as True is a security downgrade.
+    """
+    raw = _raw()
+    raw["endpoints"]["gvisor"]["pool"] = {"pool_ref": "p", flag: "false"}
+    with pytest.raises(SandboxConfigError, match="boolean"):
+        parse_backend_config(raw)
+
+
+def test_a_real_boolean_attestation_still_parses():
+    raw = _raw()
+    raw["endpoints"]["gvisor"]["attestations"] = dict(
+        raw["endpoints"]["gvisor"]["attestations"], nonroot_enforced=False
+    )
+    cfg = parse_backend_config(raw)
+    assert cfg.endpoints["gvisor"].attestations.nonroot_enforced is False
+
+
+def test_a_config_without_an_installation_id_is_refused():
+    """Reconciliation deletes what it does not recognise; it must know who we are."""
+    raw = _raw()
+    raw.pop("installation_id", None)
+    with pytest.raises(SandboxConfigError, match="installation_id"):
+        parse_backend_config(raw)
+
+
+@pytest.mark.parametrize("value", ["has space", "a" * 64, "semi;colon", "comma,tag"])
+def test_a_malformed_installation_id_is_refused(value):
+    raw = _raw()
+    raw["installation_id"] = value
+    with pytest.raises(SandboxConfigError, match="installation_id"):
+        parse_backend_config(raw)

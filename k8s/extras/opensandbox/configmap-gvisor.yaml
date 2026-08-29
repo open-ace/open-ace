@@ -1,4 +1,11 @@
-# OpenSandbox server configuration for the gVisor tier (Issue #2023).
+# OpenSandbox server configuration for the gvisor tier (Issue #2023).
+#
+# Schema: https://github.com/opensandbox-group/OpenSandbox/blob/main/server/configuration.md
+# Keys are placed in the sections upstream actually parses. `namespace` and
+# `batchsandbox_template_file` live under [kubernetes], NOT [runtime] —
+# [runtime] accepts only type / execd_image / execd_run_as_init, so a
+# `namespace` written there does not select the sandbox namespace and the
+# template is never loaded at all.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,21 +13,44 @@ metadata:
   namespace: open-ace
 data:
   sandbox.toml: |
+    [server]
+    host = "0.0.0.0"
+    # Must match the Deployment's containerPort and the probe port.
+    port = 8080
+
     [runtime]
     type = "kubernetes"
-    execd_image = "opensandbox/execd:latest"
+    execd_image = "opensandbox/execd:v1.1.0"
+
+    [kubernetes]
+    # In-cluster credentials: kubeconfig_path stays unset on purpose.
     namespace = "open-ace-sandboxes"
+    workload_provider = "batchsandbox"
+    # The pod hardening that backs the nonroot / readonly-rootfs / seccomp /
+    # dedicated-service-account / ephemeral-storage attestations. Without this
+    # line the template is inert and every one of those attestations is a
+    # promise nothing keeps.
+    batchsandbox_template_file = "/etc/opensandbox/templates/batchsandbox-template.yaml"
+    image_pull_policy = "IfNotPresent"
 
     [secure_runtime]
     # Server-level, not per-request. The provider's boot probe reads
     # /proc/version in a fresh sandbox and refuses to run if the kernel does not
     # match the tier's declared runtime_class, so this value is verified rather
-    # than trusted.
+    # than trusted. The server stamps runtimeClassName on every sandbox pod from
+    # k8s_runtime_class, which is why the shared template does not set it.
     type = "gvisor"
     k8s_runtime_class = "gvisor"
 
     [egress]
+    # image is REQUIRED whenever a client sends networkPolicy on create, and
+    # this provider always does (policy.build_network_policy). Omitting it makes
+    # every create fail rather than quietly running without egress control.
+    image = "opensandbox/egress:v1.1.7"
     # dns+nft, not dns: DNS-only enforcement cannot stop a connection made to a
     # bare IP. The provider probes the sidecar's /policy and fails closed when
     # enforcementMode is anything else.
     mode = "dns+nft"
+
+    [ingress]
+    mode = "direct"

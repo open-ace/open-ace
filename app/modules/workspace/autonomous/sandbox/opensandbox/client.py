@@ -374,27 +374,49 @@ class HttpOpenSandboxApi:
         return urlunparse((scheme, parsed.netloc, path, "", urlencode(query), ""))
 
     def execd_headers(self, sandbox_id: str) -> dict[str, str]:
-        """Headers a caller outside this class (the PTY transport) must send."""
-        return dict(self._resolve_execd(sandbox_id)[1])
+        """Headers a caller outside this class (the PTY transport) must send.
+
+        Must produce the same credential set as :meth:`_execd_request`: the
+        static configured token first, then the server-resolved per-sandbox
+        headers on top. Returning only the resolved headers made every PTY
+        upgrade unauthenticated on a deployment that authenticates execd with
+        the configured ``EXECD_ACCESS_TOKEN`` — the HTTP calls would succeed
+        and the WebSocket would be rejected, which reads as a transport bug
+        rather than a missing credential.
+        """
+        return self._execd_auth_headers(sandbox_id)
 
     # ── plumbing ──────────────────────────────────────────────────────
 
     def _lifecycle(self, method: str, path: str, *, allow_404: bool = False, **kwargs) -> Any:
         headers = {LIFECYCLE_API_KEY_HEADER: self._endpoint.api_key()}
         url = f"{self._endpoint.base_url.rstrip('/')}{path}"
-        return self._request(method, url, headers=headers, allow_404=allow_404, **kwargs)
+        # allow_redirects=False, matching _execd_request. Requests strips
+        # `Authorization` on a cross-host redirect but has no such rule for
+        # arbitrary headers, so a 30x from a compromised or misconfigured
+        # lifecycle host would forward OPEN-SANDBOX-API-KEY to wherever it
+        # pointed. The base_url is operator-configured and already correct;
+        # there is no redirect we would want to follow.
+        return self._request(
+            method, url, headers=headers, allow_404=allow_404, allow_redirects=False, **kwargs
+        )
 
-    def _execd_request(
-        self, sandbox_id: str, method: str, path: str, *, allow_404: bool = False, **kwargs
-    ) -> Any:
-        base, resolved_headers = self._resolve_execd(sandbox_id)
+    def _execd_auth_headers(self, sandbox_id: str) -> dict[str, str]:
+        """The execd credential set — the one definition, HTTP and WebSocket."""
         headers: dict[str, str] = {}
         token = self._endpoint.execd_token()
         if token:
             headers[EXECD_TOKEN_HEADER] = token
         # A server-supplied per-sandbox token takes precedence over the static
         # one: upstream's secureAccess mints a credential per sandbox.
-        headers.update(resolved_headers)
+        headers.update(self._resolve_execd(sandbox_id)[1])
+        return headers
+
+    def _execd_request(
+        self, sandbox_id: str, method: str, path: str, *, allow_404: bool = False, **kwargs
+    ) -> Any:
+        base, _ = self._resolve_execd(sandbox_id)
+        headers = self._execd_auth_headers(sandbox_id)
         url = f"{base.rstrip('/')}{path}"
         # allow_redirects=False: the execd host was server-supplied and already
         # allowlisted; a redirect would move the request off that host after the

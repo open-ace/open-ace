@@ -2379,7 +2379,6 @@ class AutonomousAgentRunner:
                     milestone_id=milestone_id,
                     system_account=system_account,
                     runtime_python_command=runtime_python_command,
-                    tenant_id=self._resolve_tenant_id(user_id),
                 )
 
             result.prompt = prompt
@@ -2540,6 +2539,26 @@ class AutonomousAgentRunner:
         project_path = os.path.expanduser(project_path)
         # Ensure the project dir exists (cross-user safe, Issue #1395).
         self._ensure_project_dir(project_path, system_account)
+
+        # #2023: resolve the tenant and check the isolation policy HERE, above
+        # the protocol dispatch. The dispatch below returns from inside itself
+        # for ZCode and for every adapter without stdin, so neither ever reached
+        # the provider gate further down — a tenant in production_required_tenants
+        # picking one of those tools would have run on Legacy with nothing
+        # recorded to say the policy had been bypassed. Fail closed instead.
+        try:
+            if tenant_id is None:
+                tenant_id = self._resolve_tenant_for_isolation(
+                    user_id, cli_tool=cli_tool, adapter=adapter
+                )
+        except SandboxError as e:
+            return AgentTaskResult(
+                session_id=session_id,
+                tracking_session_id=session_id,
+                success=False,
+                error=f"Sandbox unavailable: {e}",
+                error_code=getattr(e, "reason_code", "") or "sandbox_unavailable",
+            )
 
         # Protocol dispatch: different CLI tools speak different stdin protocols.
         # The generic _LocalSession path below assumes Claude SDK stream-json,
@@ -2702,7 +2721,17 @@ class AutonomousAgentRunner:
             logger.info("Launching agent in sandbox %s", sandbox_handle.sandbox_id)
 
         try:
-            exec_handle = provider.exec(sandbox_handle, command=cmd, env=env, exec_policy=None)
+            # #2023: materialize the project tree inside the sandbox BEFORE the
+            # agent starts. Legacy no-ops (the worktree is already there); an
+            # ephemeral backend would otherwise hand the agent an empty /workspace.
+            provider.upload_workspace(sandbox_handle, None)
+            # The provider decides its own per-turn policy. Passing a literal
+            # None here is what kept every OpenSandbox run on the foreground
+            # /command branch, whose ExecHandle get_transport() then refuses.
+            exec_policy = provider.agent_turn_policy(prompt=prompt, model=model, env=env)
+            exec_handle = provider.exec(
+                sandbox_handle, command=cmd, env=env, exec_policy=exec_policy
+            )
             # #2023: the "replaceable local seam" #2022 anticipated. The CLI
             # stream-json layer (_read_stdout/_send_sdk_init) now drives an
             # AgentTransport rather than a raw Popen, so a container backend
@@ -2808,6 +2837,20 @@ class AutonomousAgentRunner:
             # and os.getpgid(None) raises a TypeError none of the handlers here
             # catch. The transport owns its own escalation.
             transport.shutdown(grace=5.0)
+
+        # #2023: bring the agent's work product back out BEFORE destroy — after
+        # destroy the ephemeral filesystem is gone and the run's entire output
+        # with it. Legacy no-ops (the agent edited the trusted worktree in
+        # place). A failure here is NOT swallowed: for an ephemeral backend an
+        # un-collected run has produced nothing, and reporting it as a success
+        # is exactly the quiet data loss this backend exists to prevent.
+        try:
+            provider.apply_changes(sandbox_handle, project_path)
+        except Exception as e:  # noqa: BLE001 - any failure invalidates the run
+            logger.error("sandbox changeset apply failed for %s: %s", session_id[:8], e)
+            if not session.error:
+                session.error = f"Sandbox work product could not be applied: {e}"
+                session.error_code = getattr(e, "reason_code", "") or "changeset_apply_failed"
 
         # #2022 P3b: release the provider sandbox (reap any stragglers the
         # process-group signal missed + clear its _procs so a shared provider
@@ -3705,12 +3748,21 @@ class AutonomousAgentRunner:
 
         return events, tool_calls
 
-    def _resolve_tenant_id(self, user_id: int | None) -> int:
-        """Resolve the tenant for a run, defaulting to 1.
+    def _resolve_tenant_id_strict(self, user_id: int | None) -> int:
+        """Resolve the tenant, raising rather than guessing (#2023).
 
-        Single source: the sandbox isolation tier (#2023) and the session row
-        must agree on which tenant a run belongs to, and a second derivation
-        path would drift from the first.
+        Single source: the sandbox isolation tier and the session row must agree
+        on which tenant a run belongs to, and a second derivation path would
+        drift from the first — so this is the only lookup, and
+        :meth:`_resolve_tenant_id` is a wrapper over it.
+
+        A lookup FAILURE is not the same as "tenant 1".
+        ``production_required_tenants`` is keyed by tenant, so answering 1 for a
+        tenant whose policy demands production isolation silently downgrades
+        exactly the runs the policy exists to protect — and a DB blip is when
+        that is most likely to happen. Callers deciding *isolation* use this and
+        fail closed; callers doing *bookkeeping* use the lenient wrapper,
+        because a usage-sync row is not worth failing a run over.
         """
         if not user_id:
             return 1
@@ -3718,11 +3770,81 @@ class AutonomousAgentRunner:
             from app.repositories.user_repo import UserRepository
 
             user = UserRepository().get_user_by_id(user_id)
-            if user and user.get("tenant_id"):
+        except Exception as e:
+            raise SandboxError(
+                f"cannot resolve tenant for user {user_id}: {e}; refusing to assume "
+                "the default tenant because its isolation policy may be weaker"
+            ) from e
+        if user and user.get("tenant_id"):
+            try:
                 return int(user["tenant_id"])
-        except Exception:
-            pass  # default tenant
+            except (TypeError, ValueError) as e:
+                raise SandboxError(
+                    f"user {user_id} has a non-integer tenant_id {user['tenant_id']!r}"
+                ) from e
+        # No row, or a row with no tenant: a real, readable answer, not an error.
         return 1
+
+    def _resolve_tenant_id(self, user_id: int | None) -> int:
+        """Lenient tenant resolution for session/usage bookkeeping only.
+
+        NOT for the isolation decision — see :meth:`_resolve_tenant_id_strict`.
+        """
+        try:
+            return self._resolve_tenant_id_strict(user_id)
+        except SandboxError as e:
+            logger.warning(
+                "tenant lookup failed for user %s, using 1 for bookkeeping: %s", user_id, e
+            )
+            return 1
+
+    def _resolve_tenant_for_isolation(
+        self,
+        user_id: int | None,
+        *,
+        cli_tool: str,
+        adapter: Any,
+    ) -> int:
+        """Resolve the tenant and refuse a path that cannot honour its policy (#2023).
+
+        ``_select_sandbox_provider`` is the gate, but two paths in ``_run_local``
+        return before reaching it: ZCode speaks its own app-server protocol, and
+        an adapter without stdin goes through ``_run_single_shot``. Both spawn a
+        local process directly, which for a tenant in
+        ``production_required_tenants`` is exactly the silent fallback
+        acceptance criterion 12 forbids. It becomes a refusal here instead —
+        naming the tool, because "sandbox unavailable" with no cause sends an
+        operator to the cluster to look for a fault that is not there.
+
+        Strictness is scoped rather than global. When no tenant has a
+        production-isolation policy, a guessed tenant id cannot downgrade
+        anyone, so a tenant lookup that fails stays lenient — failing every
+        local run because the users table hiccuped would be a far larger
+        outage than the one this guards against.
+        """
+        from app.modules.workspace.autonomous.sandbox.isolation_tier import (
+            requires_production_isolation,
+        )
+
+        config = self._load_backend_config()
+        if config is None or not config.production_required_tenants:
+            return self._resolve_tenant_id(user_id)
+
+        tenant_id = self._resolve_tenant_id_strict(user_id)
+        if not requires_production_isolation(tenant_id, config):
+            return tenant_id
+        if cli_tool in _APPSERVER_TOOLS:
+            reason = "speaks its own app-server protocol"
+        elif not adapter.supports_stdin_input():
+            reason = "has no stdin protocol and runs single-shot"
+        else:
+            return tenant_id
+        raise SandboxError(
+            f"tenant {tenant_id} requires production isolation, but {cli_tool!r} {reason} "
+            "and its execution path bypasses the sandbox provider; choose a CLI tool that "
+            "supports the stream-json protocol (claude-code, qwen-code-cli) or remove the "
+            "tenant from production_required_tenants"
+        )
 
     def _select_sandbox_provider(
         self,

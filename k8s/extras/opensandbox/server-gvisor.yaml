@@ -45,7 +45,7 @@ spec:
           env:
             # The API key the control plane presents. sandbox-backends.json
             # references it by env-var NAME only; the value never appears there.
-            - name: OPEN_SANDBOX_API_KEY
+            - name: OPENSANDBOX_SERVER_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: opensandbox-keys
@@ -62,11 +62,17 @@ spec:
             - name: config
               mountPath: /etc/opensandbox
               readOnly: true
+            # The BatchSandbox template referenced by
+            # [kubernetes] batchsandbox_template_file. Mounted separately so the
+            # path in sandbox.toml and the path on disk cannot drift.
+            - name: sandbox-template
+              mountPath: /etc/opensandbox/templates
+              readOnly: true
             - name: tmp
               mountPath: /tmp
           readinessProbe:
             httpGet:
-              path: /healthz
+              path: /health
               port: http
           resources:
             requests:
@@ -79,6 +85,9 @@ spec:
         - name: config
           configMap:
             name: opensandbox-config-gvisor
+        - name: sandbox-template
+          configMap:
+            name: opensandbox-sandbox-template
         - name: tmp
           emptyDir: {}
 

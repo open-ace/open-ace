@@ -65,6 +65,7 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
 
 ```json
 {
+  "installation_id": "openace-prod-sg",
   "default_tier": "gvisor",
   "endpoints": {
     "gvisor": {
@@ -102,6 +103,13 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
 
 Points worth knowing before you edit it:
 
+- **`installation_id` is required and must be unique per deployment.** It is
+  stamped on every sandbox's metadata, and orphan reconciliation destroys every
+  sandbox carrying our provider tag that no local workflow row claims. Two
+  Open ACE installations sharing one lifecycle server with the same tag (or
+  none) would each classify the other's live sandboxes as unclaimed and delete
+  them mid-run. Keep it stable across restarts — changing it strands the
+  sandboxes created under the old value.
 - **Tenant keys are `str(tenant_id)`**, the integer this codebase carries — not
   a slug. There is no name→id mapping anywhere, so a slug key would match
   nothing.

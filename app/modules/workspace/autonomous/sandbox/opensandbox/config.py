@@ -48,6 +48,11 @@ _METADATA_HOSTS = frozenset(
 
 _HOSTNAME_LABEL = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", re.IGNORECASE)
 
+# Metadata values travel to upstream as plain strings; keep the installation tag
+# to a conservative, label-safe alphabet so it cannot inject separators into the
+# metadata filter that reconciliation queries with.
+_INSTALLATION_ID = re.compile(r"^[A-Za-z0-9._-]{1,63}$")
+
 
 class SandboxConfigError(SandboxError):
     """Backend configuration is missing, malformed, or internally inconsistent.
@@ -226,6 +231,13 @@ class SandboxBackendConfig:
 
     default_tier: str
     endpoints: Mapping[str, EndpointConfig]
+    # This control plane's identity, stamped on every sandbox's metadata and
+    # REQUIRED (parse refuses an empty one). Orphan reconciliation destroys
+    # every sandbox it does not recognise, so on a lifecycle server shared by
+    # two Open ACE installations a provider-only filter makes each one classify
+    # the other's live sandboxes as unclaimed and delete them mid-run. The tag
+    # must be stable across restarts and distinct per installation.
+    installation_id: str = ""
     tenant_tiers: Mapping[str, str] = field(default_factory=dict)
     project_tiers: Mapping[str, str] = field(default_factory=dict)
     # Tenants for which Legacy is not an acceptable answer. This is the sole
@@ -374,6 +386,19 @@ def parse_backend_config(raw: Mapping[str, Any]) -> SandboxBackendConfig:
             f"(upstream CreateSandboxRequest.timeout minimum), got {ttl}"
         )
 
+    installation_id = str(raw.get("installation_id") or "").strip()
+    if not installation_id:
+        raise SandboxConfigError(
+            "installation_id is required: it is stamped on every sandbox's metadata "
+            "and is what stops this deployment's orphan reconciliation from destroying "
+            "another Open ACE installation's live sandboxes on a shared lifecycle server"
+        )
+    if not _INSTALLATION_ID.match(installation_id):
+        raise SandboxConfigError(
+            f"installation_id {installation_id!r} must be 1-63 characters of "
+            "[A-Za-z0-9._-] (it travels as an upstream metadata value)"
+        )
+
     raw_endpoints = raw.get("endpoints") or {}
     if not isinstance(raw_endpoints, dict) or not raw_endpoints:
         raise SandboxConfigError("endpoints must be a non-empty object")
@@ -408,6 +433,7 @@ def parse_backend_config(raw: Mapping[str, Any]) -> SandboxBackendConfig:
     return SandboxBackendConfig(
         default_tier=default_tier,
         endpoints=endpoints,
+        installation_id=installation_id,
         tenant_tiers={str(k): str(v) for k, v in (raw.get("tenant_tiers") or {}).items()},
         project_tiers={str(k): str(v) for k, v in (raw.get("project_tiers") or {}).items()},
         production_required_tenants=required_tenants,
@@ -506,7 +532,7 @@ def _parse_attestations(tier: str, raw: Any) -> Attestations:
             continue
         # bool is a subclass of int, so test for it first.
         if isinstance(f.default, bool):
-            values[f.name] = bool(raw[f.name])
+            values[f.name] = _bool_or_raise(raw[f.name], f"endpoint {tier!r} attestation {f.name}")
         else:
             value = _int_or_raise(raw[f.name], f"endpoint {tier!r} attestation {f.name}")
             if value < 0:
@@ -525,8 +551,16 @@ def _parse_pool(tier: str, raw: Any) -> PoolConfig:
         _require_digest_pinned(image_digest, f"endpoint {tier!r} pool.image_digest")
     return PoolConfig(
         pool_ref=str(raw.get("pool_ref") or ""),
-        egress_preapplied=bool(raw.get("egress_preapplied")),
-        recycle_delete=bool(raw.get("recycle_delete")),
+        # Same strict coercion as the attestations: these two decide whether a
+        # recycled pool sandbox keeps its egress policy and whether teardown
+        # really deletes, so a string "false" reading as True is a security
+        # downgrade, not a cosmetic one.
+        egress_preapplied=_bool_or_raise(
+            raw.get("egress_preapplied", False), f"endpoint {tier!r} pool.egress_preapplied"
+        ),
+        recycle_delete=_bool_or_raise(
+            raw.get("recycle_delete", False), f"endpoint {tier!r} pool.recycle_delete"
+        ),
         image_digest=image_digest,
     )
 
@@ -602,6 +636,23 @@ def _str_list(raw: Mapping[str, Any], key: str) -> list[str]:
     if not isinstance(value, (list, tuple)):
         raise SandboxConfigError(f"{key} must be a list")
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _bool_or_raise(value: Any, label: str) -> bool:
+    """Accept a real JSON boolean only.
+
+    ``bool(value)`` is wrong for every field this guards: a templating layer
+    that emits ``"false"`` (a non-empty string) would turn a *withheld*
+    security attestation into a granted one, and the provider grants
+    capabilities off these flags. The failure is silent and fails OPEN, so the
+    coercion is refused rather than widened.
+    """
+    if not isinstance(value, bool):
+        raise SandboxConfigError(
+            f"{label} must be a JSON boolean (true/false), got {value!r}; "
+            'strings such as "false" are refused because they would read as true'
+        )
+    return value
 
 
 def _int_or_raise(value: Any, label: str) -> int:

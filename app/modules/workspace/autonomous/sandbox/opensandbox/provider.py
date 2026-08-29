@@ -30,7 +30,7 @@ import itertools
 import shlex
 import time
 import uuid
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -480,12 +480,33 @@ class OpenSandboxProvider:
         """Destroy by persisted id alone, for the post-restart reconciler.
 
         Best-effort and idempotent: the sweep walks many rows and one bad row
-        must never abort it.
+        must never abort it. The frozen ``#2022`` Protocol types this ``None``,
+        so callers that need to know whether teardown actually happened use
+        :meth:`destroy_attribution_checked` instead.
+        """
+        self.destroy_attribution_checked(sandbox_id, remote_session_id)
+
+    def destroy_attribution_checked(self, sandbox_id: str, remote_session_id: str | None) -> bool:
+        """:meth:`destroy_attribution`, but reporting whether it worked.
+
+        An extension beyond the Protocol — the same shape as
+        :meth:`get_transport` — because widening the Protocol's return type
+        would change the ``#2022`` contract for every provider.
+
+        Reporting is the point. Swallowing the error let the scheduler clear
+        ``sandbox_id`` on a transient API outage, discarding the one piece of
+        information a later retry needs: the sandbox keeps running until its
+        TTL and nothing left in the database can name it.
         """
         try:
             self._api.delete_sandbox(sandbox_id)
-        except Exception:  # noqa: BLE001 - never raises, by contract
-            pass
+        except Exception as exc:  # noqa: BLE001 - report, never raise
+            self._emit(
+                "sandbox_destroy_attribution_failed",
+                {"sandbox_id": sandbox_id, "error": str(exc)},
+            )
+            return False
+        return True
 
     def inspect(self, handle: SandboxHandle) -> SandboxStatus:
         if handle.sandbox_id in self._destroyed:
@@ -499,6 +520,23 @@ class OpenSandboxProvider:
         return policy_mod.map_state(str((record.get("status") or {}).get("state") or ""))
 
     # ── extensions beyond the Protocol ────────────────────────────────
+
+    def agent_turn_policy(self, *, prompt: str, model: str, env: Mapping[str, str]) -> Any:
+        """Build the ``exec_policy`` that selects the PTY agent-turn path.
+
+        The runner cannot construct this itself without importing an
+        OpenSandbox-specific type into ``agent_runner``, and it cannot pass
+        ``None`` either: ``exec`` would then take the ``POST /command``
+        foreground branch and the very next ``get_transport()`` would refuse
+        the state with ``not_an_agent_turn``. Every provider that ``_run_local``
+        can select therefore answers this — Legacy returns ``None``, which is
+        exactly the value it was already being given.
+        """
+        return OpenSandboxTurnSpec(
+            prompt=prompt,
+            model=model,
+            proxy_token=str(env.get("OPENACE_PROXY_TOKEN") or ""),
+        )
 
     def get_transport(self, exec_handle: ExecHandle) -> Any:
         """Return the :class:`AgentTransport` for an agent turn."""
@@ -519,8 +557,19 @@ class OpenSandboxProvider:
         workloads.
         """
         destroyed: list[str] = []
+        installation = self._config.installation_id
+        if not installation:
+            # Cannot happen through parse_backend_config, which requires it —
+            # but a hand-built config in a test or a future caller could get
+            # here, and an unscoped sweep on a shared server deletes other
+            # installations' running sandboxes. Refuse to sweep at all.
+            return destroyed
+        query = {
+            "openace.provider": PROVIDER_NAME,
+            policy_mod.INSTALLATION_METADATA_KEY: installation,
+        }
         try:
-            rows = self._api.list_sandboxes({"openace.provider": PROVIDER_NAME})
+            rows = self._api.list_sandboxes(query)
         except Exception:  # noqa: BLE001 - a failed sweep must not raise
             return destroyed
         live = set(live_sandbox_ids)
@@ -528,8 +577,14 @@ class OpenSandboxProvider:
             sandbox_id = str(row.get("id") or "")
             metadata = row.get("metadata") or {}
             # Belt and braces: filter client-side too, in case a server ignores
-            # the query parameter.
+            # the query parameters. The installation check is the load-bearing
+            # half — a server that ignored the filter would otherwise hand us
+            # another deployment's sandboxes, and every one of them looks
+            # "unclaimed" from here because its workflow rows live in a
+            # different database.
             if metadata.get("openace.provider") != PROVIDER_NAME:
+                continue
+            if metadata.get(policy_mod.INSTALLATION_METADATA_KEY) != installation:
                 continue
             if not sandbox_id or sandbox_id in live:
                 continue

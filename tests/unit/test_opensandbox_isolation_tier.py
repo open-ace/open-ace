@@ -34,6 +34,7 @@ _FULL = {
 
 def _cfg(**overrides):
     raw = {
+        "installation_id": "openace-test",
         "default_tier": "gvisor",
         "endpoints": {
             "gvisor": {
@@ -163,3 +164,90 @@ def test_project_allowlist_routes_a_single_repository_to_the_sandbox():
 
 def test_default_all_mode_keeps_every_tenant_on_the_sandbox():
     assert isinstance(_select(tenant="7"), OpenSandboxProvider)
+
+
+# ── the gate the protocol dispatch used to skip (spec §6.4) ───────────
+
+
+def _runner_with_config(monkeypatch, tmp_path, required_tenants):
+    """A runner whose backend config marks *required_tenants* no-downgrade."""
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+    config = _cfg(production_required_tenants=list(required_tenants))
+    runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
+    runner._load_backend_config = lambda: config
+    runner._resolve_tenant_id_strict = lambda user_id: 42
+    runner._resolve_tenant_id = lambda user_id: 42
+    return runner
+
+
+class _NoStdinAdapter:
+    @staticmethod
+    def supports_stdin_input() -> bool:
+        return False
+
+
+class _StdinAdapter:
+    @staticmethod
+    def supports_stdin_input() -> bool:
+        return True
+
+
+def test_zcode_is_refused_for_a_production_required_tenant(monkeypatch, tmp_path):
+    """ZCode returns from the protocol dispatch, above the provider gate.
+
+    Acceptance criterion 12 says a required policy must not silently fall back.
+    Before this check the run simply took the app-server path and spawned a
+    local process, with nothing recorded to say the policy had been bypassed.
+    """
+    runner = _runner_with_config(monkeypatch, tmp_path, ["42"])
+    with pytest.raises(SandboxError, match="production isolation"):
+        runner._resolve_tenant_for_isolation(7, cli_tool="zcode", adapter=_StdinAdapter())
+
+
+def test_a_single_shot_tool_is_refused_for_a_production_required_tenant(monkeypatch, tmp_path):
+    runner = _runner_with_config(monkeypatch, tmp_path, ["42"])
+    with pytest.raises(SandboxError, match="production isolation"):
+        runner._resolve_tenant_for_isolation(7, cli_tool="codex", adapter=_NoStdinAdapter())
+
+
+def test_a_stream_json_tool_is_allowed_through_to_the_provider_gate(monkeypatch, tmp_path):
+    runner = _runner_with_config(monkeypatch, tmp_path, ["42"])
+    assert (
+        runner._resolve_tenant_for_isolation(7, cli_tool="claude-code", adapter=_StdinAdapter())
+        == 42
+    )
+
+
+def test_an_unrequired_tenant_may_still_use_zcode(monkeypatch, tmp_path):
+    """The refusal is scoped to the policy, not a blanket ban on the tool."""
+    runner = _runner_with_config(monkeypatch, tmp_path, ["99"])
+    assert runner._resolve_tenant_for_isolation(7, cli_tool="zcode", adapter=_StdinAdapter()) == 42
+
+
+def test_a_tenant_lookup_failure_is_fatal_only_when_a_policy_exists(monkeypatch, tmp_path):
+    """A DB blip must not downgrade a protected tenant — nor break everyone else.
+
+    With a production-required list, guessing tenant 1 could silently answer
+    "not required" for a tenant that is. With no such list, nothing can be
+    downgraded, so failing every local run over a users-table hiccup would be a
+    far larger outage than the one being guarded against.
+    """
+    runner = _runner_with_config(monkeypatch, tmp_path, ["42"])
+
+    def _boom(user_id):
+        raise SandboxError("users table unreadable")
+
+    runner._resolve_tenant_id_strict = _boom
+    runner._resolve_tenant_id = lambda user_id: 1
+    with pytest.raises(SandboxError, match="users table"):
+        runner._resolve_tenant_for_isolation(7, cli_tool="claude-code", adapter=_StdinAdapter())
+
+    # Same failure, no policy configured: lenient.
+    lenient = _runner_with_config(monkeypatch, tmp_path, [])
+    lenient._resolve_tenant_id_strict = _boom
+    lenient._resolve_tenant_id = lambda user_id: 1
+    assert (
+        lenient._resolve_tenant_for_isolation(7, cli_tool="claude-code", adapter=_StdinAdapter())
+        == 1
+    )

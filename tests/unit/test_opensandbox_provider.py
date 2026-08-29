@@ -57,6 +57,7 @@ def _cfg(attestations=None, *, pool=None, tenant_tiers=None, endpoints=None, **o
     if pool is not None:
         endpoint["pool"] = pool
     raw = {
+        "installation_id": "openace-test",
         "default_tier": "gvisor",
         "endpoints": endpoints or {"gvisor": endpoint},
         "image_allowlist": [_DIGEST],

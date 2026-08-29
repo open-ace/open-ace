@@ -388,6 +388,24 @@ class LegacyPosixProvider:
         # Legacy no-op: the local worktree is already in place.
         return None
 
+    def apply_changes(self, handle: SandboxHandle, worktree_path: str) -> None:
+        """No-op: the agent edited the trusted worktree directly (#2023).
+
+        Paired with :meth:`upload_workspace`. ``_run_local`` calls both
+        unconditionally so the sandboxed round-trip is the *default* shape of a
+        run rather than a branch a future backend has to remember to add; for
+        Legacy both ends collapse to nothing, which is the honest answer.
+        """
+        return None
+
+    def agent_turn_policy(self, *, prompt: str, model: str, env: Any) -> None:
+        """Legacy has no per-turn execution policy (#2023).
+
+        ``None`` is exactly what ``_run_local`` passed as ``exec_policy``
+        before the seam existed, so routing Legacy through it is a no-change.
+        """
+        return None
+
     def collect_execution_evidence(self, handle: SandboxHandle) -> list[Any]:
         """Return the sandbox's process-level :class:`CommandExecutionEvidence`.
 

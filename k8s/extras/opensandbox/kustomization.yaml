@@ -3,7 +3,7 @@ kind: Kustomization
 resources:
   - rbac.yaml
   - runtimeclasses.yaml
-  - sandbox-podtemplate.yaml
+  - configmap-sandbox-template.yaml
   - networkpolicy.yaml
   - configmap-gvisor.yaml
   - configmap-kata.yaml

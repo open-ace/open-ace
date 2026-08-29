@@ -1,0 +1,87 @@
+# The BatchSandbox CR template both OpenSandbox servers apply (Issue #2023).
+#
+# This is the file `[kubernetes] batchsandbox_template_file` points at. It is
+# NOT a core/v1 PodTemplate: upstream's BatchSandboxTemplateManager reads a
+# partial BatchSandbox CR whose `spec.template` is a corev1.PodTemplateSpec, and
+# merges it into the manifest it generates per sandbox. An unreferenced
+# `kind: PodTemplate` object applied to the cluster is inert — the server never
+# looks for one — which would leave every attestation below asserted with
+# nothing enforcing it (the #2082 failure this design exists to avoid).
+#
+# EVERY property here backs an attestation in sandbox-backends.json. The
+# provider cannot observe any of them through the sandbox API, so it declares
+# the matching capability only because an operator asserted it — and refuses to
+# run at all when the assertion is absent (spec §5.2 refusal 9). Removing a
+# field here without removing its attestation makes the workflow row lie.
+#
+#   runAsNonRoot / runAsUser           -> nonroot_enforced
+#   readOnlyRootFilesystem             -> readonly_rootfs
+#   seccompProfile RuntimeDefault      -> seccomp_runtime_default
+#   serviceAccountName (no RBAC)       -> dedicated_service_account
+#   emptyDir sizeLimit                 -> ephemeral_storage_enforced
+#   podPidsLimit (kubelet, see README) -> pod_pids_limit
+#
+# The container is named `sandbox` deliberately: upstream's
+# _extract_template_pod_extras() searches the template's containers for exactly
+# that name and lifts its volumeMounts and securityContext into the generated
+# pod. Without a match it falls back to containers[0] — the same entry today,
+# but do not rely on that.
+#
+# runtimeClassName is deliberately ABSENT. The server sets it from
+# `[secure_runtime] k8s_runtime_class`, so one template serves both the gVisor
+# and the Kata tier and neither can drift from its own server's real runtime.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opensandbox-sandbox-template
+  namespace: open-ace
+data:
+  batchsandbox-template.yaml: |
+    metadata:
+      labels:
+        app.kubernetes.io/name: opensandbox-sandbox
+        app.kubernetes.io/part-of: open-ace
+    spec:
+      replicas: 1
+      template:
+        spec:
+          restartPolicy: Never
+          terminationGracePeriodSeconds: 30
+          serviceAccountName: opensandbox-sandbox
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: sandbox
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                # HOME must be writable — the repo synthesis runs `git init`
+                # plus a commit and git needs somewhere to write config under a
+                # read-only rootfs — and must live OUTSIDE /workspace, or
+                # `git add -A` stages the whole home tree (pip wheels, npm,
+                # pre-commit envs) into the initial commit.
+                - name: home
+                  mountPath: /home/agent
+                - name: workspace
+                  mountPath: /workspace
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: home
+              emptyDir:
+                sizeLimit: 1Gi
+            - name: workspace
+              emptyDir:
+                sizeLimit: 8Gi
+            - name: tmp
+              emptyDir:
+                sizeLimit: 1Gi

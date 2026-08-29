@@ -437,3 +437,49 @@ def test_malformed_midstream_sse_event_surfaces_as_an_error_not_silence():
     raw = b'data: {"type":"stdout","text":"a"}\n\ndata: {broken\n\ndata: {"type":"execution_complete"}\n\n'
     kinds = [e["type"] for e in iter_sse_events(_Response(content=raw))]
     assert kinds == ["stdout", "error", "execution_complete"]
+
+
+def test_lifecycle_requests_do_not_follow_redirects():
+    """Requests strips `Authorization` across hosts — not arbitrary headers.
+
+    OPEN-SANDBOX-API-KEY is a custom header, so a 30x from the lifecycle host
+    would carry the API key to wherever it pointed. The base_url is
+    operator-configured and already correct; there is no redirect worth
+    following.
+    """
+    session = _Session([_Response(200, {"id": "sb-1", "status": {"state": "Running"}})])
+    _api(session).get_sandbox("sb-1")
+    assert session.calls[-1]["allow_redirects"] is False
+    assert session.calls[-1]["headers"][LIFECYCLE_API_KEY_HEADER] == "secret-key"
+
+
+def test_the_pty_websocket_gets_the_same_execd_credentials_as_http(monkeypatch):
+    """execd_headers() must not be a weaker credential set than _execd_request.
+
+    The HTTP calls added the configured static token; execd_headers returned
+    only the server-resolved headers. On a deployment authenticating execd with
+    EXECD_ACCESS_TOKEN that made every PTY upgrade unauthenticated — HTTP fine,
+    WebSocket rejected, which reads as a transport bug rather than a missing
+    credential.
+    """
+    monkeypatch.setenv("OSB_EXECD_TOKEN", "execd-secret")
+    session = _Session([_Response(200, {"endpoint": "http://osb.open-ace.svc.cluster.local/p"})])
+    api = _api(session, _endpoint(execd_token_env="OSB_EXECD_TOKEN"))
+    assert api.execd_headers("sb-1")[EXECD_TOKEN_HEADER] == "execd-secret"
+
+
+def test_a_per_sandbox_token_still_wins_for_the_websocket(monkeypatch):
+    monkeypatch.setenv("OSB_EXECD_TOKEN", "static")
+    session = _Session(
+        [
+            _Response(
+                200,
+                {
+                    "endpoint": "http://osb.open-ace.svc.cluster.local/p",
+                    "headers": {EXECD_TOKEN_HEADER: "per-sandbox"},
+                },
+            )
+        ]
+    )
+    api = _api(session, _endpoint(execd_token_env="OSB_EXECD_TOKEN"))
+    assert api.execd_headers("sb-1")[EXECD_TOKEN_HEADER] == "per-sandbox"

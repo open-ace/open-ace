@@ -53,6 +53,11 @@ if TYPE_CHECKING:  # pragma: no cover - annotations only
 
 PROVIDER_NAME = "opensandbox"
 
+# The metadata key carrying this control plane's identity. Shared with the
+# provider's orphan sweep so the tag written and the tag filtered on cannot
+# drift apart.
+INSTALLATION_METADATA_KEY = "openace.installation"
+
 # Upstream CreateSandboxRequest.timeout is seconds with minimum 60.
 _MIN_TTL_SECONDS = 60
 
@@ -500,6 +505,11 @@ def build_create_request(
         # metadata values must all be strings upstream.
         "metadata": {
             "openace.provider": PROVIDER_NAME,
+            # WHICH Open ACE. Reconciliation destroys every sandbox carrying our
+            # provider tag that no local workflow row claims; on a lifecycle
+            # server shared by two installations that filter alone is mutual
+            # destruction. Required by parse_backend_config, so it is never "".
+            INSTALLATION_METADATA_KEY: cfg.installation_id,
             "openace.task_id": str(spec.task_id),
             "openace.tenant": str(tenant or ""),
             "openace.generation": str(generation),

@@ -42,9 +42,11 @@ from app.modules.workspace.autonomous.sandbox.provider import SandboxError
 if TYPE_CHECKING:  # pragma: no cover - annotations only
     from app.modules.workspace.autonomous.sandbox.opensandbox.config import ChangesetLimits
 
-# Directories never uploaded, at any depth. ``.git`` keeps the trusted
-# common-dir unreachable; ``.ssh`` keeps private keys out.
-_EXCLUDED_DIRS = frozenset({".git", ".ssh"})
+# Names never uploaded, at any depth, whether they are a directory OR a file.
+# ``.git`` keeps the trusted common-dir unreachable; ``.ssh`` keeps private keys
+# out. Both forms occur in practice: a normal clone has a ``.git`` directory, a
+# linked ``git worktree`` has a ``.git`` FILE pointing at the host's common dir.
+_EXCLUDED_NAMES = frozenset({".git", ".ssh"})
 
 # The subset whose presence in a *returned* manifest is a repository-integrity
 # problem rather than a credential one. Both are rejected either way, but the
@@ -155,8 +157,17 @@ def _uploadable_files(root: Path) -> Iterator[tuple[Path, str]]:
     """
     for dirpath, dirnames, filenames in os.walk(root):
         # Prune in place so os.walk does not descend into excluded trees.
-        dirnames[:] = [d for d in dirnames if d not in _EXCLUDED_DIRS]
+        dirnames[:] = [d for d in dirnames if d not in _EXCLUDED_NAMES]
         for filename in filenames:
+            # The same names must be excluded as FILES, not only as directories.
+            # In a linked `git worktree` — which is how every autonomous run is
+            # checked out — `.git` is a regular file holding an absolute
+            # `gitdir:` path on the HOST. Excluding it only from `dirnames`
+            # uploaded it: it leaks the control plane's filesystem layout into
+            # the sandbox, and the `git init` synthesis that follows then finds
+            # a .git pointing at a host path that does not exist there.
+            if filename in _EXCLUDED_NAMES:
+                continue
             absolute = Path(dirpath) / filename
             relative = absolute.relative_to(root).as_posix()
             if _is_secret_path(relative):

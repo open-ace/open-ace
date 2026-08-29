@@ -21,9 +21,70 @@ automountServiceAccountToken: false
 
 ---
 # The OpenSandbox server itself DOES need API access — it creates sandbox pods.
-# Scoped to the sandbox namespace only.
+# Its ClusterRole and binding follow below.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: opensandbox-server
   namespace: open-ace
+
+---
+# The server's Kubernetes permissions. Without these it cannot create a single
+# sandbox: BatchSandbox is a CRD, and the pods/services/secrets it generates all
+# need explicit verbs. The rules mirror upstream's opensandbox-server chart
+# ClusterRole, which is the authoritative minimum.
+#
+# ClusterRole rather than Role because two of the rules are genuinely
+# cluster-scoped — `namespaces` (the server resolves its target namespace) and
+# `node.k8s.io/runtimeclasses` (it validates the gVisor/Kata RuntimeClass exists
+# before stamping runtimeClassName on a pod). The namespaced rules are still
+# only ever exercised against `open-ace-sandboxes`, which is the namespace
+# `[kubernetes] namespace` points at.
+#
+# This grant belongs to the SERVER identity only. The per-sandbox
+# ServiceAccount above deliberately has no Role and no projected token — that
+# separation is what `dedicated_service_account` attests to, and binding these
+# rules to it instead would hand every agent the ability to read Secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: opensandbox-server
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/status", "pods/log", "events", "services", "configmaps"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete", "get"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["create", "delete", "get", "list", "patch"]
+  - apiGroups: ["node.k8s.io"]
+    resources: ["runtimeclasses"]
+    verbs: ["get", "list"]
+  - apiGroups: ["sandbox.opensandbox.io"]
+    resources: ["batchsandboxes", "batchsandboxes/status", "batchsandboxes/finalizers"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["sandbox.opensandbox.io"]
+    resources: ["pools", "pools/status", "pools/finalizers"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["sandbox.opensandbox.io"]
+    resources: ["sandboxsnapshots", "sandboxsnapshots/status", "sandboxsnapshots/finalizers"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: opensandbox-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: opensandbox-server
+subjects:
+  - kind: ServiceAccount
+    name: opensandbox-server
+    namespace: open-ace

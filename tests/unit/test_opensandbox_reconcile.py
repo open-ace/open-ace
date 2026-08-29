@@ -20,6 +20,7 @@ _DIGEST = "ghcr.io/open-ace/agent@sha256:" + "a" * 64
 
 def _write_config(tmp_path) -> str:
     raw = {
+        "installation_id": "openace-test",
         "default_tier": "gvisor",
         "endpoints": {
             "gvisor": {
@@ -112,7 +113,10 @@ def test_reconcile_orphans_paginates_and_filters(configured):
     orphan_b = provider.create(_spec("b"))
     destroyed = provider.reconcile_orphans(live_sandbox_ids={keep.sandbox_id})
     assert sorted(destroyed) == sorted([orphan_a.sandbox_id, orphan_b.sandbox_id])
-    assert api.list_filters[-1] == {"openace.provider": "opensandbox"}
+    assert api.list_filters[-1] == {
+        "openace.provider": "opensandbox",
+        "openace.installation": "openace-test",
+    }
 
 
 def test_reconcile_never_destroys_sandboxes_without_our_metadata(configured):
@@ -141,3 +145,78 @@ def _spec(task_id: str):
     from app.modules.workspace.autonomous.sandbox.types import SandboxSpec
 
     return SandboxSpec(task_id=task_id, project_path="/workspace", cli_tool="claude-code")
+
+
+def test_another_installations_sandboxes_are_never_destroyed(configured):
+    """Two Open ACE deployments sharing one lifecycle server must not fight.
+
+    Both stamp `openace.provider=opensandbox`, and each one's workflow rows
+    live in its own database — so with a provider-only filter every sandbox
+    belonging to the other reads as unclaimed, and the sweep deletes it
+    mid-run. The installation tag is what separates them.
+    """
+    api = FakeOpenSandboxApi()
+    provider = provider_for("opensandbox", api_factory=lambda endpoint: api)
+    ours = provider.create(_spec("ours"))
+    # Same product, same provider tag, different deployment.
+    api.sandboxes["sb-theirs"] = {
+        "id": "sb-theirs",
+        "status": {"state": "Running"},
+        "metadata": {
+            "openace.provider": "opensandbox",
+            "openace.installation": "openace-other-cluster",
+            "openace.task_id": "t-1",
+        },
+    }
+    destroyed = provider.reconcile_orphans(live_sandbox_ids={ours.sandbox_id})
+    assert destroyed == []
+    assert "sb-theirs" not in api.deleted
+
+
+def test_a_server_that_ignores_the_filter_is_still_filtered_client_side(configured):
+    """Belt and braces: the client-side check is the load-bearing half."""
+    api = FakeOpenSandboxApi()
+    provider = provider_for("opensandbox", api_factory=lambda endpoint: api)
+    api.sandboxes["sb-theirs"] = {
+        "id": "sb-theirs",
+        "status": {"state": "Running"},
+        "metadata": {
+            "openace.provider": "opensandbox",
+            "openace.installation": "openace-other-cluster",
+        },
+    }
+    # A server that returns everything regardless of the metadata query.
+    api.list_sandboxes = lambda metadata=None: list(api.sandboxes.values())  # type: ignore[assignment]
+    assert provider.reconcile_orphans(live_sandbox_ids=set()) == []
+
+
+def test_create_metadata_carries_the_installation_tag(configured):
+    api = FakeOpenSandboxApi()
+    provider = provider_for("opensandbox", api_factory=lambda endpoint: api)
+    handle = provider.create(_spec("x"))
+    metadata = api.sandboxes[handle.sandbox_id]["metadata"]
+    assert metadata["openace.installation"] == "openace-test"
+
+
+def test_destroy_attribution_reports_failure_instead_of_swallowing_it(configured):
+    """The scheduler clears sandbox_id on the strength of this answer.
+
+    Returning None unconditionally let a transient API outage discard the only
+    handle a retry could use, stranding a live sandbox until its TTL.
+    """
+    api = FakeOpenSandboxApi()
+    provider = provider_for("opensandbox", api_factory=lambda endpoint: api)
+
+    def _boom(sandbox_id):
+        raise RuntimeError("lifecycle server unreachable")
+
+    api.delete_sandbox = _boom  # type: ignore[assignment]
+    assert provider.destroy_attribution_checked("sb-1", None) is False
+    # The Protocol-typed method stays None-returning and still never raises.
+    assert provider.destroy_attribution("sb-1", None) is None
+
+
+def test_destroy_attribution_reports_success(configured):
+    api = FakeOpenSandboxApi()
+    provider = provider_for("opensandbox", api_factory=lambda endpoint: api)
+    assert provider.destroy_attribution_checked("sb-1", None) is True

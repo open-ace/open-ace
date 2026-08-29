@@ -8,6 +8,7 @@ gate and the orphan sweep pass green while production kept running Legacy.
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
@@ -23,6 +24,7 @@ _DIGEST = "ghcr.io/open-ace/agent@sha256:" + "a" * 64
 @pytest.fixture
 def api(tmp_path, monkeypatch):
     raw = {
+        "installation_id": "openace-test",
         "default_tier": "gvisor",
         "endpoints": {
             "gvisor": {
@@ -288,3 +290,237 @@ def test_required_production_policy_cannot_fallback_to_legacy(api, monkeypatch):
     runner.remote_session_manager = None
     selected = runner._select_sandbox_provider("local", tenant_id=1, project_path="/workspace")
     assert isinstance(selected, OpenSandboxProvider)
+
+
+# ── attribution survives a failed teardown (spec §6.7) ────────────────
+
+
+def test_a_failed_teardown_reports_false_so_the_row_keeps_its_attribution(api, monkeypatch):
+    """The scheduler clears sandbox_id on the strength of this return value.
+
+    _destroy_orphan_sandbox used to return None whatever happened, and the
+    caller then marked the row destroyed and nulled both external ids. A
+    transient outage therefore left a live sandbox billing until its TTL with
+    nothing in the database able to name it again.
+    """
+
+    def _boom(sandbox_id):
+        raise RuntimeError("lifecycle server unreachable")
+
+    api.delete_sandbox = _boom  # type: ignore[assignment]
+    wf = {
+        "workflow_id": "w1",
+        "sandbox_provider": "opensandbox",
+        "sandbox_id": "sb-1",
+        "sandbox_remote_session_id": None,
+    }
+    assert _destroy_orphan_sandbox(wf, remote_session_manager=None) is False
+
+
+def test_a_successful_teardown_reports_true(api):
+    wf = {
+        "workflow_id": "w1",
+        "sandbox_provider": "opensandbox",
+        "sandbox_id": "sb-1",
+        "sandbox_remote_session_id": None,
+    }
+    assert _destroy_orphan_sandbox(wf, remote_session_manager=None) is True
+
+
+def test_a_row_with_nothing_to_destroy_is_not_reported_as_a_failure(api):
+    """ "Nothing to tear down" must not look like "teardown failed"."""
+    wf = {
+        "workflow_id": "w1",
+        "sandbox_provider": "legacy_posix",
+        "sandbox_id": "sb-1",
+        "sandbox_remote_session_id": None,
+    }
+    assert _destroy_orphan_sandbox(wf, remote_session_manager=None) is True
+
+
+def test_a_registry_failure_is_reported_as_a_failed_teardown(api, monkeypatch):
+    def _boom(endpoint):
+        raise RuntimeError("registry exploded")
+
+    monkeypatch.setattr(registry, "_default_api_factory", _boom)
+    wf = {
+        "workflow_id": "w1",
+        "sandbox_provider": "opensandbox",
+        "sandbox_id": "sb-1",
+        "sandbox_remote_session_id": None,
+    }
+    assert _destroy_orphan_sandbox(wf, remote_session_manager=None) is False
+
+
+# ── the full _run_local round trip (spec §6.5) ────────────────────────
+#
+# The test the previous round was missing. Every provider test drove the
+# provider directly, so the backend could be entirely correct and still never
+# be *used* correctly: the runner passed exec_policy=None, which sent every
+# OpenSandbox run down the foreground /command branch, and the get_transport()
+# call immediately after refused that state with `not_an_agent_turn`. Nothing
+# called upload_workspace or apply_changes either, so even once the agent
+# started it would have received an empty tree and had its edits dropped on
+# destroy. Only a test that goes through _run_local can see any of that.
+
+
+def _load_config():
+    from app.modules.workspace.autonomous.sandbox.opensandbox.config import load_backend_config
+
+    config = load_backend_config()
+    assert config is not None
+    return config
+
+
+def _run_local_against(provider, worktree):
+    """Invoke the REAL _run_local with *provider* selected by the gate.
+
+    Only the boundaries are faked — the lifecycle/execd API and the PTY
+    WebSocket. Everything between them is production code: the isolation gate,
+    the provider lifecycle calls, the stream-json reader threads, the transport
+    seam, and the teardown ordering.
+    """
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+    runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
+    runner._local_sessions = {}
+    runner._activity_callback = None
+    runner._on_pid_registered = None
+    runner._on_pid_cleared = None
+    runner._on_sandbox_created = None
+    runner._sandbox_provider = provider
+    runner.session_manager = None
+    runner._resolve_sidebar_session = lambda *a, **k: ""
+    # Sidebar JSONL discovery is claude-code's own session-id mechanism and is
+    # orthogonal to the sandbox lifecycle under test; without a real ~/.claude
+    # tree it fails and masks every assertion below it.
+    runner._uses_sidebar_session_source = lambda *a, **k: False
+    runner._select_sandbox_provider = lambda *a, **k: provider
+    runner._resolve_sandbox_generation = lambda workflow_id: 1
+    runner._load_task_policy = lambda: None
+    runner._resource_policy_configured = lambda: False
+    runner._build_agent_env = lambda *a, **k: {"HOME": "/home/agent"}
+    return runner._run_local(
+        session_id="s-1",
+        cli_tool="claude-code",
+        model="claude-sonnet-4",
+        project_path=str(worktree),
+        prompt="do the thing",
+        permission_mode="default",
+        timeout=30,
+        workflow_id="wf-1",
+        user_id=None,
+        workspace_type="local",
+    )
+
+
+class _ScriptedPtyConnection:
+    """A PTY WebSocket that answers only AFTER the prompt arrives.
+
+    The gate is the point. A connection that replays its frames immediately
+    finishes the turn before the runner writes anything, and the transport then
+    correctly drops those writes as post-terminal — so the test would pass with
+    a runner that never spoke to the agent at all. Blocking until the prompt is
+    written is what makes "the agent was actually driven" observable.
+    """
+
+    def __init__(self, frames):
+        self.sent: list = []
+        self._frames = list(frames)
+        self._prompted = threading.Event()
+
+    def send(self, data):
+        self.sent.append(data)
+        payload = data if isinstance(data, bytes) else str(data).encode()
+        if b'"type": "user"' in payload or b'"type":"user"' in payload:
+            self._prompted.set()
+
+    def recv(self, timeout=None):
+        if not self._prompted.wait(timeout=5):
+            raise TimeoutError("the runner never sent a prompt over the PTY socket")
+        if self._frames:
+            return self._frames.pop(0)
+        return json.dumps({"type": "exit", "exit_code": 0})
+
+    def close(self):
+        self._prompted.set()
+
+
+def _stdout_frame(payload: dict) -> bytes:
+    return b"\x01" + (json.dumps(payload) + "\n").encode()
+
+
+def test_run_local_drives_create_upload_pty_collect_apply_destroy(api, tmp_path, monkeypatch):
+    from app.modules.workspace.autonomous.sandbox.opensandbox.provider import (
+        OpenSandboxProvider,
+        OpenSandboxTurnSpec,
+    )
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / "app.py").write_text("original\n", encoding="utf-8")
+
+    # The agent's turn: an init frame so the runner learns the CLI session id,
+    # then a terminal result frame.
+    conn = _ScriptedPtyConnection(
+        [
+            _stdout_frame({"type": "system", "subtype": "init", "session_id": "cli-1"}),
+            _stdout_frame(
+                {"type": "result", "subtype": "success", "result": "done", "is_error": False}
+            ),
+        ]
+    )
+    provider = OpenSandboxProvider(
+        _load_config(),
+        api_factory=lambda endpoint: api,
+        tenant="1",
+        project_path=str(worktree),
+        connect_factory=lambda url, headers: conn,
+    )
+    # The agent "edited" app.py: the manifest producer reports the new content.
+    api.set_manifest({"app.py": b"edited\n"})
+
+    calls: list[str] = []
+    for name in ("create", "upload_workspace", "exec", "apply_changes", "destroy"):
+        original = getattr(provider, name)
+
+        def _record(*a, _n=name, _o=original, **k):
+            calls.append(_n)
+            return _o(*a, **k)
+
+        monkeypatch.setattr(provider, name, _record)
+
+    seen_policy: list = []
+    original_exec = provider.exec
+
+    def _capture_exec(handle, command, env, exec_policy):
+        seen_policy.append(exec_policy)
+        return original_exec(handle, command=command, env=env, exec_policy=exec_policy)
+
+    monkeypatch.setattr(provider, "exec", _capture_exec)
+
+    result = _run_local_against(provider, worktree)
+
+    # The lifecycle actually ran, in order.
+    assert calls[:3] == ["create", "upload_workspace", "exec"]
+    assert "apply_changes" in calls and "destroy" in calls
+    assert calls.index("apply_changes") < calls.index("destroy"), (
+        "apply_changes must run BEFORE destroy — after destroy the ephemeral "
+        "filesystem is gone and the agent's entire work product with it"
+    )
+
+    # The turn took the PTY branch, not the foreground /command branch.
+    assert isinstance(seen_policy[0], OpenSandboxTurnSpec), (
+        "exec_policy was None, so the run took the foreground /command branch "
+        "and the get_transport() that follows refuses it as not_an_agent_turn"
+    )
+    # The PTY session itself is closed during teardown, so assert on what the
+    # socket carried instead of on the live session table: the runner really
+    # spoke stream-json to the agent over this transport.
+    assert conn.sent, "nothing was ever written to the PTY socket"
+    written = b"".join(f if isinstance(f, bytes) else f.encode() for f in conn.sent)
+    assert b"do the thing" in written
+
+    # The work product came back into the trusted worktree.
+    assert (worktree / "app.py").read_text(encoding="utf-8") == "edited\n"
+    assert result.success, result.error

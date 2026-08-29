@@ -440,3 +440,43 @@ def test_directories_emptied_by_a_deletion_are_pruned(tmp_path):
     )
     assert not (tmp_path / "src" / "legacy").exists()
     assert (tmp_path / "src" / "keep.py").exists()
+
+
+def test_a_linked_worktrees_gitfile_is_never_uploaded(tmp_path):
+    """A real `git worktree` checkout — .git is a FILE, not a directory.
+
+    Every autonomous run is checked out this way. Excluding `.git` only from
+    os.walk's dirnames uploaded the gitfile verbatim: it leaks the control
+    plane's absolute filesystem layout into the sandbox, and the `git init`
+    synthesis that follows then finds a .git pointing at a host path that does
+    not exist there.
+    """
+    common_dir = tmp_path / "bare" / ".git" / "worktrees" / "wt"
+    common_dir.mkdir(parents=True)
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / ".git").write_text(f"gitdir: {common_dir}\n", encoding="utf-8")
+    (worktree / "app.py").write_text("x = 1", encoding="utf-8")
+
+    uploaded = {e.path for e in build_snapshot(str(worktree))}
+    assert uploaded == {"app.py"}
+    assert not any(str(common_dir) in e.data.decode() for e in build_snapshot(str(worktree)))
+
+
+def test_an_ssh_file_is_excluded_the_same_way_a_dot_ssh_dir_is(tmp_path):
+    (tmp_path / ".ssh").write_text("not-a-dir", encoding="utf-8")
+    (tmp_path / "app.py").write_text("x", encoding="utf-8")
+    assert {e.path for e in build_snapshot(str(tmp_path))} == {"app.py"}
+
+
+def test_deletions_never_propose_removing_the_gitfile(tmp_path):
+    """The symmetry that matters: what is not uploaded is never deleted.
+
+    A .git file the snapshot skips is necessarily absent from the sandbox's
+    manifest. If derive_deletions did not skip it too, the first apply would
+    delete the linked worktree's own gitdir pointer and detach the checkout
+    from its repository.
+    """
+    (tmp_path / ".git").write_text("gitdir: /host/path\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text("x", encoding="utf-8")
+    assert derive_deletions([], worktree_path=str(tmp_path)) == ["app.py"]
