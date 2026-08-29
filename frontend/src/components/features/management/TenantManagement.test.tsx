@@ -71,7 +71,8 @@ vi.mock('@/i18n', () => ({
       settingsSaveFailed: 'Failed to save settings',
       settingsSection: 'Settings',
       contentFilterEnabled: 'Content Filter',
-      contentFilterEnabledDesc: 'When enabled, content from all users under this tenant will be filtered according to rules configured in Security Center.',
+      contentFilterEnabledDesc:
+        'When enabled, content from all users under this tenant will be filtered according to rules configured in Security Center.',
       contentFilter: 'Security Center',
       dailyTokenLimit: 'Daily Token Limit',
       monthlyTokenLimit: 'Monthly Token Limit',
@@ -690,7 +691,9 @@ describe('TenantManagement - Issue #3203: Tenant Settings', () => {
       });
 
       // Toggle content filter
-      const contentFilterCheckbox = document.getElementById('contentFilterEnabled') as HTMLInputElement;
+      const contentFilterCheckbox = document.getElementById(
+        'contentFilterEnabled'
+      ) as HTMLInputElement;
       fireEvent.click(contentFilterCheckbox);
 
       // Save
@@ -801,7 +804,9 @@ describe('TenantManagement - Issue #3203: Tenant Settings', () => {
       });
 
       // Change both settings and quota
-      const contentFilterCheckbox = document.getElementById('contentFilterEnabled') as HTMLInputElement;
+      const contentFilterCheckbox = document.getElementById(
+        'contentFilterEnabled'
+      ) as HTMLInputElement;
       fireEvent.click(contentFilterCheckbox);
 
       const inputs = document.querySelectorAll('input[type="number"]');
