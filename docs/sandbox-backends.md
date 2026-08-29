@@ -74,8 +74,12 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
       "execd_token_env": "OPENSANDBOX_EXECD_TOKEN_GVISOR",
       "runtime_class": "gvisor",
       "default_image": "ghcr.io/open-ace/agent@sha256:<64 hex>",
-      "execd_endpoint_host_allowlist": ["*.open-ace.svc.cluster.local"],
-      "egress_allow_hosts": ["api.anthropic.com", "*.githubusercontent.com"],
+      "execd_endpoint_host_allowlist": ["*.open-ace-sandboxes.svc.cluster.local"],
+      "egress_allow_hosts": [
+        "openace.open-ace.svc.cluster.local",
+        "api.anthropic.com",
+        "*.githubusercontent.com"
+      ],
       "attestations": {
         "egress_enforced": true,
         "egress_mode_dns_nft": true,
@@ -92,7 +96,6 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
     }
   },
   "rollout": {"mode": "allowlist", "tenants": ["42"], "projects": []},
-  "tenant_tiers": {"42": "kata"},
   "production_required_tenants": ["42"],
   "image_allowlist": ["ghcr.io/open-ace/agent@sha256:<64 hex>"],
   "resource_defaults": {"cpu": "2", "memory": "4Gi", "ephemeral-storage": "8Gi"},

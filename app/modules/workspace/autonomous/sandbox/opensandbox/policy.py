@@ -33,6 +33,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
+from app.modules.workspace.autonomous.sandbox.opensandbox import config as config_mod
 from app.modules.workspace.autonomous.sandbox.provider import (
     SandboxError,
     validate_spec_capabilities,
@@ -107,8 +108,15 @@ _STATE_MAP: dict[str, SandboxStatus] = {
 # The only environment variables that ever reach the sandbox. Built as an
 # allowlist rather than a denylist so a newly-introduced secret in the control
 # plane's environment cannot leak by default.
+# PATH is deliberately ABSENT. The passthrough loop runs after the defaults, so
+# leaving it here let extra["PATH"] — the control plane's own PATH, prefixed
+# with a host-only guard_bin directory — overwrite _DEFAULT_PATH. `exec claude`
+# inside the container then resolved against nvm/homebrew directories that do
+# not exist in the image, and /usr/local/bin (where an npm -g install lands)
+# was not on it: exit 127, reported as an opaque crash. The container's own
+# PATH is the only authority on where its CLI lives, which is what the argv0
+# basename rewrite in _exec_agent_turn assumes.
 _ENV_PASSTHROUGH = (
-    "PATH",
     "OPENACE_PROXY_URL",
     "OPENACE_PROXY_TOKEN",
     "OPENACE_MODEL",
@@ -168,14 +176,16 @@ def derive_capabilities(
     if att.pod_pids_limit > 0:
         caps.add(SandboxCapability.CPU_MEM_PIDS_TIME_QUOTA)
 
-    # CREDENTIAL_TOKEN_BINDING means "this sandbox's credential is bound to this
-    # sandbox". Only secureAccess provides that, and it needs gateway-mode
-    # ingress to do anything at all (see validate_spec_for_endpoint note 7) — so
-    # the static execd token alone does NOT earn the capability. Granting it
-    # from execd_token_required would claim per-sandbox binding for a
-    # deployment-wide shared secret.
-    if att.execd_token_required and att.secure_access_required:
-        caps.add(SandboxCapability.CREDENTIAL_TOKEN_BINDING)
+    # CREDENTIAL_TOKEN_BINDING is NEVER granted by this backend.
+    #
+    # It means "this sandbox's credential is bound to this sandbox", and only
+    # `secureAccess` provides that — which upstream honours solely under
+    # gateway-mode ingress (see validate_spec_for_endpoint note 7). Under the
+    # direct-ingress manifests shipped here every sandbox authenticates to execd
+    # with the same static token, which any agent can read out of execd's
+    # environment. That is a deployment-wide shared secret, the opposite of
+    # per-sandbox binding, so the capability is unreachable rather than
+    # conditional. Restoring it means implementing gateway ingress first.
 
     if att.inode_quota_enforced or att.ephemeral_storage_enforced:
         # A disjunction, because implied_required_capabilities demands this
@@ -373,19 +383,14 @@ def assert_proxy_reachable(env: Mapping[str, str], endpoint: EndpointConfig) -> 
                 "sandbox pod that resolves to the sandbox itself. Set the control plane's "
                 "server_url to an address reachable from the cluster."
             )
-        if not any(_egress_host_matches(host, pattern) for pattern in endpoint.egress_allow_hosts):
+        if not any(
+            config_mod.host_matches(host, pattern) for pattern in endpoint.egress_allow_hosts
+        ):
             raise SandboxError(
                 f"{key} host {host!r} is not in endpoint {endpoint.tier!r} egress_allow_hosts "
                 f"{sorted(endpoint.egress_allow_hosts)}; egress is deny-default, so the agent "
                 "could not reach its own LLM proxy. Add the host to egress_allow_hosts."
             )
-
-
-def _egress_host_matches(host: str, pattern: str) -> bool:
-    pattern = pattern.lower().strip()
-    if pattern.startswith("*."):
-        return host == pattern[2:] or host.endswith(pattern[1:])
-    return host == pattern
 
 
 def build_resource_limits(

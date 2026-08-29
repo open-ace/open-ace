@@ -41,6 +41,7 @@ from urllib.parse import quote, urlencode, urlparse, urlunparse
 
 import requests
 
+from app.modules.workspace.autonomous.sandbox.opensandbox import config as config_mod
 from app.modules.workspace.autonomous.sandbox.provider import SandboxError
 
 if TYPE_CHECKING:  # pragma: no cover - annotations only
@@ -506,8 +507,5 @@ def _filter_endpoint_headers(headers: Any) -> dict[str, str]:
 
 
 def _host_matches(host: str, pattern: str) -> bool:
-    pattern = pattern.lower().strip()
-    if pattern.startswith("*."):
-        suffix = pattern[1:]  # ".open-ace.svc.cluster.local"
-        return host.endswith(suffix) or host == pattern[2:]
-    return host == pattern
+    # Delegates to the single shared definition — see config.host_matches.
+    return config_mod.host_matches(host, pattern)

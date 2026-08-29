@@ -34,7 +34,6 @@ _FULL = {
     "egress_mode_dns_nft": True,
     "metadata_cidr_blocked": True,
     "execd_token_required": True,
-    "secure_access_required": True,
     "nonroot_enforced": True,
     "readonly_rootfs": True,
     "seccomp_runtime_default": True,

@@ -45,6 +45,7 @@ from app.modules.workspace.autonomous.command_evidence.types import (
 from app.modules.workspace.autonomous.sandbox.opensandbox import policy as policy_mod
 from app.modules.workspace.autonomous.sandbox.opensandbox import workspace as workspace_mod
 from app.modules.workspace.autonomous.sandbox.opensandbox.client import HttpOpenSandboxApi
+from app.modules.workspace.autonomous.sandbox.opensandbox.config import SandboxConfigError
 from app.modules.workspace.autonomous.sandbox.opensandbox.transport import PtyWebSocketTransport
 from app.modules.workspace.autonomous.sandbox.provider import SandboxError, is_current_generation
 from app.modules.workspace.autonomous.sandbox.types import (
@@ -520,6 +521,20 @@ class OpenSandboxProvider:
                     continue
                 found_anywhere = True
                 api.delete_sandbox(sandbox_id)
+            except SandboxConfigError as exc:
+                # A config fault (an unset API-key env var in THIS process — the
+                # scheduler runs as its own unit and need not share the web
+                # process's environment) is deterministic: it will fail
+                # identically on every future sweep. Reporting it as a retryable
+                # failure pinned the row `running` forever while each sweep
+                # refreshed updated_at and re-armed the TTL reaper. Treat the
+                # endpoint as not participating instead — we still cannot have
+                # created a sandbox through an endpoint we cannot authenticate
+                # to.
+                self._emit(
+                    "sandbox_endpoint_unusable",
+                    {"sandbox_id": sandbox_id, "tier": tier, "error": str(exc)},
+                )
             except Exception as exc:  # noqa: BLE001 - report, never raise
                 errors.append(f"{tier}: {exc}")
         if errors:

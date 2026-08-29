@@ -35,7 +35,6 @@ def _write_config(tmp_path) -> str:
                     "egress_mode_dns_nft": True,
                     "metadata_cidr_blocked": True,
                     "execd_token_required": True,
-                    "secure_access_required": True,
                     "nonroot_enforced": True,
                     "readonly_rootfs": True,
                     "seccomp_runtime_default": True,
@@ -293,3 +292,79 @@ def test_a_sandbox_on_a_non_default_tier_is_destroyed_on_its_own_server(tmp_path
     assert provider.destroy_attribution_checked("sb-kata-1", None) is True
     assert "sb-kata-1" in servers["kata"].deleted, "the kata sandbox was never actually destroyed"
     assert "sb-kata-1" not in servers["gvisor"].deleted
+
+
+def test_an_unauthenticatable_endpoint_does_not_pin_a_row_forever(tmp_path, monkeypatch):
+    """A deterministic config fault must not read as a retryable failure.
+
+    The scheduler runs as its own systemd unit and need not share the web
+    process's environment, so a tier whose api_key_env is unset there fails
+    identically on every sweep. Reporting that as "destroy failed" pinned the
+    row `running` permanently while each sweep refreshed updated_at and re-armed
+    the TTL reaper. The sandbox was found and deleted on its own server — the
+    row must be allowed to close.
+    """
+    raw = {
+        "installation_id": "openace-test",
+        "default_tier": "gvisor",
+        "endpoints": {
+            tier: {
+                "base_url": f"http://osb-{tier}.open-ace.svc.cluster.local:8080/v1",
+                "api_key_env": "OSB_KEY" if tier == "gvisor" else "OSB_KEY_UNSET",
+                "execd_token_env": "OSB_EXECD_TOKEN",
+                "runtime_class": "gvisor" if tier == "gvisor" else "kata-qemu",
+                "default_image": _DIGEST,
+                "egress_allow_hosts": ["api.anthropic.com"],
+                "attestations": {
+                    "egress_enforced": True,
+                    "egress_mode_dns_nft": True,
+                    "metadata_cidr_blocked": True,
+                    "execd_token_required": True,
+                    "nonroot_enforced": True,
+                    "readonly_rootfs": True,
+                    "seccomp_runtime_default": True,
+                    "dedicated_service_account": True,
+                    "pod_pids_limit": 512,
+                },
+            }
+            for tier in ("gvisor", "kata")
+        },
+        "image_allowlist": [_DIGEST],
+    }
+    path = tmp_path / "sandbox-backends.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setenv("OSB_KEY", "k")
+    monkeypatch.setenv("OSB_EXECD_TOKEN", "t")
+    monkeypatch.delenv("OSB_KEY_UNSET", raising=False)
+    monkeypatch.setenv("OPENACE_SANDBOX_BACKENDS", str(path))
+
+    from app.modules.workspace.autonomous.sandbox.opensandbox.config import SandboxConfigError
+
+    gvisor = FakeOpenSandboxApi()
+    gvisor.sandboxes["sb-1"] = {"id": "sb-1", "status": {"state": "Running"}, "metadata": {}}
+
+    class _Unauthenticatable:
+        def get_sandbox(self, sandbox_id):
+            raise SandboxConfigError("endpoint 'kata': API key env var 'OSB_KEY_UNSET' is unset")
+
+    def _factory(endpoint):
+        return _Unauthenticatable() if "kata" in endpoint.base_url else gvisor
+
+    monkeypatch.setattr(registry, "_default_api_factory", _factory)
+    provider = provider_for("opensandbox")
+
+    assert provider.destroy_attribution_checked("sb-1", None) is True
+    assert "sb-1" in gvisor.deleted
+
+
+def test_a_transient_endpoint_error_is_still_reported_as_a_failure(configured, monkeypatch):
+    """Convergence must not cost the safety property for retryable faults."""
+    api = FakeOpenSandboxApi()
+    api.sandboxes["sb-1"] = {"id": "sb-1", "status": {"state": "Running"}, "metadata": {}}
+    provider = provider_for("opensandbox", api_factory=lambda endpoint: api)
+
+    def _boom(sandbox_id):
+        raise ConnectionError("lifecycle server unreachable")
+
+    api.delete_sandbox = _boom  # type: ignore[assignment]
+    assert provider.destroy_attribution_checked("sb-1", None) is False

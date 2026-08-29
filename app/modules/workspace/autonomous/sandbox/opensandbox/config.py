@@ -94,7 +94,13 @@ class Attestations:
     egress_mode_dns_nft: bool = False
     metadata_cidr_blocked: bool = False
     execd_token_required: bool = False
-    secure_access_required: bool = False
+    # secure_access_required is GONE, not merely optional. Upstream honours
+    # `secureAccess` only when `[ingress] mode = "gateway"`, and the manifests
+    # here ship "direct" — so the attestation could never be true. Leaving the
+    # key accepted let an operator assert it (copied from an older config, or
+    # reading the name as aspirational) and be granted CREDENTIAL_TOKEN_BINDING
+    # with nothing enforcing it: the #2082 defect, one level down. Removing the
+    # field makes _parse_attestations reject the key as unknown, which is loud.
     nonroot_enforced: bool = False
     readonly_rootfs: bool = False
     seccomp_runtime_default: bool = False
@@ -663,6 +669,24 @@ def _str_list(raw: Mapping[str, Any], key: str) -> list[str]:
     if not isinstance(value, (list, tuple)):
         raise SandboxConfigError(f"{key} must be a list")
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def host_matches(host: str, pattern: str) -> bool:
+    """Does *host* satisfy an allowlist *pattern* (exact, or ``*.suffix``)?
+
+    ONE definition, shared by the execd endpoint allowlist (``client``) and the
+    egress allowlist (``policy``). They are the same question over two lists,
+    and this PR has already been bitten once by re-implementing a shared
+    predicate in two places — the snapshot/deletion split that ``133111cb``
+    fixed structurally. A second copy would let the two allowlists drift into
+    disagreeing about what ``*.svc.cluster.local`` means.
+    """
+    pattern = pattern.lower().strip()
+    host = host.lower().strip()
+    if pattern.startswith("*."):
+        suffix = pattern[1:]  # ".open-ace.svc.cluster.local"
+        return host.endswith(suffix) or host == pattern[2:]
+    return host == pattern
 
 
 def _bool_or_raise(value: Any, label: str) -> bool:

@@ -51,7 +51,6 @@ _FULL_ATTESTATIONS = {
     "egress_mode_dns_nft": True,
     "metadata_cidr_blocked": True,
     "execd_token_required": True,
-    "secure_access_required": True,
     "nonroot_enforced": True,
     "readonly_rootfs": True,
     "seccomp_runtime_default": True,
@@ -663,3 +662,75 @@ def test_an_allowlisted_proxy_url_passes():
 
     cfg = _cfg()
     assert_proxy_reachable({"ANTHROPIC_BASE_URL": "https://api.anthropic.com/v1"}, _endpoint(cfg))
+
+
+def test_the_container_path_is_not_inherited_from_the_control_plane():
+    """PATH must come from _DEFAULT_PATH, never from the host.
+
+    The passthrough loop runs after the defaults, so leaving PATH on the
+    allowlist let the control plane's own PATH — prefixed with a host-only
+    guard_bin directory — overwrite it. `exec claude` then resolved against
+    nvm/homebrew paths absent from the image while /usr/local/bin, where an
+    `npm -g` install lands, was missing: exit 127 reported as an opaque crash.
+    That also made the argv0 basename rewrite pointless.
+    """
+    cfg = _cfg()
+    env = build_env(
+        _spec(),
+        cfg,
+        _endpoint(cfg),
+        proxy_token="tok",
+        extra={"PATH": "/opt/openace/guard-bin:/Users/dev/.nvm/versions/node/v20/bin"},
+    )
+    assert "guard-bin" not in env["PATH"]
+    assert ".nvm" not in env["PATH"]
+    assert "/usr/local/bin" in env["PATH"]
+
+
+def test_secure_access_required_is_no_longer_an_accepted_attestation():
+    """Removed, not merely optional.
+
+    Leaving the key accepted let an operator assert a guarantee the
+    direct-ingress manifests cannot deliver and be granted
+    CREDENTIAL_TOKEN_BINDING for it — a capability declared with nothing
+    enforcing it, which is the #2082 defect one level down.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.config import SandboxConfigError
+
+    with pytest.raises(SandboxConfigError, match="unknown attestation"):
+        _cfg(attestations={**_FULL_ATTESTATIONS, "secure_access_required": True})
+
+
+def test_credential_token_binding_is_unreachable_for_this_backend():
+    from app.modules.workspace.autonomous.sandbox.opensandbox.policy import derive_capabilities
+    from app.modules.workspace.autonomous.sandbox.types import SandboxCapability
+
+    cfg = _cfg()
+    caps = derive_capabilities(cfg.endpoints["gvisor"], probes_passed=True)
+    assert SandboxCapability.CREDENTIAL_TOKEN_BINDING not in caps
+
+
+@pytest.mark.parametrize(
+    ("host", "pattern", "expected"),
+    [
+        ("osb.open-ace.svc.cluster.local", "*.open-ace.svc.cluster.local", True),
+        # The apex matches deliberately — pre-existing semantics of the execd
+        # allowlist, preserved by the unification rather than changed by it.
+        ("open-ace.svc.cluster.local", "*.open-ace.svc.cluster.local", True),
+        ("api.anthropic.com", "api.anthropic.com", True),
+        ("evil-api.anthropic.com", "api.anthropic.com", False),
+        ("API.ANTHROPIC.COM", "api.anthropic.com", True),
+    ],
+)
+def test_one_host_matcher_serves_both_allowlists(host, pattern, expected):
+    """The execd allowlist and the egress allowlist ask the same question.
+
+    Two copies of this predicate is the divergence 133111cb fixed structurally
+    for the snapshot/deletion pair; a second copy would let the two allowlists
+    drift on what `*.svc.cluster.local` means.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox import client as client_mod
+    from app.modules.workspace.autonomous.sandbox.opensandbox.config import host_matches
+
+    assert host_matches(host, pattern) is expected
+    assert client_mod._host_matches(host, pattern) is expected

@@ -39,7 +39,6 @@ def api(tmp_path, monkeypatch):
                     "egress_mode_dns_nft": True,
                     "metadata_cidr_blocked": True,
                     "execd_token_required": True,
-                    "secure_access_required": True,
                     "nonroot_enforced": True,
                     "readonly_rootfs": True,
                     "seccomp_runtime_default": True,
@@ -372,7 +371,7 @@ def _load_config():
     return config
 
 
-def _run_local_against(provider, worktree, monkeypatch, gate_spy=None):
+def _run_local_against(provider, worktree, monkeypatch, gate_spy=None, on_sandbox_created=None):
     """Invoke the REAL _run_local with *provider* selected by the gate.
 
     Only the boundaries are faked — the lifecycle/execd API and the PTY
@@ -389,7 +388,7 @@ def _run_local_against(provider, worktree, monkeypatch, gate_spy=None):
     runner._activity_callback = None
     runner._on_pid_registered = None
     runner._on_pid_cleared = None
-    runner._on_sandbox_created = None
+    runner._on_sandbox_created = on_sandbox_created
     runner._sandbox_provider = provider
     runner.session_manager = None
     runner._resolve_sidebar_session = lambda *a, **k: ""
@@ -607,3 +606,63 @@ def test_a_failed_apply_fails_the_run(api, tmp_path, monkeypatch):
     assert result.success is False
     assert "work product" in (result.error or "").lower()
     assert result.error_code
+
+
+def test_the_effective_policy_records_the_running_providers_capabilities(
+    api, tmp_path, monkeypatch
+):
+    """The row must describe the provider that RAN the task, not the injected default.
+
+    `_notify_sandbox_created` read `self._sandbox_provider` — the Legacy
+    provider the runner is constructed with — while stamping
+    `provider_name="opensandbox"`. Legacy's capability set always contains
+    CPU_MEM_PIDS_TIME_QUOTA, so an OpenSandbox row claimed quota enforcement
+    even for a tier attesting no pod pids limit, and dropped the namespace and
+    egress isolation it actually had. effective_policy's contract is that the
+    map cannot lie.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.provider import OpenSandboxProvider
+    from app.modules.workspace.autonomous.sandbox.types import SandboxCapability
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / "app.py").write_text("x\n", encoding="utf-8")
+    conn = _ScriptedPtyConnection(
+        [
+            _stdout_frame({"type": "system", "subtype": "init", "session_id": "cli-1"}),
+            _stdout_frame({"type": "result", "subtype": "success", "result": "ok"}),
+        ]
+    )
+    provider = OpenSandboxProvider(
+        _load_config(),
+        api_factory=lambda endpoint: api,
+        tenant="1",
+        project_path=str(worktree),
+        connect_factory=lambda url, headers: conn,
+    )
+    api.set_manifest({"app.py": b"x\n"})
+
+    recorded: list[dict] = []
+
+    def _on_created(session_id, sandbox_id, provider_name, remote_session_id, effective_policy):
+        recorded.append({"provider_name": provider_name, "effective_policy": effective_policy})
+
+    _run_local_against(provider, worktree, monkeypatch, on_sandbox_created=_on_created)
+
+    assert recorded, "on_sandbox_created never fired"
+    row = recorded[0]
+    assert row["provider_name"] == "opensandbox"
+
+    # The row must match what THIS provider declares, and differ from what the
+    # injected Legacy provider would have contributed.
+    from app.modules.workspace.autonomous.sandbox.effective_policy import build_effective_policy
+    from app.modules.workspace.autonomous.sandbox.legacy_posix import LegacyPosixProvider
+
+    expected = build_effective_policy("opensandbox", provider.capabilities(), None)
+    legacy = build_effective_policy("opensandbox", LegacyPosixProvider().capabilities(), None)
+    assert row["effective_policy"] == expected
+    assert row["effective_policy"] != legacy, (
+        "the row is indistinguishable from Legacy's capability set — the source "
+        "of declared_caps is not observable from this assertion"
+    )
+    assert SandboxCapability.NAMESPACE_ISOLATION in provider.capabilities()
