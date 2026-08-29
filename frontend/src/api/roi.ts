@@ -296,8 +296,8 @@ export const roiApi = {
   async getEfficiencyReport(params?: {
     days?: number;
     tool_name?: string;
-    task_type?: string;
-    algorithm_version?: string;
+    task_type?: 'GENERAL' | 'CODE_GENERATION' | 'DOCUMENT_ANALYSIS' | 'CONVERSATION';
+    algorithm_version?: 'v1.0' | 'v2.0' | 'auto';
   }): Promise<EfficiencyReport> {
     const queryParams: Record<string, string> = {};
     if (params?.days) queryParams.days = String(params.days);
