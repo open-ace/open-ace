@@ -6,6 +6,7 @@ import json
 import logging
 import threading
 import time
+import traceback
 from typing import Any
 
 from flask import Response, jsonify, request, stream_with_context
@@ -770,7 +771,6 @@ def _finalize_upstream_response(
     # Issue #3201: Defensive logging for missing tenant_id
     # If tenant_id is None, log a warning to help identify callers that missed passing it
     if tenant_id is None:
-        import traceback
         logger.warning(
             "_finalize_upstream_response called without tenant_id. "
             "Performance recording will be skipped. "
@@ -779,7 +779,7 @@ def _finalize_upstream_response(
             "Caller stack: %s",
             session_id[:16] if session_id else "unknown",
             provider,
-            "".join(traceback.format_stack()[-3:-1])
+            "".join(traceback.format_stack()[-3:-1]),
         )
 
     # Try to get recorder (may fail if not initialized)
