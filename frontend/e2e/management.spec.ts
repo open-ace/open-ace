@@ -280,8 +280,9 @@ test.describe('Audit Center', () => {
     // buttons in remote-directory-browser.spec.ts: the button resolves, is
     // visible/enabled/stable, and a rotating set of unrelated elements (header,
     // filter <select>, <td>) intercepts pointer events on retries only — no
-    // real overlay owns those points. force skips only the pointercache check;
-    // the modal assertions below prove the click landed on this button.
+    // real overlay owns those points. force skips the actionability pre-checks
+    // only (the browser still routes a real, hit-tested click); the modal
+    // assertions below prove the click landed on this button.
     await eyeButton.click({ force: true });
 
     // Modal body shows the JSON details (contains an opening brace).

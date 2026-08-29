@@ -63,8 +63,9 @@ test.describe('Remote Directory Browser', () => {
     // Mobile Chrome hit-testing can be transiently intercepted by the modal's
     // entry animation/layout settle (verified: the button's own center is the
     // hit-target once stable; the interceptor is the animating container).
-    // Force-click skips the pointercache check only — the post-click state
-    // assertions below still prove the interaction landed.
+    // Force-click skips the actionability pre-checks only (the browser still
+    // routes a real, hit-tested click) — the post-click state assertions below
+    // still prove the interaction landed.
     await terminalBtn.click({ force: true });
     await expect(terminalBtn).toHaveAttribute('class', /btn-primary/);
 
@@ -107,8 +108,11 @@ test.describe('Remote Directory Browser', () => {
     await expect(page.locator('.modal')).toBeVisible();
 
     const terminalBtn = page.locator('button').filter({ hasText: /终端|Terminal/ });
-    // Same Mobile Chrome transient hit-target interception as above.
+    // Same Mobile Chrome transient hit-target interception as above; the
+    // btn-primary assertion gives the force-click an immediate post-click
+    // proof, mirroring the sibling test above.
     await terminalBtn.click({ force: true });
+    await expect(terminalBtn).toHaveAttribute('class', /btn-primary/);
 
     const noMachines = page.locator('.modal').getByText(/No available machines|没有可用的机器/);
     if (await noMachines.isVisible()) {
