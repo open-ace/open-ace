@@ -11,6 +11,7 @@ is present.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -99,10 +100,24 @@ def test_project_tier_beats_tenant_tier():
     assert cfg.endpoint_for(tenant="42", project_path="/srv/high-sec").tier == "kata"
 
 
-def test_tier_pointing_at_missing_endpoint_fails_closed():
-    # Never fall back to a weaker tier — that is the acceptance item
-    # "production required policy cannot silently fall back".
-    cfg = parse_backend_config(_raw(tenant_tiers={"42": "kata"}))
+def test_tier_pointing_at_missing_endpoint_is_refused_at_parse_time():
+    """Caught when the file is read, not at the first create.
+
+    Deferring it meant the config loaded cleanly and then raised for exactly
+    the tenants an operator had singled out — who are also the likeliest
+    members of production_required_tenants, and so have no fallback.
+    """
+    with pytest.raises(SandboxConfigError, match="no endpoint"):
+        parse_backend_config(_raw(tenant_tiers={"42": "kata"}))
+    with pytest.raises(SandboxConfigError, match="no endpoint"):
+        parse_backend_config(_raw(project_tiers={"/srv/repo": "kata"}))
+
+
+def test_endpoint_for_still_fails_closed_on_a_hand_built_config():
+    # The parser now blocks this, but a config constructed directly must not
+    # fall back to a weaker tier either.
+    cfg = parse_backend_config(_raw())
+    cfg = replace(cfg, tenant_tiers={"42": "kata"})
     with pytest.raises(SandboxConfigError):
         cfg.endpoint_for(tenant="42", project_path=None)
 

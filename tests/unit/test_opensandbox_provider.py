@@ -797,3 +797,46 @@ def test_a_file_deleted_in_the_sandbox_is_removed_from_the_worktree(tmp_path):
     provider.apply_changes(handle, str(tmp_path))
     assert (tmp_path / "kept.py").read_bytes() == b"new"
     assert not (tmp_path / "gone.py").exists()
+
+
+# ── the agent's command and credentials reach it correctly (§5.4) ─────
+
+
+def test_the_host_resolved_cli_path_is_not_execd_inside_the_container():
+    """`shutil.which` runs on the CONTROL PLANE; that path means nothing in the image.
+
+    The runner resolves the agent CLI on the host and passes an absolute path.
+    Exec'ing it verbatim required the image to carry the binary at a
+    byte-identical absolute path — undocumented, unvalidated, and false for any
+    image not built to mirror the control plane's filesystem.
+    """
+    provider, api = _provider(connect_factory=lambda url, headers: _FakePtyConnection())
+    handle = provider.create(_spec())
+    provider.exec(
+        handle,
+        command=["/opt/homebrew/bin/claude", "--input-format", "stream-json"],
+        env={},
+        exec_policy=OpenSandboxTurnSpec(prompt="hi"),
+    )
+    started = api.pty_sessions[next(iter(api.pty_sessions))]["command"]
+    assert "/opt/homebrew/bin/claude" not in started
+    assert "exec 'claude'" in started or "exec claude" in started
+
+
+def test_a_turn_is_refused_when_the_proxy_host_is_not_egress_allowed():
+    """Wired, not merely defined.
+
+    The check exists in policy.py, but a test that only calls it directly would
+    stay green if the provider stopped calling it — and the symptom in
+    production is an agent that hangs on every request with nothing naming the
+    network policy as the cause.
+    """
+    provider, _ = _provider(connect_factory=lambda url, headers: _FakePtyConnection())
+    handle = provider.create(_spec())
+    with pytest.raises(SandboxError, match="egress_allow_hosts"):
+        provider.exec(
+            handle,
+            command=["claude"],
+            env={"OPENACE_PROXY_URL": "https://proxy.not-allowlisted.example/api"},
+            exec_policy=OpenSandboxTurnSpec(prompt="hi"),
+        )

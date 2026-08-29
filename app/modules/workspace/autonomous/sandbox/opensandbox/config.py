@@ -67,7 +67,11 @@ class SandboxConfigError(SandboxError):
 class ChangesetLimits:
     """Control-plane bounds applied to a ChangeSet before it touches the worktree."""
 
-    max_files: int = 2000
+    # 2000 rejected open-ace itself (2274 tracked files) — and since a failed
+    # apply now fails the run rather than degrading, the project's own primary
+    # use case hit `too_many_files` on the default. Sized for a large working
+    # tree; the byte limits below remain the real ceiling.
+    max_files: int = 20000
     max_file_bytes: int = 10 * 1024 * 1024
     max_total_bytes: int = 100 * 1024 * 1024
 
@@ -413,6 +417,29 @@ def parse_backend_config(raw: Mapping[str, Any]) -> SandboxBackendConfig:
             f"(configured tiers: {sorted(endpoints)})"
         )
 
+    tenant_tiers = {str(k): str(v) for k, v in (raw.get("tenant_tiers") or {}).items()}
+    project_tiers = {str(k): str(v) for k, v in (raw.get("project_tiers") or {}).items()}
+    # A tier name with no endpoint parses cleanly and then raises at the first
+    # create — for the very tenants an operator singled out, which are the ones
+    # most likely to also be in production_required_tenants and so have no
+    # fallback. Catch it while the config is being read.
+    dangling = sorted(
+        {
+            f"{source}[{key!r}] -> {tier!r}"
+            for source, mapping in (
+                ("tenant_tiers", tenant_tiers),
+                ("project_tiers", project_tiers),
+            )
+            for key, tier in mapping.items()
+            if tier not in endpoints
+        }
+    )
+    if dangling:
+        raise SandboxConfigError(
+            f"tier mappings reference tiers with no endpoint: {dangling}; "
+            f"configured tiers are {sorted(endpoints)}"
+        )
+
     rollout = _parse_rollout(raw.get("rollout") or {})
     required_tenants = frozenset(_str_list(raw, "production_required_tenants"))
     # A tenant that must use the backend but is excluded from the rollout is an
@@ -434,8 +461,8 @@ def parse_backend_config(raw: Mapping[str, Any]) -> SandboxBackendConfig:
         default_tier=default_tier,
         endpoints=endpoints,
         installation_id=installation_id,
-        tenant_tiers={str(k): str(v) for k, v in (raw.get("tenant_tiers") or {}).items()},
-        project_tiers={str(k): str(v) for k, v in (raw.get("project_tiers") or {}).items()},
+        tenant_tiers=tenant_tiers,
+        project_tiers=project_tiers,
         production_required_tenants=required_tenants,
         rollout=rollout,
         image_allowlist=image_allowlist,

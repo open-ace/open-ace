@@ -31,6 +31,7 @@ import re
 import shlex
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from app.modules.workspace.autonomous.sandbox.provider import (
     SandboxError,
@@ -167,6 +168,12 @@ def derive_capabilities(
     if att.pod_pids_limit > 0:
         caps.add(SandboxCapability.CPU_MEM_PIDS_TIME_QUOTA)
 
+    # CREDENTIAL_TOKEN_BINDING means "this sandbox's credential is bound to this
+    # sandbox". Only secureAccess provides that, and it needs gateway-mode
+    # ingress to do anything at all (see validate_spec_for_endpoint note 7) — so
+    # the static execd token alone does NOT earn the capability. Granting it
+    # from execd_token_required would claim per-sandbox binding for a
+    # deployment-wide shared secret.
     if att.execd_token_required and att.secure_access_required:
         caps.add(SandboxCapability.CREDENTIAL_TOKEN_BINDING)
 
@@ -246,13 +253,28 @@ def validate_spec_for_endpoint(
             f"attestations {missing}; refusing to run an agent without them"
         )
 
-    # 7. Without secureAccess a peer sandbox reaches this one's endpoint with no
-    # credential at all (upstream default is false).
-    if not att.secure_access_required:
-        raise SandboxError(
-            f"endpoint {endpoint.tier!r}: secure_access attestation absent; sandbox "
-            "endpoints would be reachable without an access token"
-        )
+    # 7. secureAccess is NOT required, and deliberately so.
+    #
+    # The provider sets `"secureAccess": True` on every create, but upstream
+    # honours it only for Kubernetes sandboxes when `[ingress] mode = "gateway"`
+    # (server/configuration.md: "currently supported only for Kubernetes
+    # sandboxes when ingress.mode = 'gateway'"; the OpenAPI adds "When omitted
+    # or false, endpoints remain accessible without the additional access
+    # token"). The manifests this repository ships run `mode = "direct"`, so
+    # per-sandbox tokens are never minted and the flag has no effect.
+    #
+    # Making the attestation mandatory therefore demanded an operator promise
+    # that the deployment cannot keep, and granted CREDENTIAL_TOKEN_BINDING off
+    # it — a capability asserted with nothing enforcing it, which is exactly the
+    # #2082 defect this package exists to avoid repeating. Requiring it is
+    # dropped rather than faked.
+    #
+    # KNOWN LIMITATION, documented in docs/sandbox-backends.md: under direct
+    # ingress every sandbox authenticates to execd with the same static
+    # EXECD_ACCESS_TOKEN, and an agent can read that token out of execd's
+    # inherited environment. A compromised agent can therefore reach a peer
+    # sandbox's execd. Closing it needs gateway-mode ingress, which is
+    # deployment work outside this backend.
 
     egress = spec.network_egress
     if egress is not None:
@@ -324,6 +346,48 @@ def build_network_policy(spec: SandboxSpec, endpoint: EndpointConfig) -> dict:
     }
 
 
+def assert_proxy_reachable(env: Mapping[str, str], endpoint: EndpointConfig) -> None:
+    """Refuse a turn whose LLM proxy the sandbox's egress policy would block.
+
+    The agent reaches Anthropic/OpenAI/etc. only through Open ACE's own proxy,
+    so the proxy host is the one destination a run cannot work without. Egress
+    is deny-default, and the proxy URL comes from the control plane's
+    ``server_url`` — which defaults to ``http://localhost:<port>``, a name that
+    inside the sandbox pod resolves to the sandbox itself.
+
+    Both misconfigurations produce the same symptom: the agent starts, every
+    request hangs or is refused, and the run dies with no indication that the
+    network policy was the cause. Refusing here names the host and the setting
+    that has to change.
+    """
+    for key in ("OPENACE_PROXY_URL", "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "GEMINI_BASE_URL"):
+        raw = str(env.get(key) or "")
+        if not raw:
+            continue
+        host = (urlparse(raw).hostname or "").lower()
+        if not host:
+            continue
+        if host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):  # noqa: S104 - comparison
+            raise SandboxError(
+                f"{key}={raw!r} points at the control plane's loopback address; inside the "
+                "sandbox pod that resolves to the sandbox itself. Set the control plane's "
+                "server_url to an address reachable from the cluster."
+            )
+        if not any(_egress_host_matches(host, pattern) for pattern in endpoint.egress_allow_hosts):
+            raise SandboxError(
+                f"{key} host {host!r} is not in endpoint {endpoint.tier!r} egress_allow_hosts "
+                f"{sorted(endpoint.egress_allow_hosts)}; egress is deny-default, so the agent "
+                "could not reach its own LLM proxy. Add the host to egress_allow_hosts."
+            )
+
+
+def _egress_host_matches(host: str, pattern: str) -> bool:
+    pattern = pattern.lower().strip()
+    if pattern.startswith("*."):
+        return host == pattern[2:] or host.endswith(pattern[1:])
+    return host == pattern
+
+
 def build_resource_limits(
     policy: AgentTaskPolicy | None, cfg: SandboxBackendConfig, endpoint: EndpointConfig
 ) -> dict[str, str]:
@@ -381,9 +445,29 @@ def build_env(
         "GIT_TERMINAL_PROMPT": "0",
     }
     for key, value in (extra or {}).items():
-        if key in _ENV_NEVER or key not in _ENV_PASSTHROUGH:
+        if key in _ENV_NEVER:
             continue
-        env[key] = str(value)
+        if key in _ENV_PASSTHROUGH:
+            env[key] = str(value)
+            continue
+        # Credential slots, forwarded on VALUE rather than name.
+        #
+        # The agent authenticates with whatever variable its CLI reads —
+        # ANTHROPIC_API_KEY for claude-code, OPENAI_API_KEY / GEMINI_API_KEY /
+        # BAILIAN_CODING_PLAN_API_KEY elsewhere, plus any name a model
+        # provider's `envKeys` config invents at runtime. A name allowlist
+        # cannot cover the dynamic ones, and omitting them entirely is what
+        # left the agent holding OPENACE_PROXY_TOKEN under a name nothing reads
+        # — it started, could not authenticate, and died.
+        #
+        # Matching on the value keeps the allowlist's guarantee intact and in
+        # fact tightens it: this forwards a variable only when it carries THIS
+        # run's short-lived proxy token, so a raw upstream API key present in
+        # the control plane's environment can never be forwarded under any
+        # name. _build_agent_env fails closed when proxy setup fails, so there
+        # is no path where these slots hold a real key.
+        if proxy_token and str(value) == proxy_token:
+            env[key] = str(value)
     if proxy_token:
         env["OPENACE_PROXY_TOKEN"] = proxy_token
     return env

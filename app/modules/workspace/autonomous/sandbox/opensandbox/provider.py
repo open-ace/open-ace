@@ -497,15 +497,39 @@ class OpenSandboxProvider:
         ``sandbox_id`` on a transient API outage, discarding the one piece of
         information a later retry needs: the sandbox keeps running until its
         TTL and nothing left in the database can name it.
+
+        Searches EVERY configured endpoint, not just this provider's own. The
+        post-restart sweep rebuilds a provider from a workflow row that records
+        the provider *name* and nothing about the tier, so it resolves to
+        ``default_tier``. In the two-tier topology this repository ships
+        (gvisor + kata via ``tenant_tiers``) that is the wrong server for every
+        non-default tenant — and since ``delete_sandbox`` treats 404 as success,
+        deleting a kata sandbox's id against the gvisor server *reported
+        success*. The scheduler then cleared the ids while the real sandbox ran
+        on to its TTL: exactly the leak this reporting exists to prevent.
+
+        Locating the sandbox before deleting it is what makes the answer mean
+        something. Finding it nowhere is success — it is already gone.
         """
-        try:
-            self._api.delete_sandbox(sandbox_id)
-        except Exception as exc:  # noqa: BLE001 - report, never raise
+        found_anywhere = False
+        errors: list[str] = []
+        for tier, endpoint in self._config.endpoints.items():
+            api = self._api if endpoint is self._endpoint else self._api_factory(endpoint)
+            try:
+                if api.get_sandbox(sandbox_id) is None:
+                    continue
+                found_anywhere = True
+                api.delete_sandbox(sandbox_id)
+            except Exception as exc:  # noqa: BLE001 - report, never raise
+                errors.append(f"{tier}: {exc}")
+        if errors:
             self._emit(
                 "sandbox_destroy_attribution_failed",
-                {"sandbox_id": sandbox_id, "error": str(exc)},
+                {"sandbox_id": sandbox_id, "errors": errors},
             )
             return False
+        if not found_anywhere:
+            self._emit("sandbox_destroy_attribution_absent", {"sandbox_id": sandbox_id})
         return True
 
     def inspect(self, handle: SandboxHandle) -> SandboxStatus:
@@ -723,7 +747,15 @@ class OpenSandboxProvider:
             proxy_token=turn.proxy_token,
             extra=env,
         )
-        pty_command = policy_mod.build_pty_command(command, env=merged)
+        # Fail closed before the agent starts rather than after it has burned a
+        # turn failing to reach its own proxy.
+        policy_mod.assert_proxy_reachable(merged, self._endpoint)
+        # argv[0] was resolved by shutil.which on the CONTROL PLANE. That host
+        # path has no meaning inside the image, so resolve by name there — the
+        # container's PATH is the only authority on where its own CLI lives.
+        pty_command = policy_mod.build_pty_command(
+            [Path(command[0]).name, *command[1:]] if command else command, env=merged
+        )
         transport = PtyWebSocketTransport(
             self._api,
             sandbox_id=handle.sandbox_id,

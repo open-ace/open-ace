@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from app.modules.workspace.autonomous.sandbox.isolation_tier import (
@@ -77,8 +79,10 @@ def test_required_production_policy_cannot_fallback_to_legacy():
     assert isinstance(_select(tenant="42"), OpenSandboxProvider)
 
     # ...and when the tier it needs has no endpoint, it RAISES rather than
-    # quietly running somewhere weaker.
-    cfg = _cfg(tenant_tiers={"42": "kata"})
+    # quietly running somewhere weaker. parse_backend_config now rejects a
+    # dangling tier outright, so build the broken config directly to keep
+    # testing the GATE's behaviour rather than the parser's.
+    cfg = replace(_cfg(), tenant_tiers={"42": "kata"})
     with pytest.raises(SandboxError):
         _select(tenant="42", config=cfg)
 
@@ -106,7 +110,9 @@ def test_misconfigured_tier_does_not_silently_downgrade_a_non_required_tenant():
     # provider is never constructed — is exactly the quiet downgrade this gate
     # exists to prevent. It must be loud for everyone, not only for tenants on
     # the required list.
-    cfg = _cfg(tenant_tiers={"7": "kata"}, production_required_tenants=[])
+    # Built directly: the parser refuses a dangling tier now, and this test is
+    # about the gate refusing rather than downgrading.
+    cfg = replace(_cfg(production_required_tenants=[]), tenant_tiers={"7": "kata"})
     with pytest.raises(SandboxError):
         _select(tenant="7", config=cfg, fallback=LegacyPosixProvider())
 

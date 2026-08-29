@@ -96,6 +96,7 @@ def test_default_api_factory_is_monkeypatchable(configured, monkeypatch):
     # The scheduler's sweep builds its provider through provider_for and passes
     # no factory, so this indirection is the only seam a reconciliation test has.
     api = FakeOpenSandboxApi()
+    api.sandboxes["sb-1"] = {"id": "sb-1", "status": {"state": "Running"}, "metadata": {}}
     monkeypatch.setattr(registry, "_default_api_factory", lambda endpoint: api)
     provider = provider_for("opensandbox")
     provider.destroy_attribution("sb-1", None)
@@ -205,6 +206,7 @@ def test_destroy_attribution_reports_failure_instead_of_swallowing_it(configured
     handle a retry could use, stranding a live sandbox until its TTL.
     """
     api = FakeOpenSandboxApi()
+    api.sandboxes["sb-1"] = {"id": "sb-1", "status": {"state": "Running"}, "metadata": {}}
     provider = provider_for("opensandbox", api_factory=lambda endpoint: api)
 
     def _boom(sandbox_id):
@@ -218,5 +220,76 @@ def test_destroy_attribution_reports_failure_instead_of_swallowing_it(configured
 
 def test_destroy_attribution_reports_success(configured):
     api = FakeOpenSandboxApi()
+    api.sandboxes["sb-1"] = {"id": "sb-1", "status": {"state": "Running"}, "metadata": {}}
     provider = provider_for("opensandbox", api_factory=lambda endpoint: api)
     assert provider.destroy_attribution_checked("sb-1", None) is True
+    assert "sb-1" in api.deleted
+
+
+def test_an_already_gone_sandbox_is_success_not_failure(configured):
+    """Nothing to delete is the desired end state, not a retryable failure."""
+    api = FakeOpenSandboxApi()
+    provider = provider_for("opensandbox", api_factory=lambda endpoint: api)
+    assert provider.destroy_attribution_checked("sb-missing", None) is True
+
+
+def test_a_sandbox_on_a_non_default_tier_is_destroyed_on_its_own_server(tmp_path, monkeypatch):
+    """The two-tier topology this repo ships, and the leak it used to cause.
+
+    The workflow row records the provider NAME and nothing about the tier, so
+    the post-restart sweep resolved to default_tier — the gvisor server for a
+    kata tenant. delete_sandbox treats 404 as success, so deleting the kata
+    sandbox's id against the gvisor server reported SUCCESS, the scheduler
+    cleared the ids, and the real sandbox ran on to its TTL.
+    """
+    raw = {
+        "installation_id": "openace-test",
+        "default_tier": "gvisor",
+        "tenant_tiers": {"42": "kata"},
+        "endpoints": {
+            tier: {
+                "base_url": f"http://osb-{tier}.open-ace.svc.cluster.local:8080/v1",
+                "api_key_env": "OSB_KEY",
+                "execd_token_env": "OSB_EXECD_TOKEN",
+                "runtime_class": "gvisor" if tier == "gvisor" else "kata-qemu",
+                "default_image": _DIGEST,
+                "egress_allow_hosts": ["api.anthropic.com"],
+                "attestations": {
+                    "egress_enforced": True,
+                    "egress_mode_dns_nft": True,
+                    "metadata_cidr_blocked": True,
+                    "execd_token_required": True,
+                    "nonroot_enforced": True,
+                    "readonly_rootfs": True,
+                    "seccomp_runtime_default": True,
+                    "dedicated_service_account": True,
+                    "pod_pids_limit": 512,
+                },
+            }
+            for tier in ("gvisor", "kata")
+        },
+        "image_allowlist": [_DIGEST],
+    }
+    path = tmp_path / "sandbox-backends.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setenv("OSB_KEY", "k")
+    monkeypatch.setenv("OSB_EXECD_TOKEN", "t")
+    monkeypatch.setenv("OPENACE_SANDBOX_BACKENDS", str(path))
+
+    servers = {"gvisor": FakeOpenSandboxApi(), "kata": FakeOpenSandboxApi()}
+    # The sandbox lives on kata; the sweep will resolve to gvisor.
+    servers["kata"].sandboxes["sb-kata-1"] = {
+        "id": "sb-kata-1",
+        "status": {"state": "Running"},
+        "metadata": {"openace.provider": "opensandbox", "openace.installation": "openace-test"},
+    }
+
+    def _factory(endpoint):
+        return servers["kata" if "kata" in endpoint.base_url else "gvisor"]
+
+    monkeypatch.setattr(registry, "_default_api_factory", _factory)
+    provider = provider_for("opensandbox")
+
+    assert provider.destroy_attribution_checked("sb-kata-1", None) is True
+    assert "sb-kata-1" in servers["kata"].deleted, "the kata sandbox was never actually destroyed"
+    assert "sb-kata-1" not in servers["gvisor"].deleted

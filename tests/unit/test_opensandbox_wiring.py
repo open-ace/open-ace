@@ -372,7 +372,7 @@ def _load_config():
     return config
 
 
-def _run_local_against(provider, worktree, monkeypatch):
+def _run_local_against(provider, worktree, monkeypatch, gate_spy=None):
     """Invoke the REAL _run_local with *provider* selected by the gate.
 
     Only the boundaries are faked — the lifecycle/execd API and the PTY
@@ -403,6 +403,10 @@ def _run_local_against(provider, worktree, monkeypatch):
     # `claude` is on PATH is not what is under test; the provider lifecycle is.
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/local/bin/{name}")
     runner._select_sandbox_provider = lambda *a, **k: provider
+    # Left REAL by default so the round trip exercises the production gate;
+    # a spy replaces it only where the test is about the call itself.
+    if gate_spy is not None:
+        runner._resolve_tenant_for_isolation = gate_spy
     runner._resolve_sandbox_generation = lambda workflow_id: 1
     runner._load_task_policy = lambda: None
     runner._resource_policy_configured = lambda: False
@@ -531,3 +535,75 @@ def test_run_local_drives_create_upload_pty_collect_apply_destroy(api, tmp_path,
     # The work product came back into the trusted worktree.
     assert (worktree / "app.py").read_text(encoding="utf-8") == "edited\n"
     assert result.success, result.error
+
+
+def test_run_local_actually_calls_the_isolation_gate(api, tmp_path, monkeypatch):
+    """Mutation-proved gap: deleting the gate call left 94 tests green.
+
+    Round 2 found the isolation gate routed through a method `_run_local` never
+    called. The fix added the call — but nothing asserted the call exists, so
+    the identical regression could land again silently.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.provider import OpenSandboxProvider
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / "app.py").write_text("x\n", encoding="utf-8")
+    conn = _ScriptedPtyConnection(
+        [
+            _stdout_frame({"type": "system", "subtype": "init", "session_id": "cli-1"}),
+            _stdout_frame({"type": "result", "subtype": "success", "result": "ok"}),
+        ]
+    )
+    provider = OpenSandboxProvider(
+        _load_config(),
+        api_factory=lambda endpoint: api,
+        tenant="1",
+        project_path=str(worktree),
+        connect_factory=lambda url, headers: conn,
+    )
+    api.set_manifest({"app.py": b"x\n"})
+
+    seen: list = []
+    _run_local_against(
+        provider,
+        worktree,
+        monkeypatch,
+        gate_spy=lambda *a, **k: (seen.append(True), 1)[1],
+    )
+    assert seen, "_run_local never consulted the isolation gate"
+
+
+def test_a_failed_apply_fails_the_run(api, tmp_path, monkeypatch):
+    """Mutation-proved gap: removing the error assignment left 54 tests green.
+
+    An ephemeral backend whose work product cannot be applied has produced
+    nothing. Reporting that run as a success is the silent data loss this
+    backend exists to prevent, so the claim needs a test of its own.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.provider import OpenSandboxProvider
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / "app.py").write_text("original\n", encoding="utf-8")
+    conn = _ScriptedPtyConnection(
+        [
+            _stdout_frame({"type": "system", "subtype": "init", "session_id": "cli-1"}),
+            _stdout_frame({"type": "result", "subtype": "success", "result": "done"}),
+        ]
+    )
+    provider = OpenSandboxProvider(
+        _load_config(),
+        api_factory=lambda endpoint: api,
+        tenant="1",
+        project_path=str(worktree),
+        connect_factory=lambda url, headers: conn,
+    )
+    # The producer never wrote a manifest: collection fails, so the run's work
+    # product cannot come back.
+    api.set_manifest(None)
+
+    result = _run_local_against(provider, worktree, monkeypatch)
+    assert result.success is False
+    assert "work product" in (result.error or "").lower()
+    assert result.error_code

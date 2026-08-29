@@ -996,6 +996,7 @@ class AutonomousAgentRunner:
         session_id: str,
         sandbox_handle: Any,
         remote_session_id: str | None,
+        provider: Any = None,
     ) -> None:
         """Fire ``on_sandbox_created`` so the orchestrator persists mid-run state (#2022 P6).
 
@@ -1018,7 +1019,14 @@ class AutonomousAgentRunner:
             )
 
             try:
-                declared_caps = self._sandbox_provider.capabilities()
+                # The provider that actually ran this task, NOT the injected
+                # default. Reading self._sandbox_provider stamped Legacy's
+                # capability set onto a row labelled provider_name="opensandbox"
+                # — so the row claimed CPU_MEM_PIDS_TIME_QUOTA (always in
+                # _LEGACY_CAPS) even for a tier that attested no pod pids limit,
+                # and omitted the namespace/egress isolation it really had.
+                # effective_policy's contract is that the map cannot lie.
+                declared_caps = (provider or self._sandbox_provider).capabilities()
             except Exception:
                 declared_caps = frozenset()
             effective_policy = build_effective_policy(
@@ -2745,7 +2753,7 @@ class AutonomousAgentRunner:
             # #2022 P6: persist a mid-run 'running' row so a crash between exec
             # and task completion leaves an orphan the reconciler can destroy.
             # Local has no external session id → None.
-            self._notify_sandbox_created(session_id, sandbox_handle, None)
+            self._notify_sandbox_created(session_id, sandbox_handle, None, provider)
         except (OSError, subprocess.SubprocessError, SandboxError) as e:
             # SandboxError belongs here too: without it an exec failure from a
             # container backend skips this handler and the sandbox leaks until
@@ -4014,7 +4022,9 @@ class AutonomousAgentRunner:
                     remote_session_id = exec_handle.command_id
                     # #2022 P6: persist mid-run 'running' + remote_session_id so
                     # a crash leaves an orphan the reconciler can destroy by id.
-                    self._notify_sandbox_created(session_id, sandbox_handle, remote_session_id)
+                    self._notify_sandbox_created(
+                        session_id, sandbox_handle, remote_session_id, provider
+                    )
                     tracker.persisted_session_id = remote_session_id
                     tracker.sandbox_handle = sandbox_handle
                     tracker.exec_handle = exec_handle

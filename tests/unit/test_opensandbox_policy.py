@@ -190,14 +190,29 @@ def test_tag_only_image_refused():
         _create(spec)
 
 
-def test_missing_secure_access_attestation_refused():
-    # Without secureAccess a peer sandbox reaches this one's endpoint with no
-    # credential at all — acceptance criterion 5.
+def test_a_tier_without_secure_access_still_runs_but_loses_the_capability():
+    """secureAccess needs gateway-mode ingress upstream; ours is direct.
+
+    Requiring the attestation demanded a promise the shipped manifests cannot
+    keep, and granted CREDENTIAL_TOKEN_BINDING off it — a capability asserted
+    with nothing enforcing it (#2082). The tier now runs, and simply does not
+    claim per-sandbox credential binding.
+    """
     cfg = _cfg(
         attestations={k: v for k, v in _FULL_ATTESTATIONS.items() if k != "secure_access_required"}
     )
-    with pytest.raises(SandboxError, match="secure_access"):
-        _create(cfg=cfg)
+    _create(cfg=cfg)  # no refusal
+
+
+def test_credential_token_binding_is_not_granted_without_secure_access():
+    from app.modules.workspace.autonomous.sandbox.opensandbox.policy import derive_capabilities
+    from app.modules.workspace.autonomous.sandbox.types import SandboxCapability
+
+    cfg = _cfg(
+        attestations={k: v for k, v in _FULL_ATTESTATIONS.items() if k != "secure_access_required"}
+    )
+    caps = derive_capabilities(cfg.endpoints["gvisor"], probes_passed=True)
+    assert SandboxCapability.CREDENTIAL_TOKEN_BINDING not in caps
 
 
 @pytest.mark.parametrize(
@@ -548,3 +563,103 @@ def test_pty_command_rejects_a_newline_bearing_env_value():
 def test_pty_command_rejects_an_invalid_env_var_name():
     with pytest.raises(SandboxError):
         build_pty_command(["claude"], env={"BAD NAME": "x"})
+
+
+# ── the agent's LLM credential (spec §5.4) ────────────────────────────
+
+
+def test_the_agent_receives_the_credential_variable_its_cli_actually_reads():
+    """Without this the backend cannot complete a run at all.
+
+    _build_agent_env mints a short-lived proxy token and hands it to the
+    adapter, which returns it as ANTHROPIC_API_KEY — the only variable
+    claude-code reads. A name-based allowlist that kept OPENACE_PROXY_TOKEN but
+    dropped ANTHROPIC_API_KEY left the agent holding the credential under a
+    name nothing consumes: it started, could not authenticate, and died. Every
+    provider test passed, because none of them assembled the runner's env.
+    """
+    cfg = _cfg()
+    # Exactly the shape _build_agent_env produces (agent_runner.py:1658-1665).
+    runner_env = {
+        "ANTHROPIC_API_KEY": "PROXYTOKEN-abc",
+        "ANTHROPIC_BASE_URL": "https://proxy.open-ace.example/api/remote/llm-proxy",
+        "OPENACE_PROXY_URL": "https://proxy.open-ace.example/api/remote/llm-proxy",
+        "OPENACE_PROXY_TOKEN": "PROXYTOKEN-abc",
+    }
+    env = build_env(_spec(), cfg, _endpoint(cfg), proxy_token="PROXYTOKEN-abc", extra=runner_env)
+    assert env["ANTHROPIC_API_KEY"] == "PROXYTOKEN-abc"
+
+
+def test_a_dynamic_provider_env_key_carrying_the_token_is_forwarded():
+    """Model providers invent env-var names at runtime (`envKeys`).
+
+    A static name allowlist cannot enumerate them, which is why forwarding is
+    decided on the VALUE being this run's proxy token.
+    """
+    cfg = _cfg()
+    env = build_env(
+        _spec(),
+        cfg,
+        _endpoint(cfg),
+        proxy_token="PROXYTOKEN-abc",
+        extra={"BAILIAN_CODING_PLAN_API_KEY": "PROXYTOKEN-abc"},
+    )
+    assert env["BAILIAN_CODING_PLAN_API_KEY"] == "PROXYTOKEN-abc"
+
+
+def test_a_real_api_key_is_never_forwarded_under_a_credential_name():
+    """The value-match is what keeps the allowlist's guarantee.
+
+    A raw upstream key sitting in a credential-shaped variable is NOT this
+    run's proxy token, so it does not travel — which is a stronger guarantee
+    than the name allowlist gave.
+    """
+    cfg = _cfg()
+    env = build_env(
+        _spec(),
+        cfg,
+        _endpoint(cfg),
+        proxy_token="PROXYTOKEN-abc",
+        extra={"ANTHROPIC_API_KEY": "sk-ant-REAL-KEY", "OPENAI_API_KEY": "sk-REAL"},
+    )
+    assert "sk-ant-REAL-KEY" not in env.values()
+    assert env.get("ANTHROPIC_API_KEY") != "sk-ant-REAL-KEY"
+    assert "OPENAI_API_KEY" not in env
+
+
+def test_no_credential_travels_when_proxy_setup_failed():
+    """_build_agent_env fails closed; nothing here may re-open it."""
+    cfg = _cfg()
+    env = build_env(_spec(), cfg, _endpoint(cfg), extra={"ANTHROPIC_API_KEY": "whatever"})
+    assert "ANTHROPIC_API_KEY" not in env
+
+
+def test_a_proxy_url_the_egress_policy_would_block_is_refused():
+    """Egress is deny-default; the proxy is the one host a run cannot work without.
+
+    Both misconfigurations below produce the same symptom — the agent starts,
+    every request hangs, the run dies with nothing pointing at the network
+    policy. Refusing names the host and the setting to change.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.policy import assert_proxy_reachable
+
+    cfg = _cfg()
+    endpoint = _endpoint(cfg)  # egress_allow_hosts = api.anthropic.com
+    with pytest.raises(SandboxError, match="egress_allow_hosts"):
+        assert_proxy_reachable({"OPENACE_PROXY_URL": "https://proxy.internal/x"}, endpoint)
+
+
+def test_a_loopback_proxy_url_is_refused():
+    """Inside the pod, localhost is the sandbox itself — not the control plane."""
+    from app.modules.workspace.autonomous.sandbox.opensandbox.policy import assert_proxy_reachable
+
+    cfg = _cfg()
+    with pytest.raises(SandboxError, match="loopback"):
+        assert_proxy_reachable({"ANTHROPIC_BASE_URL": "http://localhost:5000/api"}, _endpoint(cfg))
+
+
+def test_an_allowlisted_proxy_url_passes():
+    from app.modules.workspace.autonomous.sandbox.opensandbox.policy import assert_proxy_reachable
+
+    cfg = _cfg()
+    assert_proxy_reachable({"ANTHROPIC_BASE_URL": "https://api.anthropic.com/v1"}, _endpoint(cfg))

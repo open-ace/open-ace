@@ -81,7 +81,6 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
         "egress_mode_dns_nft": true,
         "metadata_cidr_blocked": true,
         "execd_token_required": true,
-        "secure_access_required": true,
         "nonroot_enforced": true,
         "readonly_rootfs": true,
         "seccomp_runtime_default": true,
@@ -103,6 +102,13 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
 
 Points worth knowing before you edit it:
 
+- **The agent's LLM proxy must be egress-allowlisted and cluster-reachable.**
+  Egress is deny-default and the proxy is the one host a run cannot work
+  without, so its hostname has to appear in that tier's `egress_allow_hosts`.
+  It also must not be a loopback address: the control plane's `server_url`
+  defaults to `http://localhost:<port>`, which inside the sandbox pod resolves
+  to the sandbox itself. The provider refuses the turn in both cases rather
+  than letting the agent hang on every request.
 - **`installation_id` is required and must be unique per deployment.** It is
   stamped on every sandbox's metadata, and orphan reconciliation destroys every
   sandbox carrying our provider tag that no local workflow row claims. Two
@@ -259,9 +265,42 @@ trusted repository. Commit and push stay control-plane side. `HOME` is at
 `/home/agent`, deliberately outside `/workspace`, so the agent's caches never
 enter that repository.
 
-**The image must provide `git` and `python3`.** The provider runs the repo
-synthesis and the ChangeSet manifest producer inside the sandbox; both fail
-closed with a structured reason code if the binaries are absent.
+**The image must provide `git`, `python3`, and the agent CLI on `PATH`.** The
+provider runs the repo synthesis and the ChangeSet manifest producer inside the
+sandbox; both fail closed with a structured reason code if the binaries are
+absent. The agent CLI (`claude`, `qwen`, …) is invoked by **name**, not by the
+path the control plane resolved it to — the host's `shutil.which` result has no
+meaning inside the image — so the image's own `PATH` must find it.
+
+**The control plane must also have the agent CLI installed.** `_run_local`
+resolves the executable on the host before selecting a provider, and returns
+`CLI tool '<name>' not found` if it is missing — even for a run that would
+execute entirely inside a container. A control plane that never runs agents
+locally therefore cannot yet use this backend. Tracked as follow-up work;
+restructuring command construction around provider selection is out of scope
+for #2023.
+
+**`secureAccess` does nothing under the shipped manifests.** Upstream honours it
+only for Kubernetes sandboxes when `[ingress] mode = "gateway"`, and
+`k8s/extras/opensandbox/` configures `direct`. The provider still requests it
+(harmless, and correct for a gateway deployment), but no per-sandbox token is
+minted, so `secure_access_required` is **not** a required attestation and
+`CREDENTIAL_TOKEN_BINDING` is withheld without it. The consequence: every
+sandbox authenticates to execd with the same static `EXECD_ACCESS_TOKEN`, and an
+agent can read that token out of execd's inherited environment — so a
+compromised agent can reach a peer sandbox's execd. Closing this requires
+gateway-mode ingress, which is deployment work beyond this backend.
+
+**Orphan reconciliation is per-workflow-row only.** `reconcile_orphans()`, the
+metadata-scoped sweep of the whole lifecycle server, has no production caller;
+teardown happens through `destroy_attribution` on rows the database already
+knows about. A sandbox whose workflow row was lost entirely is reclaimed by its
+TTL, not by Open ACE.
+
+**Multi-turn `--resume` does not carry session history.** Each turn gets a fresh
+sandbox with an empty `HOME`, so a `--resume` on turn 2 finds no local session
+state from turn 1. The prompt and the workspace carry over; the CLI's own
+session cache does not.
 
 ---
 

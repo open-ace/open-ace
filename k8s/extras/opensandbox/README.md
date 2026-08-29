@@ -25,7 +25,7 @@ the workflow row lie about what protected the run.
 | `metadata_cidr_blocked` | `networkpolicy.yaml` |
 | `egress_enforced`, `egress_mode_dns_nft` | `configmap-*.yaml` — `[egress] mode = "dns+nft"` |
 | `execd_token_required` | `server-*.yaml` — a non-empty `EXECD_ACCESS_TOKEN` |
-| `secure_access_required` | the provider always sets `secureAccess: true`; keep it attested so a tier cannot opt out |
+| `secure_access_required` | **nothing, under these manifests.** Upstream honours `secureAccess` only when `[ingress] mode = "gateway"`; ours is `direct`, so no per-sandbox token is minted. It is no longer required, and `CREDENTIAL_TOKEN_BINDING` is withheld without it. See the limitation note in `docs/sandbox-backends.md`. |
 | `ephemeral_storage_enforced` | `configmap-sandbox-template.yaml` volume `sizeLimit`s |
 | — (not an attestation, but required) | `configmap-sandbox-template.yaml` mounts a **writable** volume at `/home/agent`. `HOME` lives outside `/workspace` on purpose: under `/workspace` the repo synthesis's `git add -A` stages the agent's whole home tree — pip wheels, npm, pre-commit environments — into the initial commit. |
 | `inode_quota_enforced` | **nothing here.** Leave it `false` unless the node filesystem carries a real project quota — see below. |
