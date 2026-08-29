@@ -8,6 +8,7 @@
  * - Suspend/Activate tenants
  * - Quota checking with result modal (Issue #3132)
  * - Tenant settings management with content filter toggle (Issue #3203)
+ * - Audit log settings management (Issue #3204)
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -125,6 +126,21 @@ const validateTrialDays = (
   return null;
 };
 
+// Audit log retention days validation (Issue #3204)
+const validateRetentionDays = (
+  value: string | number | undefined,
+  language: Language
+): string | null => {
+  if (value === undefined || value === null || value === '') {
+    return null; // Optional field, empty uses default
+  }
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 1 || num > 365) {
+    return t('validationRetentionDaysRange', language);
+  }
+  return null;
+};
+
 export const TenantManagement: React.FC = () => {
   const language = useLanguage();
   const toast = useToast();
@@ -163,8 +179,11 @@ export const TenantManagement: React.FC = () => {
     max_sessions_per_user: 5,
   });
   // Issue #3203: Settings and original data for change detection
+  // Issue #3204: Add audit_log_enabled and audit_log_retention_days
   const [settingsData, setSettingsData] = useState<TenantSettings>({
     content_filter_enabled: true,
+    audit_log_enabled: true,
+    audit_log_retention_days: 90,
   });
   const [originalQuota, setOriginalQuota] = useState({
     daily_token_limit: 1,
@@ -176,10 +195,14 @@ export const TenantManagement: React.FC = () => {
   });
   const [originalSettings, setOriginalSettings] = useState<TenantSettings>({
     content_filter_enabled: true,
+    audit_log_enabled: true,
+    audit_log_retention_days: 90,
   });
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [trialDaysError, setTrialDaysError] = useState<string | null>(null);
+  // Issue #3204: Retention days validation error
+  const [retentionDaysError, setRetentionDaysError] = useState<string | null>(null);
 
   // Issue #3132: Quota check state
   const { checkingTenants, checkResult, checkQuota, clearResult } = useTenantQuotaCheck();
@@ -303,11 +326,17 @@ export const TenantManagement: React.FC = () => {
     setOriginalQuota(quota);
 
     // Issue #3203: Load settings data with default value fallback
+    // Issue #3204: Add audit_log_enabled and audit_log_retention_days
     const settings: TenantSettings = {
       content_filter_enabled: tenant.settings?.content_filter_enabled ?? true,
+      audit_log_enabled: tenant.settings?.audit_log_enabled ?? true,
+      audit_log_retention_days: tenant.settings?.audit_log_retention_days ?? 90,
     };
     setSettingsData(settings);
     setOriginalSettings(settings);
+
+    // Issue #3204: Clear validation errors
+    setRetentionDaysError(null);
 
     setShowQuotaModal(true);
   };
@@ -405,13 +434,26 @@ export const TenantManagement: React.FC = () => {
     );
   };
 
+  // Issue #3204: Extended to include audit_log_enabled and audit_log_retention_days
   const hasSettingsChanges = () => {
-    return settingsData.content_filter_enabled !== originalSettings.content_filter_enabled;
+    return (
+      settingsData.content_filter_enabled !== originalSettings.content_filter_enabled ||
+      settingsData.audit_log_enabled !== originalSettings.audit_log_enabled ||
+      settingsData.audit_log_retention_days !== originalSettings.audit_log_retention_days
+    );
   };
 
   // Issue #3203: Intelligent save with change detection
   const handleSaveQuota = async () => {
     if (!editingTenant) return;
+
+    // Issue #3204: Validate retention days before saving
+    const error = validateRetentionDays(settingsData.audit_log_retention_days, language);
+    if (error) {
+      setRetentionDaysError(error);
+      return;
+    }
+
     setIsSaving(true);
 
     try {
@@ -425,9 +467,12 @@ export const TenantManagement: React.FC = () => {
       }
 
       // Save settings first if changed
+      // Issue #3204: Include audit_log_enabled and audit_log_retention_days
       if (needSaveSettings) {
         await tenantApi.updateSettings(editingTenant.id, {
           content_filter_enabled: settingsData.content_filter_enabled,
+          audit_log_enabled: settingsData.audit_log_enabled,
+          audit_log_retention_days: settingsData.audit_log_retention_days,
         });
       }
 
@@ -1091,6 +1136,58 @@ export const TenantManagement: React.FC = () => {
               <small className="text-muted d-block mt-1">
                 {t('contentFilterEnabledDesc', language)}{' '}
                 <a href="/security">{t('contentFilter', language)}</a>
+              </small>
+            </div>
+
+            {/* Issue #3204: Audit Log Settings */}
+            <div className="col-12">
+              <div className="form-check form-switch">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="auditLogEnabled"
+                  checked={settingsData.audit_log_enabled}
+                  disabled={isSaving}
+                  onChange={(e) =>
+                    setSettingsData({
+                      ...settingsData,
+                      audit_log_enabled: e.target.checked,
+                    })
+                  }
+                />
+                <label className="form-check-label" htmlFor="auditLogEnabled">
+                  {t('auditLogEnabled', language)}
+                </label>
+              </div>
+              <small className="text-muted d-block mt-1">
+                {t('auditLogEnabledDesc', language)}
+              </small>
+            </div>
+
+            {/* Issue #3204: Audit Log Retention Days */}
+            <div className="col-md-6">
+              <label className="form-label">{t('auditLogRetentionDays', language)}</label>
+              <input
+                type="number"
+                className={`form-control ${retentionDaysError ? 'is-invalid' : ''}`}
+                min="1"
+                max="365"
+                value={settingsData.audit_log_retention_days ?? 90}
+                disabled={isSaving}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value, 10);
+                  setSettingsData({
+                    ...settingsData,
+                    audit_log_retention_days: isNaN(value) ? 90 : value,
+                  });
+                  // Validate on change
+                  const error = validateRetentionDays(e.target.value, language);
+                  setRetentionDaysError(error);
+                }}
+              />
+              {retentionDaysError && <div className="invalid-feedback">{retentionDaysError}</div>}
+              <small className="text-muted d-block mt-1">
+                {t('auditLogRetentionDaysHelp', language)}
               </small>
             </div>
           </div>

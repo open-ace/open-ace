@@ -659,6 +659,8 @@ describe('TenantManagement - Issue #3203: Tenant Settings', () => {
         created_at: '2024-01-01',
         settings: {
           content_filter_enabled: true,
+          audit_log_enabled: true,
+          audit_log_retention_days: 90,
         },
         quota: {
           daily_token_limit: 1000000,
@@ -673,7 +675,11 @@ describe('TenantManagement - Issue #3203: Tenant Settings', () => {
       mockTenantApi.listTenants.mockResolvedValueOnce({ tenants: [tenant], count: 1 });
       mockTenantApi.updateSettings.mockResolvedValueOnce({
         ...tenant,
-        settings: { content_filter_enabled: false },
+        settings: {
+          content_filter_enabled: false,
+          audit_log_enabled: true,
+          audit_log_retention_days: 90,
+        },
       });
 
       render(<TenantManagement />);
@@ -701,8 +707,11 @@ describe('TenantManagement - Issue #3203: Tenant Settings', () => {
       fireEvent.click(saveButton);
 
       await waitFor(() => {
+        // Issue #3204: Now includes all settings fields
         expect(mockTenantApi.updateSettings).toHaveBeenCalledWith(1, {
           content_filter_enabled: false,
+          audit_log_enabled: true,
+          audit_log_retention_days: 90,
         });
         expect(mockTenantApi.updateQuota).not.toHaveBeenCalled();
       });
@@ -718,6 +727,8 @@ describe('TenantManagement - Issue #3203: Tenant Settings', () => {
         created_at: '2024-01-01',
         settings: {
           content_filter_enabled: true,
+          audit_log_enabled: true,
+          audit_log_retention_days: 90,
         },
         quota: {
           daily_token_limit: 1000000,
@@ -771,6 +782,8 @@ describe('TenantManagement - Issue #3203: Tenant Settings', () => {
         created_at: '2024-01-01',
         settings: {
           content_filter_enabled: true,
+          audit_log_enabled: true,
+          audit_log_retention_days: 90,
         },
         quota: {
           daily_token_limit: 1000000,
@@ -785,7 +798,11 @@ describe('TenantManagement - Issue #3203: Tenant Settings', () => {
       mockTenantApi.listTenants.mockResolvedValueOnce({ tenants: [tenant], count: 1 });
       mockTenantApi.updateSettings.mockResolvedValueOnce({
         ...tenant,
-        settings: { content_filter_enabled: false },
+        settings: {
+          content_filter_enabled: false,
+          audit_log_enabled: true,
+          audit_log_retention_days: 90,
+        },
       });
       mockTenantApi.updateQuota.mockResolvedValueOnce(tenant);
 
@@ -833,6 +850,8 @@ describe('TenantManagement - Issue #3203: Tenant Settings', () => {
         created_at: '2024-01-01',
         settings: {
           content_filter_enabled: true,
+          audit_log_enabled: true,
+          audit_log_retention_days: 90,
         },
         quota: {
           daily_token_limit: 1000000,
