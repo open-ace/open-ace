@@ -372,7 +372,7 @@ def _load_config():
     return config
 
 
-def _run_local_against(provider, worktree):
+def _run_local_against(provider, worktree, monkeypatch):
     """Invoke the REAL _run_local with *provider* selected by the gate.
 
     Only the boundaries are faked — the lifecycle/execd API and the PTY
@@ -380,6 +380,8 @@ def _run_local_against(provider, worktree):
     the provider lifecycle calls, the stream-json reader threads, the transport
     seam, and the teardown ordering.
     """
+    import shutil
+
     from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
 
     runner = AutonomousAgentRunner.__new__(AutonomousAgentRunner)
@@ -395,6 +397,11 @@ def _run_local_against(provider, worktree):
     # orthogonal to the sandbox lifecycle under test; without a real ~/.claude
     # tree it fails and masks every assertion below it.
     runner._uses_sidebar_session_source = lambda *a, **k: False
+    # The agent CLI binary is not installed on CI runners, and _run_local
+    # returns "CLI tool not found" before it reaches the provider at all —
+    # which makes this test silently vacuous there rather than red. Whether
+    # `claude` is on PATH is not what is under test; the provider lifecycle is.
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/local/bin/{name}")
     runner._select_sandbox_provider = lambda *a, **k: provider
     runner._resolve_sandbox_generation = lambda workflow_id: 1
     runner._load_task_policy = lambda: None
@@ -499,7 +506,7 @@ def test_run_local_drives_create_upload_pty_collect_apply_destroy(api, tmp_path,
 
     monkeypatch.setattr(provider, "exec", _capture_exec)
 
-    result = _run_local_against(provider, worktree)
+    result = _run_local_against(provider, worktree, monkeypatch)
 
     # The lifecycle actually ran, in order.
     assert calls[:3] == ["create", "upload_workspace", "exec"]
