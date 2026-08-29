@@ -206,8 +206,12 @@ export const ROIAnalysis: React.FC = () => {
   const [assumptionError, setAssumptionError] = useState<string | null>(null);
 
   // Efficiency algorithm v2 parameters
-  const [selectedAlgorithmVersion, setSelectedAlgorithmVersion] = useState<string>('auto');
-  const [selectedTaskType, setSelectedTaskType] = useState<string>('');
+  const [selectedAlgorithmVersion, setSelectedAlgorithmVersion] = useState<
+    'v1.0' | 'v2.0' | 'auto'
+  >('auto');
+  const [selectedTaskType, setSelectedTaskType] = useState<
+    'GENERAL' | 'CODE_GENERATION' | 'DOCUMENT_ANALYSIS' | 'CONVERSATION' | ''
+  >('');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
 
   // Expanded action-item rows (by suggestion_id)
@@ -501,7 +505,15 @@ export const ROIAnalysis: React.FC = () => {
         setIsLoading(false);
       }
     },
-    [assumptionKey, endDate, overrideAssumptions, selectedTool, startDate, selectedAlgorithmVersion, selectedTaskType]
+    [
+      assumptionKey,
+      endDate,
+      overrideAssumptions,
+      selectedTool,
+      startDate,
+      selectedAlgorithmVersion,
+      selectedTaskType,
+    ]
   );
 
   useEffect(() => {
@@ -661,7 +673,9 @@ export const ROIAnalysis: React.FC = () => {
               aria-expanded={showAdvancedFilters}
               aria-controls="advanced-filters"
             >
-              <i className={cn('bi me-2', showAdvancedFilters ? 'bi-chevron-up' : 'bi-chevron-down')} />
+              <i
+                className={cn('bi me-2', showAdvancedFilters ? 'bi-chevron-up' : 'bi-chevron-down')}
+              />
               {t('efficiencyAdvancedFilters', language)}
             </button>
           </div>
@@ -679,7 +693,7 @@ export const ROIAnalysis: React.FC = () => {
                   { value: 'v1.0', label: t('efficiencyAlgorithmV1', language) },
                 ]}
                 value={selectedAlgorithmVersion}
-                onChange={setSelectedAlgorithmVersion}
+                onChange={(value) => setSelectedAlgorithmVersion(value as 'v1.0' | 'v2.0' | 'auto')}
               />
             </div>
             <div className="col-md-4">
@@ -688,12 +702,23 @@ export const ROIAnalysis: React.FC = () => {
                 options={[
                   { value: '', label: t('efficiencyTaskTypeAuto', language) },
                   { value: 'GENERAL', label: t('efficiencyTaskTypeGeneral', language) },
-                  { value: 'CODE_GENERATION', label: t('efficiencyTaskTypeCodeGeneration', language) },
-                  { value: 'DOCUMENT_ANALYSIS', label: t('efficiencyTaskTypeDocumentAnalysis', language) },
+                  {
+                    value: 'CODE_GENERATION',
+                    label: t('efficiencyTaskTypeCodeGeneration', language),
+                  },
+                  {
+                    value: 'DOCUMENT_ANALYSIS',
+                    label: t('efficiencyTaskTypeDocumentAnalysis', language),
+                  },
                   { value: 'CONVERSATION', label: t('efficiencyTaskTypeConversation', language) },
                 ]}
                 value={selectedTaskType}
-                onChange={setSelectedTaskType}
+                onChange={(value) =>
+                  setSelectedTaskType(
+                    value as
+                      '' | 'GENERAL' | 'CODE_GENERATION' | 'DOCUMENT_ANALYSIS' | 'CONVERSATION'
+                  )
+                }
               />
             </div>
             <div className="col-md-4 d-flex align-items-end">
