@@ -675,7 +675,11 @@ describe('TenantManagement - Issue #3203: Tenant Settings', () => {
       mockTenantApi.listTenants.mockResolvedValueOnce({ tenants: [tenant], count: 1 });
       mockTenantApi.updateSettings.mockResolvedValueOnce({
         ...tenant,
-        settings: { content_filter_enabled: false, audit_log_enabled: true, audit_log_retention_days: 90 },
+        settings: {
+          content_filter_enabled: false,
+          audit_log_enabled: true,
+          audit_log_retention_days: 90,
+        },
       });
 
       render(<TenantManagement />);
@@ -794,7 +798,11 @@ describe('TenantManagement - Issue #3203: Tenant Settings', () => {
       mockTenantApi.listTenants.mockResolvedValueOnce({ tenants: [tenant], count: 1 });
       mockTenantApi.updateSettings.mockResolvedValueOnce({
         ...tenant,
-        settings: { content_filter_enabled: false, audit_log_enabled: true, audit_log_retention_days: 90 },
+        settings: {
+          content_filter_enabled: false,
+          audit_log_enabled: true,
+          audit_log_retention_days: 90,
+        },
       });
       mockTenantApi.updateQuota.mockResolvedValueOnce(tenant);
 

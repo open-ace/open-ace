@@ -1185,9 +1185,7 @@ export const TenantManagement: React.FC = () => {
                   setRetentionDaysError(error);
                 }}
               />
-              {retentionDaysError && (
-                <div className="invalid-feedback">{retentionDaysError}</div>
-              )}
+              {retentionDaysError && <div className="invalid-feedback">{retentionDaysError}</div>}
               <small className="text-muted d-block mt-1">
                 {t('auditLogRetentionDaysHelp', language)}
               </small>
