@@ -7,6 +7,7 @@
  * - Quota management
  * - Suspend/Activate tenants
  * - Quota checking with result modal (Issue #3132)
+ * - Tenant settings management with content filter toggle (Issue #3203)
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -26,19 +27,21 @@ import {
   Badge,
   PageRefreshControl,
 } from '@/components/common';
-import { useConfirm } from '@/components/common';
+import { useConfirm, useToast } from '@/components/common';
 import {
   tenantApi,
   type Tenant,
   type TenantPlan,
+  type TenantSettings,
   type CreateTenantRequest,
   type UpdateTenantRequest,
 } from '@/api';
 import { formatDateTime } from '@/utils';
-import { usePageRefresh } from '@/hooks';
+import { usePageRefresh, useAuth } from '@/hooks';
 import { useTenantQuotaCheck } from '@/hooks/useTenantQuotaCheck';
 import { TOKEN_QUOTA_MULTIPLIER } from '@/constants/quota';
 import { formatQuotaForDisplay } from '@/utils/quotaFormatter';
+import { canManageTenant } from '@/utils/permissions';
 import { QuotaCheckResultModal } from './QuotaCheckResultModal';
 
 // Tenant i18n fixes (Issue #1500)
@@ -124,6 +127,8 @@ const validateTrialDays = (
 
 export const TenantManagement: React.FC = () => {
   const language = useLanguage();
+  const toast = useToast();
+  const { user } = useAuth();
   const [tenants, setTenants] = useState<Tenant[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -157,6 +162,22 @@ export const TenantManagement: React.FC = () => {
     max_users: 100,
     max_sessions_per_user: 5,
   });
+  // Issue #3203: Settings and original data for change detection
+  const [settingsData, setSettingsData] = useState<TenantSettings>({
+    content_filter_enabled: true,
+  });
+  const [originalQuota, setOriginalQuota] = useState({
+    daily_token_limit: 1,
+    monthly_token_limit: 30,
+    daily_request_limit: 10000,
+    monthly_request_limit: 300000,
+    max_users: 100,
+    max_sessions_per_user: 5,
+  });
+  const [originalSettings, setOriginalSettings] = useState<TenantSettings>({
+    content_filter_enabled: true,
+  });
+  const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [trialDaysError, setTrialDaysError] = useState<string | null>(null);
 
@@ -265,7 +286,8 @@ export const TenantManagement: React.FC = () => {
 
   const handleOpenQuota = (tenant: Tenant) => {
     setEditingTenant(tenant);
-    setQuotaData({
+    // Issue #3203: Load quota data and save original values
+    const quota = {
       daily_token_limit: Math.floor(
         (tenant.quota?.daily_token_limit ?? 1000000) / TOKEN_QUOTA_MULTIPLIER
       ),
@@ -276,7 +298,17 @@ export const TenantManagement: React.FC = () => {
       monthly_request_limit: tenant.quota?.monthly_request_limit ?? 300000,
       max_users: tenant.quota?.max_users ?? 100,
       max_sessions_per_user: tenant.quota?.max_sessions_per_user ?? 5,
-    });
+    };
+    setQuotaData(quota);
+    setOriginalQuota(quota);
+
+    // Issue #3203: Load settings data with default value fallback
+    const settings: TenantSettings = {
+      content_filter_enabled: tenant.settings?.content_filter_enabled ?? true,
+    };
+    setSettingsData(settings);
+    setOriginalSettings(settings);
+
     setShowQuotaModal(true);
   };
 
@@ -361,21 +393,72 @@ export const TenantManagement: React.FC = () => {
     }
   };
 
+  // Issue #3203: Change detection functions
+  const hasQuotaChanges = () => {
+    return (
+      quotaData.daily_token_limit !== originalQuota.daily_token_limit ||
+      quotaData.monthly_token_limit !== originalQuota.monthly_token_limit ||
+      quotaData.daily_request_limit !== originalQuota.daily_request_limit ||
+      quotaData.monthly_request_limit !== originalQuota.monthly_request_limit ||
+      quotaData.max_users !== originalQuota.max_users ||
+      quotaData.max_sessions_per_user !== originalQuota.max_sessions_per_user
+    );
+  };
+
+  const hasSettingsChanges = () => {
+    return settingsData.content_filter_enabled !== originalSettings.content_filter_enabled;
+  };
+
+  // Issue #3203: Intelligent save with change detection
   const handleSaveQuota = async () => {
     if (!editingTenant) return;
+    setIsSaving(true);
+
     try {
-      await tenantApi.updateQuota(editingTenant.id, {
-        daily_token_limit: quotaData.daily_token_limit * TOKEN_QUOTA_MULTIPLIER,
-        monthly_token_limit: quotaData.monthly_token_limit * TOKEN_QUOTA_MULTIPLIER,
-        daily_request_limit: quotaData.daily_request_limit,
-        monthly_request_limit: quotaData.monthly_request_limit,
-        max_users: quotaData.max_users,
-        max_sessions_per_user: quotaData.max_sessions_per_user,
-      });
+      const needSaveSettings = hasSettingsChanges();
+      const needSaveQuota = hasQuotaChanges();
+
+      // No changes, just close the modal
+      if (!needSaveSettings && !needSaveQuota) {
+        handleCloseQuotaModal();
+        return;
+      }
+
+      // Save settings first if changed
+      if (needSaveSettings) {
+        await tenantApi.updateSettings(editingTenant.id, {
+          content_filter_enabled: settingsData.content_filter_enabled,
+        });
+      }
+
+      // Save quota if changed
+      if (needSaveQuota) {
+        await tenantApi.updateQuota(editingTenant.id, {
+          daily_token_limit: quotaData.daily_token_limit * TOKEN_QUOTA_MULTIPLIER,
+          monthly_token_limit: quotaData.monthly_token_limit * TOKEN_QUOTA_MULTIPLIER,
+          daily_request_limit: quotaData.daily_request_limit,
+          monthly_request_limit: quotaData.monthly_request_limit,
+          max_users: quotaData.max_users,
+          max_sessions_per_user: quotaData.max_sessions_per_user,
+        });
+      }
+
+      toast.success(t('settingsSaved', language));
       handleCloseQuotaModal();
       fetchTenants();
-    } catch (err) {
-      console.error('Failed to save quota:', err);
+    } catch (err: unknown) {
+      // API client throws ApiError objects (plain objects with message property)
+      let errorMessage: string;
+      if (err && typeof err === 'object' && 'message' in err) {
+        errorMessage = String((err as { message: string }).message);
+      } else if (err instanceof Error) {
+        errorMessage = (err as Error).message;
+      } else {
+        errorMessage = 'Failed to save settings';
+      }
+      toast.error(t('settingsSaveFailed', language) + ': ' + errorMessage);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -625,14 +708,17 @@ export const TenantManagement: React.FC = () => {
                         >
                           <i className="bi bi-pencil" />
                         </Button>
-                        <Button
-                          variant="outline-secondary"
-                          size="sm"
-                          onClick={() => handleOpenQuota(tenant)}
-                          title={t('editQuota', language) ?? 'Edit Quota'}
-                        >
-                          <i className="bi bi-sliders" />
-                        </Button>
+                        {/* Issue #3203: Permission check for quota/settings button */}
+                        {canManageTenant(user, tenant.id) && (
+                          <Button
+                            variant="outline-secondary"
+                            size="sm"
+                            onClick={() => handleOpenQuota(tenant)}
+                            title={t('tenantSettingsModal', language) ?? 'Tenant Settings'}
+                          >
+                            <i className="bi bi-sliders" />
+                          </Button>
+                        )}
                         <Button
                           variant="outline-info"
                           size="sm"
@@ -858,18 +944,23 @@ export const TenantManagement: React.FC = () => {
         </form>
       </Modal>
 
-      {/* Quota Modal */}
+      {/* Quota & Settings Modal - Issue #3203 */}
       <Modal
         isOpen={showQuotaModal}
         onClose={handleCloseQuotaModal}
-        title={t('editQuota', language)}
-        size="md"
+        title={t('tenantSettingsModal', language)}
+        size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={handleCloseQuotaModal}>
+            <Button variant="secondary" onClick={handleCloseQuotaModal} disabled={isSaving}>
               {t('cancel', language)}
             </Button>
-            <Button variant="primary" onClick={handleSaveQuota}>
+            <Button
+              variant="primary"
+              onClick={handleSaveQuota}
+              loading={isSaving}
+              disabled={isSaving}
+            >
               {t('save', language)}
             </Button>
           </>
@@ -881,6 +972,7 @@ export const TenantManagement: React.FC = () => {
             handleSaveQuota();
           }}
         >
+          {/* Quota Section */}
           <div className="row g-3">
             <div className="col-md-6">
               <label className="form-label">{t('dailyTokenLimit', language)} (M)</label>
@@ -888,6 +980,7 @@ export const TenantManagement: React.FC = () => {
                 type="number"
                 className="form-control"
                 value={quotaData.daily_token_limit}
+                disabled={isSaving}
                 onChange={(e) =>
                   setQuotaData({
                     ...quotaData,
@@ -902,6 +995,7 @@ export const TenantManagement: React.FC = () => {
                 type="number"
                 className="form-control"
                 value={quotaData.monthly_token_limit}
+                disabled={isSaving}
                 onChange={(e) =>
                   setQuotaData({
                     ...quotaData,
@@ -916,6 +1010,7 @@ export const TenantManagement: React.FC = () => {
                 type="number"
                 className="form-control"
                 value={quotaData.daily_request_limit}
+                disabled={isSaving}
                 onChange={(e) =>
                   setQuotaData({
                     ...quotaData,
@@ -930,6 +1025,7 @@ export const TenantManagement: React.FC = () => {
                 type="number"
                 className="form-control"
                 value={quotaData.monthly_request_limit}
+                disabled={isSaving}
                 onChange={(e) =>
                   setQuotaData({
                     ...quotaData,
@@ -944,6 +1040,7 @@ export const TenantManagement: React.FC = () => {
                 type="number"
                 className="form-control"
                 value={quotaData.max_users}
+                disabled={isSaving}
                 onChange={(e) =>
                   setQuotaData({ ...quotaData, max_users: parseInt(e.target.value) || 1 })
                 }
@@ -955,6 +1052,7 @@ export const TenantManagement: React.FC = () => {
                 type="number"
                 className="form-control"
                 value={quotaData.max_sessions_per_user}
+                disabled={isSaving}
                 onChange={(e) =>
                   setQuotaData({
                     ...quotaData,
@@ -962,6 +1060,38 @@ export const TenantManagement: React.FC = () => {
                   })
                 }
               />
+            </div>
+          </div>
+
+          {/* Divider */}
+          <hr className="my-4" />
+
+          {/* Settings Section - Issue #3203 */}
+          <h6 className="mb-3">{t('settingsSection', language)}</h6>
+          <div className="row g-3">
+            <div className="col-12">
+              <div className="form-check form-switch">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="contentFilterEnabled"
+                  checked={settingsData.content_filter_enabled}
+                  disabled={isSaving}
+                  onChange={(e) =>
+                    setSettingsData({
+                      ...settingsData,
+                      content_filter_enabled: e.target.checked,
+                    })
+                  }
+                />
+                <label className="form-check-label" htmlFor="contentFilterEnabled">
+                  {t('contentFilterEnabled', language)}
+                </label>
+              </div>
+              <small className="text-muted d-block mt-1">
+                {t('contentFilterEnabledDesc', language)}{' '}
+                <a href="/security">{t('contentFilter', language)}</a>
+              </small>
             </div>
           </div>
         </form>

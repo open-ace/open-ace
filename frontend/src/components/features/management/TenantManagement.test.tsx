@@ -206,9 +206,24 @@ vi.mock('@/constants/quota', () => ({
   TOKEN_QUOTA_MULTIPLIER: 1000000,
 }));
 
+// Issue #3203: Mock canManageTenant for permission checks
+vi.mock('@/utils/permissions', () => ({
+  canManageTenant: () => true,
+}));
+
 vi.mock('@/hooks', () => ({
   usePageRefresh: () => ({
     refresh: {},
+  }),
+  // Issue #3203: Mock useAuth for permission checks
+  useAuth: () => ({
+    user: {
+      id: 'test-user',
+      role: 'admin',
+      tenant_id: null,
+    },
+    isAuthenticated: true,
+    isLoading: false,
   }),
 }));
 

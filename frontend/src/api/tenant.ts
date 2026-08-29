@@ -22,7 +22,8 @@ export interface Tenant {
   created_at: string;
   updated_at?: string;
   quota?: TenantQuota;
-  settings?: Record<string, unknown>;
+  // Issue #3203: Update settings type to TenantSettings
+  settings?: TenantSettings;
   user_count?: number;
   total_tokens_used?: number;
   total_requests_made?: number;
@@ -35,6 +36,24 @@ export interface TenantQuota {
   monthly_request_limit: number;
   max_users: number;
   max_sessions_per_user: number;
+}
+
+// Issue #3203: Tenant Settings interface matching backend TenantSettings
+export interface TenantSettings {
+  allowed_tools?: string[];
+  content_filter_enabled?: boolean;
+  audit_log_enabled?: boolean;
+  audit_log_retention_days?: number;
+  data_retention_days?: number;
+  sso_enabled?: boolean;
+  sso_provider?: string | null;
+  auto_provision_users?: boolean;
+  custom_branding?: boolean;
+  branding_name?: string | null;
+  branding_logo_url?: string | null;
+  roi_assumptions?: Record<string, unknown> | null;
+  block_sensitive_keyword?: boolean;
+  sensitive_keyword_match_mode?: 'word_boundary' | 'substring';
 }
 
 export interface CreateTenantRequest {
@@ -132,7 +151,8 @@ export const tenantApi = {
     return apiClient.put<Tenant>(`/api/tenants/${tenantId}/quota`, data);
   },
 
-  async updateSettings(tenantId: number, data: Record<string, unknown>): Promise<Tenant> {
+  // Issue #3203: Update settings parameter type to Partial<TenantSettings>
+  async updateSettings(tenantId: number, data: Partial<TenantSettings>): Promise<Tenant> {
     return apiClient.put<Tenant>(`/api/tenants/${tenantId}/settings`, data);
   },
 
