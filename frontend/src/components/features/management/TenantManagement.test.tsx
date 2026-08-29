@@ -32,7 +32,7 @@ vi.mock('@/store', () => ({
   useLanguage: () => 'en',
 }));
 
-// Mock i18n
+// Mock i18n - Issue #3203: Add tenantSettingsModal
 vi.mock('@/i18n', () => ({
   t: (key: string) => {
     const translations: Record<string, string> = {
@@ -66,6 +66,19 @@ vi.mock('@/i18n', () => ({
       confirmSuspendTenant: 'Are you sure you want to suspend this tenant?',
       confirmDeleteTenant: 'Are you sure you want to delete this tenant?',
       tenantNameRequired: 'Tenant name is required',
+      tenantSettingsModal: 'Tenant Settings',
+      settingsSaved: 'Settings saved',
+      settingsSaveFailed: 'Failed to save settings',
+      settingsSection: 'Settings',
+      contentFilterEnabled: 'Content Filter',
+      contentFilterEnabledDesc: 'When enabled, content from all users under this tenant will be filtered according to rules configured in Security Center.',
+      contentFilter: 'Security Center',
+      dailyTokenLimit: 'Daily Token Limit',
+      monthlyTokenLimit: 'Monthly Token Limit',
+      dailyRequestLimit: 'Daily Request Limit',
+      monthlyRequestLimit: 'Monthly Request Limit',
+      maxUsers: 'Max Users',
+      maxSessionsPerUser: 'Max Sessions Per User',
     };
     return translations[key] || key;
   },
@@ -179,7 +192,7 @@ vi.mock('@/components/common', () => ({
   }),
 }));
 
-// Mock API
+// Mock API - Issue #3203: Add updateSettings
 vi.mock('@/api', () => ({
   tenantApi: {
     listTenants: vi.fn(),
@@ -188,6 +201,8 @@ vi.mock('@/api', () => ({
     deleteTenant: vi.fn(),
     suspendTenant: vi.fn(),
     activateTenant: vi.fn(),
+    updateQuota: vi.fn(),
+    updateSettings: vi.fn(),
   },
 }));
 
@@ -519,6 +534,360 @@ describe('TenantManagement - Issue #3137', () => {
 
       // Should display table
       expect(screen.getByText('Unknown Plan Tenant')).toBeInTheDocument();
+    });
+  });
+});
+
+// Issue #3203: Tests for tenant settings management
+describe('TenantManagement - Issue #3203: Tenant Settings', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('Settings Modal', () => {
+    it('should open settings modal with tenant settings data', async () => {
+      const tenant = {
+        id: 1,
+        name: 'Test Tenant',
+        slug: 'test-tenant',
+        plan: 'standard',
+        status: 'active',
+        created_at: '2024-01-01',
+        settings: {
+          content_filter_enabled: false,
+        },
+      };
+
+      mockTenantApi.listTenants.mockResolvedValueOnce({ tenants: [tenant], count: 1 });
+
+      render(<TenantManagement />);
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('loading')).not.toBeInTheDocument();
+      });
+
+      // Click settings button (sliders icon)
+      const settingsButtons = screen.getAllByTitle('Tenant Settings');
+      fireEvent.click(settingsButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('modal')).toBeInTheDocument();
+      });
+
+      // Verify modal title
+      const modal = screen.getByTestId('modal');
+      expect(within(modal).getByTestId('modal-title').textContent).toBe('Tenant Settings');
+    });
+
+    it('should display content filter toggle in settings modal', async () => {
+      const tenant = {
+        id: 1,
+        name: 'Test Tenant',
+        slug: 'test-tenant',
+        plan: 'standard',
+        status: 'active',
+        created_at: '2024-01-01',
+        settings: {
+          content_filter_enabled: true,
+        },
+      };
+
+      mockTenantApi.listTenants.mockResolvedValueOnce({ tenants: [tenant], count: 1 });
+
+      render(<TenantManagement />);
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('loading')).not.toBeInTheDocument();
+      });
+
+      // Open settings modal
+      const settingsButtons = screen.getAllByTitle('Tenant Settings');
+      fireEvent.click(settingsButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('modal')).toBeInTheDocument();
+      });
+
+      // Check for content filter checkbox
+      const contentFilterCheckbox = document.getElementById('contentFilterEnabled');
+      expect(contentFilterCheckbox).toBeInTheDocument();
+      expect(contentFilterCheckbox).toBeChecked();
+    });
+
+    it('should use default value true for content_filter_enabled when not set', async () => {
+      const tenant = {
+        id: 1,
+        name: 'Test Tenant',
+        slug: 'test-tenant',
+        plan: 'standard',
+        status: 'active',
+        created_at: '2024-01-01',
+        settings: {},
+      };
+
+      mockTenantApi.listTenants.mockResolvedValueOnce({ tenants: [tenant], count: 1 });
+
+      render(<TenantManagement />);
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('loading')).not.toBeInTheDocument();
+      });
+
+      // Open settings modal
+      const settingsButtons = screen.getAllByTitle('Tenant Settings');
+      fireEvent.click(settingsButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('modal')).toBeInTheDocument();
+      });
+
+      // Check that content filter is enabled by default
+      const contentFilterCheckbox = document.getElementById('contentFilterEnabled');
+      expect(contentFilterCheckbox).toBeChecked();
+    });
+  });
+
+  describe('Smart Save Logic', () => {
+    it('should call updateSettings when only settings are changed', async () => {
+      const tenant = {
+        id: 1,
+        name: 'Test Tenant',
+        slug: 'test-tenant',
+        plan: 'standard',
+        status: 'active',
+        created_at: '2024-01-01',
+        settings: {
+          content_filter_enabled: true,
+        },
+        quota: {
+          daily_token_limit: 1000000,
+          monthly_token_limit: 30000000,
+          daily_request_limit: 10000,
+          monthly_request_limit: 300000,
+          max_users: 100,
+          max_sessions_per_user: 5,
+        },
+      };
+
+      mockTenantApi.listTenants.mockResolvedValueOnce({ tenants: [tenant], count: 1 });
+      mockTenantApi.updateSettings.mockResolvedValueOnce({
+        ...tenant,
+        settings: { content_filter_enabled: false },
+      });
+
+      render(<TenantManagement />);
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('loading')).not.toBeInTheDocument();
+      });
+
+      // Open settings modal
+      const settingsButtons = screen.getAllByTitle('Tenant Settings');
+      fireEvent.click(settingsButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('modal')).toBeInTheDocument();
+      });
+
+      // Toggle content filter
+      const contentFilterCheckbox = document.getElementById('contentFilterEnabled') as HTMLInputElement;
+      fireEvent.click(contentFilterCheckbox);
+
+      // Save
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockTenantApi.updateSettings).toHaveBeenCalledWith(1, {
+          content_filter_enabled: false,
+        });
+        expect(mockTenantApi.updateQuota).not.toHaveBeenCalled();
+      });
+    });
+
+    it('should call updateQuota when only quota is changed', async () => {
+      const tenant = {
+        id: 1,
+        name: 'Test Tenant',
+        slug: 'test-tenant',
+        plan: 'standard',
+        status: 'active',
+        created_at: '2024-01-01',
+        settings: {
+          content_filter_enabled: true,
+        },
+        quota: {
+          daily_token_limit: 1000000,
+          monthly_token_limit: 30000000,
+          daily_request_limit: 10000,
+          monthly_request_limit: 300000,
+          max_users: 100,
+          max_sessions_per_user: 5,
+        },
+      };
+
+      mockTenantApi.listTenants.mockResolvedValueOnce({ tenants: [tenant], count: 1 });
+      mockTenantApi.updateQuota.mockResolvedValueOnce(tenant);
+
+      render(<TenantManagement />);
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('loading')).not.toBeInTheDocument();
+      });
+
+      // Open settings modal
+      const settingsButtons = screen.getAllByTitle('Tenant Settings');
+      fireEvent.click(settingsButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('modal')).toBeInTheDocument();
+      });
+
+      // Change quota (find the daily token limit input)
+      const inputs = document.querySelectorAll('input[type="number"]');
+      const dailyTokenInput = inputs[0] as HTMLInputElement;
+      fireEvent.change(dailyTokenInput, { target: { value: '2' } });
+
+      // Save
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockTenantApi.updateQuota).toHaveBeenCalled();
+        expect(mockTenantApi.updateSettings).not.toHaveBeenCalled();
+      });
+    });
+
+    it('should call both APIs when both settings and quota are changed', async () => {
+      const tenant = {
+        id: 1,
+        name: 'Test Tenant',
+        slug: 'test-tenant',
+        plan: 'standard',
+        status: 'active',
+        created_at: '2024-01-01',
+        settings: {
+          content_filter_enabled: true,
+        },
+        quota: {
+          daily_token_limit: 1000000,
+          monthly_token_limit: 30000000,
+          daily_request_limit: 10000,
+          monthly_request_limit: 300000,
+          max_users: 100,
+          max_sessions_per_user: 5,
+        },
+      };
+
+      mockTenantApi.listTenants.mockResolvedValueOnce({ tenants: [tenant], count: 1 });
+      mockTenantApi.updateSettings.mockResolvedValueOnce({
+        ...tenant,
+        settings: { content_filter_enabled: false },
+      });
+      mockTenantApi.updateQuota.mockResolvedValueOnce(tenant);
+
+      render(<TenantManagement />);
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('loading')).not.toBeInTheDocument();
+      });
+
+      // Open settings modal
+      const settingsButtons = screen.getAllByTitle('Tenant Settings');
+      fireEvent.click(settingsButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('modal')).toBeInTheDocument();
+      });
+
+      // Change both settings and quota
+      const contentFilterCheckbox = document.getElementById('contentFilterEnabled') as HTMLInputElement;
+      fireEvent.click(contentFilterCheckbox);
+
+      const inputs = document.querySelectorAll('input[type="number"]');
+      const dailyTokenInput = inputs[0] as HTMLInputElement;
+      fireEvent.change(dailyTokenInput, { target: { value: '2' } });
+
+      // Save
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockTenantApi.updateSettings).toHaveBeenCalled();
+        expect(mockTenantApi.updateQuota).toHaveBeenCalled();
+      });
+    });
+
+    it('should not call any API when nothing is changed', async () => {
+      const tenant = {
+        id: 1,
+        name: 'Test Tenant',
+        slug: 'test-tenant',
+        plan: 'standard',
+        status: 'active',
+        created_at: '2024-01-01',
+        settings: {
+          content_filter_enabled: true,
+        },
+        quota: {
+          daily_token_limit: 1000000,
+          monthly_token_limit: 30000000,
+          daily_request_limit: 10000,
+          monthly_request_limit: 300000,
+          max_users: 100,
+          max_sessions_per_user: 5,
+        },
+      };
+
+      mockTenantApi.listTenants.mockResolvedValueOnce({ tenants: [tenant], count: 1 });
+
+      render(<TenantManagement />);
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('loading')).not.toBeInTheDocument();
+      });
+
+      // Open settings modal
+      const settingsButtons = screen.getAllByTitle('Tenant Settings');
+      fireEvent.click(settingsButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('modal')).toBeInTheDocument();
+      });
+
+      // Save without changes
+      const saveButton = screen.getByText('Save');
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockTenantApi.updateSettings).not.toHaveBeenCalled();
+        expect(mockTenantApi.updateQuota).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('Permission Check', () => {
+    it('should show settings button for admin users', async () => {
+      const tenant = {
+        id: 1,
+        name: 'Test Tenant',
+        slug: 'test-tenant',
+        plan: 'standard',
+        status: 'active',
+        created_at: '2024-01-01',
+      };
+
+      mockTenantApi.listTenants.mockResolvedValueOnce({ tenants: [tenant], count: 1 });
+
+      render(<TenantManagement />);
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('loading')).not.toBeInTheDocument();
+      });
+
+      // Settings button should be visible (canManageTenant returns true in mock)
+      const settingsButtons = screen.getAllByTitle('Tenant Settings');
+      expect(settingsButtons.length).toBeGreaterThan(0);
     });
   });
 });
