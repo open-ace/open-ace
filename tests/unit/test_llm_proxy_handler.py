@@ -654,5 +654,323 @@ class TestResponsesApiConversion:
         )
 
 
+# ===================================================================
+# G. Performance Recording with tenant_id (Issue #3201)
+# ===================================================================
+
+
+class TestPerformanceRecordingWithTenantId:
+    """
+    Tests for tenant_id propagation in performance recording.
+    Issue #3201: Response time metrics missing due to tenant_id=None.
+    """
+
+    def test_forward_via_gateway_with_tenant_id(self, flask_app):
+        """
+        Test that _forward_via_gateway correctly passes tenant_id to _finalize_upstream_response.
+        This ensures the Gateway path (model gateway) properly records performance data.
+
+        Note: This test verifies the parameter passing through the call chain.
+        The actual recorder behavior is tested in test_finalize_upstream_response_with_tenant_id.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from app.modules.workspace.llm_proxy_handler import _forward_via_gateway
+
+        # Setup mock HTTP response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'{"ok":true}'
+        mock_response.headers = {"Content-Type": "application/json"}
+
+        # Setup mock plan
+        class MockPlan:
+            target_url = "https://api.example.com/v1/chat/completions"
+            path = "v1/chat/completions"
+            gateway_key = "test-key"
+            headers = {}
+            ssrf_blocked = False
+
+            @staticmethod
+            def body_transformer(data):
+                return data
+
+        plan = MockPlan()
+
+        # Create a mock for _finalize_upstream_response
+        finalize_mock = MagicMock(return_value=MagicMock(status_code=200))
+
+        with patch(
+            "app.modules.workspace.llm_proxy_handler._finalize_upstream_response", finalize_mock
+        ):
+            with patch("requests.request", return_value=mock_response):
+                with flask_app.test_request_context(
+                    "/", method="POST", data=b'{"model":"test"}', content_type="application/json"
+                ):
+                    _ = _forward_via_gateway(
+                        plan,
+                        session_id="session-1",
+                        user_id=1,
+                        provider="openai",
+                        tenant_id=1,  # Should be passed to _finalize_upstream_response
+                        requested_model="test-model",
+                    )
+
+        # Verify _finalize_upstream_response was called
+        assert finalize_mock.called, "_finalize_upstream_response should have been called"
+
+        # Verify tenant_id was passed
+        call_kwargs = finalize_mock.call_args[1]
+        assert "tenant_id" in call_kwargs, "tenant_id should be in call arguments"
+        assert call_kwargs["tenant_id"] == 1, "tenant_id should be passed correctly"
+
+    def test_finalize_upstream_response_with_tenant_id(self, flask_app):
+        """
+        Test that _finalize_upstream_response correctly passes tenant_id to the recorder.
+        This ensures the direct connection path properly records performance data.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from app.modules.workspace.llm_proxy_handler import _finalize_upstream_response
+
+        # Setup mock recorder instance
+        mock_recorder_instance = MagicMock()
+
+        # Setup mock response with all required attributes
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'{"ok":true}'
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.iter_content.return_value = [b'{"ok":true}']
+
+        # Patch the recorder class at the source
+        with patch(
+            "app.utils.request_performance.RequestPerformanceRecorder"
+        ) as mock_recorder_class:
+            mock_recorder_class.return_value = mock_recorder_instance
+            mock_recorder_class._instance = None  # Reset singleton
+
+            with flask_app.test_request_context("/"):
+                _ = _finalize_upstream_response(
+                    mock_response,
+                    b'{"model":"test"}',
+                    session_id="session-1",
+                    user_id=1,
+                    provider="openai",
+                    tenant_id=2,  # Should be passed to recorder
+                )
+
+        # Verify recorder was called with correct tenant_id
+        assert (
+            mock_recorder_instance.record_request_start.called
+        ), "record_request_start should have been called"
+        call_kwargs = mock_recorder_instance.record_request_start.call_args[1]
+        assert call_kwargs["tenant_id"] == 2, "tenant_id should be passed to recorder"
+
+    @patch(_HTTP_PATH)
+    @patch("app.utils.request_performance.RequestPerformanceRecorder")
+    @patch(_QUOTA_PATH)
+    @patch(_PROXY_PATH)
+    def test_llm_proxy_request_performance_recording(
+        self, mock_get_proxy, mock_quota_cls, mock_recorder_class, mock_http, remote_app
+    ):
+        """
+        End-to-end test for performance recording through handle_llm_proxy_request.
+        Verifies that the entire request flow correctly records performance data.
+        """
+        # Setup mock recorder instance
+        mock_recorder_instance = MagicMock()
+        mock_recorder_class.return_value = mock_recorder_instance
+        mock_recorder_class._instance = None  # Reset singleton
+
+        mock_proxy = MagicMock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token()
+        mock_proxy.resolve_api_key_for_scope.return_value = (
+            "key",
+            "https://api.openai.com",
+            1,
+            {},
+            "",
+        )
+        mock_get_proxy.return_value = mock_proxy
+
+        mock_quota_cls.return_value = _make_quota_ok()
+
+        # Setup mock HTTP response
+        upstream_body = json.dumps(
+            {
+                "id": "chatcmpl-123",
+                "model": "gpt-4",
+                "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }
+        ).encode()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = upstream_body
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.iter_content.return_value = [upstream_body]
+        mock_http.return_value = mock_response
+
+        client = remote_app.test_client()
+        resp = client.post(
+            "/api/remote/llm-proxy/v1/chat/completions",
+            json={"model": "gpt-4", "messages": [{"role": "user", "content": "test"}]},
+            headers={"Authorization": "Bearer valid-token"},
+        )
+
+        assert resp.status_code == 200
+
+        # Verify performance recording was initiated
+        assert mock_recorder_instance.record_request_start.called
+        call_kwargs = mock_recorder_instance.record_request_start.call_args[1]
+        # tenant_id should be 1 (from mock token)
+        assert call_kwargs["tenant_id"] == 1, "tenant_id should be extracted from token and passed"
+
+    @patch(_HTTP_PATH)
+    @patch("app.utils.request_performance.RequestPerformanceRecorder")
+    @patch(_QUOTA_PATH)
+    @patch(_PROXY_PATH)
+    def test_tenant_isolation_in_performance_data(
+        self, mock_get_proxy, mock_quota_cls, mock_recorder_class, mock_http, remote_app
+    ):
+        """
+        Test that different tenant_ids result in separate performance records.
+        This is a critical security requirement to prevent cross-tenant data leakage.
+        """
+        # Setup mock recorder instance
+        mock_recorder_instance = MagicMock()
+        mock_recorder_class.return_value = mock_recorder_instance
+        mock_recorder_class._instance = None  # Reset singleton
+
+        mock_proxy = MagicMock()
+
+        # First request for tenant 1
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token(tenant_id=1)
+        mock_proxy.resolve_api_key_for_scope.return_value = (
+            "key",
+            "https://api.openai.com",
+            1,
+            {},
+            "",
+        )
+        mock_get_proxy.return_value = mock_proxy
+
+        mock_quota_cls.return_value = _make_quota_ok()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'{"ok":true}'
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.iter_content.return_value = [b'{"ok":true}']
+        mock_http.return_value = mock_response
+
+        client = remote_app.test_client()
+        resp = client.post(
+            "/api/remote/llm-proxy/v1/chat/completions",
+            json={"model": "gpt-4", "messages": [{"role": "user", "content": "test"}]},
+            headers={"Authorization": "Bearer tenant1-token"},
+        )
+        assert resp.status_code == 200
+
+        # Verify tenant_id=1 was recorded
+        call_kwargs_1 = mock_recorder_instance.record_request_start.call_args[1]
+        assert call_kwargs_1["tenant_id"] == 1
+
+        # Reset for second request
+        mock_recorder_instance.reset_mock()
+        mock_proxy.validate_proxy_token.return_value = _mock_proxy_token(tenant_id=2)
+
+        resp = client.post(
+            "/api/remote/llm-proxy/v1/chat/completions",
+            json={"model": "gpt-4", "messages": [{"role": "user", "content": "test"}]},
+            headers={"Authorization": "Bearer tenant2-token"},
+        )
+        assert resp.status_code == 200
+
+        # Verify tenant_id=2 was recorded
+        call_kwargs_2 = mock_recorder_instance.record_request_start.call_args[1]
+        assert call_kwargs_2["tenant_id"] == 2
+
+        # Ensure tenant IDs are different
+        assert call_kwargs_1["tenant_id"] != call_kwargs_2["tenant_id"]
+
+    def test_performance_recording_error_handling(self, flask_app):
+        """
+        Test that performance recording failures do not affect the main request.
+        The recorder should fail gracefully without blocking the response.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from app.modules.workspace.llm_proxy_handler import _finalize_upstream_response
+
+        # Make recorder class raise an exception
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'{"ok":true}'
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.iter_content.return_value = [b'{"ok":true}']
+
+        with patch(
+            "app.utils.request_performance.RequestPerformanceRecorder"
+        ) as mock_recorder_class:
+            # Make the recorder raise an exception
+            mock_recorder_class.side_effect = Exception("Recorder not initialized")
+
+            with flask_app.test_request_context("/"):
+                # This should not raise an exception
+                result = _finalize_upstream_response(
+                    mock_response,
+                    b'{"model":"test"}',
+                    session_id="session-1",
+                    user_id=1,
+                    provider="openai",
+                    tenant_id=1,
+                )
+
+        # Verify the response was still returned
+        assert result.status_code == 200
+
+    def test_tenant_id_zero_handling(self, flask_app):
+        """
+        Test that tenant_id=0 (default tenant) is handled correctly.
+        This ensures the system can record performance data for the default tenant.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from app.modules.workspace.llm_proxy_handler import _finalize_upstream_response
+
+        # Setup mock recorder instance
+        mock_recorder_instance = MagicMock()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'{"ok":true}'
+        mock_response.headers = {"Content-Type": "application/json"}
+        mock_response.iter_content.return_value = [b'{"ok":true}']
+
+        # Patch the recorder class at the source
+        with patch(
+            "app.utils.request_performance.RequestPerformanceRecorder"
+        ) as mock_recorder_class:
+            mock_recorder_class.return_value = mock_recorder_instance
+            mock_recorder_class._instance = None  # Reset singleton
+
+            with flask_app.test_request_context("/"):
+                _ = _finalize_upstream_response(
+                    mock_response,
+                    b'{"model":"test"}',
+                    session_id="session-1",
+                    user_id=1,
+                    provider="openai",
+                    tenant_id=0,  # Default tenant
+                )
+
+        # Verify recorder was called with tenant_id=0
+        assert mock_recorder_instance.record_request_start.called
+        call_kwargs = mock_recorder_instance.record_request_start.call_args[1]
+        assert call_kwargs["tenant_id"] == 0, "tenant_id=0 should be recorded correctly"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

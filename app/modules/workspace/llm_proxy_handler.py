@@ -6,6 +6,7 @@ import json
 import logging
 import threading
 import time
+import traceback
 from typing import Any
 
 from flask import Response, jsonify, request, stream_with_context
@@ -743,6 +744,7 @@ def _finalize_upstream_response(
     content_type: str | None = None,
     request_path: str = "",
     requested_model: str | None = None,
+    tenant_id: int | None = None,  # Issue #3201: Add tenant_id for performance recording
 ) -> Response:
     """Stream or return an upstream response, recording LLM usage on completion.
 
@@ -754,6 +756,7 @@ def _finalize_upstream_response(
     Issue #2184: Added request_path, requested_model, and request_id extraction
     for multi-provider usage recording with proper protocol detection.
     Issue #3080: Added response time tracking.
+    Issue #3201: Added tenant_id parameter for performance recording.
     """
     if content_type is None:
         content_type = resp.headers.get("Content-Type", "")
@@ -765,6 +768,20 @@ def _finalize_upstream_response(
     # Generate a unique performance request ID
     perf_request_id = generate_request_id(session_id)
 
+    # Issue #3201: Defensive logging for missing tenant_id
+    # If tenant_id is None, log a warning to help identify callers that missed passing it
+    if tenant_id is None:
+        logger.warning(
+            "_finalize_upstream_response called without tenant_id. "
+            "Performance recording will be skipped. "
+            "This indicates a caller is not passing tenant_id correctly. "
+            "Session: %s, Provider: %s. "
+            "Caller stack: %s",
+            session_id[:16] if session_id else "unknown",
+            provider,
+            "".join(traceback.format_stack()[-3:-1]),
+        )
+
     # Try to get recorder (may fail if not initialized)
     recorder = None
     try:
@@ -773,7 +790,7 @@ def _finalize_upstream_response(
         recorder.record_request_start(
             request_id=perf_request_id,
             session_id=session_id,
-            tenant_id=None,  # Will be resolved from session
+            tenant_id=tenant_id,  # Issue #3201: Use parameter instead of None
             tool_name=provider,
             sample_type="streaming" if "text/event-stream" in content_type else "batch",
             model=requested_model,
@@ -1089,6 +1106,7 @@ def _forward_via_gateway(
     session_id: str,
     user_id: int,
     provider: str,
+    tenant_id: int | None = None,  # Issue #3201: Add tenant_id for performance recording
     requested_model: str | None = None,
 ) -> Response | tuple[Response, int]:
     """Execute a single gateway attempt and return the finalized response.
@@ -1100,6 +1118,7 @@ def _forward_via_gateway(
     ``_gateway_error_response`` so the gateway key never leaks (R7).
 
     Issue #1894: Added SSRF blocked handling.
+    Issue #3201: Added tenant_id for performance recording.
     """
     # Issue #1894: Handle SSRF blocked gateway URL
     if getattr(plan, "ssrf_blocked", False):
@@ -1158,6 +1177,7 @@ def _forward_via_gateway(
             provider,
             request_path=plan.path,
             requested_model=requested_model,
+            tenant_id=tenant_id,  # Issue #3201: Pass tenant_id for performance recording
         )
     except Exception as exc:
         logger.error("LLM proxy gateway error: %s", exc)
@@ -1492,6 +1512,7 @@ def handle_llm_proxy_request(
             session_id=session_id,
             user_id=user_id,
             provider=provider,
+            tenant_id=tenant_id,  # Issue #3201: Pass tenant_id for performance recording
             requested_model=requested_model,
         )
     # ── end model-gateway seam ───────────────────────────────────────────
@@ -1878,6 +1899,7 @@ def handle_llm_proxy_request(
                 provider,
                 request_path=path,
                 requested_model=requested_model,
+                tenant_id=tenant_id,  # Issue #3201: Pass tenant_id for performance recording
             )
 
         except Exception as exc:
