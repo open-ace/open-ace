@@ -2297,10 +2297,17 @@ class AutonomousAgentRunner:
         # here; _run_zcode_appserver creates the row under the real CLI id.
         creates_session_late = cli_tool in _APPSERVER_TOOLS
 
+        # Resolved unconditionally. It is read later by _sync_usage_to_daily_usage
+        # on BOTH the local and remote paths, but was assigned only inside the
+        # branch below — so any app-server tool (ZCode sets creates_session_late)
+        # raised UnboundLocalError there. That surfaced as a bare
+        # "cannot access local variable" with error_code=None, masking the real
+        # diagnostic, including the #2023 production-isolation refusal. The bug
+        # predates this PR; the new refusal is what made it visible.
+        wf_tenant_id = self._resolve_tenant_id(user_id)
+
         # Create wrapper sessions only for tools without a deferred session id.
         if self.session_manager and not creates_session_late:
-            # Resolve tenant_id (default 1) so fail-closed tenant resolution passes.
-            wf_tenant_id = self._resolve_tenant_id(user_id)
             try:
                 self.session_manager.create_session(
                     session_id=session_id,
@@ -2705,6 +2712,14 @@ class AutonomousAgentRunner:
                     policy=self._load_task_policy(),
                 )
             )
+            # Persist attribution the moment an id exists, BEFORE upload/exec/
+            # attach. Recording it only after attach left a window in which a
+            # crash — or a failed boot probe whose best-effort delete also
+            # failed — left a live sandbox no workflow row could name, and the
+            # metadata-scoped server sweep that could have found it anyway has
+            # no production caller. Emitting twice is harmless: the second call
+            # rewrites the same row with the same ids.
+            self._notify_sandbox_created(session_id, sandbox_handle, None, provider)
         except SandboxError as e:
             return AgentTaskResult(
                 session_id=session_id,
@@ -2754,10 +2769,14 @@ class AutonomousAgentRunner:
             # and task completion leaves an orphan the reconciler can destroy.
             # Local has no external session id → None.
             self._notify_sandbox_created(session_id, sandbox_handle, None, provider)
-        except (OSError, subprocess.SubprocessError, SandboxError) as e:
-            # SandboxError belongs here too: without it an exec failure from a
-            # container backend skips this handler and the sandbox leaks until
-            # its TTL.
+        except Exception as e:  # noqa: BLE001 - the sandbox EXISTS; nothing may leak it
+            # Deliberately catch-all. The previous tuple (OSError,
+            # SubprocessError, SandboxError) missed the normal failure of a
+            # rejected PTY upgrade: websockets raises InvalidStatus on a
+            # 401/403 handshake, which is none of those. The sandbox is
+            # already created at this point and attribution is not persisted
+            # until attach succeeds, so an escaping exception leaked a live
+            # sandbox that nothing in the database could name.
             provider.destroy(sandbox_handle)
             return self._stamp_sandbox_attribution(
                 AgentTaskResult(

@@ -176,16 +176,13 @@ def derive_capabilities(
     if att.pod_pids_limit > 0:
         caps.add(SandboxCapability.CPU_MEM_PIDS_TIME_QUOTA)
 
-    # CREDENTIAL_TOKEN_BINDING is NEVER granted by this backend.
-    #
-    # It means "this sandbox's credential is bound to this sandbox", and only
-    # `secureAccess` provides that — which upstream honours solely under
-    # gateway-mode ingress (see validate_spec_for_endpoint note 7). Under the
-    # direct-ingress manifests shipped here every sandbox authenticates to execd
-    # with the same static token, which any agent can read out of execd's
-    # environment. That is a deployment-wide shared secret, the opposite of
-    # per-sandbox binding, so the capability is unreachable rather than
-    # conditional. Restoring it means implementing gateway ingress first.
+    # CREDENTIAL_TOKEN_BINDING means "this sandbox's credential is bound to this
+    # sandbox". Only `secureAccess` provides that, and upstream honours it solely
+    # under gateway-mode ingress — which the shipped manifests now configure. The
+    # attestation is the operator's statement that their server really runs that
+    # way; the provider cannot read the server's TOML to check.
+    if att.execd_token_required and att.secure_access_required:
+        caps.add(SandboxCapability.CREDENTIAL_TOKEN_BINDING)
 
     if att.inode_quota_enforced or att.ephemeral_storage_enforced:
         # A disjunction, because implied_required_capabilities demands this
@@ -263,28 +260,19 @@ def validate_spec_for_endpoint(
             f"attestations {missing}; refusing to run an agent without them"
         )
 
-    # 7. secureAccess is NOT required, and deliberately so.
-    #
-    # The provider sets `"secureAccess": True` on every create, but upstream
-    # honours it only for Kubernetes sandboxes when `[ingress] mode = "gateway"`
-    # (server/configuration.md: "currently supported only for Kubernetes
-    # sandboxes when ingress.mode = 'gateway'"; the OpenAPI adds "When omitted
-    # or false, endpoints remain accessible without the additional access
-    # token"). The manifests this repository ships run `mode = "direct"`, so
-    # per-sandbox tokens are never minted and the flag has no effect.
-    #
-    # Making the attestation mandatory therefore demanded an operator promise
-    # that the deployment cannot keep, and granted CREDENTIAL_TOKEN_BINDING off
-    # it — a capability asserted with nothing enforcing it, which is exactly the
-    # #2082 defect this package exists to avoid repeating. Requiring it is
-    # dropped rather than faked.
-    #
-    # KNOWN LIMITATION, documented in docs/sandbox-backends.md: under direct
-    # ingress every sandbox authenticates to execd with the same static
-    # EXECD_ACCESS_TOKEN, and an agent can read that token out of execd's
-    # inherited environment. A compromised agent can therefore reach a peer
-    # sandbox's execd. Closing it needs gateway-mode ingress, which is
-    # deployment work outside this backend.
+    # 7. Without secureAccess a peer sandbox reaches this one's endpoint with no
+    # per-sandbox credential — only the deployment-wide static execd token, which
+    # any agent can read out of execd's environment. #2023 requires that peer
+    # boundary to hold, so a tier that cannot attest it is refused rather than
+    # documented. The attestation is backed by `[ingress] mode = "gateway"` in
+    # k8s/extras/opensandbox; under `direct` it must not be asserted.
+    if not att.secure_access_required:
+        raise SandboxError(
+            f"endpoint {endpoint.tier!r}: secure_access attestation absent; sandbox "
+            "endpoints would be reachable by a peer with only the shared static "
+            "execd token. Configure gateway-mode ingress (see k8s/extras/opensandbox) "
+            "and attest secure_access_required."
+        )
 
     egress = spec.network_egress
     if egress is not None:

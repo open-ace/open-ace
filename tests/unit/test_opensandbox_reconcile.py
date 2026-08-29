@@ -35,6 +35,7 @@ def _write_config(tmp_path) -> str:
                     "egress_mode_dns_nft": True,
                     "metadata_cidr_blocked": True,
                     "execd_token_required": True,
+                    "secure_access_required": True,
                     "nonroot_enforced": True,
                     "readonly_rootfs": True,
                     "seccomp_runtime_default": True,
@@ -258,6 +259,7 @@ def test_a_sandbox_on_a_non_default_tier_is_destroyed_on_its_own_server(tmp_path
                     "egress_mode_dns_nft": True,
                     "metadata_cidr_blocked": True,
                     "execd_token_required": True,
+                    "secure_access_required": True,
                     "nonroot_enforced": True,
                     "readonly_rootfs": True,
                     "seccomp_runtime_default": True,
@@ -320,6 +322,7 @@ def test_an_unauthenticatable_endpoint_does_not_pin_a_row_forever(tmp_path, monk
                     "egress_mode_dns_nft": True,
                     "metadata_cidr_blocked": True,
                     "execd_token_required": True,
+                    "secure_access_required": True,
                     "nonroot_enforced": True,
                     "readonly_rootfs": True,
                     "seccomp_runtime_default": True,
@@ -367,4 +370,81 @@ def test_a_transient_endpoint_error_is_still_reported_as_a_failure(configured, m
         raise ConnectionError("lifecycle server unreachable")
 
     api.delete_sandbox = _boom  # type: ignore[assignment]
+    assert provider.destroy_attribution_checked("sb-1", None) is False
+
+
+def test_an_unconfirmed_delete_is_not_reported_as_success(configured):
+    """DELETE is accepted, not applied.
+
+    Upstream goes Stopping then Terminated over successive reads, and a server
+    that ignored the request answers identically at the moment of the call.
+    Returning True there let the scheduler clear the only id naming a sandbox
+    that was still Running.
+    """
+    api = FakeOpenSandboxApi()
+    api.sandboxes["sb-1"] = {"id": "sb-1", "status": {"state": "Running"}, "metadata": {}}
+    api.stall_delete = True  # accepted, nothing happens
+    provider = provider_for("opensandbox", api_factory=lambda endpoint: api)
+    assert provider.destroy_attribution_checked("sb-1", None) is False
+
+
+def test_an_endpoint_we_could_not_query_is_not_proof_of_absence(tmp_path, monkeypatch):
+    """ "I could not ask" must never be recorded as "it is not there".
+
+    The scheduler is its own unit and may lack a credential the web process
+    had — which is exactly why an endpoint it cannot authenticate to may be the
+    one that created the sandbox. Concluding absence there discards the only id
+    that could name a live sandbox.
+    """
+    raw = {
+        "installation_id": "openace-test",
+        "default_tier": "gvisor",
+        "endpoints": {
+            tier: {
+                "base_url": f"http://osb-{tier}.open-ace.svc.cluster.local:8080/v1",
+                "api_key_env": "OSB_KEY" if tier == "gvisor" else "OSB_KEY_UNSET",
+                "execd_token_env": "OSB_EXECD_TOKEN",
+                "runtime_class": "gvisor" if tier == "gvisor" else "kata-qemu",
+                "default_image": _DIGEST,
+                "egress_allow_hosts": ["api.anthropic.com"],
+                "attestations": {
+                    "egress_enforced": True,
+                    "egress_mode_dns_nft": True,
+                    "metadata_cidr_blocked": True,
+                    "execd_token_required": True,
+                    "secure_access_required": True,
+                    "nonroot_enforced": True,
+                    "readonly_rootfs": True,
+                    "seccomp_runtime_default": True,
+                    "dedicated_service_account": True,
+                    "pod_pids_limit": 512,
+                },
+            }
+            for tier in ("gvisor", "kata")
+        },
+        "image_allowlist": [_DIGEST],
+    }
+    path = tmp_path / "sandbox-backends.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setenv("OSB_KEY", "k")
+    monkeypatch.setenv("OSB_EXECD_TOKEN", "t")
+    monkeypatch.delenv("OSB_KEY_UNSET", raising=False)
+    monkeypatch.setenv("OPENACE_SANDBOX_BACKENDS", str(path))
+
+    from app.modules.workspace.autonomous.sandbox.opensandbox.config import SandboxConfigError
+
+    empty = FakeOpenSandboxApi()  # gvisor genuinely does not have it
+
+    class _Unauthenticatable:
+        def get_sandbox(self, sandbox_id):
+            raise SandboxConfigError("endpoint 'kata': API key env var 'OSB_KEY_UNSET' is unset")
+
+    monkeypatch.setattr(
+        registry,
+        "_default_api_factory",
+        lambda endpoint: _Unauthenticatable() if "kata" in endpoint.base_url else empty,
+    )
+    provider = provider_for("opensandbox")
+    # Not found on the one endpoint we could query, and the other was unusable:
+    # absence is NOT established.
     assert provider.destroy_attribution_checked("sb-1", None) is False

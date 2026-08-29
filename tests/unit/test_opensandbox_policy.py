@@ -51,6 +51,7 @@ _FULL_ATTESTATIONS = {
     "egress_mode_dns_nft": True,
     "metadata_cidr_blocked": True,
     "execd_token_required": True,
+    "secure_access_required": True,
     "nonroot_enforced": True,
     "readonly_rootfs": True,
     "seccomp_runtime_default": True,
@@ -189,18 +190,20 @@ def test_tag_only_image_refused():
         _create(spec)
 
 
-def test_a_tier_without_secure_access_still_runs_but_loses_the_capability():
-    """secureAccess needs gateway-mode ingress upstream; ours is direct.
+def test_a_tier_without_secure_access_is_refused():
+    """#2023 requires the peer boundary to hold.
 
-    Requiring the attestation demanded a promise the shipped manifests cannot
-    keep, and granted CREDENTIAL_TOKEN_BINDING off it — a capability asserted
-    with nothing enforcing it (#2082). The tier now runs, and simply does not
-    claim per-sandbox credential binding.
+    Under direct ingress upstream mints no per-sandbox credential, so every
+    sandbox shares one static execd token that any agent can read from execd's
+    environment — a compromised agent reaches a peer's execd. The manifests now
+    configure gateway ingress; a tier that cannot attest it is refused rather
+    than run with the hole documented.
     """
     cfg = _cfg(
         attestations={k: v for k, v in _FULL_ATTESTATIONS.items() if k != "secure_access_required"}
     )
-    _create(cfg=cfg)  # no refusal
+    with pytest.raises(SandboxError, match="secure_access"):
+        _create(cfg=cfg)
 
 
 def test_credential_token_binding_is_not_granted_without_secure_access():
@@ -687,27 +690,18 @@ def test_the_container_path_is_not_inherited_from_the_control_plane():
     assert "/usr/local/bin" in env["PATH"]
 
 
-def test_secure_access_required_is_no_longer_an_accepted_attestation():
-    """Removed, not merely optional.
+def test_credential_token_binding_is_granted_only_with_secure_access():
+    """The capability and the attestation must move together.
 
-    Leaving the key accepted let an operator assert a guarantee the
-    direct-ingress manifests cannot deliver and be granted
-    CREDENTIAL_TOKEN_BINDING for it — a capability declared with nothing
-    enforcing it, which is the #2082 defect one level down.
+    Granting it from execd_token_required alone would claim per-sandbox
+    credential binding for a deployment-wide shared secret.
     """
-    from app.modules.workspace.autonomous.sandbox.opensandbox.config import SandboxConfigError
-
-    with pytest.raises(SandboxConfigError, match="unknown attestation"):
-        _cfg(attestations={**_FULL_ATTESTATIONS, "secure_access_required": True})
-
-
-def test_credential_token_binding_is_unreachable_for_this_backend():
     from app.modules.workspace.autonomous.sandbox.opensandbox.policy import derive_capabilities
     from app.modules.workspace.autonomous.sandbox.types import SandboxCapability
 
     cfg = _cfg()
     caps = derive_capabilities(cfg.endpoints["gvisor"], probes_passed=True)
-    assert SandboxCapability.CREDENTIAL_TOKEN_BINDING not in caps
+    assert SandboxCapability.CREDENTIAL_TOKEN_BINDING in caps
 
 
 @pytest.mark.parametrize(

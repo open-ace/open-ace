@@ -514,6 +514,7 @@ class OpenSandboxProvider:
         """
         found_anywhere = False
         errors: list[str] = []
+        inconclusive: list[str] = []
         for tier, endpoint in self._config.endpoints.items():
             api = self._api if endpoint is self._endpoint else self._api_factory(endpoint)
             try:
@@ -521,16 +522,29 @@ class OpenSandboxProvider:
                     continue
                 found_anywhere = True
                 api.delete_sandbox(sandbox_id)
+                # DELETE is accepted, not applied: upstream goes Stopping then
+                # Terminated over successive reads, and a server that ignored
+                # the request answers exactly the same. Without this the method
+                # reported success for a sandbox still Running, and the
+                # scheduler cleared the only id that could name it again.
+                if not self._confirm_terminal(sandbox_id):
+                    errors.append(f"{tier}: delete not confirmed terminal")
             except SandboxConfigError as exc:
-                # A config fault (an unset API-key env var in THIS process — the
-                # scheduler runs as its own unit and need not share the web
-                # process's environment) is deterministic: it will fail
-                # identically on every future sweep. Reporting it as a retryable
-                # failure pinned the row `running` forever while each sweep
-                # refreshed updated_at and re-armed the TTL reaper. Treat the
-                # endpoint as not participating instead — we still cannot have
-                # created a sandbox through an endpoint we cannot authenticate
-                # to.
+                # A config fault here (an unset API-key env var in THIS process —
+                # the scheduler is its own unit and need not share the web
+                # process's environment) is deterministic and will recur on every
+                # sweep, so reporting it as a plain retryable failure pinned the
+                # row `running` forever while each sweep re-armed the TTL reaper.
+                #
+                # But it is NOT evidence of absence, which is what an earlier
+                # version of this concluded — and that reasoning contradicted
+                # the very sentence above: if the scheduler's environment can
+                # differ from the web process's, then the web process may well
+                # have created the sandbox through exactly this endpoint. So the
+                # endpoint is recorded as *inconclusive*: harmless when the
+                # sandbox is found and torn down elsewhere, and fatal to the
+                # "already gone" conclusion when it is not.
+                inconclusive.append(f"{tier}: {exc}")
                 self._emit(
                     "sandbox_endpoint_unusable",
                     {"sandbox_id": sandbox_id, "tier": tier, "error": str(exc)},
@@ -544,6 +558,16 @@ class OpenSandboxProvider:
             )
             return False
         if not found_anywhere:
+            if inconclusive:
+                # Never seen anywhere we could actually ask. Concluding "already
+                # gone" here is how a live sandbox loses the only id that names
+                # it; keep the attribution and let an operator fix the
+                # credentials.
+                self._emit(
+                    "sandbox_destroy_attribution_failed",
+                    {"sandbox_id": sandbox_id, "errors": inconclusive},
+                )
+                return False
             self._emit("sandbox_destroy_attribution_absent", {"sandbox_id": sandbox_id})
         return True
 

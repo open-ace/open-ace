@@ -85,6 +85,7 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
         "egress_mode_dns_nft": true,
         "metadata_cidr_blocked": true,
         "execd_token_required": true,
+        "secure_access_required": true,
         "nonroot_enforced": true,
         "readonly_rootfs": true,
         "seccomp_runtime_default": true,
@@ -283,22 +284,32 @@ locally therefore cannot yet use this backend. Tracked as follow-up work;
 restructuring command construction around provider selection is out of scope
 for #2023.
 
-**`secureAccess` does nothing under the shipped manifests.** Upstream honours it
-only for Kubernetes sandboxes when `[ingress] mode = "gateway"`, and
-`k8s/extras/opensandbox/` configures `direct`. The provider still requests it
-(harmless, and correct for a gateway deployment), but no per-sandbox token is
-minted, so `secure_access_required` is **not** a required attestation and
-`CREDENTIAL_TOKEN_BINDING` is withheld without it. The consequence: every
-sandbox authenticates to execd with the same static `EXECD_ACCESS_TOKEN`, and an
-agent can read that token out of execd's inherited environment — so a
-compromised agent can reach a peer sandbox's execd. Closing this requires
-gateway-mode ingress, which is deployment work beyond this backend.
+**Gateway ingress is required, not optional.** `secureAccess` — the per-sandbox
+credential that stops one sandbox reaching another's execd — is honoured by
+upstream only for Kubernetes sandboxes under `[ingress] mode = "gateway"`.
+`k8s/extras/opensandbox/` configures gateway mode, `[ingress.gateway]`, and the
+`OPENSANDBOX_SECURE_ACCESS_*` signing keys accordingly. **You must set
+`ingress.gateway.address` for your own deployment** (a wildcard domain, no
+scheme). A tier that cannot attest `secure_access_required` is refused at
+`create()` rather than run with the peer boundary open — under `direct` every
+sandbox shares one static `EXECD_ACCESS_TOKEN` that any agent can read from
+execd's environment, which #2023's `test_sandbox_cannot_read_host_or_peer_workspace`
+exists to forbid.
+
+**The BatchSandbox CRD and its controller are a prerequisite.** The server is
+configured with `workload_provider = "batchsandbox"`, but the CRD and the
+controller that reconciles those objects come from upstream's
+`opensandbox-controller` Helm chart, which this kustomization deliberately does
+not vendor. Install and pin it *before* applying these manifests, or the first
+sandbox create is accepted and never reconciled. See the README.
 
 **Orphan reconciliation is per-workflow-row only.** `reconcile_orphans()`, the
 metadata-scoped sweep of the whole lifecycle server, has no production caller;
 teardown happens through `destroy_attribution` on rows the database already
-knows about. A sandbox whose workflow row was lost entirely is reclaimed by its
-TTL, not by Open ACE.
+knows about. Attribution is now persisted the moment `create()` returns an id,
+so the crash window that could strand an unnameable sandbox is closed — but a
+sandbox whose workflow row is lost entirely is still reclaimed by its TTL rather
+than by Open ACE.
 
 **Multi-turn `--resume` does not carry session history.** Each turn gets a fresh
 sandbox with an empty `HOME`, so a `--resume` on turn 2 finds no local session

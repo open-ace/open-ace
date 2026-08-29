@@ -52,5 +52,27 @@ data:
     # enforcementMode is anything else.
     mode = "dns+nft"
 
+    [store]
+    # REQUIRED. Without it upstream defaults to ~/.opensandbox/opensandbox.db,
+    # which under this pod (UID 1000, readOnlyRootFilesystem, only /tmp
+    # writable) resolves somewhere unwritable — and the snapshot repository
+    # creates its parent directory and schema at import time, so the server
+    # fails before readiness rather than at first use.
+    type = "sqlite"
+    path = "/var/lib/opensandbox/opensandbox.db"
+
     [ingress]
-    mode = "direct"
+    # gateway, NOT direct: `secureAccess` is honoured only for Kubernetes
+    # sandboxes under gateway mode (server/configuration.md). Under direct
+    # ingress no per-sandbox credential is minted, every sandbox shares the one
+    # static EXECD_ACCESS_TOKEN, and a compromised agent can reach a peer's
+    # execd — which #2023's `test_sandbox_cannot_read_host_or_peer_workspace`
+    # exists to forbid. The `secure_access_required` attestation is what this
+    # block backs; dropping either without the other makes the workflow row lie.
+    mode = "gateway"
+
+    [ingress.gateway]
+    # MUST be changed per deployment. A wildcard domain is required for
+    # route.mode = "wildcard", and no scheme is permitted.
+    address = "*.sandbox.open-ace.example"
+    route.mode = "wildcard"

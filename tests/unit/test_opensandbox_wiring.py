@@ -39,6 +39,7 @@ def api(tmp_path, monkeypatch):
                     "egress_mode_dns_nft": True,
                     "metadata_cidr_blocked": True,
                     "execd_token_required": True,
+                    "secure_access_required": True,
                     "nonroot_enforced": True,
                     "readonly_rootfs": True,
                     "seccomp_runtime_default": True,
@@ -666,3 +667,77 @@ def test_the_effective_policy_records_the_running_providers_capabilities(
         "of declared_caps is not observable from this assertion"
     )
     assert SandboxCapability.NAMESPACE_ISOLATION in provider.capabilities()
+
+
+def test_a_rejected_pty_upgrade_destroys_the_sandbox_it_created(api, tmp_path, monkeypatch):
+    """websockets raises InvalidStatus on a 401/403 handshake — not OSError.
+
+    The post-create handler caught only (OSError, SubprocessError, SandboxError),
+    so a rejected upgrade escaped it. The sandbox was already created and
+    attribution was not persisted until after attach succeeded, leaving a live
+    sandbox that nothing in the database could name.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.provider import OpenSandboxProvider
+
+    class _Rejected(Exception):
+        """Stands in for websockets.exceptions.InvalidStatus."""
+
+    # The fixture pre-seeds "sb-1" and create() mints the same id, which would
+    # make "which ids did create() produce" unanswerable.
+    api.sandboxes.clear()
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / "app.py").write_text("x\n", encoding="utf-8")
+
+    def _refuse(url, headers):
+        raise _Rejected("server rejected WebSocket connection: HTTP 403")
+
+    provider = OpenSandboxProvider(
+        _load_config(),
+        api_factory=lambda endpoint: api,
+        tenant="1",
+        project_path=str(worktree),
+        connect_factory=_refuse,
+    )
+    result = _run_local_against(provider, worktree, monkeypatch)
+
+    assert result.success is False
+    created = set(api.sandboxes)
+    assert created, f"no sandbox created; result.error={result.error!r}"
+    assert created <= api.deleted, f"leaked sandbox(es): {created - api.deleted}"
+
+
+def test_attribution_is_persisted_before_the_agent_is_attached(api, tmp_path, monkeypatch):
+    """A crash between create and attach must still leave a nameable row.
+
+    provider.create() returns a live sandbox before upload, exec and PTY attach
+    run. Recording attribution only after attach left that whole window with no
+    row the startup reconciler could act on.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.provider import OpenSandboxProvider
+
+    class _Rejected(Exception):
+        pass
+
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / "app.py").write_text("x\n", encoding="utf-8")
+
+    recorded: list[str] = []
+
+    def _on_created(session_id, sandbox_id, provider_name, remote_session_id, effective_policy):
+        recorded.append(sandbox_id)
+
+    def _refuse(url, headers):
+        raise _Rejected("rejected")
+
+    provider = OpenSandboxProvider(
+        _load_config(),
+        api_factory=lambda endpoint: api,
+        tenant="1",
+        project_path=str(worktree),
+        connect_factory=_refuse,
+    )
+    _run_local_against(provider, worktree, monkeypatch, on_sandbox_created=_on_created)
+    assert recorded, "the sandbox existed but was never recorded before attach failed"

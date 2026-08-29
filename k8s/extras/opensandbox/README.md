@@ -25,7 +25,7 @@ the workflow row lie about what protected the run.
 | `metadata_cidr_blocked` | `networkpolicy.yaml` |
 | `egress_enforced`, `egress_mode_dns_nft` | `configmap-*.yaml` — `[egress] mode = "dns+nft"` |
 | `execd_token_required` | `server-*.yaml` — a non-empty `EXECD_ACCESS_TOKEN` |
-| `secure_access_required` | **nothing, under these manifests.** Upstream honours `secureAccess` only when `[ingress] mode = "gateway"`; ours is `direct`, so no per-sandbox token is minted. It is no longer required, and `CREDENTIAL_TOKEN_BINDING` is withheld without it. See the limitation note in `docs/sandbox-backends.md`. |
+| `secure_access_required` | `configmap-*.yaml` — `[ingress] mode = "gateway"` plus `[ingress.gateway]`, and the `OPENSANDBOX_SECURE_ACCESS_*` keys in `server-*.yaml`. Under `direct` no per-sandbox token is minted and this must NOT be attested. |
 | `ephemeral_storage_enforced` | `configmap-sandbox-template.yaml` volume `sizeLimit`s |
 | — (not an attestation, but required) | `configmap-sandbox-template.yaml` mounts a **writable** volume at `/home/agent`. `HOME` lives outside `/workspace` on purpose: under `/workspace` the repo synthesis's `git add -A` stages the agent's whole home tree — pip wheels, npm, pre-commit environments — into the initial commit. |
 | `inode_quota_enforced` | **nothing here.** Leave it `false` unless the node filesystem carries a real project quota — see below. |
@@ -92,6 +92,32 @@ declared `runtime_class`.
 
 ## Applying
 
+### 1. Install the BatchSandbox CRD and controller FIRST
+
+These manifests configure the server with `workload_provider = "batchsandbox"`,
+but the CRD and the controller that reconciles those objects are upstream's, and
+this kustomization deliberately does not vendor them — pinning someone else's
+CRDs inside our tree is how they silently drift out of date. Without them the
+first sandbox create is *accepted* and then never reconciled, which looks like a
+hang rather than a missing prerequisite.
+
+```bash
+helm install opensandbox-controller \
+  oci://ghcr.io/opensandbox-group/charts/opensandbox-controller \
+  --version <pinned> -n opensandbox-system --create-namespace
+kubectl get crd batchsandboxes.sandbox.opensandbox.io   # must exist before step 3
+```
+
+### 2. Set your gateway address
+
+`configmap-gvisor.yaml` and `configmap-kata.yaml` ship a placeholder
+`ingress.gateway.address` (`*.sandbox.open-ace.example`). It **must** be a
+wildcard domain you control, with no scheme, resolving to your ingress gateway.
+Gateway mode is what makes `secureAccess` mint per-sandbox credentials; leaving
+the placeholder means sandbox endpoints are unroutable.
+
+### 3. Apply
+
 ```bash
 kubectl apply -k k8s/extras/opensandbox/
 ```
@@ -124,8 +150,17 @@ kubectl create secret generic opensandbox-keys -n open-ace \
   --from-literal=gvisor-api-key="$(openssl rand -hex 32)" \
   --from-literal=gvisor-execd-token="$(openssl rand -hex 32)" \
   --from-literal=kata-api-key="$(openssl rand -hex 32)" \
-  --from-literal=kata-execd-token="$(openssl rand -hex 32)"
+  --from-literal=kata-execd-token="$(openssl rand -hex 32)" \
+  --from-literal=gvisor-secure-access-keys="$(openssl rand -hex 32)" \
+  --from-literal=gvisor-secure-access-active-key="$(openssl rand -hex 32)" \
+  --from-literal=kata-secure-access-keys="$(openssl rand -hex 32)" \
+  --from-literal=kata-secure-access-active-key="$(openssl rand -hex 32)"
 ```
+
+The `secure-access-*` pair is what gateway mode signs per-sandbox credentials
+with. Without them `secureAccess` has nothing to mint, and the
+`secure_access_required` attestation would be unbacked — which the provider
+refuses to run against.
 
 `sandbox-backends.json` names the environment variables holding these; the
 values never appear in that file.

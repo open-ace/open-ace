@@ -1,3 +1,18 @@
+# Snapshot metadata must survive a restart (upstream: `memory` is deliberately
+# not the default "because server-managed snapshot resources must survive
+# process restarts"). An emptyDir would silently lose it on every roll.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: opensandbox-store-gvisor
+  namespace: open-ace
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+
+---
 # OpenSandbox server for the gvisor isolation tier (Issue #2023).
 #
 # One Deployment per tier, because the secure runtime is a SERVER-level setting
@@ -13,7 +28,14 @@ metadata:
     app.kubernetes.io/name: opensandbox
     app.kubernetes.io/component: gvisor
 spec:
-  replicas: 2
+  # ONE active server process. Upstream: "Run only one active server process
+  # against a PostgreSQL database", and the SQLite store below is per-pod — two
+  # replicas would each keep their own snapshot metadata and disagree.
+  replicas: 1
+  strategy:
+    # The store PVC is ReadWriteOnce; a rolling update would deadlock waiting
+    # for the outgoing pod to release it.
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: opensandbox
@@ -58,6 +80,21 @@ spec:
                 secretKeyRef:
                   name: opensandbox-keys
                   key: gvisor-execd-token
+            # Gateway-mode secureAccess signing keys. The server builds
+            # [ingress.secure_access] from these at startup, which keeps the key
+            # material out of the ConfigMap. Without them gateway mode has
+            # nothing to sign per-sandbox credentials with — and the
+            # secure_access_required attestation would be unbacked again.
+            - name: OPENSANDBOX_SECURE_ACCESS_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: opensandbox-keys
+                  key: gvisor-secure-access-keys
+            - name: OPENSANDBOX_SECURE_ACCESS_ACTIVE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: opensandbox-keys
+                  key: gvisor-secure-access-active-key
           volumeMounts:
             - name: config
               mountPath: /etc/opensandbox
@@ -68,6 +105,8 @@ spec:
             - name: sandbox-template
               mountPath: /etc/opensandbox/templates
               readOnly: true
+            - name: store
+              mountPath: /var/lib/opensandbox
             - name: tmp
               mountPath: /tmp
           readinessProbe:
@@ -88,6 +127,9 @@ spec:
         - name: sandbox-template
           configMap:
             name: opensandbox-sandbox-template
+        - name: store
+          persistentVolumeClaim:
+            claimName: opensandbox-store-gvisor
         - name: tmp
           emptyDir: {}
 

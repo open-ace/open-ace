@@ -94,13 +94,14 @@ class Attestations:
     egress_mode_dns_nft: bool = False
     metadata_cidr_blocked: bool = False
     execd_token_required: bool = False
-    # secure_access_required is GONE, not merely optional. Upstream honours
-    # `secureAccess` only when `[ingress] mode = "gateway"`, and the manifests
-    # here ship "direct" — so the attestation could never be true. Leaving the
-    # key accepted let an operator assert it (copied from an older config, or
-    # reading the name as aspirational) and be granted CREDENTIAL_TOKEN_BINDING
-    # with nothing enforcing it: the #2082 defect, one level down. Removing the
-    # field makes _parse_attestations reject the key as unknown, which is loud.
+    # Backed by `[ingress] mode = "gateway"` plus `[ingress.gateway]` and the
+    # OPENSANDBOX_SECURE_ACCESS_* signing keys in k8s/extras/opensandbox. Under
+    # `mode = "direct"` upstream mints no per-sandbox credential and this must
+    # NOT be asserted — every sandbox would share one static execd token, which
+    # any agent can read from execd's environment, and a compromised agent could
+    # reach a peer's execd. That is what #2023's
+    # test_sandbox_cannot_read_host_or_peer_workspace forbids.
+    secure_access_required: bool = False
     nonroot_enforced: bool = False
     readonly_rootfs: bool = False
     seccomp_runtime_default: bool = False
