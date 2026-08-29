@@ -238,24 +238,65 @@ test.describe('Audit Center', () => {
   });
 
   test('should open details in a modal instead of window.alert', async ({ page }) => {
+    // The lane's organic audit rows are bare logins without details, and the
+    // details <pre> only renders for rows whose sanitized details are
+    // non-empty — self-provision the premise BEFORE navigating (the audit
+    // list does not auto-refresh). Re-writing the admin's own quota with its
+    // current values logs a QUOTA_UPDATE entry with details and no lasting
+    // side effects.
+    const quotaResp = await page.request.get('/api/admin/quota/usage');
+    expect(quotaResp.ok()).toBeTruthy();
+    const usage = (await quotaResp.json()) as Array<{
+      id: number;
+      daily_token_quota?: number | null;
+      monthly_token_quota?: number | null;
+      daily_request_quota?: number | null;
+      monthly_request_quota?: number | null;
+    }>;
+    const admin = usage.find((u) => u.id === 1) ?? usage[0];
+    expect(admin).toBeTruthy();
+    // Re-write every currently-set value (an all-empty payload is rejected);
+    // this is idempotent for the user and produces a QUOTA_UPDATE audit row.
+    const payload: Record<string, number> = {};
+    if (admin.daily_token_quota != null) payload.daily_token_quota = admin.daily_token_quota;
+    if (admin.monthly_token_quota != null) payload.monthly_token_quota = admin.monthly_token_quota;
+    if (admin.daily_request_quota != null) payload.daily_request_quota = admin.daily_request_quota;
+    if (admin.monthly_request_quota != null)
+      payload.monthly_request_quota = admin.monthly_request_quota;
+    expect(Object.keys(payload).length).toBeGreaterThan(0);
+    const writeResp = await page.request.put(`/api/admin/users/${admin.id}/quota`, {
+      data: payload,
+    });
+    expect(writeResp.ok()).toBeTruthy();
+
     await page.goto('/manage/audit');
     await waitForApp(page);
 
-    // The eye button only renders on rows that carry details.
-    const eyeButton = page.locator('.audit-center table tbody tr .bi-eye').first();
-    if (!(await eyeButton.isVisible().catch(() => false))) return;
-
-    await eyeButton.click();
+    // The eye button renders unconditionally per row; the newest row (the
+    // QUOTA_UPDATE just triggered) is first (listed by timestamp DESC).
+    const eyeButton = page.locator('.audit-detail-btn').first();
+    await expect(eyeButton).toBeVisible();
+    // Same Mobile Chrome transient hit-target interception as the terminal
+    // buttons in remote-directory-browser.spec.ts: the button resolves, is
+    // visible/enabled/stable, and a rotating set of unrelated elements (header,
+    // filter <select>, <td>) intercepts pointer events on retries only — no
+    // real overlay owns those points. force skips the actionability pre-checks
+    // only (the browser still routes a real, hit-tested click); the modal
+    // assertions below prove the click landed on this button.
+    await eyeButton.click({ force: true });
 
     // Modal body shows the JSON details (contains an opening brace).
     const modalBody = page.locator('.modal-body pre').first();
     await expect(modalBody).toBeVisible({ timeout: 5000 });
     expect((await modalBody.innerText()).includes('{')).toBeTruthy();
 
-    // Close via the header close button and confirm the modal is gone.
+    // Close via the header close button and confirm the modal is gone. The
+    // animating modal-header transiently intercepts the small close button's
+    // hit point on Mobile Chrome (same family as the interceptors above);
+    // force is safe because the toHaveCount(0) below proves the modal closed.
     const closeBtn = page.locator('.modal-header .btn-close').first();
     await expect(closeBtn).toBeVisible();
-    await closeBtn.click();
+    await closeBtn.click({ force: true });
     await expect(modalBody).toHaveCount(0);
   });
 });
