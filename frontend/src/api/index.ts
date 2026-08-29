@@ -122,6 +122,8 @@ export type {
   Tenant,
   TenantPlan,
   TenantQuota,
+  // Issue #3203: Export TenantSettings
+  TenantSettings,
   CreateTenantRequest,
   UpdateTenantRequest,
   UpdateTenantQuotaRequest,

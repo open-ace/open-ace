@@ -447,6 +447,13 @@ export const translations: Record<Language, Translations> = {
     dailyRequests: 'Daily Requests',
     monthlyRequests: 'Monthly Requests',
     editQuota: 'Edit Quota',
+    // Issue #3203: Tenant Settings Modal
+    tenantSettingsModal: 'Tenant Settings',
+    settingsSection: 'Settings',
+    contentFilterEnabled: 'Content Filter',
+    contentFilterEnabledDesc:
+      'When enabled, content from all users under this tenant will be filtered according to rules configured in Security Center.',
+    settingsSaveFailed: 'Failed to save settings',
     unlimited: 'Unlimited',
     dailyRequestQuota: 'Daily Request Quota',
     monthlyRequestQuota: 'Monthly Request Quota',
@@ -2744,6 +2751,12 @@ export const translations: Record<Language, Translations> = {
     dailyRequests: '每日请求数',
     monthlyRequests: '每月请求数',
     editQuota: '编辑配额',
+    // Issue #3203: Tenant Settings Modal
+    tenantSettingsModal: '租户设置',
+    settingsSection: '设置',
+    contentFilterEnabled: '内容过滤',
+    contentFilterEnabledDesc: '开启后，该租户下所有用户发送的内容将受安全中心配置的规则约束。',
+    settingsSaveFailed: '设置保存失败',
     unlimited: '无限制',
     dailyRequestQuota: '每日请求配额',
     monthlyRequestQuota: '每月请求配额',
@@ -5291,6 +5304,13 @@ export const translations: Record<Language, Translations> = {
     dailyRequests: '毎日のリクエスト',
     monthlyRequests: '月間リクエスト',
     editQuota: 'クォータ編集',
+    // Issue #3203: Tenant Settings Modal
+    tenantSettingsModal: 'テナント設定',
+    settingsSection: '設定',
+    contentFilterEnabled: 'コンテンツフィルター',
+    contentFilterEnabledDesc:
+      '有効にすると、このテナントのすべてのユーザーが送信するコンテンツは、セキュリティセンターで設定されたルールに従ってフィルタリングされます。',
+    settingsSaveFailed: '設定の保存に失敗しました',
     unlimited: '無制限',
     dailyRequestQuota: '毎日のリクエストクォータ',
     monthlyRequestQuota: '月間リクエストクォータ',
@@ -7372,6 +7392,13 @@ export const translations: Record<Language, Translations> = {
     dailyRequests: '일일 요청',
     monthlyRequests: '월간 요청',
     editQuota: '할당량 편집',
+    // Issue #3203: Tenant Settings Modal
+    tenantSettingsModal: '테넌트 설정',
+    settingsSection: '설정',
+    contentFilterEnabled: '콘텐츠 필터',
+    contentFilterEnabledDesc:
+      '활성화하면 이 테넌트의 모든 사용자가 보낸 콘텐츠는 보안 센터에서 구성한 규칙에 따라 필터링됩니다.',
+    settingsSaveFailed: '설정 저장 실패',
     unlimited: '무제한',
     dailyRequestQuota: '일일 요청 할당량',
     monthlyRequestQuota: '월간 요청 할당량',
