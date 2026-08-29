@@ -453,6 +453,13 @@ export const translations: Record<Language, Translations> = {
     contentFilterEnabled: 'Content Filter',
     contentFilterEnabledDesc:
       'When enabled, content from all users under this tenant will be filtered according to rules configured in Security Center.',
+    // Issue #3204: Audit Log Settings
+    auditLogEnabled: 'Audit Log',
+    auditLogEnabledDesc:
+      'When enabled, all user operations under this tenant will be recorded to the audit center. This setting affects only the current tenant.',
+    auditLogRetentionDays: 'Retention Days',
+    auditLogRetentionDaysHelp: 'Number of days to retain audit logs (1-365 days).',
+    validationRetentionDaysRange: 'Retention days must be an integer between 1 and 365',
     settingsSaveFailed: 'Failed to save settings',
     unlimited: 'Unlimited',
     dailyRequestQuota: 'Daily Request Quota',
@@ -2756,6 +2763,12 @@ export const translations: Record<Language, Translations> = {
     settingsSection: '设置',
     contentFilterEnabled: '内容过滤',
     contentFilterEnabledDesc: '开启后，该租户下所有用户发送的内容将受安全中心配置的规则约束。',
+    // Issue #3204: Audit Log Settings
+    auditLogEnabled: '审计日志',
+    auditLogEnabledDesc: '开启后，该租户下所有用户操作将被记录到审计中心。此配置仅影响当前租户。',
+    auditLogRetentionDays: '保留天数',
+    auditLogRetentionDaysHelp: '审计日志保留天数（1-365 天）。',
+    validationRetentionDaysRange: '保留天数必须是 1-365 之间的整数',
     settingsSaveFailed: '设置保存失败',
     unlimited: '无限制',
     dailyRequestQuota: '每日请求配额',
@@ -5310,6 +5323,13 @@ export const translations: Record<Language, Translations> = {
     contentFilterEnabled: 'コンテンツフィルター',
     contentFilterEnabledDesc:
       '有効にすると、このテナントのすべてのユーザーが送信するコンテンツは、セキュリティセンターで設定されたルールに従ってフィルタリングされます。',
+    // Issue #3204: Audit Log Settings
+    auditLogEnabled: '監査ログ',
+    auditLogEnabledDesc:
+      '有効にすると、このテナントのすべてのユーザー操作が監査センターに記録されます。この設定は現在のテナントにのみ適用されます。',
+    auditLogRetentionDays: '保持日数',
+    auditLogRetentionDaysHelp: '監査ログを保持する日数（1〜365日）。',
+    validationRetentionDaysRange: '保持日数は1〜365の整数である必要があります',
     settingsSaveFailed: '設定の保存に失敗しました',
     unlimited: '無制限',
     dailyRequestQuota: '毎日のリクエストクォータ',
@@ -7398,6 +7418,13 @@ export const translations: Record<Language, Translations> = {
     contentFilterEnabled: '콘텐츠 필터',
     contentFilterEnabledDesc:
       '활성화하면 이 테넌트의 모든 사용자가 보낸 콘텐츠는 보안 센터에서 구성한 규칙에 따라 필터링됩니다.',
+    // Issue #3204: Audit Log Settings
+    auditLogEnabled: '감사 로그',
+    auditLogEnabledDesc:
+      '활성화하면 이 테넌트의 모든 사용자 작업이 감사 센터에 기록됩니다. 이 설정은 현재 테넌트에만 적용됩니다.',
+    auditLogRetentionDays: '보존 일수',
+    auditLogRetentionDaysHelp: '감사 로그를 보존할 일수 (1-365일).',
+    validationRetentionDaysRange: '보존 일수는 1-365 사이의 정수여야 합니다',
     settingsSaveFailed: '설정 저장 실패',
     unlimited: '무제한',
     dailyRequestQuota: '일일 요청 할당량',
