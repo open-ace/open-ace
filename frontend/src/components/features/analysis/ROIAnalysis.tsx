@@ -46,8 +46,15 @@ import { formatTokens, formatToolName, formatChartDate } from '@/utils';
 import { useTools, usePageRefresh } from '@/hooks';
 
 // Cache key generator
-const getCacheKey = (startDate: string, endDate: string, tool: string, assumptions: string) =>
-  `roi_${startDate}_${endDate}_${tool}_${assumptions}`;
+const getCacheKey = (params: {
+  startDate: string;
+  endDate: string;
+  tool: string;
+  assumptions: string;
+  algorithmVersion: string;
+  taskType: string;
+}) =>
+  `roi_${params.startDate}_${params.endDate}_${params.tool}_${params.assumptions}_${params.algorithmVersion}_${params.taskType}`;
 
 // Simple cache for ROI data
 const roiDataCache = new Map<
@@ -197,6 +204,15 @@ export const ROIAnalysis: React.FC = () => {
   const [overrideAssumptions, setOverrideAssumptions] = useState<ROIAssumptions | null>(null);
   const [draftAssumptions, setDraftAssumptions] = useState<AssumptionDraft>(EMPTY_ASSUMPTION_DRAFT);
   const [assumptionError, setAssumptionError] = useState<string | null>(null);
+
+  // Efficiency algorithm v2 parameters
+  const [selectedAlgorithmVersion, setSelectedAlgorithmVersion] = useState<
+    'v1.0' | 'v2.0' | 'auto'
+  >('auto');
+  const [selectedTaskType, setSelectedTaskType] = useState<
+    'GENERAL' | 'CODE_GENERATION' | 'DOCUMENT_ANALYSIS' | 'CONVERSATION' | ''
+  >('');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
 
   // Expanded action-item rows (by suggestion_id)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -396,7 +412,14 @@ export const ROIAnalysis: React.FC = () => {
     async (forceRefresh = false) => {
       if (!startDate || !endDate) return;
 
-      const cacheKey = getCacheKey(startDate, endDate, selectedTool, assumptionKey);
+      const cacheKey = getCacheKey({
+        startDate,
+        endDate,
+        tool: selectedTool,
+        assumptions: assumptionKey,
+        algorithmVersion: selectedAlgorithmVersion,
+        taskType: selectedTaskType,
+      });
       const cached = roiDataCache.get(cacheKey);
       const now = Date.now();
 
@@ -441,7 +464,12 @@ export const ROIAnalysis: React.FC = () => {
             tool_name: selectedTool || undefined,
           }),
           roiApi.getOptimizationSuggestions(30, selectedTool || undefined),
-          roiApi.getEfficiencyReport({ days: 30, tool_name: selectedTool || undefined }),
+          roiApi.getEfficiencyReport({
+            days: 30,
+            tool_name: selectedTool || undefined,
+            algorithm_version: selectedAlgorithmVersion || undefined,
+            task_type: selectedTaskType || undefined,
+          }),
           roiApi.getROIByUser({
             start_date: startDate,
             end_date: endDate,
@@ -477,7 +505,15 @@ export const ROIAnalysis: React.FC = () => {
         setIsLoading(false);
       }
     },
-    [assumptionKey, endDate, overrideAssumptions, selectedTool, startDate]
+    [
+      assumptionKey,
+      endDate,
+      overrideAssumptions,
+      selectedTool,
+      startDate,
+      selectedAlgorithmVersion,
+      selectedTaskType,
+    ]
   );
 
   useEffect(() => {
@@ -629,7 +665,70 @@ export const ROIAnalysis: React.FC = () => {
             <label className="form-label">{t('tableTool', language)}</label>
             <Select options={toolOptions} value={selectedTool} onChange={setSelectedTool} />
           </div>
+          <div className="col-md-3 d-flex align-items-end">
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+              aria-expanded={showAdvancedFilters}
+              aria-controls="advanced-filters"
+            >
+              <i
+                className={cn('bi me-2', showAdvancedFilters ? 'bi-chevron-up' : 'bi-chevron-down')}
+              />
+              {t('efficiencyAdvancedFilters', language)}
+            </button>
+          </div>
         </div>
+
+        {/* Advanced Filters (Collapsible) */}
+        {showAdvancedFilters && (
+          <div className="row g-3 mt-2 border-top pt-3" id="advanced-filters">
+            <div className="col-md-4">
+              <label className="form-label">{t('efficiencyAlgorithmVersion', language)}</label>
+              <Select
+                options={[
+                  { value: 'auto', label: t('efficiencyAlgorithmAuto', language) },
+                  { value: 'v2.0', label: t('efficiencyAlgorithmV2', language) },
+                  { value: 'v1.0', label: t('efficiencyAlgorithmV1', language) },
+                ]}
+                value={selectedAlgorithmVersion}
+                onChange={(value) => setSelectedAlgorithmVersion(value as 'v1.0' | 'v2.0' | 'auto')}
+              />
+            </div>
+            <div className="col-md-4">
+              <label className="form-label">{t('efficiencyTaskType', language)}</label>
+              <Select
+                options={[
+                  { value: '', label: t('efficiencyTaskTypeAuto', language) },
+                  { value: 'GENERAL', label: t('efficiencyTaskTypeGeneral', language) },
+                  {
+                    value: 'CODE_GENERATION',
+                    label: t('efficiencyTaskTypeCodeGeneration', language),
+                  },
+                  {
+                    value: 'DOCUMENT_ANALYSIS',
+                    label: t('efficiencyTaskTypeDocumentAnalysis', language),
+                  },
+                  { value: 'CONVERSATION', label: t('efficiencyTaskTypeConversation', language) },
+                ]}
+                value={selectedTaskType}
+                onChange={(value) =>
+                  setSelectedTaskType(
+                    value as
+                      '' | 'GENERAL' | 'CODE_GENERATION' | 'DOCUMENT_ANALYSIS' | 'CONVERSATION'
+                  )
+                }
+              />
+            </div>
+            <div className="col-md-4 d-flex align-items-end">
+              <small className="text-muted">
+                <i className="bi bi-info-circle me-1" />
+                {t('roiEstimateDisclaimer', language)}
+              </small>
+            </div>
+          </div>
+        )}
       </Card>
 
       <Card className="mb-4">
@@ -901,6 +1000,58 @@ export const ROIAnalysis: React.FC = () => {
                     <td>{t('wastePercentage', language)}</td>
                     <td className="text-end">{(efficiency.waste_percentage ?? 0).toFixed(1)}%</td>
                   </tr>
+                  {/* Algorithm Version */}
+                  {efficiency.algorithm_version && (
+                    <tr>
+                      <td>{t('efficiencyAlgorithmVersion', language)}</td>
+                      <td className="text-end">
+                        <span
+                          className={cn(
+                            'badge',
+                            efficiency.algorithm_version === 'v2.0'
+                              ? 'bg-success'
+                              : efficiency.algorithm_version === 'v1.0'
+                                ? 'bg-secondary'
+                                : 'bg-info'
+                          )}
+                        >
+                          {efficiency.algorithm_version === 'v2.0'
+                            ? t('efficiencyAlgorithmV2', language)
+                            : efficiency.algorithm_version === 'v1.0'
+                              ? t('efficiencyAlgorithmV1', language)
+                              : efficiency.algorithm_version}
+                        </span>
+                      </td>
+                    </tr>
+                  )}
+                  {/* Applied Task Type */}
+                  {efficiency.applied_task_type && (
+                    <tr>
+                      <td>{t('efficiencyAppliedTaskType', language)}</td>
+                      <td className="text-end">
+                        <span className="badge bg-primary">
+                          {efficiency.applied_task_type === 'GENERAL'
+                            ? t('efficiencyTaskTypeGeneral', language)
+                            : efficiency.applied_task_type === 'CODE_GENERATION'
+                              ? t('efficiencyTaskTypeCodeGeneration', language)
+                              : efficiency.applied_task_type === 'DOCUMENT_ANALYSIS'
+                                ? t('efficiencyTaskTypeDocumentAnalysis', language)
+                                : efficiency.applied_task_type === 'CONVERSATION'
+                                  ? t('efficiencyTaskTypeConversation', language)
+                                  : efficiency.applied_task_type}
+                        </span>
+                      </td>
+                    </tr>
+                  )}
+                  {/* Inference Confidence (v2 only) */}
+                  {efficiency.inference_confidence !== undefined &&
+                    efficiency.inference_confidence !== null &&
+                    efficiency.inference_confidence > 0 && (
+                      <tr>
+                        <td>{t('efficiencyInferenceConfidence', language)}</td>
+                        <td className="text-end">{efficiency.inference_confidence.toFixed(0)}%</td>
+                      </tr>
+                    )}
                 </tbody>
               </table>
             </div>
