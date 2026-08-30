@@ -235,7 +235,7 @@ event.
 | Reason code | Meaning | What to do |
 | --- | --- | --- |
 | `pool_not_attested` | warm pool requested without all of `egress_preapplied`, `recycle_delete`, `image_digest` | pool mode bypasses the image allowlist, resource limits and egress policy; attest all three or stop using it |
-| `runtime_class_mismatch` | the sandbox kernel is not the declared runtime | the server's `[secure_runtime]` and the tier's `runtime_class` disagree, or the RuntimeClass is missing on the node |
+| `runtime_class_mismatch` | the sandbox kernel contradicts the declared runtime (raised only when a gVisor kernel is seen; see §5 on the one-directional check) | the server's `[secure_runtime]` and the tier's `runtime_class` disagree, or the RuntimeClass is missing on the node |
 | `egress_not_deny_default` | sidecar reports `allow` | check `[egress]` in the tier's ConfigMap |
 | `egress_mode_insufficient` | sidecar reports `dns`, not `dns+nft` | DNS-only cannot stop a bare-IP connection; set `mode = "dns+nft"` |
 | `spec_refused` | the request could not be built (image, volumes, egress, pids) | the message names the field |

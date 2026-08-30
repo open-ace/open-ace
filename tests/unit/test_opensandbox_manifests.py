@@ -266,3 +266,34 @@ def test_the_docs_example_points_at_the_service_for_its_own_tier():
             f"{endpoint['runtime_class']!r} but base_url points at {host!r}, "
             f"which is the {'gvisor' if host == services['gvisor'] else host} Service"
         )
+
+
+def test_no_document_claims_the_probe_verifies_the_kata_runtime():
+    """Three sweeps in a row corrected some sites and missed others.
+
+    The probe is one-directional: it positively verifies gVisor and only rules
+    gVisor out for Kata. Kata is the sole usable tier, so an operator-facing
+    document promising the kernel is checked against the declared runtime_class
+    overstates the guarantee they actually have. This scans every doc rather
+    than relying on the next person to grep exhaustively.
+    """
+    import re
+
+    root = _DIR.parents[2]
+    sources = [root / "docs" / "sandbox-backends.md", _DIR / "README.md"]
+    # Phrasings that assert the probe enforces the declared class unconditionally.
+    overclaims = [
+        r"refuses to continue if the kernel does not match",
+        r"does not take that on trust",
+        r"\*\*verified\*\* by a `/proc/version` probe",
+        r"probe would catch it and refuse every run",
+    ]
+    offenders = []
+    for path in sources:
+        text = path.read_text(encoding="utf-8")
+        for pattern in overclaims:
+            for m in re.finditer(pattern, text):
+                offenders.append(f"{path.name}: {text[m.start():m.start() + 70]!r}")
+    assert not offenders, "documents overstate what the runtime probe proves:\n" + "\n".join(
+        offenders
+    )

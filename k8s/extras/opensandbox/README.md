@@ -74,9 +74,10 @@ that name is load-bearing.
 
 One template serves both tiers: `runtimeClassName` is deliberately absent from
 it, because the server stamps the pod from `[secure_runtime] k8s_runtime_class`.
-A per-tier copy could disagree with its own server's runtime — the provider's
-`/proc/version` probe would catch it and refuse every run, correct but
-avoidable.
+A per-tier copy could disagree with its own server's runtime. The
+`/proc/version` probe catches that only across the gVisor/Kata boundary, not
+between two Kata tiers (see below), so do not rely on it to notice a copy that
+drifted — keep the single template.
 
 ## Two tiers, because the runtime is server-level
 
@@ -86,9 +87,16 @@ configured runtime. SDK users and API callers require no code changes." Each
 tier therefore needs its own Deployment, Service and ConfigMap, and the backend
 config routes tenants to the right endpoint.
 
-The provider does not take that on trust: on the first sandbox per endpoint it
-reads `/proc/version` and refuses to continue if the kernel does not match the
-declared `runtime_class`.
+The provider checks that on the first sandbox per endpoint by reading
+`/proc/version` — but **the check is one-directional, and the weaker direction
+is the one that matters here**. gVisor's kernel identifies itself, so a tier
+declaring gVisor and not getting it is caught. Kata boots a real kernel in a VM
+whose `/proc/version` is indistinguishable from an unisolated `runc`
+container's, so a Kata tier is only confirmed *not* gVisor — the probe cannot
+prove Kata is in force. Since gVisor cannot run agent workloads at all (it
+cannot enforce egress; see `docs/sandbox-backends.md` §7), Kata is the only
+usable tier, and its isolation rests on `[secure_runtime] k8s_runtime_class`
+plus the RuntimeClass genuinely existing on the node — not on this probe.
 
 ## Applying
 
