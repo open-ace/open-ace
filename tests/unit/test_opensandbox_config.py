@@ -588,3 +588,46 @@ def test_a_kata_tier_may_attest_egress_enforcement():
         )
     )
     assert cfg.endpoints["kata"].attestations.egress_enforced is True
+
+
+# `runsc` is NOT here: it is gVisor's handler name and is now correctly
+# classified as gVisor family, so it is refused by the egress rule below.
+@pytest.mark.parametrize("runtime_class", ["totally-made-up", "runc", "sysbox-runc"])
+def test_an_unverifiable_runtime_class_is_refused(runtime_class):
+    """A RuntimeClass name this backend cannot classify buys no capability.
+
+    `runsc` is gVisor's OWN handler name and a common RuntimeClass. Matching on
+    the substring "gvisor" let it past the config refusal AND past both branches
+    of the boot probe — which then set probes_passed having verified nothing,
+    while NAMESPACE_ISOLATION is granted off exactly that flag. A capability
+    declared with nothing enforcing it is the defect this package exists to
+    prevent.
+    """
+    with pytest.raises(SandboxConfigError, match="cannot verify|not a runtime"):
+        parse_backend_config(_raw(endpoints={"t": _endpoint(runtime_class=runtime_class)}))
+
+
+@pytest.mark.parametrize("runtime_class", ["gvisor", "gVisor", "runsc", "gvisor-nvidia"])
+def test_every_gvisor_family_name_is_refused_with_egress(runtime_class):
+    """The gVisor/egress incompatibility is about the runtime, not the spelling."""
+    raw = _raw(
+        endpoints={
+            "t": _endpoint(
+                runtime_class=runtime_class,
+                attestations={"egress_enforced": True, "egress_mode_dns_nft": True},
+            )
+        }
+    )
+    with pytest.raises(SandboxConfigError, match="cannot enforce egress"):
+        parse_backend_config(raw)
+
+
+def test_the_runtime_family_classifier_is_shared_with_the_probe():
+    """One definition, so config and probe cannot disagree about a name."""
+    from app.modules.workspace.autonomous.sandbox.opensandbox.config import runtime_family
+
+    assert runtime_family("runsc") == "gvisor"
+    assert runtime_family("gvisor") == "gvisor"
+    assert runtime_family("kata-qemu") == "kata"
+    assert runtime_family("kata-fc") == "kata"
+    assert runtime_family("nonsense") == ""

@@ -209,3 +209,54 @@ def test_the_gvisor_tier_configures_no_egress_sidecar():
         "the gVisor tier configures an egress sidecar it cannot use; every "
         "create would be rejected"
     )
+
+
+def test_every_namespace_the_manifests_use_is_also_created():
+    """`kubectl apply -k` must not require a namespace it does not define.
+
+    Ten objects target `open-ace` and nothing created it, so applying to any
+    cluster without it failed — and the README's Apply step named no such
+    prerequisite. Caught only by a server-side dry-run against a real API
+    server; a purely local `kubectl kustomize` renders happily.
+    """
+    import subprocess
+
+    rendered = subprocess.run(
+        ["kubectl", "kustomize", str(_DIR)], capture_output=True, text=True, check=True
+    ).stdout
+    docs = [d for d in yaml.safe_load_all(rendered) if d]
+    defined = {d["metadata"]["name"] for d in docs if d["kind"] == "Namespace"}
+    used = {d["metadata"]["namespace"] for d in docs if d.get("metadata", {}).get("namespace")}
+    missing = used - defined
+    assert not missing, f"objects target namespaces nothing creates: {sorted(missing)}"
+
+
+def test_the_docs_example_points_at_the_service_for_its_own_tier():
+    """A `kata` tier whose base_url is the gVisor Service fails on every create.
+
+    The example was migrated to Kata field by field and its base_url was left on
+    `opensandbox`, which selects the gVisor deployment — so an operator copying
+    it verbatim would hit the exact `networkPolicy is not compatible with
+    runtime 'gvisor'` error the migration existed to eliminate.
+    """
+    import json
+    import re
+
+    md = (_DIR.parents[2] / "docs" / "sandbox-backends.md").read_text(encoding="utf-8")
+    raw = json.loads(
+        re.search(r"```json\n(\{.*?\n\})\n```", md, re.S).group(1).replace("<64 hex>", "a" * 64)
+    )
+    services = {}
+    for tier in _TIERS:
+        for d in yaml.safe_load_all((_DIR / f"server-{tier}.yaml").read_text()):
+            if d and d["kind"] == "Service":
+                services[tier] = d["metadata"]["name"]
+
+    for tier_name, endpoint in raw["endpoints"].items():
+        host = endpoint["base_url"].split("//", 1)[1].split(".", 1)[0]
+        family = "kata" if "kata" in endpoint["runtime_class"].lower() else "gvisor"
+        assert host == services[family], (
+            f"tier {tier_name!r} declares runtime_class "
+            f"{endpoint['runtime_class']!r} but base_url points at {host!r}, "
+            f"which is the {'gvisor' if host == services['gvisor'] else host} Service"
+        )

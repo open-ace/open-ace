@@ -69,7 +69,7 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
   "default_tier": "kata",
   "endpoints": {
     "kata": {
-      "base_url": "http://opensandbox.open-ace.svc.cluster.local:8080/v1",
+      "base_url": "http://opensandbox-kata.open-ace.svc.cluster.local:8080/v1",
       "api_key_env": "OPENSANDBOX_API_KEY_KATA",
       "execd_token_env": "OPENSANDBOX_EXECD_TOKEN_KATA",
       "runtime_class": "kata-qemu",
@@ -128,8 +128,8 @@ Points worth knowing before you edit it:
 - **Tenant keys are `str(tenant_id)`**, the integer this codebase carries — not
   a slug. There is no name→id mapping anywhere, so a slug key would match
   nothing.
-- **`rollout` decides Legacy vs OpenSandbox; `tenant_tiers` decides gVisor vs
-  Kata.** They are different questions — `tenant_tiers` cannot route a tenant
+- **`rollout` decides Legacy vs OpenSandbox; `tenant_tiers` decides which
+  endpoint.** (Only Kata tiers can run agent workloads — see §7.) They are different questions — `tenant_tiers` cannot route a tenant
   back to Legacy, because every tier is an OpenSandbox endpoint.
 - **`production_required_tenants` is the no-downgrade list.** A tenant on it
   gets OpenSandbox or an exception; there is no path from "required" to Legacy.
@@ -176,7 +176,7 @@ to before this backend existed. That is also the rollback: remove the file.
 
 ### A suggested sequence
 
-1. Deploy the gVisor tier with `rollout.mode = "allowlist"` and a single project
+1. Deploy the Kata tier (gVisor cannot enforce egress — see §7) with `rollout.mode = "allowlist"` and a single project
    path. One repository moves; nothing else changes.
 2. Widen `rollout.tenants` a tenant at a time.
 3. Add the Kata tier and route high-security tenants to it with `tenant_tiers`

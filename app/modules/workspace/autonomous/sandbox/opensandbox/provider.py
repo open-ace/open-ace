@@ -42,6 +42,7 @@ from app.modules.workspace.autonomous.command_evidence.types import (
     compute_output_digest,
     derive_terminal_reason,
 )
+from app.modules.workspace.autonomous.sandbox.opensandbox import config as config_mod
 from app.modules.workspace.autonomous.sandbox.opensandbox import policy as policy_mod
 from app.modules.workspace.autonomous.sandbox.opensandbox import workspace as workspace_mod
 from app.modules.workspace.autonomous.sandbox.opensandbox.client import HttpOpenSandboxApi
@@ -696,13 +697,29 @@ class OpenSandboxProvider:
         kernel = self._probe_kernel(handle.sandbox_id)
         expected = self._endpoint.runtime_class.lower()
         looks_gvisor = "gvisor" in kernel.lower()
-        if expected.startswith("gvisor") and not looks_gvisor:
+        # Same classifier the config validation uses, so the names the two agree
+        # to recognise cannot drift. Matching on `startswith("gvisor")` alone
+        # meant "runsc" — gVisor's OWN handler name — matched neither branch:
+        # the probe verified nothing and then set probes_passed, off which
+        # NAMESPACE_ISOLATION is granted.
+        family = config_mod.runtime_family(expected)
+        if not family:
+            # Unreachable through parse_backend_config, which refuses an
+            # unrecognised runtime_class — but a hand-built config must not be
+            # able to buy a capability with an unverifiable name.
+            raise self._refuse(
+                f"runtime probe: endpoint declares runtime_class {expected!r}, which this "
+                "backend cannot verify; refusing rather than passing a probe that "
+                "checked nothing",
+                "runtime_class_unverifiable",
+            )
+        if family == "gvisor" and not looks_gvisor:
             raise self._refuse(
                 f"runtime probe: endpoint declares {expected!r} but the sandbox "
                 f"kernel does not identify as gVisor ({kernel[:80]!r})",
                 "runtime_class_mismatch",
             )
-        if expected.startswith("kata") and looks_gvisor:
+        if family == "kata" and looks_gvisor:
             raise self._refuse(
                 f"runtime probe: endpoint declares {expected!r} but the sandbox "
                 "kernel identifies as gVisor",

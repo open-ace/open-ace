@@ -237,21 +237,21 @@ def test_a_sandbox_on_a_non_default_tier_is_destroyed_on_its_own_server(tmp_path
     """The two-tier topology this repo ships, and the leak it used to cause.
 
     The workflow row records the provider NAME and nothing about the tier, so
-    the post-restart sweep resolved to default_tier — the gvisor server for a
+    the post-restart sweep resolved to default_tier — the wrong server for a
     kata tenant. delete_sandbox treats 404 as success, so deleting the kata
-    sandbox's id against the gvisor server reported SUCCESS, the scheduler
+    sandbox's id against that other server reported SUCCESS, the scheduler
     cleared the ids, and the real sandbox ran on to its TTL.
     """
     raw = {
         "installation_id": "openace-test",
-        "default_tier": "gvisor",
-        "tenant_tiers": {"42": "kata"},
+        "default_tier": "kata-default",
+        "tenant_tiers": {"42": "kata-other"},
         "endpoints": {
             tier: {
                 "base_url": f"http://osb-{tier}.open-ace.svc.cluster.local:8080/v1",
                 "api_key_env": "OSB_KEY",
                 "execd_token_env": "OSB_EXECD_TOKEN",
-                "runtime_class": "kata-qemu" if tier == "gvisor" else "kata-qemu",
+                "runtime_class": "kata-qemu",
                 "default_image": _DIGEST,
                 "egress_allow_hosts": ["api.anthropic.com"],
                 "attestations": {
@@ -267,7 +267,7 @@ def test_a_sandbox_on_a_non_default_tier_is_destroyed_on_its_own_server(tmp_path
                     "pod_pids_limit": 512,
                 },
             }
-            for tier in ("gvisor", "kata")
+            for tier in ("kata-default", "kata-other")
         },
         "image_allowlist": [_DIGEST],
     }
@@ -277,23 +277,25 @@ def test_a_sandbox_on_a_non_default_tier_is_destroyed_on_its_own_server(tmp_path
     monkeypatch.setenv("OSB_EXECD_TOKEN", "t")
     monkeypatch.setenv("OPENACE_SANDBOX_BACKENDS", str(path))
 
-    servers = {"gvisor": FakeOpenSandboxApi(), "kata": FakeOpenSandboxApi()}
-    # The sandbox lives on kata; the sweep will resolve to gvisor.
-    servers["kata"].sandboxes["sb-kata-1"] = {
+    servers = {"kata-default": FakeOpenSandboxApi(), "kata-other": FakeOpenSandboxApi()}
+    # The sandbox lives on the non-default tier; the sweep resolves to the default.
+    servers["kata-other"].sandboxes["sb-kata-1"] = {
         "id": "sb-kata-1",
         "status": {"state": "Running"},
         "metadata": {"openace.provider": "opensandbox", "openace.installation": "openace-test"},
     }
 
     def _factory(endpoint):
-        return servers["kata" if "kata" in endpoint.base_url else "gvisor"]
+        return servers["kata-other" if "kata-other" in endpoint.base_url else "kata-default"]
 
     monkeypatch.setattr(registry, "_default_api_factory", _factory)
     provider = provider_for("opensandbox")
 
     assert provider.destroy_attribution_checked("sb-kata-1", None) is True
-    assert "sb-kata-1" in servers["kata"].deleted, "the kata sandbox was never actually destroyed"
-    assert "sb-kata-1" not in servers["gvisor"].deleted
+    assert (
+        "sb-kata-1" in servers["kata-other"].deleted
+    ), "the kata sandbox was never actually destroyed"
+    assert "sb-kata-1" not in servers["kata-default"].deleted
 
 
 def test_an_unauthenticatable_endpoint_does_not_pin_a_row_forever(tmp_path, monkeypatch):
@@ -308,13 +310,13 @@ def test_an_unauthenticatable_endpoint_does_not_pin_a_row_forever(tmp_path, monk
     """
     raw = {
         "installation_id": "openace-test",
-        "default_tier": "gvisor",
+        "default_tier": "kata-default",
         "endpoints": {
             tier: {
                 "base_url": f"http://osb-{tier}.open-ace.svc.cluster.local:8080/v1",
-                "api_key_env": "OSB_KEY" if tier == "gvisor" else "OSB_KEY_UNSET",
+                "api_key_env": "OSB_KEY" if tier == "kata-default" else "OSB_KEY_UNSET",
                 "execd_token_env": "OSB_EXECD_TOKEN",
-                "runtime_class": "kata-qemu" if tier == "gvisor" else "kata-qemu",
+                "runtime_class": "kata-qemu",
                 "default_image": _DIGEST,
                 "egress_allow_hosts": ["api.anthropic.com"],
                 "attestations": {
@@ -330,7 +332,7 @@ def test_an_unauthenticatable_endpoint_does_not_pin_a_row_forever(tmp_path, monk
                     "pod_pids_limit": 512,
                 },
             }
-            for tier in ("gvisor", "kata")
+            for tier in ("kata-default", "kata-other")
         },
         "image_allowlist": [_DIGEST],
     }
@@ -343,21 +345,23 @@ def test_an_unauthenticatable_endpoint_does_not_pin_a_row_forever(tmp_path, monk
 
     from app.modules.workspace.autonomous.sandbox.opensandbox.config import SandboxConfigError
 
-    gvisor = FakeOpenSandboxApi()
-    gvisor.sandboxes["sb-1"] = {"id": "sb-1", "status": {"state": "Running"}, "metadata": {}}
+    working = FakeOpenSandboxApi()
+    working.sandboxes["sb-1"] = {"id": "sb-1", "status": {"state": "Running"}, "metadata": {}}
 
     class _Unauthenticatable:
         def get_sandbox(self, sandbox_id):
             raise SandboxConfigError("endpoint 'kata': API key env var 'OSB_KEY_UNSET' is unset")
 
     def _factory(endpoint):
-        return _Unauthenticatable() if "kata" in endpoint.base_url else gvisor
+        # Only the NON-default tier is unauthenticatable; the default one holds
+        # the sandbox and tears it down successfully.
+        return _Unauthenticatable() if "kata-other" in endpoint.base_url else working
 
     monkeypatch.setattr(registry, "_default_api_factory", _factory)
     provider = provider_for("opensandbox")
 
     assert provider.destroy_attribution_checked("sb-1", None) is True
-    assert "sb-1" in gvisor.deleted
+    assert "sb-1" in working.deleted
 
 
 def test_a_transient_endpoint_error_is_still_reported_as_a_failure(configured, monkeypatch):
@@ -398,13 +402,13 @@ def test_an_endpoint_we_could_not_query_is_not_proof_of_absence(tmp_path, monkey
     """
     raw = {
         "installation_id": "openace-test",
-        "default_tier": "gvisor",
+        "default_tier": "kata-default",
         "endpoints": {
             tier: {
                 "base_url": f"http://osb-{tier}.open-ace.svc.cluster.local:8080/v1",
-                "api_key_env": "OSB_KEY" if tier == "gvisor" else "OSB_KEY_UNSET",
+                "api_key_env": "OSB_KEY" if tier == "kata-default" else "OSB_KEY_UNSET",
                 "execd_token_env": "OSB_EXECD_TOKEN",
-                "runtime_class": "kata-qemu" if tier == "gvisor" else "kata-qemu",
+                "runtime_class": "kata-qemu",
                 "default_image": _DIGEST,
                 "egress_allow_hosts": ["api.anthropic.com"],
                 "attestations": {
@@ -420,7 +424,7 @@ def test_an_endpoint_we_could_not_query_is_not_proof_of_absence(tmp_path, monkey
                     "pod_pids_limit": 512,
                 },
             }
-            for tier in ("gvisor", "kata")
+            for tier in ("kata-default", "kata-other")
         },
         "image_allowlist": [_DIGEST],
     }
@@ -433,7 +437,7 @@ def test_an_endpoint_we_could_not_query_is_not_proof_of_absence(tmp_path, monkey
 
     from app.modules.workspace.autonomous.sandbox.opensandbox.config import SandboxConfigError
 
-    empty = FakeOpenSandboxApi()  # gvisor genuinely does not have it
+    empty = FakeOpenSandboxApi()  # the queryable tier genuinely does not have it
 
     class _Unauthenticatable:
         def get_sandbox(self, sandbox_id):
@@ -442,7 +446,7 @@ def test_an_endpoint_we_could_not_query_is_not_proof_of_absence(tmp_path, monkey
     monkeypatch.setattr(
         registry,
         "_default_api_factory",
-        lambda endpoint: _Unauthenticatable() if "kata" in endpoint.base_url else empty,
+        lambda endpoint: _Unauthenticatable() if "kata-other" in endpoint.base_url else empty,
     )
     provider = provider_for("opensandbox")
     # Not found on the one endpoint we could query, and the other was unusable:
@@ -460,14 +464,14 @@ def test_terminal_confirmation_asks_the_server_that_held_the_sandbox(tmp_path, m
     """
     raw = {
         "installation_id": "openace-test",
-        "default_tier": "gvisor",
-        "tenant_tiers": {"42": "kata"},
+        "default_tier": "kata-default",
+        "tenant_tiers": {"42": "kata-other"},
         "endpoints": {
             tier: {
                 "base_url": f"http://osb-{tier}.open-ace.svc.cluster.local:8080/v1",
                 "api_key_env": "OSB_KEY",
                 "execd_token_env": "OSB_EXECD_TOKEN",
-                "runtime_class": "kata-qemu" if tier == "gvisor" else "kata-qemu",
+                "runtime_class": "kata-qemu",
                 "default_image": _DIGEST,
                 "egress_allow_hosts": ["api.anthropic.com"],
                 "attestations": {
@@ -483,7 +487,7 @@ def test_terminal_confirmation_asks_the_server_that_held_the_sandbox(tmp_path, m
                     "pod_pids_limit": 512,
                 },
             }
-            for tier in ("gvisor", "kata")
+            for tier in ("kata-default", "kata-other")
         },
         "image_allowlist": [_DIGEST],
     }
@@ -493,22 +497,24 @@ def test_terminal_confirmation_asks_the_server_that_held_the_sandbox(tmp_path, m
     monkeypatch.setenv("OSB_EXECD_TOKEN", "t")
     monkeypatch.setenv("OPENACE_SANDBOX_BACKENDS", str(path))
 
-    servers = {"gvisor": FakeOpenSandboxApi(), "kata": FakeOpenSandboxApi()}
+    servers = {"kata-default": FakeOpenSandboxApi(), "kata-other": FakeOpenSandboxApi()}
     # Lives on kata, and that server accepts DELETE without acting on it.
-    servers["kata"].sandboxes["sb-kata-1"] = {
+    servers["kata-other"].sandboxes["sb-kata-1"] = {
         "id": "sb-kata-1",
         "status": {"state": "Running"},
         "metadata": {"openace.provider": "opensandbox", "openace.installation": "openace-test"},
     }
-    servers["kata"].stall_delete = True
+    servers["kata-other"].stall_delete = True
 
     monkeypatch.setattr(
         registry,
         "_default_api_factory",
-        lambda endpoint: servers["kata" if "kata" in endpoint.base_url else "gvisor"],
+        lambda endpoint: servers[
+            "kata-other" if "kata-other" in endpoint.base_url else "kata-default"
+        ],
     )
     provider = provider_for("opensandbox")
 
     # gvisor 404s for this id; that must NOT count as confirmation.
     assert provider.destroy_attribution_checked("sb-kata-1", None) is False
-    assert servers["kata"].sandboxes["sb-kata-1"]["status"]["state"] == "Running"
+    assert servers["kata-other"].sandboxes["sb-kata-1"]["status"]["state"] == "Running"

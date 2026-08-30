@@ -530,7 +530,16 @@ def _parse_endpoint(tier: str, body: Any, image_allowlist: frozenset[str]) -> En
     # nothing short of running one would have shown it. Refuse the combination
     # here rather than let an operator discover it one failed run at a time.
     runtime_class_value = str(body.get("runtime_class") or "").strip()
-    if attestations.egress_enforced and "gvisor" in runtime_class_value.lower():
+    family = runtime_family(runtime_class_value)
+    if not family:
+        raise SandboxConfigError(
+            f"endpoint {tier!r}: runtime_class {runtime_class_value!r} is not a runtime this "
+            "backend can verify. The boot probe recognises only gVisor "
+            f"({sorted(_GVISOR_RUNTIME_CLASSES)}) and Kata ({sorted(_KATA_RUNTIME_CLASSES)}) "
+            "names; anything else would set probes_passed having checked nothing, and "
+            "NAMESPACE_ISOLATION would be declared with nothing enforcing it."
+        )
+    if attestations.egress_enforced and family == "gvisor":
         raise SandboxConfigError(
             f"endpoint {tier!r}: runtime_class {runtime_class_value!r} cannot enforce egress. "
             "Upstream rejects every create carrying a networkPolicy under gVisor "
@@ -689,6 +698,32 @@ def _str_list(raw: Mapping[str, Any], key: str) -> list[str]:
     if not isinstance(value, (list, tuple)):
         raise SandboxConfigError(f"{key} must be a list")
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+# The runtime classes this backend knows how to VERIFY. A RuntimeClass name is
+# operator-chosen and arbitrary — "runsc" is gVisor's own handler name, and
+# "kata_qemu" is a plausible typo — so matching on the substring "gvisor" let
+# both slip past every check: the config refusal did not fire AND neither branch
+# of the boot probe fired, so `_probes_passed` was set having verified nothing
+# while NAMESPACE_ISOLATION was granted on it. That is a capability declared and
+# not enforced, which this package exists to prevent.
+_GVISOR_RUNTIME_CLASSES = frozenset({"gvisor", "runsc"})
+_KATA_RUNTIME_CLASSES = frozenset({"kata", "kata-qemu", "kata-fc", "kata-clh", "kata-runtime"})
+
+
+def runtime_family(runtime_class: str) -> str:
+    """Classify a RuntimeClass as ``"gvisor"``, ``"kata"``, or ``""`` if unknown.
+
+    ONE definition, shared by config validation and the provider's boot probe,
+    so the set of names the two agree to recognise cannot drift — the same
+    reasoning as :func:`host_matches`.
+    """
+    name = runtime_class.strip().lower()
+    if name in _GVISOR_RUNTIME_CLASSES or name.startswith("gvisor"):
+        return "gvisor"
+    if name in _KATA_RUNTIME_CLASSES or name.startswith("kata"):
+        return "kata"
+    return ""
 
 
 def host_matches(host: str, pattern: str) -> bool:

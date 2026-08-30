@@ -23,7 +23,7 @@ the workflow row lie about what protected the run.
 | `dedicated_service_account` | `rbac.yaml` — a ServiceAccount with no Role, and `automountServiceAccountToken: false` |
 | `pod_pids_limit` | kubelet `--pod-max-pids` / `podPidsLimit` on the sandbox nodes (see below) |
 | `metadata_cidr_blocked` | `networkpolicy.yaml` |
-| `egress_enforced`, `egress_mode_dns_nft` | `configmap-*.yaml` — `[egress] mode = "dns+nft"` |
+| `egress_enforced`, `egress_mode_dns_nft` | **`configmap-kata.yaml` only** — `[egress] mode = "dns+nft"`. `configmap-gvisor.yaml` deliberately has no `[egress]`: gVisor cannot run the sidecar, so that tier must not attest these (the config parser refuses it). |
 | `execd_token_required` | `server-*.yaml` — a non-empty `EXECD_ACCESS_TOKEN` |
 | `secure_access_required` | `configmap-*.yaml` — `[ingress] mode = "gateway"` plus `[ingress.gateway]`, and the `OPENSANDBOX_SECURE_ACCESS_*` keys in `server-*.yaml`. Under `direct` no per-sandbox token is minted and this must NOT be attested. |
 | `ephemeral_storage_enforced` | `configmap-sandbox-template.yaml` volume `sizeLimit`s |
