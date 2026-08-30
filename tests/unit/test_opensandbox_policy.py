@@ -66,7 +66,7 @@ def _cfg(attestations=None, **overrides):
         "base_url": "http://osb.open-ace.svc.cluster.local:8080/v1",
         "api_key_env": "OSB_KEY",
         "execd_token_env": "OSB_EXECD_TOKEN",
-        "runtime_class": "gvisor",
+        "runtime_class": "kata-qemu",
         "default_image": _DIGEST,
         "egress_allow_hosts": ["api.anthropic.com"],
         "attestations": _FULL_ATTESTATIONS if attestations is None else attestations,

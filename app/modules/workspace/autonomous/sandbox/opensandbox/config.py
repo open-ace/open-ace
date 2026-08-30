@@ -520,6 +520,25 @@ def _parse_endpoint(tier: str, body: Any, image_allowlist: frozenset[str]) -> En
             f"endpoint {tier!r}: execd_token_required is attested but execd_token_env "
             "is unset; the client would send no token and every execd call would 401"
         )
+    # gVisor and the egress sidecar are mutually exclusive UPSTREAM. The sidecar
+    # redirects DNS through the iptables nat table, which gVisor's netstack does
+    # not implement, so the server rejects every create carrying a networkPolicy:
+    #   "networkPolicy is not compatible with runtime 'gvisor': gVisor does not
+    #    support the iptables nat table required by the egress sidecar."
+    # This provider ALWAYS sends networkPolicy (policy.build_create_request), so
+    # such a tier cannot create a single sandbox. Verified against a real server;
+    # nothing short of running one would have shown it. Refuse the combination
+    # here rather than let an operator discover it one failed run at a time.
+    runtime_class_value = str(body.get("runtime_class") or "").strip()
+    if attestations.egress_enforced and "gvisor" in runtime_class_value.lower():
+        raise SandboxConfigError(
+            f"endpoint {tier!r}: runtime_class {runtime_class_value!r} cannot enforce egress. "
+            "Upstream rejects every create carrying a networkPolicy under gVisor "
+            "(the sidecar needs the iptables nat table, which gVisor lacks), and this "
+            "provider always sends one — so no sandbox could ever start. Use a Kata "
+            "tier for workloads that require default-deny egress."
+        )
+
     if attestations.egress_enforced and not egress_hosts:
         raise SandboxConfigError(
             f"endpoint {tier!r}: egress_enforced is attested but egress_allow_hosts is empty; "

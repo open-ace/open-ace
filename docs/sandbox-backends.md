@@ -66,13 +66,13 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
 ```json
 {
   "installation_id": "openace-prod-sg",
-  "default_tier": "gvisor",
+  "default_tier": "kata",
   "endpoints": {
-    "gvisor": {
+    "kata": {
       "base_url": "http://opensandbox.open-ace.svc.cluster.local:8080/v1",
-      "api_key_env": "OPENSANDBOX_API_KEY_GVISOR",
-      "execd_token_env": "OPENSANDBOX_EXECD_TOKEN_GVISOR",
-      "runtime_class": "gvisor",
+      "api_key_env": "OPENSANDBOX_API_KEY_KATA",
+      "execd_token_env": "OPENSANDBOX_EXECD_TOKEN_KATA",
+      "runtime_class": "kata-qemu",
       "default_image": "ghcr.io/open-ace/agent@sha256:<64 hex>",
       "execd_endpoint_host_allowlist": ["opensandbox-gateway.open-ace.example"],
       "egress_allow_hosts": [
@@ -304,6 +304,19 @@ the per-sandbox credential traverse whatever path reaches
 `ingress.gateway.address`. Nothing in `k8s/extras/opensandbox/` provides TLS —
 terminate it at your ingress, or keep the gateway address on a network you
 trust. Treat this as a deployment requirement, not a nicety.
+
+**gVisor cannot enforce egress, so it cannot run agent workloads.** The egress
+sidecar redirects DNS through the iptables nat table, which gVisor's netstack
+does not implement. A real server logs the incompatibility at startup and then
+answers every create carrying a `networkPolicy` with
+`networkPolicy is not compatible with runtime 'gvisor'` — and this provider
+always sends one. Since #2023 requires default-deny egress, **Kata is the tier
+that satisfies it**; the shipped gVisor tier therefore configures no egress
+sidecar, must not attest `egress_enforced` (`parse_backend_config` refuses that
+combination outright), and consequently fails closed for agent workloads. It
+remains in the manifests for non-egress uses and so the incompatibility is
+recorded rather than rediscovered. Found by running a real server; every prior
+review read this as a working two-tier setup.
 
 **Gateway ingress is required, not optional.** `secureAccess` — the per-sandbox
 credential that stops one sandbox reaching another's execd — is honoured by

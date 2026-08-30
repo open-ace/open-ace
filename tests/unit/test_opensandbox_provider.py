@@ -49,7 +49,7 @@ def _cfg(attestations=None, *, pool=None, tenant_tiers=None, endpoints=None, **o
         "base_url": "http://osb.open-ace.svc.cluster.local:8080/v1",
         "api_key_env": "OSB_KEY",
         "execd_token_env": "OSB_EXECD_TOKEN",
-        "runtime_class": "gvisor",
+        "runtime_class": "kata-qemu",
         "default_image": _DIGEST,
         "egress_allow_hosts": ["api.anthropic.com"],
         "attestations": _FULL if attestations is None else attestations,
@@ -319,7 +319,10 @@ def test_runtime_probe_rejects_a_gvisor_kernel_on_a_kata_endpoint():
 
 
 def test_runtime_probe_accepts_a_matching_kernel():
-    provider, _ = _provider(FakeOpenSandboxApi(runtime_kernel="Linux 4.4.0 gVisor"))
+    # The shared fixture declares a Kata tier — the only kind that can run these
+    # workloads, since upstream rejects every networkPolicy under gVisor — so a
+    # kernel that does NOT identify as gVisor is the match here.
+    provider, _ = _provider(FakeOpenSandboxApi(runtime_kernel="Linux 5.15.0 #1 SMP"))
     assert provider.create(_spec())
 
 

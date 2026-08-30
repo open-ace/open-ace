@@ -156,6 +156,8 @@ def iter_sse_events(response: Any) -> Iterator[dict]:
     must not turn into an exception on an otherwise good run.
     """
     buffer: list[str] = []
+    # The most recent bare-JSON line, held until we know whether it is last.
+    pending: str | None = None
     for raw_line in response.iter_lines():
         line = (
             raw_line.decode("utf-8", errors="replace") if isinstance(raw_line, bytes) else raw_line
@@ -176,10 +178,26 @@ def iter_sse_events(response: Any) -> Iterator[dict]:
                 buffer = []
                 if event is not None:
                     yield event
-            event = _decode_sse_buffer([line], tolerate_undecodable=False)
+            # HELD, not decoded yet. Only the FINAL event of a stream may be
+            # truncated, and we cannot know a line is final until something
+            # follows it — so the pending line is decoded strictly once more
+            # content arrives, and tolerantly at end-of-stream. Decoding
+            # eagerly turned a mid-ping truncation after a SUCCESSFUL command
+            # into a synthetic error event, which _run_foreground raises on:
+            # it failed runs that had worked, and contradicted this function's
+            # own promise to drop a truncated tail.
+            if pending is not None:
+                event = _decode_sse_buffer([pending], tolerate_undecodable=False)
+                if event is not None:
+                    yield event
+            pending = line
+            continue
+        if pending is not None:
+            # Any other content line also proves the held one was not last.
+            event = _decode_sse_buffer([pending], tolerate_undecodable=False)
+            pending = None
             if event is not None:
                 yield event
-            continue
         if line == "":
             event = _decode_sse_buffer(buffer, tolerate_undecodable=False)
             buffer = []
@@ -188,9 +206,15 @@ def iter_sse_events(response: Any) -> Iterator[dict]:
             continue
         if line.startswith("data:"):
             buffer.append(line[5:].lstrip())
-    # Only the FINAL buffer may be undecodable — a truncated tail is a normal
+    # Only the FINAL event may be undecodable — a truncated tail is a normal
     # way for a stream to end. A malformed event mid-stream is a real signal (a
-    # lost stdout chunk, a lost error) and must not vanish silently.
+    # lost stdout chunk, a lost error) and must not vanish silently. This holds
+    # for BOTH wire shapes: the bare-JSON one real execd sends, and the `data:`
+    # one upstream's OpenAPI documents.
+    if pending is not None:
+        event = _decode_sse_buffer([pending], tolerate_undecodable=True)
+        if event is not None:
+            yield event
     event = _decode_sse_buffer(buffer, tolerate_undecodable=True)
     if event is not None:
         yield event

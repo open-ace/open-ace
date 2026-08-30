@@ -45,7 +45,11 @@ class FakeOpenSandboxApi:
         scripted_exit_code: int = 0,
         scripted_timeout: bool = False,
         pod_oom: bool = False,
-        runtime_kernel: str = "Linux version 4.4.0 #1 SMP gVisor",
+        # A normal kernel, matching the Kata tiers the fixtures now use: gVisor
+        # cannot run these workloads at all (upstream rejects every networkPolicy
+        # under it), so a gVisor default would make the probe refuse everywhere.
+        # Tests that exercise the mismatch pass a gVisor string explicitly.
+        runtime_kernel: str = "Linux version 5.15.0 #1 SMP",
         stderr_text: str = "",
         egress_enforcement_mode: str = "dns+nft",
         egress_default_action: str = "deny",

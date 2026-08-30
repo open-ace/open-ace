@@ -4,6 +4,21 @@
 # Role or RoleBinding: a sandbox must not be able to read Secrets, list Pods, or
 # reach the API server at all. automountServiceAccountToken is false on the pod
 # template as well, so the token is never even projected into the container.
+# The control-plane namespace: the servers, their ConfigMaps, Services, PVCs and
+# the server ServiceAccount all live here. Ten objects target it, and nothing
+# used to create it — `kubectl apply -k` failed on any cluster that did not
+# already have it, which the README's "Apply" step did not mention. Caught by a
+# server-side dry-run against a real API server.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: open-ace
+  labels:
+    kubernetes.io/metadata.name: open-ace
+
+---
+# Where sandbox pods run, kept separate so the NetworkPolicy and the
+# no-permissions ServiceAccount apply only to them.
 apiVersion: v1
 kind: Namespace
 metadata:

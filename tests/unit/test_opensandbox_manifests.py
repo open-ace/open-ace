@@ -190,8 +190,22 @@ def test_pod_hardening_attestations_are_backed_by_the_template(tier):
     assert any(tpl_path.startswith(m.rstrip("/") + "/") for m in mounts)
 
 
-@pytest.mark.parametrize("tier", _TIERS)
-def test_egress_attestations_are_backed(tier):
-    cfg = _server_toml(tier)
+def test_the_kata_tier_backs_the_egress_attestations():
+    cfg = _server_toml("kata")
     assert cfg["egress"]["mode"] == "dns+nft"
     assert cfg["egress"]["image"], "required whenever clients send networkPolicy"
+
+
+def test_the_gvisor_tier_configures_no_egress_sidecar():
+    """gVisor + egress sidecar means every create is rejected upstream.
+
+    The sidecar needs the iptables nat table, which gVisor's netstack lacks. A
+    real server logs the incompatibility at startup and then refuses every
+    create carrying a networkPolicy — which this provider always sends. This
+    tier shipped WITH an egress block and was the default, so not one sandbox
+    could have started. Only running a real server surfaced it.
+    """
+    assert "egress" not in _server_toml("gvisor"), (
+        "the gVisor tier configures an egress sidecar it cannot use; every "
+        "create would be rejected"
+    )

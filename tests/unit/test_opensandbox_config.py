@@ -33,7 +33,7 @@ def _endpoint(**overrides) -> dict:
         "execd_token_env": "OSB_EXECD_TOKEN",
         "base_url": "http://osb.open-ace.svc.cluster.local:8080/v1",
         "api_key_env": "OSB_KEY_GVISOR",
-        "runtime_class": "gvisor",
+        "runtime_class": "kata-qemu",
         "default_image": _DIGEST,
         "egress_allow_hosts": ["api.anthropic.com"],
         "attestations": {"egress_enforced": True, "egress_mode_dns_nft": True},
@@ -59,7 +59,7 @@ def _raw(**overrides) -> dict:
 
 def test_resolves_default_tier_endpoint():
     cfg = parse_backend_config(_raw())
-    assert cfg.endpoint_for(tenant=None, project_path=None).runtime_class == "gvisor"
+    assert cfg.endpoint_for(tenant=None, project_path=None).runtime_class == "kata-qemu"
 
 
 def test_tenant_tier_overrides_default():
@@ -78,7 +78,7 @@ def test_tenant_tier_overrides_default():
         )
     )
     assert cfg.endpoint_for(tenant="42", project_path=None).runtime_class == "kata-qemu"
-    assert cfg.endpoint_for(tenant="7", project_path=None).runtime_class == "gvisor"
+    assert cfg.endpoint_for(tenant="7", project_path=None).runtime_class == "kata-qemu"
 
 
 def test_project_tier_beats_tenant_tier():
@@ -550,3 +550,41 @@ def test_a_malformed_installation_id_is_refused(value):
     raw["installation_id"] = value
     with pytest.raises(SandboxConfigError, match="installation_id"):
         parse_backend_config(raw)
+
+
+def test_a_gvisor_tier_cannot_attest_egress_enforcement():
+    """gVisor and the egress sidecar are mutually exclusive UPSTREAM.
+
+    Verified against a real OpenSandbox server, which answers:
+      "networkPolicy is not compatible with runtime 'gvisor': gVisor does not
+       support the iptables nat table required by the egress sidecar."
+    This provider always sends a networkPolicy, so such a tier could not create
+    a single sandbox. Nothing short of running a real server surfaced it — the
+    shipped gVisor tier had been the DEFAULT tier all along.
+    """
+    raw = _raw(
+        endpoints={
+            "gvisor": _endpoint(
+                runtime_class="gvisor",
+                attestations={"egress_enforced": True, "egress_mode_dns_nft": True},
+            )
+        }
+    )
+    with pytest.raises(SandboxConfigError, match="cannot enforce egress"):
+        parse_backend_config(raw)
+
+
+def test_a_kata_tier_may_attest_egress_enforcement():
+    """Kata supports the sidecar, so it is the tier that satisfies #2023."""
+    cfg = parse_backend_config(
+        _raw(
+            endpoints={
+                "kata": _endpoint(
+                    runtime_class="kata-qemu",
+                    attestations={"egress_enforced": True, "egress_mode_dns_nft": True},
+                )
+            },
+            default_tier="kata",
+        )
+    )
+    assert cfg.endpoints["kata"].attestations.egress_enforced is True

@@ -70,7 +70,7 @@ def _endpoint(**overrides) -> EndpointConfig:
         "tier": "gvisor",
         "base_url": "http://osb.open-ace.svc.cluster.local:8080/v1",
         "api_key_env": "OSB_KEY",
-        "runtime_class": "gvisor",
+        "runtime_class": "kata-qemu",
         "default_image": _DIGEST,
         "execd_endpoint_host_allowlist": ("osb.open-ace.svc.cluster.local",),
         "attestations": Attestations(egress_enforced=True, egress_mode_dns_nft=True),
@@ -638,3 +638,33 @@ def test_the_upload_metadata_part_carries_a_filename():
     files = session.calls[-1]["files"]
     parts = dict(files)
     assert parts["metadata"][0], "metadata part has no filename; execd will not see it"
+
+
+def test_a_truncated_tail_is_dropped_in_the_BARE_shape_too():
+    """The tolerance must cover the shape real execd actually sends.
+
+    The pre-existing truncation guard used the `data:` form, which execd never
+    emits — so when the bare-JSON branch was added it decoded eagerly and turned
+    a cut mid-event into a synthetic error event. `_run_foreground` raises on any
+    error event, so a command that had ALREADY succeeded failed. Pings fire every
+    3s and this backend now routes execd through a gateway hop, so a truncated
+    final chunk is reachable, not theoretical.
+    """
+    body = (
+        b'{"type":"stdout","text":"done"}\n\n'
+        b'{"type":"execution_complete"}\n\n'
+        b'{"type":"pi'  # cut mid-ping
+    )
+    types = [e["type"] for e in iter_sse_events(_Response(200, content=body))]
+    assert types == ["stdout", "execution_complete"], types
+
+
+def test_corruption_mid_stream_is_still_surfaced_in_the_bare_shape():
+    """Only the FINAL event may be dropped — a lost middle event is a real signal."""
+    body = (
+        b'{"type":"stdout","text":"a"}\n\n'
+        b"{TRUNCATED-MIDDLE\n\n"
+        b'{"type":"execution_complete"}\n\n'
+    )
+    types = [e["type"] for e in iter_sse_events(_Response(200, content=body))]
+    assert types == ["stdout", "error", "execution_complete"], types

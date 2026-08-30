@@ -27,7 +27,7 @@ def _write_config(tmp_path) -> str:
                 "base_url": "http://osb.open-ace.svc.cluster.local:8080/v1",
                 "api_key_env": "OSB_KEY",
                 "execd_token_env": "OSB_EXECD_TOKEN",
-                "runtime_class": "gvisor",
+                "runtime_class": "kata-qemu",
                 "default_image": _DIGEST,
                 "egress_allow_hosts": ["api.anthropic.com"],
                 "attestations": {
@@ -251,7 +251,7 @@ def test_a_sandbox_on_a_non_default_tier_is_destroyed_on_its_own_server(tmp_path
                 "base_url": f"http://osb-{tier}.open-ace.svc.cluster.local:8080/v1",
                 "api_key_env": "OSB_KEY",
                 "execd_token_env": "OSB_EXECD_TOKEN",
-                "runtime_class": "gvisor" if tier == "gvisor" else "kata-qemu",
+                "runtime_class": "kata-qemu" if tier == "gvisor" else "kata-qemu",
                 "default_image": _DIGEST,
                 "egress_allow_hosts": ["api.anthropic.com"],
                 "attestations": {
@@ -314,7 +314,7 @@ def test_an_unauthenticatable_endpoint_does_not_pin_a_row_forever(tmp_path, monk
                 "base_url": f"http://osb-{tier}.open-ace.svc.cluster.local:8080/v1",
                 "api_key_env": "OSB_KEY" if tier == "gvisor" else "OSB_KEY_UNSET",
                 "execd_token_env": "OSB_EXECD_TOKEN",
-                "runtime_class": "gvisor" if tier == "gvisor" else "kata-qemu",
+                "runtime_class": "kata-qemu" if tier == "gvisor" else "kata-qemu",
                 "default_image": _DIGEST,
                 "egress_allow_hosts": ["api.anthropic.com"],
                 "attestations": {
@@ -404,7 +404,7 @@ def test_an_endpoint_we_could_not_query_is_not_proof_of_absence(tmp_path, monkey
                 "base_url": f"http://osb-{tier}.open-ace.svc.cluster.local:8080/v1",
                 "api_key_env": "OSB_KEY" if tier == "gvisor" else "OSB_KEY_UNSET",
                 "execd_token_env": "OSB_EXECD_TOKEN",
-                "runtime_class": "gvisor" if tier == "gvisor" else "kata-qemu",
+                "runtime_class": "kata-qemu" if tier == "gvisor" else "kata-qemu",
                 "default_image": _DIGEST,
                 "egress_allow_hosts": ["api.anthropic.com"],
                 "attestations": {
@@ -467,7 +467,7 @@ def test_terminal_confirmation_asks_the_server_that_held_the_sandbox(tmp_path, m
                 "base_url": f"http://osb-{tier}.open-ace.svc.cluster.local:8080/v1",
                 "api_key_env": "OSB_KEY",
                 "execd_token_env": "OSB_EXECD_TOKEN",
-                "runtime_class": "gvisor" if tier == "gvisor" else "kata-qemu",
+                "runtime_class": "kata-qemu" if tier == "gvisor" else "kata-qemu",
                 "default_image": _DIGEST,
                 "egress_allow_hosts": ["api.anthropic.com"],
                 "attestations": {

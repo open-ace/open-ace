@@ -42,15 +42,24 @@ data:
     type = "gvisor"
     k8s_runtime_class = "gvisor"
 
-    [egress]
-    # image is REQUIRED whenever a client sends networkPolicy on create, and
-    # this provider always does (policy.build_network_policy). Omitting it makes
-    # every create fail rather than quietly running without egress control.
-    image = "opensandbox/egress:v1.1.7"
-    # dns+nft, not dns: DNS-only enforcement cannot stop a connection made to a
-    # bare IP. The provider probes the sidecar's /policy and fails closed when
-    # enforcementMode is anything else.
-    mode = "dns+nft"
+    # NO [egress] SECTION, deliberately.
+    #
+    # gVisor cannot run the egress sidecar: it redirects DNS through the iptables
+    # nat table, which gVisor's netstack does not implement. A real server logs
+    #   "The egress sidecar's iptables nat-based DNS redirect is incompatible
+    #    with gVisor. Sandboxes created with network_policy will be rejected at
+    #    creation time."
+    # and then answers every create with
+    #   "networkPolicy is not compatible with runtime 'gvisor'".
+    # This provider ALWAYS sends a networkPolicy, so configuring egress here
+    # would guarantee that not one sandbox could start — which is exactly what
+    # this tier did until a real server was run against it.
+    #
+    # Consequence: this tier CANNOT satisfy #2023's default-deny egress
+    # requirement, so sandbox-backends.json must not attest `egress_enforced`
+    # for it (parse_backend_config refuses that combination), and the provider
+    # will therefore refuse agent workloads here. Use the Kata tier for those.
+    # See docs/sandbox-backends.md §7.
 
     [store]
     # REQUIRED. Without it upstream defaults to ~/.opensandbox/opensandbox.db,
