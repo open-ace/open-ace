@@ -125,10 +125,18 @@ the gateway is what *verifies* the signing keys the server signs with.
 ### 3. Set your gateway address
 
 `configmap-gvisor.yaml` and `configmap-kata.yaml` ship a placeholder
-`ingress.gateway.address` (`*.sandbox.open-ace.example`). It **must** be a
-wildcard domain you control, with no scheme, resolving to your ingress gateway.
-Gateway mode is what makes `secureAccess` mint per-sandbox credentials; leaving
-the placeholder means sandbox endpoints are unroutable.
+`ingress.gateway.address` (`opensandbox-gateway.open-ace.example`). Replace it
+with the host of the gateway you deployed in step 2 — a plain domain, **no
+scheme and no wildcard**, resolving to that gateway's Service.
+
+A wildcard would be wrong here and upstream rejects it: `route.mode` is
+`header`, and `validate_ingress_mode` refuses a wildcard address for any
+non-wildcard route mode, so the server fails to load its config and never
+becomes ready. Wildcard addresses go with `route.mode = "wildcard"`, which the
+shipped gateway does not serve.
+
+Gateway mode is also what makes `secureAccess` mint per-sandbox credentials;
+leaving the placeholder means sandbox endpoints resolve nowhere.
 
 ### 4. Apply
 

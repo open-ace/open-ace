@@ -105,6 +105,25 @@ def test_the_route_mode_is_one_the_shipped_gateway_can_serve(tier):
     ), "a wildcard address only makes sense for wildcard routing"
 
 
+def test_the_readme_does_not_tell_operators_to_set_a_wildcard_address():
+    """Step 3's prose must agree with the route mode step 2 configures.
+
+    It told operators the address "must be a wildcard domain". Under
+    `route.mode = "header"` upstream's validate_ingress_mode refuses a wildcard
+    address outright, so following the README produced a config-load failure and
+    a server that never becomes ready — the same class as the secret recipe,
+    reached through documentation rather than code.
+    """
+    readme = (_DIR / "README.md").read_text(encoding="utf-8")
+    step = readme[readme.index("### 3. Set your gateway address") :]
+    step = step[: step.index("### 4.")]
+    assert "must** be a\nwildcard domain" not in step
+    assert "no scheme and no wildcard" in step or "no wildcard" in step
+    # And the shipped value itself is not a wildcard.
+    for tier in _TIERS:
+        assert not _server_toml(tier)["ingress"]["gateway"]["address"].startswith("*.")
+
+
 @pytest.mark.parametrize("tier", _TIERS)
 def test_the_store_volume_is_writable_by_the_runtime_user(tier):
     """A PVC mounted without fsGroup is root-owned and UID 1000 cannot write it."""

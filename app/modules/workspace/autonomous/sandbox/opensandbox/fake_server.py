@@ -27,6 +27,7 @@ import json
 from collections.abc import Iterator
 
 from app.modules.workspace.autonomous.sandbox.opensandbox.client import (
+    INGRESS_ROUTE_HEADER,
     SECURE_ACCESS_HEADER,
     OpenSandboxApiError,
 )
@@ -162,11 +163,17 @@ class FakeOpenSandboxApi:
         return f"http://execd.invalid/sandboxes/{sandbox_id}/port/44772"
 
     def execd_headers(self, sandbox_id: str) -> dict[str, str]:
-        # The UPSTREAM header name. It previously returned an invented
-        # "X-Sandbox-Access-Token", which happened to be on the client's
-        # allowlist — so the fake and the client agreed with each other about a
-        # header the real server never sends.
-        return {SECURE_ACCESS_HEADER: f"tok-{sandbox_id}"} if self._require_endpoint_token else {}
+        # UPSTREAM names, and the header-mode SHAPE the shipped ConfigMaps
+        # produce: the routing header always, the secure-access token when the
+        # server mints one. This previously returned an invented
+        # "X-Sandbox-Access-Token" that happened to be on the client's allowlist,
+        # so the fake and the client agreed with each other about a header the
+        # real server never sends — and it later omitted the routing header
+        # entirely, hiding that the filter dropped it.
+        headers = {INGRESS_ROUTE_HEADER: f"{sandbox_id}-44772"}
+        if self._require_endpoint_token:
+            headers[SECURE_ACCESS_HEADER] = f"tok-{sandbox_id}"
+        return headers
 
     def peer_request(self, sandbox_id: str, *, token: str | None) -> dict:
         """Simulate a *different* sandbox reaching this one's endpoint.

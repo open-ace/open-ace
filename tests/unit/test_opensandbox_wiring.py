@@ -741,3 +741,50 @@ def test_attribution_is_persisted_before_the_agent_is_attached(api, tmp_path, mo
     )
     _run_local_against(provider, worktree, monkeypatch, on_sandbox_created=_on_created)
     assert recorded, "the sandbox existed but was never recorded before attach failed"
+
+
+def test_a_failing_destroy_does_not_replace_the_original_error(api, tmp_path, monkeypatch):
+    """Cleanup must not become the thing that escapes.
+
+    The catch-all handler calls provider.destroy(), and the server that just
+    failed the exec is the same one being asked to delete. OpenSandboxProvider
+    happens to be safe here — its _safe_destroy swallows — so this drives a
+    provider whose destroy() really raises, which is what the guard is for and
+    what any other backend may do. Unguarded, the cleanup error replaced the
+    original one and escaped _run_local with no AgentTaskResult at all.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.provider import OpenSandboxProvider
+
+    class _Rejected(Exception):
+        pass
+
+    api.sandboxes.clear()
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    (worktree / "app.py").write_text("x\n", encoding="utf-8")
+
+    inner = OpenSandboxProvider(
+        _load_config(),
+        api_factory=lambda endpoint: api,
+        tenant="1",
+        project_path=str(worktree),
+        connect_factory=lambda url, headers: (_ for _ in ()).throw(_Rejected("upgrade refused")),
+    )
+
+    class _DestroyRaises:
+        """Delegates everything, except destroy() blows up."""
+
+        def __init__(self, wrapped):
+            self._wrapped = wrapped
+
+        def __getattr__(self, name):
+            return getattr(self._wrapped, name)
+
+        def destroy(self, handle):
+            raise RuntimeError("lifecycle server unreachable")
+
+    result = _run_local_against(_DestroyRaises(inner), worktree, monkeypatch)
+    assert result.success is False
+    assert "upgrade refused" in (
+        result.error or ""
+    ), f"the destroy failure replaced the original error: {result.error!r}"

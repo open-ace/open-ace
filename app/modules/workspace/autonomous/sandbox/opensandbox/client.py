@@ -56,6 +56,13 @@ EGRESS_AUTH_HEADER = "OPENSANDBOX-EGRESS-AUTH"
 # services/constants.py OPEN_SANDBOX_SECURE_ACCESS_HEADER — this is the header
 # the whole peer-isolation property rests on, so it must match exactly.
 SECURE_ACCESS_HEADER = "OpenSandbox-Secure-Access"
+# ROUTING, not auth. Under `[ingress.gateway] route.mode = "header"` — what the
+# shipped ConfigMaps use — upstream returns the bare gateway host as the endpoint
+# and puts the sandbox identity ONLY here, as "<sandbox_id>-<port>"
+# (services/helpers.py::format_ingress_endpoint). Drop it and every execd request
+# reaches the gateway with nothing to route on: it falls back to the Host header,
+# fails to parse a port out of the gateway's own name, and answers 400.
+INGRESS_ROUTE_HEADER = "OpenSandbox-Ingress-To"
 
 # Upstream ``GET /sandboxes`` defaults to ``pageSize`` 20. A single-request
 # sweep would silently miss everything past the first page — precisely when the
@@ -69,6 +76,7 @@ _DEFAULT_MAX_LIST_PAGES = 100
 _ALLOWED_ENDPOINT_HEADER_KEYS = frozenset(
     {
         SECURE_ACCESS_HEADER.lower(),
+        INGRESS_ROUTE_HEADER.lower(),
         EXECD_TOKEN_HEADER.lower(),
         EGRESS_AUTH_HEADER.lower(),
     }
@@ -79,8 +87,13 @@ _ALLOWED_ENDPOINT_HEADER_KEYS = frozenset(
 # (OpenSandbox-Secure-Access) was silently stripped by the filter below. Under
 # gateway mode that drops the per-sandbox credential from every execd call: the
 # gateway 401s, no run completes, and the peer-isolation guarantee this backend
-# advertises has nothing behind it. Add a name here only after finding it in
-# upstream's constants.
+# advertises has nothing behind it.
+#
+# This list is the COMPLETE set of names upstream ever puts in Endpoint.headers:
+# services/helpers.py:248 (ingress routing), services/endpoint_auth.py:39
+# (egress) and :44 (secure access). Adding a name here requires finding it in
+# upstream's constants; removing one silently breaks a whole routing mode, which
+# is how the ingress header went missing when route.mode changed to "header".
 
 # Proxy lookup is disabled on every call: under gevent it can recurse (#2237).
 # requests treats a None value as "no proxy for this scheme", which is exactly

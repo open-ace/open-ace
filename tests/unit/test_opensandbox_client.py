@@ -19,6 +19,7 @@ import pytest
 
 from app.modules.workspace.autonomous.sandbox.opensandbox.client import (
     EXECD_TOKEN_HEADER,
+    INGRESS_ROUTE_HEADER,
     LIFECYCLE_API_KEY_HEADER,
     SECURE_ACCESS_HEADER,
     HttpOpenSandboxApi,
@@ -529,3 +530,62 @@ def test_an_invented_access_token_header_is_still_stripped():
     headers = _api(session).execd_headers("sb-1")
     assert "X-Sandbox-Access-Token" not in headers
     assert "X-Evil" not in headers
+
+
+def _header_mode_endpoint_body(sandbox_id: str, port: int = 44772) -> dict:
+    """Exactly what upstream returns under `route.mode = "header"`.
+
+    services/helpers.py::format_ingress_endpoint — the endpoint is the BARE
+    gateway host and the sandbox identity travels only in the routing header.
+    Tests that supply only the auth header model a response the shipped
+    ConfigMaps never produce, which is how the routing header went missing.
+    """
+    return {
+        "endpoint": "http://opensandbox-gateway.open-ace.example",
+        "headers": {
+            INGRESS_ROUTE_HEADER: f"{sandbox_id}-{port}",
+            SECURE_ACCESS_HEADER: "per-sandbox-token",
+        },
+    }
+
+
+def test_gateway_header_routing_survives_the_endpoint_filter(monkeypatch):
+    """Without the routing header the gateway cannot tell which sandbox we mean.
+
+    It falls back to the Host header, tries to parse `<id>-<port>` out of the
+    gateway's own name, and returns 400 — so every upload/exec/PTY call fails
+    and no run completes.
+    """
+    monkeypatch.setenv("OSB_EXECD_TOKEN", "static")
+    session = _Session(
+        [
+            _Response(200, _header_mode_endpoint_body("sb-1")),
+            _Response(200, {"running": False, "exit_code": 0}),
+        ]
+    )
+    api = _api(
+        session,
+        _endpoint(
+            execd_token_env="OSB_EXECD_TOKEN",
+            execd_endpoint_host_allowlist=("opensandbox-gateway.open-ace.example",),
+        ),
+    )
+    api.command_status("sb-1", "cmd-1")
+    sent = session.calls[-1]["headers"]
+    assert sent[INGRESS_ROUTE_HEADER] == "sb-1-44772"
+    assert sent[SECURE_ACCESS_HEADER] == "per-sandbox-token"
+
+
+def test_the_pty_socket_also_carries_the_routing_header(monkeypatch):
+    """The WebSocket upgrade goes through the gateway too."""
+    monkeypatch.setenv("OSB_EXECD_TOKEN", "static")
+    session = _Session([_Response(200, _header_mode_endpoint_body("sb-9"))])
+    api = _api(
+        session,
+        _endpoint(
+            execd_token_env="OSB_EXECD_TOKEN",
+            execd_endpoint_host_allowlist=("opensandbox-gateway.open-ace.example",),
+        ),
+    )
+    headers = api.execd_headers("sb-9")
+    assert headers[INGRESS_ROUTE_HEADER] == "sb-9-44772"
