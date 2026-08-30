@@ -19,6 +19,8 @@ import tomllib
 import pytest
 import yaml
 
+from app.modules.workspace.autonomous.sandbox.opensandbox.config import runtime_family
+
 pytestmark = [pytest.mark.regression, pytest.mark.issue(2023)]
 
 _DIR = pathlib.Path(__file__).resolve().parents[2] / "k8s" / "extras" / "opensandbox"
@@ -219,12 +221,13 @@ def test_every_namespace_the_manifests_use_is_also_created():
     prerequisite. Caught only by a server-side dry-run against a real API
     server; a purely local `kubectl kustomize` renders happily.
     """
-    import subprocess
-
-    rendered = subprocess.run(
-        ["kubectl", "kustomize", str(_DIR)], capture_output=True, text=True, check=True
-    ).stdout
-    docs = [d for d in yaml.safe_load_all(rendered) if d]
+    # Read the resources directly rather than shelling out to `kubectl`: a
+    # contributor without it got a hard FileNotFoundError, not a skip, and this
+    # assertion needs no rendering — the kustomization is a flat resources list.
+    kustomization = yaml.safe_load((_DIR / "kustomization.yaml").read_text(encoding="utf-8"))
+    docs = []
+    for name in kustomization["resources"]:
+        docs.extend(d for d in yaml.safe_load_all((_DIR / name).read_text(encoding="utf-8")) if d)
     defined = {d["metadata"]["name"] for d in docs if d["kind"] == "Namespace"}
     used = {d["metadata"]["namespace"] for d in docs if d.get("metadata", {}).get("namespace")}
     missing = used - defined
@@ -254,7 +257,10 @@ def test_the_docs_example_points_at_the_service_for_its_own_tier():
 
     for tier_name, endpoint in raw["endpoints"].items():
         host = endpoint["base_url"].split("//", 1)[1].split(".", 1)[0]
-        family = "kata" if "kata" in endpoint["runtime_class"].lower() else "gvisor"
+        # config.runtime_family, NOT a local substring test — re-implementing it
+        # here is exactly the drift that classifier exists to prevent, and the
+        # substring form is what let `runsc` through in the first place.
+        family = runtime_family(endpoint["runtime_class"])
         assert host == services[family], (
             f"tier {tier_name!r} declares runtime_class "
             f"{endpoint['runtime_class']!r} but base_url points at {host!r}, "

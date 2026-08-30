@@ -901,3 +901,27 @@ def test_a_setup_command_with_no_events_fails_closed():
     api.run_command = lambda sandbox_id, body: iter(())  # type: ignore[assignment]
     with pytest.raises(SandboxError, match="no events"):
         provider.upload_workspace(handle, None)
+
+
+def test_the_runtime_probe_is_one_directional_for_kata():
+    """Pins a KNOWN limitation so it cannot be mistaken for verification.
+
+    gVisor's kernel identifies itself, so a gVisor claim is positively checked.
+    Kata boots a real kernel in a VM whose /proc/version looks like plain runc's,
+    so a Kata claim is only confirmed not-gVisor. Since Kata is the only tier
+    that can run agent workloads, that asymmetry is the actual strength of
+    NAMESPACE_ISOLATION and is documented in docs/sandbox-backends.md §5 rather
+    than overstated.
+    """
+    from app.modules.workspace.autonomous.sandbox.types import SandboxCapability
+
+    # A generic kernel — what plain runc would report — passes a Kata tier.
+    provider, _ = _provider(FakeOpenSandboxApi(runtime_kernel="Linux version 5.15.0-91-generic"))
+    provider.create(_spec())
+    assert SandboxCapability.NAMESPACE_ISOLATION in provider.capabilities()
+
+    # The one direction that IS positive: a gVisor kernel under a Kata tier is
+    # still refused.
+    provider2, _ = _provider(FakeOpenSandboxApi(runtime_kernel="Linux 4.4.0 gVisor"))
+    with pytest.raises(SandboxError, match="runtime"):
+        provider2.create(_spec())

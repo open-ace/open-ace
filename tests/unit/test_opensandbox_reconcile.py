@@ -458,7 +458,7 @@ def test_terminal_confirmation_asks_the_server_that_held_the_sandbox(tmp_path, m
     """A 404 from the WRONG server is not a confirmed teardown.
 
     _confirm_terminal read self._api — the default-tier client — so sweeping a
-    kata sandbox asked the gvisor server, got a 404 for a sandbox that had never
+    non-default-tier sandbox asked the default server, got a 404 for a sandbox that had never
     lived there, and scored it confirmed. The guard inverted itself for exactly
     the multi-tier case the sweep exists to handle.
     """

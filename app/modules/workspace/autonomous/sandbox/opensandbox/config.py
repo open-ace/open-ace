@@ -178,8 +178,10 @@ class EndpointConfig:
 
     ``runtime_class`` is a *declaration* of what the operator set server-side, not
     a request field — upstream exposes no API that reports the effective runtime.
-    It is cross-checked at runtime by the provider's boot probe rather than taken
-    on trust.
+    The provider's boot probe checks it, but only ONE direction is a positive
+    proof: a gVisor claim is verified against ``/proc/version``, while a Kata
+    claim is merely confirmed not-gVisor (Kata's guest kernel is
+    indistinguishable from runc's). See ``_run_probes``.
     """
 
     tier: str

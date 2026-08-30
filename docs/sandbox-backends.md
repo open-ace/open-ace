@@ -176,11 +176,14 @@ to before this backend existed. That is also the rollback: remove the file.
 
 ### A suggested sequence
 
-1. Deploy the Kata tier (gVisor cannot enforce egress — see §7) with `rollout.mode = "allowlist"` and a single project
-   path. One repository moves; nothing else changes.
+1. Deploy a Kata tier with `rollout.mode = "allowlist"` and a single project
+   path. One repository moves; nothing else changes. It must be Kata: gVisor
+   cannot enforce egress, so it cannot run agent workloads at all (§7).
 2. Widen `rollout.tenants` a tenant at a time.
-3. Add the Kata tier and route high-security tenants to it with `tenant_tiers`
-   (this picks *which* tier, not *whether* to use one).
+3. If you want separate isolation domains — a dedicated node pool, a different
+   image allowlist, tighter egress — add a *second* Kata tier and route
+   high-security tenants to it with `tenant_tiers` (this picks *which* tier, not
+   *whether* to use one). Skip this step if one tier is enough.
 4. Add those tenants to `production_required_tenants` once a missing backend
    should be an error rather than a downgrade.
 5. Switch to `rollout.mode = "all"` when the backend is the default everywhere.
@@ -194,7 +197,7 @@ ones that are *not* claimed matter as much as the ones that are.
 
 | Capability | Enforced by |
 | --- | --- |
-| `NAMESPACE_ISOLATION` | the gVisor/Kata runtime class, **verified** by a `/proc/version` probe on the first sandbox per endpoint |
+| `NAMESPACE_ISOLATION` | the declared runtime class, checked by a `/proc/version` probe on the first sandbox per endpoint. **The check is one-directional**: a gVisor claim is positively verified (its kernel identifies itself), a Kata claim is only confirmed *not* gVisor — Kata's guest kernel is indistinguishable from an unisolated runc container's, so this cannot prove Kata is in force. Treat the Kata runtime class as an operator attestation backed by `[secure_runtime] k8s_runtime_class` and the RuntimeClass existing on the node. |
 | `NETWORK_EGRESS_POLICY` | egress sidecar `deny_all` in `dns+nft` mode, **verified** by probing its `/policy`, plus the cluster NetworkPolicy |
 | `FILESYSTEM_ACL` | pod `securityContext`: non-root, read-only rootfs, dropped capabilities, seccomp `RuntimeDefault` |
 | `CPU_MEM_PIDS_TIME_QUOTA` | `resourceLimits` cpu/memory via kubelet, `podPidsLimit` for pids, sandbox TTL for wall clock |

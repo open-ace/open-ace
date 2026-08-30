@@ -503,11 +503,11 @@ class OpenSandboxProvider:
         Searches EVERY configured endpoint, not just this provider's own. The
         post-restart sweep rebuilds a provider from a workflow row that records
         the provider *name* and nothing about the tier, so it resolves to
-        ``default_tier``. In the two-tier topology this repository ships
-        (gvisor + kata via ``tenant_tiers``) that is the wrong server for every
-        non-default tenant — and since ``delete_sandbox`` treats 404 as success,
-        deleting a kata sandbox's id against the gvisor server *reported
-        success*. The scheduler then cleared the ids while the real sandbox ran
+        ``default_tier``. Any deployment with more than one tier (``tenant_tiers``
+        routing tenants to separate endpoints) therefore resolves to the wrong
+        server for every non-default tenant — and since ``delete_sandbox`` treats
+        404 as success, deleting a sandbox's id against a server that never held
+        it *reported success*. The scheduler then cleared the ids while the real sandbox ran
         on to its TTL: exactly the leak this reporting exists to prevent.
 
         Locating the sandbox before deleting it is what makes the answer mean
@@ -686,11 +686,27 @@ class OpenSandboxProvider:
         return body
 
     def _run_probes(self, handle: SandboxHandle) -> None:
-        """Verify the runtime class and the egress mode before trusting them.
+        """Check the runtime class and the egress mode before trusting them.
 
         Upstream exposes no API reporting the effective secure runtime, so
         without this the runtime class is only an operator's word, and
         ``NETWORK_EGRESS_POLICY`` rests on a boolean nobody checked.
+
+        WHAT THIS ACTUALLY ESTABLISHES, per direction — the two are not
+        symmetric, and the difference matters because Kata is now the only tier
+        that can run agent workloads:
+
+        * gVisor-declared: POSITIVE. gVisor's kernel identifies itself in
+          ``/proc/version``, so a tier claiming gVisor and not getting it is
+          caught.
+        * Kata-declared: NEGATIVE ONLY. It rules out gVisor. Kata boots a real
+          kernel in a VM whose ``/proc/version`` is indistinguishable from plain
+          runc's, so this cannot tell Kata from an unisolated container. A
+          positive check would need a hypervisor signal (DMI product name), and
+          that differs per Kata hypervisor (qemu / fc / clh) — shipping one
+          untested risks refusing legitimate deployments, so the asymmetry is
+          documented rather than papered over. ``docs/sandbox-backends.md`` §5
+          states the same limitation.
         """
         if self._probes_passed:
             return
