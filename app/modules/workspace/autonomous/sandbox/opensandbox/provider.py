@@ -829,6 +829,17 @@ class OpenSandboxProvider:
                 },
             )
         )
+        if not events:
+            # A command that produced NO events is not an observed success.
+            # Real execd always emits at least an `init` frame, so an empty
+            # stream means we failed to read the protocol — which is exactly
+            # what happened while the SSE parser only understood `data:` lines:
+            # every setup command "succeeded" without evidence, and the agent
+            # ran against a tree that may never have been prepared. Fail closed
+            # here too, so a future protocol drift cannot resurrect that.
+            raise self._refuse(
+                f"sandbox setup command produced no events: {command[:80]}", reason_code
+            )
         stdout = "".join(str(e.get("text") or "") for e in events if e.get("type") == "stdout")
         for event in events:
             if event.get("type") != "error":

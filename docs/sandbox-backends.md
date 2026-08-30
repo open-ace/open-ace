@@ -281,6 +281,14 @@ absent. The agent CLI (`claude`, `qwen`, …) is invoked by **name**, not by the
 path the control plane resolved it to — the host's `shutil.which` result has no
 meaning inside the image — so the image's own `PATH` must find it.
 
+**The image must contain the configured `runtime_user` / `runtime_group`.**
+execd chowns every uploaded file to them, and looks the name up inside the
+container — so a user that does not exist there fails the upload with
+`500 error chmoding file ...: failed to lookup user <name>`. Since
+`upload_workspace` is the first thing any run does, the whole run dies there.
+The defaults are `openace`/`openace`; either add that user to your agent image
+or set both fields to one it already has. Verified against a real execd.
+
 **The control plane must also have the agent CLI installed.** `_run_local`
 resolves the executable on the host before selecting a provider, and returns
 `CLI tool '<name>' not found` if it is missing — even for a run that would

@@ -162,6 +162,24 @@ def iter_sse_events(response: Any) -> Iterator[dict]:
         )
         if line.startswith(":"):
             continue
+        # Real execd streams BARE JSON objects, one per line, under
+        # `content-type: text/event-stream` and with no `data:` prefix — verified
+        # against opensandbox/execd v1.1.0. Accumulating only `data:` lines
+        # yielded NOTHING for every command: _run_foreground then saw no error
+        # event and reported the repo synthesis as successful whether or not it
+        # ran, and the /command branch of stream() produced an empty run.
+        # The `data:` form is still handled below because upstream's OpenAPI
+        # documents SSE and other endpoints may use it.
+        if line.startswith("{"):
+            if buffer:
+                event = _decode_sse_buffer(buffer, tolerate_undecodable=False)
+                buffer = []
+                if event is not None:
+                    yield event
+            event = _decode_sse_buffer([line], tolerate_undecodable=False)
+            if event is not None:
+                yield event
+            continue
         if line == "":
             event = _decode_sse_buffer(buffer, tolerate_undecodable=False)
             buffer = []
@@ -325,7 +343,14 @@ class HttpOpenSandboxApi:
             "POST",
             "/files/upload",
             files=[
-                ("metadata", (None, metadata, "application/json")),
+                # The metadata part MUST carry a filename. execd reads it from
+                # `form.File["metadata"]` (components/execd/.../filesystem_upload.go),
+                # and a part with filename=None is emitted by requests as a plain
+                # form field, landing in form.Value instead — execd then counts
+                # zero metadata parts and answers `400 metadata file is missing`.
+                # Verified against a real execd; every upload failed before this,
+                # which is the first call any run makes.
+                ("metadata", ("metadata.json", metadata, "application/json")),
                 ("file", (path.rsplit("/", 1)[-1], data, "application/octet-stream")),
             ],
         )

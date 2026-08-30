@@ -589,3 +589,52 @@ def test_the_pty_socket_also_carries_the_routing_header(monkeypatch):
     )
     headers = api.execd_headers("sb-9")
     assert headers[INGRESS_ROUTE_HEADER] == "sb-9-44772"
+
+
+def test_bare_json_lines_are_parsed_as_events():
+    """Real execd streams bare JSON objects, not `data:`-prefixed SSE.
+
+    Captured verbatim from opensandbox/execd v1.1.0 over
+    `content-type: text/event-stream`. Accumulating only `data:` lines yielded
+    NOTHING for every command — _run_foreground saw no error event and reported
+    the repo synthesis as successful whether or not it ran.
+    """
+    body = (
+        b'{"type":"init","text":"cmd-abc","timestamp":1}\n\n'
+        b'{"type":"ping","text":"pong","timestamp":2}\n\n'
+        b'{"type":"stdout","text":"hello-real","timestamp":3}\n\n'
+        b'{"type":"error","timestamp":4,'
+        b'"error":{"ename":"CommandExecError","evalue":"3","traceback":["exit status 3"]}}\n\n'
+    )
+    events = list(iter_sse_events(_Response(200, content=body)))
+    assert [e["type"] for e in events] == ["init", "stdout", "error"], events
+    assert events[-1]["error"]["evalue"] == "3"
+
+
+def test_the_data_prefixed_form_still_parses():
+    """Upstream's OpenAPI documents SSE; both shapes must work."""
+    body = b'data: {"type":"stdout","text":"x"}\n\ndata: {"type":"execution_complete"}\n\n'
+    assert [e["type"] for e in iter_sse_events(_Response(200, content=body))] == [
+        "stdout",
+        "execution_complete",
+    ]
+
+
+def test_the_upload_metadata_part_carries_a_filename():
+    """execd reads metadata from form.File, so the part needs a filename.
+
+    With filename=None requests emits it as a plain form field, it lands in
+    form.Value, execd counts zero metadata parts and answers
+    `400 metadata file is missing` — verified against a real execd. This is the
+    first call any run makes, so every run failed at upload.
+    """
+    session = _Session(
+        [
+            _Response(200, {"endpoint": "http://osb.open-ace.svc.cluster.local/p"}),
+            _Response(200, {}),
+        ]
+    )
+    _api(session).upload_file("sb-1", "/workspace/a.py", b"x", 0o644)
+    files = session.calls[-1]["files"]
+    parts = dict(files)
+    assert parts["metadata"][0], "metadata part has no filename; execd will not see it"

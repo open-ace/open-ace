@@ -882,3 +882,19 @@ def test_a_turn_is_refused_when_the_proxy_host_is_not_egress_allowed():
             env={"OPENACE_PROXY_URL": "https://proxy.not-allowlisted.example/api"},
             exec_policy=OpenSandboxTurnSpec(prompt="hi"),
         )
+
+
+def test_a_setup_command_with_no_events_fails_closed():
+    """Zero events is not an observed success.
+
+    Real execd always emits at least an `init` frame, so an empty stream means
+    the protocol was not read — which is exactly what happened while the SSE
+    parser understood only `data:` lines. Every setup command "succeeded"
+    without evidence and the agent ran against a tree that may never have been
+    prepared. Defense in depth against a future protocol drift.
+    """
+    provider, api = _provider()
+    handle = provider.create(_spec())
+    api.run_command = lambda sandbox_id, body: iter(())  # type: ignore[assignment]
+    with pytest.raises(SandboxError, match="no events"):
+        provider.upload_workspace(handle, None)
