@@ -398,6 +398,16 @@ caches the result for the process lifetime:
   advertises itself there; Kata reports a distinct kernel. Mismatch against
   `runtime_class` → `SandboxError`, sandbox destroyed. This converts acceptance
   criteria 3 and 4 from an operator's word into a verified fact.
+
+  > **CORRECTION (added post-implementation).** The premise "Kata reports a
+  > distinct kernel" is **false**, and every overstated claim about this probe
+  > elsewhere traces back to this paragraph. Kata boots a real kernel in a VM
+  > whose `/proc/version` is indistinguishable from an unisolated `runc`
+  > container's, so the probe is one-directional: it positively verifies a
+  > gVisor claim and merely rules gVisor *out* for a Kata claim. Acceptance
+  > criteria 3 and 4 are therefore verified for gVisor only. This record is left
+  > as written — it is what was designed — with the error marked rather than
+  > edited away. See `docs/sandbox-backends.md` §5 and `_run_probes`.
 - **Egress probe** — `GET` the sidecar `/policy` and assert
   `defaultAction == "deny"` **and** `enforcementMode == "dns+nft"`. Mismatch →
   `SandboxError`. Without this, `NETWORK_EGRESS_POLICY` rests on an unverifiable

@@ -268,14 +268,20 @@ def test_the_docs_example_points_at_the_service_for_its_own_tier():
         )
 
 
-def test_no_document_claims_the_probe_verifies_the_kata_runtime():
-    """Three sweeps in a row corrected some sites and missed others.
+def test_the_known_probe_overclaims_are_not_reinstated():
+    """A regression guard over KNOWN phrasings — not a proof of the property.
 
-    The probe is one-directional: it positively verifies gVisor and only rules
-    gVisor out for Kata. Kata is the sole usable tier, so an operator-facing
-    document promising the kernel is checked against the declared runtime_class
-    overstates the guarantee they actually have. This scans every doc rather
-    than relying on the next person to grep exhaustively.
+    Three sweeps in a row corrected some sites and missed others, so this pins
+    the specific sentences that were wrong. It catches a bad revert or merge
+    that restores them. It does NOT catch a newly-worded overclaim: a reviewer
+    demonstrated that by writing a fresh sentence promising the same false
+    guarantee, which this passed in silence.
+
+    The name and docstring say that plainly because the earlier version claimed
+    to "scan every doc" — asserting a universal property the mechanism does not
+    establish, which is precisely the kind of overstatement this test exists to
+    catch. See test_probe_claims_carry_the_one_directional_caveat for the
+    broader (still heuristic) check.
     """
     import re
 
@@ -296,4 +302,45 @@ def test_no_document_claims_the_probe_verifies_the_kata_runtime():
                 offenders.append(f"{path.name}: {text[m.start():m.start() + 70]!r}")
     assert not offenders, "documents overstate what the runtime probe proves:\n" + "\n".join(
         offenders
+    )
+
+
+def test_probe_claims_carry_the_one_directional_caveat():
+    """Co-location heuristic: discussing the probe means stating its limit.
+
+    Stronger than the blocklist above because it keys on the SUBJECT rather than
+    the wording — any operator-doc paragraph that talks about the sandbox kernel
+    and `runtime_class` together must also carry the one-directional caveat. A
+    reviewer's freshly-worded overclaim, which the blocklist missed entirely, is
+    caught by this.
+
+    Still a heuristic, and this docstring will not pretend otherwise: it cannot
+    prove no document overstates the guarantee, only that the paragraphs where
+    the subject comes up mention the limit. Prose that discusses the probe
+    without naming `runtime_class` slips through.
+    """
+    import re
+
+    root = _DIR.parents[2]
+    caveat = re.compile(
+        r"one-directional|only confirmed \*?not\*? gvisor|cannot prove kata|"
+        r"indistinguishable from|only across the gvisor/kata boundary|"
+        r"do not rely on it",
+        re.I,
+    )
+    kernel_topic = re.compile(r"kernel|/proc/version", re.I)
+    offenders = []
+    for path in (root / "docs" / "sandbox-backends.md", _DIR / "README.md"):
+        text = path.read_text(encoding="utf-8")
+        for para in re.split(r"\n\s*\n", text):
+            if "runtime_class" not in para or not kernel_topic.search(para):
+                continue
+            # Table rows and the reason-code catalogue reference the caveat by
+            # pointing at the section that states it.
+            if caveat.search(para) or "see §5" in para or "one-directional" in para:
+                continue
+            offenders.append(f"{path.name}: {para.strip()[:110]!r}")
+    assert not offenders, (
+        "paragraphs discuss the kernel probe and runtime_class without the "
+        "one-directional caveat:\n" + "\n".join(offenders)
     )
