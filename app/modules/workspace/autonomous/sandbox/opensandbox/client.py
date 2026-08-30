@@ -91,9 +91,14 @@ _ALLOWED_ENDPOINT_HEADER_KEYS = frozenset(
 #
 # This list is the COMPLETE set of names upstream ever puts in Endpoint.headers:
 # services/helpers.py:248 (ingress routing), services/endpoint_auth.py:39
-# (egress) and :44 (secure access). Adding a name here requires finding it in
-# upstream's constants; removing one silently breaks a whole routing mode, which
-# is how the ingress header went missing when route.mode changed to "header".
+# (egress) and :44 (secure access) — matching the three endpoint header
+# constants in services/constants.py:34,35,37. api/lifecycle.py:597 also touches
+# this map but only ever REMOVES the ingress header (under use_server_proxy the
+# server proxies directly, so gateway routing is unwanted); it is not a source of
+# names, and is cited here so the next audit does not have to rediscover that.
+# Adding a name requires finding it in upstream's constants; removing one
+# silently breaks a whole routing mode, which is how the ingress header went
+# missing when route.mode changed to "header".
 
 # Proxy lookup is disabled on every call: under gevent it can recurse (#2237).
 # requests treats a None value as "no proxy for this scheme", which is exactly

@@ -117,8 +117,10 @@ def test_the_readme_does_not_tell_operators_to_set_a_wildcard_address():
     readme = (_DIR / "README.md").read_text(encoding="utf-8")
     step = readme[readme.index("### 3. Set your gateway address") :]
     step = step[: step.index("### 4.")]
-    assert "must** be a\nwildcard domain" not in step
-    assert "no scheme and no wildcard" in step or "no wildcard" in step
+    # Deliberately not matching the old sentence verbatim: that was sensitive to
+    # line wrapping, so reflowing the paragraph would defeat it. Assert the
+    # instruction that must be present instead.
+    assert "no wildcard" in step
     # And the shipped value itself is not a wildcard.
     for tier in _TIERS:
         assert not _server_toml(tier)["ingress"]["gateway"]["address"].startswith("*.")
