@@ -335,9 +335,7 @@ def test_probe_claims_carry_the_one_directional_caveat():
         for para in re.split(r"\n\s*\n", text):
             if "runtime_class" not in para or not kernel_topic.search(para):
                 continue
-            # Table rows and the reason-code catalogue reference the caveat by
-            # pointing at the section that states it.
-            if caveat.search(para) or "see §5" in para or "one-directional" in para:
+            if caveat.search(para):
                 continue
             offenders.append(f"{path.name}: {para.strip()[:110]!r}")
     assert not offenders, (
