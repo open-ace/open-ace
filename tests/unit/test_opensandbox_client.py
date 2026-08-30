@@ -20,6 +20,7 @@ import pytest
 from app.modules.workspace.autonomous.sandbox.opensandbox.client import (
     EXECD_TOKEN_HEADER,
     LIFECYCLE_API_KEY_HEADER,
+    SECURE_ACCESS_HEADER,
     HttpOpenSandboxApi,
     OpenSandboxApiError,
     iter_sse_events,
@@ -259,7 +260,8 @@ def test_server_supplied_endpoint_headers_are_filtered_by_allowlist():
                 {
                     "endpoint": "http://osb.open-ace.svc.cluster.local/p",
                     "headers": {
-                        "X-Sandbox-Access-Token": "tok",
+                        # Upstream's real per-sandbox credential header.
+                        SECURE_ACCESS_HEADER: "tok",
                         "Authorization": "Bearer stolen",
                         "X-Evil": "1",
                     },
@@ -270,7 +272,7 @@ def test_server_supplied_endpoint_headers_are_filtered_by_allowlist():
     )
     _api(session).command_status("sb-1", "cmd-1")
     headers = session.calls[-1]["headers"]
-    assert headers.get("X-Sandbox-Access-Token") == "tok"
+    assert headers.get(SECURE_ACCESS_HEADER) == "tok"
     assert "X-Evil" not in headers
     assert headers.get("Authorization") != "Bearer stolen"
 
@@ -483,3 +485,47 @@ def test_a_per_sandbox_token_still_wins_for_the_websocket(monkeypatch):
     )
     api = _api(session, _endpoint(execd_token_env="OSB_EXECD_TOKEN"))
     assert api.execd_headers("sb-1")[EXECD_TOKEN_HEADER] == "per-sandbox"
+
+
+def test_the_real_secure_access_header_survives_the_endpoint_filter(monkeypatch):
+    """The per-sandbox credential must reach execd, under UPSTREAM's name.
+
+    The allowlist previously carried two invented names and not
+    `OpenSandbox-Secure-Access`, which is what upstream actually sends
+    (services/constants.py OPEN_SANDBOX_SECURE_ACCESS_HEADER). The filter
+    stripped the real header, so under gateway mode every execd call would
+    arrive uncredentialed and the gateway would reject it — while the fake
+    server sent one of the invented names, so every test agreed with itself.
+    """
+    monkeypatch.setenv("OSB_EXECD_TOKEN", "static")
+    session = _Session(
+        [
+            _Response(
+                200,
+                {
+                    "endpoint": "http://osb.open-ace.svc.cluster.local/p",
+                    "headers": {SECURE_ACCESS_HEADER: "per-sandbox-token"},
+                },
+            )
+        ]
+    )
+    api = _api(session, _endpoint(execd_token_env="OSB_EXECD_TOKEN"))
+    assert api.execd_headers("sb-1")[SECURE_ACCESS_HEADER] == "per-sandbox-token"
+
+
+def test_an_invented_access_token_header_is_still_stripped():
+    """The allowlist stays an allowlist — only names upstream really sends."""
+    session = _Session(
+        [
+            _Response(
+                200,
+                {
+                    "endpoint": "http://osb.open-ace.svc.cluster.local/p",
+                    "headers": {"X-Sandbox-Access-Token": "made-up", "X-Evil": "no"},
+                },
+            )
+        ]
+    )
+    headers = _api(session).execd_headers("sb-1")
+    assert "X-Sandbox-Access-Token" not in headers
+    assert "X-Evil" not in headers

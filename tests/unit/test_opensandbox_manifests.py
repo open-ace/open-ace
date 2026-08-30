@@ -56,11 +56,65 @@ def test_gateway_ingress_backs_the_secure_access_attestation(tier):
 
 @pytest.mark.parametrize("tier", _TIERS)
 def test_the_secure_access_signing_keys_are_wired(tier):
-    """Gateway mode with no signing keys mints nothing."""
+    """Gateway mode needs the signing keys the gateway verifies."""
     containers = _deployment(tier)["spec"]["template"]["spec"]["containers"]
     names = {e["name"] for c in containers for e in c.get("env", [])}
     assert "OPENSANDBOX_SECURE_ACCESS_KEYS" in names
     assert "OPENSANDBOX_SECURE_ACCESS_ACTIVE_KEY" in names
+
+
+@pytest.mark.parametrize("tier", _TIERS)
+def test_the_documented_secret_recipe_produces_values_upstream_accepts(tier):
+    """Asserting the env-var NAMES exist does not make the VALUES loadable.
+
+    Upstream parses OPENSANDBOX_SECURE_ACCESS_KEYS as `<key_id>=<base64>` with
+    key_id exactly one char in [0-9a-z], and the active key must be one of those
+    ids. The README first shipped `openssl rand -hex 32` for both — no `=`, and
+    a 64-char active key — which fails config validation, so the server never
+    becomes ready. That is the same "pods cannot start" class the store fix
+    closed, reintroduced through the docs.
+    """
+    import re
+
+    readme = (_DIR / "README.md").read_text(encoding="utf-8")
+    keys = re.search(rf"{tier}-secure-access-keys=\"([^\"]+)\"", readme)
+    active = re.search(rf"{tier}-secure-access-active-key=\"([^\"]+)\"", readme)
+    assert keys and active, "README no longer documents the secure-access secret"
+
+    for entry in keys.group(1).split(","):
+        key_id, sep, secret = entry.partition("=")
+        assert sep == "=", f"{entry!r} is not key_id=base64"
+        assert re.fullmatch(r"[0-9a-z]", key_id), f"key_id {key_id!r} must be one char [0-9a-z]"
+        assert secret, "empty secret"
+    assert re.fullmatch(r"[0-9a-z]", active.group(1)), "active key must be one char [0-9a-z]"
+    assert active.group(1) in [e.partition("=")[0] for e in keys.group(1).split(",")]
+
+
+@pytest.mark.parametrize("tier", _TIERS)
+def test_the_route_mode_is_one_the_shipped_gateway_can_serve(tier):
+    """Upstream's gateway accepts --mode <header|uri>; wildcard is not offered.
+
+    Choosing `wildcard` would have the server hand out `<id>-<port>.<domain>`
+    hosts the gateway cannot route, and demand wildcard DNS and a wildcard
+    certificate besides.
+    """
+    gateway = _server_toml(tier)["ingress"]["gateway"]
+    assert gateway["route"]["mode"] in ("header", "uri")
+    assert not gateway["address"].startswith(
+        "*."
+    ), "a wildcard address only makes sense for wildcard routing"
+
+
+@pytest.mark.parametrize("tier", _TIERS)
+def test_the_store_volume_is_writable_by_the_runtime_user(tier):
+    """A PVC mounted without fsGroup is root-owned and UID 1000 cannot write it."""
+    pod = _deployment(tier)["spec"]["template"]["spec"]
+    sc = pod["securityContext"]
+    assert sc.get("runAsUser") == 1000
+    assert sc.get("fsGroup") == 1000, (
+        "no fsGroup: a freshly provisioned CSI volume mounts root:root 0755, so "
+        "the server cannot create its SQLite file and dies at import time"
+    )
 
 
 @pytest.mark.parametrize("tier", _TIERS)

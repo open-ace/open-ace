@@ -72,7 +72,13 @@ data:
     mode = "gateway"
 
     [ingress.gateway]
-    # MUST be changed per deployment. A wildcard domain is required for
-    # route.mode = "wildcard", and no scheme is permitted.
-    address = "*.sandbox.open-ace.example"
-    route.mode = "wildcard"
+    # MUST be changed per deployment: the host clients reach sandboxes through,
+    # with NO scheme. This is the ingress gateway's address, not the server's.
+    address = "opensandbox-gateway.open-ace.example"
+    # header, not wildcard. Upstream's shipped gateway (components/ingress,
+    # deployed by the opensandbox-server chart) accepts `--mode <header|uri>`
+    # only; its chart documents gatewayRouteMode as "header or uri". Choosing
+    # `wildcard` would have the server hand out `<id>-<port>.<domain>` hosts
+    # that the gateway cannot route, and require wildcard DNS and a wildcard
+    # certificate on top.
+    route.mode = "header"

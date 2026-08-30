@@ -2774,10 +2774,19 @@ class AutonomousAgentRunner:
             # SubprocessError, SandboxError) missed the normal failure of a
             # rejected PTY upgrade: websockets raises InvalidStatus on a
             # 401/403 handshake, which is none of those. The sandbox is
-            # already created at this point and attribution is not persisted
-            # until attach succeeds, so an escaping exception leaked a live
-            # sandbox that nothing in the database could name.
-            provider.destroy(sandbox_handle)
+            # already created at this point, so an escaping exception would
+            # leak a live sandbox.
+            try:
+                provider.destroy(sandbox_handle)
+            except Exception as destroy_error:  # noqa: BLE001 - must not mask `e`
+                # The server that just failed the exec is the one being asked to
+                # delete, so this raising is entirely plausible — and letting it
+                # replace `e` would escape _run_local with no AgentTaskResult at
+                # all. Attribution was persisted right after create, so the
+                # reconciler can still find this sandbox.
+                logger.warning(
+                    "sandbox destroy failed while handling %s: %s", type(e).__name__, destroy_error
+                )
             return self._stamp_sandbox_attribution(
                 AgentTaskResult(
                     session_id=(

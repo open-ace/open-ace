@@ -50,6 +50,13 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        # Required for the store PVC. A freshly provisioned CSI volume mounts
+        # root:root 0755, and without fsGroup the kubelet performs no ownership
+        # change — so UID 1000 cannot create the SQLite file and the server dies
+        # at the same import-time point the store fix exists to prevent. Every
+        # other PVC-mounting manifest in this repo sets it (k8s/deployment.yaml).
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -80,11 +87,18 @@ spec:
                 secretKeyRef:
                   name: opensandbox-keys
                   key: kata-execd-token
-            # Gateway-mode secureAccess signing keys. The server builds
-            # [ingress.secure_access] from these at startup, which keeps the key
-            # material out of the ConfigMap. Without them gateway mode has
-            # nothing to sign per-sandbox credentials with — and the
-            # secure_access_required attestation would be unbacked again.
+            # Gateway-mode SIGNED-URL keys. The server builds
+            # [ingress.secure_access] from these at startup, keeping key material
+            # out of the ConfigMap; the ingress gateway verifies what the server
+            # signs, so the two must share them.
+            #
+            # Format is strict: <key_id>=<base64>, key_id exactly one character
+            # in [0-9a-z], and the active key must be one of those ids. A bare
+            # hex string fails config validation and the server never starts.
+            #
+            # NOT what the peer-isolation guarantee rests on: the opaque
+            # per-sandbox OpenSandbox-Secure-Access token needs only
+            # `[ingress] mode = "gateway"`.
             - name: OPENSANDBOX_SECURE_ACCESS_KEYS
               valueFrom:
                 secretKeyRef:

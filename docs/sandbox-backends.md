@@ -74,7 +74,7 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
       "execd_token_env": "OPENSANDBOX_EXECD_TOKEN_GVISOR",
       "runtime_class": "gvisor",
       "default_image": "ghcr.io/open-ace/agent@sha256:<64 hex>",
-      "execd_endpoint_host_allowlist": ["*.open-ace-sandboxes.svc.cluster.local"],
+      "execd_endpoint_host_allowlist": ["opensandbox-gateway.open-ace.example"],
       "egress_allow_hosts": [
         "openace.open-ace.svc.cluster.local",
         "api.anthropic.com",
@@ -113,6 +113,11 @@ Points worth knowing before you edit it:
   defaults to `http://localhost:<port>`, which inside the sandbox pod resolves
   to the sandbox itself. The provider refuses the turn in both cases rather
   than letting the agent hang on every request.
+- **`execd_endpoint_host_allowlist` must name the GATEWAY host.** Under gateway
+  ingress the server hands back the gateway's address, not a per-sandbox cluster
+  name, and the client refuses any execd URL whose host is not on this list. It
+  therefore has to match `ingress.gateway.address` in the server ConfigMap; a
+  `*.svc.cluster.local` entry left over from direct ingress refuses every call.
 - **`installation_id` is required and must be unique per deployment.** It is
   stamped on every sandbox's metadata, and orphan reconciliation destroys every
   sandbox carrying our provider tag that no local workflow row claims. Two
@@ -283,6 +288,14 @@ execute entirely inside a container. A control plane that never runs agents
 locally therefore cannot yet use this backend. Tracked as follow-up work;
 restructuring command construction around provider selection is out of scope
 for #2023.
+
+**Gateway endpoints are plain HTTP unless you terminate TLS yourself.** The
+server returns a bare host and the client defaults to `http://`. Under `direct`
+that traffic was cluster-internal; under `gateway` the workspace snapshot and
+the per-sandbox credential traverse whatever path reaches
+`ingress.gateway.address`. Nothing in `k8s/extras/opensandbox/` provides TLS —
+terminate it at your ingress, or keep the gateway address on a network you
+trust. Treat this as a deployment requirement, not a nicety.
 
 **Gateway ingress is required, not optional.** `secureAccess` — the per-sandbox
 credential that stops one sandbox reaching another's execd — is honoured by

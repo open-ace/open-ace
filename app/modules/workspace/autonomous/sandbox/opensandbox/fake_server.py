@@ -26,7 +26,10 @@ import itertools
 import json
 from collections.abc import Iterator
 
-from app.modules.workspace.autonomous.sandbox.opensandbox.client import OpenSandboxApiError
+from app.modules.workspace.autonomous.sandbox.opensandbox.client import (
+    SECURE_ACCESS_HEADER,
+    OpenSandboxApiError,
+)
 
 _PAGE_SIZE = 20
 
@@ -159,9 +162,11 @@ class FakeOpenSandboxApi:
         return f"http://execd.invalid/sandboxes/{sandbox_id}/port/44772"
 
     def execd_headers(self, sandbox_id: str) -> dict[str, str]:
-        return (
-            {"X-Sandbox-Access-Token": f"tok-{sandbox_id}"} if self._require_endpoint_token else {}
-        )
+        # The UPSTREAM header name. It previously returned an invented
+        # "X-Sandbox-Access-Token", which happened to be on the client's
+        # allowlist — so the fake and the client agreed with each other about a
+        # header the real server never sends.
+        return {SECURE_ACCESS_HEADER: f"tok-{sandbox_id}"} if self._require_endpoint_token else {}
 
     def peer_request(self, sandbox_id: str, *, token: str | None) -> dict:
         """Simulate a *different* sandbox reaching this one's endpoint.

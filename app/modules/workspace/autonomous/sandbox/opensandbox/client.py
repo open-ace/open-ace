@@ -52,6 +52,10 @@ logger = logging.getLogger(__name__)
 LIFECYCLE_API_KEY_HEADER = "OPEN-SANDBOX-API-KEY"
 EXECD_TOKEN_HEADER = "X-EXECD-ACCESS-TOKEN"
 EGRESS_AUTH_HEADER = "OPENSANDBOX-EGRESS-AUTH"
+# The per-sandbox credential gateway mode mints. Upstream name, verbatim from
+# services/constants.py OPEN_SANDBOX_SECURE_ACCESS_HEADER — this is the header
+# the whole peer-isolation property rests on, so it must match exactly.
+SECURE_ACCESS_HEADER = "OpenSandbox-Secure-Access"
 
 # Upstream ``GET /sandboxes`` defaults to ``pageSize`` 20. A single-request
 # sweep would silently miss everything past the first page — precisely when the
@@ -64,12 +68,19 @@ _DEFAULT_MAX_LIST_PAGES = 100
 # verbatim would be header injection into every subsequent request.
 _ALLOWED_ENDPOINT_HEADER_KEYS = frozenset(
     {
-        "x-sandbox-access-token",
-        "x-openace-access-token",
+        SECURE_ACCESS_HEADER.lower(),
         EXECD_TOKEN_HEADER.lower(),
         EGRESS_AUTH_HEADER.lower(),
     }
 )
+# "x-sandbox-access-token" / "x-openace-access-token" used to sit here. Neither
+# is a name upstream ever sends — they were invented, and the fake server sent
+# the invented one, so every test agreed with itself while the REAL header
+# (OpenSandbox-Secure-Access) was silently stripped by the filter below. Under
+# gateway mode that drops the per-sandbox credential from every execd call: the
+# gateway 401s, no run completes, and the peer-isolation guarantee this backend
+# advertises has nothing behind it. Add a name here only after finding it in
+# upstream's constants.
 
 # Proxy lookup is disabled on every call: under gevent it can recurse (#2237).
 # requests treats a None value as "no proxy for this scheme", which is exactly

@@ -527,7 +527,7 @@ class OpenSandboxProvider:
                 # the request answers exactly the same. Without this the method
                 # reported success for a sandbox still Running, and the
                 # scheduler cleared the only id that could name it again.
-                if not self._confirm_terminal(sandbox_id):
+                if not self._confirm_terminal(sandbox_id, api=api):
                     errors.append(f"{tier}: delete not confirmed terminal")
             except SandboxConfigError as exc:
                 # A config fault here (an unset API-key env var in THIS process —
@@ -941,18 +941,28 @@ class OpenSandboxProvider:
                 return str(event["text"])
         return uuid.uuid4().hex
 
-    def _confirm_terminal(self, sandbox_id: str, attempts: int = 5) -> bool:  # noqa: D401
-        """Poll until the sandbox is observably gone.
+    def _confirm_terminal(
+        self, sandbox_id: str, attempts: int = 5, api: OpenSandboxApi | None = None
+    ) -> bool:  # noqa: D401
+        """Poll until the sandbox is observably gone, on the server that HELD it.
 
         Upstream's DELETE returns 204 and the sandbox then goes Stopping →
         Terminated, so a single read would almost always see Stopping and
         report an unconfirmed destroy for a teardown that in fact succeeded.
+
+        *api* is not optional in spirit: reading ``self._api`` unconditionally
+        meant that when ``destroy_attribution_checked`` swept a non-default
+        tier, the confirmation asked the DEFAULT server about a sandbox that
+        had never lived there, got a 404, and scored it as a confirmed
+        teardown — turning the guard into the opposite of a check for exactly
+        the multi-tier case the sweep exists to handle.
         """
+        client = api if api is not None else self._api
         for attempt in range(max(attempts, 1)):
             if attempt:
                 time.sleep(self._destroy_poll_interval)
             try:
-                record = self._api.get_sandbox(sandbox_id)
+                record = client.get_sandbox(sandbox_id)
             except SandboxError:
                 return False
             if record is None:

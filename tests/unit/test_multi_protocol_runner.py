@@ -478,3 +478,29 @@ def test_openclaw_single_shot_includes_agent_json_flags():
     assert "--agent" in args
     assert "--json" in args
     assert "do something" in args
+
+
+@pytest.mark.regression
+@pytest.mark.issue(2023)
+def test_an_app_server_tool_does_not_raise_unboundlocalerror_for_the_tenant():
+    """wf_tenant_id must exist on every path that later reads it.
+
+    It was assigned only inside `if self.session_manager and not
+    creates_session_late:`, while the usage sync reads it unconditionally — so
+    every app-server tool (ZCode) raised UnboundLocalError there. That surfaced
+    as a bare "cannot access local variable" with error_code=None, masking the
+    real diagnostic including #2023's production-isolation refusal.
+    """
+    import inspect
+
+    from app.modules.workspace.autonomous.agent_runner import AutonomousAgentRunner
+
+    src = inspect.getsource(AutonomousAgentRunner.run_agent_task)
+    assign = src.index("wf_tenant_id = ")
+    guard = src.index("if self.session_manager and not creates_session_late:")
+    assert assign < guard, (
+        "wf_tenant_id is assigned inside the session-creating branch again; "
+        "app-server tools will raise UnboundLocalError at the usage sync"
+    )
+    # And it is genuinely read outside that branch.
+    assert src.count("wf_tenant_id") >= 3

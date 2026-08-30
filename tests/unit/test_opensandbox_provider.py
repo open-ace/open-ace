@@ -354,6 +354,48 @@ def test_sandbox_cannot_read_host_or_peer_workspace(tmp_path):
     assert api.peer_request(handle.sandbox_id, token=f"tok-{handle.sandbox_id}")["ok"]
 
 
+def test_the_per_sandbox_credential_actually_reaches_execd():
+    """The other half of peer isolation: WE must send the token.
+
+    The check above only proves the server would refuse an unauthenticated
+    peer. It asserts against the fake directly and never touches the client —
+    so it stayed green while the client's endpoint-header allowlist silently
+    stripped the real `OpenSandbox-Secure-Access` header, which would have left
+    every one of OUR execd calls uncredentialed under gateway mode.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.client import (
+        SECURE_ACCESS_HEADER,
+        HttpOpenSandboxApi,
+    )
+
+    class _Session:
+        def __init__(self):
+            self.calls = []
+
+        def request(self, method, url, **kw):
+            self.calls.append(kw)
+
+            class _R:
+                status_code = 200
+                text = "{}"
+                content = b""
+                headers: dict = {}
+
+                @staticmethod
+                def json():
+                    return {
+                        "endpoint": "http://osb.open-ace.svc.cluster.local/p",
+                        "headers": {SECURE_ACCESS_HEADER: "per-sandbox-abc"},
+                    }
+
+            return _R()
+
+    cfg = _cfg()
+    session = _Session()
+    real = HttpOpenSandboxApi(cfg.endpoints["gvisor"], session=session)
+    assert real.execd_headers("sb-1").get(SECURE_ACCESS_HEADER) == "per-sandbox-abc"
+
+
 def test_upload_workspace_sends_no_git_or_credential_files(tmp_path):
     (tmp_path / ".git").mkdir()
     (tmp_path / ".git" / "config").write_text("[remote]", encoding="utf-8")

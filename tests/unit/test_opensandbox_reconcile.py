@@ -448,3 +448,67 @@ def test_an_endpoint_we_could_not_query_is_not_proof_of_absence(tmp_path, monkey
     # Not found on the one endpoint we could query, and the other was unusable:
     # absence is NOT established.
     assert provider.destroy_attribution_checked("sb-1", None) is False
+
+
+def test_terminal_confirmation_asks_the_server_that_held_the_sandbox(tmp_path, monkeypatch):
+    """A 404 from the WRONG server is not a confirmed teardown.
+
+    _confirm_terminal read self._api — the default-tier client — so sweeping a
+    kata sandbox asked the gvisor server, got a 404 for a sandbox that had never
+    lived there, and scored it confirmed. The guard inverted itself for exactly
+    the multi-tier case the sweep exists to handle.
+    """
+    raw = {
+        "installation_id": "openace-test",
+        "default_tier": "gvisor",
+        "tenant_tiers": {"42": "kata"},
+        "endpoints": {
+            tier: {
+                "base_url": f"http://osb-{tier}.open-ace.svc.cluster.local:8080/v1",
+                "api_key_env": "OSB_KEY",
+                "execd_token_env": "OSB_EXECD_TOKEN",
+                "runtime_class": "gvisor" if tier == "gvisor" else "kata-qemu",
+                "default_image": _DIGEST,
+                "egress_allow_hosts": ["api.anthropic.com"],
+                "attestations": {
+                    "egress_enforced": True,
+                    "egress_mode_dns_nft": True,
+                    "metadata_cidr_blocked": True,
+                    "execd_token_required": True,
+                    "secure_access_required": True,
+                    "nonroot_enforced": True,
+                    "readonly_rootfs": True,
+                    "seccomp_runtime_default": True,
+                    "dedicated_service_account": True,
+                    "pod_pids_limit": 512,
+                },
+            }
+            for tier in ("gvisor", "kata")
+        },
+        "image_allowlist": [_DIGEST],
+    }
+    path = tmp_path / "sandbox-backends.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setenv("OSB_KEY", "k")
+    monkeypatch.setenv("OSB_EXECD_TOKEN", "t")
+    monkeypatch.setenv("OPENACE_SANDBOX_BACKENDS", str(path))
+
+    servers = {"gvisor": FakeOpenSandboxApi(), "kata": FakeOpenSandboxApi()}
+    # Lives on kata, and that server accepts DELETE without acting on it.
+    servers["kata"].sandboxes["sb-kata-1"] = {
+        "id": "sb-kata-1",
+        "status": {"state": "Running"},
+        "metadata": {"openace.provider": "opensandbox", "openace.installation": "openace-test"},
+    }
+    servers["kata"].stall_delete = True
+
+    monkeypatch.setattr(
+        registry,
+        "_default_api_factory",
+        lambda endpoint: servers["kata" if "kata" in endpoint.base_url else "gvisor"],
+    )
+    provider = provider_for("opensandbox")
+
+    # gvisor 404s for this id; that must NOT count as confirmation.
+    assert provider.destroy_attribution_checked("sb-kata-1", None) is False
+    assert servers["kata"].sandboxes["sb-kata-1"]["status"]["state"] == "Running"

@@ -105,10 +105,24 @@ hang rather than a missing prerequisite.
 helm install opensandbox-controller \
   oci://ghcr.io/opensandbox-group/charts/opensandbox-controller \
   --version <pinned> -n opensandbox-system --create-namespace
-kubectl get crd batchsandboxes.sandbox.opensandbox.io   # must exist before step 3
+kubectl get crd batchsandboxes.sandbox.opensandbox.io   # must exist before step 4
 ```
 
-### 2. Set your gateway address
+### 2. Deploy the ingress gateway data plane
+
+Setting `[ingress] mode = "gateway"` tells the server to *hand out* gateway
+URLs. It does not deploy anything that serves them. Upstream ships the gateway
+as separate resources (ServiceAccount, ClusterRole/Binding, Deployment,
+Service running `components/ingress`), disabled by default in its chart
+(`server.gateway.enabled: false`). Without it the server advertises endpoints
+nothing answers, and every upload/exec/PTY call fails to connect — the same
+"accepted then never serviced" shape as a missing BatchSandbox controller.
+
+Deploy it with `server.gateway.enabled=true`, `gatewayRouteMode=header` (matching
+`route.mode` in the ConfigMaps), and the same `secure-access` Secret as below —
+the gateway is what *verifies* the signing keys the server signs with.
+
+### 3. Set your gateway address
 
 `configmap-gvisor.yaml` and `configmap-kata.yaml` ship a placeholder
 `ingress.gateway.address` (`*.sandbox.open-ace.example`). It **must** be a
@@ -116,7 +130,7 @@ wildcard domain you control, with no scheme, resolving to your ingress gateway.
 Gateway mode is what makes `secureAccess` mint per-sandbox credentials; leaving
 the placeholder means sandbox endpoints are unroutable.
 
-### 3. Apply
+### 4. Apply
 
 ```bash
 kubectl apply -k k8s/extras/opensandbox/
@@ -151,16 +165,24 @@ kubectl create secret generic opensandbox-keys -n open-ace \
   --from-literal=gvisor-execd-token="$(openssl rand -hex 32)" \
   --from-literal=kata-api-key="$(openssl rand -hex 32)" \
   --from-literal=kata-execd-token="$(openssl rand -hex 32)" \
-  --from-literal=gvisor-secure-access-keys="$(openssl rand -hex 32)" \
-  --from-literal=gvisor-secure-access-active-key="$(openssl rand -hex 32)" \
-  --from-literal=kata-secure-access-keys="$(openssl rand -hex 32)" \
-  --from-literal=kata-secure-access-active-key="$(openssl rand -hex 32)"
+  --from-literal=gvisor-secure-access-keys="a=$(openssl rand -base64 32)" \
+  --from-literal=gvisor-secure-access-active-key="a" \
+  --from-literal=kata-secure-access-keys="a=$(openssl rand -base64 32)" \
+  --from-literal=kata-secure-access-active-key="a"
 ```
 
-The `secure-access-*` pair is what gateway mode signs per-sandbox credentials
-with. Without them `secureAccess` has nothing to mint, and the
-`secure_access_required` attestation would be unbacked — which the provider
-refuses to run against.
+**The `secure-access-*` shape is not free-form.** Upstream parses
+`OPENSANDBOX_SECURE_ACCESS_KEYS` as a comma-separated list of
+`<key_id>=<base64-secret>`, where `key_id` is **exactly one character** in
+`[0-9a-z]`, and `OPENSANDBOX_SECURE_ACCESS_ACTIVE_KEY` must be one such id
+present in that list. A bare random hex string has no `=` and fails config
+validation at startup with `entries must be in key_id=base64 form` — the server
+never becomes ready.
+
+These keys sign *signed URLs*. The opaque per-sandbox `OpenSandbox-Secure-Access`
+token that the peer-isolation guarantee actually rests on needs only
+`[ingress] mode = "gateway"`; the keys are required by the gateway component
+below, which verifies them.
 
 `sandbox-backends.json` names the environment variables holding these; the
 values never appear in that file.
