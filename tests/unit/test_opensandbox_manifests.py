@@ -189,10 +189,11 @@ def test_pod_hardening_attestations_are_backed_by_the_template(tier):
     assert pod["serviceAccountName"] == "opensandbox-sandbox"
     assert pod["automountServiceAccountToken"] is False
     sandbox = next(c for c in pod["containers"] if c["name"] == "sandbox")
-    # The non-root identity belongs to the SANDBOX container, not the pod:
-    # execd shares this pod and must stay root so it can drop privileges per
-    # request (setgroups needs CAP_SETGID). Pod-level runAsUser broke every
-    # /command with EPERM on a live cluster.
+    # The non-root identity is written on the SANDBOX container. execd runs
+    # inside that same container (upstream's bootstrap.sh is its PID 1), so it
+    # inherits the uid either way — which is why such a deployment must attest
+    # `execd_runs_as_exec_identity`; see
+    # test_the_template_uid_and_the_exec_identity_attestation_agree.
     assert sandbox["securityContext"]["runAsNonRoot"] is True
     assert sandbox["securityContext"]["runAsUser"] == 1000
     assert (
@@ -217,18 +218,78 @@ def test_the_kata_tier_backs_the_egress_attestations():
 
 
 def test_the_gvisor_tier_configures_no_egress_sidecar():
-    """gVisor + egress sidecar means every create is rejected upstream.
+    """gVisor + egress sidecar means every create carrying one is rejected.
 
     The sidecar needs the iptables nat table, which gVisor's netstack lacks. A
     real server logs the incompatibility at startup and then refuses every
-    create carrying a networkPolicy — which this provider always sends. This
-    tier shipped WITH an egress block and was the default, so not one sandbox
-    could have started. Only running a real server surfaced it.
+    create carrying a networkPolicy. This tier shipped WITH an egress block and
+    was the default, and the provider sent a networkPolicy unconditionally, so
+    not one sandbox could have started. Only running a real server surfaced it.
+
+    The tier now enforces egress at the CNI instead and the provider omits
+    `networkPolicy` for it — but this block must still stay absent, because a
+    configured sidecar the server cannot run is what produced the startup
+    incompatibility in the first place.
     """
     assert "egress" not in _server_toml("gvisor"), (
         "the gVisor tier configures an egress sidecar it cannot use; every "
         "create would be rejected"
     )
+
+
+def test_the_networkpolicy_selects_the_sandbox_pods():
+    """The podSelector must match labels the POD actually carries.
+
+    This is the load-bearing link for `egress_cni_default_deny` — the gVisor
+    tier's only egress control — and for `metadata_cidr_blocked`. It was broken:
+    the labels lived at the BatchSandbox CR's own `metadata`, which never
+    reaches the pod. Upstream builds the pod's labels itself at
+    `spec.template.metadata.labels` and deep-merges the template over them, so
+    a NetworkPolicy selecting on CR labels matches nothing while both
+    attestations go on being asserted — a capability declared and not enforced.
+
+    Namespaces are compared too: a NetworkPolicy only ever selects pods in its
+    own namespace, so one written for the wrong namespace is equally inert.
+    """
+    doc = yaml.safe_load((_DIR / "configmap-sandbox-template.yaml").read_text())
+    tpl = yaml.safe_load(doc["data"]["batchsandbox-template.yaml"])
+    pod_labels = tpl["spec"]["template"].get("metadata", {}).get("labels", {})
+
+    netpol = yaml.safe_load((_DIR / "networkpolicy.yaml").read_text())
+    selector = netpol["spec"]["podSelector"]["matchLabels"]
+    assert selector, "an empty podSelector would select every pod in the namespace"
+    missing = {k: v for k, v in selector.items() if pod_labels.get(k) != v}
+    assert not missing, (
+        f"the NetworkPolicy selects {missing} but the sandbox POD template sets "
+        f"{pod_labels or 'no pod labels at all'}; the policy would match no pod while "
+        "egress_cni_default_deny and metadata_cidr_blocked stayed attested"
+    )
+
+    for tier in _TIERS:
+        sandbox_ns = _server_toml(tier)["kubernetes"]["namespace"]
+        assert netpol["metadata"]["namespace"] == sandbox_ns, (
+            f"the {tier} server creates sandboxes in {sandbox_ns!r} but the NetworkPolicy "
+            f"lives in {netpol['metadata']['namespace']!r}, where it selects nothing"
+        )
+
+
+def test_the_networkpolicy_denies_the_ranges_its_attestations_name():
+    """`metadata_cidr_blocked` and `egress_cni_default_deny` name specific ranges.
+
+    The metadata address and every private range must be excluded from the
+    catch-all rule. Anything narrower and the attestations overstate what the
+    manifest does.
+    """
+    netpol = yaml.safe_load((_DIR / "networkpolicy.yaml").read_text())
+    excepted: set[str] = set()
+    for rule in netpol["spec"]["egress"]:
+        for peer in rule.get("to", []):
+            block = peer.get("ipBlock")
+            if block and block.get("cidr") == "0.0.0.0/0":
+                excepted.update(block.get("except", []))
+    assert "169.254.0.0/16" in excepted, "the metadata address is reachable"
+    for private in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"):
+        assert private in excepted, f"{private} is reachable from a sandbox"
 
 
 def test_every_namespace_the_manifests_use_is_also_created():

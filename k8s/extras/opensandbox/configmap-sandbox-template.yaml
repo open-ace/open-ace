@@ -44,21 +44,45 @@ data:
     spec:
       replicas: 1
       template:
+        metadata:
+          # POD labels — the ones networkpolicy.yaml's podSelector matches.
+          #
+          # The block above this is the BatchSandbox CR's own metadata, which
+          # does NOT reach the pod: upstream builds the pod's labels itself at
+          # `spec.template.metadata.labels` and deep-merges the template over
+          # them, so a label written only at CR level selects the custom
+          # resource and nothing else. The NetworkPolicy would then match zero
+          # pods while `metadata_cidr_blocked` and `egress_cni_default_deny`
+          # went on being attested — a capability declared and not enforced,
+          # which is the failure this whole design exists to prevent.
+          #
+          # test_the_networkpolicy_selects_the_sandbox_pods binds these two
+          # files together so they cannot drift apart again.
+          labels:
+            app.kubernetes.io/name: opensandbox-sandbox
+            app.kubernetes.io/part-of: open-ace
         spec:
           restartPolicy: Never
           terminationGracePeriodSeconds: 30
           serviceAccountName: opensandbox-sandbox
           automountServiceAccountToken: false
-          # POD level carries only what must apply to every container. The
-          # non-root identity is deliberately NOT here: this pod also runs
-          # upstream's execd (as an init/sidecar), and execd's design is to run
-          # as root and drop privileges per request — every /command carries a
-          # uid/gid, and setgroups(2) needs CAP_SETGID. Forcing execd to uid
-          # 1000 pod-wide made every command fail
-          # `fork/exec /usr/bin/bash: operation not permitted`, verified on a
-          # live gVisor cluster. Scoping runAsUser to the `sandbox` container
-          # keeps the agent non-root (which is what `nonroot_enforced` attests)
-          # without disarming execd.
+          # POD level carries only what must apply to every container.
+          #
+          # `runAsUser: 1000` sits on the `sandbox` container below, and that
+          # is ALSO execd's identity: upstream's bootstrap.sh is PID 1 of this
+          # container and starts execd as another process inside it, so execd
+          # is not a sidecar and cannot be given a different uid here. An
+          # earlier revision moved runAsUser to the container in the belief
+          # that it left execd running as root; it did not, and every
+          # /command carrying a uid/gid still died
+          # `fork/exec /usr/bin/bash: operation not permitted` (setgroups(2)
+          # needs CAP_SETGID, which a uid-1000 execd does not have). Verified
+          # on a live gVisor cluster.
+          #
+          # A deployment shaped like this one must therefore attest
+          # `execd_runs_as_exec_identity`, which stops the provider sending
+          # uid/gid at all and lets execd run commands as itself. The agent is
+          # non-root either way, which is what `nonroot_enforced` attests.
           securityContext:
             fsGroup: 1000
             seccompProfile:

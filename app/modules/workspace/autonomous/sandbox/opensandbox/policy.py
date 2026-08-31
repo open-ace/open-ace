@@ -27,6 +27,7 @@ such a tier rather than treating those attestations as advisory.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import shlex
 from collections.abc import Mapping, Sequence
@@ -183,6 +184,18 @@ def derive_capabilities(
             # All three: a deny-default policy enforced in dns-only mode does
             # not stop a connection made to a bare IP, and the cluster
             # NetworkPolicy is what closes that.
+            #
+            # A CNI-enforced tier (egress_cni_default_deny — the only mechanism
+            # gVisor can run) reaches none of these branches, and that is the
+            # point. It has real egress control: the metadata service, the
+            # cluster's own ranges and every private network are denied, and the
+            # boot probe verifies it. What it does NOT have is a per-sandbox
+            # policy the spec can shape or narrow, and NETWORK_EGRESS_POLICY is
+            # the contract's word for exactly that. Declaring it off a static
+            # cluster-wide rule would be the #2082 failure with an extra step:
+            # `build_effective_policy` would write the capability to the
+            # workflow row, and a spec asking for a tighter allowlist would be
+            # accepted and then ignored.
             caps.add(SandboxCapability.NETWORK_EGRESS_POLICY)
 
     if (
@@ -234,8 +247,17 @@ def synthesise_spec_fields(
             image=endpoint.default_image, runtime=endpoint.runtime_class, toolchain=""
         )
     egress = spec.network_egress
-    if egress is None:
+    if egress is None and (
+        config_mod.egress_enforcement_mode(endpoint) == config_mod.EGRESS_MODE_SIDECAR_FQDN
+    ):
         egress = NetworkEgressPolicy(mode="deny_all", allow_hosts=endpoint.egress_allow_hosts)
+    # Under CNI enforcement `egress` stays None on purpose. There is exactly one
+    # static cluster NetworkPolicy for every sandbox, so there is no per-spec
+    # policy to send and none to honour — and synthesising one anyway would make
+    # `implied_required_capabilities` demand NETWORK_EGRESS_POLICY, which this
+    # mode does not declare, refusing every run on a tier that is correctly
+    # configured. The honest record of what applied is the absent capability in
+    # the effective-policy snapshot, not a policy object nothing reads.
     return replace_spec(spec, runtime=runtime, network_egress=egress)
 
 
@@ -295,6 +317,21 @@ def validate_spec_for_endpoint(
         )
 
     egress = spec.network_egress
+    if egress is not None and (
+        config_mod.egress_enforcement_mode(endpoint) == config_mod.EGRESS_MODE_CNI_CIDR
+    ):
+        # 10. A caller asked for a per-sandbox egress policy on a tier whose
+        # only enforcement is one static cluster NetworkPolicy. The shared #2022
+        # gate below would already refuse this (the spec field implies
+        # NETWORK_EGRESS_POLICY, which this mode does not declare) — but as
+        # `CapabilityUnsupported({network_egress_policy})`, which names neither
+        # the field that caused it nor the reason. Say it here instead.
+        raise SandboxError(
+            f"endpoint {endpoint.tier!r} enforces egress at the CNI, where one static "
+            "NetworkPolicy applies to every sandbox; a per-spec network_egress cannot be "
+            "honoured and would be silently dropped. Use a tier attesting egress_enforced "
+            "(the OpenSandbox sidecar) for a spec that needs its own egress policy."
+        )
     if egress is not None:
         # 1. Upstream's NetworkRule.target is documented as "FQDN or wildcard
         # domain ... IP/CIDR not yet supported in the egress MVP". Silently
@@ -391,6 +428,15 @@ def assert_proxy_reachable(env: Mapping[str, str], endpoint: EndpointConfig) -> 
                 "sandbox pod that resolves to the sandbox itself. Set the control plane's "
                 "server_url to an address reachable from the cluster."
             )
+        if config_mod.egress_enforcement_mode(endpoint) == config_mod.EGRESS_MODE_CNI_CIDR:
+            # No allowlist exists to check against — the cluster NetworkPolicy is
+            # CIDR-based, and parse_backend_config keeps egress_allow_hosts empty
+            # for this mode. What that policy DOES block is every private range,
+            # which is exactly where a proxy reached by a cluster-internal name
+            # or address lives. Same failure the loopback check exists for: the
+            # agent starts, every request hangs, and nothing says why.
+            _assert_reachable_under_cni(key, raw, host, endpoint)
+            continue
         if not any(
             config_mod.host_matches(host, pattern) for pattern in endpoint.egress_allow_hosts
         ):
@@ -399,6 +445,39 @@ def assert_proxy_reachable(env: Mapping[str, str], endpoint: EndpointConfig) -> 
                 f"{sorted(endpoint.egress_allow_hosts)}; egress is deny-default, so the agent "
                 "could not reach its own LLM proxy. Add the host to egress_allow_hosts."
             )
+
+
+# Suffixes that only ever name something inside the cluster. Resolving one gives
+# a Service ClusterIP or a Pod IP, both inside a range the shipped NetworkPolicy
+# denies.
+_CLUSTER_INTERNAL_SUFFIXES = (".svc", ".svc.cluster.local", ".cluster.local")
+
+
+def _assert_reachable_under_cni(key: str, raw: str, host: str, endpoint: EndpointConfig) -> None:
+    """Refuse a proxy address ``k8s/extras/opensandbox/networkpolicy.yaml`` denies.
+
+    Only literals and cluster-internal names are judged: a public name that
+    happens to resolve into a private range cannot be caught without doing DNS
+    here, and a wrong answer would refuse a working deployment. This catches the
+    two mistakes an operator actually makes.
+    """
+    remedy = (
+        f"Endpoint {endpoint.tier!r} enforces egress at the CNI, where "
+        "k8s/extras/opensandbox/networkpolicy.yaml denies every private and link-local "
+        "range. Give the control plane an address the sandbox pods can route to, or, if "
+        "your cluster deliberately permits this destination, amend that NetworkPolicy — "
+        "the egress_cni_default_deny attestation describes the shipped one."
+    )
+    if host.endswith(_CLUSTER_INTERNAL_SUFFIXES):
+        raise SandboxError(f"{key}={raw!r} names a cluster-internal service. {remedy}")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return
+    if address.is_private or address.is_link_local or address.is_loopback:
+        raise SandboxError(
+            f"{key}={raw!r} is a private address the sandbox pods cannot reach. {remedy}"
+        )
 
 
 def build_resource_limits(
@@ -605,12 +684,11 @@ def build_create_request(
         else max(cfg.sandbox_ttl_seconds, _MIN_TTL_SECONDS)
     )
 
-    return {
+    body: dict = {
         # image is an ImageSpec object, not a bare string.
         "image": {"uri": spec.runtime.image if spec.runtime else endpoint.default_image},
         "entrypoint": _build_entrypoint(endpoint.exec_uid, endpoint.exec_gid),
         "resourceLimits": build_resource_limits(policy, cfg, endpoint),
-        "networkPolicy": build_network_policy(spec, endpoint),
         "timeout": ttl,
         # Without this, sandbox endpoints are reachable with no access token.
         "secureAccess": True,
@@ -628,6 +706,17 @@ def build_create_request(
             "openace.generation": str(generation),
         },
     }
+    # The key is OMITTED, not sent empty, under CNI enforcement. Upstream's
+    # ensure_egress_runtime_compatible starts `if not network_policy: return`
+    # and otherwise answers a gVisor create with
+    #   "networkPolicy is not compatible with runtime 'gvisor': ... Use a
+    #    compatible runtime (e.g. kata) or remove networkPolicy."
+    # Sending one unconditionally is what made the gVisor tier unable to start a
+    # single sandbox. Removing it is upstream's own prescribed remedy — and it
+    # also stops the server injecting an egress sidecar that could not work.
+    if config_mod.egress_enforcement_mode(endpoint) == config_mod.EGRESS_MODE_SIDECAR_FQDN:
+        body["networkPolicy"] = build_network_policy(spec, endpoint)
+    return body
 
 
 def map_state(state: str) -> SandboxStatus:

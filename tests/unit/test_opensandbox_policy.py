@@ -60,6 +60,22 @@ _FULL_ATTESTATIONS = {
     "ephemeral_storage_enforced": True,
 }
 
+# The same deployment with the OTHER egress mechanism: the cluster NetworkPolicy
+# alone, which is all gVisor can run. `egress_allow_hosts` must be empty
+# alongside it — see test_a_cni_tier_may_not_carry_an_egress_allowlist.
+_CNI_ATTESTATIONS = {
+    k: v
+    for k, v in _FULL_ATTESTATIONS.items()
+    if k not in ("egress_enforced", "egress_mode_dns_nft")
+}
+_CNI_ATTESTATIONS["egress_cni_default_deny"] = True
+
+
+def _cni_cfg(**overrides):
+    endpoint = {"egress_allow_hosts": [], "runtime_class": "gvisor"}
+    endpoint.update(overrides.pop("endpoint", {}))
+    return _cfg(attestations=_CNI_ATTESTATIONS, endpoint=endpoint, **overrides)
+
 
 def _cfg(attestations=None, **overrides):
     endpoint = {
@@ -152,15 +168,49 @@ def test_production_shaped_spec_is_synthesised_from_the_tier():
     assert spec.network_egress is not None and spec.network_egress.mode == "deny_all"
 
 
-def test_tier_without_egress_attestation_fails_closed_even_when_spec_asks_nothing():
-    # The synthesised policy implies NETWORK_EGRESS_POLICY, which an
-    # unattested tier does not declare -> CapabilityUnsupported.
-    cfg = _cfg(
-        attestations={k: v for k, v in _FULL_ATTESTATIONS.items() if k != "egress_enforced"},
-        endpoint={"egress_allow_hosts": ["api.anthropic.com"]},
-    )
-    with pytest.raises(CapabilityUnsupported):
-        _create(cfg=cfg)
+def test_a_cni_tier_sends_no_network_policy_at_all():
+    """Upstream rejects a gVisor create that carries one; omitting is its remedy.
+
+    ``ensure_egress_runtime_compatible`` opens ``if not network_policy: return``
+    and otherwise answers "networkPolicy is not compatible with runtime
+    'gvisor' ... or remove networkPolicy". Sending an empty policy, or a
+    deny-default one with no rules, is not removing it.
+    """
+    body = _create(cfg=_cni_cfg())
+    assert "networkPolicy" not in body
+
+
+def test_a_cni_tier_synthesises_no_per_spec_egress_policy():
+    """There is one static cluster policy, so there is nothing per-spec to fill in.
+
+    Synthesising one anyway would make ``implied_required_capabilities`` demand
+    NETWORK_EGRESS_POLICY — which this mode does not declare — and refuse every
+    run on a correctly configured tier.
+    """
+    cfg = _cni_cfg()
+    spec = synthesise_spec_fields(_spec(), cfg, _endpoint(cfg))
+    assert spec.network_egress is None
+    assert spec.runtime is not None  # the other synthesised field is unaffected
+
+
+def test_a_cni_tier_declares_no_egress_capability():
+    caps = derive_capabilities(_endpoint(_cni_cfg()), probes_passed=True)
+    assert SandboxCapability.NETWORK_EGRESS_POLICY not in caps
+    # ...but it is a real isolation tier otherwise: the runtime probe passed.
+    assert SandboxCapability.NAMESPACE_ISOLATION in caps
+
+
+def test_a_cni_tier_refuses_a_spec_that_asks_for_its_own_egress_policy():
+    """Named refusal, not an opaque CapabilityUnsupported from the shared gate."""
+    cfg = _cni_cfg()
+    spec = _spec(network_egress=NetworkEgressPolicy(mode="deny_all", allow_hosts=("x.example",)))
+    with pytest.raises(SandboxError, match="per-spec network_egress cannot be honoured"):
+        _create(spec, cfg=cfg)
+
+
+def test_a_sidecar_tier_still_sends_its_network_policy():
+    """The guard above must not have turned the sidecar path off as well."""
+    assert "networkPolicy" in _create()
 
 
 # ── other refusals ────────────────────────────────────────────────────
@@ -260,8 +310,15 @@ def test_capabilities_track_attestations_not_a_constant():
     assert SandboxCapability.FILESYSTEM_ACL in full
     assert SandboxCapability.CPU_MEM_PIDS_TIME_QUOTA in full
 
+    # The leanest endpoint the config layer will now build: one egress
+    # mechanism attested and nothing else.
     bare = derive_capabilities(
-        _endpoint(_cfg(attestations={}, endpoint={"egress_allow_hosts": ["api.anthropic.com"]})),
+        _endpoint(
+            _cfg(
+                attestations={"egress_cni_default_deny": True},
+                endpoint={"egress_allow_hosts": []},
+            )
+        ),
         probes_passed=True,
     )
     assert SandboxCapability.NETWORK_EGRESS_POLICY not in bare
@@ -278,10 +335,17 @@ def test_namespace_isolation_requires_the_runtime_probe_to_have_passed():
 
 
 def test_egress_capability_requires_all_three_egress_attestations():
-    for missing in ("egress_enforced", "egress_mode_dns_nft", "metadata_cidr_blocked"):
+    for missing in ("egress_mode_dns_nft", "metadata_cidr_blocked"):
         attestations = {k: v for k, v in _FULL_ATTESTATIONS.items() if k != missing}
         caps = derive_capabilities(_endpoint(_cfg(attestations=attestations)), probes_passed=True)
         assert SandboxCapability.NETWORK_EGRESS_POLICY not in caps, missing
+    # `egress_enforced` is the third, and dropping it now changes the
+    # endpoint's whole enforcement mechanism rather than just removing a flag —
+    # the config layer refuses an endpoint attesting neither. The CNI tier that
+    # replaces it must not get the capability either.
+    assert SandboxCapability.NETWORK_EGRESS_POLICY not in derive_capabilities(
+        _endpoint(_cni_cfg()), probes_passed=True
+    )
 
 
 def test_storage_quota_capability_needs_at_least_one_storage_attestation():
@@ -514,10 +578,12 @@ def test_sandbox_state_mapping_is_total(state, expected):
 
 
 def test_validate_spec_for_endpoint_runs_the_shared_2022_gate():
-    # A tier that attests pod hardening (so refusal 9 passes) but not egress
-    # cannot supply NETWORK_EGRESS_POLICY, and the shared #2022 gate must be the
-    # thing that catches it — not a bespoke check in this module.
-    cfg = _cfg(attestations={k: v for k, v in _FULL_ATTESTATIONS.items() if k != "egress_enforced"})
+    # A CNI tier attests pod hardening (so refusal 9 passes) and enforces egress
+    # at the cluster layer, but cannot supply NETWORK_EGRESS_POLICY. A spec
+    # DEMANDING that capability must be caught by the shared #2022 gate — not by
+    # a bespoke check in this module, and not by the named refusal above, which
+    # keys on the spec's network_egress field rather than on this requirement.
+    cfg = _cni_cfg()
     spec = _spec(required_capabilities=frozenset({SandboxCapability.NETWORK_EGRESS_POLICY}))
     with pytest.raises(CapabilityUnsupported):
         validate_spec_for_endpoint(spec, cfg, _endpoint(cfg), probes_passed=True)
@@ -665,6 +731,39 @@ def test_an_allowlisted_proxy_url_passes():
 
     cfg = _cfg()
     assert_proxy_reachable({"ANTHROPIC_BASE_URL": "https://api.anthropic.com/v1"}, _endpoint(cfg))
+
+
+def test_a_cni_tier_accepts_any_public_proxy_host():
+    """There is no allowlist to be on: CIDR rules cannot express one.
+
+    Applying the sidecar tier's check here would refuse every proxy, since
+    `egress_allow_hosts` is required to be empty under this mechanism.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.policy import assert_proxy_reachable
+
+    endpoint = _endpoint(_cni_cfg())
+    assert_proxy_reachable({"ANTHROPIC_BASE_URL": "https://proxy.example.com/api"}, endpoint)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://10.4.2.9:5000/api",  # RFC1918 literal
+        "http://192.168.1.10/api",
+        "http://openace.open-ace.svc.cluster.local/api",  # cluster-internal name
+    ],
+)
+def test_a_cni_tier_refuses_a_proxy_the_cluster_policy_blocks(url):
+    """The shipped NetworkPolicy denies every private range, proxy included.
+
+    Same failure the loopback check exists for: the agent starts, every request
+    hangs, and nothing in the logs points at the network policy.
+    """
+    from app.modules.workspace.autonomous.sandbox.opensandbox.policy import assert_proxy_reachable
+
+    endpoint = _endpoint(_cni_cfg())
+    with pytest.raises(SandboxError, match="cannot reach|cluster-internal"):
+        assert_proxy_reachable({"OPENACE_PROXY_URL": url}, endpoint)
 
 
 def test_the_container_path_is_not_inherited_from_the_control_plane():

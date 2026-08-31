@@ -50,15 +50,26 @@ data:
     #    with gVisor. Sandboxes created with network_policy will be rejected at
     #    creation time."
     # and then answers every create with
-    #   "networkPolicy is not compatible with runtime 'gvisor'".
-    # This provider ALWAYS sends a networkPolicy, so configuring egress here
-    # would guarantee that not one sandbox could start — which is exactly what
-    # this tier did until a real server was run against it.
+    #   "networkPolicy is not compatible with runtime 'gvisor': ... Use a
+    #    compatible runtime (e.g. kata) or remove networkPolicy."
+    # This provider once sent a networkPolicy unconditionally, so not one
+    # sandbox on this tier could start — which is what running a real server
+    # against it revealed.
     #
-    # Consequence: this tier CANNOT satisfy #2023's default-deny egress
-    # requirement, so sandbox-backends.json must not attest `egress_enforced`
-    # for it (parse_backend_config refuses that combination), and the provider
-    # will therefore refuse agent workloads here. Use the Kata tier for those.
+    # Egress on this tier is therefore enforced one layer down, by the cluster
+    # NetworkPolicy in networkpolicy.yaml, which the CNI applies outside the
+    # sandbox kernel where gVisor's missing nat table is irrelevant. The
+    # provider omits `networkPolicy` from every create for a tier attesting
+    # `egress_cni_default_deny` — upstream's own prescribed remedy — and its
+    # boot probe verifies from inside a live sandbox that the cluster policy is
+    # in force.
+    #
+    # What that costs, stated plainly: CIDR rules cannot express an FQDN
+    # allowlist, so this tier denies the metadata service, the cluster's own
+    # ranges and every private network, but leaves the public internet open.
+    # It does not get NETWORK_EGRESS_POLICY, and a spec that requires a
+    # per-sandbox egress policy is refused here rather than silently degraded.
+    # Use the Kata tier when the allowlist itself is the control you need.
     # See docs/sandbox-backends.md §7.
 
     [store]

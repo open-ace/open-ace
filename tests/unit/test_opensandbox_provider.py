@@ -44,6 +44,13 @@ _FULL = {
 }
 
 
+# The same deployment with the OTHER egress mechanism: the cluster NetworkPolicy
+# alone (the only one gVisor can run). `egress_allow_hosts` must be empty
+# alongside it, and exactly one of the two mechanisms may be attested.
+_CNI = {k: v for k, v in _FULL.items() if k not in ("egress_enforced", "egress_mode_dns_nft")}
+_CNI["egress_cni_default_deny"] = True
+
+
 def _cfg(attestations=None, *, pool=None, tenant_tiers=None, endpoints=None, **overrides):
     endpoint = {
         "base_url": "http://osb.open-ace.svc.cluster.local:8080/v1",
@@ -67,6 +74,27 @@ def _cfg(attestations=None, *, pool=None, tenant_tiers=None, endpoints=None, **o
     }
     raw.update(overrides)
     return parse_backend_config(raw)
+
+
+def _cni_cfg(**overrides):
+    """A CNI-enforced endpoint, still on a Kata runtime_class.
+
+    The runtime class stays Kata so the kernel probe is not also under test
+    here: a gVisor tier is what makes this mechanism mandatory, not what makes
+    it work, and a Kata operator who declines to run the sidecar lands in
+    exactly this configuration.
+    """
+    endpoint = {
+        "base_url": "http://osb.open-ace.svc.cluster.local:8080/v1",
+        "api_key_env": "OSB_KEY",
+        "execd_token_env": "OSB_EXECD_TOKEN",
+        "runtime_class": "kata-qemu",
+        "default_image": _DIGEST,
+        "egress_allow_hosts": [],
+        "attestations": _CNI,
+    }
+    endpoint.update(overrides.pop("endpoint", {}))
+    return _cfg(endpoints={"gvisor": endpoint}, **overrides)
 
 
 @pytest.fixture(autouse=True)
@@ -119,10 +147,13 @@ def test_create_mints_a_handle_with_provider_name_and_generation():
 
 
 def test_create_rejects_a_capability_the_endpoint_does_not_attest():
-    cfg = _cfg(attestations={**_FULL, "egress_enforced": False})
+    # A CNI tier enforces egress, but not per-sandbox — so it does not declare
+    # NETWORK_EGRESS_POLICY, and a spec demanding it must fail closed.
+    cfg = _cni_cfg()
     provider, _ = _provider(cfg=cfg)
+    spec = _spec(required_capabilities=frozenset({SandboxCapability.NETWORK_EGRESS_POLICY}))
     with pytest.raises((CapabilityUnsupported, SandboxError)):
-        provider.create(_spec())
+        provider.create(spec)
 
 
 def test_stale_generation_handle_is_refused():
@@ -338,6 +369,71 @@ def test_egress_probe_fails_closed_when_the_sidecar_reports_dns_only():
 def test_egress_probe_fails_closed_on_an_allow_default():
     provider, _ = _provider(FakeOpenSandboxApi(egress_default_action="allow"))
     with pytest.raises(SandboxError, match="egress"):
+        provider.create(_spec())
+
+
+# ── the CNI enforcement mechanism (the only one gVisor can run) ───────
+
+
+def test_a_cni_tier_creates_when_the_cluster_policy_is_in_force():
+    api = FakeOpenSandboxApi()  # default: both destinations BLOCKED
+    provider, _ = _provider(api, cfg=_cni_cfg())
+    assert provider.create(_spec())
+
+
+@pytest.mark.parametrize("destination", ["METADATA", "CLUSTER"])
+def test_a_cni_tier_fails_closed_when_the_sandbox_can_still_reach_out(destination):
+    """The attestation's whole content is that this policy is applied.
+
+    On a gVisor tier it is the ONLY egress control, so an unapplied manifest — or
+    one whose podSelector matches nothing, which this repository shipped — must
+    stop the run rather than be taken on the operator's word.
+    """
+    api = FakeOpenSandboxApi()
+    api.cluster_egress = {**api.cluster_egress, destination: "REACHABLE"}
+    provider, _ = _provider(api, cfg=_cni_cfg())
+    with pytest.raises(SandboxError, match="cluster NetworkPolicy is not restricting"):
+        provider.create(_spec())
+
+
+def test_a_cni_tier_fails_closed_when_dns_leaves_the_check_undecided():
+    """A blocked packet and a failed lookup must not read the same.
+
+    Folding UNRESOLVED into BLOCKED would grant the attestation for free on any
+    cluster with a broken resolver — a false PASS on the one check a gVisor
+    tier's egress rests on.
+    """
+    api = FakeOpenSandboxApi()
+    api.cluster_egress = {"METADATA": "BLOCKED", "CLUSTER": "UNRESOLVED"}
+    provider, _ = _provider(api, cfg=_cni_cfg())
+    with pytest.raises(SandboxError, match="did not resolve"):
+        provider.create(_spec())
+
+
+def test_a_cni_tier_fails_closed_when_the_probe_cannot_run():
+    """No python3 in the image means no verdict, and no verdict is a refusal.
+
+    Unlike the kernel probe's optional sources, there is no second opinion here:
+    passing anyway would grant the tier unverified egress enforcement.
+    """
+    api = FakeOpenSandboxApi()
+    api.cluster_egress = None
+    provider, _ = _provider(api, cfg=_cni_cfg())
+    with pytest.raises(SandboxError, match="no verdict"):
+        provider.create(_spec())
+
+
+def test_a_sidecar_tier_also_probes_the_cluster_policy_it_attests():
+    """`metadata_cidr_blocked` is what closes the sidecar's bare-IP gap.
+
+    It names the same manifest, so it gets the same check — otherwise the flag
+    that upgrades a Kata tier to NETWORK_EGRESS_POLICY is the one flag nothing
+    verifies.
+    """
+    api = FakeOpenSandboxApi()
+    api.cluster_egress = {**api.cluster_egress, "METADATA": "REACHABLE"}
+    provider, _ = _provider(api)  # the shared fixture is a sidecar tier
+    with pytest.raises(SandboxError, match="cluster NetworkPolicy is not restricting"):
         provider.create(_spec())
 
 
@@ -908,10 +1004,9 @@ def test_the_runtime_probe_is_one_directional_for_kata():
 
     gVisor's kernel identifies itself, so a gVisor claim is positively checked.
     Kata boots a real kernel in a VM whose /proc/version looks like plain runc's,
-    so a Kata claim is only confirmed not-gVisor. Since Kata is the only tier
-    that can run agent workloads, that asymmetry is the actual strength of
-    NAMESPACE_ISOLATION and is documented in docs/sandbox-backends.md §5 rather
-    than overstated.
+    so a Kata claim is only confirmed not-gVisor. That asymmetry sets the actual
+    strength of NAMESPACE_ISOLATION on a Kata tier, and is documented in
+    docs/sandbox-backends.md §5 rather than overstated.
     """
     from app.modules.workspace.autonomous.sandbox.types import SandboxCapability
 

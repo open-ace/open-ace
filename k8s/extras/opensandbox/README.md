@@ -22,8 +22,9 @@ the workflow row lie about what protected the run.
 | `seccomp_runtime_default` | `configmap-sandbox-template.yaml` — `seccompProfile: RuntimeDefault` |
 | `dedicated_service_account` | `rbac.yaml` — a ServiceAccount with no Role, and `automountServiceAccountToken: false` |
 | `pod_pids_limit` | kubelet `--pod-max-pids` / `podPidsLimit` on the sandbox nodes (see below) |
-| `metadata_cidr_blocked` | `networkpolicy.yaml` |
-| `egress_enforced`, `egress_mode_dns_nft` | **`configmap-kata.yaml` only** — `[egress] mode = "dns+nft"`. `configmap-gvisor.yaml` deliberately has no `[egress]`: gVisor cannot run the sidecar, so that tier must not attest these (the config parser refuses it). |
+| `metadata_cidr_blocked` | `networkpolicy.yaml`, selecting the sandbox pods by the labels `configmap-sandbox-template.yaml` sets at `spec.template.metadata.labels` |
+| `egress_cni_default_deny` | the same `networkpolicy.yaml`. This is the whole of a gVisor tier's egress control: CIDR-based, identical for every sandbox, public internet open. Attested *instead of* the two below, never alongside them. |
+| `egress_enforced`, `egress_mode_dns_nft` | **`configmap-kata.yaml` only** — `[egress] mode = "dns+nft"`. `configmap-gvisor.yaml` deliberately has no `[egress]`: gVisor cannot run the sidecar, so that tier attests `egress_cni_default_deny` instead (the config parser refuses the sidecar there, and refuses an endpoint attesting neither mechanism or both). |
 | `execd_token_required` | `server-*.yaml` — a non-empty `EXECD_ACCESS_TOKEN` |
 | `secure_access_required` | `configmap-*.yaml` — `[ingress] mode = "gateway"` plus `[ingress.gateway]`, and the `OPENSANDBOX_SECURE_ACCESS_*` keys in `server-*.yaml`. Under `direct` no per-sandbox token is minted and this must NOT be attested. |
 | `ephemeral_storage_enforced` | `configmap-sandbox-template.yaml` volume `sizeLimit`s |
@@ -93,10 +94,15 @@ is the one that matters here**. gVisor's kernel identifies itself, so a tier
 declaring gVisor and not getting it is caught. Kata boots a real kernel in a VM
 whose `/proc/version` is indistinguishable from an unisolated `runc`
 container's, so a Kata tier is only confirmed *not* gVisor — the probe cannot
-prove Kata is in force. Since gVisor cannot run agent workloads at all (it
-cannot enforce egress; see `docs/sandbox-backends.md` §7), Kata is the only
-usable tier, and its isolation rests on `[secure_runtime] k8s_runtime_class`
-plus the RuntimeClass genuinely existing on the node — not on this probe.
+prove Kata is in force. A Kata tier's isolation therefore rests on
+`[secure_runtime] k8s_runtime_class` plus the RuntimeClass genuinely existing on
+the node, not on this probe.
+
+Both tiers run agent workloads; what differs is egress. gVisor cannot run the
+egress sidecar, so its tier enforces only `networkpolicy.yaml` — CIDR-based,
+identical for every sandbox, public internet open — and does not declare
+`network_egress_policy`. Route a tenant whose egress must be allowlisted to the
+Kata tier. See `docs/sandbox-backends.md` §7 for exactly what that costs.
 
 ## Applying
 
@@ -162,6 +168,16 @@ kubectl apply -f k8s/extras/opensandbox/image-policy.yaml
 Cosign signature and SBOM verification live there, at admission. The provider
 enforces only allowlist membership and digest pinning, so "image allowlist,
 signature and SBOM" is a split responsibility, not a single Python check.
+
+## Cluster prerequisites
+
+- **A CNI that enforces `NetworkPolicy`.** Calico, Cilium and most managed
+  offerings do; kind's default `kindnet` does not — it accepts the objects and
+  silently ignores them. `networkpolicy.yaml` is what backs
+  `metadata_cidr_blocked`, and on a gVisor tier it is the *only* egress control,
+  so a CNI that ignores it leaves agents with open egress. The provider probes
+  this from inside the first sandbox and refuses with `egress_cni_not_enforced`
+  rather than trusting the attestation.
 
 ## Node prerequisites
 

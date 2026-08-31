@@ -45,10 +45,9 @@ class FakeOpenSandboxApi:
         scripted_exit_code: int = 0,
         scripted_timeout: bool = False,
         pod_oom: bool = False,
-        # A normal kernel, matching the Kata tiers the fixtures now use: gVisor
-        # cannot run these workloads at all (upstream rejects every networkPolicy
-        # under it), so a gVisor default would make the probe refuse everywhere.
-        # Tests that exercise the mismatch pass a gVisor string explicitly.
+        # A normal kernel, matching the Kata tiers most fixtures declare. A
+        # gVisor default would make the runtime probe refuse every Kata tier,
+        # so tests that exercise the mismatch pass a gVisor string explicitly.
         runtime_kernel: str = "Linux version 5.15.0 #1 SMP",
         stderr_text: str = "",
         egress_enforcement_mode: str = "dns+nft",
@@ -88,6 +87,19 @@ class FakeOpenSandboxApi:
         self._egress_default_action = egress_default_action
         self._require_endpoint_token = require_endpoint_token
         self._commands: dict[str, dict] = {}
+        # What the provider's cluster-egress probe finds when it runs. The
+        # default models a sandbox under the shipped NetworkPolicy: neither
+        # destination reachable. Set a value to "REACHABLE" to model a policy
+        # that was never applied, or the whole thing to None to model an image
+        # with no python3, where the probe prints nothing it can read.
+        #
+        # Answered through run_command rather than by a shortcut attribute
+        # (the way proc_version is), so the provider's real parsing of the
+        # probe's stdout is what the tests exercise.
+        self.cluster_egress: dict[str, str] | None = {
+            "METADATA": "BLOCKED",
+            "CLUSTER": "BLOCKED",
+        }
 
     # ── Lifecycle ─────────────────────────────────────────────────────
 
@@ -207,6 +219,8 @@ class FakeOpenSandboxApi:
         self._require_execd(sandbox_id)
         self.command_bodies.append(body)
         command = str(body.get("command") or "")
+        if "OPENACE_METADATA=" in command:
+            return iter(self._cluster_egress_events())
         if "openace-manifest.py" in command:
             # The producer runs inside the sandbox and writes to /tmp.
             if self._manifest is not None:
@@ -225,6 +239,23 @@ class FakeOpenSandboxApi:
             "finished_at": None if self._scripted_timeout else "2026-08-28T00:00:01Z",
         }
         return iter(self._script_events(command_id, exit_code))
+
+    def _cluster_egress_events(self) -> list[dict]:
+        """Stand in for the in-sandbox probe, at the wire shape it really has.
+
+        A sandbox with no python3 does not print an empty verdict — the shell
+        writes "python3: not found" to stderr and nothing else — so `None` is
+        modelled that way rather than as blank stdout.
+        """
+        command_id = f"cmd-{next(self._command_ids)}"
+        events: list[dict] = [{"type": "init", "text": command_id}]
+        if self.cluster_egress is None:
+            events.append({"type": "stderr", "text": "sh: python3: not found\n"})
+        else:
+            for name, verdict in self.cluster_egress.items():
+                events.append({"type": "stdout", "text": f"OPENACE_{name}={verdict}\n"})
+        events.append({"type": "execution_complete", "execution_time": 1})
+        return events
 
     def _script_events(self, command_id: str, exit_code: int) -> list[dict]:
         events: list[dict] = [{"type": "init", "text": command_id}]

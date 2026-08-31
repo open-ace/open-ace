@@ -90,8 +90,33 @@ class Attestations:
     lose the capability, never gain it.
     """
 
+    # The two egress ENFORCEMENT MECHANISMS. Exactly one must be attested per
+    # endpoint (parse_backend_config refuses neither and refuses both), because
+    # they are not interchangeable and the capability set differs:
+    #
+    #   egress_enforced         -> the OpenSandbox egress sidecar. Per-sandbox,
+    #                              FQDN allowlist, deny-default. Grants
+    #                              NETWORK_EGRESS_POLICY (with the two flags
+    #                              below). Impossible under gVisor.
+    #   egress_cni_default_deny -> the cluster NetworkPolicy alone. One static
+    #                              rule for every sandbox: RFC1918 + link-local
+    #                              denied, the public internet OPEN. Grants no
+    #                              egress capability, because there is nothing
+    #                              per-spec to honour.
     egress_enforced: bool = False
     egress_mode_dns_nft: bool = False
+    # Backed by k8s/extras/opensandbox/networkpolicy.yaml being applied AND its
+    # podSelector matching this tier's sandbox pods (the sandbox template sets
+    # the label; test_the_networkpolicy_selects_the_sandbox_pods binds the two).
+    #
+    # This is the gVisor tier's ONLY egress control, and it is deliberately
+    # weaker than the sidecar: it stops a sandbox reaching the metadata service,
+    # the cluster's own pod/service ranges and any private network, but it does
+    # NOT restrict which public hosts a sandbox may reach. A tier attesting this
+    # therefore does not get NETWORK_EGRESS_POLICY, and a spec that requires
+    # that capability fails closed here rather than running under a policy the
+    # backend cannot honour.
+    egress_cni_default_deny: bool = False
     metadata_cidr_blocked: bool = False
     execd_token_required: bool = False
     # Backed by `[ingress] mode = "gateway"` plus `[ingress.gateway]` and the
@@ -556,17 +581,57 @@ def _parse_endpoint(tier: str, body: Any, image_allowlist: frozenset[str]) -> En
         )
     if attestations.egress_enforced and family == "gvisor":
         raise SandboxConfigError(
-            f"endpoint {tier!r}: runtime_class {runtime_class_value!r} cannot enforce egress. "
-            "Upstream rejects every create carrying a networkPolicy under gVisor "
-            "(the sidecar needs the iptables nat table, which gVisor lacks), and this "
-            "provider always sends one — so no sandbox could ever start. Use a Kata "
-            "tier for workloads that require default-deny egress."
+            f"endpoint {tier!r}: runtime_class {runtime_class_value!r} cannot run the egress "
+            "sidecar. Upstream rejects every create carrying a networkPolicy under gVisor "
+            "(the sidecar needs the iptables nat table, which gVisor lacks), so no sandbox "
+            "could ever start. A gVisor tier enforces egress at the CNI instead: attest "
+            "egress_cni_default_deny and leave egress_allow_hosts empty."
+        )
+
+    # Exactly one enforcement mechanism, never zero and never both.
+    #
+    # Zero would run agent code with no egress control at all, which #2023's
+    # threat model does not permit — and before this rule existed that config
+    # was reachable: `egress_enforced = false` parsed fine and the refusal only
+    # arrived later, as an opaque CapabilityUnsupported at create() time.
+    #
+    # Both would be a claim the deployment cannot make. The sidecar tier already
+    # has the cluster NetworkPolicy underneath it (that is what
+    # metadata_cidr_blocked attests); asserting the CNI flag on top would say
+    # "this tier's egress is CIDR-only", which contradicts the FQDN allowlist it
+    # actually enforces. Two names for one property is how an attestation stops
+    # meaning anything.
+    modes = [
+        name
+        for name, present in (
+            ("egress_enforced", attestations.egress_enforced),
+            ("egress_cni_default_deny", attestations.egress_cni_default_deny),
+        )
+        if present
+    ]
+    if len(modes) != 1:
+        raise SandboxConfigError(
+            f"endpoint {tier!r}: attest exactly one egress enforcement mechanism, got "
+            f"{modes or 'none'}. 'egress_enforced' is the OpenSandbox egress sidecar "
+            "(per-sandbox FQDN allowlist, Kata only); 'egress_cni_default_deny' is the "
+            "cluster NetworkPolicy alone (one static CIDR rule, no FQDN allowlist, the "
+            "only option under gVisor). An endpoint with neither would run agent code "
+            "with no egress control."
         )
 
     if attestations.egress_enforced and not egress_hosts:
         raise SandboxConfigError(
             f"endpoint {tier!r}: egress_enforced is attested but egress_allow_hosts is empty; "
             "a deny-default policy with no allowlist cannot reach the LLM proxy"
+        )
+
+    if attestations.egress_cni_default_deny and egress_hosts:
+        raise SandboxConfigError(
+            f"endpoint {tier!r}: egress_cni_default_deny is attested with egress_allow_hosts "
+            f"{sorted(egress_hosts)}, but nothing would enforce that list. The cluster "
+            "NetworkPolicy is CIDR-based and identical for every sandbox; there is no "
+            "per-host allowlist under this mechanism, so a populated list here reads as a "
+            "restriction that does not exist. Leave it empty."
         )
 
     host_allowlist = tuple(_str_list(body, "execd_endpoint_host_allowlist")) or (parsed.hostname,)
@@ -739,6 +804,32 @@ def runtime_family(runtime_class: str) -> str:
     if name in _KATA_RUNTIME_CLASSES or name.startswith("kata"):
         return "kata"
     return ""
+
+
+# The two egress enforcement mechanisms, as returned by
+# :func:`egress_enforcement_mode`. See :class:`Attestations` for what each one
+# actually enforces; the short version is that only the sidecar is per-sandbox.
+EGRESS_MODE_SIDECAR_FQDN = "sidecar_fqdn"
+EGRESS_MODE_CNI_CIDR = "cni_cidr"
+
+
+def egress_enforcement_mode(endpoint: EndpointConfig) -> str:
+    """Which mechanism enforces egress for *endpoint*.
+
+    ONE definition, for the same reason as :func:`runtime_family` and
+    :func:`host_matches`: this answer decides whether the create request carries
+    a ``networkPolicy``, whether a per-spec egress policy is synthesised, and
+    whether ``NETWORK_EGRESS_POLICY`` is declared. Three call sites deriving it
+    independently from the raw attestations is how they drift into disagreeing.
+
+    ``parse_backend_config`` guarantees exactly one of the two flags is set, so
+    this is total for any endpoint that came through it. A hand-built config
+    that set neither would fall through to the CNI answer — the conservative
+    one, since it declares no capability.
+    """
+    if endpoint.attestations.egress_enforced:
+        return EGRESS_MODE_SIDECAR_FQDN
+    return EGRESS_MODE_CNI_CIDR
 
 
 def host_matches(host: str, pattern: str) -> bool:

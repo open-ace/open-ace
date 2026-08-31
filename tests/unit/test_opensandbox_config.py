@@ -132,8 +132,12 @@ def test_default_tier_absent_from_endpoints_is_rejected():
 
 def test_attestations_default_to_absent_not_present():
     # A missing attestation must read as "not enforced", so the capability is
-    # dropped and any spec requiring it fails closed at create().
-    cfg = parse_backend_config(_raw(endpoints={"gvisor": _endpoint(attestations={})}))
+    # dropped and any spec requiring it fails closed at create(). Only the
+    # egress mechanism is stated here — one of the two is mandatory — and every
+    # other field must still come back absent.
+    cfg = parse_backend_config(
+        _raw(endpoints={"gvisor": _endpoint(attestations={"egress_enforced": True})})
+    )
     att = cfg.endpoint_for(tenant=None, project_path=None).attestations
     assert att.nonroot_enforced is False
     assert att.pod_pids_limit == 0
@@ -398,7 +402,7 @@ def test_execd_token_read_from_its_env_var(monkeypatch):
         _raw(
             endpoints={
                 "gvisor": _endpoint(
-                    attestations={"execd_token_required": True},
+                    attestations={"execd_token_required": True, "egress_enforced": True},
                     execd_token_env="OSB_EXECD_TOKEN",
                 )
             }
@@ -413,7 +417,7 @@ def test_execd_token_missing_from_env_fails_closed(monkeypatch):
         _raw(
             endpoints={
                 "gvisor": _endpoint(
-                    attestations={"execd_token_required": True},
+                    attestations={"execd_token_required": True, "egress_enforced": True},
                     execd_token_env="OSB_EXECD_TOKEN",
                 )
             }
@@ -552,15 +556,18 @@ def test_a_malformed_installation_id_is_refused(value):
         parse_backend_config(raw)
 
 
-def test_a_gvisor_tier_cannot_attest_egress_enforcement():
-    """gVisor and the egress sidecar are mutually exclusive UPSTREAM.
+def test_a_gvisor_tier_cannot_attest_the_egress_sidecar():
+    """gVisor and the egress SIDECAR are mutually exclusive UPSTREAM.
 
     Verified against a real OpenSandbox server, which answers:
       "networkPolicy is not compatible with runtime 'gvisor': gVisor does not
        support the iptables nat table required by the egress sidecar."
-    This provider always sends a networkPolicy, so such a tier could not create
-    a single sandbox. Nothing short of running a real server surfaced it — the
-    shipped gVisor tier had been the DEFAULT tier all along.
+    Nothing short of running a real server surfaced it — the shipped gVisor tier
+    had been the DEFAULT tier all along.
+
+    Only the sidecar is refused. Such a tier enforces egress at the CNI instead
+    (``egress_cni_default_deny``), which
+    ``test_a_gvisor_tier_may_attest_cni_egress_instead`` covers.
     """
     raw = _raw(
         endpoints={
@@ -570,7 +577,84 @@ def test_a_gvisor_tier_cannot_attest_egress_enforcement():
             )
         }
     )
-    with pytest.raises(SandboxConfigError, match="cannot enforce egress"):
+    with pytest.raises(SandboxConfigError, match="cannot run the egress sidecar"):
+        parse_backend_config(raw)
+
+
+def test_a_gvisor_tier_may_attest_cni_egress_instead():
+    """The other half of the rule above: gVisor is usable, via the CNI.
+
+    ``egress_cni_default_deny`` names the cluster NetworkPolicy, which the CNI
+    applies outside the sandbox kernel — so gVisor's missing iptables nat table
+    is irrelevant to it.
+    """
+    cfg = parse_backend_config(
+        _raw(
+            endpoints={
+                "gvisor": _endpoint(
+                    runtime_class="gvisor",
+                    egress_allow_hosts=[],
+                    attestations={"egress_cni_default_deny": True},
+                )
+            }
+        )
+    )
+    endpoint = cfg.endpoint_for(tenant=None, project_path=None)
+    assert endpoint.attestations.egress_cni_default_deny is True
+    assert config_module.egress_enforcement_mode(endpoint) == config_module.EGRESS_MODE_CNI_CIDR
+
+
+def test_an_endpoint_attesting_no_egress_mechanism_is_refused():
+    """Neither mechanism means no egress control at all, which #2023 forbids.
+
+    Before this rule the config parsed and the refusal arrived much later, as a
+    bare ``CapabilityUnsupported`` from the shared #2022 gate at create() time —
+    naming neither the endpoint nor the missing attestation.
+    """
+    raw = _raw(
+        endpoints={"t": _endpoint(egress_allow_hosts=[], attestations={"nonroot_enforced": True})}
+    )
+    with pytest.raises(SandboxConfigError, match="exactly one egress enforcement"):
+        parse_backend_config(raw)
+
+
+def test_an_endpoint_attesting_both_egress_mechanisms_is_refused():
+    """Two names for one property is how an attestation stops meaning anything.
+
+    A sidecar tier already sits on top of the cluster NetworkPolicy — that is
+    what ``metadata_cidr_blocked`` records. Adding the CNI flag would also claim
+    the tier's egress is CIDR-only, contradicting the FQDN allowlist it enforces.
+    """
+    raw = _raw(
+        endpoints={
+            "t": _endpoint(
+                attestations={
+                    "egress_enforced": True,
+                    "egress_mode_dns_nft": True,
+                    "egress_cni_default_deny": True,
+                }
+            )
+        }
+    )
+    with pytest.raises(SandboxConfigError, match="exactly one egress enforcement"):
+        parse_backend_config(raw)
+
+
+def test_a_cni_tier_may_not_carry_an_egress_allowlist():
+    """An allowlist nothing enforces reads as a restriction that does not exist.
+
+    The cluster NetworkPolicy is CIDR-based and identical for every sandbox;
+    there is no per-host allowlist under it to populate.
+    """
+    raw = _raw(
+        endpoints={
+            "t": _endpoint(
+                egress_allow_hosts=["api.anthropic.com"],
+                attestations={"egress_cni_default_deny": True},
+            )
+        }
+    )
+    with pytest.raises(SandboxConfigError, match="nothing would enforce that list"):
         parse_backend_config(raw)
 
 
@@ -608,8 +692,8 @@ def test_an_unverifiable_runtime_class_is_refused(runtime_class):
 
 
 @pytest.mark.parametrize("runtime_class", ["gvisor", "gVisor", "runsc", "gvisor-nvidia"])
-def test_every_gvisor_family_name_is_refused_with_egress(runtime_class):
-    """The gVisor/egress incompatibility is about the runtime, not the spelling."""
+def test_every_gvisor_family_name_is_refused_with_the_sidecar(runtime_class):
+    """The gVisor/sidecar incompatibility is about the runtime, not the spelling."""
     raw = _raw(
         endpoints={
             "t": _endpoint(
@@ -618,7 +702,7 @@ def test_every_gvisor_family_name_is_refused_with_egress(runtime_class):
             )
         }
     )
-    with pytest.raises(SandboxConfigError, match="cannot enforce egress"):
+    with pytest.raises(SandboxConfigError, match="cannot run the egress sidecar"):
         parse_backend_config(raw)
 
 

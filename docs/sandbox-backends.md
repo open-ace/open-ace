@@ -51,6 +51,12 @@ pipe mode — that is what supplies the interactive stdin its
 
 **Cluster**
 
+- A CNI that **enforces** `NetworkPolicy` (Calico, Cilium, and most managed
+  offerings do; kind's default `kindnet` does not — it accepts the objects and
+  ignores them). Every tier's egress rests on it, and on a gVisor tier it is the
+  only egress control there is. The provider's boot probe refuses with
+  `egress_cni_not_enforced` if it is not in force.
+
 ```bash
 kubectl apply -k k8s/extras/opensandbox/
 kubectl get runtimeclass          # expect: gvisor, kata-qemu
@@ -95,8 +101,32 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
         "ephemeral_storage_enforced": true,
         "inode_quota_enforced": false
       }
+    },
+    "gvisor": {
+      "base_url": "http://opensandbox.open-ace.svc.cluster.local:8080/v1",
+      "api_key_env": "OPENSANDBOX_API_KEY_GVISOR",
+      "execd_token_env": "OPENSANDBOX_EXECD_TOKEN_GVISOR",
+      "runtime_class": "gvisor",
+      "default_image": "ghcr.io/open-ace/agent@sha256:<64 hex>",
+      "execd_endpoint_host_allowlist": ["opensandbox-gateway.open-ace.example"],
+      "egress_allow_hosts": [],
+      "attestations": {
+        "egress_cni_default_deny": true,
+        "metadata_cidr_blocked": true,
+        "execd_token_required": true,
+        "execd_runs_as_exec_identity": true,
+        "secure_access_required": true,
+        "nonroot_enforced": true,
+        "readonly_rootfs": true,
+        "seccomp_runtime_default": true,
+        "dedicated_service_account": true,
+        "pod_pids_limit": 512,
+        "ephemeral_storage_enforced": true,
+        "inode_quota_enforced": false
+      }
     }
   },
+  "tenant_tiers": {"42": "kata"},
   "rollout": {"mode": "allowlist", "tenants": ["42"], "projects": []},
   "production_required_tenants": ["42"],
   "image_allowlist": ["ghcr.io/open-ace/agent@sha256:<64 hex>"],
@@ -107,13 +137,27 @@ kubectl get runtimeclass          # expect: gvisor, kata-qemu
 
 Points worth knowing before you edit it:
 
-- **The agent's LLM proxy must be egress-allowlisted and cluster-reachable.**
-  Egress is deny-default and the proxy is the one host a run cannot work
-  without, so its hostname has to appear in that tier's `egress_allow_hosts`.
-  It also must not be a loopback address: the control plane's `server_url`
+- **Every endpoint attests exactly one egress mechanism, and they are not
+  equivalent.** `egress_enforced` is the OpenSandbox egress sidecar: per-sandbox,
+  deny-default, FQDN allowlist — and impossible under gVisor, whose netstack has
+  no iptables nat table for the sidecar's DNS redirect.
+  `egress_cni_default_deny` is the cluster NetworkPolicy on its own: one static
+  CIDR rule for every sandbox, denying the metadata service and all private
+  ranges while leaving the public internet open. A tier attesting neither is
+  refused at config load; a tier attesting both is too, because the second flag
+  would contradict the first. Only the sidecar mechanism yields
+  `network_egress_policy`, so the two tiers are genuinely different products —
+  see §5 and §7.
+- **The agent's LLM proxy must be cluster-reachable, and on a sidecar tier
+  egress-allowlisted.** The proxy is the one host a run cannot work without. On
+  a sidecar tier its hostname has to appear in that tier's `egress_allow_hosts`
+  (which must be empty on a CNI tier, where nothing would enforce it). On either
+  tier it must not be a loopback address — the control plane's `server_url`
   defaults to `http://localhost:<port>`, which inside the sandbox pod resolves
-  to the sandbox itself. The provider refuses the turn in both cases rather
-  than letting the agent hang on every request.
+  to the sandbox itself — and on a CNI tier it must not be a private address or
+  a cluster-internal name, both of which that NetworkPolicy denies. The provider
+  refuses the turn in each case rather than letting the agent hang on every
+  request.
 - **`execd_endpoint_host_allowlist` must name the GATEWAY host.** Under gateway
   ingress the server hands back the gateway's address, not a per-sandbox cluster
   name, and the client refuses any execd URL whose host is not on this list. It
@@ -130,8 +174,9 @@ Points worth knowing before you edit it:
   a slug. There is no name→id mapping anywhere, so a slug key would match
   nothing.
 - **`rollout` decides Legacy vs OpenSandbox; `tenant_tiers` decides which
-  endpoint.** (Only Kata tiers can run agent workloads — see §7.) They are different questions — `tenant_tiers` cannot route a tenant
-  back to Legacy, because every tier is an OpenSandbox endpoint.
+  endpoint.** Both tiers run agent workloads; what differs is the egress
+  guarantee (see §7). They are different questions — `tenant_tiers` cannot route
+  a tenant back to Legacy, because every tier is an OpenSandbox endpoint.
 - **`production_required_tenants` is the no-downgrade list.** A tenant on it
   gets OpenSandbox or an exception; there is no path from "required" to Legacy.
 - **An explicitly requested config path that does not exist raises.** It does
@@ -177,12 +222,13 @@ to before this backend existed. That is also the rollback: remove the file.
 
 ### A suggested sequence
 
-1. Deploy a Kata tier with `rollout.mode = "allowlist"` and a single project
-   path. One repository moves; nothing else changes. It must be Kata: gVisor
-   cannot enforce egress, so it cannot run agent workloads at all (§7).
+1. Deploy one tier with `rollout.mode = "allowlist"` and a single project path.
+   One repository moves; nothing else changes. Choose gVisor for lower startup
+   cost, Kata if you need the FQDN egress allowlist — gVisor cannot run the
+   egress sidecar and enforces only the coarse cluster NetworkPolicy (§7).
 2. Widen `rollout.tenants` a tenant at a time.
 3. If you want separate isolation domains — a dedicated node pool, a different
-   image allowlist, tighter egress — add a *second* Kata tier and route
+   image allowlist, an FQDN egress allowlist — add a *second* tier and route
    high-security tenants to it with `tenant_tiers` (this picks *which* tier, not
    *whether* to use one). Skip this step if one tier is enough.
 4. Add those tenants to `production_required_tenants` once a missing backend
@@ -199,7 +245,7 @@ ones that are *not* claimed matter as much as the ones that are.
 | Capability | Enforced by |
 | --- | --- |
 | `NAMESPACE_ISOLATION` | the declared runtime class, checked by a `/proc/version` probe on the first sandbox per endpoint. **The check is one-directional**: a gVisor claim is positively verified (its kernel identifies itself), a Kata claim is only confirmed *not* gVisor — Kata's guest kernel is indistinguishable from an unisolated runc container's, so this cannot prove Kata is in force. Treat the Kata runtime class as an operator attestation backed by `[secure_runtime] k8s_runtime_class` and the RuntimeClass existing on the node. |
-| `NETWORK_EGRESS_POLICY` | egress sidecar `deny_all` in `dns+nft` mode, **verified** by probing its `/policy`, plus the cluster NetworkPolicy |
+| `NETWORK_EGRESS_POLICY` | egress sidecar `deny_all` in `dns+nft` mode, **verified** by probing its `/policy`, plus the cluster NetworkPolicy. **Sidecar tiers only.** A CNI tier (`egress_cni_default_deny` — the only mechanism gVisor can run) still enforces egress, but with one static CIDR rule for every sandbox and no FQDN allowlist, so it does not declare this capability and a spec requiring it fails closed there. Both mechanisms rest on the cluster NetworkPolicy, which the provider verifies from inside the first sandbox by confirming the metadata service and the Kubernetes API server are unreachable. |
 | `FILESYSTEM_ACL` | pod `securityContext`: non-root, read-only rootfs, dropped capabilities, seccomp `RuntimeDefault` |
 | `CPU_MEM_PIDS_TIME_QUOTA` | `resourceLimits` cpu/memory via kubelet, `podPidsLimit` for pids, sandbox TTL for wall clock |
 | `PRIVATE_HOME_TMP_XDG` | a fresh container per sandbox with `HOME`/`TMPDIR`/`XDG_*` set explicitly |
@@ -239,6 +285,8 @@ event.
 | `runtime_class_mismatch` | the sandbox kernel contradicts the declared runtime (raised only when a gVisor kernel is seen; see §5 on the one-directional check) | the server's `[secure_runtime]` and the tier's `runtime_class` disagree, or the RuntimeClass is missing on the node |
 | `egress_not_deny_default` | sidecar reports `allow` | check `[egress]` in the tier's ConfigMap |
 | `egress_mode_insufficient` | sidecar reports `dns`, not `dns+nft` | DNS-only cannot stop a bare-IP connection; set `mode = "dns+nft"` |
+| `egress_cni_not_enforced` | the sandbox reached the metadata service or the Kubernetes API server | the cluster NetworkPolicy is not restricting this pod: apply `networkpolicy.yaml`, check its `podSelector` matches the sandbox pod labels, and check your service CIDR falls inside one of its excluded ranges |
+| `egress_probe_unavailable` | the cluster-egress probe produced no verdict | it needs `python3` on `PATH` in the sandbox image; an unverifiable attestation is refused rather than trusted |
 | `spec_refused` | the request could not be built (image, volumes, egress, pids) | the message names the field |
 | `stale_generation` | a handle from before a reconciliation bump | benign; the workflow will re-create |
 | `destroy_unconfirmed` | teardown was issued but never observed terminal | the reconciler retries; check server health |
@@ -309,18 +357,41 @@ the per-sandbox credential traverse whatever path reaches
 terminate it at your ingress, or keep the gateway address on a network you
 trust. Treat this as a deployment requirement, not a nicety.
 
-**gVisor cannot enforce egress, so it cannot run agent workloads.** The egress
-sidecar redirects DNS through the iptables nat table, which gVisor's netstack
-does not implement. A real server logs the incompatibility at startup and then
-answers every create carrying a `networkPolicy` with
-`networkPolicy is not compatible with runtime 'gvisor'` — and this provider
-always sends one. Since #2023 requires default-deny egress, **Kata is the tier
-that satisfies it**; the shipped gVisor tier therefore configures no egress
-sidecar, must not attest `egress_enforced` (`parse_backend_config` refuses that
-combination outright), and consequently fails closed for agent workloads. It
-remains in the manifests for non-egress uses and so the incompatibility is
-recorded rather than rediscovered. Found by running a real server; every prior
-review read this as a working two-tier setup.
+**gVisor's egress control is coarser than Kata's, and the difference is real.**
+The egress sidecar redirects DNS through the iptables nat table, which gVisor's
+netstack does not implement. A real server logs the incompatibility at startup
+and then answers every create carrying a `networkPolicy` with
+`networkPolicy is not compatible with runtime 'gvisor': ... Use a compatible
+runtime (e.g. kata) or remove networkPolicy.` Found by running a real server;
+every prior review read the shipped gVisor tier as working, when in fact it
+could not create a single sandbox.
+
+A gVisor tier therefore takes upstream's own remedy: the provider omits
+`networkPolicy` entirely and egress is enforced one layer down, by the cluster
+`NetworkPolicy` in `k8s/extras/opensandbox/networkpolicy.yaml`, which the CNI
+applies outside the sandbox kernel where the missing nat table is irrelevant.
+Such a tier attests `egress_cni_default_deny` instead of `egress_enforced`
+(`parse_backend_config` refuses the sidecar under gVisor, and refuses an
+endpoint attesting neither mechanism or both).
+
+**What you give up, precisely.** The cluster policy is CIDR-based and identical
+for every sandbox. It denies the instance metadata service, the cluster's own
+pod and service ranges, and every private network — the provider verifies that
+from inside the first sandbox rather than trusting the attestation — but it
+leaves **the whole public internet reachable**. There is no FQDN allowlist and
+no per-sandbox variation, so:
+
+- a gVisor tier does not declare `network_egress_policy`, and the effective-policy
+  snapshot on the workflow row records its absence;
+- a spec carrying its own `network_egress` is refused there rather than run
+  under a policy the tier cannot honour;
+- `egress_allow_hosts` must be empty for such a tier, because nothing would
+  enforce it.
+
+Choose Kata when the allowlist itself is the control you need — an agent that
+can reach any public host can exfiltrate to any public host. Choose gVisor when
+its lower startup cost matters more and the CIDR boundary is enough. Both tiers
+supply `namespace_isolation` identically.
 
 **Gateway ingress is required, not optional.** `secureAccess` — the per-sandbox
 credential that stops one sandbox reaching another's execd — is honoured by
@@ -396,9 +467,37 @@ every lifecycle call.*
 | Syscall coverage | a documented subset; unusual syscalls may fail | full Linux kernel |
 | Hardware requirement | none | VT-x / AMD-V + KVM |
 | Density | high | lower — a VM per sandbox |
-| Typical use | default for all tenants | high-security tenants |
+| Egress enforcement | cluster NetworkPolicy only: CIDR, static, public internet open | egress sidecar: per-sandbox FQDN allowlist, deny-default |
+| Declares `network_egress_policy` | no | yes |
+| Typical use | default for all tenants | tenants whose egress must be allowlisted |
 
-*Provenance: upstream guide plus the runtime projects' own documentation.*
+*Provenance: the first four rows are the upstream guide plus the runtime
+projects' own documentation. The egress rows are this repository's own
+behaviour — see §7 — and the gVisor limitation was found by running a real
+server, not read from a document.*
+
+**Neither runtime has been measured by this project.** What has and has not been
+run against real infrastructure, stated exactly:
+
+- The lifecycle and exec paths — create, upload, `/command` with SSE, PTY
+  transport, download, delete — were exercised against a real OpenSandbox
+  server, which is what surfaced the wire-level defects (file mode encoding,
+  the SSE framing, execd's identity model) that a green test suite had hidden.
+- A real Kubernetes cluster running **gVisor** is what surfaced the
+  `networkPolicy` incompatibility and the `/proc/version` probe's false refusal.
+- **Kata has never been exercised at all**: it needs `/dev/kvm`, which no
+  machine available during development had.
+- The CNI egress mechanism has been exercised only through the boot probe's
+  logic, not against a policy-enforcing CNI. Its correctness rests on that probe
+  refusing when the policy is not in force — see the prerequisite below.
+
+**Your CNI must actually enforce NetworkPolicy.** Several common development
+CNIs (kind's default `kindnet` among them) accept `NetworkPolicy` objects and
+ignore them. Under a sidecar tier that only weakens `metadata_cidr_blocked`;
+under a CNI tier it means there is no egress control whatsoever. This is why the
+boot probe exists and why it fails closed: a cluster whose CNI ignores the
+policy is refused with `egress_cni_not_enforced` at the first sandbox rather
+than running agents with open egress.
 
 ### Cost
 

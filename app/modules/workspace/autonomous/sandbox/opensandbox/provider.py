@@ -89,6 +89,48 @@ _DESTROYED_MEMO_LIMIT = 4096
 _MANIFEST_SCRIPT_PATH = "/tmp/openace-manifest.py"  # noqa: S108 - ephemeral sandbox
 _MANIFEST_OUTPUT_PATH = "/tmp/openace-manifest.json"  # noqa: S108 - ephemeral sandbox
 
+# Two destinations the shipped cluster NetworkPolicy denies, probed from inside
+# the sandbox by _probe_cluster_egress.
+#
+# Resolution is separated from connection on purpose. A dropped packet and a
+# failed DNS lookup both surface as an exception from `connect`, so folding them
+# together would let a cluster with broken DNS report BLOCKED and buy the
+# attestation for free — a false PASS on the one check a gVisor tier's egress
+# rests on. `UNRESOLVED` is reported distinctly and refused.
+#
+# `connect` rather than `connect_ex`: the latter's behaviour on timeout differs
+# across CPython versions (it can raise instead of returning an errno), and a
+# probe whose failure mode is version-dependent is worse than no probe. Single
+# quotes throughout so the whole program survives the double-quoted shell word,
+# and no `$` or backtick anywhere for the shell to expand.
+#
+# Verified inside a real gVisor sandbox on a live cluster (runsc netstack,
+# uid 1000, readOnlyRootFilesystem): a pod carrying the template's labels
+# reports OPENACE_CLUSTER=BLOCKED, and an otherwise identical pod without them
+# reports REACHABLE. That difference is what establishes the verdict comes from
+# the NetworkPolicy rather than from an unroutable address.
+_CLUSTER_EGRESS_PROBE = """python3 -c "
+import socket
+
+def probe(host, port):
+    try:
+        infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+    except Exception:
+        return 'UNRESOLVED'
+    s = socket.socket()
+    s.settimeout(3)
+    try:
+        s.connect(infos[0][4])
+        return 'REACHABLE'
+    except Exception:
+        return 'BLOCKED'
+    finally:
+        s.close()
+
+print('OPENACE_METADATA=' + probe('169.254.169.254', 80))
+print('OPENACE_CLUSTER=' + probe('kubernetes.default.svc.cluster.local', 443))
+" """
+
 _GIT_SYNTHESIS = (
     "git init -q && git add -A && "
     "git -c user.name='Open ACE' -c user.email='agent@open-ace.invalid' "
@@ -693,8 +735,8 @@ class OpenSandboxProvider:
         ``NETWORK_EGRESS_POLICY`` rests on a boolean nobody checked.
 
         WHAT THIS ACTUALLY ESTABLISHES, per direction — the two are not
-        symmetric, and the difference matters because Kata is now the only tier
-        that can run agent workloads:
+        symmetric, and the weaker direction is the one guarding the tier whose
+        egress allowlist is the reason to choose it:
 
         * gVisor-declared: POSITIVE. gVisor's kernel identifies itself in
           ``/proc/version``, so a tier claiming gVisor and not getting it is
@@ -741,7 +783,10 @@ class OpenSandboxProvider:
                 "kernel identifies as gVisor",
                 "runtime_class_mismatch",
             )
-        if self._endpoint.attestations.egress_enforced:
+        att = self._endpoint.attestations
+        if att.egress_cni_default_deny or att.metadata_cidr_blocked:
+            self._probe_cluster_egress(handle.sandbox_id)
+        if att.egress_enforced:
             policy = self._api.egress_policy(handle.sandbox_id)
             if policy.get("defaultAction") != "deny":
                 raise self._refuse(
@@ -786,6 +831,86 @@ class OpenSandboxProvider:
                 "".join(str(e.get("text") or "") for e in events if e.get("type") == "stdout")
             )
         return "\n".join(collected)
+
+    def _probe_cluster_egress(self, sandbox_id: str) -> None:
+        """Check the cluster NetworkPolicy from inside the sandbox.
+
+        The counterpart of the sidecar probe below, for the mechanism attested
+        by ``egress_cni_default_deny`` / ``metadata_cidr_blocked``. It matters
+        more here than there: on a gVisor tier this NetworkPolicy is the ONLY
+        egress control, and a manifest that was never applied — or whose
+        podSelector matches no pod, which is a mistake this repository has
+        already made once — leaves the attestation asserted with nothing behind
+        it.
+
+        WHAT THIS ESTABLISHES, precisely:
+
+        * The metadata address and the Kubernetes API server are unreachable
+          from the sandbox. Those are two destinations the shipped policy denies
+          and that exist to be denied — the API server in particular is present
+          in every cluster and sits inside the service CIDR, so reaching it
+          proves the private-range denial is not in force.
+        * It does NOT prove the shipped manifest is what produced that result.
+          An unroutable address is unreachable whether or not a policy exists.
+          The probe is a NEGATIVE control: it catches an unenforced attestation,
+          it does not independently verify an enforced one. On a cluster with no
+          metadata service that leg cannot discriminate at all — verified live,
+          where it read BLOCKED both with and without the policy applied; the
+          API-server leg is the one that separated the two.
+
+        A probe that cannot run is a refusal, not a shrug. Unlike
+        ``_probe_kernel``'s optional sources, this is the only check standing
+        between a CNI tier and unrestricted egress — so a missing verdict and an
+        unresolvable destination are both refusals rather than passes.
+        """
+        try:
+            events = list(self._api.run_command(sandbox_id, {"command": _CLUSTER_EGRESS_PROBE}))
+        except SandboxError as exc:
+            raise self._refuse(
+                f"egress probe: could not run the cluster-egress check ({exc}); refusing "
+                "rather than trusting egress_cni_default_deny unverified",
+                "egress_probe_unavailable",
+            ) from exc
+        output = "".join(
+            str(e.get("text") or "") for e in events if e.get("type") in ("stdout", "stderr")
+        )
+        reachable = [
+            name
+            for name, token in (
+                ("the instance metadata service", "OPENACE_METADATA="),
+                ("the Kubernetes API server", "OPENACE_CLUSTER="),
+            )
+            if f"{token}REACHABLE" in output
+        ] or None
+        missing = [
+            token for token in ("OPENACE_METADATA=", "OPENACE_CLUSTER=") if token not in output
+        ]
+        if missing:
+            raise self._refuse(
+                f"egress probe: the cluster-egress check produced no verdict for {missing} "
+                f"(output {output[:200]!r}); python3 must be on PATH in the sandbox image "
+                "for this attestation to be verifiable",
+                "egress_probe_unavailable",
+            )
+        if "OPENACE_CLUSTER=UNRESOLVED" in output:
+            # DNS failed, so the check could not discriminate. Folding this into
+            # BLOCKED would grant the attestation to a cluster whose resolver is
+            # broken — and such a sandbox could not reach its LLM proxy either.
+            raise self._refuse(
+                "egress probe: kubernetes.default.svc.cluster.local did not resolve, so the "
+                "cluster-egress check proves nothing; the sandbox has no working DNS, which "
+                "would also stop the agent reaching its LLM proxy",
+                "egress_probe_unavailable",
+            )
+        if reachable:
+            raise self._refuse(
+                f"egress probe: the sandbox can reach {' and '.join(reachable)}, so the "
+                "cluster NetworkPolicy is not restricting this pod. Apply "
+                "k8s/extras/opensandbox/networkpolicy.yaml, confirm its podSelector matches "
+                "the sandbox pod labels, and check that your service CIDR falls inside one "
+                "of its excluded ranges",
+                "egress_cni_not_enforced",
+            )
 
     def _exec_command(
         self, handle: SandboxHandle, command: list[str], env: dict[str, str]
