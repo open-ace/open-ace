@@ -487,20 +487,34 @@ projects' own documentation. The egress rows are this repository's own
 behaviour — see §7 — and the gVisor limitation was found by running a real
 server, not read from a document.*
 
-**Neither runtime has been measured by this project.** What has and has not been
-run against real infrastructure, stated exactly:
+**No performance number in this section was measured by this project** — the
+overhead figures above are upstream's. That is separate from whether the backend
+*works*, which has been tested; here is exactly what has and has not been run
+against real infrastructure:
 
-- The lifecycle and exec paths — create, upload, `/command` with SSE, PTY
-  transport, download, delete — were exercised against a real OpenSandbox
-  server, which is what surfaced the wire-level defects (file mode encoding,
-  the SSE framing, execd's identity model) that a green test suite had hidden.
-- A real Kubernetes cluster running **gVisor** is what surfaced the
-  `networkPolicy` incompatibility and the `/proc/version` probe's false refusal.
-- **Kata has never been exercised at all**: it needs `/dev/kvm`, which no
-  machine available during development had.
-- The CNI egress mechanism has been exercised only through the boot probe's
-  logic, not against a policy-enforcing CNI. Its correctness rests on that probe
-  refusing when the policy is not in force — see the prerequisite below.
+- **The gVisor tier's full lifecycle has been run end to end on a real cluster**
+  under `runsc`: create → kernel probe → CNI probe → upload and git synthesis →
+  foreground exec with SSE → PTY agent turn → evidence → `collect_changes` →
+  `apply_changes` → destroy. That run is what surfaced the wire-level defects a
+  green test suite had hidden — file mode encoding, SSE framing, execd's identity
+  model, the `networkPolicy` incompatibility, the `/proc/version` probe's false
+  refusal, a NetworkPolicy whose podSelector matched no pod, git's
+  `dubious ownership` on a root-owned `/workspace`, and a command timeout sent
+  in the wrong unit.
+- **The CNI egress mechanism has been verified in both directions on a
+  policy-enforcing CNI** (Calico): without the manifest the boot probe reads the
+  API server as reachable and refuses with `egress_cni_not_enforced`; with it
+  applied, both legs read blocked and the run proceeds. Creating a sandbox with
+  no `networkPolicy` against a gVisor-configured server is likewise confirmed
+  accepted.
+- **Kata has never been exercised at all**: it needs `/dev/kvm`, and the
+  attempt to stand one up reached nested VT-x and `kata-deploy` before failing
+  on a guest kernel with no `vhost_net` module. Every Kata statement in this
+  document is therefore design intent, not measurement.
+- One piece of the `dubious ownership` fix — the global `safe.directory` that
+  covers git commands **the agent itself** runs, as opposed to the repo
+  synthesis — was verified locally with git's `GIT_TEST_ASSUME_DIFFERENT_OWNER`
+  hook rather than on a cluster.
 
 **Your CNI must actually enforce NetworkPolicy.** Several common development
 CNIs (kind's default `kindnet` among them) accept `NetworkPolicy` objects and
