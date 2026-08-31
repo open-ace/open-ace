@@ -4,7 +4,9 @@
  * Tests cover:
  * - Notification bell renders when authenticated
  * - Notification bell hidden when not authenticated
- * - Clicking bell navigates to /manage/quota
+ * - Clicking bell navigates based on user role:
+ *   - Admin/Manager: /manage/quota?tab=alerts
+ *   - Regular user: /work/alerts
  * - Polling fetches unread count on mount and every 30s
  * - Polling cleans up on unmount
  * - API error handled gracefully
@@ -17,13 +19,19 @@ import { MemoryRouter } from 'react-router-dom';
 
 // Mutable mock state
 let mockIsAuthenticated = true;
+let mockUserRole: string | null = 'admin';
 const mockGetUnreadCount = vi.fn();
 const mockNavigate = vi.fn();
 
 // Mock hooks
 vi.mock('@/hooks', () => ({
   useAuth: () => ({
-    user: { username: 'testuser', email: 'test@test.com', avatar_url: null },
+    user: {
+      username: 'testuser',
+      email: 'test@test.com',
+      avatar_url: null,
+      role: mockUserRole,
+    },
     isAuthenticated: mockIsAuthenticated,
     logout: vi.fn(),
   }),
@@ -100,6 +108,7 @@ import { Header } from './Header';
 describe('Header - Notification Bell', () => {
   beforeEach(() => {
     mockIsAuthenticated = true;
+    mockUserRole = 'admin';
     mockGetUnreadCount.mockResolvedValue(5);
     mockNavigate.mockClear();
     mockGetUnreadCount.mockClear();
@@ -140,13 +149,48 @@ describe('Header - Notification Bell', () => {
     });
   });
 
-  it('navigates to /manage/quota when bell is clicked', async () => {
+  // Issue #3223: Admin navigates to /manage/quota?tab=alerts
+  it('navigates to /manage/quota?tab=alerts when admin clicks bell', async () => {
+    mockUserRole = 'admin';
     renderHeader();
     await waitFor(() => {
       expect(screen.getByTitle('Unread Alerts')).toBeInTheDocument();
     });
     fireEvent.click(screen.getByTitle('Unread Alerts'));
-    expect(mockNavigate).toHaveBeenCalledWith('/manage/quota');
+    expect(mockNavigate).toHaveBeenCalledWith('/manage/quota?tab=alerts');
+  });
+
+  // Issue #3223: Manager navigates to /manage/quota?tab=alerts
+  it('navigates to /manage/quota?tab=alerts when manager clicks bell', async () => {
+    mockUserRole = 'manager';
+    renderHeader();
+    await waitFor(() => {
+      expect(screen.getByTitle('Unread Alerts')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTitle('Unread Alerts'));
+    expect(mockNavigate).toHaveBeenCalledWith('/manage/quota?tab=alerts');
+  });
+
+  // Issue #3223: Regular user navigates to /work/alerts
+  it('navigates to /work/alerts when regular user clicks bell', async () => {
+    mockUserRole = 'user';
+    renderHeader();
+    await waitFor(() => {
+      expect(screen.getByTitle('Unread Alerts')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTitle('Unread Alerts'));
+    expect(mockNavigate).toHaveBeenCalledWith('/work/alerts');
+  });
+
+  // Issue #3223: Readonly user navigates to /work/alerts
+  it('navigates to /work/alerts when readonly user clicks bell', async () => {
+    mockUserRole = 'readonly';
+    renderHeader();
+    await waitFor(() => {
+      expect(screen.getByTitle('Unread Alerts')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTitle('Unread Alerts'));
+    expect(mockNavigate).toHaveBeenCalledWith('/work/alerts');
   });
 
   it('handles API error gracefully without crashing', async () => {

@@ -9,6 +9,7 @@ import { useAuth, useTheme, useLanguage } from '@/hooks';
 import { useAppStore } from '@/store';
 import { t, setLanguage as setI18nLanguage } from '@/i18n';
 import { alertsApi } from '@/api';
+import { canAccessManageMode } from '@/utils/permissions';
 import { UserSettingsModal, Avatar, CountBadge } from '@/components/common';
 import { DocumentViewer, helpDocs, getDocTitle } from '@/components/work/DocumentViewer';
 
@@ -59,7 +60,11 @@ export const Header: React.FC<HeaderProps> = ({ compact = false }) => {
   }, [isAuthenticated, fetchUnreadCount]);
 
   const handleNotificationClick = () => {
-    navigate('/manage/quota');
+    if (canAccessManageMode(user)) {
+      navigate('/manage/quota?tab=alerts');
+    } else {
+      navigate('/work/alerts');
+    }
   };
 
   const handleThemeToggle = () => {
