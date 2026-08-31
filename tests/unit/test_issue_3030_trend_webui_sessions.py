@@ -223,7 +223,7 @@ class TestGetTrendDataMerge:
         result = svc.get_trend_data("2026-08-01", "2026-08-31")
 
         assert len(result) == 2
-        tools = {r["tool_name"] for r in result}
+        tools = {r["tool"] for r in result}
         assert "claude" in tools
         assert "qwen" in tools
 
@@ -499,8 +499,8 @@ class TestMixedDateTypes:
 
         # qwen should merge, claude should be separate
         assert len(result) == 2
-        qwen_record = next(r for r in result if r["tool_name"] == "qwen")
-        claude_record = next(r for r in result if r["tool_name"] == "claude")
+        qwen_record = next(r for r in result if r["tool"] == "qwen")
+        claude_record = next(r for r in result if r["tool"] == "claude")
         assert qwen_record["tokens"] == 15000
         assert claude_record["tokens"] == 5000
 
