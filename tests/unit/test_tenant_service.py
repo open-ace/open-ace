@@ -213,10 +213,21 @@ class TestTenantService:
         mock_tenant = MagicMock()
         mock_tenant.quota.daily_token_limit = 1000000
         mock_tenant.quota.daily_request_limit = 1000
+        # Issue #3197: Add billing cycle and monthly quota fields
+        mock_tenant.quota.monthly_token_limit = 30000000
+        mock_tenant.quota.monthly_request_limit = 30000
+        mock_tenant.billing_cycle_start = None
+        mock_tenant.billing_cycle_end = None
+        mock_tenant.current_cycle_tokens = 0
+        mock_tenant.user_count = 0
         mock_repo.get_by_id.return_value = mock_tenant
         mock_repo.get_usage.return_value = []
         result = svc.get_tenant_stats(1)
         assert result is not None
+        # Issue #3197: Verify monthly usage fields are present
+        assert "monthly_tokens" in result["quota_usage"]
+        assert "monthly_requests" in result["quota_usage"]
+        assert "billing_cycle" in result
 
     # Issue #2128: 软废弃警告测试
     def test_update_settings_deprecated_sso_enabled_warning(self, caplog):
