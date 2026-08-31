@@ -6,7 +6,7 @@ Data models for multi-tenant support.
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -182,6 +182,11 @@ class Tenant:
     trial_ends_at: datetime | None = None
     subscription_ends_at: datetime | None = None
 
+    # Billing cycle fields (Issue #3200)
+    billing_cycle_start: date | None = None
+    billing_cycle_end: date | None = None
+    current_cycle_tokens: int = 0
+
     # Ephemeral runtime marker for concurrent-settings-update detection
     # (not persisted; reset to None on every load).
     _last_settings_update: datetime | None = None
@@ -208,6 +213,9 @@ class Tenant:
             "updated_at": ensure_utc_suffix(self.updated_at),
             "trial_ends_at": ensure_utc_suffix(self.trial_ends_at),
             "subscription_ends_at": ensure_utc_suffix(self.subscription_ends_at),
+            "billing_cycle_start": str(self.billing_cycle_start) if self.billing_cycle_start else None,
+            "billing_cycle_end": str(self.billing_cycle_end) if self.billing_cycle_end else None,
+            "current_cycle_tokens": self.current_cycle_tokens,
             "user_count": self.user_count,
             "total_tokens_used": self.total_tokens_used,
             "total_requests_made": self.total_requests_made,
@@ -218,6 +226,19 @@ class Tenant:
         """Create from dictionary."""
         quota_data = data.get("quota", {})
         settings_data = data.get("settings", {})
+
+        # Parse billing cycle date fields
+        billing_cycle_start = data.get("billing_cycle_start")
+        if billing_cycle_start and isinstance(billing_cycle_start, str):
+            billing_cycle_start = date.fromisoformat(billing_cycle_start)
+        elif billing_cycle_start and hasattr(billing_cycle_start, "isoformat"):
+            billing_cycle_start = billing_cycle_start
+
+        billing_cycle_end = data.get("billing_cycle_end")
+        if billing_cycle_end and isinstance(billing_cycle_end, str):
+            billing_cycle_end = date.fromisoformat(billing_cycle_end)
+        elif billing_cycle_end and hasattr(billing_cycle_end, "isoformat"):
+            billing_cycle_end = billing_cycle_end
 
         return cls(
             id=data.get("id"),
@@ -234,6 +255,9 @@ class Tenant:
             updated_at=parse_db_datetime(data.get("updated_at")),
             trial_ends_at=parse_db_datetime(data.get("trial_ends_at")),
             subscription_ends_at=parse_db_datetime(data.get("subscription_ends_at")),
+            billing_cycle_start=billing_cycle_start,
+            billing_cycle_end=billing_cycle_end,
+            current_cycle_tokens=data.get("current_cycle_tokens", 0),
             user_count=data.get("user_count", 0),
             total_tokens_used=data.get("total_tokens_used", 0),
             total_requests_made=data.get("total_requests_made", 0),

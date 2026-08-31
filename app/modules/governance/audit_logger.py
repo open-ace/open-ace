@@ -96,6 +96,9 @@ class AuditAction(Enum):
     QUOTA_ALERT = "quota_alert"
     QUOTA_EXCEEDED = "quota_exceeded"
 
+    # Tenant billing actions (Issue #3200)
+    TENANT_BILLING_PERIOD_RESET = "tenant_billing_period_reset"
+
     # Data access actions
     DATA_VIEW = "data_view"
     DATA_EXPORT = "data_export"
